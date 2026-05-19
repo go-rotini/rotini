@@ -1,0 +1,7 @@
+$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json
+name: todo
+commands:
+  - name: list
+    aliases: ["ls", "l"]
+  - name: remove
+    aliases: ["rm", "delete"]

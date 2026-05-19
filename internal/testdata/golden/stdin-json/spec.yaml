@@ -1,0 +1,16 @@
+$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json
+name: mailer
+commands:
+  - name: send
+    inputs:
+      stdin:
+        schema:
+          type: object
+          properties:
+            to:
+              type: string
+            subject:
+              type: string
+            body:
+              type: string
+          required: true

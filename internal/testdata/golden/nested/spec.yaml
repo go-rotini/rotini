@@ -1,0 +1,32 @@
+$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json
+name: myprog
+inputs:
+  flags:
+    - name: verbose
+      identifiers: ["-v", "--verbose"]
+      schema:
+        type: bool
+commands:
+  - name: foo
+    inputs:
+      flags:
+        - name: fopt
+          identifiers: ["--fopt"]
+          schema:
+            type: string
+    commands:
+      - name: bar
+        inputs:
+          flags:
+            - name: bopt
+              identifiers: ["--bopt"]
+              schema:
+                type: integer
+        commands:
+          - name: baz
+            inputs:
+              flags:
+                - name: zopt
+                  identifiers: ["--zopt"]
+                  schema:
+                    type: string
