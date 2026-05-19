@@ -13,35 +13,28 @@ import (
 	"github.com/go-rotini/rotini/rtk"
 )
 
-// templatesFS holds every codegen template the package emits. Each
-// template renders one .gen.go file in the user's project (plus
-// .rotini.spec.yaml / .rotini.conf.yaml / main.go for `rotini init`).
+// templatesFS holds every codegen template the package emits. One
+// framework file is rendered per Run invocation (rotini.gen.tmpl);
+// the bridge and skeleton templates write to the user's cmd package
+// under different rules.
 //
-// Per-template breakdown — split per emitted concern so a future change
-// to one output file doesn't ripple through unrelated ones:
+// Templates:
 //
-//   - lifecycle.gen.tmpl  — Execution, RunExecution, SafeCall
-//   - render.gen.tmpl     — RenderError, ExitCode
-//   - spec.gen.tmpl       — `var Spec = rtk.ProgramSpec{...}` literal
-//   - inputs.gen.tmpl     — per-command *Flags / *Arguments / *Inputs
-//     types + RotiniCommandPath + PopulateFromArgv
-//   - handlers.gen.tmpl   — per-command Handler interfaces + Ctx aliases
-//   - aggregate Handlers interface
-//   - executors.gen.tmpl  — per-command build<Cmd>Execution + the
-//     executor dispatch map
-//   - program.gen.tmpl    — Program type + NewProgram + Execute body
-//     auto-binding rtk services
-//   - config.gen.tmpl     — emitted only when `configs:` is declared
-//   - bridge.gen.tmpl     — user's internal/handlers/handlers.gen.go
-//     (Program var + accessor methods)
-//   - handler-skel.go.tmpl — per-command skeleton, written only when
-//     the file does not already exist
+//   - rotini.gen.tmpl       — single framework file containing spec
+//     literal, inputs types, handler interfaces, lifecycle helpers,
+//     executors, Program, completion accessor, RenderError / ExitCode.
+//     Rendered to <framework-dir>/<conf.Framework.GenFile>.
+//   - bridge.gen.tmpl       — user's internal/handlers/handlers.gen.go
+//     (handlers struct + Program var + accessor methods). Always
+//     overwritten.
+//   - handler-skel.go.tmpl  — per-command stub. Rendered once per
+//     command path; written only when the target file does not exist.
 //
 // Plus `rotini init` scaffolds:
 //
-//   - spec.yaml.tmpl   — initial .rotini.spec.yaml
-//   - conf.yaml.tmpl   — initial .rotini.conf.yaml
-//   - main.go.tmpl     — initial main.go
+//   - init-spec.yaml.tmpl  — initial .rotini.spec.yaml
+//   - init-conf.yaml.tmpl  — initial .rotini.conf.yaml
+//   - init-main.go.tmpl    — initial main.go
 //
 //go:embed templates/*.tmpl
 var templatesFS embed.FS
