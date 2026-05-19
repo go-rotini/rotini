@@ -190,9 +190,10 @@ linters:
           - tagalign
           - errchkjson
 
-      # Per-platform syscall wrappers and the recursive walker have inherent
-      # complexity floors. Same pattern as env/dotenv/scanner.
-      - path: walk\.go
+      # The parser-engine files in rtk/ have unavoidable complexity (declared-
+      # type dispatch, recursive command-tree walking) and produce dynamic
+      # errors carrying the user's input by their very nature.
+      - path: rtk/(coerce|flags|parser|args)\.go
         linters:
           - cyclop
           - gocognit
@@ -200,49 +201,7 @@ linters:
           - funlen
           - maintidx
           - nestif
-
-      - path: copy\.go
-        linters:
-          - cyclop
-          - gocognit
-          - gocyclo
-          - funlen
-          - maintidx
-          - nestif
-
-      - path: userdirs_(linux|darwin|windows)\.go
-        linters:
-          - cyclop
-          - gocognit
-          - gocyclo
-          - funlen
-          - nestif
-
-      - path: write\.go
-        linters:
-          - cyclop
-          - gocognit
-          - gocyclo
-          - funlen
-          - nestif
-
-      - path: watcher/backend_(inotify_linux|kqueue_darwin|windows)\.go
-        linters:
-          - cyclop
-          - gocognit
-          - gocyclo
-          - funlen
-          - maintidx
-          - nestif
-          - unparam
-
-      - path: archive/(extract|create)_(tar|zip)\.go
-        linters:
-          - cyclop
-          - gocognit
-          - gocyclo
-          - funlen
-          - nestif
+          - err113
 
 issues:
   max-issues-per-linter: 0

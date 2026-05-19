@@ -1,6 +1,7 @@
 package rtk
 
 import (
+	"fmt"
 	"io"
 	"time"
 )
@@ -384,3 +385,69 @@ type Parser interface {
 //
 //nolint:modernize // Ptr takes a value; new(T) returns *T pointing to zero
 func Ptr[T any](v T) *T { return &v }
+
+// defaultParser is the rtk-default implementation of [Parser]. It tokenizes
+// argv against the spec, walks the command tree resolving values per the
+// argv → env → config → default precedence chain, validates against spec
+// constraints, and projects the resolved [Result] into the supplied
+// [Target] via [Target.PopulateFromArgv].
+type defaultParser struct {
+	spec   ProgramSpec
+	inputs Inputs
+	coerce CoerceValueFn
+}
+
+// NewParser returns the default rtk [Parser] bound to spec and inputs. Use
+// [Option] values to configure non-default behavior (custom coercer, etc.).
+//
+// The returned Parser is safe for concurrent Parse calls only when the
+// supplied Inputs.Stdin reader is. Most callers construct one Parser per
+// invocation, so concurrency is rarely a concern.
+func NewParser(spec ProgramSpec, inputs Inputs, opts ...Option) Parser {
+	p := &defaultParser{
+		spec:   spec,
+		inputs: inputs,
+		coerce: CoerceBuiltinValue,
+	}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
+}
+
+// Option configures a [defaultParser] returned by [NewParser]. Apply via
+// the variadic opts argument:
+//
+//	rp := rtk.NewParser(spec, inputs, rtk.WithCoercer(customCoercer))
+type Option func(*defaultParser)
+
+// WithCoercer overrides the built-in type coercion table. Custom coercers
+// should defer to [CoerceBuiltinValue] for built-in types and only handle
+// user-defined types themselves:
+//
+//	rtk.WithCoercer(func(t, v string) (any, bool, error) {
+//		switch t {
+//		case "*time.Location":
+//			loc, err := time.LoadLocation(v)
+//			return loc, false, err
+//		default:
+//			return rtk.CoerceBuiltinValue(t, v)
+//		}
+//	})
+func WithCoercer(fn CoerceValueFn) Option {
+	return func(p *defaultParser) { p.coerce = fn }
+}
+
+// Parse satisfies the [Parser] interface. It runs the engine against the
+// bound spec and inputs and projects the resolved Result into target via
+// target.PopulateFromArgv.
+func (p *defaultParser) Parse(target Target) error {
+	result, err := parseProgram(p.spec, p.inputs, p.coerce)
+	if err != nil {
+		return err
+	}
+	if err := target.PopulateFromArgv(result); err != nil {
+		return fmt.Errorf("rtk: target.PopulateFromArgv: %w", err)
+	}
+	return nil
+}
