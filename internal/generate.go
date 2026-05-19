@@ -56,6 +56,9 @@ var frameworkTemplates = []string{
 	"render.gen.tmpl",
 	"inputs.gen.tmpl",
 	"handlers.gen.tmpl",
+	"lifecycle.gen.tmpl",
+	"executors.gen.tmpl",
+	"program.gen.tmpl",
 }
 
 // RunOptions configures a [Run] invocation. SpecPath is required; the

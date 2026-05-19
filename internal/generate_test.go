@@ -80,7 +80,15 @@ func TestRun_emitsFoundationFiles(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	wantBasenames := []string{"handlers.gen.go", "inputs.gen.go", "render.gen.go", "spec.gen.go"}
+	wantBasenames := []string{
+		"executors.gen.go",
+		"handlers.gen.go",
+		"inputs.gen.go",
+		"lifecycle.gen.go",
+		"program.gen.go",
+		"render.gen.go",
+		"spec.gen.go",
+	}
 	gotBasenames := make([]string, len(res.FilesWritten))
 	for i, p := range res.FilesWritten {
 		gotBasenames[i] = filepath.Base(p)

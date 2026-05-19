@@ -285,6 +285,88 @@ func TestRender_handlersGen(t *testing.T) {
 }
 
 // =============================================================================
+// lifecycle.gen.tmpl
+// =============================================================================
+
+func TestRender_lifecycleGen(t *testing.T) {
+	t.Parallel()
+	in := internal.NewRenderInput("rotini", fixtureSpec())
+	out := renderOK(t, "lifecycle.gen.tmpl", in)
+
+	containsAll(t, "lifecycle.gen.tmpl", out,
+		`package rotini`,
+		`func SafeCall(fn func() error) (err error)`,
+		`type Execution struct`,
+		`Path string`,
+		`Run func() error`, // godoc comments between fields prevent gofmt alignment
+		`func RunExecution(ex Execution) error`,
+		`rtk.EarlyExit`,
+		`ErrEmptyExecution`,
+	)
+}
+
+// =============================================================================
+// executors.gen.tmpl
+// =============================================================================
+
+func TestRender_executorsGen(t *testing.T) {
+	t.Parallel()
+	in := internal.NewRenderInput("rotini", fixtureSpec())
+	out := renderOK(t, "executors.gen.tmpl", in)
+
+	containsAll(t, "executors.gen.tmpl", out,
+		`package rotini`,
+		`var executors = map[string]func(*Program) Execution{`,
+		`"":        buildRootExecution`,
+		`"add":     buildAddExecution`,
+		`"foo":     buildFooExecution`,
+		`"foo-bar": buildFooBarExecution`,
+		`func buildRootExecution(p *Program) Execution`,
+		`func buildAddExecution(p *Program) Execution`,
+		`func buildFooBarExecution(p *Program) Execution`,
+		`var inputs RootInputs`,
+		`var inputs AddInputs`,
+		`var inputs FooBarInputs`,
+		`p.handlers.Root()`,
+		`p.handlers.Add()`,
+		`p.handlers.FooBar()`,
+		`ErrParserUnbound`,
+	)
+}
+
+// =============================================================================
+// program.gen.tmpl
+// =============================================================================
+
+func TestRender_programGen(t *testing.T) {
+	t.Parallel()
+	in := internal.NewRenderInput("rotini", fixtureSpec())
+	out := renderOK(t, "program.gen.tmpl", in)
+
+	containsAll(t, "program.gen.tmpl", out,
+		`package rotini`,
+		`type Program struct`,
+		`registry *rtk.Registry`,
+		`handlers Handlers`,
+		`func NewProgram(h Handlers) *Program`,
+		`reg.Bind("io", rtk.NewIO())`,
+		`reg.Bind("os", rtk.NewOS())`,
+		`reg.Bind("signals", rtk.NewSignals())`,
+		`reg.Bind("ticker", rtk.NewTicker())`,
+		`func (p *Program) Registry() *rtk.Registry`,
+		`func (p *Program) Execute() error`,
+		`func (p *Program) ExecuteArgs(argv []string) error`,
+		`rtk.NewParser(Spec, rtk.Inputs{`,
+		`p.registry.Bind("parser", parser)`,
+		`rtk.Tokenize(argv, Spec)`,
+		`strings.Join(tok.CommandPath, "-")`,
+		`build, ok := executors[path]`,
+		`RunExecution(build(p))`,
+		`ErrParserUnbound`,
+	)
+}
+
+// =============================================================================
 // Unknown-template error
 // =============================================================================
 
