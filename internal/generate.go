@@ -46,23 +46,15 @@ import (
 //go:embed templates/*.tmpl
 var templatesFS embed.FS
 
-// frameworkTemplates is the ordered list of templates [Run] emits into
-// the user's framework package directory. Order is stable so the
-// returned [RunResult.FilesWritten] is deterministic.
+// frameworkTemplate is the single template that renders the user's
+// framework package. One template → one rotini.gen.go file —
+// matching rotiniold's convention and standard Go codegen practice.
+// The output filename comes from conf.Generate.Framework.GenFile
+// (default "rotini.gen.go").
 //
-// As more wiring templates land (M2.5b), the list grows. Bridge and
-// handler-skel templates emit to *different* directories under
-// different write rules and are not part of this set.
-var frameworkTemplates = []string{
-	"spec.gen.tmpl",
-	"render.gen.tmpl",
-	"inputs.gen.tmpl",
-	"handlers.gen.tmpl",
-	"lifecycle.gen.tmpl",
-	"executors.gen.tmpl",
-	"program.gen.tmpl",
-	"completion.gen.tmpl",
-}
+// Bridge and handler-skel templates emit to *different* directories
+// under different write rules and are not part of this constant.
+const frameworkTemplate = "rotini.gen.tmpl"
 
 // RunOptions configures a [Run] invocation. SpecPath is required; the
 // rest have sensible defaults so the simplest "run codegen against this
@@ -180,20 +172,23 @@ func Run(opts RunOptions) (*RunResult, error) {
 	frameworkIn := NewRenderInput(pkg, programSpec)
 
 	result := &RunResult{}
-	for _, name := range frameworkTemplates {
-		out, err := Render(name, frameworkIn)
-		if err != nil {
-			return nil, fmt.Errorf("internal: render %s: %w", name, err)
-		}
-		path := filepath.Join(outputDir, templateOutputFilename(name))
-		if err := fs.WriteFile(path, out,
-			fs.WithAtomic(true),
-			fs.WithMkdirAll(true),
-		); err != nil {
-			return nil, fmt.Errorf("internal: write %s: %w", path, err)
-		}
-		result.FilesWritten = append(result.FilesWritten, path)
+
+	// Render the single framework template into the configured
+	// GenFile (default "rotini.gen.go"). One file holds spec,
+	// inputs, handler interfaces, lifecycle, executors, program,
+	// completion, and render — matching rotiniold's convention.
+	frameworkBytes, err := Render(frameworkTemplate, frameworkIn)
+	if err != nil {
+		return nil, fmt.Errorf("internal: render %s: %w", frameworkTemplate, err)
 	}
+	frameworkPath := filepath.Join(outputDir, conf.Generate.Framework.GenFile)
+	if err := fs.WriteFile(frameworkPath, frameworkBytes,
+		fs.WithAtomic(true),
+		fs.WithMkdirAll(true),
+	); err != nil {
+		return nil, fmt.Errorf("internal: write %s: %w", frameworkPath, err)
+	}
+	result.FilesWritten = append(result.FilesWritten, frameworkPath)
 
 	if !opts.SkipBridge {
 		if err := emitBridgeAndSkeletons(opts, conf, cmdDir, cmdPkg, outputDir, pkg, programSpec, result); err != nil {
@@ -373,14 +368,4 @@ func resolveOutputTarget(opts RunOptions, conf *Conf) (dir, pkg string) {
 		}
 	}
 	return dir, pkg
-}
-
-// templateOutputFilename derives the .gen.go filename from a
-// template name: "spec.gen.tmpl" → "spec.gen.go". Unknown
-// extensions pass through unchanged.
-func templateOutputFilename(tmplName string) string {
-	if base, ok := strings.CutSuffix(tmplName, ".tmpl"); ok {
-		return base + ".go"
-	}
-	return tmplName + ".go"
 }

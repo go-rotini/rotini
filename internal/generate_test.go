@@ -64,10 +64,14 @@ func writeRunFixture(t *testing.T) (specPath, outDir string) {
 }
 
 // =============================================================================
-// Happy path: emit foundation templates
+// Happy path: emit the consolidated framework file
 // =============================================================================
 
-func TestRun_emitsFoundationFiles(t *testing.T) {
+// TestRun_emitsRotiniGenFile asserts the framework-package output is
+// exactly one file (rotini.gen.go) per rotiniold convention and
+// standard Go codegen practice. Anything else means the renderer
+// regressed back to the broken per-template-per-file split.
+func TestRun_emitsRotiniGenFile(t *testing.T) {
 	t.Parallel()
 	specPath, outDir := writeRunFixture(t)
 
@@ -80,16 +84,7 @@ func TestRun_emitsFoundationFiles(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	wantBasenames := []string{
-		"completion.gen.go",
-		"executors.gen.go",
-		"handlers.gen.go",
-		"inputs.gen.go",
-		"lifecycle.gen.go",
-		"program.gen.go",
-		"render.gen.go",
-		"spec.gen.go",
-	}
+	wantBasenames := []string{"rotini.gen.go"}
 	gotBasenames := make([]string, len(res.FilesWritten))
 	for i, p := range res.FilesWritten {
 		gotBasenames[i] = filepath.Base(p)
@@ -98,8 +93,7 @@ func TestRun_emitsFoundationFiles(t *testing.T) {
 		t.Errorf("FilesWritten basenames: got %v, want %v", gotBasenames, wantBasenames)
 	}
 
-	// Verify each file is non-empty, declares the right package,
-	// and references rtk.
+	// The single file must declare the right package and import rtk.
 	for _, p := range res.FilesWritten {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -128,9 +122,9 @@ func TestRun_specContentReflectsInput(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	specGo, err := os.ReadFile(filepath.Join(outDir, "spec.gen.go"))
+	specGo, err := os.ReadFile(filepath.Join(outDir, "rotini.gen.go"))
 	if err != nil {
-		t.Fatalf("read spec.gen.go: %v", err)
+		t.Fatalf("read rotini.gen.go: %v", err)
 	}
 	got := string(specGo)
 	wants := []string{
@@ -144,7 +138,7 @@ func TestRun_specContentReflectsInput(t *testing.T) {
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {
-			t.Errorf("spec.gen.go missing %q", w)
+			t.Errorf("rotini.gen.go missing %q", w)
 		}
 	}
 }
@@ -198,12 +192,12 @@ func TestRun_packageDerivedFromOutputDirBasename(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	specGo, err := os.ReadFile(filepath.Join(outDir, "spec.gen.go"))
+	specGo, err := os.ReadFile(filepath.Join(outDir, "rotini.gen.go"))
 	if err != nil {
-		t.Fatalf("read spec.gen.go: %v", err)
+		t.Fatalf("read rotini.gen.go: %v", err)
 	}
 	if !strings.Contains(string(specGo), "package mycli") {
-		t.Errorf("spec.gen.go: missing `package mycli` (got first line: %q)", firstLine(string(specGo)))
+		t.Errorf("rotini.gen.go: missing `package mycli` (got first line: %q)", firstLine(string(specGo)))
 	}
 }
 
@@ -220,9 +214,9 @@ func TestRun_explicitPackageOverridesBasename(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	specGo, _ := os.ReadFile(filepath.Join(outDir, "spec.gen.go"))
+	specGo, _ := os.ReadFile(filepath.Join(outDir, "rotini.gen.go"))
 	if !strings.Contains(string(specGo), "package explicit") {
-		t.Errorf("spec.gen.go: missing explicit package override")
+		t.Errorf("rotini.gen.go: missing explicit package override")
 	}
 }
 
@@ -255,8 +249,8 @@ generate:
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if _, err := os.Stat("fwgen/spec.gen.go"); err != nil {
-		t.Errorf("fwgen/spec.gen.go: %v", err)
+	if _, err := os.Stat("fwgen/rotini.gen.go"); err != nil {
+		t.Errorf("fwgen/rotini.gen.go: %v", err)
 	}
 }
 
@@ -387,10 +381,11 @@ func TestRun_emitsBridgeAndSkelsWhenModulePathResolvable(t *testing.T) {
 		t.Errorf("foo_bar.go missing FooBarInputs reference")
 	}
 
-	// FilesWritten lists framework + bridge + every stub.
-	if len(res.FilesWritten) < 11 {
-		t.Errorf("FilesWritten count: got %d, want at least 11 (7 framework + bridge + 4 stubs)",
-			len(res.FilesWritten))
+	// FilesWritten lists exactly: 1 framework file (rotini.gen.go) +
+	// 1 bridge file (handlers.gen.go) + 4 stubs (root + 3 cmds).
+	if len(res.FilesWritten) != 6 {
+		t.Errorf("FilesWritten count: got %d, want 6 (rotini.gen.go + handlers.gen.go + 4 stubs); files=%v",
+			len(res.FilesWritten), res.FilesWritten)
 	}
 }
 
