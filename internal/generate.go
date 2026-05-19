@@ -258,7 +258,7 @@ func emitBridgeAndSkeletons(
 	// Render handler skeletons (one per command, plus root).
 	paths := append([]string{""}, bridgeIn.SortedCommandPaths()...)
 	for _, path := range paths {
-		skelPath := filepath.Join(cmdDir, HandlerFilename(path))
+		skelPath := filepath.Join(cmdDir, HandlerFilename(programSpec.Name, path))
 		if fs.Exists(skelPath) {
 			result.FilesSkipped = append(result.FilesSkipped, skelPath)
 			continue

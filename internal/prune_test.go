@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -16,9 +17,10 @@ import (
 // =============================================================================
 
 // pruneFixtureSpec mirrors runFixtureSpec but lives in this file so the
-// two test suites can evolve independently. Three commands: "add",
-// "foo", "foo bar" — handler files expected: root.go, add.go, foo.go,
-// foo_bar.go.
+// two test suites can evolve independently. Program name "todo" plus
+// three commands ("add", "foo", "foo bar") produces these expected
+// handler files (per the &lt;progname&gt;_&lt;path&gt;.go convention):
+// todo.go, todo_add.go, todo_foo.go, todo_foo_bar.go.
 const pruneFixtureSpec = `$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json
 name: todo
 commands:
@@ -84,17 +86,36 @@ func equalStringsSlice(a, b []string) bool {
 func TestHandlerFilename(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
+		prog string
 		path string
 		want string
 	}{
-		{"", "root.go"},
-		{"add", "add.go"},
-		{"foo-bar", "foo_bar.go"},
-		{"foo-bar-baz", "foo_bar_baz.go"},
+		// Root command files are bare-program-named.
+		{"rotini", "", "rotini.go"},
+		{"todo", "", "todo.go"},
+		// Single-segment paths are program-prefixed.
+		{"rotini", "generate", "rotini_generate.go"},
+		{"todo", "add", "todo_add.go"},
+		// Nested paths join with underscores, hyphens converted.
+		{"rotini", "foo-bar", "rotini_foo_bar.go"},
+		{"rotini", "foo-bar-baz", "rotini_foo_bar_baz.go"},
+		// Program names with hyphens convert too.
+		{"my-cli", "add", "my_cli_add.go"},
+		{"my-cli", "", "my_cli.go"},
+		// Empty program name falls back to "root" so the result is
+		// still a valid Go file basename — guards old callers from
+		// silently producing ".go".
+		{"", "", "root.go"},
+		{"", "add", "root_add.go"},
+		// Sibling-command-name uniqueness: parent path is preserved
+		// in the filename, so cmd1/sub vs cmd2/sub get distinct files.
+		{"mycli", "cmd1-sub", "mycli_cmd1_sub.go"},
+		{"mycli", "cmd2-sub", "mycli_cmd2_sub.go"},
 	}
 	for _, c := range cases {
-		if got := internal.HandlerFilename(c.path); got != c.want {
-			t.Errorf("HandlerFilename(%q): got %q, want %q", c.path, got, c.want)
+		if got := internal.HandlerFilename(c.prog, c.path); got != c.want {
+			t.Errorf("HandlerFilename(%q, %q): got %q, want %q",
+				c.prog, c.path, got, c.want)
 		}
 	}
 }
@@ -109,10 +130,10 @@ func TestPrune_deletesStaleFile(t *testing.T) {
 	// file ("removed_cmd.go") that no longer corresponds to a command
 	// in the spec.
 	specPath, handlersDir := writePruneFixture(t, []string{
-		"root.go",
-		"add.go",
-		"foo.go",
-		"foo_bar.go",
+		"todo.go",
+		"todo_add.go",
+		"todo_foo.go",
+		"todo_foo_bar.go",
 		"removed_cmd.go",
 	})
 	res, err := internal.Prune(internal.PruneOptions{
@@ -125,8 +146,8 @@ func TestPrune_deletesStaleFile(t *testing.T) {
 	if got := basenames(res.FilesDeleted); !equalStringsSlice(got, []string{"removed_cmd.go"}) {
 		t.Errorf("FilesDeleted: got %v, want [removed_cmd.go]", got)
 	}
-	if got := basenames(res.FilesKept); !equalStringsSlice(got, []string{"add.go", "foo.go", "foo_bar.go", "root.go"}) {
-		t.Errorf("FilesKept: got %v, want [add.go foo.go foo_bar.go root.go]", got)
+	if got := basenames(res.FilesKept); !equalStringsSlice(got, []string{"todo.go", "todo_add.go", "todo_foo.go", "todo_foo_bar.go"}) {
+		t.Errorf("FilesKept: got %v, want [todo.go todo_add.go todo_foo.go todo_foo_bar.go]", got)
 	}
 	// Verify the deletion actually happened.
 	if _, err := os.Stat(filepath.Join(handlersDir, "removed_cmd.go")); !errors.Is(err, os.ErrNotExist) {
@@ -137,10 +158,10 @@ func TestPrune_deletesStaleFile(t *testing.T) {
 func TestPrune_keepRetainsSafelistedFile(t *testing.T) {
 	t.Parallel()
 	specPath, handlersDir := writePruneFixture(t, []string{
-		"root.go",
-		"add.go",
-		"foo.go",
-		"foo_bar.go",
+		"todo.go",
+		"todo_add.go",
+		"todo_foo.go",
+		"todo_foo_bar.go",
 		"my_helper.go", // stale BUT safelisted
 	})
 	res, err := internal.Prune(internal.PruneOptions{
@@ -163,10 +184,10 @@ func TestPrune_keepRetainsSafelistedFile(t *testing.T) {
 func TestPrune_dryRunDoesNotDelete(t *testing.T) {
 	t.Parallel()
 	specPath, handlersDir := writePruneFixture(t, []string{
-		"root.go",
-		"add.go",
-		"foo.go",
-		"foo_bar.go",
+		"todo.go",
+		"todo_add.go",
+		"todo_foo.go",
+		"todo_foo_bar.go",
 		"stale.go",
 	})
 	res, err := internal.Prune(internal.PruneOptions{
@@ -193,10 +214,10 @@ func TestPrune_dryRunDoesNotDelete(t *testing.T) {
 func TestPrune_skipsNonGoFiles(t *testing.T) {
 	t.Parallel()
 	specPath, handlersDir := writePruneFixture(t, []string{
-		"root.go",
-		"add.go",
-		"foo.go",
-		"foo_bar.go",
+		"todo.go",
+		"todo_add.go",
+		"todo_foo.go",
+		"todo_foo_bar.go",
 		"README.md",  // non-Go
 		".gitignore", // hidden, non-Go
 		"data.yaml",  // non-Go
@@ -225,10 +246,10 @@ func TestPrune_skipsGoFilesOutsideConvention(t *testing.T) {
 	// "_internal.go" starts with underscore — Go ignores it at build
 	// time, so prune shouldn't claim it either.
 	specPath, handlersDir := writePruneFixture(t, []string{
-		"root.go",
-		"add.go",
-		"foo.go",
-		"foo_bar.go",
+		"todo.go",
+		"todo_add.go",
+		"todo_foo.go",
+		"todo_foo_bar.go",
 		"foo-bar.go",  // hyphenated; not generated convention
 		"123digit.go", // starts with digit; invalid Go identifier
 	})
@@ -291,10 +312,10 @@ func TestPrune_emptyHandlersDir(t *testing.T) {
 func TestPrune_skipsSubdirectories(t *testing.T) {
 	t.Parallel()
 	specPath, handlersDir := writePruneFixture(t, []string{
-		"root.go",
-		"add.go",
-		"foo.go",
-		"foo_bar.go",
+		"todo.go",
+		"todo_add.go",
+		"todo_foo.go",
+		"todo_foo_bar.go",
 	})
 	// Add a subdirectory that itself contains a "stale.go" file.
 	// Prune is single-level, so the subdir is left alone.
@@ -327,10 +348,10 @@ func TestPrune_skipsSubdirectories(t *testing.T) {
 func TestPrune_isIdempotent(t *testing.T) {
 	t.Parallel()
 	specPath, handlersDir := writePruneFixture(t, []string{
-		"root.go",
-		"add.go",
-		"foo.go",
-		"foo_bar.go",
+		"todo.go",
+		"todo_add.go",
+		"todo_foo.go",
+		"todo_foo_bar.go",
 		"stale.go",
 	})
 	first, err := internal.Prune(internal.PruneOptions{
@@ -410,10 +431,10 @@ func TestPrune_scenarioStaleActiveSafelistedNonGo(t *testing.T) {
 	t.Parallel()
 	specPath, handlersDir := writePruneFixture(t, []string{
 		// Active (correspond to commands in the spec):
-		"root.go",
-		"add.go",
-		"foo.go",
-		"foo_bar.go",
+		"todo.go",
+		"todo_add.go",
+		"todo_foo.go",
+		"todo_foo_bar.go",
 		// Stale (no command in spec):
 		"old_cmd.go",
 		"another_stale.go",
@@ -431,7 +452,8 @@ func TestPrune_scenarioStaleActiveSafelistedNonGo(t *testing.T) {
 		t.Fatalf("Prune: %v", err)
 	}
 	wantDeleted := []string{"another_stale.go", "old_cmd.go"}
-	wantKept := []string{"add.go", "foo.go", "foo_bar.go", "my_helper.go", "root.go"}
+	// basenames() sorts alphabetically: my_helper < todo < todo_add < ...
+	wantKept := []string{"my_helper.go", "todo.go", "todo_add.go", "todo_foo.go", "todo_foo_bar.go"}
 	if got := basenames(res.FilesDeleted); !equalStringsSlice(got, wantDeleted) {
 		t.Errorf("FilesDeleted: got %v, want %v", got, wantDeleted)
 	}
@@ -482,7 +504,7 @@ commands:
 	if err := os.MkdirAll(handlersDir, 0o750); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
-	for _, f := range []string{"root.go", "foo.go", "foo_bar.go", "foo_bar_baz.go", "foo_bar_baz_quux.go"} {
+	for _, f := range []string{"x.go", "x_foo.go", "x_foo_bar.go", "x_foo_bar_baz.go", "x_foo_bar_baz_quux.go"} {
 		if err := os.WriteFile(filepath.Join(handlersDir, f), []byte("package x\n"), 0o600); err != nil {
 			t.Fatalf("write %s: %v", f, err)
 		}
@@ -494,20 +516,13 @@ commands:
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
-	if got := basenames(res.FilesDeleted); !equalStringsSlice(got, []string{"foo_bar_baz_quux.go"}) {
-		t.Errorf("FilesDeleted: got %v, want [foo_bar_baz_quux.go]", got)
+	if got := basenames(res.FilesDeleted); !equalStringsSlice(got, []string{"x_foo_bar_baz_quux.go"}) {
+		t.Errorf("FilesDeleted: got %v, want [x_foo_bar_baz_quux.go]", got)
 	}
 	// Sanity: every legitimately-deep path was retained.
 	keptNames := basenames(res.FilesKept)
-	for _, want := range []string{"root.go", "foo.go", "foo_bar.go", "foo_bar_baz.go"} {
-		found := false
-		for _, n := range keptNames {
-			if n == want {
-				found = true
-				break
-			}
-		}
-		if !found {
+	for _, want := range []string{"x.go", "x_foo.go", "x_foo_bar.go", "x_foo_bar_baz.go"} {
+		if !slices.Contains(keptNames, want) {
 			t.Errorf("expected %q in FilesKept, got %v", want, keptNames)
 		}
 	}

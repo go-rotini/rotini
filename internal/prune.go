@@ -139,22 +139,35 @@ var ErrMissingHandlersDir = errors.New("internal: HandlersDir is required")
 // spec currently expects: one per command (root included), named per
 // the rotini-handler-filename convention.
 //
-// Convention: the root command's handler file is "root.go"; every
-// other command's file is "<path-with-hyphens-as-underscores>.go".
-// "add" → "add.go"; "foo-bar-baz" → "foo_bar_baz.go".
+// Convention: every handler file is named
+// "<program>_<segments>.go", with the program name prefixed and
+// every command-path segment joined by underscores. The root command's
+// file is just "<program>.go".
 //
-// The convention uses underscores rather than hyphens for Go's usual
-// file-naming idiom — `go build` accepts hyphenated names but most
-// tooling assumes underscores.
+// Examples for a program named "rotini":
+//
+//   - root command           → "rotini.go"
+//   - "generate"             → "rotini_generate.go"
+//   - "foo bar baz"          → "rotini_foo_bar_baz.go"
+//
+// This is the rotiniold convention, kept because it (a) prefixes the
+// program name into every filename so handlers are self-identifying,
+// and (b) makes sibling commands with the same leaf name (e.g.,
+// `cmd1 sub` vs `cmd2 sub`) end up in distinct files
+// (`prog_cmd1_sub.go` vs `prog_cmd2_sub.go`).
+//
+// Hyphens in either the program name or any path segment are
+// translated to underscores so the result is a valid Go file name
+// idiomatically.
 func expectedHandlerFilenames(ps rtk.ProgramSpec) map[string]bool {
 	out := map[string]bool{
-		"root.go": true,
+		HandlerFilename(ps.Name, ""): true,
 	}
 	var walk func(cmds []rtk.CommandSpec)
 	walk = func(cmds []rtk.CommandSpec) {
 		for i := range cmds {
 			c := &cmds[i]
-			out[HandlerFilename(c.Path)] = true
+			out[HandlerFilename(ps.Name, c.Path)] = true
 			walk(c.Commands)
 		}
 	}
@@ -163,20 +176,30 @@ func expectedHandlerFilenames(ps rtk.ProgramSpec) map[string]bool {
 }
 
 // HandlerFilename derives the handler file basename for a command
-// path. Exported so codegen (M2.5b's handler-skel template) can use
-// the same naming rule and so users writing tooling around the
-// scaffold can compute expected names without re-implementing the
-// convention.
+// path. Exported so codegen (the handler-skel template) and tools
+// surrounding the scaffold can compute expected names without
+// re-implementing the convention.
 //
-//   - "" (root)        → "root.go"
-//   - "add"            → "add.go"
-//   - "foo-bar"        → "foo_bar.go"
-//   - "foo-bar-baz"    → "foo_bar_baz.go"
-func HandlerFilename(commandPath string) string {
-	if commandPath == "" {
-		return "root.go"
+// Examples (program "rotini"):
+//
+//   - HandlerFilename("rotini", "")             → "rotini.go"
+//   - HandlerFilename("rotini", "generate")     → "rotini_generate.go"
+//   - HandlerFilename("rotini", "foo-bar-baz")  → "rotini_foo_bar_baz.go"
+//   - HandlerFilename("my-cli", "add")          → "my_cli_add.go"
+//
+// programName must be non-empty; an empty name falls back to "root"
+// so legacy callers (and tests) keep producing a syntactically valid
+// filename, but production callers always supply a name from
+// [rtk.ProgramSpec.Name].
+func HandlerFilename(programName, commandPath string) string {
+	prog := strings.ReplaceAll(programName, "-", "_")
+	if prog == "" {
+		prog = "root"
 	}
-	return strings.ReplaceAll(commandPath, "-", "_") + ".go"
+	if commandPath == "" {
+		return prog + ".go"
+	}
+	return prog + "_" + strings.ReplaceAll(commandPath, "-", "_") + ".go"
 }
 
 // looksLikeHandlerFile reports whether a basename matches the rotini

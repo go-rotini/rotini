@@ -354,7 +354,7 @@ func TestRun_emitsBridgeAndSkelsWhenModulePathResolvable(t *testing.T) {
 	}
 
 	// Per-command stubs (one per path + root).
-	wantStubs := []string{"root.go", "add.go", "foo.go", "foo_bar.go"}
+	wantStubs := []string{"todo.go", "todo_add.go", "todo_foo.go", "todo_foo_bar.go"}
 	for _, s := range wantStubs {
 		p := filepath.Join(cmdDir, s)
 		if _, err := os.Stat(p); err != nil {
@@ -375,11 +375,11 @@ func TestRun_emitsBridgeAndSkelsWhenModulePathResolvable(t *testing.T) {
 	}
 
 	// Per-command type names match the convention.
-	rootStub, _ := os.ReadFile(filepath.Join(cmdDir, "root.go"))
+	rootStub, _ := os.ReadFile(filepath.Join(cmdDir, "todo.go"))
 	if !strings.Contains(string(rootStub), `type RootHandlerImpl struct{}`) {
-		t.Errorf("root.go missing RootHandlerImpl type")
+		t.Errorf("todo.go missing RootHandlerImpl type")
 	}
-	fooBarStub, _ := os.ReadFile(filepath.Join(cmdDir, "foo_bar.go"))
+	fooBarStub, _ := os.ReadFile(filepath.Join(cmdDir, "todo_foo_bar.go"))
 	if !strings.Contains(string(fooBarStub), `type FooBarHandlerImpl struct{}`) {
 		t.Errorf("foo_bar.go missing FooBarHandlerImpl type")
 	}
@@ -409,7 +409,7 @@ func TestRun_stubsAreWriteOnlyIfMissing(t *testing.T) {
 		t.Fatalf("first Run: %v", err)
 	}
 	// Hand-edit add.go: replace the TODO with real implementation.
-	addPath := filepath.Join(cmdDir, "add.go")
+	addPath := filepath.Join(cmdDir, "todo_add.go")
 	custom := "package cmd\n\n// user-authored content\n"
 	if err := os.WriteFile(addPath, []byte(custom), 0o600); err != nil {
 		t.Fatalf("rewrite add.go: %v", err)
@@ -434,7 +434,7 @@ func TestRun_stubsAreWriteOnlyIfMissing(t *testing.T) {
 			got, custom)
 	}
 	// FilesSkipped should list every stub that already existed.
-	wantSkipped := []string{"add.go", "foo.go", "foo_bar.go", "root.go"}
+	wantSkipped := []string{"todo_add.go", "todo_foo.go", "todo_foo_bar.go", "todo.go"}
 	for _, w := range wantSkipped {
 		found := false
 		for _, p := range res2.FilesSkipped {
