@@ -367,6 +367,69 @@ func TestRender_programGen(t *testing.T) {
 }
 
 // =============================================================================
+// bridge.gen.tmpl
+// =============================================================================
+
+func TestRender_bridgeGen(t *testing.T) {
+	t.Parallel()
+	in := internal.NewRenderInput("cmd", fixtureSpec()).
+		WithFramework("example.com/me/myapp/internal/cli/rotini", "rotini")
+	out := renderOK(t, "bridge.gen.tmpl", in)
+
+	containsAll(t, "bridge.gen.tmpl", out,
+		`package cmd`,
+		`rotini "example.com/me/myapp/internal/cli/rotini"`,
+		`type handlers struct`,
+		`func (h *handlers) Root() rotini.RootHandler { return h.root }`,
+		`func (h *handlers) Add() rotini.AddHandler`,
+		`func (h *handlers) FooBar() rotini.FooBarHandler`,
+		`var Program = rotini.NewProgram(&handlers{`,
+		`&RootHandlerImpl{}`,
+		`&AddHandlerImpl{}`,
+		`&FooBarHandlerImpl{}`,
+	)
+}
+
+// =============================================================================
+// handler-skel.go.tmpl
+// =============================================================================
+
+func TestRender_handlerSkelGen_root(t *testing.T) {
+	t.Parallel()
+	in := internal.NewRenderInput("cmd", fixtureSpec()).
+		WithFramework("example.com/me/myapp/internal/cli/rotini", "rotini").
+		WithCurrentPath("") // root command
+	out := renderOK(t, "handler-skel.go.tmpl", in)
+
+	containsAll(t, "handler-skel.go.tmpl", out,
+		`package cmd`,
+		`rotini "example.com/me/myapp/internal/cli/rotini"`,
+		`type RootHandlerImpl struct{}`,
+		`func (h *RootHandlerImpl) Run(`,
+		`ctx rotini.RootCtx`,
+		`inputs *rotini.RootInputs`,
+		`// TODO: implement.`,
+	)
+}
+
+func TestRender_handlerSkelGen_named(t *testing.T) {
+	t.Parallel()
+	in := internal.NewRenderInput("cmd", fixtureSpec()).
+		WithFramework("example.com/me/myapp/internal/cli/rotini", "rotini").
+		WithCurrentPath("foo-bar")
+	out := renderOK(t, "handler-skel.go.tmpl", in)
+
+	containsAll(t, "handler-skel.go.tmpl", out,
+		`package cmd`,
+		`rotini "example.com/me/myapp/internal/cli/rotini"`,
+		`type FooBarHandlerImpl struct{}`,
+		`func (h *FooBarHandlerImpl) Run(`,
+		`ctx rotini.FooBarCtx`,
+		`inputs *rotini.FooBarInputs`,
+	)
+}
+
+// =============================================================================
 // Unknown-template error
 // =============================================================================
 

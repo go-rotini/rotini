@@ -31,16 +31,63 @@ type RenderInput struct {
 	// map. Path is hyphen-joined ("foo-bar-baz"); root is omitted. Sorted
 	// iteration via [SortedCommandPaths].
 	FlatCommands map[string]*rtk.CommandSpec
+
+	// FrameworkImportPath is the full Go import path of the framework
+	// package the bridge / handler-skel templates need to reference
+	// (e.g., "example.com/me/myapp/internal/cli/rotini"). Empty for
+	// framework-internal templates that don't import themselves.
+	FrameworkImportPath string
+
+	// FrameworkPackage is the Go package name (basename of the import
+	// path) used as the import qualifier in bridge / handler-skel
+	// templates: `import "<path>"` is referenced as
+	// `<FrameworkPackage>.X`. Empty for framework-internal templates.
+	FrameworkPackage string
+
+	// CurrentPath identifies a specific command path the template is
+	// rendering for. Used by handler-skel.go.tmpl which emits one stub
+	// per command. Empty for templates that iterate over all
+	// commands (e.g., bridge.gen.tmpl, executors.gen.tmpl).
+	CurrentPath string
 }
 
 // NewRenderInput builds a [RenderInput] from spec + package name. The
 // FlatCommands map is computed once so templates don't redo the walk.
+// Bridge/handler-skel templates need [RenderInput.FrameworkImportPath]
+// and [RenderInput.FrameworkPackage] set in addition; use the With*
+// chain methods.
 func NewRenderInput(pkg string, spec rtk.ProgramSpec) RenderInput {
 	return RenderInput{
 		Package:      pkg,
 		Spec:         spec,
 		FlatCommands: flattenCommandSpecs(spec.Commands, ""),
 	}
+}
+
+// WithFramework returns a copy of r with FrameworkImportPath and
+// FrameworkPackage set. Used by [Run] when invoking bridge /
+// handler-skel templates.
+func (r RenderInput) WithFramework(importPath, pkg string) RenderInput {
+	r.FrameworkImportPath = importPath
+	r.FrameworkPackage = pkg
+	return r
+}
+
+// WithCurrentPath returns a copy of r with CurrentPath set. Used by
+// [Run] when invoking handler-skel templates once per command path.
+func (r RenderInput) WithCurrentPath(path string) RenderInput {
+	r.CurrentPath = path
+	return r
+}
+
+// CurrentCommand returns the *CommandSpec corresponding to
+// CurrentPath, or nil when the current path is empty (root) or not
+// found in FlatCommands.
+func (r RenderInput) CurrentCommand() *rtk.CommandSpec {
+	if r.CurrentPath == "" {
+		return nil
+	}
+	return r.FlatCommands[r.CurrentPath]
 }
 
 // SortedCommandPaths returns the keys of [RenderInput.FlatCommands] in
@@ -118,6 +165,7 @@ func templateFuncs() template.FuncMap {
 	return template.FuncMap{
 		// String / path helpers.
 		"toPascalCase":                     toPascalCase,
+		"camelCasePath":                    camelCasePath,
 		"lastPathSegment":                  lastPathSegment,
 		"commandIntermediateAncestorPaths": commandIntermediateAncestorPaths,
 		"goStringSlice":                    goStringSliceLiteral,
@@ -163,6 +211,21 @@ func toPascalCase(s string) string {
 		}
 	}
 	return string(out)
+}
+
+// camelCasePath produces the bridge-friendly field-name form of a
+// hyphen-joined command path: "" → "root"; "add" → "add";
+// "foo-bar-baz" → "fooBarBaz". Used as the field identifier in the
+// bridge's handlers struct.
+func camelCasePath(path string) string {
+	if path == "" {
+		return "root"
+	}
+	pascal := toPascalCase(path)
+	if pascal == "" {
+		return ""
+	}
+	return string(unicode.ToLower(rune(pascal[0]))) + pascal[1:]
 }
 
 // lastPathSegment returns the trailing segment of a hyphen-joined

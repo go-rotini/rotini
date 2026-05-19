@@ -303,6 +303,247 @@ func TestRun_missingSpecFileReturnsError(t *testing.T) {
 }
 
 // =============================================================================
+// Bridge + handler-skel emission
+// =============================================================================
+
+func TestRun_emitsBridgeAndSkelsWhenModulePathResolvable(t *testing.T) {
+	t.Parallel()
+	specPath, outDir := writeRunFixture(t)
+	cmdDir := filepath.Join(filepath.Dir(specPath), "cmd")
+
+	res, err := internal.Run(internal.RunOptions{
+		SpecPath:   specPath,
+		OutputDir:  outDir,
+		Package:    "rotini",
+		CmdDir:     cmdDir,
+		CmdPackage: "cmd",
+		ModulePath: "example.com/me/todo",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Bridge + per-command skels should be in cmdDir.
+	bridgePath := filepath.Join(cmdDir, "handlers.gen.go")
+	if _, err := os.Stat(bridgePath); err != nil {
+		t.Fatalf("bridge not written: %v", err)
+	}
+	bridge, err := os.ReadFile(bridgePath)
+	if err != nil {
+		t.Fatalf("read bridge: %v", err)
+	}
+	wantBridge := []string{
+		`package cmd`,
+		`rotini "example.com/me/todo/`, // framework import path
+		`type handlers struct`,
+		`type handlers struct`,
+		`func (h *handlers) Root() rotini.RootHandler { return h.root }`,
+		`func (h *handlers) Add() rotini.AddHandler`,
+		`func (h *handlers) FooBar() rotini.FooBarHandler`,
+		`var Program = rotini.NewProgram(&handlers{`,
+		`&RootHandlerImpl{}`,
+		`&AddHandlerImpl{}`,
+		`&FooBarHandlerImpl{}`,
+	}
+	for _, w := range wantBridge {
+		if !strings.Contains(string(bridge), w) {
+			t.Errorf("bridge missing %q\n--- got ---\n%s", w, bridge)
+		}
+	}
+
+	// Per-command stubs (one per path + root).
+	wantStubs := []string{"root.go", "add.go", "foo.go", "foo_bar.go"}
+	for _, s := range wantStubs {
+		p := filepath.Join(cmdDir, s)
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("stub %s missing: %v", s, err)
+			continue
+		}
+		content, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatalf("read %s: %v", s, err)
+		}
+		got := string(content)
+		if !strings.Contains(got, "package cmd") {
+			t.Errorf("%s missing package cmd", s)
+		}
+		if !strings.Contains(got, `rotini "example.com/me/todo/`) {
+			t.Errorf("%s missing rotini import", s)
+		}
+	}
+
+	// Per-command type names match the convention.
+	rootStub, _ := os.ReadFile(filepath.Join(cmdDir, "root.go"))
+	if !strings.Contains(string(rootStub), `type RootHandlerImpl struct{}`) {
+		t.Errorf("root.go missing RootHandlerImpl type")
+	}
+	fooBarStub, _ := os.ReadFile(filepath.Join(cmdDir, "foo_bar.go"))
+	if !strings.Contains(string(fooBarStub), `type FooBarHandlerImpl struct{}`) {
+		t.Errorf("foo_bar.go missing FooBarHandlerImpl type")
+	}
+	if !strings.Contains(string(fooBarStub), `*rotini.FooBarInputs`) {
+		t.Errorf("foo_bar.go missing FooBarInputs reference")
+	}
+
+	// FilesWritten lists framework + bridge + every stub.
+	if len(res.FilesWritten) < 11 {
+		t.Errorf("FilesWritten count: got %d, want at least 11 (7 framework + bridge + 4 stubs)",
+			len(res.FilesWritten))
+	}
+}
+
+func TestRun_stubsAreWriteOnlyIfMissing(t *testing.T) {
+	t.Parallel()
+	specPath, outDir := writeRunFixture(t)
+	cmdDir := filepath.Join(filepath.Dir(specPath), "cmd")
+
+	// First run: writes everything fresh.
+	if _, err := internal.Run(internal.RunOptions{
+		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
+		CmdDir: cmdDir, CmdPackage: "cmd",
+		ModulePath: "example.com/me/todo",
+	}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	// Hand-edit add.go: replace the TODO with real implementation.
+	addPath := filepath.Join(cmdDir, "add.go")
+	custom := "package cmd\n\n// user-authored content\n"
+	if err := os.WriteFile(addPath, []byte(custom), 0o600); err != nil {
+		t.Fatalf("rewrite add.go: %v", err)
+	}
+
+	// Second run: stubs should NOT be overwritten (write-only-if-missing).
+	res2, err := internal.Run(internal.RunOptions{
+		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
+		CmdDir: cmdDir, CmdPackage: "cmd",
+		ModulePath: "example.com/me/todo",
+	})
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	got, err := os.ReadFile(addPath)
+	if err != nil {
+		t.Fatalf("read add.go: %v", err)
+	}
+	if string(got) != custom {
+		t.Errorf("add.go was overwritten on second run despite write-only-if-missing rule:\n--- got ---\n%s\n--- want ---\n%s",
+			got, custom)
+	}
+	// FilesSkipped should list every stub that already existed.
+	wantSkipped := []string{"add.go", "foo.go", "foo_bar.go", "root.go"}
+	for _, w := range wantSkipped {
+		found := false
+		for _, p := range res2.FilesSkipped {
+			if filepath.Base(p) == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("FilesSkipped missing %q (got %v)", w, basenamesSlice(res2.FilesSkipped))
+		}
+	}
+}
+
+func TestRun_bridgeAlwaysOverwrites(t *testing.T) {
+	t.Parallel()
+	specPath, outDir := writeRunFixture(t)
+	cmdDir := filepath.Join(filepath.Dir(specPath), "cmd")
+	bridgePath := filepath.Join(cmdDir, "handlers.gen.go")
+
+	// First run: writes a fresh bridge.
+	if _, err := internal.Run(internal.RunOptions{
+		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
+		CmdDir: cmdDir, CmdPackage: "cmd",
+		ModulePath: "example.com/me/todo",
+	}); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	first, _ := os.ReadFile(bridgePath)
+
+	// Hand-edit the bridge to verify it gets clobbered on next run.
+	if err := os.WriteFile(bridgePath, []byte("// hand-edited!\n"), 0o600); err != nil {
+		t.Fatalf("rewrite bridge: %v", err)
+	}
+
+	// Second run: bridge must be regenerated.
+	if _, err := internal.Run(internal.RunOptions{
+		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
+		CmdDir: cmdDir, CmdPackage: "cmd",
+		ModulePath: "example.com/me/todo",
+	}); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	second, _ := os.ReadFile(bridgePath)
+
+	if string(second) == "// hand-edited!\n" {
+		t.Error("bridge retained hand-edit; expected regeneration")
+	}
+	if string(second) != string(first) {
+		t.Error("bridge content differs across runs (non-deterministic)")
+	}
+}
+
+func TestRun_skipBridgeOptionSuppressesEmission(t *testing.T) {
+	t.Parallel()
+	specPath, outDir := writeRunFixture(t)
+	cmdDir := filepath.Join(filepath.Dir(specPath), "cmd")
+
+	_, err := internal.Run(internal.RunOptions{
+		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
+		CmdDir: cmdDir, CmdPackage: "cmd",
+		ModulePath: "example.com/me/todo",
+		SkipBridge: true,
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cmdDir, "handlers.gen.go")); !os.IsNotExist(err) {
+		t.Errorf("handlers.gen.go: want not-exist, got err=%v", err)
+	}
+}
+
+func TestRun_missingModulePathSkipsBridge(t *testing.T) {
+	t.Parallel()
+	specPath, outDir := writeRunFixture(t)
+	cmdDir := filepath.Join(filepath.Dir(specPath), "cmd")
+
+	res, err := internal.Run(internal.RunOptions{
+		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
+		CmdDir: cmdDir, CmdPackage: "cmd",
+		// ModulePath: "" — go.mod walk fails inside a tempdir
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cmdDir, "handlers.gen.go")); !os.IsNotExist(err) {
+		t.Errorf("handlers.gen.go: want not-exist, got err=%v", err)
+	}
+	foundSkip := false
+	for _, p := range res.FilesSkipped {
+		if strings.Contains(p, "handlers.gen.go") {
+			foundSkip = true
+			break
+		}
+	}
+	if !foundSkip {
+		t.Errorf("FilesSkipped: did not mention bridge (%v)", res.FilesSkipped)
+	}
+}
+
+// basenamesSlice is a local helper extracting basenames from a slice
+// of full paths for error-message rendering. The prune_test.go file
+// has a `basenames` helper but that test file is part of the same
+// package — duplicating here avoids a tangle of cross-test imports.
+func basenamesSlice(paths []string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = filepath.Base(p)
+	}
+	return out
+}
+
+// =============================================================================
 // Helpers
 // =============================================================================
 

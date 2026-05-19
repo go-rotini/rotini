@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-rotini/fs"
+	"github.com/go-rotini/rotini/rtk"
 )
 
 // templatesFS holds every codegen template the package emits. Each
@@ -79,14 +80,37 @@ type RunOptions struct {
 
 	// OutputDir is the framework-package directory the .gen.go files
 	// are written to. When empty, the directory is derived from
-	// conf.Generate.Framework.Package (default "internal/cli/cmd").
+	// conf.Generate.Framework.Package (default "internal/cli/rotini").
 	// The path is relative to the current working directory unless
 	// absolute.
 	OutputDir string
 
-	// Package is the Go package name the rendered files declare. When
-	// empty, the basename of OutputDir is used.
+	// Package is the Go package name the rendered framework files
+	// declare. When empty, the basename of OutputDir is used.
 	Package string
+
+	// CmdDir is the directory the user-handler bridge (handlers.gen.go)
+	// and per-command skeleton files (root.go, add.go, ...) are
+	// written to. When empty, derived from conf.Generate.Cmd.Package
+	// (default "internal/cli/cmd").
+	CmdDir string
+
+	// CmdPackage is the Go package name the bridge + skeleton files
+	// declare. When empty, the basename of CmdDir is used.
+	CmdPackage string
+
+	// ModulePath is the Go module path used to import the framework
+	// package from the bridge / skeleton files (e.g.,
+	// "example.com/me/myapp"). When empty, [Run] walks go.mod from
+	// SpecPath's directory upward. If neither override nor go.mod is
+	// available, [Run] skips bridge + skeleton emission with a
+	// non-fatal warning surfaced via [RunResult.FilesSkipped].
+	ModulePath string
+
+	// SkipBridge, when true, suppresses bridge + skeleton emission.
+	// Useful when the user manages their own handler-bridge wiring
+	// or wants to render only the framework package.
+	SkipBridge bool
 }
 
 // RunResult reports the outcome of a [Run] invocation.
@@ -137,12 +161,14 @@ func Run(opts RunOptions) (*RunResult, error) {
 	ApplyConfDefaults(conf)
 
 	outputDir, pkg := resolveOutputTarget(opts, conf)
+	cmdDir, cmdPkg := resolveCmdTarget(opts, conf)
 
-	in := NewRenderInput(pkg, ToProgramSpec(spec))
+	programSpec := ToProgramSpec(spec)
+	frameworkIn := NewRenderInput(pkg, programSpec)
 
 	result := &RunResult{}
 	for _, name := range frameworkTemplates {
-		out, err := Render(name, in)
+		out, err := Render(name, frameworkIn)
 		if err != nil {
 			return nil, fmt.Errorf("internal: render %s: %w", name, err)
 		}
@@ -156,8 +182,103 @@ func Run(opts RunOptions) (*RunResult, error) {
 		result.FilesWritten = append(result.FilesWritten, path)
 	}
 
+	if !opts.SkipBridge {
+		if err := emitBridgeAndSkeletons(opts, conf, cmdDir, cmdPkg, outputDir, pkg, programSpec, result); err != nil {
+			return nil, err
+		}
+	}
+
 	sort.Strings(result.FilesWritten)
+	sort.Strings(result.FilesSkipped)
 	return result, nil
+}
+
+// emitBridgeAndSkeletons renders the user-handler bridge (always
+// overwrite) and per-command skeleton stubs (write-only-if-missing)
+// into cmdDir. Module-path resolution falls back to a go.mod walk
+// from the spec file's directory; when unresolvable, this step is a
+// no-op and bridge emission is reported through
+// [RunResult.FilesSkipped] (a runnable test harness or the rotini
+// binary can supply ModulePath explicitly).
+func emitBridgeAndSkeletons(
+	opts RunOptions,
+	conf *Conf,
+	cmdDir, cmdPkg, frameworkDir, frameworkPkg string,
+	programSpec rtk.ProgramSpec,
+	result *RunResult,
+) error {
+	modulePath := opts.ModulePath
+	if modulePath == "" {
+		if mp, err := findModulePath(filepath.Dir(opts.SpecPath)); err == nil {
+			modulePath = mp
+		}
+	}
+	if modulePath == "" {
+		// No module path resolvable; skip bridge emission with a
+		// breadcrumb so callers know what happened.
+		result.FilesSkipped = append(result.FilesSkipped,
+			filepath.Join(cmdDir, conf.Generate.Cmd.GenFile)+" (no module path resolvable; pass RunOptions.ModulePath or run inside a Go module)")
+		return nil
+	}
+
+	frameworkImportPath := modulePath + "/" + filepath.ToSlash(frameworkDir)
+
+	bridgeIn := NewRenderInput(cmdPkg, programSpec).
+		WithFramework(frameworkImportPath, frameworkPkg)
+
+	out, err := Render("bridge.gen.tmpl", bridgeIn)
+	if err != nil {
+		return fmt.Errorf("internal: render bridge.gen.tmpl: %w", err)
+	}
+	bridgePath := filepath.Join(cmdDir, conf.Generate.Cmd.GenFile)
+	if err := fs.WriteFile(bridgePath, out,
+		fs.WithAtomic(true),
+		fs.WithMkdirAll(true),
+	); err != nil {
+		return fmt.Errorf("internal: write %s: %w", bridgePath, err)
+	}
+	result.FilesWritten = append(result.FilesWritten, bridgePath)
+
+	// Render handler skeletons (one per command, plus root).
+	paths := append([]string{""}, bridgeIn.SortedCommandPaths()...)
+	for _, path := range paths {
+		skelPath := filepath.Join(cmdDir, HandlerFilename(path))
+		if fs.Exists(skelPath) {
+			result.FilesSkipped = append(result.FilesSkipped, skelPath)
+			continue
+		}
+		skelIn := bridgeIn.WithCurrentPath(path)
+		skelBytes, err := Render("handler-skel.go.tmpl", skelIn)
+		if err != nil {
+			return fmt.Errorf("internal: render handler-skel for %q: %w", path, err)
+		}
+		if err := fs.WriteFile(skelPath, skelBytes,
+			fs.WithAtomic(true),
+			fs.WithMkdirAll(true),
+		); err != nil {
+			return fmt.Errorf("internal: write %s: %w", skelPath, err)
+		}
+		result.FilesWritten = append(result.FilesWritten, skelPath)
+	}
+	return nil
+}
+
+// resolveCmdTarget figures out where bridge + skeleton files should
+// land and what package name they should declare. Explicit options
+// win over conf defaults.
+func resolveCmdTarget(opts RunOptions, conf *Conf) (dir, pkg string) {
+	dir = opts.CmdDir
+	if dir == "" {
+		dir = conf.Generate.Cmd.Package
+	}
+	pkg = opts.CmdPackage
+	if pkg == "" {
+		pkg = filepath.Base(dir)
+		if strings.ContainsRune(pkg, filepath.Separator) || pkg == "." || pkg == "" {
+			pkg = "cmd"
+		}
+	}
+	return dir, pkg
 }
 
 // ErrMissingSpecPath is returned by [Run] when [RunOptions.SpecPath] is

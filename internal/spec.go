@@ -302,7 +302,7 @@ func ApplyConfDefaults(c *Conf) {
 		c.Generate.Cmd.GenFile = "handlers.gen.go"
 	}
 	if c.Generate.Framework.Package == "" {
-		c.Generate.Framework.Package = "internal/cli/cmd"
+		c.Generate.Framework.Package = "internal/cli/rotini"
 	}
 	if c.Generate.Framework.GenFile == "" {
 		c.Generate.Framework.GenFile = "rotini.gen.go"

@@ -1,0 +1,39 @@
+{{- /* handler-skel.go.tmpl — per-command stub. Renders one handler
+       implementation per command path. Written by [internal.Run]
+       only when the target file does not already exist (per D10);
+       once on disk it is the user's to edit. */ -}}
+{{- $pathPascal := toPascalCase .CurrentPath -}}
+{{- if eq .CurrentPath "" -}}
+{{- $pathPascal = "Root" -}}
+{{- end -}}
+package {{.Package}}
+
+import {{.FrameworkPackage}} "{{.FrameworkImportPath}}"
+
+// {{$pathPascal}}HandlerImpl implements the
+// {{$.FrameworkPackage}}.{{$pathPascal}}Handler interface for the
+{{- if eq .CurrentPath ""}}
+// root command.
+{{- else}}
+// "{{.CurrentPath}}" command.
+{{- end}}
+//
+// Replace the body of Run with your command's behavior. Inputs is a
+// strongly-typed bag of every flag and argument the spec declares
+// for this command (and its ancestors); ctx.Registry holds the rtk
+// services bound during program startup.
+type {{$pathPascal}}HandlerImpl struct{}
+
+// Run is the entry point the framework dispatches to after parsing
+// argv. Return nil on success; any non-nil error is rendered to
+// stderr by {{$.FrameworkPackage}}.RenderError and surfaced as a
+// non-zero exit code by {{$.FrameworkPackage}}.ExitCode.
+func (h *{{$pathPascal}}HandlerImpl) Run(
+	ctx {{$.FrameworkPackage}}.{{$pathPascal}}Ctx,
+	inputs *{{$.FrameworkPackage}}.{{$pathPascal}}Inputs,
+) error {
+	// TODO: implement.
+	_ = ctx
+	_ = inputs
+	return nil
+}
