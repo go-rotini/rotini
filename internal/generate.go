@@ -24,10 +24,10 @@ import (
 //     literal, inputs types, handler interfaces, lifecycle helpers,
 //     executors, Program, completion accessor, RenderError / ExitCode.
 //     Rendered to <framework-dir>/<conf.Framework.GenFile>.
-//   - bridge.gen.tmpl       — user's internal/handlers/handlers.gen.go
+//   - handlers.go.tmpl       — user's internal/handlers/handlers.gen.go
 //     (handlers struct + Program var + accessor methods). Always
 //     overwritten.
-//   - handler-skel.go.tmpl  — per-command stub. Rendered once per
+//   - handler.go.tmpl  — per-command stub. Rendered once per
 //     command path; written only when the target file does not exist.
 //
 // Plus `rotini init` scaffolds:
@@ -45,8 +45,9 @@ var templatesFS embed.FS
 // The output filename comes from conf.Generate.Framework.GenFile
 // (default "rotini.gen.go").
 //
-// Bridge and handler-skel templates emit to *different* directories
-// under different write rules and are not part of this constant.
+// handlers.go.tmpl and handler.go.tmpl emit to a *different*
+// directory (the user's cmd/bridge package) under different write
+// rules and are not part of this constant.
 const frameworkTemplate = "rotini.gen.tmpl"
 
 // RunOptions configures a [Run] invocation. SpecPath is required; the
@@ -230,9 +231,9 @@ func emitBridgeAndSkeletons(
 	bridgeIn := NewRenderInput(cmdPkg, programSpec).
 		WithFramework(frameworkImportPath, frameworkPkg)
 
-	out, err := Render("bridge.gen.tmpl", bridgeIn)
+	out, err := Render("handlers.go.tmpl", bridgeIn)
 	if err != nil {
-		return fmt.Errorf("internal: render bridge.gen.tmpl: %w", err)
+		return fmt.Errorf("internal: render handlers.go.tmpl: %w", err)
 	}
 	bridgePath := filepath.Join(cmdDir, conf.Generate.Cmd.GenFile)
 	if err := fs.WriteFile(bridgePath, out,
@@ -252,7 +253,7 @@ func emitBridgeAndSkeletons(
 			continue
 		}
 		skelIn := bridgeIn.WithCurrentPath(path)
-		skelBytes, err := Render("handler-skel.go.tmpl", skelIn)
+		skelBytes, err := Render("handler.go.tmpl", skelIn)
 		if err != nil {
 			return fmt.Errorf("internal: render handler-skel for %q: %w", path, err)
 		}

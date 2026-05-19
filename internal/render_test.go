@@ -280,16 +280,16 @@ func TestRender_rotiniGen_ancestorComposition(t *testing.T) {
 }
 
 // =============================================================================
-// bridge.gen.tmpl — user's handlers package wiring
+// handlers.go.tmpl — user's handlers package wiring
 // =============================================================================
 
 func TestRender_bridgeGen(t *testing.T) {
 	t.Parallel()
 	in := internal.NewRenderInput("cmd", fixtureSpec()).
 		WithFramework("example.com/me/myapp/internal/cli/rotini", "rotini")
-	out := renderOK(t, "bridge.gen.tmpl", in)
+	out := renderOK(t, "handlers.go.tmpl", in)
 
-	containsAll(t, "bridge.gen.tmpl", out,
+	containsAll(t, "handlers.go.tmpl", out,
 		`package cmd`,
 		`rotini "example.com/me/myapp/internal/cli/rotini"`,
 		`type handlers struct`,
@@ -304,7 +304,7 @@ func TestRender_bridgeGen(t *testing.T) {
 }
 
 // =============================================================================
-// handler-skel.go.tmpl — per-command user-handler stubs
+// handler.go.tmpl — per-command user-handler stubs
 // =============================================================================
 
 func TestRender_handlerSkelGen_root(t *testing.T) {
@@ -312,9 +312,9 @@ func TestRender_handlerSkelGen_root(t *testing.T) {
 	in := internal.NewRenderInput("cmd", fixtureSpec()).
 		WithFramework("example.com/me/myapp/internal/cli/rotini", "rotini").
 		WithCurrentPath("") // root command
-	out := renderOK(t, "handler-skel.go.tmpl", in)
+	out := renderOK(t, "handler.go.tmpl", in)
 
-	containsAll(t, "handler-skel.go.tmpl", out,
+	containsAll(t, "handler.go.tmpl", out,
 		`package cmd`,
 		`rotini "example.com/me/myapp/internal/cli/rotini"`,
 		`type RootHandlerImpl struct{}`,
@@ -330,9 +330,9 @@ func TestRender_handlerSkelGen_named(t *testing.T) {
 	in := internal.NewRenderInput("cmd", fixtureSpec()).
 		WithFramework("example.com/me/myapp/internal/cli/rotini", "rotini").
 		WithCurrentPath("foo-bar")
-	out := renderOK(t, "handler-skel.go.tmpl", in)
+	out := renderOK(t, "handler.go.tmpl", in)
 
-	containsAll(t, "handler-skel.go.tmpl", out,
+	containsAll(t, "handler.go.tmpl", out,
 		`package cmd`,
 		`rotini "example.com/me/myapp/internal/cli/rotini"`,
 		`type FooBarHandlerImpl struct{}`,
@@ -366,7 +366,7 @@ func TestRender_unknownTemplate(t *testing.T) {
 func TestRender_deterministicOrdering(t *testing.T) {
 	t.Parallel()
 	in := internal.NewRenderInput("rotini", fixtureSpec())
-	for _, name := range []string{"rotini.gen.tmpl", "bridge.gen.tmpl"} {
+	for _, name := range []string{"rotini.gen.tmpl", "handlers.go.tmpl"} {
 		a, err := internal.Render(name, in.WithFramework("example.com/x/y", "rotini"))
 		if err != nil {
 			t.Fatalf("first Render(%s): %v", name, err)

@@ -33,29 +33,30 @@ type RenderInput struct {
 	FlatCommands map[string]*rtk.CommandSpec
 
 	// FrameworkImportPath is the full Go import path of the framework
-	// package the bridge / handler-skel templates need to reference
-	// (e.g., "example.com/me/myapp/internal/cli/rotini"). Empty for
-	// framework-internal templates that don't import themselves.
+	// package the handlers.go.tmpl / handler.go.tmpl templates need
+	// to reference (e.g., "example.com/me/myapp/internal/cli/rotini").
+	// Empty for framework-internal templates that don't import
+	// themselves.
 	FrameworkImportPath string
 
 	// FrameworkPackage is the Go package name (basename of the import
-	// path) used as the import qualifier in bridge / handler-skel
-	// templates: `import "<path>"` is referenced as
+	// path) used as the import qualifier in handlers.go.tmpl /
+	// handler.go.tmpl: `import "<path>"` is referenced as
 	// `<FrameworkPackage>.X`. Empty for framework-internal templates.
 	FrameworkPackage string
 
 	// CurrentPath identifies a specific command path the template is
-	// rendering for. Used by handler-skel.go.tmpl which emits one stub
+	// rendering for. Used by handler.go.tmpl which emits one stub
 	// per command. Empty for templates that iterate over all
-	// commands (e.g., bridge.gen.tmpl, executors.gen.tmpl).
+	// commands (e.g., handlers.go.tmpl, executors.gen.tmpl).
 	CurrentPath string
 }
 
 // NewRenderInput builds a [RenderInput] from spec + package name. The
 // FlatCommands map is computed once so templates don't redo the walk.
-// Bridge/handler-skel templates need [RenderInput.FrameworkImportPath]
-// and [RenderInput.FrameworkPackage] set in addition; use the With*
-// chain methods.
+// handlers.go.tmpl and handler.go.tmpl need
+// [RenderInput.FrameworkImportPath] and [RenderInput.FrameworkPackage]
+// set in addition; use the With* chain methods.
 func NewRenderInput(pkg string, spec rtk.ProgramSpec) RenderInput {
 	return RenderInput{
 		Package:      pkg,
@@ -65,8 +66,8 @@ func NewRenderInput(pkg string, spec rtk.ProgramSpec) RenderInput {
 }
 
 // WithFramework returns a copy of r with FrameworkImportPath and
-// FrameworkPackage set. Used by [Run] when invoking bridge /
-// handler-skel templates.
+// FrameworkPackage set. Used by [Run] when invoking handlers.go.tmpl
+// / handler.go.tmpl.
 func (r RenderInput) WithFramework(importPath, pkg string) RenderInput {
 	r.FrameworkImportPath = importPath
 	r.FrameworkPackage = pkg
@@ -74,7 +75,7 @@ func (r RenderInput) WithFramework(importPath, pkg string) RenderInput {
 }
 
 // WithCurrentPath returns a copy of r with CurrentPath set. Used by
-// [Run] when invoking handler-skel templates once per command path.
+// [Run] when invoking handler.go.tmpl once per command path.
 func (r RenderInput) WithCurrentPath(path string) RenderInput {
 	r.CurrentPath = path
 	return r

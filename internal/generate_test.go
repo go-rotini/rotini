@@ -298,7 +298,7 @@ func TestRun_missingSpecFileReturnsError(t *testing.T) {
 }
 
 // =============================================================================
-// Bridge + handler-skel emission
+// handlers.go.tmpl + handler.go.tmpl emission
 // =============================================================================
 
 func TestRun_emitsBridgeAndSkelsWhenModulePathResolvable(t *testing.T) {
