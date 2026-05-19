@@ -1,0 +1,249 @@
+version: "2"
+
+linters:
+  default: all
+  disable:
+    # Deprecated
+    - wsl
+
+    # Not applicable to this project
+    - bodyclose
+    - rowserrcheck
+    - sqlclosecheck
+    - noctx
+    - spancheck
+    - zerologlint
+    - loggercheck
+    - promlinter
+    - protogetter
+    - ginkgolinter
+    - testifylint
+    - sloglint
+    - unqueryvet
+    - arangolint
+    - gosmopolitan
+
+    # Too opinionated for a filesystem-helpers library
+    - exhaustruct
+    - varnamelen
+    - wsl_v5
+    - nlreturn
+    - noinlineerr
+    - godox
+    - depguard
+    - goheader
+    - gomodguard
+    - lll
+    - gochecknoglobals
+    - ireturn
+    - nonamedreturns
+    - paralleltest
+    - tparallel
+    - testpackage
+    - mnd
+    - funcorder
+    - containedctx
+    - tagliatelle
+    - forbidigo
+    - exhaustive
+    - recvcheck
+
+  settings:
+    cyclop:
+      max-complexity: 25
+
+    gocognit:
+      min-complexity: 40
+
+    gocyclo:
+      min-complexity: 25
+
+    funlen:
+      lines: 120
+      statements: 80
+      ignore-comments: true
+
+    nestif:
+      min-complexity: 10
+
+    goconst:
+      min-len: 5
+      min-occurrences: 5
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+        - opinionated
+      disabled-checks:
+        - hugeParam
+        - rangeValCopy
+        - unnamedResult
+
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+
+    errcheck:
+      check-type-assertions: false
+      check-blank: true
+
+    # The fs package's purpose is variable-driven file access; G304 (potential
+    # file inclusion) and G115 (integer overflow) noise don't pay back in
+    # actionable findings here.
+    gosec:
+      excludes:
+        - G304
+        - G115
+
+    nakedret:
+      max-func-lines: 10
+
+    misspell:
+      locale: US
+
+    interfacebloat:
+      max: 5
+
+    wrapcheck:
+      ignore-interface-regexps:
+        - "io\\.Writer"
+        - "io\\.Reader"
+        - "io\\.Closer"
+      ignore-sig-regexps:
+        - "io\\.Writer\\)\\.Write"
+        - "\\(\\*os\\.PathError\\)"
+      ignore-package-globs:
+        - "strconv"
+        - "encoding/hex"
+        - "encoding/base64"
+
+    perfsprint:
+      strconcat: false
+
+    godot:
+      scope: toplevel
+
+    maintidx:
+      under: 15
+
+    prealloc:
+      simple: true
+      for-loops: true
+
+  exclusions:
+    presets:
+      - comments
+      - common-false-positives
+      - std-error-handling
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - forcetypeassert
+          - dupl
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - goconst
+          - maintidx
+          - wrapcheck
+          - err113
+          - exhaustive
+          - makezero
+          - unparam
+          - nestif
+          - godot
+          - gocritic
+          - prealloc
+          - perfsprint
+          - errorlint
+          - inamedparam
+          - embeddedstructfieldcheck
+          - modernize
+          - unconvert
+          - revive
+          - misspell
+          - intrange
+          - testableexamples
+          - staticcheck
+          - tagalign
+          - errchkjson
+
+      # Per-platform syscall wrappers and the recursive walker have inherent
+      # complexity floors. Same pattern as env/dotenv/scanner.
+      - path: walk\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - maintidx
+          - nestif
+
+      - path: copy\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - maintidx
+          - nestif
+
+      - path: userdirs_(linux|darwin|windows)\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - nestif
+
+      - path: write\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - nestif
+
+      - path: watcher/backend_(inotify_linux|kqueue_darwin|windows)\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - maintidx
+          - nestif
+          - unparam
+
+      - path: archive/(extract|create)_(tar|zip)\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - nestif
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -1,0 +1,68 @@
+name: Bug Report
+description: Report a bug in go-rotini/env
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: env-input
+    attributes:
+      label: Environment Variables / `.env` Input
+      description: |
+        Env-var values, or `.env` file contents, that trigger the bug.
+        Redact any secrets: replace with `<redacted>` and note the type.
+      render: shell
+
+  - type: textarea
+    id: struct
+    attributes:
+      label: Target Struct
+      description: The Go struct you're loading into, including tags.
+      render: go
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened. Include error messages if applicable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Minimal Go code that reproduces the issue.
+      render: go
+
+  - type: input
+    id: os
+    attributes:
+      label: OS
+      placeholder: e.g. macOS 14, Ubuntu 22.04, Windows Server 2022
+
+  - type: input
+    id: go-version
+    attributes:
+      label: Go Version
+      placeholder: e.g. 1.26.2
+
+  - type: input
+    id: package-version
+    attributes:
+      label: Package Version
+      placeholder: e.g. v0.1.0
