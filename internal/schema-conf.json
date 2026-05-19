@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Rotini Configuration Schema",
+  "description": "Schema for a Rotini CLI configuration file.",
+  "type": "object",
+  "required": [
+    "$schema"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL identifying the rotini configuration schema version. The version segment must match the installed rotini binary version.",
+      "pattern": "^https://raw\\.githubusercontent\\.com/matthewgetz/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-conf\\.json$"
+    },
+    "generate": {
+      "$ref": "#/definitions/GenerateConfig"
+    }
+  },
+  "definitions": {
+    "GenerateConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cmd": {
+          "$ref": "#/definitions/GenerateCmdConfig"
+        },
+        "framework": {
+          "$ref": "#/definitions/GenerateFrameworkConfig"
+        }
+      }
+    },
+    "GenerateCmdConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "package": {
+          "type": "string",
+          "description": "Import path (relative to module root) for the command handler package. Package name is derived from the last path segment.",
+          "default": "internal/cli/cmd"
+        },
+        "gen_file": {
+          "type": "string",
+          "description": "Name of the framework-controlled gen file placed in the command handler package (e.g. 'handlers.gen.go'). Must end in .go.",
+          "default": "handlers.gen.go"
+        },
+        "prune": {
+          "$ref": "#/definitions/PruneConfig"
+        }
+      }
+    },
+    "PruneConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Controls pruning of stub files in the command handler package.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, rotini removes stub files in the command handler package that no longer correspond to a command in the spec."
+        },
+        "keep": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "File names (not paths) that should never be removed by pruning, even when they do not correspond to a command in the spec."
+        }
+      }
+    },
+    "GenerateFrameworkConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "package": {
+          "type": "string",
+          "description": "Import path (relative to module root) for the framework package. Package name is derived from the last path segment.",
+          "default": "internal/cli/rotini"
+        },
+        "gen_file": {
+          "type": "string",
+          "description": "Name of the framework gen file placed in the framework package (e.g. 'rotini.gen.go'). Must end in .go.",
+          "default": "rotini.gen.go"
+        },
+        "additional_imports": {
+          "type": "array",
+          "description": "Additional Go import paths included in the generated framework file. Use when input or output types reference third-party packages. Each entry is a package path (e.g., 'net/url') or an aliased import (e.g., 'myalias net/url').",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

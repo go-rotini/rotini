@@ -1,0 +1,473 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Rotini Spec Schema",
+  "description": "Schema for a Rotini CLI definition spec file.",
+  "type": "object",
+  "required": [
+    "$schema",
+    "name"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL identifying the rotini spec schema version. The version segment must match the installed rotini binary version.",
+      "pattern": "^https://raw\\.githubusercontent\\.com/matthewgetz/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-spec\\.json$"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+      "description": "Root command name used in routing."
+    },
+    "aliases": {
+      "type": "array",
+      "description": "Additional names that invoke the root command.",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+      }
+    },
+    "timeout": {
+      "type": "string",
+      "description": "Root command execution timeout. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
+    },
+    "inputs": {
+      "$ref": "#/definitions/Inputs",
+      "description": "Typed inputs for the root command: flags, arguments, file values, and variables."
+    },
+    "commands": {
+      "type": "array",
+      "description": "Sub-commands of the root command.",
+      "items": {
+        "$ref": "#/definitions/Command"
+      }
+    },
+    "remote_commands": {
+      "type": "array",
+      "description": "Co-located remote binaries dispatched as first-class sub-commands of the root command.",
+      "items": {
+        "$ref": "#/definitions/RemoteCommandSpec"
+      }
+    },
+    "files": {
+      "type": "array",
+      "description": "Config files to load at startup.",
+      "items": {
+        "$ref": "#/definitions/ConfigSpec"
+      }
+    },
+    "events": {
+      "type": "array",
+      "description": "Events this program can emit. Each name must be unique.",
+      "items": {
+        "$ref": "#/definitions/EventSpec"
+      }
+    },
+    "metadata": {
+      "type": "array",
+      "description": "Build-time metadata vars injected via go ldflags.",
+      "items": {
+        "$ref": "#/definitions/MetadataEntry"
+      }
+    },
+    "schemas": {
+      "type": "object",
+      "description": "Reusable named schema definitions. Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\".",
+      "additionalProperties": {
+        "$ref": "#/definitions/Schema"
+      }
+    }
+  },
+  "definitions": {
+    "MetadataEntry": {
+      "type": "object",
+      "required": [
+        "var"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "var": {
+          "type": "string",
+          "pattern": "^[A-Z][a-zA-Z0-9_]*$",
+          "description": "Exported Go identifier for the ldflag var. Rotini declares this as a package-level var in the framework package. Inject at build time: -ldflags \"-X <module>/<framework-pkg>.<var>=<value>\""
+        },
+        "default": {
+          "type": "string",
+          "description": "Fallback value used when the ldflag has not been applied at build time. Becomes the var's initial value in the generated file."
+        }
+      }
+    },
+    "BaseSchema": {
+      "type": "object",
+      "description": "Shared fields for Schema and InputSchema. JSON Schema Draft 7 does not support additionalProperties: false on schemas that use allOf for inheritance — strictness is enforced by Go's DisallowUnknownFields at parse time.",
+      "properties": {
+        "$ref": {
+          "type": "string",
+          "pattern": "^#/schemas/",
+          "description": "Reference to a named schema in the top-level schemas map (e.g. '#/schemas/MySchema'). Resolved at codegen time."
+        },
+        "type": {
+          "type": "string",
+          "description": "The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent."
+        },
+        "nullable": {
+          "type": "boolean",
+          "default": false
+        },
+        "description": {
+          "type": "string"
+        },
+        "enum": {
+          "type": "array",
+          "description": "Allowed values; parsed values are validated against this list",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression the value must match (string type only)"
+        },
+        "minimum": {
+          "type": "number",
+          "description": "Minimum allowed value (numeric types only)"
+        },
+        "maximum": {
+          "type": "number",
+          "description": "Maximum allowed value (numeric types only)"
+        },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum string length (string type only)"
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum string length (string type only)"
+        },
+        "minItems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Schema"
+          }
+        },
+        "items": {
+          "$ref": "#/definitions/Schema"
+        }
+      }
+    },
+    "Schema": {
+      "description": "JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/BaseSchema"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "required": {
+              "type": "array",
+              "description": "Required property names for object schemas (standard JSON Schema semantics).",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "InputSchema": {
+      "description": "Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/BaseSchema"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean — unlike the string-array 'required' on Schema."
+            },
+            "default": {
+              "description": "Default value applied when the input is not provided"
+            },
+            "variable": {
+              "type": "string",
+              "description": "Environment variable name (environment inputs only)",
+              "pattern": "^[A-Z_][A-Z0-9_]*$"
+            },
+            "file": {
+              "type": "string",
+              "description": "Config file logical name to read from (config_values inputs only)"
+            },
+            "key": {
+              "type": "string",
+              "description": "Key path within the config file (config_values inputs only, e.g., 'server.port')"
+            }
+          }
+        }
+      ]
+    },
+    "FlagInput": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name for the flag"
+        },
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition and input-level metadata (required, deprecated, default, hidden)"
+        },
+        "identifiers": {
+          "type": "array",
+          "description": "CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is auto-derived.",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        }
+      }
+    },
+    "ArgumentInput": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name for the argument"
+        },
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition and input-level metadata (required, deprecated, default)"
+        }
+      }
+    },
+    "ConfigInput": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name for this config value"
+        },
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition and input-level metadata (required, default, file, key)"
+        }
+      }
+    },
+    "EnvInput": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name for this env var input"
+        },
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition and input-level metadata (required, default, variable)"
+        }
+      }
+    },
+    "StdinSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition for stdin content. Set required: true in schema to error when stdin is empty."
+        }
+      }
+    },
+    "Inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "flags": {
+          "type": "array",
+          "description": "Flag inputs for this command",
+          "items": {
+            "$ref": "#/definitions/FlagInput"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "description": "Positional argument inputs for this command",
+          "items": {
+            "$ref": "#/definitions/ArgumentInput"
+          }
+        },
+        "files": {
+          "type": "array",
+          "description": "Config file value inputs for this command",
+          "items": {
+            "$ref": "#/definitions/ConfigInput"
+          }
+        },
+        "variables": {
+          "type": "array",
+          "description": "Environment variable inputs for this command",
+          "items": {
+            "$ref": "#/definitions/EnvInput"
+          }
+        },
+        "stdin": {
+          "$ref": "#/definitions/StdinSpec",
+          "description": "Declares expected stdin format and schema for this command"
+        }
+      }
+    },
+    "EventSpec": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Unique event name (snake_case). Used to name Emit{Name} methods and On{Name} handler fields."
+        },
+        "schema": {
+          "$ref": "#/definitions/Schema",
+          "description": "Shape of the event payload. When omitted, the emit method takes a *{BinName}{PascalName}EventMsg of an empty struct."
+        }
+      }
+    },
+    "RemoteCommandSpec": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Name of the remote command. The dispatched binary must be named <program>-<name> and located in the same directory as the host binary."
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Additional names that invoke this remote command.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Host-side timeout for the remote binary execution. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
+        }
+      }
+    },
+    "ConfigSpec": {
+      "type": "object",
+      "required": [
+        "name",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Logical name for the config file (e.g., 'app-config')"
+        },
+        "path": {
+          "type": "string",
+          "description": "File path (supports ~ for home dir)"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "json",
+            "yaml",
+            "toml"
+          ],
+          "default": "json",
+          "description": "File format"
+        },
+        "schema": {
+          "$ref": "#/definitions/Schema",
+          "description": "When set, generates a typed config struct and validates required fields at load time."
+        }
+      }
+    },
+    "Command": {
+      "description": "A command node in the CLI command tree.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Command name used in routing."
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Command execution timeout. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
+        },
+        "inputs": {
+          "$ref": "#/definitions/Inputs",
+          "description": "Typed inputs for this command: flags, arguments, file values, and variables."
+        },
+        "commands": {
+          "type": "array",
+          "description": "Sub-commands of this command.",
+          "items": {
+            "$ref": "#/definitions/Command"
+          }
+        },
+        "remote_commands": {
+          "type": "array",
+          "description": "Co-located remote binaries dispatched as first-class sub-commands of this command.",
+          "items": {
+            "$ref": "#/definitions/RemoteCommandSpec"
+          }
+        }
+      }
+    }
+  }
+}
