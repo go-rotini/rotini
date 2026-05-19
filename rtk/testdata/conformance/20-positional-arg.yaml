@@ -1,0 +1,19 @@
+name: positional-arg
+description: A single positional argument is collected at the leaf.
+spec:
+  name: myprog
+  commands:
+    - name: echo
+      path: echo
+      arguments:
+        - name: msg
+          type: string
+inputs:
+  argv: ["echo", "hello"]
+expected:
+  command_path: ["echo"]
+  parsed_args: ["hello"]
+  flags_by_scope:
+    "": {}
+    echo: {}
+  stdin: null

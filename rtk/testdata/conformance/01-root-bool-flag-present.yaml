@@ -1,0 +1,17 @@
+name: root-bool-flag-present
+description: A root-scope bool flag set to true by its long identifier.
+spec:
+  name: myprog
+  flags:
+    - name: verbose
+      identifiers: ["-v", "--verbose"]
+      type: bool
+inputs:
+  argv: ["--verbose"]
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      verbose: true
+  stdin: null

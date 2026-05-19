@@ -1,0 +1,17 @@
+name: bool-explicit-false
+description: An explicit `--flag false` arg is honored and consumes the value token.
+spec:
+  name: myprog
+  flags:
+    - name: enabled
+      identifiers: ["--enabled"]
+      type: bool
+inputs:
+  argv: ["--enabled", "false"]
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      enabled: false
+  stdin: null

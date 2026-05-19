@@ -1,0 +1,20 @@
+name: stdin-dash-as-positional
+description: A `-` positional token is substituted with the stdin content.
+spec:
+  name: myprog
+  commands:
+    - name: echo
+      path: echo
+      arguments:
+        - name: msg
+          type: string
+inputs:
+  argv: ["echo", "-"]
+  stdin: "piped content"
+expected:
+  command_path: ["echo"]
+  parsed_args: ["piped content"]
+  flags_by_scope:
+    "": {}
+    echo: {}
+  stdin: null

@@ -1,0 +1,22 @@
+name: stdin-json
+description: JSON-format stdin is exposed as map[string]any.
+spec:
+  name: myprog
+  root_stdin:
+    format: "json"
+  flags:
+    - name: help
+      identifiers: ["--help"]
+      type: bool
+inputs:
+  argv: ["--help"]
+  stdin: '{"name":"rotini","count":42}'
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      help: true
+  stdin:
+    name: "rotini"
+    count: 42

@@ -1,0 +1,18 @@
+name: enum-flag-ok
+description: An enum-constrained string flag with an allowed value.
+spec:
+  name: myprog
+  flags:
+    - name: output
+      identifiers: ["-o", "--output"]
+      type: string
+      enum: ["table", "json", "yaml"]
+inputs:
+  argv: ["--output", "yaml"]
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      output: "yaml"
+  stdin: null

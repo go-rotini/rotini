@@ -193,7 +193,7 @@ linters:
       # The parser-engine files in rtk/ have unavoidable complexity (declared-
       # type dispatch, recursive command-tree walking) and produce dynamic
       # errors carrying the user's input by their very nature.
-      - path: rtk/(coerce|flags|parser|args)\.go
+      - path: rtk/(coerce|flags|parser|args|stdin)\.go
         linters:
           - cyclop
           - gocognit

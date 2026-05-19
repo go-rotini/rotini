@@ -1,0 +1,21 @@
+name: subcommand-scoped-flag
+description: A flag declared on a subcommand lands in that command's scope.
+spec:
+  name: myprog
+  commands:
+    - name: list
+      path: list
+      flags:
+        - name: filter
+          identifiers: ["-f", "--filter"]
+          type: string
+inputs:
+  argv: ["list", "-f", "open"]
+expected:
+  command_path: ["list"]
+  parsed_args: []
+  flags_by_scope:
+    "": {}
+    list:
+      filter: "open"
+  stdin: null

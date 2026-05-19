@@ -125,6 +125,7 @@ func parseCommandLevel(
 	extraPositional []string,
 	result *Result,
 	in *Inputs,
+	stdinData []byte,
 	rootFlags []FlagSpec,
 	coerce CoerceValueFn,
 ) error {
@@ -132,7 +133,6 @@ func parseCommandLevel(
 	result.FlagsByScope[cmd.Name] = cmdScope
 	consumed[cmdIdx] = true
 
-	stdinData := readStdin(in)
 	if err := parseScopedFlags(cmd.Flags, cmdScope, args, consumed, stdinData, coerce); err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func parseCommandLevel(
 
 	if subCmd != nil {
 		result.CommandPath = append(result.CommandPath, subCmd.Name)
-		return parseCommandLevel(subCmd, args, subCmdIdx, consumed, doubleDashSeen, extraPositional, result, in, rootFlags, coerce)
+		return parseCommandLevel(subCmd, args, subCmdIdx, consumed, doubleDashSeen, extraPositional, result, in, stdinData, rootFlags, coerce)
 	}
 
 	// No subcommand — collect positional arguments.
@@ -224,6 +224,15 @@ func parseCommandLevel(
 			}
 		}
 	}
+
+	// Shape Result.Stdin per the leaf command's StdinSpec (if any).
+	if cmd.Stdin != nil {
+		shaped, err := shapeStdin(stdinData, cmd.Stdin)
+		if err != nil {
+			return err
+		}
+		result.Stdin = shaped
+	}
 	return nil
 }
 
@@ -261,7 +270,10 @@ func parseProgram(spec ProgramSpec, in Inputs, coerce CoerceValueFn) (*Result, e
 
 	consumed := make(map[int]bool)
 
-	stdinData := readStdin(&in)
+	// Read stdin once per Parse call. The cached bytes feed two uses:
+	// (a) `-` substitution in argv during flag/positional parsing, and
+	// (b) Result.Stdin shaping per the active command's StdinSpec.
+	stdinData := readStdinBytes(in.Stdin)
 	if err := parseScopedFlags(spec.Flags, rootScope, flagArgs, consumed, stdinData, coerce); err != nil {
 		return nil, err
 	}
@@ -291,36 +303,20 @@ func parseProgram(spec ProgramSpec, in Inputs, coerce CoerceValueFn) (*Result, e
 				}
 			}
 		}
+		// Shape Result.Stdin per the root spec (if declared).
+		if spec.RootStdin != nil {
+			shaped, err := shapeStdin(stdinData, spec.RootStdin)
+			if err != nil {
+				return nil, err
+			}
+			result.Stdin = shaped
+		}
 		return result, nil
 	}
 
 	result.CommandPath = append(result.CommandPath, matchedCmd.Name)
-	if err := parseCommandLevel(matchedCmd, flagArgs, cmdIdx, consumed, doubleDashIdx >= 0, extraPositional, result, &in, spec.Flags, coerce); err != nil {
+	if err := parseCommandLevel(matchedCmd, flagArgs, cmdIdx, consumed, doubleDashIdx >= 0, extraPositional, result, &in, stdinData, spec.Flags, coerce); err != nil {
 		return nil, err
 	}
 	return result, nil
-}
-
-// readStdin reads all of in.Stdin if it's a piped (non-TTY) reader. It
-// returns nil if Stdin is nil or appears to be a terminal. The result is
-// cached on a per-Inputs basis to avoid re-reading.
-//
-// At M1.4 this is a thin wrapper that reads everything available. M1.7
-// (stdin shaping) extends it to drive [StdinSpec.Format] dispatch.
-func readStdin(in *Inputs) []byte {
-	if in == nil || in.Stdin == nil {
-		return nil
-	}
-	// We don't have a TTY check at this level — defer that to rtk.IO's
-	// helpers in M1.9. For now, read whatever is available.
-	if rb, ok := in.Stdin.(interface{ ReadRawBytes() ([]byte, error) }); ok {
-		data, err := rb.ReadRawBytes()
-		if err != nil {
-			return nil
-		}
-		return data
-	}
-	// Fall back to nothing — the caller will use the raw reader directly
-	// for stdin substitution semantics.
-	return nil
 }

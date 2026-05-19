@@ -1,0 +1,25 @@
+name: subcommand-env-fallback
+description: Env fallback works for subcommand-scoped flags.
+spec:
+  name: myprog
+  commands:
+    - name: list
+      path: list
+      flags:
+        - name: filter
+          identifiers: ["-f", "--filter"]
+          type: string
+          env_key: "MYPROG_FILTER"
+          default: "all"
+inputs:
+  argv: ["list"]
+  env:
+    MYPROG_FILTER: "open"
+expected:
+  command_path: ["list"]
+  parsed_args: []
+  flags_by_scope:
+    "": {}
+    list:
+      filter: "open"
+  stdin: null

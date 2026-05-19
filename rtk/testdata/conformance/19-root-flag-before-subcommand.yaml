@@ -1,0 +1,21 @@
+name: root-flag-before-subcommand
+description: A root flag supplied before a subcommand routes to the root scope.
+spec:
+  name: myprog
+  flags:
+    - name: output
+      identifiers: ["-o", "--output"]
+      type: string
+  commands:
+    - name: list
+      path: list
+inputs:
+  argv: ["--output", "json", "list"]
+expected:
+  command_path: ["list"]
+  parsed_args: []
+  flags_by_scope:
+    "":
+      output: "json"
+    list: {}
+  stdin: null

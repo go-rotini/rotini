@@ -1,0 +1,24 @@
+name: flag-and-positional-mixed
+description: A leading flag at the leaf, followed by a positional.
+spec:
+  name: myprog
+  commands:
+    - name: list
+      path: list
+      flags:
+        - name: filter
+          identifiers: ["-f"]
+          type: string
+      arguments:
+        - name: scope
+          type: string
+inputs:
+  argv: ["list", "-f", "open", "todo"]
+expected:
+  command_path: ["list"]
+  parsed_args: ["todo"]
+  flags_by_scope:
+    "": {}
+    list:
+      filter: "open"
+  stdin: null

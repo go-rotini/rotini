@@ -1,0 +1,25 @@
+name: flag-env-fallback
+description: An absent flag with an EnvKey falls back to the env value.
+spec:
+  name: myprog
+  flags:
+    - name: output
+      identifiers: ["-o", "--output"]
+      type: string
+      default: "default-loses"
+      env_key: "MYPROG_OUTPUT"
+    - name: help
+      identifiers: ["--help"]
+      type: bool
+inputs:
+  argv: ["--help"]
+  env:
+    MYPROG_OUTPUT: "env-wins"
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      output: "env-wins"
+      help: true
+  stdin: null

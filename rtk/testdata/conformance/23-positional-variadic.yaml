@@ -1,0 +1,20 @@
+name: positional-variadic
+description: A variadic positional argument collects all remaining tokens.
+spec:
+  name: myprog
+  commands:
+    - name: cat
+      path: cat
+      arguments:
+        - name: paths
+          type: string
+          variadic: true
+inputs:
+  argv: ["cat", "a.txt", "b.txt", "c.txt"]
+expected:
+  command_path: ["cat"]
+  parsed_args: ["a.txt", "b.txt", "c.txt"]
+  flags_by_scope:
+    "": {}
+    cat: {}
+  stdin: null

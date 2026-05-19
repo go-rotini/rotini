@@ -1,0 +1,12 @@
+name: error-int-coercion
+description: A non-numeric value for an int flag surfaces CoercionError.
+spec:
+  name: myprog
+  flags:
+    - name: count
+      identifiers: ["-c", "--count"]
+      type: int
+inputs:
+  argv: ["--count", "twelve"]
+expected:
+  error_contains: "count"

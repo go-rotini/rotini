@@ -1,0 +1,19 @@
+name: min-max-int-ok
+description: A min/max-constrained int flag with a value inside the range.
+spec:
+  name: myprog
+  flags:
+    - name: port
+      identifiers: ["--port"]
+      type: int
+      min: 1
+      max: 65535
+inputs:
+  argv: ["--port", "8080"]
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      port: 8080
+  stdin: null

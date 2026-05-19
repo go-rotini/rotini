@@ -1,0 +1,22 @@
+name: bool-default-true-fallback
+description: A bool flag with a Default of "true" falls back to true when absent.
+spec:
+  name: myprog
+  flags:
+    - name: enabled
+      identifiers: ["--enabled"]
+      type: bool
+      default: "true"
+    - name: help
+      identifiers: ["--help"]
+      type: bool
+inputs:
+  argv: ["--help"]
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      enabled: true
+      help: true
+  stdin: null

@@ -1,0 +1,17 @@
+name: short-flag-equals
+description: A short-form string flag with inline value via `=`.
+spec:
+  name: myprog
+  flags:
+    - name: output
+      identifiers: ["-o", "--output"]
+      type: string
+inputs:
+  argv: ["-o=yaml"]
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      output: "yaml"
+  stdin: null

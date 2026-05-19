@@ -1,0 +1,20 @@
+name: stdin-text
+description: Text-format stdin is exposed as a trimmed string.
+spec:
+  name: myprog
+  root_stdin:
+    format: "text"
+  flags:
+    - name: help
+      identifiers: ["--help"]
+      type: bool
+inputs:
+  argv: ["--help"]
+  stdin: "hello world\n"
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      help: true
+  stdin: "hello world"

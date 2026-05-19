@@ -1,0 +1,25 @@
+name: grouped-short-bools
+description: Three bool flags grouped into a single -abc token.
+spec:
+  name: myprog
+  flags:
+    - name: a
+      identifiers: ["-a"]
+      type: bool
+    - name: b
+      identifiers: ["-b"]
+      type: bool
+    - name: c
+      identifiers: ["-c"]
+      type: bool
+inputs:
+  argv: ["-abc"]
+expected:
+  command_path: []
+  parsed_args: []
+  flags_by_scope:
+    "":
+      a: true
+      b: true
+      c: true
+  stdin: null
