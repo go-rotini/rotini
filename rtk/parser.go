@@ -197,9 +197,9 @@ func parseCommandLevel(
 		result.ParsedArgs = append(result.ParsedArgs, extraPositional...)
 	}
 
-	applyEnvVarValues(cmd.Flags, cmdScope, in.Env, coerce)
-	applyConfigKeyValues(cmd.Flags, cmdScope, in.Config, coerce)
-	applyFlagDefaults(cmd.Flags, cmdScope, coerce)
+	if err := resolveFlagsViaRecon(cmd.Flags, cmdScope, in, coerce); err != nil {
+		return err
+	}
 	applyArgumentDefaults(cmd.Arguments, &result.ParsedArgs)
 
 	if err := validateRequiredFlags(cmd.Flags, cmdScope); err != nil {
@@ -268,9 +268,9 @@ func parseProgram(spec ProgramSpec, in Inputs, coerce CoerceValueFn) (*Result, e
 
 	matchedCmd, cmdIdx := findMatchedCommand(spec.Commands, flagArgs, 0, consumed)
 
-	applyEnvVarValues(spec.Flags, rootScope, in.Env, coerce)
-	applyConfigKeyValues(spec.Flags, rootScope, in.Config, coerce)
-	applyFlagDefaults(spec.Flags, rootScope, coerce)
+	if err := resolveFlagsViaRecon(spec.Flags, rootScope, &in, coerce); err != nil {
+		return nil, err
+	}
 
 	if err := validateRequiredFlags(spec.Flags, rootScope); err != nil {
 		return nil, err
