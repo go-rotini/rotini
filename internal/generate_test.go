@@ -81,6 +81,7 @@ func TestRun_emitsFoundationFiles(t *testing.T) {
 	}
 
 	wantBasenames := []string{
+		"completion.gen.go",
 		"executors.gen.go",
 		"handlers.gen.go",
 		"inputs.gen.go",
@@ -318,6 +319,7 @@ func TestRun_emitsBridgeAndSkelsWhenModulePathResolvable(t *testing.T) {
 		CmdDir:     cmdDir,
 		CmdPackage: "cmd",
 		ModulePath: "example.com/me/todo",
+		ModuleRoot: filepath.Dir(specPath),
 	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -402,6 +404,7 @@ func TestRun_stubsAreWriteOnlyIfMissing(t *testing.T) {
 		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
 		CmdDir: cmdDir, CmdPackage: "cmd",
 		ModulePath: "example.com/me/todo",
+		ModuleRoot: filepath.Dir(specPath),
 	}); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
@@ -417,6 +420,7 @@ func TestRun_stubsAreWriteOnlyIfMissing(t *testing.T) {
 		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
 		CmdDir: cmdDir, CmdPackage: "cmd",
 		ModulePath: "example.com/me/todo",
+		ModuleRoot: filepath.Dir(specPath),
 	})
 	if err != nil {
 		t.Fatalf("second Run: %v", err)
@@ -456,6 +460,7 @@ func TestRun_bridgeAlwaysOverwrites(t *testing.T) {
 		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
 		CmdDir: cmdDir, CmdPackage: "cmd",
 		ModulePath: "example.com/me/todo",
+		ModuleRoot: filepath.Dir(specPath),
 	}); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
@@ -471,6 +476,7 @@ func TestRun_bridgeAlwaysOverwrites(t *testing.T) {
 		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
 		CmdDir: cmdDir, CmdPackage: "cmd",
 		ModulePath: "example.com/me/todo",
+		ModuleRoot: filepath.Dir(specPath),
 	}); err != nil {
 		t.Fatalf("second Run: %v", err)
 	}
@@ -493,6 +499,7 @@ func TestRun_skipBridgeOptionSuppressesEmission(t *testing.T) {
 		SpecPath: specPath, OutputDir: outDir, Package: "rotini",
 		CmdDir: cmdDir, CmdPackage: "cmd",
 		ModulePath: "example.com/me/todo",
+		ModuleRoot: filepath.Dir(specPath),
 		SkipBridge: true,
 	})
 	if err != nil {

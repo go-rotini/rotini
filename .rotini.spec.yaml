@@ -1,0 +1,135 @@
+$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/0.0.0/schema-spec.json
+name: rotini
+inputs:
+  flags:
+    - name: help
+      identifiers:
+        - -h
+        - --help
+      schema:
+        type: bool
+    - name: version
+      identifiers:
+        - -v
+        - --version
+      schema:
+        type: bool
+commands:
+  - name: initialize
+    aliases:
+      - init
+    inputs:
+      arguments:
+        - name: name
+          schema:
+            type: string
+      flags:
+        - name: format
+          identifiers:
+            - --format
+          schema:
+            type: string
+            enum:
+              - json
+              - yaml
+            default: yaml
+        - name: force
+          identifiers:
+            - --force
+          schema:
+            type: bool
+        - name: help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+  - name: generate
+    aliases:
+      - gen
+    inputs:
+      arguments:
+        - name: file
+          schema:
+            type: string
+            default: .rotini.spec.yaml
+      flags:
+        - name: config
+          identifiers:
+            - -c
+            - --config
+          schema:
+            type: string
+        - name: help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+        - name: watch
+          identifiers:
+            - --watch
+            - -w
+          schema:
+            type: bool
+  - name: validate
+    aliases:
+      - val
+    inputs:
+      arguments:
+        - name: file
+          schema:
+            type: string
+            default: .rotini.spec.yaml
+      flags:
+        - name: help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+  - name: help
+    inputs:
+      arguments:
+        - name: command
+          schema:
+            type: array
+      flags:
+        - name: help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+  - name: version
+    inputs:
+      flags:
+        - name: help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+  - name: completion
+    inputs:
+      arguments:
+        - name: shell
+          schema:
+            type: string
+            enum:
+              - zsh
+              - bash
+              - fish
+              - powershell
+              - nushell
+              - elvish
+      flags:
+        - name: help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+metadata:
+  - var: Version
+    default: dev

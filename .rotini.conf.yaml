@@ -1,0 +1,15 @@
+$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/0.0.0/schema-conf.json
+generate:
+  cmd:
+    package: internal/handlers
+    gen_file: handlers.gen.go
+    prune:
+      enabled: true
+      keep:
+        # help_text.go holds the user-facing help strings; not a
+        # generated handler stub, so the pruner must leave it alone.
+        - help_text.go
+  framework:
+    package: internal/rotini
+    gen_file: rotini.gen.go
+    additional_imports: []

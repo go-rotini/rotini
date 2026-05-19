@@ -216,13 +216,17 @@ func TestRender_inputsGen_populateFromArgv_callsAncestors(t *testing.T) {
 
 func TestRender_inputsGen_variadicArg(t *testing.T) {
 	t.Parallel()
+	// The DSL → ProgramSpec translator sets Type to the slice form
+	// for variadic args (e.g., "array" schema type → "[]string"), so
+	// the test fixture mirrors that shape rather than the schema
+	// scalar form.
 	spec := rtk.ProgramSpec{
 		Name: "cat",
 		Commands: []rtk.CommandSpec{
 			{
 				Path: "cat", Name: "cat",
 				Arguments: []rtk.ArgumentSpec{
-					{Name: "paths", Type: "string", Variadic: true},
+					{Name: "paths", Type: "[]string", Variadic: true},
 				},
 			},
 		},
@@ -363,6 +367,23 @@ func TestRender_programGen(t *testing.T) {
 		`build, ok := executors[path]`,
 		`RunExecution(build(p))`,
 		`ErrParserUnbound`,
+	)
+}
+
+// =============================================================================
+// completion.gen.tmpl
+// =============================================================================
+
+func TestRender_completionGen(t *testing.T) {
+	t.Parallel()
+	in := internal.NewRenderInput("rotini", fixtureSpec())
+	out := renderOK(t, "completion.gen.tmpl", in)
+
+	containsAll(t, "completion.gen.tmpl", out,
+		`package rotini`,
+		`import "github.com/go-rotini/rotini/rtk"`,
+		`func Completion(shell rtk.Shell) (string, error)`,
+		`return rtk.GenerateCompletion(shell, Spec)`,
 	)
 }
 

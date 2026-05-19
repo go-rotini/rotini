@@ -30,7 +30,7 @@ type CatFlags struct {
 
 // CatArguments carries the "cat" command's positional arguments.
 type CatArguments struct {
-	Paths [][]string
+	Paths []string
 }
 
 // CatInputs is the typed input for the "cat" command.

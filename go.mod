@@ -4,7 +4,14 @@ go 1.26.2
 
 toolchain go1.26.3
 
-require github.com/go-rotini/recon v1.0.0
+require (
+	github.com/go-rotini/fs v1.0.0
+	github.com/go-rotini/jsonc v1.1.0
+	github.com/go-rotini/jsonschema v1.0.0
+	github.com/go-rotini/recon v1.0.0
+	github.com/go-rotini/toml v1.1.0
+	github.com/go-rotini/yaml v1.2.0
+)
 
 tool (
 	github.com/go-gremlins/gremlins/cmd/gremlins
@@ -85,11 +92,6 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-rotini/dotenv v1.0.0 // indirect
 	github.com/go-rotini/env v1.0.0 // indirect
-	github.com/go-rotini/fs v1.0.0 // indirect
-	github.com/go-rotini/jsonc v1.1.0 // indirect
-	github.com/go-rotini/jsonschema v1.0.0 // indirect
-	github.com/go-rotini/toml v1.1.0 // indirect
-	github.com/go-rotini/yaml v1.2.0 // indirect
 	github.com/go-toolsmith/astcast v1.1.0 // indirect
 	github.com/go-toolsmith/astcopy v1.1.0 // indirect
 	github.com/go-toolsmith/astequal v1.2.0 // indirect

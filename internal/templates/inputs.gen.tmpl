@@ -64,11 +64,10 @@ type {{$pathPascal}}Flags struct {
 // {{$pathPascal}}Arguments carries the "{{$path}}" command's positional arguments.
 type {{$pathPascal}}Arguments struct {
 {{- range $cmd.Arguments}}
-{{- if .Variadic}}
-	{{toPascalCase .Name}} []{{goType .Type}}
-{{- else}}
+{{- /* Variadic args use Type directly: the translator already
+       sets Type to a slice form (e.g., "[]string") for variadic
+       arguments, so prefixing with [] would produce [][]T. */ -}}
 	{{toPascalCase .Name}} {{goType .Type}}
-{{- end}}
 {{- end}}
 }
 {{- end}}

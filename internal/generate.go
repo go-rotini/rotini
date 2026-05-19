@@ -4,6 +4,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -60,6 +61,7 @@ var frameworkTemplates = []string{
 	"lifecycle.gen.tmpl",
 	"executors.gen.tmpl",
 	"program.gen.tmpl",
+	"completion.gen.tmpl",
 }
 
 // RunOptions configures a [Run] invocation. SpecPath is required; the
@@ -111,6 +113,17 @@ type RunOptions struct {
 	// Useful when the user manages their own handler-bridge wiring
 	// or wants to render only the framework package.
 	SkipBridge bool
+
+	// ModuleRoot is the directory containing go.mod. Used to compute
+	// the framework's import path when OutputDir is absolute (e.g.,
+	// in tests):
+	//
+	//	frameworkImportPath = ModulePath + "/" + Rel(ModuleRoot, OutputDir)
+	//
+	// When empty, the current working directory is assumed. Production
+	// callers (the rotini binary) run from the module root with
+	// relative paths, so the field is rarely set explicitly.
+	ModuleRoot string
 }
 
 // RunResult reports the outcome of a [Run] invocation.
@@ -221,7 +234,10 @@ func emitBridgeAndSkeletons(
 		return nil
 	}
 
-	frameworkImportPath := modulePath + "/" + filepath.ToSlash(frameworkDir)
+	frameworkImportPath, err := computeImportPath(modulePath, opts.ModuleRoot, frameworkDir)
+	if err != nil {
+		return fmt.Errorf("internal: compute framework import path: %w", err)
+	}
 
 	bridgeIn := NewRenderInput(cmdPkg, programSpec).
 		WithFramework(frameworkImportPath, frameworkPkg)
@@ -262,6 +278,45 @@ func emitBridgeAndSkeletons(
 	}
 	return nil
 }
+
+// computeImportPath produces the Go import path of the framework
+// package, given the module's path (from go.mod), the module root
+// directory (defaults to cwd), and the framework output directory.
+//
+// When dir is relative, it is interpreted as already-relative-to-
+// module-root and appended directly. When dir is absolute, the
+// result is modulePath + "/" + filepath.Rel(root, dir).
+//
+// Returns an error if dir is absolute but root is empty / not
+// resolvable, or if dir escapes root.
+func computeImportPath(modulePath, root, dir string) (string, error) {
+	rel := dir
+	if filepath.IsAbs(dir) {
+		if root == "" {
+			cwd, err := os.Getwd()
+			if err != nil {
+				return "", fmt.Errorf("get working directory: %w", err)
+			}
+			root = cwd
+		}
+		r, err := filepath.Rel(root, dir)
+		if err != nil {
+			return "", fmt.Errorf("compute rel(%s, %s): %w", root, dir, err)
+		}
+		rel = r
+	}
+	rel = filepath.ToSlash(rel)
+	if strings.HasPrefix(rel, "../") || rel == ".." {
+		return "", fmt.Errorf("%w: %s is outside module root %s", ErrPathOutsideModule, dir, root)
+	}
+	return modulePath + "/" + rel, nil
+}
+
+// ErrPathOutsideModule is returned by [computeImportPath] when the
+// output directory resolves to a path outside the module root —
+// e.g., the user passed an absolute OutputDir that doesn't sit
+// under ModuleRoot.
+var ErrPathOutsideModule = errors.New("internal: output directory is outside the module root")
 
 // resolveCmdTarget figures out where bridge + skeleton files should
 // land and what package name they should declare. Explicit options
