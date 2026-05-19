@@ -28,10 +28,20 @@ func (h *InitializeHandlerImpl) Run(ctx rotini.InitializeCtx, inputs *rotini.Ini
 		return &rtk.EarlyExit{Code: 1}
 	}
 
+	// "dev" is the build-time fallback when the binary wasn't built
+	// with -ldflags; passing it through would produce a $schema URL
+	// the schema's tag-pattern regex rejects. Fall back to Initialize's
+	// "0.0.0" placeholder for dev/CI builds — users on a release
+	// binary get the real version baked in via ldflags.
+	rotiniVersion := Version
+	if rotiniVersion == "dev" {
+		rotiniVersion = ""
+	}
 	_, err := internal.Initialize(internal.InitOptions{
 		Name:          inputs.Arguments.Name,
 		Force:         inputs.Flags.Force,
-		RotiniVersion: Version,
+		RotiniVersion: rotiniVersion,
+		Format:        internal.InitFormat(inputs.Flags.Format),
 	})
 	if err != nil {
 		_, _ = io.Stderr.Println(fmt.Sprintf("Error: %s", err.Error()))

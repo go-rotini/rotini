@@ -2,6 +2,7 @@ package internal
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -9,13 +10,43 @@ import (
 	"regexp"
 
 	"github.com/go-rotini/fs"
+	"github.com/go-rotini/jsonc"
+	"github.com/go-rotini/yaml"
 )
+
+// InitFormat identifies the on-disk encoding of the .rotini.spec /
+// .rotini.conf files [Initialize] writes. The scaffold template is
+// authored once in YAML (the most readable form); other formats are
+// produced by round-tripping through the matching codec package.
+type InitFormat string
+
+const (
+	// InitFormatYAML emits .rotini.spec.yaml + .rotini.conf.yaml.
+	InitFormatYAML InitFormat = "yaml"
+
+	// InitFormatJSON emits .rotini.spec.json + .rotini.conf.json
+	// (indented via [encoding/json.MarshalIndent]).
+	InitFormatJSON InitFormat = "json"
+
+	// InitFormatJSONC emits .rotini.spec.jsonc + .rotini.conf.jsonc
+	// via [github.com/go-rotini/jsonc].MarshalIndent — valid JSON
+	// today, ready for the user to add comments after.
+	InitFormatJSONC InitFormat = "jsonc"
+)
+
+// SupportedInitFormats lists every [InitFormat] [Initialize] knows
+// how to write. Useful for `--format` flag enums.
+var SupportedInitFormats = []InitFormat{InitFormatYAML, InitFormatJSON, InitFormatJSONC}
+
+// ErrUnsupportedInitFormat is returned by [Initialize] when
+// [InitOptions.Format] is not one of [SupportedInitFormats].
+var ErrUnsupportedInitFormat = errors.New("internal: unsupported init format")
 
 // InitOptions configures an [Initialize] invocation. Name is required;
 // the rest have sensible defaults.
 type InitOptions struct {
-	// Name is the root command name embedded in the generated
-	// .rotini.spec.yaml. Must match the spec schema's name pattern
+	// Name is the root command name embedded in the generated spec
+	// file. Must match the spec schema's name pattern
 	// ([a-zA-Z][a-zA-Z0-9_-]*).
 	Name string
 
@@ -38,6 +69,11 @@ type InitOptions struct {
 	// build version.
 	RotiniVersion string
 
+	// Format selects the on-disk encoding for the spec + conf files.
+	// Empty defaults to [InitFormatYAML]. main.go is always Go;
+	// Format does not affect it.
+	Format InitFormat
+
 	// Force, when true, overwrites existing files. When false (default),
 	// [Initialize] returns [ErrAlreadyExists] for the first file it
 	// finds already present so users don't accidentally clobber
@@ -52,9 +88,10 @@ type InitResult struct {
 	FilesWritten []string
 }
 
-// Initialize lays out a new rotini project: writes
-// .rotini.spec.yaml, .rotini.conf.yaml, and main.go into opts.Dir
-// using the embedded init templates.
+// Initialize lays out a new rotini project: writes the spec file,
+// the conf file, and main.go into opts.Dir using the embedded init
+// templates. Spec + conf encoding follows opts.Format; main.go is
+// always Go.
 //
 // On Force=false, the entire operation aborts before any write when
 // any target already exists. On Force=true, each target is
@@ -83,8 +120,17 @@ func Initialize(opts InitOptions) (*InitResult, error) {
 		version = "0.0.0"
 	}
 
-	specPath := filepath.Join(dir, ".rotini.spec.yaml")
-	confPath := filepath.Join(dir, ".rotini.conf.yaml")
+	format := opts.Format
+	if format == "" {
+		format = InitFormatYAML
+	}
+	ext, err := extensionForFormat(format)
+	if err != nil {
+		return nil, err
+	}
+
+	specPath := filepath.Join(dir, ".rotini.spec."+ext)
+	confPath := filepath.Join(dir, ".rotini.conf."+ext)
 	mainPath := filepath.Join(dir, "main.go")
 
 	if !opts.Force {
@@ -95,24 +141,38 @@ func Initialize(opts InitOptions) (*InitResult, error) {
 		}
 	}
 
-	specBytes, err := renderInitTemplate("init-spec.yaml.tmpl", map[string]any{
+	// Render the YAML scaffold templates, then convert to the
+	// requested format. JSON / JSONC outputs preserve the field
+	// structure and values — comments in YAML are dropped during
+	// round-trip; we accept that for now since the init scaffold
+	// has no user-meaningful comments.
+	specYAML, err := renderInitTemplate("rotini-spec.yaml.tmpl", map[string]any{
 		"Name":          opts.Name,
 		"RotiniVersion": version,
 	})
 	if err != nil {
 		return nil, err
 	}
-	confBytes, err := renderInitTemplate("init-conf.yaml.tmpl", map[string]any{
+	confYAML, err := renderInitTemplate("rotini-conf.yaml.tmpl", map[string]any{
 		"RotiniVersion": version,
 	})
 	if err != nil {
 		return nil, err
 	}
-	mainBytes, err := renderInitTemplate("init-main.go.tmpl", map[string]any{
+	mainBytes, err := renderInitTemplate("rotini-main.go.tmpl", map[string]any{
 		"ModulePath": modulePath,
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	specBytes, err := convertFormat(specYAML, format)
+	if err != nil {
+		return nil, fmt.Errorf("internal: convert spec to %s: %w", format, err)
+	}
+	confBytes, err := convertFormat(confYAML, format)
+	if err != nil {
+		return nil, fmt.Errorf("internal: convert conf to %s: %w", format, err)
 	}
 
 	writes := []struct {
@@ -131,6 +191,55 @@ func Initialize(opts InitOptions) (*InitResult, error) {
 		result.FilesWritten = append(result.FilesWritten, w.path)
 	}
 	return result, nil
+}
+
+// extensionForFormat returns the file extension (no dot) for an
+// [InitFormat]. Returns [ErrUnsupportedInitFormat] for unknown values.
+func extensionForFormat(f InitFormat) (string, error) {
+	switch f {
+	case InitFormatYAML:
+		return "yaml", nil
+	case InitFormatJSON:
+		return "json", nil
+	case InitFormatJSONC:
+		return "jsonc", nil
+	default:
+		return "", fmt.Errorf("%w: %q (supported: %v)", ErrUnsupportedInitFormat, f, SupportedInitFormats)
+	}
+}
+
+// convertFormat re-encodes yamlBytes into the target [InitFormat]:
+//
+//   - yaml  → returned unchanged.
+//   - json  → yaml.Unmarshal → json.MarshalIndent.
+//   - jsonc → yaml.Unmarshal → jsonc.MarshalIndent.
+//
+// JSON / JSONC outputs receive a trailing newline so editors that
+// insert one don't show spurious diffs on first save.
+func convertFormat(yamlBytes []byte, target InitFormat) ([]byte, error) {
+	if target == InitFormatYAML {
+		return yamlBytes, nil
+	}
+	var v any
+	if err := yaml.Unmarshal(yamlBytes, &v); err != nil {
+		return nil, fmt.Errorf("decode yaml: %w", err)
+	}
+	switch target {
+	case InitFormatJSON:
+		out, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("encode json: %w", err)
+		}
+		return append(out, '\n'), nil
+	case InitFormatJSONC:
+		out, err := jsonc.MarshalIndent(v, "  ")
+		if err != nil {
+			return nil, fmt.Errorf("encode jsonc: %w", err)
+		}
+		return append(out, '\n'), nil
+	default:
+		return nil, fmt.Errorf("%w: %q", ErrUnsupportedInitFormat, target)
+	}
 }
 
 // ErrAlreadyExists is returned by [Initialize] when a target file

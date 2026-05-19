@@ -6,9 +6,10 @@ generate:
     prune:
       enabled: true
       keep:
-        # help_text.go holds the user-facing help strings; not a
-        # generated handler stub, so the pruner must leave it alone.
-        - help_text.go
+        # help.go holds the user-facing help strings (helpKey enum +
+        # getHelp lookup + Version var). Not a generated handler stub,
+        # so the pruner must leave it alone.
+        - help.go
   framework:
     package: internal/rotini
     gen_file: rotini.gen.go

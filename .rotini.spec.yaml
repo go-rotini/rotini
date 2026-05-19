@@ -30,8 +30,9 @@ commands:
           schema:
             type: string
             enum:
-              - json
               - yaml
+              - json
+              - jsonc
             default: yaml
         - name: force
           identifiers:

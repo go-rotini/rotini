@@ -337,3 +337,189 @@ func TestInitialize_unsetVersionUsesPlaceholder(t *testing.T) {
 		t.Errorf("spec did not use 0.0.0 placeholder; got:\n%s", got)
 	}
 }
+
+// =============================================================================
+// Format support — YAML / JSON / JSONC scaffolds
+// =============================================================================
+
+func TestInitialize_yamlFormatIsDefault(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeGoMod(t, dir, "example.com/me/myapp")
+
+	res, err := internal.Initialize(internal.InitOptions{
+		Name:          "todo",
+		Dir:           dir,
+		RotiniVersion: "1.2.3",
+		// Format: ""  — defaulted to YAML
+	})
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	wantBasenames := map[string]bool{
+		".rotini.spec.yaml": true,
+		".rotini.conf.yaml": true,
+		"main.go":           true,
+	}
+	for _, p := range res.FilesWritten {
+		if !wantBasenames[filepath.Base(p)] {
+			t.Errorf("FilesWritten contains unexpected basename %q", filepath.Base(p))
+		}
+		delete(wantBasenames, filepath.Base(p))
+	}
+	if len(wantBasenames) != 0 {
+		t.Errorf("FilesWritten missing: %v", wantBasenames)
+	}
+	// YAML content keys.
+	got := readFile(t, filepath.Join(dir, ".rotini.spec.yaml"))
+	if !strings.Contains(got, "name: todo") {
+		t.Errorf("yaml spec missing `name: todo`; got:\n%s", got)
+	}
+}
+
+func TestInitialize_jsonFormatProducesJSONFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeGoMod(t, dir, "example.com/me/myapp")
+
+	_, err := internal.Initialize(internal.InitOptions{
+		Name:          "todo",
+		Dir:           dir,
+		RotiniVersion: "1.2.3",
+		Format:        internal.InitFormatJSON,
+	})
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	specPath := filepath.Join(dir, ".rotini.spec.json")
+	confPath := filepath.Join(dir, ".rotini.conf.json")
+	if _, err := os.Stat(specPath); err != nil {
+		t.Errorf("expected .rotini.spec.json: %v", err)
+	}
+	if _, err := os.Stat(confPath); err != nil {
+		t.Errorf("expected .rotini.conf.json: %v", err)
+	}
+	// .yaml files must NOT exist.
+	if _, err := os.Stat(filepath.Join(dir, ".rotini.spec.yaml")); !os.IsNotExist(err) {
+		t.Errorf(".rotini.spec.yaml should not exist when Format=json: %v", err)
+	}
+
+	// Round-trip: the JSON we wrote should re-parse via the regular
+	// spec loader and validate against the schema.
+	spec, err := internal.LoadSpec(specPath)
+	if err != nil {
+		t.Fatalf("LoadSpec on generated json: %v", err)
+	}
+	if err := internal.Validate(spec); err != nil {
+		t.Fatalf("Validate on generated json: %v", err)
+	}
+	if spec.Name != "todo" {
+		t.Errorf("spec.Name: got %q, want %q", spec.Name, "todo")
+	}
+
+	// Content is indented JSON; no YAML-only constructs leak through.
+	got := readFile(t, specPath)
+	if !strings.Contains(got, `"name": "todo"`) {
+		t.Errorf("json spec missing `\"name\": \"todo\"`; got:\n%s", got)
+	}
+	if strings.Contains(got, "name: todo") {
+		t.Errorf("json spec contains YAML-style key/value pair:\n%s", got)
+	}
+}
+
+func TestInitialize_jsoncFormatProducesJSONCFile(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeGoMod(t, dir, "example.com/me/myapp")
+
+	_, err := internal.Initialize(internal.InitOptions{
+		Name:          "todo",
+		Dir:           dir,
+		RotiniVersion: "1.2.3",
+		Format:        internal.InitFormatJSONC,
+	})
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	specPath := filepath.Join(dir, ".rotini.spec.jsonc")
+	confPath := filepath.Join(dir, ".rotini.conf.jsonc")
+	if _, err := os.Stat(specPath); err != nil {
+		t.Errorf("expected .rotini.spec.jsonc: %v", err)
+	}
+	if _, err := os.Stat(confPath); err != nil {
+		t.Errorf("expected .rotini.conf.jsonc: %v", err)
+	}
+
+	// JSONC is JSON-compatible at write time; the loader's content
+	// sniffer + jsonc parser handle either bare JSON or
+	// comment-enriched JSON. Round-trip through LoadSpec verifies.
+	spec, err := internal.LoadSpec(specPath)
+	if err != nil {
+		t.Fatalf("LoadSpec on generated jsonc: %v", err)
+	}
+	if err := internal.Validate(spec); err != nil {
+		t.Fatalf("Validate on generated jsonc: %v", err)
+	}
+	if spec.Name != "todo" {
+		t.Errorf("spec.Name: got %q, want %q", spec.Name, "todo")
+	}
+}
+
+func TestInitialize_unsupportedFormatReturnsSentinel(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeGoMod(t, dir, "example.com/me/myapp")
+
+	_, err := internal.Initialize(internal.InitOptions{
+		Name:          "todo",
+		Dir:           dir,
+		RotiniVersion: "1.2.3",
+		Format:        "xml",
+	})
+	if err == nil {
+		t.Fatal("expected ErrUnsupportedInitFormat, got nil")
+	}
+	if !errors.Is(err, internal.ErrUnsupportedInitFormat) {
+		t.Errorf("got %v, want errors.Is(ErrUnsupportedInitFormat)=true", err)
+	}
+}
+
+func TestInitialize_supportedInitFormatsRoundTrip(t *testing.T) {
+	t.Parallel()
+	// Sanity: every format in SupportedInitFormats must produce a
+	// loadable + validatable spec. Catches accidental drops from the
+	// format-handling switch.
+	for _, format := range internal.SupportedInitFormats {
+		t.Run(string(format), func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			writeGoMod(t, dir, "example.com/me/myapp")
+			_, err := internal.Initialize(internal.InitOptions{
+				Name:          "x",
+				Dir:           dir,
+				RotiniVersion: "1.2.3",
+				Format:        format,
+			})
+			if err != nil {
+				t.Fatalf("Initialize(%s): %v", format, err)
+			}
+			ext := string(format)
+			specPath := filepath.Join(dir, ".rotini.spec."+ext)
+			confPath := filepath.Join(dir, ".rotini.conf."+ext)
+			s, err := internal.LoadSpec(specPath)
+			if err != nil {
+				t.Fatalf("LoadSpec(%s): %v", format, err)
+			}
+			if err := internal.Validate(s); err != nil {
+				t.Fatalf("Validate(%s): %v", format, err)
+			}
+			c, err := internal.LoadConf(confPath)
+			if err != nil {
+				t.Fatalf("LoadConf(%s): %v", format, err)
+			}
+			if err := internal.ValidateConf(c); err != nil {
+				t.Fatalf("ValidateConf(%s): %v", format, err)
+			}
+		})
+	}
+}

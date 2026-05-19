@@ -31,7 +31,7 @@ var Spec = rtk.ProgramSpec{
 			Name:    "initialize",
 			Aliases: []string{"init"},
 			Flags: []rtk.FlagSpec{
-				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Default: "yaml", Enum: []string{"json", "yaml"}},
+				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Default: "yaml", Enum: []string{"yaml", "json", "jsonc"}},
 				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
