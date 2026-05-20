@@ -1,7 +1,6 @@
 package internal
 
 import (
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -10,25 +9,13 @@ import (
 	"time"
 
 	"github.com/go-rotini/jsonschema"
+	"github.com/go-rotini/rotini/schemas"
 )
 
-// schemaSpecJSON is the JSON Schema describing a valid .rotini.spec.yaml
-// document. It is embedded from internal/schema-spec.json so users can run
-// `go tool rotini validate` against any spec file without external
-// dependencies.
-//
-// internal/schema-spec.json is the source of truth; CI publishes a copy
-// to the repo root on release so external tooling (IDE plugins, CI
-// linters) can fetch the schema by URL.
-//
-//go:embed schema-spec.json
-var schemaSpecJSON []byte
-
-// schemaConfJSON is the JSON Schema describing a valid .rotini.conf.yaml
-// document. Same embedding rules as [schemaSpecJSON].
-//
-//go:embed schema-conf.json
-var schemaConfJSON []byte
+// The .rotini.spec / .rotini.conf JSON Schemas are embedded in and
+// exported by the schema package ([schema.Spec] / [schema.Conf]); we
+// compile those bytes here so `go tool rotini validate` works against
+// any spec file without external dependencies.
 
 // Compiled regex patterns mirroring the schema constraints. They are
 // duplicated in code so the semantic checks (which operate after JSON
@@ -156,7 +143,7 @@ func validateConfAgainstSchema(c *Conf, errs *SpecError) error {
 // guarantees safety under concurrent Validate calls.
 func loadSpecSchema() (*jsonschema.Schema, error) {
 	specSchemaOnce.Do(func() {
-		sch, err := jsonschema.Compile(schemaSpecJSON)
+		sch, err := jsonschema.Compile(schemas.RotiniSchemaSpec)
 		if err != nil {
 			errSpecSchemaCompile = fmt.Errorf("compile schema-spec.json: %w", err)
 			return
@@ -170,7 +157,7 @@ func loadSpecSchema() (*jsonschema.Schema, error) {
 // first call.
 func loadConfSchema() (*jsonschema.Schema, error) {
 	confSchemaOnce.Do(func() {
-		sch, err := jsonschema.Compile(schemaConfJSON)
+		sch, err := jsonschema.Compile(schemas.RotiniSchemaConf)
 		if err != nil {
 			errConfSchemaCompile = fmt.Errorf("compile schema-conf.json: %w", err)
 			return
