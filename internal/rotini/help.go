@@ -1,4 +1,4 @@
-package cmd
+package rotini
 
 type helpKey int
 
