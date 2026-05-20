@@ -13,9 +13,10 @@ import (
 )
 
 // The .rotini.spec / .rotini.conf JSON Schemas are embedded in and
-// exported by the schema package ([schema.Spec] / [schema.Conf]); we
-// compile those bytes here so `go tool rotini validate` works against
-// any spec file without external dependencies.
+// exported by the schemas package ([schemas.RotiniSchemaSpec] /
+// [schemas.RotiniSchemaConf]); we compile those bytes here so
+// `go tool rotini validate` works against any spec file without
+// external dependencies.
 
 // Compiled regex patterns mirroring the schema constraints. They are
 // duplicated in code so the semantic checks (which operate after JSON
@@ -34,7 +35,7 @@ var (
 var validConfigFormats = map[string]bool{"json": true, "yaml": true, "toml": true}
 
 // compiledSpecSchema is the lazily-compiled JSON Schema instance for
-// schema-spec.json. We compile once on first use and reuse for every
+// the spec schema. We compile once on first use and reuse for every
 // subsequent Validate call. sync.Once gates the compile so concurrent
 // Validate calls don't race on initialization.
 var (
@@ -44,7 +45,7 @@ var (
 )
 
 // compiledConfSchema is the lazily-compiled JSON Schema instance for
-// schema-conf.json.
+// the conf schema.
 var (
 	confSchemaOnce       sync.Once
 	confSchemaVal        *jsonschema.Schema
@@ -145,7 +146,7 @@ func loadSpecSchema() (*jsonschema.Schema, error) {
 	specSchemaOnce.Do(func() {
 		sch, err := jsonschema.Compile(schemas.RotiniSchemaSpec)
 		if err != nil {
-			errSpecSchemaCompile = fmt.Errorf("compile schema-spec.json: %w", err)
+			errSpecSchemaCompile = fmt.Errorf("compile spec schema: %w", err)
 			return
 		}
 		specSchemaVal = sch
@@ -159,7 +160,7 @@ func loadConfSchema() (*jsonschema.Schema, error) {
 	confSchemaOnce.Do(func() {
 		sch, err := jsonschema.Compile(schemas.RotiniSchemaConf)
 		if err != nil {
-			errConfSchemaCompile = fmt.Errorf("compile schema-conf.json: %w", err)
+			errConfSchemaCompile = fmt.Errorf("compile conf schema: %w", err)
 			return
 		}
 		confSchemaVal = sch

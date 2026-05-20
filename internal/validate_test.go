@@ -18,7 +18,7 @@ import (
 // failure can be attributed to a single change.
 func validSpec() *internal.Spec {
 	return &internal.Spec{
-		SchemaURL: "https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json",
+		SchemaURL: "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json",
 		Name:      "greet",
 	}
 }
@@ -511,7 +511,7 @@ func TestValidateConf_nilOK(t *testing.T) {
 func TestValidateConf_minimalOK(t *testing.T) {
 	t.Parallel()
 	c := &internal.Conf{
-		SchemaURL: "https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-conf.json",
+		SchemaURL: "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/conf.json",
 	}
 	mustNoErr(t, internal.ValidateConf(c))
 }

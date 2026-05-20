@@ -599,7 +599,7 @@ func TestToProgramSpec_stdinNoSchemaDefaultsToJSON(t *testing.T) {
 
 func TestToProgramSpec_endToEndFromYAML(t *testing.T) {
 	t.Parallel()
-	yaml := `$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json
+	yaml := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json
 name: todo
 inputs:
   flags:

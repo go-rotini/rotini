@@ -11,7 +11,7 @@
     "$schema": {
       "type": "string",
       "description": "URL identifying the rotini configuration schema version. The version segment must match the installed rotini binary version.",
-      "pattern": "^https://raw\\.githubusercontent\\.com/matthewgetz/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-conf\\.json$"
+      "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schemas/conf\\.json$"
     },
     "generate": {
       "$ref": "#/definitions/GenerateConfig"

@@ -18,7 +18,7 @@ import (
 // supplied path's extension isn't one of the supported spec/conf formats.
 var ErrUnsupportedExtension = errors.New("unsupported file extension")
 
-// Spec DSL types mirror schema-spec.json exactly: field names match the
+// Spec DSL types mirror schemas/spec.json exactly: field names match the
 // JSON keys, and the loader strictly enforces "no unknown fields" so
 // typos surface immediately rather than silently no-op-ing.
 //

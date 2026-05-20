@@ -21,7 +21,7 @@ import (
 // three commands ("add", "foo", "foo bar") produces these expected
 // handler files (per the &lt;progname&gt;_&lt;path&gt;.go convention):
 // todo.go, todo_add.go, todo_foo.go, todo_foo_bar.go.
-const pruneFixtureSpec = `$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json
+const pruneFixtureSpec = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json
 name: todo
 commands:
   - name: add
@@ -486,7 +486,7 @@ func TestPrune_scenarioStaleActiveSafelistedNonGo(t *testing.T) {
 func TestPrune_recognizesNestedCommandPaths(t *testing.T) {
 	t.Parallel()
 	// Spec with three-level nesting: foo -> bar -> baz.
-	deepSpec := `$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json
+	deepSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json
 name: x
 commands:
   - name: foo

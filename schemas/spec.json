@@ -12,7 +12,7 @@
     "$schema": {
       "type": "string",
       "description": "URL identifying the rotini spec schema version. The version segment must match the installed rotini binary version.",
-      "pattern": "^https://raw\\.githubusercontent\\.com/matthewgetz/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-spec\\.json$"
+      "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schemas/spec\\.json$"
     },
     "name": {
       "type": "string",

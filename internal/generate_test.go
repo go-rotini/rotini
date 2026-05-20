@@ -18,7 +18,7 @@ import (
 // covers a root flag, a single sub-command with a flag and required
 // positional, and one nested command path so the rendered output
 // exercises both the simple and the ancestor-composition paths.
-const runFixtureSpec = `$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json
+const runFixtureSpec = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json
 name: todo
 inputs:
   flags:
@@ -230,7 +230,7 @@ func TestRun_outputDirFromConf(t *testing.T) {
 
 	// Write a conf alongside the spec pointing at "fwgen".
 	confPath := filepath.Join(filepath.Dir(specPath), ".rotini.conf.yaml")
-	conf := `$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-conf.json
+	conf := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/conf.json
 generate:
   framework:
     package: fwgen

@@ -77,7 +77,7 @@ func TestInitialize_specContent(t *testing.T) {
 
 	got := readFile(t, filepath.Join(dir, ".rotini.spec.yaml"))
 	wants := []string{
-		`$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-spec.json`,
+		`$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json`,
 		`name: todo`,
 		`commands: []`,
 	}
@@ -113,7 +113,7 @@ func TestInitialize_confContent(t *testing.T) {
 
 	got := readFile(t, filepath.Join(dir, ".rotini.conf.yaml"))
 	wants := []string{
-		`$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/1.2.3/schema-conf.json`,
+		`$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/conf.json`,
 		`internal/cli/cmd`,
 		`internal/cli/rotini`,
 		`prune:`,
@@ -333,7 +333,7 @@ func TestInitialize_unsetVersionUsesPlaceholder(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 	got := readFile(t, filepath.Join(dir, ".rotini.spec.yaml"))
-	if !strings.Contains(got, `/refs/tags/0.0.0/schema-spec.json`) {
+	if !strings.Contains(got, `/refs/tags/0.0.0/schemas/spec.json`) {
 		t.Errorf("spec did not use 0.0.0 placeholder; got:\n%s", got)
 	}
 }
