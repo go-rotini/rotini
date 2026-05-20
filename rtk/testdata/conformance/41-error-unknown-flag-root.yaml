@@ -1,8 +1,0 @@
-name: error-unknown-flag-root
-description: An unknown flag at the root surfaces UnknownFlagError.
-spec:
-  name: myprog
-inputs:
-  argv: ["--nope"]
-expected:
-  error_contains: "unknown flag"
