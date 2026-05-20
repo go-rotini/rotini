@@ -1,0 +1,11 @@
+$schema: https://raw.githubusercontent.com/matthewgetz/rotini/refs/tags/{{.RotiniVersion}}/schema-conf.json
+generate:
+  cmd:
+    package: internal/cli/cmd
+    gen_file: handlers.gen.go
+    prune:
+      enabled: true
+  framework:
+    package: internal/cli/rotini
+    gen_file: rotini.gen.go
+    additional_imports: []

@@ -1,0 +1,27 @@
+package {{.CommandsPackageName}}
+
+import (
+	"context"
+{{- if .FrameworkImport}}
+	"{{.FrameworkImport}}"
+{{- end}}
+)
+
+type {{.RootCommandName}}{{.CommandName}}Handlers struct{}
+
+var _ {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Handlers = (*{{.RootCommandName}}{{.CommandName}}Handlers)(nil)
+
+func (*{{.RootCommandName}}{{.CommandName}}Handlers) CascadingPreRun(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+}
+
+func (*{{.RootCommandName}}{{.CommandName}}Handlers) PreRun(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+}
+
+func (*{{.RootCommandName}}{{.CommandName}}Handlers) Run(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+}
+
+func (*{{.RootCommandName}}{{.CommandName}}Handlers) PostRun(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+}
+
+func (*{{.RootCommandName}}{{.CommandName}}Handlers) CascadingPostRun(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+}
