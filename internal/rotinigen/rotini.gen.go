@@ -274,9 +274,21 @@ var RotiniDefinition = rtk.Spec[LinkerFlagsMetadata]{
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool"},
 	},
-	Files:          []rtk.FilesSpec{},
-	RemoteCommands: []rtk.RemoteCommandsSpec{},
 	Metadata: LinkerFlagsMetadata{
 		Version: Version,
 	},
+}
+
+type ProgramExecutor struct {
+	Execute func()
+}
+
+func NewProgram(h Handlers) ProgramExecutor {
+	return ProgramExecutor{
+		Execute: func() {
+			// parse argv to find correct command
+			// if command not found err
+			// if command found dispatch the lifecycle tree
+		},
+	}
 }
