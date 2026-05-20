@@ -18,7 +18,7 @@ import (
 // ProgramSpec describes a complete CLI program: its name, its program-level
 // (root) flags, its command tree, and optionally a root-command stdin
 // contract.
-type ProgramSpec struct {
+type Spec[T any] struct {
 	// Name is the binary name (e.g., "rotini", "todo"). Used in help output
 	// and shell-completion scripts.
 	Name string
@@ -41,6 +41,8 @@ type ProgramSpec struct {
 	// RootStdin describes the stdin contract for the root command, if any.
 	// Most programs leave this nil and declare stdin per-command.
 	RootStdin *StdinSpec
+
+	Metadata T
 }
 
 // CommandSpec describes a single command — its identifiers, its inputs, and

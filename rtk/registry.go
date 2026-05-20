@@ -92,7 +92,7 @@ func Get[T any](r *Registry, key string) T {
 // Generated code emits per-command aliases — `type RotiniGenerateCtx = Ctx` —
 // so handler signatures read self-documentingly across commands while sharing
 // a single underlying type.
-type Ctx struct {
+type Context struct {
 	// Registry is the service registry bound for this invocation. Handler
 	// code uses it to retrieve services:
 	//

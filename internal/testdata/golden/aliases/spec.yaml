@@ -1,7 +1,0 @@
-$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json
-name: todo
-commands:
-  - name: list
-    aliases: ["ls", "l"]
-  - name: remove
-    aliases: ["rm", "delete"]
