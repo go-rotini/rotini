@@ -3,13 +3,13 @@ package handlers
 import (
 	"context"
 
-	"github.com/go-rotini/rotini/internal/rotinigen"
+	"github.com/go-rotini/rotini/internal/rotini/gen"
 	"github.com/go-rotini/rotini/rtk"
 )
 
 type rotiniHelpHandlers struct{}
 
-var _ rotinigen.RotiniHelpHandlers = (*rotiniHelpHandlers)(nil)
+var _ gen.RotiniHelpHandlers = (*rotiniHelpHandlers)(nil)
 
 func (*rotiniHelpHandlers) CascadingPreRun(ctx context.Context, rtx rtk.Context) {
 }
