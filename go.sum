@@ -222,6 +222,8 @@ github.com/go-rotini/jsonc v1.1.0 h1:rH+QF/pRorrNBqSPUI0L5SHi9pGXor48b5TuTdvVie0
 github.com/go-rotini/jsonc v1.1.0/go.mod h1:PG7X1If13RRskZfLk8IM0r1RuQwj0q7BLvsXXmoO1n0=
 github.com/go-rotini/jsonschema v1.0.0 h1:tMM2+A7CaU7BsK4vncfHbhzHhupUUb5QPMZ8h8F4cCY=
 github.com/go-rotini/jsonschema v1.0.0/go.mod h1:rU+aFHZy6XlGeiHxfgv/OedlUU5CbFaB1j/wKlq+vTQ=
+github.com/go-rotini/jsonschema v1.1.0 h1:lEBKwC2lQsPDcImRvQBXH3a7tfQwcdggHf0qcA2U3uE=
+github.com/go-rotini/jsonschema v1.1.0/go.mod h1:clLhg3v0C4HPav1Sh03AdNOeQhktQRTC74lFbqfqFKA=
 github.com/go-rotini/recon v1.0.0 h1:Uz6Hkb272sGGw7n5gpWJQDDL0E+dQ5yBg7wqxWDcKeo=
 github.com/go-rotini/recon v1.0.0/go.mod h1:u2AFLRw0HwKo4kRFVN/l6SfVpZcE9ciFuhG1b+gMB2c=
 github.com/go-rotini/toml v1.1.0 h1:zZ0ZSu/IphjnAZ88IxbecI2Jy1dW+SuzjPlEHF6Vg4I=

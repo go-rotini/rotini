@@ -7,7 +7,7 @@ toolchain go1.26.3
 require (
 	github.com/go-rotini/fs v1.0.0
 	github.com/go-rotini/jsonc v1.1.0
-	github.com/go-rotini/jsonschema v1.0.0
+	github.com/go-rotini/jsonschema v1.1.0
 	github.com/go-rotini/recon v1.0.0
 	github.com/go-rotini/toml v1.1.0
 	github.com/go-rotini/yaml v1.2.0
@@ -15,6 +15,7 @@ require (
 
 tool (
 	github.com/go-gremlins/gremlins/cmd/gremlins
+	github.com/go-rotini/jsonschema/gentypes
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	github.com/google/go-licenses/v2
 	golang.org/x/vuln/cmd/govulncheck
