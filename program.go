@@ -12,10 +12,14 @@ type CommandExecutor func(handlers CommandHandlers) error
 type program struct {
 	ctx      context.Context
 	args     []string
-	handlers ProgramHandlers
+	handlers any
 }
 
-func NewProgram[T any](h ProgramHandlers) *program {
+// NewProgram wires a generated program's aggregate handler set (the rtg
+// ProgramHandlers implementation) to the rotini runtime. It accepts any so the
+// runtime need not import the generated framework package; dispatch resolves
+// the per-command handlers from h at execution time.
+func NewProgram(h any) *program {
 	return &program{
 		ctx:      context.Background(),
 		args:     os.Args[1:],

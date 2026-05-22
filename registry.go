@@ -33,7 +33,7 @@ type Rtx struct {
 
 // NewRegistry returns an empty Registry.
 func NewRtx() *Rtx {
-	return &Context{services: make(map[string]any)}
+	return &Rtx{services: make(map[string]any)}
 }
 
 // Bind associates value with key, overwriting any prior binding. It returns
@@ -85,11 +85,24 @@ func Get[T any](r *Rtx, key string) T {
 	return zero
 }
 
-// Ctx is the per-command context passed into every handler hook
-// (CascadingPreRun, PreRun, Run, PostRun, CascadingPostRun). It carries the
-// service Registry; handler code retrieves services via [Get].
+// Context is the per-command context passed into every handler hook
+// (CascadingPreRun, PreRun, Run, PostRun, CascadingPostRun). It is a pointer
+// to the per-invocation [Rtx] service registry, so every hook shares the same
+// bindings and a copy never duplicates the registry's mutex. Handler code
+// retrieves services via [Get] and its typed inputs via [Inputs].
+type Context = *Rtx
+
+// inputsKey is the well-known registry key under which the runtime binds a
+// command's typed inputs struct for retrieval via [Inputs].
+const inputsKey = "inputs"
+
+// Inputs returns the typed inputs struct the runtime bound for the running
+// command, e.g. Inputs[rtg.RotiniGenerateInputs](rtx). It is the generated
+// programs' standard accessor for parsed flags and arguments.
 //
-// Generated code emits per-command aliases — `type RotiniGenerateCtx = Ctx` —
-// so handler signatures read self-documentingly across commands while sharing
-// a single underlying type.
-type Context = Rtx
+// NOTE: argv parsing and the bind step that populates the inputs are part of
+// the runtime execution path, which is not yet implemented; until then this
+// returns the zero value of T.
+func Inputs[T any](rtx Context) T {
+	return Get[T](rtx, inputsKey)
+}

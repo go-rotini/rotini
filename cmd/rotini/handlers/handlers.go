@@ -3,12 +3,12 @@ package handlers
 
 import (
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/cmd/rotini/gen"
+	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 )
 
 type handlers struct{}
 
-var _ gen.ProgramHandlers = (*handlers)(nil)
+var _ rtg.ProgramHandlers = (*handlers)(nil)
 
 var Program = rotini.NewProgram(&handlers{})
 

@@ -3,5 +3,8 @@
 //go:generate go run . generate ./.rotini.spec.yaml --config ../../.rotini.conf.yaml
 package main
 
+import "github.com/go-rotini/rotini/cmd/rotini/handlers"
+
 func main() {
+	handlers.Program.Execute()
 }
