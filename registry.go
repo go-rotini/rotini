@@ -29,6 +29,7 @@ import "sync"
 type Rtx struct {
 	mu       sync.RWMutex
 	services map[string]any
+	parsed   *parsedInputs // argv parsed by the runtime; read by [Inputs]
 }
 
 // NewRegistry returns an empty Registry.
@@ -91,18 +92,3 @@ func Get[T any](r *Rtx, key string) T {
 // bindings and a copy never duplicates the registry's mutex. Handler code
 // retrieves services via [Get] and its typed inputs via [Inputs].
 type Context = *Rtx
-
-// inputsKey is the well-known registry key under which the runtime binds a
-// command's typed inputs struct for retrieval via [Inputs].
-const inputsKey = "inputs"
-
-// Inputs returns the typed inputs struct the runtime bound for the running
-// command, e.g. Inputs[rtg.RotiniGenerateInputs](rtx). It is the generated
-// programs' standard accessor for parsed flags and arguments.
-//
-// NOTE: argv parsing and the bind step that populates the inputs are part of
-// the runtime execution path, which is not yet implemented; until then this
-// returns the zero value of T.
-func Inputs[T any](rtx Context) T {
-	return Get[T](rtx, inputsKey)
-}

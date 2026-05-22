@@ -15,9 +15,78 @@ type ProgramHandlers interface {
 	RotiniVersion() rotini.CommandHandlers
 }
 
+var Definition = rotini.Definition{
+	Name:    "rotini",
+	Handler: "Rotini",
+	Flags: []rotini.FlagDef{
+		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool"},
+	},
+	Commands: []rotini.CommandDef{
+		{Name: "initialize",
+			Handler: "RotiniInitialize",
+			Aliases: []string{"init"},
+			Flags: []rotini.FlagDef{
+				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Default: "yaml", Enum: []string{"json", "yaml"}},
+				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "name", Type: "string"},
+			},
+		},
+		{Name: "generate",
+			Handler: "RotiniGenerate",
+			Aliases: []string{"gen"},
+			Flags: []rotini.FlagDef{
+				{Name: "config", Identifiers: []string{"-c", "--config"}, Type: "string"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool"},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
+			},
+		},
+		{Name: "validate",
+			Handler: "RotiniValidate",
+			Aliases: []string{"val"},
+			Flags: []rotini.FlagDef{
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
+			},
+		},
+		{Name: "help",
+			Handler: "RotiniHelp",
+			Flags: []rotini.FlagDef{
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "command", Type: "[]string", Variadic: true},
+			},
+		},
+		{Name: "version",
+			Handler: "RotiniVersion",
+			Flags: []rotini.FlagDef{
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+			},
+		},
+		{Name: "completion",
+			Handler: "RotiniCompletion",
+			Flags: []rotini.FlagDef{
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "shell", Type: "string", Enum: []string{"zsh", "bash", "fish", "powershell", "nushell", "elvish"}},
+			},
+		},
+	},
+}
+
 type RotiniFlags struct {
-	Help    bool
-	Version bool
+	Help    bool `rotini:"help"`
+	Version bool `rotini:"version"`
 }
 
 type RotiniArguments struct{}
@@ -28,15 +97,15 @@ type RotiniCommandInputs struct {
 }
 
 type RotiniInputs struct {
-	Rotini RotiniCommandInputs
+	Rotini RotiniCommandInputs `rotini:"scope=rotini"`
 }
 
 type RotiniCompletionFlags struct {
-	Help bool
+	Help bool `rotini:"help"`
 }
 
 type RotiniCompletionArguments struct {
-	Shell string
+	Shell string `rotini:"shell"`
 }
 
 type RotiniCompletionCommandInputs struct {
@@ -45,18 +114,18 @@ type RotiniCompletionCommandInputs struct {
 }
 
 type RotiniCompletionInputs struct {
-	Rotini           RotiniCommandInputs
-	RotiniCompletion RotiniCompletionCommandInputs
+	Rotini           RotiniCommandInputs           `rotini:"scope=rotini"`
+	RotiniCompletion RotiniCompletionCommandInputs `rotini:"scope=completion"`
 }
 
 type RotiniGenerateFlags struct {
-	Config string
-	Help   bool
-	Watch  bool
+	Config string `rotini:"config"`
+	Help   bool   `rotini:"help"`
+	Watch  bool   `rotini:"watch"`
 }
 
 type RotiniGenerateArguments struct {
-	File string
+	File string `rotini:"file"`
 }
 
 type RotiniGenerateCommandInputs struct {
@@ -65,16 +134,16 @@ type RotiniGenerateCommandInputs struct {
 }
 
 type RotiniGenerateInputs struct {
-	Rotini         RotiniCommandInputs
-	RotiniGenerate RotiniGenerateCommandInputs
+	Rotini         RotiniCommandInputs         `rotini:"scope=rotini"`
+	RotiniGenerate RotiniGenerateCommandInputs `rotini:"scope=generate"`
 }
 
 type RotiniHelpFlags struct {
-	Help bool
+	Help bool `rotini:"help"`
 }
 
 type RotiniHelpArguments struct {
-	Command []string
+	Command []string `rotini:"command"`
 }
 
 type RotiniHelpCommandInputs struct {
@@ -83,18 +152,18 @@ type RotiniHelpCommandInputs struct {
 }
 
 type RotiniHelpInputs struct {
-	Rotini     RotiniCommandInputs
-	RotiniHelp RotiniHelpCommandInputs
+	Rotini     RotiniCommandInputs     `rotini:"scope=rotini"`
+	RotiniHelp RotiniHelpCommandInputs `rotini:"scope=help"`
 }
 
 type RotiniInitializeFlags struct {
-	Format string
-	Force  bool
-	Help   bool
+	Format string `rotini:"format"`
+	Force  bool   `rotini:"force"`
+	Help   bool   `rotini:"help"`
 }
 
 type RotiniInitializeArguments struct {
-	Name string
+	Name string `rotini:"name"`
 }
 
 type RotiniInitializeCommandInputs struct {
@@ -103,16 +172,16 @@ type RotiniInitializeCommandInputs struct {
 }
 
 type RotiniInitializeInputs struct {
-	Rotini           RotiniCommandInputs
-	RotiniInitialize RotiniInitializeCommandInputs
+	Rotini           RotiniCommandInputs           `rotini:"scope=rotini"`
+	RotiniInitialize RotiniInitializeCommandInputs `rotini:"scope=initialize"`
 }
 
 type RotiniValidateFlags struct {
-	Help bool
+	Help bool `rotini:"help"`
 }
 
 type RotiniValidateArguments struct {
-	File string
+	File string `rotini:"file"`
 }
 
 type RotiniValidateCommandInputs struct {
@@ -121,12 +190,12 @@ type RotiniValidateCommandInputs struct {
 }
 
 type RotiniValidateInputs struct {
-	Rotini         RotiniCommandInputs
-	RotiniValidate RotiniValidateCommandInputs
+	Rotini         RotiniCommandInputs         `rotini:"scope=rotini"`
+	RotiniValidate RotiniValidateCommandInputs `rotini:"scope=validate"`
 }
 
 type RotiniVersionFlags struct {
-	Help bool
+	Help bool `rotini:"help"`
 }
 
 type RotiniVersionArguments struct{}
@@ -137,6 +206,6 @@ type RotiniVersionCommandInputs struct {
 }
 
 type RotiniVersionInputs struct {
-	Rotini        RotiniCommandInputs
-	RotiniVersion RotiniVersionCommandInputs
+	Rotini        RotiniCommandInputs        `rotini:"scope=rotini"`
+	RotiniVersion RotiniVersionCommandInputs `rotini:"scope=version"`
 }

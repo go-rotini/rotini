@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 	"unicode"
@@ -24,10 +25,13 @@ const (
 //go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl
 var templateFS embed.FS
 
-// fieldDef is one generated struct field: a Go identifier and its type.
+// fieldDef is one generated struct field: a Go identifier, its type, and its
+// `rotini` struct-tag content — a flag/argument logical name, or
+// "scope=<command-name>" for the per-command fields of an <Cmd>Inputs struct.
 type fieldDef struct {
 	Field  string
 	GoType string
+	Tag    string
 }
 
 // inputBlock is the set of generated input types for a single command. The
@@ -82,7 +86,7 @@ func generateAll(spec *Spec, conf *Conf) error {
 
 	root, cmds := buildCommands(spec)
 
-	if err := writeFrameworkFile(lay, root, cmds); err != nil {
+	if err := writeFrameworkFile(spec, lay, root, cmds); err != nil {
 		return err
 	}
 	if err := writeHandlerStubs(lay, root, cmds); err != nil {
@@ -112,7 +116,7 @@ func buildCommands(spec *Spec) (genCommand, []genCommand) {
 		filename: rootName + ".go",
 		flags:    flagFields(spec.Inputs),
 		args:     argFields(spec.Inputs),
-		inputs:   []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs"}},
+		inputs:   []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs", Tag: "scope=" + rootName}},
 	}
 
 	var nodes []struct {
@@ -146,26 +150,23 @@ func buildCommands(spec *Spec) (genCommand, []genCommand) {
 			filename: rootName + "_" + n.path + ".go",
 			flags:    flagFields(n.cmd.Inputs),
 			args:     argFields(n.cmd.Inputs),
-			inputs:   inputsFields(rootPascal, n.path),
+			inputs:   inputsFields(rootName, rootPascal, n.path),
 		})
 	}
 	return root, cmds
 }
 
-// inputsFields returns the fields of a command's <Prefix>Inputs struct: one
-// per ancestor command (root first, then each intermediate) plus the command
-// itself, each field named after the command's PascalCase prefix and typed as
-// that prefix's CommandInputs.
-func inputsFields(rootPascal, path string) []fieldDef {
-	prefixes := []string{rootPascal}
+// inputsFields returns the fields of a command's <Prefix>Inputs struct: one per
+// ancestor command (root first, then each intermediate) plus the command
+// itself. Each field is named after the command's PascalCase prefix, typed as
+// that prefix's CommandInputs, and tagged `scope=<command-name>` so the binder
+// matches it to the parsed scope (by command name, never the parent prefix).
+func inputsFields(rootName, rootPascal, path string) []fieldDef {
+	fields := []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs", Tag: "scope=" + rootName}}
 	segments := strings.Split(path, "_")
 	for i := 1; i <= len(segments); i++ {
-		sub := strings.Join(segments[:i], "_")
-		prefixes = append(prefixes, rootPascal+toPascalCase(sub))
-	}
-	fields := make([]fieldDef, 0, len(prefixes))
-	for _, p := range prefixes {
-		fields = append(fields, fieldDef{Field: p, GoType: p + "CommandInputs"})
+		prefix := rootPascal + toPascalCase(strings.Join(segments[:i], "_"))
+		fields = append(fields, fieldDef{Field: prefix, GoType: prefix + "CommandInputs", Tag: "scope=" + segments[i-1]})
 	}
 	return fields
 }
@@ -179,10 +180,10 @@ func flagFields(in *Inputs) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Flags)+len(in.Variables))
 	for _, f := range in.Flags {
-		fields = append(fields, fieldDef{Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema)})
+		fields = append(fields, fieldDef{Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name})
 	}
 	for _, v := range in.Variables {
-		fields = append(fields, fieldDef{Field: toPascalCase(v.Name), GoType: goFieldType(v.Schema)})
+		fields = append(fields, fieldDef{Field: toPascalCase(v.Name), GoType: goFieldType(v.Schema), Tag: v.Name})
 	}
 	return fields
 }
@@ -194,7 +195,7 @@ func argFields(in *Inputs) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Arguments))
 	for _, a := range in.Arguments {
-		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema)})
+		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name})
 	}
 	return fields
 }
@@ -240,11 +241,162 @@ func jsonSchemaTypeToGo(t string) string {
 	}
 }
 
+// renderDefinition renders the `var Definition = rotini.Definition{…}` literal —
+// the compiled command tree the runtime parses against. It is emitted into the
+// framework file and gofmt-formatted with the rest of it, so the produced text
+// only needs to be valid Go, not pretty.
+func renderDefinition(spec *Spec) string {
+	rootPascal := toPascalCase(spec.Name)
+	var b strings.Builder
+	b.WriteString("var Definition = " + rotiniPkgName + ".Definition{\n")
+	b.WriteString("Name: " + strconv.Quote(spec.Name) + ",\n")
+	b.WriteString("Handler: " + strconv.Quote(rootPascal) + ",\n")
+	if len(spec.Aliases) > 0 {
+		b.WriteString("Aliases: " + goStringSlice(spec.Aliases) + ",\n")
+	}
+	if fl := flagDefsLiteral(spec.Inputs); fl != "" {
+		b.WriteString("Flags: " + fl + ",\n")
+	}
+	if al := argDefsLiteral(spec.Inputs); al != "" {
+		b.WriteString("Arguments: " + al + ",\n")
+	}
+	if cl := commandDefsLiteral(rootPascal, "", spec.Commands); cl != "" {
+		b.WriteString("Commands: " + cl + ",\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+func commandDefsLiteral(rootPascal, parentPath string, cmds []Command) string {
+	if len(cmds) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[]" + rotiniPkgName + ".CommandDef{\n")
+	for _, c := range cmds {
+		path := c.Name
+		if parentPath != "" {
+			path = parentPath + "_" + c.Name
+		}
+		b.WriteString("{Name: " + strconv.Quote(c.Name) + ",\n")
+		b.WriteString("Handler: " + strconv.Quote(rootPascal+toPascalCase(path)) + ",\n")
+		if len(c.Aliases) > 0 {
+			b.WriteString("Aliases: " + goStringSlice(c.Aliases) + ",\n")
+		}
+		if fl := flagDefsLiteral(c.Inputs); fl != "" {
+			b.WriteString("Flags: " + fl + ",\n")
+		}
+		if al := argDefsLiteral(c.Inputs); al != "" {
+			b.WriteString("Arguments: " + al + ",\n")
+		}
+		if cl := commandDefsLiteral(rootPascal, path, c.Commands); cl != "" {
+			b.WriteString("Commands: " + cl + ",\n")
+		}
+		b.WriteString("},\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+func flagDefsLiteral(in *Inputs) string {
+	if in == nil || len(in.Flags) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[]" + rotiniPkgName + ".FlagDef{\n")
+	for _, f := range in.Flags {
+		ids := f.Identifiers
+		if len(ids) == 0 {
+			ids = []string{"--" + strings.ReplaceAll(f.Name, "_", "-")}
+		}
+		b.WriteString("{Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(ids))
+		b.WriteString(", Type: " + strconv.Quote(schemaType(f.Schema)))
+		writeSchemaCommon(&b, f.Schema)
+		b.WriteString("},\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+func argDefsLiteral(in *Inputs) string {
+	if in == nil || len(in.Arguments) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[]" + rotiniPkgName + ".ArgDef{\n")
+	for _, a := range in.Arguments {
+		typ := schemaType(a.Schema)
+		b.WriteString("{Name: " + strconv.Quote(a.Name) + ", Type: " + strconv.Quote(typ))
+		if strings.HasPrefix(typ, "[]") {
+			b.WriteString(", Variadic: true")
+		}
+		writeSchemaCommon(&b, a.Schema)
+		b.WriteString("},\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// writeSchemaCommon appends the Required/Default/Enum fields shared by FlagDef
+// and ArgDef literals, omitting zero values.
+func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
+	if schema == nil {
+		return
+	}
+	if schema.Required {
+		b.WriteString(", Required: true")
+	}
+	if d := defaultString(schema.Default); d != "" {
+		b.WriteString(", Default: " + strconv.Quote(d))
+	}
+	if len(schema.Enum) > 0 {
+		b.WriteString(", Enum: " + goStringSlice(schema.Enum))
+	}
+}
+
+// schemaType resolves an input schema to the Definition's type string,
+// defaulting to "string".
+func schemaType(schema *InputSchema) string {
+	if schema != nil && schema.Type != "" {
+		return jsonSchemaTypeToGo(schema.Type)
+	}
+	return "string"
+}
+
+// goStringSlice renders a []string{…} literal.
+func goStringSlice(ss []string) string {
+	quoted := make([]string, len(ss))
+	for i, s := range ss {
+		quoted[i] = strconv.Quote(s)
+	}
+	return "[]string{" + strings.Join(quoted, ", ") + "}"
+}
+
+// defaultString renders an input's decoded default value as a string.
+func defaultString(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case bool:
+		return strconv.FormatBool(x)
+	case float64:
+		return strconv.FormatFloat(x, 'g', -1, 64)
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	default:
+		return fmt.Sprintf("%v", x)
+	}
+}
+
 // writeFrameworkFile renders and writes the framework file: the ProgramHandlers
 // aggregate interface plus the typed input structs for every command. It is
 // always (over)written — it is fully generated and carries a DO NOT EDIT
 // banner.
-func writeFrameworkFile(lay layout, root genCommand, cmds []genCommand) error {
+func writeFrameworkFile(spec *Spec, lay layout, root genCommand, cmds []genCommand) error {
 	all := append([]genCommand{root}, cmds...)
 
 	methods := make([]string, 0, len(all))
@@ -273,6 +425,7 @@ func writeFrameworkFile(lay layout, root genCommand, cmds []genCommand) error {
 		"StdImports":   sortedKeys(stdImports),
 		"Methods":      methods,
 		"Blocks":       blocks,
+		"Definition":   renderDefinition(spec),
 	}
 	content, err := renderGo("framework", "templates/rotini.go.tmpl", data)
 	if err != nil {

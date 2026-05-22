@@ -10,7 +10,13 @@ type handlers struct{}
 
 var _ rtg.ProgramHandlers = (*handlers)(nil)
 
-var Program = rotini.NewProgram(&handlers{})
+var Program = rotini.NewProgram(rtg.Definition, &handlers{})
+
+// Handlers exposes this CLI's aggregate handlers so a parent program can
+// statically compose this CLI as a sub-command tree.
+func Handlers() rtg.ProgramHandlers {
+	return &handlers{}
+}
 
 func (*handlers) Rotini() rotini.CommandHandlers {
 	return &rotiniHandlers{}

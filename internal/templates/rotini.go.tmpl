@@ -13,12 +13,14 @@ type ProgramHandlers interface {
 	{{.}}() {{$.RotiniPkg}}.CommandHandlers
 {{- end}}
 }
+
+{{.Definition}}
 {{- range .Blocks}}
 
 {{if .Flags}}
 type {{.Prefix}}Flags struct {
 {{- range .Flags}}
-	{{.Field}} {{.GoType}}
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
 {{- end}}
 }
 {{- else}}
@@ -27,7 +29,7 @@ type {{.Prefix}}Flags struct{}
 {{if .Arguments}}
 type {{.Prefix}}Arguments struct {
 {{- range .Arguments}}
-	{{.Field}} {{.GoType}}
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
 {{- end}}
 }
 {{- else}}
@@ -41,7 +43,7 @@ type {{.Prefix}}CommandInputs struct {
 
 type {{.Prefix}}Inputs struct {
 {{- range .InputsFields}}
-	{{.Field}} {{.GoType}}
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
 {{- end}}
 }
 {{- end}}

@@ -72,7 +72,7 @@ func TestGenerateDefaultLayout(t *testing.T) {
 	}
 
 	mustContain(t, filepath.Join(tmp, "rtg", "rotini.go"), "package rtg", "type ProgramHandlers interface")
-	mustContain(t, filepath.Join(tmp, "rth", "handlers.go"), "package rth", "var Program = rotini.NewProgram(&handlers{})")
+	mustContain(t, filepath.Join(tmp, "rth", "handlers.go"), "package rth", "var Program = rotini.NewProgram(rtg.Definition, &handlers{})")
 	mustContain(t, filepath.Join(tmp, "rth", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
 }
 

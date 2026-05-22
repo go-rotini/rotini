@@ -10,7 +10,11 @@ type handlers struct{}
 
 var _ {{.FrameworkPkg}}.ProgramHandlers = (*handlers)(nil)
 
-var Program = {{.RotiniPkg}}.NewProgram(&handlers{})
+var Program = {{.RotiniPkg}}.NewProgram({{.FrameworkPkg}}.Definition, &handlers{})
+
+// Handlers exposes this CLI's aggregate handlers so a parent program can
+// statically compose this CLI as a sub-command tree.
+func Handlers() {{.FrameworkPkg}}.ProgramHandlers { return &handlers{} }
 {{- range .Methods}}
 
 func (*handlers) {{.Method}}() {{$.RotiniPkg}}.CommandHandlers {
