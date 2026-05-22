@@ -15,7 +15,7 @@ type program struct {
 	handlers ProgramHandlers
 }
 
-func NewProgram(h ProgramHandlers) *program {
+func NewProgram[T any](h ProgramHandlers) *program {
 	return &program{
 		ctx:      context.Background(),
 		args:     os.Args[1:],

@@ -1,4 +1,4 @@
-$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schemas/spec.json
+$schema: https://raw.githubusercontent.com/matthewgetz/config/refs/tags/1.0.26/schema-spec.json
 name: rotini
 inputs:
   flags:
@@ -30,9 +30,8 @@ commands:
           schema:
             type: string
             enum:
-              - yaml
               - json
-              - jsonc
+              - yaml
             default: yaml
         - name: force
           identifiers:
