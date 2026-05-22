@@ -15,6 +15,7 @@ tool (
 require (
 	github.com/go-rotini/fs v1.0.0
 	github.com/go-rotini/jsonc v1.1.0
+	github.com/go-rotini/jsonschema v1.1.0
 	github.com/go-rotini/yaml v1.2.0
 )
 
@@ -88,7 +89,6 @@ require (
 	github.com/go-critic/go-critic v0.14.3 // indirect
 	github.com/go-gremlins/gremlins v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
-	github.com/go-rotini/jsonschema v1.1.0 // indirect
 	github.com/go-rotini/toml v1.1.0 // indirect
 	github.com/go-toolsmith/astcast v1.1.0 // indirect
 	github.com/go-toolsmith/astcopy v1.1.0 // indirect
