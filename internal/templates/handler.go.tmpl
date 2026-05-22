@@ -1,27 +1,26 @@
-package {{.CommandsPackageName}}
+package {{.Package}}
 
 import (
 	"context"
-{{- if .FrameworkImport}}
-	"{{.FrameworkImport}}"
-{{- end}}
+
+	"{{.RotiniImport}}"
 )
 
-type {{.RootCommandName}}{{.CommandName}}Handlers struct{}
+type {{.HandlerType}} struct{}
 
-var _ {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Handlers = (*{{.RootCommandName}}{{.CommandName}}Handlers)(nil)
+var _ {{.RotiniPkg}}.CommandHandlers = (*{{.HandlerType}})(nil)
 
-func (*{{.RootCommandName}}{{.CommandName}}Handlers) CascadingPreRun(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
 }
 
-func (*{{.RootCommandName}}{{.CommandName}}Handlers) PreRun(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+func (*{{.HandlerType}}) PreRun(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
 }
 
-func (*{{.RootCommandName}}{{.CommandName}}Handlers) Run(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+func (*{{.HandlerType}}) Run(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
 }
 
-func (*{{.RootCommandName}}{{.CommandName}}Handlers) PostRun(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+func (*{{.HandlerType}}) PostRun(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
 }
 
-func (*{{.RootCommandName}}{{.CommandName}}Handlers) CascadingPostRun(ctx context.Context, rtx {{.FrameworkPrefix}}{{toPascalCase .RootCommandName}}{{.CommandName}}Ctx) {
+func (*{{.HandlerType}}) CascadingPostRun(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
 }

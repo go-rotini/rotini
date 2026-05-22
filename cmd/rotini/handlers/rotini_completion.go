@@ -8,7 +8,7 @@ import (
 
 type rotiniCompletionHandlers struct{}
 
-var _ rotini.CommandHandlers = (*rotiniHandlers)(nil)
+var _ rotini.CommandHandlers = (*rotiniCompletionHandlers)(nil)
 
 func (*rotiniCompletionHandlers) CascadingPreRun(ctx context.Context, rtx rotini.Context) {
 }

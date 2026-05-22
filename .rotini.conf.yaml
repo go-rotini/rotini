@@ -1,8 +1,8 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schemas/conf.json
 generate:
   cmd:
-    package: internal/handlers
-    gen_file: handlers.gen.go
+    package: cmd/rotini/handlers
+    gen_file: handlers.go
     prune:
       enabled: true
       keep:
@@ -11,6 +11,6 @@ generate:
         # so the pruner must leave it alone.
         - help.go
   framework:
-    package: internal/rotini
-    gen_file: rotini.gen.go
+    package: cmd/rotini/rtg
+    gen_file: rotini.go
     additional_imports: []

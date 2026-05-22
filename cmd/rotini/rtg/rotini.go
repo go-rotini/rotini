@@ -129,8 +129,7 @@ type RotiniVersionFlags struct {
 	Help bool
 }
 
-type RotiniVersionArguments struct {
-}
+type RotiniVersionArguments struct{}
 
 type RotiniVersionCommandInputs struct {
 	Flags     RotiniVersionFlags
