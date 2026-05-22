@@ -1,7 +1,7 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
   cmd:
-    package: cmd/rotini/handlers
+    package: cmd/rotini/rth
     gen_file: handlers.go
     prune:
       enabled: true

@@ -62,7 +62,7 @@ type layout struct {
 	frameworkImport  string // import path, e.g. "github.com/.../cmd/rotini/rtg"
 
 	handlerDir     string // absolute output dir for stubs + rollup
-	handlerPkgName string // package name, e.g. "handlers"
+	handlerPkgName string // package name, e.g. "rth"
 	rollupFile     string // rollup file name, e.g. "handlers.go"
 }
 
@@ -397,7 +397,7 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
 // applyConfDefaults fills in the sane rotini conf defaults for any unset
 // generation settings, so a missing or partial conf still produces the
 // companion-CLI layout: framework package "rtg"/rotini.go and handler package
-// "handlers"/handlers.go.
+// "rth"/handlers.go.
 func applyConfDefaults(conf *Conf) {
 	if conf.Generate == nil {
 		conf.Generate = &GenerateConfig{}
@@ -417,7 +417,7 @@ func applyConfDefaults(conf *Conf) {
 	}
 	cmd := conf.Generate.Cmd
 	if cmd.Package == "" {
-		cmd.Package = "handlers"
+		cmd.Package = "rth"
 	}
 	if cmd.GenFile == "" {
 		cmd.GenFile = "handlers.go"

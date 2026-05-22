@@ -13,7 +13,7 @@ import (
 const companionConf = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
   cmd:
-    package: cmd/rotini/handlers
+    package: cmd/rotini/rth
     gen_file: handlers.go
   framework:
     package: cmd/rotini/rtg
@@ -43,14 +43,14 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 
 	rels := []string{
 		"cmd/rotini/rtg/rotini.go",
-		"cmd/rotini/handlers/handlers.go",
-		"cmd/rotini/handlers/rotini.go",
-		"cmd/rotini/handlers/rotini_completion.go",
-		"cmd/rotini/handlers/rotini_generate.go",
-		"cmd/rotini/handlers/rotini_help.go",
-		"cmd/rotini/handlers/rotini_initialize.go",
-		"cmd/rotini/handlers/rotini_validate.go",
-		"cmd/rotini/handlers/rotini_version.go",
+		"cmd/rotini/rth/handlers.go",
+		"cmd/rotini/rth/rotini.go",
+		"cmd/rotini/rth/rotini_completion.go",
+		"cmd/rotini/rth/rotini_generate.go",
+		"cmd/rotini/rth/rotini_help.go",
+		"cmd/rotini/rth/rotini_initialize.go",
+		"cmd/rotini/rth/rotini_validate.go",
+		"cmd/rotini/rth/rotini_version.go",
 	}
 	for _, rel := range rels {
 		assertGoEqual(t, filepath.Join(tmp, rel), filepath.Join(repoRoot, rel))
@@ -58,7 +58,7 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 }
 
 // TestGenerateDefaultLayout verifies that with no conf the sane defaults place
-// the framework file at rtg/rotini.go and the rollup at handlers/handlers.go.
+// the framework file at rtg/rotini.go and the rollup at rth/handlers.go.
 func TestGenerateDefaultLayout(t *testing.T) {
 	repoRoot := repoRoot(t)
 	specPath := filepath.Join(repoRoot, "cmd", "rotini", ".rotini.spec.yaml")
@@ -72,8 +72,8 @@ func TestGenerateDefaultLayout(t *testing.T) {
 	}
 
 	mustContain(t, filepath.Join(tmp, "rtg", "rotini.go"), "package rtg", "type ProgramHandlers interface")
-	mustContain(t, filepath.Join(tmp, "handlers", "handlers.go"), "package handlers", "var Program = rotini.NewProgram(&handlers{})")
-	mustContain(t, filepath.Join(tmp, "handlers", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
+	mustContain(t, filepath.Join(tmp, "rth", "handlers.go"), "package rth", "var Program = rotini.NewProgram(&handlers{})")
+	mustContain(t, filepath.Join(tmp, "rth", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
 }
 
 // TestGeneratePrunesOrphanStubs verifies that, with prune enabled, a stub that
@@ -85,11 +85,11 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
-	handlersDir := filepath.Join(tmp, "handlers")
+	handlersDir := filepath.Join(tmp, "rth")
 	orphan := filepath.Join(handlersDir, "rotini_obsolete.go")
 	keep := filepath.Join(handlersDir, "help.go")
-	writeTestFile(t, orphan, "package handlers\n")
-	writeTestFile(t, keep, "package handlers\n")
+	writeTestFile(t, orphan, "package rth\n")
+	writeTestFile(t, keep, "package rth\n")
 
 	conf := "generate:\n  cmd:\n    prune:\n      enabled: true\n      keep:\n        - help.go\n"
 	confPath := filepath.Join(tmp, ".rotini.conf.yaml")
