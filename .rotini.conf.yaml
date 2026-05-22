@@ -1,4 +1,4 @@
-$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schemas/conf.json
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
   cmd:
     package: cmd/rotini/handlers

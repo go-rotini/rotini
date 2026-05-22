@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/go-rotini/jsonschema"
-	"github.com/go-rotini/rotini/schemas"
+	"github.com/go-rotini/rotini"
 )
 
 // errSpecPathRequired is reported by [Validate] when no spec-file path is
@@ -42,7 +42,7 @@ func (e *violationError) Error() string {
 // the cached result.
 func loadSpecSchema() (*jsonschema.Schema, error) {
 	specSchemaOnce.Do(func() {
-		s, err := jsonschema.Compile(schemas.RotiniSchemaSpec)
+		s, err := jsonschema.Compile(rotini.SchemaSpec)
 		if err != nil {
 			errSpecSchema = fmt.Errorf("compile spec schema: %w", err)
 			return
@@ -56,7 +56,7 @@ func loadSpecSchema() (*jsonschema.Schema, error) {
 // the cached result.
 func loadConfSchema() (*jsonschema.Schema, error) {
 	confSchemaOnce.Do(func() {
-		s, err := jsonschema.Compile(schemas.RotiniSchemaConf)
+		s, err := jsonschema.Compile(rotini.SchemaConf)
 		if err != nil {
 			errConfSchema = fmt.Errorf("compile conf schema: %w", err)
 			return

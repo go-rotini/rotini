@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	validSpecHeader = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json\n"
-	validConfHeader = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/conf.json\n"
+	validSpecHeader = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json\n"
+	validConfHeader = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-conf.json\n"
 )
 
 func writeTemp(t *testing.T, name, content string) string {
@@ -52,7 +52,7 @@ func TestValidate_unknownField(t *testing.T) {
 	// additionalProperties:false must reject unknown fields; this only
 	// works because validation runs on the raw instance, not a decoded
 	// struct (which would silently drop "bogus").
-	doc := `{"$schema":"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schemas/spec.json","name":"demo","bogus":true}`
+	doc := `{"$schema":"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json","name":"demo","bogus":true}`
 	path := writeTemp(t, "spec.json", doc)
 	if err := Validate(path, ""); err == nil {
 		t.Fatal("expected error for unknown field")

@@ -10,7 +10,7 @@ import (
 
 // companionConf points generation at the same package layout as the committed
 // rotini companion CLI so the output can be compared against it.
-const companionConf = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schemas/conf.json
+const companionConf = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
   cmd:
     package: cmd/rotini/handlers
