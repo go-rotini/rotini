@@ -22,8 +22,8 @@ import (
 
 func main() {
 	const (
-		specPath = "./.rotini.spec.yaml"     // cmd/rotini/.rotini.spec.yaml
-		confPath = "../../.rotini.conf.yaml" // module-root .rotini.conf.yaml
+		specPath = "./.rotini.spec.yaml" // cmd/rotini/.rotini.spec.yaml
+		confPath = "./.rotini.conf.yaml" // cmd/rotini/.rotini.conf.yaml
 	)
 	if err := internal.Generate(specPath, confPath); err != nil {
 		log.Fatalf("rotini generate: %v", err)
