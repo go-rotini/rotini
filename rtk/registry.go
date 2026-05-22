@@ -26,14 +26,14 @@ import "sync"
 //
 // Bindings persist for the lifetime of the Registry; the auto-bind step only
 // runs for keys the user did not already supply.
-type Registry struct {
+type Rtx struct {
 	mu       sync.RWMutex
 	services map[string]any
 }
 
 // NewRegistry returns an empty Registry.
-func NewRegistry() *Registry {
-	return &Registry{services: make(map[string]any)}
+func NewRtx() *Rtx {
+	return &Context{services: make(map[string]any)}
 }
 
 // Bind associates value with key, overwriting any prior binding. It returns
@@ -42,7 +42,7 @@ func NewRegistry() *Registry {
 //	cmd.Program.Bind("io", customIO).Bind("os", customOS).Execute()
 //
 // Bind is safe for concurrent use.
-func (r *Registry) Bind(key string, value any) *Registry {
+func (r *Rtx) Bind(key string, value any) *Rtx {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.services == nil {
@@ -53,7 +53,7 @@ func (r *Registry) Bind(key string, value any) *Registry {
 }
 
 // Has reports whether a binding exists under key.
-func (r *Registry) Has(key string) bool {
+func (r *Rtx) Has(key string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	_, ok := r.services[key]
@@ -73,7 +73,7 @@ func (r *Registry) Has(key string) bool {
 //
 // Callers that want to distinguish "unbound" from "wrong type" should call
 // [Registry.Has] first, then Get.
-func Get[T any](r *Registry, key string) T {
+func Get[T any](r *Rtx, key string) T {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if v, ok := r.services[key]; ok {
@@ -92,21 +92,4 @@ func Get[T any](r *Registry, key string) T {
 // Generated code emits per-command aliases — `type RotiniGenerateCtx = Ctx` —
 // so handler signatures read self-documentingly across commands while sharing
 // a single underlying type.
-type Context struct {
-	// Registry is the service registry bound for this invocation. Handler
-	// code uses it to retrieve services:
-	//
-	//	rp := rtk.Get[rtk.Parser](rtx.Registry, "parser")
-	Registry *Registry
-}
-
-// BuildInfo carries linker-flags-injected build metadata. Generated rotini
-// programs bind a BuildInfo value into the registry under the key
-// "build-info". The fields are typically populated via `-ldflags
-// "-X path.Version=v1.2.3 -X path.Commit=abc123 -X path.Date=2026-05-18"`
-// at build time.
-type BuildInfo struct {
-	Version string
-	Commit  string
-	Date    string
-}
+type Context = Rtx

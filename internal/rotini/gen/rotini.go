@@ -3,11 +3,13 @@ package gen
 
 import (
 	"context"
+	"os"
 
 	"github.com/go-rotini/rotini/rtk"
 )
 
-type RotiniHandlers interface {
+// move this to rtk -- nothing about this needs generated and it allows the program concept to be moved into rtk
+type CommandHandlers interface {
 	CascadingPreRun(ctx context.Context, rtx rtk.Context)
 	PreRun(ctx context.Context, rtx rtk.Context)
 	Run(ctx context.Context, rtx rtk.Context)
@@ -15,62 +17,14 @@ type RotiniHandlers interface {
 	CascadingPostRun(ctx context.Context, rtx rtk.Context)
 }
 
-type RotiniCompletionHandlers interface {
-	CascadingPreRun(ctx context.Context, rtx rtk.Context)
-	PreRun(ctx context.Context, rtx rtk.Context)
-	Run(ctx context.Context, rtx rtk.Context)
-	PostRun(ctx context.Context, rtx rtk.Context)
-	CascadingPostRun(ctx context.Context, rtx rtk.Context)
-}
-
-type RotiniGenerateHandlers interface {
-	CascadingPreRun(ctx context.Context, rtx rtk.Context)
-	PreRun(ctx context.Context, rtx rtk.Context)
-	Run(ctx context.Context, rtx rtk.Context)
-	PostRun(ctx context.Context, rtx rtk.Context)
-	CascadingPostRun(ctx context.Context, rtx rtk.Context)
-}
-
-type RotiniHelpHandlers interface {
-	CascadingPreRun(ctx context.Context, rtx rtk.Context)
-	PreRun(ctx context.Context, rtx rtk.Context)
-	Run(ctx context.Context, rtx rtk.Context)
-	PostRun(ctx context.Context, rtx rtk.Context)
-	CascadingPostRun(ctx context.Context, rtx rtk.Context)
-}
-
-type RotiniInitializeHandlers interface {
-	CascadingPreRun(ctx context.Context, rtx rtk.Context)
-	PreRun(ctx context.Context, rtx rtk.Context)
-	Run(ctx context.Context, rtx rtk.Context)
-	PostRun(ctx context.Context, rtx rtk.Context)
-	CascadingPostRun(ctx context.Context, rtx rtk.Context)
-}
-
-type RotiniValidateHandlers interface {
-	CascadingPreRun(ctx context.Context, rtx rtk.Context)
-	PreRun(ctx context.Context, rtx rtk.Context)
-	Run(ctx context.Context, rtx rtk.Context)
-	PostRun(ctx context.Context, rtx rtk.Context)
-	CascadingPostRun(ctx context.Context, rtx rtk.Context)
-}
-
-type RotiniVersionHandlers interface {
-	CascadingPreRun(ctx context.Context, rtx rtk.Context)
-	PreRun(ctx context.Context, rtx rtk.Context)
-	Run(ctx context.Context, rtx rtk.Context)
-	PostRun(ctx context.Context, rtx rtk.Context)
-	CascadingPostRun(ctx context.Context, rtx rtk.Context)
-}
-
-type Handlers interface {
-	Rotini() RotiniHandlers
-	RotiniCompletion() RotiniCompletionHandlers
-	RotiniGenerate() RotiniGenerateHandlers
-	RotiniHelp() RotiniHelpHandlers
-	RotiniInitialize() RotiniInitializeHandlers
-	RotiniValidate() RotiniValidateHandlers
-	RotiniVersion() RotiniVersionHandlers
+type ProgramHandlers interface {
+	Rotini() CommandHandlers
+	RotiniCompletion() CommandHandlers
+	RotiniGenerate() CommandHandlers
+	RotiniHelp() CommandHandlers
+	RotiniInitialize() CommandHandlers
+	RotiniValidate() CommandHandlers
+	RotiniVersion() CommandHandlers
 }
 
 type RotiniFlags struct {
@@ -200,95 +154,34 @@ type RotiniVersionInputs struct {
 	RotiniVersion RotiniVersionCommandInputs
 }
 
-type LinkerFlagsMetadata struct {
-	Version string
+type CommandParser func(args []string) (CommandHandlers, error)
+
+type CommandExecutor func(handlers CommandHandlers) error
+
+type program struct {
+	ctx      context.Context
+	args     []string
+	handlers ProgramHandlers
 }
 
-var (
-	Version = "dev"
-)
-
-var RotiniDefinition = rtk.Spec[LinkerFlagsMetadata]{
-	Name: "rotini",
-	Commands: []rtk.CommandSpec{
-		{
-			Name:    "initialize",
-			Aliases: []string{"init"},
-			Flags: []rtk.FlagSpec{
-				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Default: "yaml", Enum: []string{"json", "yaml"}},
-				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-			},
-			Arguments: []rtk.ArgumentSpec{
-				{Name: "name", Type: "string"},
-			},
-		},
-		{
-			Name:    "generate",
-			Aliases: []string{"gen"},
-			Flags: []rtk.FlagSpec{
-				{Name: "config", Identifiers: []string{"-c", "--config"}, Type: "string"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool"},
-			},
-			Arguments: []rtk.ArgumentSpec{
-				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
-			},
-		},
-		{
-			Name:    "validate",
-			Aliases: []string{"val"},
-			Flags: []rtk.FlagSpec{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-			},
-			Arguments: []rtk.ArgumentSpec{
-				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
-			},
-		},
-		{
-			Name: "help",
-			Flags: []rtk.FlagSpec{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-			},
-			Arguments: []rtk.ArgumentSpec{
-				{Name: "command", Type: "[]string", Variadic: true},
-			},
-		},
-		{
-			Name: "version",
-			Flags: []rtk.FlagSpec{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-			},
-		},
-		{
-			Name: "completion",
-			Flags: []rtk.FlagSpec{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-			},
-			Arguments: []rtk.ArgumentSpec{
-				{Name: "shell", Type: "string", Enum: []string{"zsh", "bash", "fish", "powershell", "nushell", "elvish"}},
-			},
-		},
-	},
-	Flags: []rtk.FlagSpec{
-		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool"},
-	},
-	Metadata: LinkerFlagsMetadata{
-		Version: Version,
-	},
-}
-
-type ProgramExecutor struct {
-	Execute func()
-}
-
-func NewProgram(h Handlers) ProgramExecutor {
-	return ProgramExecutor{
-		Execute: func() {
-			// parse argv to find correct command
-			// if command not found err
-			// if command found dispatch the lifecycle tree
-		},
+func NewProgram(h ProgramHandlers) *program {
+	return &program{
+		ctx:      context.Background(),
+		args:     os.Args[1:],
+		handlers: h,
+		// parser: rtk.DefaultCommandParser
+		// executor: rtk.DefaultCommandExecutor
 	}
+}
+
+func (p *program) WithArguments(args []string) *program {
+	if args != nil {
+		p.args = args
+	}
+	return p
+}
+
+func (p *program) Execute() {
+	// parse p.args, find "last" command to get the command handlers that need to be run
+	// run the command handlers
 }
