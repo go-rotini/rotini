@@ -13,6 +13,12 @@ tool (
 )
 
 require (
+	github.com/go-rotini/fs v1.0.0
+	github.com/go-rotini/jsonc v1.1.0
+	github.com/go-rotini/yaml v1.2.0
+)
+
+require (
 	4d63.com/gocheckcompilerdirectives v1.3.0 // indirect
 	4d63.com/gochecknoglobals v0.2.2 // indirect
 	charm.land/lipgloss/v2 v2.0.3 // indirect
@@ -82,10 +88,8 @@ require (
 	github.com/go-critic/go-critic v0.14.3 // indirect
 	github.com/go-gremlins/gremlins v0.6.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
-	github.com/go-rotini/jsonc v1.1.0 // indirect
 	github.com/go-rotini/jsonschema v1.1.0 // indirect
 	github.com/go-rotini/toml v1.1.0 // indirect
-	github.com/go-rotini/yaml v1.2.0 // indirect
 	github.com/go-toolsmith/astcast v1.1.0 // indirect
 	github.com/go-toolsmith/astcopy v1.1.0 // indirect
 	github.com/go-toolsmith/astequal v1.2.0 // indirect
