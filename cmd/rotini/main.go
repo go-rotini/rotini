@@ -3,8 +3,8 @@
 //go:generate go run gen.go
 package main
 
-import "github.com/go-rotini/rotini/cmd/rotini/handlers"
+import "github.com/go-rotini/rotini/cmd/rotini/rth"
 
 func main() {
-	handlers.Program.Execute()
+	rth.Program.Execute()
 }
