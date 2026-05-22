@@ -100,6 +100,40 @@ func writeFile[T any](path string, v *T) error {
 	return nil
 }
 
+// toJSON reads the file at path and returns its contents as canonical JSON
+// bytes, regardless of the source serialization. It feeds documents to the
+// jsonschema validator, which operates on JSON instances. The raw instance
+// is returned (not a decoded struct) so schema rules like
+// additionalProperties:false still see unknown fields.
+func toJSON(path string) ([]byte, error) {
+	format := detectFormat(path)
+	if format == formatUnknown {
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, path)
+	}
+	data, err := fs.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	switch format {
+	case formatJSON:
+		return data, nil
+	case formatJSONC:
+		out, err := jsonc.ToJSON(data)
+		if err != nil {
+			return nil, fmt.Errorf("convert %s to json: %w", path, err)
+		}
+		return out, nil
+	case formatYAML:
+		out, err := yaml.ToJSON(data)
+		if err != nil {
+			return nil, fmt.Errorf("convert %s to json: %w", path, err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, path)
+	}
+}
+
 // watchFile watches the file at path and invokes onChange with a freshly
 // decoded *T after each content change, until ctx is canceled. Decode
 // errors are delivered to onChange rather than stopping the watch, so a
