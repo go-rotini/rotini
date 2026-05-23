@@ -31,7 +31,12 @@ func confSchemaURL() string {
 // create-once files (spec, conf, main.go) are left untouched unless force is
 // set; the generated framework/rollup files are always (re)written, and handler
 // stubs are never overwritten.
-func Initialize(name, format string, force bool) error {
+//
+// When into names an existing CLI, the new CLI is additionally registered as a
+// statically composed ($ref) sub-command of that parent (the parent's spec
+// gains a $ref and is re-generated). The new CLI still gets its own main.go and
+// stays independently buildable.
+func Initialize(name, format string, force bool, into string) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
@@ -67,7 +72,52 @@ func Initialize(name, format string, force bool) error {
 	if err := writeMainGo(mainPath, moduleName, name); err != nil {
 		return err
 	}
-	return Generate(specPath, confPath)
+	if err := Generate(specPath, confPath); err != nil {
+		return err
+	}
+	if into != "" {
+		return composeInto(moduleRoot, into, name, ext)
+	}
+	return nil
+}
+
+// composeInto registers child as a $ref sub-command of the parent CLI and
+// re-generates the parent so the composition takes effect.
+func composeInto(moduleRoot, parent, child, childExt string) error {
+	parentDir := filepath.Join(moduleRoot, "cmd", parent)
+	parentSpec, err := discoverFile(parentDir, ".rotini.spec.")
+	if err != nil {
+		return fmt.Errorf("compose into %q: %w", parent, err)
+	}
+	parentConf, _ := discoverFile(parentDir, ".rotini.conf.")
+
+	spec, err := ReadSpec(parentSpec)
+	if err != nil {
+		return err
+	}
+	ref := "../" + child + "/.rotini.spec." + childExt
+	for _, c := range spec.Commands {
+		if c.Ref == ref {
+			return Generate(parentSpec, parentConf) // already referenced
+		}
+	}
+	spec.Commands = append(spec.Commands, Command{Ref: ref})
+	if err := WriteSpec(parentSpec, spec); err != nil {
+		return err
+	}
+	return Generate(parentSpec, parentConf)
+}
+
+// discoverFile returns the first dir/<prefix><ext> file that exists, trying the
+// supported serializations in order.
+func discoverFile(dir, prefix string) (string, error) {
+	for _, ext := range []string{"yaml", "yml", "jsonc", "json"} {
+		p := filepath.Join(dir, prefix+ext)
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("no %s* file found in %s", prefix, dir)
 }
 
 // normalizeFormat resolves the requested format to a file extension, defaulting

@@ -16,7 +16,7 @@ func initTestModule(t *testing.T) string {
 
 func TestInitialize_scaffoldsStandalone(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false); err != nil {
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 
@@ -37,27 +37,27 @@ func TestInitialize_scaffoldsStandalone(t *testing.T) {
 
 func TestInitialize_noClobberThenForce(t *testing.T) {
 	initTestModule(t)
-	if err := Initialize("mycli", "yaml", false); err != nil {
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("first Initialize: %v", err)
 	}
-	err := Initialize("mycli", "yaml", false)
+	err := Initialize("mycli", "yaml", false, "")
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("re-init without force: got %v, want 'already exists'", err)
 	}
-	if err := Initialize("mycli", "yaml", true); err != nil {
+	if err := Initialize("mycli", "yaml", true, ""); err != nil {
 		t.Fatalf("re-init with force: %v", err)
 	}
 }
 
 func TestInitialize_forcePreservesEditedStub(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false); err != nil {
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	stub := filepath.Join(tmp, "cmd", "mycli", "rth", "mycli.go")
 	writeTestFile(t, stub, "package rth\n\n// EDITED BY USER\n")
 
-	if err := Initialize("mycli", "yaml", true); err != nil {
+	if err := Initialize("mycli", "yaml", true, ""); err != nil {
 		t.Fatalf("re-init with force: %v", err)
 	}
 	mustContain(t, stub, "EDITED BY USER")
@@ -65,7 +65,7 @@ func TestInitialize_forcePreservesEditedStub(t *testing.T) {
 
 func TestInitialize_formatJSON(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("tool", "json", false); err != nil {
+	if err := Initialize("tool", "json", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.spec.json"), `"name": "tool"`)
@@ -74,17 +74,37 @@ func TestInitialize_formatJSON(t *testing.T) {
 
 func TestInitialize_errors(t *testing.T) {
 	initTestModule(t)
-	if err := Initialize("", "yaml", false); err == nil {
+	if err := Initialize("", "yaml", false, ""); err == nil {
 		t.Error("empty name should error")
 	}
-	if err := Initialize("x", "toml", false); err == nil {
+	if err := Initialize("x", "toml", false, ""); err == nil {
 		t.Error("unsupported format should error")
 	}
 }
 
 func TestInitialize_outsideModule(t *testing.T) {
-	t.Chdir(t.TempDir()) // no go.mod anywhere up the tree (TempDir is isolated)
-	if err := Initialize("mycli", "yaml", false); err == nil {
+	t.Chdir(t.TempDir()) // no go.mod up the tree
+	if err := Initialize("mycli", "yaml", false, ""); err == nil {
 		t.Error("Initialize outside a module should error")
 	}
+}
+
+func TestInitialize_into(t *testing.T) {
+	tmp := initTestModule(t)
+	if err := Initialize("parent", "yaml", false, ""); err != nil {
+		t.Fatalf("init parent: %v", err)
+	}
+	if err := Initialize("child", "yaml", false, "parent"); err != nil {
+		t.Fatalf("init child --into parent: %v", err)
+	}
+
+	// The parent spec gained a $ref to the child (the value may be quoted by the
+	// YAML encoder).
+	mustContain(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"), "$ref:", "../child/.rotini.spec.yaml")
+	// The parent re-generated to compose the child.
+	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/rotini.go"),
+		"ParentChild() rotini.CommandHandlers", `Handler: "ParentChild"`)
+	mustContain(t, filepath.Join(tmp, "cmd/parent/rth/handlers.go"), "childrth.Handlers().Child()")
+	// The child is still its own standalone binary.
+	mustContain(t, filepath.Join(tmp, "cmd/child/main.go"), "rth.Program.Execute()")
 }

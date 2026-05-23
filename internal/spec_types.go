@@ -61,8 +61,10 @@ type BaseSchema struct {
 	Type string `json:"type,omitempty"`
 }
 
-// A command node in the CLI command tree.
+// A command node in the CLI command tree. A command is either declared inline (with 'name') or composed from another spec file (with '$ref').
 type Command struct {
+	// Path to another rotini spec file whose command tree is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name.
+	Ref string `json:"$ref,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases.
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of this command.
@@ -70,7 +72,7 @@ type Command struct {
 	// Typed inputs for this command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
 	// Command name used in routing.
-	Name string `json:"name"`
+	Name string `json:"name,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.

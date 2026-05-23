@@ -425,10 +425,11 @@
       }
     },
     "Command": {
-      "description": "A command node in the CLI command tree.",
+      "description": "A command node in the CLI command tree. A command is either declared inline (with 'name') or composed from another spec file (with '$ref').",
       "type": "object",
-      "required": [
-        "name"
+      "anyOf": [
+        { "required": ["name"] },
+        { "required": ["$ref"] }
       ],
       "additionalProperties": false,
       "properties": {
@@ -436,6 +437,10 @@
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
           "description": "Command name used in routing."
+        },
+        "$ref": {
+          "type": "string",
+          "description": "Path to another rotini spec file whose command tree is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name."
         },
         "aliases": {
           "type": "array",

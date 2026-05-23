@@ -70,90 +70,53 @@ type layout struct {
 	rollupFile     string // rollup file name, e.g. "handlers.go"
 }
 
-// generateAll runs a single generation pass: it writes the framework file,
-// creates any missing handler stubs, (re)writes the handler rollup, and prunes
-// orphaned stubs when configured.
-func generateAll(spec *Spec, conf *Conf) error {
+// generateAll runs a single generation pass: it resolves the spec (expanding
+// any composed $ref children), writes the framework file, creates missing
+// handler stubs, (re)writes the handler rollup, and prunes orphaned stubs when
+// configured. specPath is needed to resolve $ref paths relative to the spec.
+func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	moduleRoot, moduleName, err := findModule()
 	if err != nil {
 		return err
 	}
-
 	lay, err := resolveLayout(conf, moduleRoot, moduleName)
 	if err != nil {
 		return err
 	}
-
-	root, cmds := buildCommands(spec)
-
-	if err := writeFrameworkFile(spec, lay, root, cmds); err != nil {
+	gp, err := resolveTree(spec, specPath, moduleRoot, moduleName)
+	if err != nil {
 		return err
 	}
-	if err := writeHandlerStubs(lay, root, cmds); err != nil {
+
+	if err := writeFrameworkFile(gp, lay); err != nil {
 		return err
 	}
-	if err := writeHandlerRollup(lay, root, cmds); err != nil {
+	if err := writeHandlerStubs(gp, lay); err != nil {
+		return err
+	}
+	if err := writeHandlerRollup(gp, lay); err != nil {
 		return err
 	}
 	if c := conf.Generate.Cmd; c != nil && c.Prune != nil && c.Prune.Enabled {
-		if err := pruneStubs(lay, root, cmds, c.Prune.Keep); err != nil {
+		if err := pruneStubs(gp, lay, c.Prune.Keep); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// buildCommands resolves the spec into the root command plus a slice of
-// sub-commands sorted by their underscore-joined path. Sorting makes the
-// generated output deterministic regardless of spec ordering.
-func buildCommands(spec *Spec) (genCommand, []genCommand) {
-	rootName := spec.Name
-	rootPascal := toPascalCase(rootName)
-
-	root := genCommand{
-		prefix:   rootPascal,
-		handler:  lowerFirst(rootPascal) + "Handlers",
-		filename: rootName + ".go",
-		flags:    flagFields(spec.Inputs),
-		args:     argFields(spec.Inputs),
-		inputs:   []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs", Tag: "scope=" + rootName}},
+// methods returns the ProgramHandlers method names: the root, then every own
+// and composed sub-command, sorted.
+func (gp *genProgram) methods() []string {
+	out := []string{gp.root.prefix}
+	for _, c := range gp.own {
+		out = append(out, c.prefix)
 	}
-
-	var nodes []struct {
-		path string
-		cmd  Command
+	for _, c := range gp.composed {
+		out = append(out, c.prefix)
 	}
-	var walk func(cmds []Command, parent string)
-	walk = func(cmds []Command, parent string) {
-		for _, c := range cmds {
-			path := c.Name
-			if parent != "" {
-				path = parent + "_" + c.Name
-			}
-			nodes = append(nodes, struct {
-				path string
-				cmd  Command
-			}{path, c})
-			walk(c.Commands, path)
-		}
-	}
-	walk(spec.Commands, "")
-
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].path < nodes[j].path })
-
-	cmds := make([]genCommand, 0, len(nodes))
-	for _, n := range nodes {
-		prefix := rootPascal + toPascalCase(n.path)
-		cmds = append(cmds, genCommand{
-			prefix:   prefix,
-			handler:  lowerFirst(rootPascal) + toPascalCase(n.path) + "Handlers",
-			filename: rootName + "_" + n.path + ".go",
-			flags:    flagFields(n.cmd.Inputs),
-			args:     argFields(n.cmd.Inputs),
-			inputs:   inputsFields(rootName, rootPascal, n.path),
-		})
-	}
-	return root, cmds
+	sort.Strings(out)
+	return out
 }
 
 // inputsFields returns the fields of a command's <Prefix>Inputs struct: one per
@@ -245,56 +208,24 @@ func jsonSchemaTypeToGo(t string) string {
 // the compiled command tree the runtime parses against. It is emitted into the
 // framework file and gofmt-formatted with the rest of it, so the produced text
 // only needs to be valid Go, not pretty.
-func renderDefinition(spec *Spec) string {
-	rootPascal := toPascalCase(spec.Name)
+func renderDefinition(gp *genProgram) string {
 	var b strings.Builder
 	b.WriteString("var Definition = " + rotiniPkgName + ".Definition{\n")
-	b.WriteString("Name: " + strconv.Quote(spec.Name) + ",\n")
-	b.WriteString("Handler: " + strconv.Quote(rootPascal) + ",\n")
-	if len(spec.Aliases) > 0 {
-		b.WriteString("Aliases: " + goStringSlice(spec.Aliases) + ",\n")
+	b.WriteString("Name: " + strconv.Quote(gp.rootName) + ",\n")
+	b.WriteString("Handler: " + strconv.Quote(gp.rootPascal) + ",\n")
+	if len(gp.rootAliases) > 0 {
+		b.WriteString("Aliases: " + goStringSlice(gp.rootAliases) + ",\n")
 	}
-	if fl := flagDefsLiteral(spec.Inputs); fl != "" {
+	if fl := flagDefsLiteral(gp.rootInputs); fl != "" {
 		b.WriteString("Flags: " + fl + ",\n")
 	}
-	if al := argDefsLiteral(spec.Inputs); al != "" {
+	if al := argDefsLiteral(gp.rootInputs); al != "" {
 		b.WriteString("Arguments: " + al + ",\n")
 	}
-	if cl := commandDefsLiteral(rootPascal, "", spec.Commands); cl != "" {
+	if cl := rnodesLiteral(gp.tree); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
 	}
 	b.WriteString("}\n")
-	return b.String()
-}
-
-func commandDefsLiteral(rootPascal, parentPath string, cmds []Command) string {
-	if len(cmds) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("[]" + rotiniPkgName + ".CommandDef{\n")
-	for _, c := range cmds {
-		path := c.Name
-		if parentPath != "" {
-			path = parentPath + "_" + c.Name
-		}
-		b.WriteString("{Name: " + strconv.Quote(c.Name) + ",\n")
-		b.WriteString("Handler: " + strconv.Quote(rootPascal+toPascalCase(path)) + ",\n")
-		if len(c.Aliases) > 0 {
-			b.WriteString("Aliases: " + goStringSlice(c.Aliases) + ",\n")
-		}
-		if fl := flagDefsLiteral(c.Inputs); fl != "" {
-			b.WriteString("Flags: " + fl + ",\n")
-		}
-		if al := argDefsLiteral(c.Inputs); al != "" {
-			b.WriteString("Arguments: " + al + ",\n")
-		}
-		if cl := commandDefsLiteral(rootPascal, path, c.Commands); cl != "" {
-			b.WriteString("Commands: " + cl + ",\n")
-		}
-		b.WriteString("},\n")
-	}
-	b.WriteString("}")
 	return b.String()
 }
 
@@ -396,14 +327,12 @@ func defaultString(v any) string {
 // aggregate interface plus the typed input structs for every command. It is
 // always (over)written — it is fully generated and carries a DO NOT EDIT
 // banner.
-func writeFrameworkFile(spec *Spec, lay layout, root genCommand, cmds []genCommand) error {
-	all := append([]genCommand{root}, cmds...)
+func writeFrameworkFile(gp *genProgram, lay layout) error {
+	own := append([]genCommand{gp.root}, gp.own...)
 
-	methods := make([]string, 0, len(all))
-	blocks := make([]inputBlock, 0, len(all))
+	blocks := make([]inputBlock, 0, len(own))
 	stdImports := map[string]bool{}
-	for _, c := range all {
-		methods = append(methods, c.prefix)
+	for _, c := range own {
 		blocks = append(blocks, inputBlock{
 			Prefix:       c.prefix,
 			Flags:        c.flags,
@@ -423,9 +352,9 @@ func writeFrameworkFile(spec *Spec, lay layout, root genCommand, cmds []genComma
 		"RotiniImport": rotiniImportPath,
 		"RotiniPkg":    rotiniPkgName,
 		"StdImports":   sortedKeys(stdImports),
-		"Methods":      methods,
+		"Methods":      gp.methods(),
 		"Blocks":       blocks,
-		"Definition":   renderDefinition(spec),
+		"Definition":   renderDefinition(gp),
 	}
 	content, err := renderGo("framework", "templates/rotini.go.tmpl", data)
 	if err != nil {
@@ -435,10 +364,11 @@ func writeFrameworkFile(spec *Spec, lay layout, root genCommand, cmds []genComma
 }
 
 // writeHandlerStubs creates a per-command handler stub for the root command and
-// every sub-command, but only when the file does not already exist — stubs are
-// user-editable, so an existing stub is never overwritten.
-func writeHandlerStubs(lay layout, root genCommand, cmds []genCommand) error {
-	for _, c := range append([]genCommand{root}, cmds...) {
+// every OWN sub-command, but only when the file does not already exist — stubs
+// are user-editable, so an existing stub is never overwritten. Composed
+// commands have no stub here; their handlers live in the child's package.
+func writeHandlerStubs(gp *genProgram, lay layout) error {
+	for _, c := range append([]genCommand{gp.root}, gp.own...) {
 		path := filepath.Join(lay.handlerDir, c.filename)
 		if _, err := os.Stat(path); err == nil {
 			continue
@@ -463,17 +393,30 @@ func writeHandlerStubs(lay layout, root genCommand, cmds []genCommand) error {
 }
 
 // writeHandlerRollup renders and writes the handler rollup file: the unexported
-// handlers struct, the ProgramHandlers compile-time assertion, the Program var,
-// and one method per command returning its stub. It is always (over)written.
-func writeHandlerRollup(lay layout, root genCommand, cmds []genCommand) error {
+// handlers struct, the ProgramHandlers assertion, the Program var, the Handlers
+// accessor, and one method per command — own commands return a local stub,
+// composed commands delegate to the child's rth. It is always (over)written.
+func writeHandlerRollup(gp *genProgram, lay layout) error {
 	type rollupMethod struct {
-		Method      string
-		HandlerType string
+		Method         string
+		Composed       bool
+		HandlerType    string
+		DelegateAlias  string
+		DelegateMethod string
 	}
-	methods := make([]rollupMethod, 0, len(cmds)+1)
-	for _, c := range append([]genCommand{root}, cmds...) {
+	var methods []rollupMethod
+	for _, c := range append([]genCommand{gp.root}, gp.own...) {
 		methods = append(methods, rollupMethod{Method: c.prefix, HandlerType: c.handler})
 	}
+	for _, c := range gp.composed {
+		methods = append(methods, rollupMethod{
+			Method:         c.prefix,
+			Composed:       true,
+			DelegateAlias:  c.delegateAlias,
+			DelegateMethod: c.delegateMethod,
+		})
+	}
+	sort.Slice(methods, func(i, j int) bool { return methods[i].Method < methods[j].Method })
 
 	data := map[string]any{
 		"Package":         lay.handlerPkgName,
@@ -481,6 +424,7 @@ func writeHandlerRollup(lay layout, root genCommand, cmds []genCommand) error {
 		"RotiniPkg":       rotiniPkgName,
 		"FrameworkImport": lay.frameworkImport,
 		"FrameworkPkg":    lay.frameworkPkgName,
+		"ChildImports":    gp.childImports,
 		"Methods":         methods,
 	}
 	content, err := renderGo("rollup", "templates/handlers.go.tmpl", data)
@@ -490,14 +434,14 @@ func writeHandlerRollup(lay layout, root genCommand, cmds []genCommand) error {
 	return writeGeneratedFile(filepath.Join(lay.handlerDir, lay.rollupFile), content)
 }
 
-// pruneStubs removes handler .go files that no longer correspond to a command,
-// preserving the rollup file, the keep list, and any test files.
-func pruneStubs(lay layout, root genCommand, cmds []genCommand, keepList []string) error {
+// pruneStubs removes handler .go files that no longer correspond to an own
+// command, preserving the rollup file, the keep list, and any test files.
+func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	protected := map[string]bool{
-		root.filename:  true,
-		lay.rollupFile: true,
+		gp.root.filename: true,
+		lay.rollupFile:   true,
 	}
-	for _, c := range cmds {
+	for _, c := range gp.own {
 		protected[c.filename] = true
 	}
 	for _, k := range keepList {

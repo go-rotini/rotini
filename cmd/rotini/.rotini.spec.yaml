@@ -38,6 +38,11 @@ commands:
             - --force
           schema:
             type: bool
+        - name: into
+          identifiers:
+            - --into
+          schema:
+            type: string
         - name: help
           identifiers:
             - -h

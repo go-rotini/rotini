@@ -33,7 +33,7 @@ func Generate(specPath, confPath string) error {
 	}
 	applyConfDefaults(conf)
 
-	return generateAll(spec, conf)
+	return generateAll(spec, conf, specPath)
 }
 
 // loadConfOrDefaults reads the conf at confPath, treating an empty path or a
