@@ -51,6 +51,14 @@ func (p *program) Execute() {
 // run is the testable core of Execute: it returns the process exit code instead
 // of calling os.Exit. 0 = success, 2 = usage error, 1 = other failure.
 func (p *program) run(argv []string) int {
+	// Hidden completion entrypoint invoked by the generated shell scripts.
+	if len(argv) > 0 && argv[0] == completeCommand {
+		for _, c := range complete(p.def, argv[1:]) {
+			fmt.Fprintln(p.stdout, c)
+		}
+		return 0
+	}
+
 	res, err := parse(p.def, argv)
 	if err != nil {
 		fmt.Fprintf(p.stderr, "%s: %s\n", p.def.Name, err)

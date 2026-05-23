@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -20,15 +21,20 @@ func (*rotiniCompletionHandlers) PreRun(ctx context.Context, rtx rotini.Context)
 }
 
 func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	flags := rotini.Inputs[rtg.RotiniCompletionInputs](rtx).RotiniCompletion.Flags
+	in := rotini.Inputs[rtg.RotiniCompletionInputs](rtx).RotiniCompletion
 
-	if flags.Help {
+	if in.Flags.Help {
 		fmt.Println(getRotiniHelp(helpKeyRotiniCompletion))
 		return
 	}
 
-	fmt.Fprintln(os.Stderr, "rotini completion: shell completion is not yet implemented")
-	rotini.Exit(rtx, 1)
+	script, err := rotini.CompletionScript(filepath.Base(os.Args[0]), in.Arguments.Shell)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		rotini.Exit(rtx, 1)
+		return
+	}
+	fmt.Print(script)
 }
 
 func (*rotiniCompletionHandlers) PostRun(ctx context.Context, rtx rotini.Context) {
