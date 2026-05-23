@@ -19,6 +19,10 @@ func (*rotiniVersionHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx rotini.Context) {
+	if rotini.Inputs[rtg.RotiniVersionInputs](rtx).RotiniVersion.Flags.Help {
+		fmt.Println(getRotiniHelp(helpKeyRotiniVersion))
+		return
+	}
 	fmt.Println("rotini", rtg.Version)
 }
 

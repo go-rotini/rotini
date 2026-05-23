@@ -101,7 +101,23 @@ func versionString(def Definition) string {
 // case (git, kubectl). Non-root commands always dispatch and decide for
 // themselves.
 func bareNamespace(def Definition, argv []string) bool {
+	if declaresHelp(def) {
+		return false // the program declares its own help; let it dispatch and handle bare invocation
+	}
 	return len(argv) == 0 && (len(def.Commands) > 0 || len(def.RemoteCommands) > 0)
+}
+
+// declaresHelp reports whether the root command declares its own -h/--help flag,
+// in which case the runtime defers all help handling to the program's handlers.
+func declaresHelp(def Definition) bool {
+	for _, f := range def.Flags {
+		for _, id := range f.Identifiers {
+			if id == "-h" || id == "--help" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the

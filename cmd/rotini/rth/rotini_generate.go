@@ -22,6 +22,10 @@ func (*rotiniGenerateHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	in := rotini.Inputs[rtg.RotiniGenerateInputs](rtx).RotiniGenerate
+	if in.Flags.Help {
+		fmt.Println(getRotiniHelp(helpKeyRotiniGenerate))
+		return
+	}
 	if err := internal.Generate(in.Arguments.File, in.Flags.Config); err != nil {
 		fmt.Fprintln(os.Stderr, "rotini generate:", err)
 		rotini.Exit(rtx, 1)

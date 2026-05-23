@@ -22,6 +22,10 @@ func (*rotiniInitializeHandlers) PreRun(ctx context.Context, rtx rotini.Context)
 
 func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	in := rotini.Inputs[rtg.RotiniInitializeInputs](rtx).RotiniInitialize
+	if in.Flags.Help {
+		fmt.Println(getRotiniHelp(helpKeyRotiniInitialize))
+		return
+	}
 	if err := internal.Initialize(in.Arguments.Name, in.Flags.Format, in.Flags.Force, in.Flags.Into); err != nil {
 		fmt.Fprintln(os.Stderr, "rotini init:", err)
 		rotini.Exit(rtx, 1)
