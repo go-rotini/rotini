@@ -1,0 +1,90 @@
+package internal
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func initTestModule(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), "module example.com/myclis\n\ngo 1.26\n")
+	t.Chdir(tmp)
+	return tmp
+}
+
+func TestInitialize_scaffoldsStandalone(t *testing.T) {
+	tmp := initTestModule(t)
+	if err := Initialize("mycli", "yaml", false); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+
+	dir := filepath.Join(tmp, "cmd", "mycli")
+	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli", "schema-spec.json")
+	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"),
+		"package: cmd/mycli/rth", "gen_file: handlers.go",
+		"package: cmd/mycli/rtg", "gen_file: rotini.go", "schema-conf.json")
+	mustContain(t, filepath.Join(dir, "main.go"),
+		"//go:generate rotini generate",
+		`"example.com/myclis/cmd/mycli/rth"`, "rth.Program.Execute()")
+	mustContain(t, filepath.Join(dir, "rtg", "rotini.go"),
+		"package rtg", "type ProgramHandlers interface", "var Definition")
+	mustContain(t, filepath.Join(dir, "rth", "handlers.go"),
+		"package rth", "rotini.NewProgram(rtg.Definition, &handlers{})")
+	mustContain(t, filepath.Join(dir, "rth", "mycli.go"), "type mycliHandlers struct{}")
+}
+
+func TestInitialize_noClobberThenForce(t *testing.T) {
+	initTestModule(t)
+	if err := Initialize("mycli", "yaml", false); err != nil {
+		t.Fatalf("first Initialize: %v", err)
+	}
+	err := Initialize("mycli", "yaml", false)
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("re-init without force: got %v, want 'already exists'", err)
+	}
+	if err := Initialize("mycli", "yaml", true); err != nil {
+		t.Fatalf("re-init with force: %v", err)
+	}
+}
+
+func TestInitialize_forcePreservesEditedStub(t *testing.T) {
+	tmp := initTestModule(t)
+	if err := Initialize("mycli", "yaml", false); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	stub := filepath.Join(tmp, "cmd", "mycli", "rth", "mycli.go")
+	writeTestFile(t, stub, "package rth\n\n// EDITED BY USER\n")
+
+	if err := Initialize("mycli", "yaml", true); err != nil {
+		t.Fatalf("re-init with force: %v", err)
+	}
+	mustContain(t, stub, "EDITED BY USER")
+}
+
+func TestInitialize_formatJSON(t *testing.T) {
+	tmp := initTestModule(t)
+	if err := Initialize("tool", "json", false); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.spec.json"), `"name": "tool"`)
+	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.conf.json"), `"cmd/tool/rth"`)
+}
+
+func TestInitialize_errors(t *testing.T) {
+	initTestModule(t)
+	if err := Initialize("", "yaml", false); err == nil {
+		t.Error("empty name should error")
+	}
+	if err := Initialize("x", "toml", false); err == nil {
+		t.Error("unsupported format should error")
+	}
+}
+
+func TestInitialize_outsideModule(t *testing.T) {
+	t.Chdir(t.TempDir()) // no go.mod anywhere up the tree (TempDir is isolated)
+	if err := Initialize("mycli", "yaml", false); err == nil {
+		t.Error("Initialize outside a module should error")
+	}
+}

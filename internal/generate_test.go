@@ -41,19 +41,23 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	rels := []string{
+	// The always-(re)generated files are reproduced byte-for-byte.
+	for _, rel := range []string{
 		"cmd/rotini/rtg/rotini.go",
 		"cmd/rotini/rth/handlers.go",
-		"cmd/rotini/rth/rotini.go",
-		"cmd/rotini/rth/rotini_completion.go",
-		"cmd/rotini/rth/rotini_generate.go",
-		"cmd/rotini/rth/rotini_help.go",
-		"cmd/rotini/rth/rotini_initialize.go",
-		"cmd/rotini/rth/rotini_validate.go",
-		"cmd/rotini/rth/rotini_version.go",
-	}
-	for _, rel := range rels {
+	} {
 		assertGoEqual(t, filepath.Join(tmp, rel), filepath.Join(repoRoot, rel))
+	}
+
+	// Handler stubs are create-if-missing user code, so the committed copies are
+	// edited (wired to internal funcs) and intentionally diverge from a fresh
+	// stub. Assert the generator produced each with the expected stub shape.
+	for _, name := range []string{
+		"rotini", "rotini_completion", "rotini_generate",
+		"rotini_help", "rotini_initialize", "rotini_validate", "rotini_version",
+	} {
+		mustContain(t, filepath.Join(tmp, "cmd/rotini/rth", name+".go"),
+			"package rth", "rotini.CommandHandlers", "rotini.Context")
 	}
 }
 

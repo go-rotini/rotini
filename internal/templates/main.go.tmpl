@@ -1,14 +1,8 @@
-//go:generate go tool github.com/go-rotini/rotini generate {{.RotiniSpecFilePath}} --config {{.RotiniConfFilePath}}
+//go:generate rotini generate
 package main
 
-import (
-{{- if .RotiniCommandPackageAlias}}
-	"{{.RotiniCommandPackageAlias}} {{.RotiniCommandPackageImport}}"
-{{- else}}
-	"{{.RotiniCommandPackageImport}}"
-{{- end}}
-)
+import "{{.Import}}"
 
 func main() {
-	{{.RotiniCommandPackageName}}.Program.Execute()
+	{{.Pkg}}.Program.Execute()
 }

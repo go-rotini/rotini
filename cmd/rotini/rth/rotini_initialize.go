@@ -2,8 +2,12 @@ package rth
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/cmd/rotini/rtg"
+	"github.com/go-rotini/rotini/internal"
 )
 
 type rotiniInitializeHandlers struct{}
@@ -17,6 +21,13 @@ func (*rotiniInitializeHandlers) PreRun(ctx context.Context, rtx rotini.Context)
 }
 
 func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx rotini.Context) {
+	in := rotini.Inputs[rtg.RotiniInitializeInputs](rtx).RotiniInitialize
+	if err := internal.Initialize(in.Arguments.Name, in.Flags.Format, in.Flags.Force); err != nil {
+		fmt.Fprintln(os.Stderr, "rotini init:", err)
+		rotini.Exit(rtx, 1)
+		return
+	}
+	fmt.Printf("initialized %q under cmd/%s\n", in.Arguments.Name, in.Arguments.Name)
 }
 
 func (*rotiniInitializeHandlers) PostRun(ctx context.Context, rtx rotini.Context) {

@@ -103,14 +103,37 @@ func (p *program) dispatch(chain []frame, rtx *Rtx) int {
 	}
 
 	leaf := handlers[len(handlers)-1]
-	for _, h := range handlers {
-		h.CascadingPreRun(p.ctx, rtx)
-	}
-	leaf.PreRun(p.ctx, rtx)
-	leaf.Run(p.ctx, rtx)
-	leaf.PostRun(p.ctx, rtx)
+	// CascadingPreRun (root→leaf), then the leaf's Pre/Run/Post — short-circuited
+	// once a hook calls Exit. CascadingPostRun (leaf→root) always runs for cleanup.
+	func() {
+		for _, h := range handlers {
+			if h.CascadingPreRun(p.ctx, rtx); rtx.stopped {
+				return
+			}
+		}
+		if leaf.PreRun(p.ctx, rtx); rtx.stopped {
+			return
+		}
+		if leaf.Run(p.ctx, rtx); rtx.stopped {
+			return
+		}
+		leaf.PostRun(p.ctx, rtx)
+	}()
 	for i := len(handlers) - 1; i >= 0; i-- {
 		handlers[i].CascadingPostRun(p.ctx, rtx)
 	}
-	return 0
+	return rtx.exitCode
+}
+
+// Exit records a non-zero exit code for the program and stops the current
+// command's remaining leaf hooks (PreRun/Run/PostRun); CascadingPostRun still
+// runs so cleanup is not skipped. The process exits with code once the lifecycle
+// completes. It is the handler-facing way to fail a command until lifecycle
+// hooks themselves return errors.
+func Exit(rtx Context, code int) {
+	if rtx == nil {
+		return
+	}
+	rtx.exitCode = code
+	rtx.stopped = true
 }

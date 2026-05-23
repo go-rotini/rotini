@@ -30,6 +30,8 @@ type Rtx struct {
 	mu       sync.RWMutex
 	services map[string]any
 	parsed   *parsedInputs // argv parsed by the runtime; read by [Inputs]
+	exitCode int           // process exit code requested via [Exit]
+	stopped  bool          // [Exit] was called; remaining leaf hooks are skipped
 }
 
 // NewRegistry returns an empty Registry.
