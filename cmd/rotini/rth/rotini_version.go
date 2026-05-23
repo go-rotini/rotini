@@ -2,8 +2,10 @@ package rth
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 )
 
 type rotiniVersionHandlers struct{}
@@ -17,6 +19,7 @@ func (*rotiniVersionHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx rotini.Context) {
+	fmt.Println("rotini", rtg.Version)
 }
 
 func (*rotiniVersionHandlers) PostRun(ctx context.Context, rtx rotini.Context) {

@@ -15,6 +15,9 @@ type ProgramHandlers interface {
 	RotiniVersion() rotini.CommandHandlers
 }
 
+// Version is set at build time via -ldflags "-X <pkg>.Version=<value>".
+var Version = "dev"
+
 var Definition = rotini.Definition{
 	Name:        "rotini",
 	Handler:     "Rotini",
@@ -24,6 +27,7 @@ var Definition = rotini.Definition{
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool"},
 	},
+	Version: Version,
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
 			Handler: "RotiniInitialize",

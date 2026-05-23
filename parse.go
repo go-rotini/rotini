@@ -15,12 +15,13 @@ type frame struct {
 	flags       []FlagDef
 	arguments   []ArgDef
 	commands    []CommandDef
+	remotes     []RemoteDef
 }
 
 func rootFrame(def Definition) frame {
 	return frame{
 		name: def.Name, handler: def.Handler, summary: def.Summary, description: def.Description,
-		flags: def.Flags, arguments: def.Arguments, commands: def.Commands,
+		flags: def.Flags, arguments: def.Arguments, commands: def.Commands, remotes: def.RemoteCommands,
 	}
 }
 
@@ -37,11 +38,15 @@ type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
 
-// parseResult is the outcome of resolving argv against a [Definition].
+// parseResult is the outcome of resolving argv against a [Definition]. When
+// remote is set, argv selected a remote/co-located sub-command and the runtime
+// should exec it instead of dispatching the chain.
 type parseResult struct {
-	chain  []frame // root → leaf
-	parsed *parsedInputs
-	help   bool // built-in help was requested (-h/--help)
+	chain   []frame // root → leaf
+	parsed  *parsedInputs
+	help    bool // built-in help was requested (-h/--help)
+	version bool // built-in version was requested (-v/--version)
+	remote  *remoteDispatch
 }
 
 // parse resolves argv against def: it walks the command tree by name/alias,
@@ -53,6 +58,7 @@ func parse(def Definition, argv []string) (*parseResult, error) {
 	chain := []frame{rootFrame(def)}
 	store := &parsedInputs{scopes: map[string]scopeInputs{}}
 	help := false
+	version := false
 	startedArgs := false
 
 	addFlag := func(scope, name, value string) {
@@ -81,11 +87,15 @@ func parse(def Definition, argv []string) (*parseResult, error) {
 			name, inline, hasInline := splitFlag(tok)
 			fdef, scope, ok := findFlag(chain, name)
 			if !ok {
-				if name == "-h" || name == "--help" {
+				switch name {
+				case "-h", "--help":
 					help = true
-					continue
+				case "-v", "--version":
+					version = true
+				default:
+					return nil, &usageError{msg: fmt.Sprintf("unknown flag %q", name)}
 				}
-				return nil, &usageError{msg: fmt.Sprintf("unknown flag %q", name)}
+				continue
 			}
 			var value string
 			switch {
@@ -115,9 +125,14 @@ func parse(def Definition, argv []string) (*parseResult, error) {
 				chain = append(chain, cmdFrame(child))
 				continue
 			}
+			if rd, ok := findRemote(cur, tok); ok {
+				// A remote/co-located command: exec its binary with the rest of
+				// argv passed through untouched.
+				return &parseResult{remote: &remoteDispatch{def: rd, args: append([]string{}, argv[i+1:]...)}}, nil
+			}
 			// Not a sub-command. If this command branches but takes no
 			// arguments, the token is a mistyped command, not an argument.
-			if len(cur.commands) > 0 && len(cur.arguments) == 0 {
+			if (len(cur.commands) > 0 || len(cur.remotes) > 0) && len(cur.arguments) == 0 {
 				return nil, &usageError{msg: unknownCommandMsg(cur, tok)}
 			}
 		}
@@ -126,7 +141,22 @@ func parse(def Definition, argv []string) (*parseResult, error) {
 	}
 
 	applyDefaults(chain, store)
-	return &parseResult{chain: chain, parsed: store, help: help}, nil
+	return &parseResult{chain: chain, parsed: store, help: help, version: version}, nil
+}
+
+// findRemote returns the remote sub-command of f matching tok by name or alias.
+func findRemote(f frame, tok string) (RemoteDef, bool) {
+	for _, r := range f.remotes {
+		if r.Name == tok {
+			return r, true
+		}
+		for _, a := range r.Aliases {
+			if a == tok {
+				return r, true
+			}
+		}
+	}
+	return RemoteDef{}, false
 }
 
 // applyDefaults fills in declared flag and trailing-argument defaults for inputs

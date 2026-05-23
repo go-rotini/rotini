@@ -13,6 +13,10 @@ type ProgramHandlers interface {
 	{{.}}() {{$.RotiniPkg}}.CommandHandlers
 {{- end}}
 }
+{{range .Metadata}}
+// {{.Var}} is set at build time via -ldflags "-X <pkg>.{{.Var}}=<value>".
+var {{.Var}} = {{printf "%q" .Default}}
+{{- end}}
 
 {{.Definition}}
 {{- range .Blocks}}

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 	"unicode"
 )
 
@@ -228,10 +229,41 @@ func renderDefinition(gp *genProgram) string {
 	if al := argDefsLiteral(gp.rootInputs); al != "" {
 		b.WriteString("Arguments: " + al + ",\n")
 	}
+	if gp.versionVar != "" {
+		b.WriteString("Version: " + gp.versionVar + ",\n")
+	}
 	if cl := rnodesLiteral(gp.tree); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
 	}
+	if rl := remoteDefsLiteral(gp.rootName, gp.rootRemotes); rl != "" {
+		b.WriteString("RemoteCommands: " + rl + ",\n")
+	}
 	b.WriteString("}\n")
+	return b.String()
+}
+
+// remoteDefsLiteral renders the []rotini.RemoteDef literal for a command's
+// remote/co-located sub-commands. The expected binary is "<host>-<name>".
+func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
+	if len(rcs) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[]" + rotiniPkgName + ".RemoteDef{\n")
+	for _, rc := range rcs {
+		b.WriteString("{Name: " + strconv.Quote(rc.Name))
+		b.WriteString(", Binary: " + strconv.Quote(host+"-"+rc.Name))
+		if len(rc.Aliases) > 0 {
+			b.WriteString(", Aliases: " + goStringSlice(rc.Aliases))
+		}
+		if rc.Timeout != "" {
+			if d, err := time.ParseDuration(rc.Timeout); err == nil && d > 0 {
+				b.WriteString(fmt.Sprintf(", Timeout: %d", int64(d)))
+			}
+		}
+		b.WriteString("},\n")
+	}
+	b.WriteString("}")
 	return b.String()
 }
 
@@ -364,6 +396,7 @@ func writeFrameworkFile(gp *genProgram, lay layout) error {
 		"Methods":      gp.methods(),
 		"Blocks":       blocks,
 		"Definition":   renderDefinition(gp),
+		"Metadata":     gp.metadata,
 	}
 	content, err := renderGo("framework", "templates/rotini.go.tmpl", data)
 	if err != nil {

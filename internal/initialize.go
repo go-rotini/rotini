@@ -139,8 +139,9 @@ func normalizeFormat(format string) (string, error) {
 // The user adds commands from there.
 func scaffoldSpec(name string) *Spec {
 	return &Spec{
-		Schema: specSchemaURL(),
-		Name:   name,
+		Schema:   specSchemaURL(),
+		Name:     name,
+		Metadata: []MetadataEntry{{Var: "Version", Default: "dev"}},
 	}
 }
 

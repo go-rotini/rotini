@@ -77,6 +77,19 @@ func printUsage(w io.Writer, chain []frame) {
 		writeColumns(w, rows)
 	}
 
+	if len(leaf.remotes) > 0 {
+		rows := make([][2]string, 0, len(leaf.remotes))
+		for _, r := range leaf.remotes {
+			name := r.Name
+			if len(r.Aliases) > 0 {
+				name += ", " + strings.Join(r.Aliases, ", ")
+			}
+			rows = append(rows, [2]string{name, "(plugin: " + r.Binary + ")"})
+		}
+		fmt.Fprint(w, "\nPlugin commands:\n")
+		writeColumns(w, rows)
+	}
+
 	if len(leaf.commands) > 0 {
 		fmt.Fprintf(w, "\nUse %q for more information about a command.\n", full+" <command> --help")
 	}

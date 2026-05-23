@@ -20,6 +20,9 @@ type genProgram struct {
 	rootAliases     []string
 	rootSummary     string
 	rootDescription string
+	metadata        []MetadataEntry     // ldflag-settable vars emitted in rtg
+	versionVar      string              // metadata var feeding Definition.Version (Var == "Version")
+	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
 
 	root         genCommand    // the root command (own)
 	own          []genCommand  // inline sub-commands, sorted by prefix
@@ -72,6 +75,13 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootAliases:     spec.Aliases,
 		rootSummary:     spec.Summary,
 		rootDescription: spec.Description,
+		metadata:        spec.Metadata,
+		rootRemotes:     spec.RemoteCommands,
+	}
+	for _, m := range spec.Metadata {
+		if m.Var == "Version" {
+			gp.versionVar = m.Var
+		}
 	}
 	gp.root = genCommand{
 		prefix:   gp.rootPascal,

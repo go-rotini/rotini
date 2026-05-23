@@ -206,6 +206,21 @@ func TestPrintUsage_rich(t *testing.T) {
 	}
 }
 
+func TestRun_versionFlag(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Version: "1.2.3"}
+	for _, arg := range []string{"--version", "-v"} {
+		out := &bytes.Buffer{}
+		p := NewProgram(def, &testHandlers{log: new([]string)}).WithArguments([]string{arg})
+		p.stdout, p.stderr = out, &bytes.Buffer{}
+		if code := p.run(p.args); code != 0 {
+			t.Fatalf("%s: run = %d, want 0", arg, code)
+		}
+		if got := strings.TrimSpace(out.String()); got != "app 1.2.3" {
+			t.Errorf("%s: version output = %q, want %q", arg, got, "app 1.2.3")
+		}
+	}
+}
+
 func contains(ss []string, want string) bool {
 	for _, s := range ss {
 		if s == want {

@@ -62,6 +62,15 @@ func (p *program) run(argv []string) int {
 		return 1
 	}
 
+	if res.remote != nil {
+		return p.execRemote(res.remote)
+	}
+
+	if res.version {
+		fmt.Fprintln(p.stdout, versionString(p.def))
+		return 0
+	}
+
 	if res.help || bareNamespace(p.def, argv) {
 		printUsage(p.stdout, res.chain)
 		return 0
@@ -77,12 +86,22 @@ func (p *program) run(argv []string) int {
 	return p.dispatch(res.chain, rtx)
 }
 
+// versionString renders the built-in --version output, falling back to
+// "(devel)" when no version metadata was provided.
+func versionString(def Definition) string {
+	v := def.Version
+	if v == "" {
+		v = "(devel)"
+	}
+	return def.Name + " " + v
+}
+
 // bareNamespace reports whether the program was invoked with no arguments while
 // the root command branches into sub-commands — the conventional "print help"
 // case (git, kubectl). Non-root commands always dispatch and decide for
 // themselves.
 func bareNamespace(def Definition, argv []string) bool {
-	return len(argv) == 0 && len(def.Commands) > 0
+	return len(argv) == 0 && (len(def.Commands) > 0 || len(def.RemoteCommands) > 0)
 }
 
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the

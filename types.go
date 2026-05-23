@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"context"
+	"time"
 )
 
 // CommandHandlers is the lifecycle interface every command's handler set
@@ -20,14 +21,26 @@ type CommandHandlers interface {
 // [NewProgram]; the runtime uses it to parse argv, dispatch, and render help and
 // completion. It is data only — behavior lives in the handlers.
 type Definition struct {
-	Name        string
-	Aliases     []string
-	Handler     string // ProgramHandlers method for the root command, e.g. "Rotini"
-	Summary     string
-	Description string
-	Flags       []FlagDef
-	Arguments   []ArgDef
-	Commands    []CommandDef
+	Name           string
+	Aliases        []string
+	Handler        string // ProgramHandlers method for the root command, e.g. "Rotini"
+	Summary        string
+	Description    string
+	Version        string // value of the program's version metadata var (ldflag-settable)
+	Flags          []FlagDef
+	Arguments      []ArgDef
+	Commands       []CommandDef
+	RemoteCommands []RemoteDef // co-located plugin sub-commands (Model 3)
+}
+
+// RemoteDef describes a remote/co-located sub-command (kubectl/git plugin
+// style): invoking it execs the sibling binary Binary, passing through the
+// remaining arguments.
+type RemoteDef struct {
+	Name    string
+	Aliases []string
+	Binary  string        // expected executable name, e.g. "kubectl-ctx"
+	Timeout time.Duration // 0 means no timeout
 }
 
 // CommandDef describes one command node within a [Definition]. Handler is the
