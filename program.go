@@ -67,6 +67,11 @@ func (p *program) run(argv []string) int {
 		return 0
 	}
 
+	if err := requiredErrors(res.chain, res.parsed); err != nil {
+		fmt.Fprintf(p.stderr, "%s: %s\n\nRun '%s --help' for usage.\n", p.def.Name, err, p.def.Name)
+		return 2
+	}
+
 	rtx := NewRtx()
 	rtx.bindParsed(res.parsed)
 	return p.dispatch(res.chain, rtx)

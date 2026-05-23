@@ -10,6 +10,8 @@ type Spec struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of the root command.
 	Commands []Command `json:"commands,omitempty"`
+	// Longer description of the program, shown in its help.
+	Description string `json:"description,omitempty"`
 	// Events this program can emit. Each name must be unique.
 	Events []EventSpec `json:"events,omitempty"`
 	// Config files to load at startup.
@@ -24,6 +26,8 @@ type Spec struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>".
 	Schemas map[string]Schema `json:"schemas,omitempty"`
+	// One-line summary of the program, shown at the top of its help.
+	Summary string `json:"summary,omitempty"`
 	// Root command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
 }
@@ -69,12 +73,16 @@ type Command struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of this command.
 	Commands []Command `json:"commands,omitempty"`
+	// Longer description of this command, shown in its help.
+	Description string `json:"description,omitempty"`
 	// Typed inputs for this command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
 	// Command name used in routing.
 	Name string `json:"name,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
+	// One-line summary of this command, shown in the parent's command list and at the top of this command's help.
+	Summary string `json:"summary,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
 }

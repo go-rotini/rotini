@@ -1,5 +1,7 @@
 $schema: https://raw.githubusercontent.com/matthewgetz/config/refs/tags/1.0.26/schema-spec.json
 name: rotini
+summary: Generate type-safe Go CLIs from a declarative spec.
+description: rotini scaffolds and generates command-line programs from a .rotini.spec file, wiring typed inputs and lifecycle handlers for you.
 inputs:
   flags:
     - name: help
@@ -16,6 +18,7 @@ inputs:
         type: bool
 commands:
   - name: initialize
+    summary: Scaffold a new CLI under cmd/<name>.
     aliases:
       - init
     inputs:
@@ -29,6 +32,7 @@ commands:
             - --format
           schema:
             type: string
+            description: Serialization for the scaffolded spec and conf.
             enum:
               - json
               - yaml
@@ -43,6 +47,7 @@ commands:
             - --into
           schema:
             type: string
+            description: Also compose the new CLI into this parent CLI.
         - name: help
           identifiers:
             - -h
@@ -50,6 +55,7 @@ commands:
           schema:
             type: bool
   - name: generate
+    summary: Generate framework + handler code from a spec.
     aliases:
       - gen
     inputs:
@@ -78,6 +84,7 @@ commands:
           schema:
             type: bool
   - name: validate
+    summary: Validate a spec (and optional conf) against the schema.
     aliases:
       - val
     inputs:
@@ -94,6 +101,7 @@ commands:
           schema:
             type: bool
   - name: help
+    summary: Show help for a command.
     inputs:
       arguments:
         - name: command
@@ -107,6 +115,7 @@ commands:
           schema:
             type: bool
   - name: version
+    summary: Print the rotini version.
     inputs:
       flags:
         - name: help
@@ -116,6 +125,7 @@ commands:
           schema:
             type: bool
   - name: completion
+    summary: Generate a shell completion script.
     inputs:
       arguments:
         - name: shell

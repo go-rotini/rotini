@@ -19,6 +19,14 @@
       "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
       "description": "Root command name used in routing."
     },
+    "summary": {
+      "type": "string",
+      "description": "One-line summary of the program, shown at the top of its help."
+    },
+    "description": {
+      "type": "string",
+      "description": "Longer description of the program, shown in its help."
+    },
     "aliases": {
       "type": "array",
       "description": "Additional names that invoke the root command.",
@@ -437,6 +445,14 @@
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
           "description": "Command name used in routing."
+        },
+        "summary": {
+          "type": "string",
+          "description": "One-line summary of this command, shown in the parent's command list and at the top of this command's help."
+        },
+        "description": {
+          "type": "string",
+          "description": "Longer description of this command, shown in its help."
         },
         "$ref": {
           "type": "string",

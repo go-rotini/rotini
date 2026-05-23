@@ -8,19 +8,27 @@ import (
 // frame is one resolved command node on the invocation path: the root, then
 // each descended sub-command.
 type frame struct {
-	name      string
-	handler   string
-	flags     []FlagDef
-	arguments []ArgDef
-	commands  []CommandDef
+	name        string
+	handler     string
+	summary     string
+	description string
+	flags       []FlagDef
+	arguments   []ArgDef
+	commands    []CommandDef
 }
 
 func rootFrame(def Definition) frame {
-	return frame{name: def.Name, handler: def.Handler, flags: def.Flags, arguments: def.Arguments, commands: def.Commands}
+	return frame{
+		name: def.Name, handler: def.Handler, summary: def.Summary, description: def.Description,
+		flags: def.Flags, arguments: def.Arguments, commands: def.Commands,
+	}
 }
 
 func cmdFrame(c CommandDef) frame {
-	return frame{name: c.Name, handler: c.Handler, flags: c.Flags, arguments: c.Arguments, commands: c.Commands}
+	return frame{
+		name: c.Name, handler: c.Handler, summary: c.Summary, description: c.Description,
+		flags: c.Flags, arguments: c.Arguments, commands: c.Commands,
+	}
 }
 
 // usageError is a parse-time failure caused by bad input; it maps to exit
@@ -117,7 +125,90 @@ func parse(def Definition, argv []string) (*parseResult, error) {
 		addArg(chain[len(chain)-1].name, tok)
 	}
 
+	applyDefaults(chain, store)
 	return &parseResult{chain: chain, parsed: store, help: help}, nil
+}
+
+// applyDefaults fills in declared flag and trailing-argument defaults for inputs
+// the user did not provide, so handlers and required-checks see them.
+func applyDefaults(chain []frame, store *parsedInputs) {
+	for _, f := range chain {
+		var si scopeInputs
+		touched := false
+		for _, fd := range f.flags {
+			if fd.Default == "" {
+				continue
+			}
+			if !touched {
+				si = store.scopes[f.name]
+				if si.flags == nil {
+					si.flags = map[string][]string{}
+				}
+				touched = true
+			}
+			if _, ok := si.flags[fd.Name]; !ok {
+				si.flags[fd.Name] = []string{fd.Default}
+			}
+		}
+		if touched {
+			store.scopes[f.name] = si
+		}
+	}
+
+	leaf := chain[len(chain)-1]
+	si := store.scopes[leaf.name]
+	changed := false
+	for i := len(si.args); i < len(leaf.arguments); i++ {
+		if leaf.arguments[i].Default == "" {
+			break // can't fill a gap before a defaultless argument
+		}
+		si.args = append(si.args, leaf.arguments[i].Default)
+		changed = true
+	}
+	if changed {
+		store.scopes[leaf.name] = si
+	}
+}
+
+// requiredErrors reports any required flags or arguments (across the resolved
+// chain / on the leaf) that were neither provided nor defaulted.
+func requiredErrors(chain []frame, store *parsedInputs) error {
+	var missing []string
+	for _, f := range chain {
+		si := store.scopes[f.name]
+		for _, fd := range f.flags {
+			if fd.Required {
+				if _, ok := si.flags[fd.Name]; !ok {
+					missing = append(missing, flagLabel(fd))
+				}
+			}
+		}
+	}
+	leaf := chain[len(chain)-1]
+	si := store.scopes[leaf.name]
+	for i, ad := range leaf.arguments {
+		if ad.Required && i >= len(si.args) {
+			missing = append(missing, "<"+ad.Name+">")
+		}
+	}
+	if len(missing) > 0 {
+		return &usageError{msg: "missing required " + plural("input", len(missing)) + ": " + strings.Join(missing, ", ")}
+	}
+	return nil
+}
+
+func flagLabel(f FlagDef) string {
+	if len(f.Identifiers) > 0 {
+		return f.Identifiers[0]
+	}
+	return "--" + f.Name
+}
+
+func plural(word string, n int) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
 }
 
 // isFlag reports whether tok is a flag token (e.g. "-h", "--watch",

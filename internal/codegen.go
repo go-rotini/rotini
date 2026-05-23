@@ -216,6 +216,12 @@ func renderDefinition(gp *genProgram) string {
 	if len(gp.rootAliases) > 0 {
 		b.WriteString("Aliases: " + goStringSlice(gp.rootAliases) + ",\n")
 	}
+	if gp.rootSummary != "" {
+		b.WriteString("Summary: " + strconv.Quote(gp.rootSummary) + ",\n")
+	}
+	if gp.rootDescription != "" {
+		b.WriteString("Description: " + strconv.Quote(gp.rootDescription) + ",\n")
+	}
 	if fl := flagDefsLiteral(gp.rootInputs); fl != "" {
 		b.WriteString("Flags: " + fl + ",\n")
 	}
@@ -273,6 +279,9 @@ func argDefsLiteral(in *Inputs) string {
 func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	if schema == nil {
 		return
+	}
+	if schema.Description != "" {
+		b.WriteString(", Description: " + strconv.Quote(schema.Description))
 	}
 	if schema.Required {
 		b.WriteString(", Required: true")

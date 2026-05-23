@@ -61,17 +61,18 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 	}
 }
 
-// TestGenerateDefaultLayout verifies that with no conf the sane defaults place
-// the framework file at rtg/rotini.go and the rollup at rth/handlers.go.
+// TestGenerateDefaultLayout verifies that, with no conf alongside the spec and
+// none supplied, the sane defaults place the framework file at rtg/rotini.go
+// and the rollup at rth/handlers.go (relative to the module root).
 func TestGenerateDefaultLayout(t *testing.T) {
-	repoRoot := repoRoot(t)
-	specPath := filepath.Join(repoRoot, "cmd", "rotini", ".rotini.spec.yaml")
-
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	// A spec with NO adjacent conf, so generation falls back to the defaults.
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: rotini\ncommands:\n  - name: generate\n")
 
 	t.Chdir(tmp)
-	if err := Generate(specPath, ""); err != nil {
+	if err := Generate(".rotini.spec.yaml", ""); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 

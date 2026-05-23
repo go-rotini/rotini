@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // Generate reads the rotini spec at specPath and the conf at confPath, then
@@ -25,6 +26,14 @@ func Generate(specPath, confPath string) error {
 	spec, err := ReadSpec(specPath)
 	if err != nil {
 		return err
+	}
+
+	// When no conf is given (e.g. the scaffolded `//go:generate rotini generate`),
+	// discover a .rotini.conf.* next to the spec before falling back to defaults.
+	if confPath == "" {
+		if p, derr := discoverFile(filepath.Dir(specPath), ".rotini.conf."); derr == nil {
+			confPath = p
+		}
 	}
 
 	conf, err := loadConfOrDefaults(confPath)

@@ -16,8 +16,10 @@ type ProgramHandlers interface {
 }
 
 var Definition = rotini.Definition{
-	Name:    "rotini",
-	Handler: "Rotini",
+	Name:        "rotini",
+	Handler:     "Rotini",
+	Summary:     "Generate type-safe Go CLIs from a declarative spec.",
+	Description: "rotini scaffolds and generates command-line programs from a .rotini.spec file, wiring typed inputs and lifecycle handlers for you.",
 	Flags: []rotini.FlagDef{
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool"},
@@ -26,10 +28,11 @@ var Definition = rotini.Definition{
 		{Name: "initialize",
 			Handler: "RotiniInitialize",
 			Aliases: []string{"init"},
+			Summary: "Scaffold a new CLI under cmd/<name>.",
 			Flags: []rotini.FlagDef{
-				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Default: "yaml", Enum: []string{"json", "yaml"}},
+				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Description: "Serialization for the scaffolded spec and conf.", Default: "yaml", Enum: []string{"json", "yaml"}},
 				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
-				{Name: "into", Identifiers: []string{"--into"}, Type: "string"},
+				{Name: "into", Identifiers: []string{"--into"}, Type: "string", Description: "Also compose the new CLI into this parent CLI."},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
@@ -39,6 +42,7 @@ var Definition = rotini.Definition{
 		{Name: "generate",
 			Handler: "RotiniGenerate",
 			Aliases: []string{"gen"},
+			Summary: "Generate framework + handler code from a spec.",
 			Flags: []rotini.FlagDef{
 				{Name: "config", Identifiers: []string{"-c", "--config"}, Type: "string"},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
@@ -51,6 +55,7 @@ var Definition = rotini.Definition{
 		{Name: "validate",
 			Handler: "RotiniValidate",
 			Aliases: []string{"val"},
+			Summary: "Validate a spec (and optional conf) against the schema.",
 			Flags: []rotini.FlagDef{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
@@ -60,6 +65,7 @@ var Definition = rotini.Definition{
 		},
 		{Name: "help",
 			Handler: "RotiniHelp",
+			Summary: "Show help for a command.",
 			Flags: []rotini.FlagDef{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
@@ -69,12 +75,14 @@ var Definition = rotini.Definition{
 		},
 		{Name: "version",
 			Handler: "RotiniVersion",
+			Summary: "Print the rotini version.",
 			Flags: []rotini.FlagDef{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
 		},
 		{Name: "completion",
 			Handler: "RotiniCompletion",
+			Summary: "Generate a shell completion script.",
 			Flags: []rotini.FlagDef{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},

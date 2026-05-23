@@ -171,6 +171,41 @@ func TestRun_bareNamespacePrintsHelp(t *testing.T) {
 	}
 }
 
+func TestPrintUsage_rich(t *testing.T) {
+	def := Definition{
+		Name:        "app",
+		Handler:     "App",
+		Summary:     "Do things.",
+		Description: "A longer description of app.",
+		Flags:       []FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool", Description: "Be loud."}},
+		Commands: []CommandDef{
+			{
+				Name: "run", Handler: "AppRun", Aliases: []string{"r"}, Summary: "Run it.",
+				Flags:     []FlagDef{{Name: "count", Identifiers: []string{"--count"}, Type: "int", Description: "How many.", Default: "1"}},
+				Arguments: []ArgDef{{Name: "name", Description: "Who to run."}},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	printUsage(&buf, []frame{rootFrame(def)})
+	root := buf.String()
+	for _, want := range []string{"Do things.", "Usage:", "A longer description of app.", "Commands:", "run, r", "Run it.", "Be loud."} {
+		if !strings.Contains(root, want) {
+			t.Errorf("root help missing %q:\n%s", want, root)
+		}
+	}
+
+	buf.Reset()
+	printUsage(&buf, []frame{rootFrame(def), cmdFrame(def.Commands[0])})
+	leaf := buf.String()
+	for _, want := range []string{"Run it.", "app run", "Arguments:", "Who to run.", "Flags:", "--count int", "How many.", `(default "1")`} {
+		if !strings.Contains(leaf, want) {
+			t.Errorf("run help missing %q:\n%s", want, leaf)
+		}
+	}
+}
+
 func contains(ss []string, want string) bool {
 	for _, s := range ss {
 		if s == want {
