@@ -19,11 +19,14 @@ func (*rotiniVersionHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	if rotini.Inputs[rtg.RotiniVersionInputs](rtx).RotiniVersion.Flags.Help {
+	flags := rotini.Inputs[rtg.RotiniVersionInputs](rtx).RotiniVersion.Flags
+
+	if flags.Help {
 		fmt.Println(getRotiniHelp(helpKeyRotiniVersion))
 		return
 	}
-	fmt.Println("rotini", rtg.Version)
+
+	fmt.Println(rtg.Version)
 }
 
 func (*rotiniVersionHandlers) PostRun(ctx context.Context, rtx rotini.Context) {

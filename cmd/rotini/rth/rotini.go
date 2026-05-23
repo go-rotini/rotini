@@ -20,13 +20,13 @@ func (*rotiniHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	flags := rotini.Inputs[rtg.RotiniInputs](rtx).Rotini.Flags
+
 	switch {
 	case flags.Help:
 		fmt.Println(getRotiniHelp(helpKeyRotini))
 	case flags.Version:
-		fmt.Println("rotini", rtg.Version)
+		fmt.Println(rtg.Version)
 	default:
-		// Bare invocation with no command: show help, exit non-zero.
 		fmt.Println(getRotiniHelp(helpKeyRotini))
 		rotini.Exit(rtx, 1)
 	}

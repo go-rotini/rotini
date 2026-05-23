@@ -53,7 +53,7 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	path := strings.Join(in.Arguments.Command, " ")
 	key, ok := helpKeyForPath(path)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "rotini help: unknown command %q\n\n", path)
+		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\n", path)
 		fmt.Println(getRotiniHelp(helpKeyRotini))
 		rotini.Exit(rtx, 1)
 		return

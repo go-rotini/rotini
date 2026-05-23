@@ -20,10 +20,13 @@ func (*rotiniCompletionHandlers) PreRun(ctx context.Context, rtx rotini.Context)
 }
 
 func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	if rotini.Inputs[rtg.RotiniCompletionInputs](rtx).RotiniCompletion.Flags.Help {
+	flags := rotini.Inputs[rtg.RotiniCompletionInputs](rtx).RotiniCompletion.Flags
+
+	if flags.Help {
 		fmt.Println(getRotiniHelp(helpKeyRotiniCompletion))
 		return
 	}
+
 	fmt.Fprintln(os.Stderr, "rotini completion: shell completion is not yet implemented")
 	rotini.Exit(rtx, 1)
 }
