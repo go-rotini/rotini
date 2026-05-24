@@ -22,12 +22,13 @@ func (*rotiniHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	inputs, err := rotini.Parse[rtg.RotiniInputs](rtx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "rotini:", err)
-		rotini.Exit(rtx, 2)
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		fmt.Println(helpTextRotini)
+		rotini.Exit(rtx, 1)
 		return
 	}
-	flags := inputs.Rotini.Flags
 
+	flags := inputs.Rotini.Flags
 	switch {
 	case flags.Help:
 		fmt.Println(helpTextRotini)
