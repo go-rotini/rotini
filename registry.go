@@ -142,25 +142,6 @@ func (r *Rtx) Get(key string) any {
 	return r.services[key]
 }
 
-// MustGet returns the service bound under key, or panics with a [*ServiceError]
-// (unwrapping to [ErrServiceNotFound]) when key is unbound. The panic is not a
-// dead end: the runtime recovers it inside dispatch and routes it through the
-// program's OnError funnel (see [program.OnError]). Callers type-assert the
-// result; use MustGet for services a handler cannot run without:
-//
-//	parser := rtx.MustGet("parser").(*rtk.Parser)
-func (r *Rtx) MustGet(key string) any {
-	if r != nil {
-		r.mu.RLock()
-		v, ok := r.services[key]
-		r.mu.RUnlock()
-		if ok {
-			return v
-		}
-	}
-	panic(&ServiceError{Key: key})
-}
-
 // Context is the per-command context passed into every handler hook
 // (CascadingPreRun, PreRun, Run, PostRun, CascadingPostRun). It is a pointer to
 // the per-invocation [Rtx], so every hook shares the same registry, argv, and
