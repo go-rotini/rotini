@@ -48,19 +48,21 @@ func (p *program) WithArguments(args []string) *program {
 // prior binding, and returns the receiver so it chains with [program.OnError] and
 // [program.WithArguments] before [program.Execute]. It is the dependency-injection
 // seam: bind a real implementation in production or a double in tests, with the
-// same handler code retrieving it via [Get]/[MustGet]. Binding "parser" overrides
-// the default [Parser] that [Parse] uses.
+// same handler code retrieving it via [Rtx.Get] (or the rtk package's typed
+// Get/MustGet). Binding "parser" overrides the default parser the rtk package uses.
 func (p *program) Bind(key string, value any) *program {
 	p.rtx.Bind(key, value)
 	return p
 }
 
-// OnError sets the funnel that handles a [MustGet] failure or any panic raised
-// inside a hook: the runtime recovers it during dispatch, calls fn(rtx, err), and
-// exits the process with the int fn returns. It is the single place to classify
-// (errors.Is/errors.As), log (file, error-tracking service), and print errors in
-// the CLI's own style. With no funnel set, the default prints the error to stderr
-// and returns 1. OnError returns the receiver so it chains with [program.Bind].
+// OnError sets the funnel that handles any panic raised inside a hook (e.g. the
+// rtk package's MustGet on a missing service): the runtime recovers it during
+// dispatch and calls fn(ctx, rtx, err), where fn decides the exit code by calling
+// rtx.Exit. It is the single place to classify (errors.Is/errors.As), log (file,
+// error-tracking service), and print errors in the CLI's own style. With no funnel
+// set, the default prints the error to stderr and exits 1 (and the panic path
+// floors a 0 to 1, so a funnel that forgets rtx.Exit still fails). OnError returns
+// the receiver so it chains with [program.Bind].
 func (p *program) OnError(fn func(ctx context.Context, rtx Context, err error)) *program {
 	p.onError = fn
 	return p
@@ -114,9 +116,10 @@ func (p *program) defaultOnError(_ context.Context, rtx Context, err error) {
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the
 // recorded Handler method name, via reflection on the aggregate handlers) and
 // runs the lifecycle: CascadingPreRun root→leaf, then the leaf's PreRun, Run,
-// and PostRun, then CascadingPostRun leaf→root. A [MustGet] failure or any panic
-// raised inside a hook is recovered and routed through the registry's OnError
-// funnel, whose returned code becomes the process exit code.
+// and PostRun, then CascadingPostRun leaf→root. Any panic raised inside a hook
+// (e.g. the rtk package's MustGet on a missing service) is recovered and routed
+// through the registry's OnError funnel, whose rtx.Exit code becomes the process
+// exit code.
 func (p *program) dispatch(chain []ResolvedCommand, rtx *Rtx) (code int) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
@@ -135,7 +138,7 @@ func (p *program) dispatch(chain []ResolvedCommand, rtx *Rtx) (code int) {
 		handlers[i] = h
 	}
 
-	// A MustGet failure or any panic from a hook unwinds to here, skipping the
+	// A panic from a hook (e.g. rtk.MustGet) unwinds to here, skipping the
 	// `return rtx.exitCode` below — so the funnel runs and we lift its exit code
 	// (set via rtx.Exit) into the named return ourselves. The panic path is always
 	// a failure: if the funnel left the code at 0, floor it to 1.

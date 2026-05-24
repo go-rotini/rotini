@@ -2,8 +2,6 @@ package rth
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"strings"
 
 	"github.com/go-rotini/rotini"
@@ -45,34 +43,30 @@ func (*rotiniHelpHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniHelpHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	parser, ok := rtx.Get("parser").(*rtk.Parser)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "rotini: parser not bound")
-		rtx.Exit(1)
-		return
-	}
+	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
+	io := rtk.MustGet[*rtk.IO](rtx, "io")
 
 	var inputs rtg.RotiniHelpInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(os.Stderr, "rotini:", err)
+		io.Stderr.Println("rotini:", err)
 		rtx.Exit(1)
 		return
 	}
 	in := inputs.RotiniHelp
 	if in.Flags.Help {
-		fmt.Println(helpTextRotiniHelp)
+		io.Stdout.Println(helpTextRotiniHelp)
 		return
 	}
 
 	path := strings.Join(in.Arguments.Command, " ")
 	text, ok := helpTextForPath(path)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\n", path)
-		fmt.Println(helpTextRotiniHelp)
+		io.Stderr.Printf("Error: unknown command %q\n\n", path)
+		io.Stdout.Println(helpTextRotiniHelp)
 		rtx.Exit(1)
 		return
 	}
-	fmt.Println(text)
+	io.Stdout.Println(text)
 }
 
 func (*rotiniHelpHandlers) PostRun(ctx context.Context, rtx rotini.Context) {

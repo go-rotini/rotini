@@ -7,15 +7,16 @@ import (
 	"sync"
 )
 
-// ErrServiceNotFound is the sentinel [Rtx.MustGet] panics with (wrapped in a
-// [*ServiceError]) when a registry key is unbound. A handler's OnError funnel
-// classifies it with errors.Is:
+// ErrServiceNotFound is the sentinel reported when a registry key is unbound — the
+// rtk package's MustGet panics a [*ServiceError] wrapping it, which the runtime
+// recovers and routes to OnError. A funnel classifies it with errors.Is:
 //
 //	case errors.Is(err, rotini.ErrServiceNotFound):
 var ErrServiceNotFound = errors.New("rotini: service not found")
 
-// ServiceError is the error [Rtx.MustGet] panics with when key is unbound. It
-// unwraps to [ErrServiceNotFound]; recover the key with errors.As.
+// ServiceError reports a registry key that was requested but unbound (or bound to
+// the wrong type) — the rtk package's MustGet panics it. It unwraps to
+// [ErrServiceNotFound]; recover the key with errors.As.
 type ServiceError struct {
 	Key string // the registry key that was requested
 }
@@ -34,7 +35,8 @@ func (e *ServiceError) Unwrap() error { return ErrServiceNotFound }
 //
 // The registry is the dependency-injection seam: bind any service with [Rtx.Bind]
 // (a real implementation in production, a double in tests) and retrieve it with
-// [Rtx.Get]/[Rtx.MustGet]. Bindings persist for the lifetime of the Rtx. Opt-in
+// [Rtx.Get] (or the rtk package's typed Get/MustGet). Bindings persist for the
+// lifetime of the Rtx. Opt-in
 // input parsing (the rtk package's Parser) reads [Rtx.Args]/[Rtx.Chain]; the
 // runtime itself never parses flags.
 //
@@ -61,7 +63,7 @@ func NewRtx() *Rtx {
 // and Usage helpers, in isolation:
 //
 //	rtx := rotini.NewContext(rtg.Definition, []string{"generate", "x.yaml"})
-//	parser := rtx.MustGet("parser").(*rtk.Parser)
+//	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
 //	var in rtg.RotiniGenerateInputs
 //	err := parser.Parse(rtx, &in)
 //
@@ -131,8 +133,8 @@ func (r *Rtx) Chain() []ResolvedCommand {
 //		// not bound — fail the command, or fall back
 //	}
 //
-// Get reports a miss as nil and never panics; use [Rtx.MustGet] to route a
-// missing service through the OnError funnel instead.
+// Get reports a miss as nil and never panics; use the rtk package's typed Get
+// (comma-ok) or MustGet (panics → OnError funnel) for type-safe retrieval.
 func (r *Rtx) Get(key string) any {
 	if r == nil {
 		return nil
@@ -145,8 +147,9 @@ func (r *Rtx) Get(key string) any {
 // Context is the per-command context passed into every handler hook
 // (CascadingPreRun, PreRun, Run, PostRun, CascadingPostRun). It is a pointer to
 // the per-invocation [Rtx], so every hook shares the same registry, argv, and
-// exit state. Handlers retrieve services via [Rtx.Get]/[Rtx.MustGet] and the raw
-// argv via [Rtx.Args]; typed inputs are an opt-in via the rtk package's Parser.
+// exit state. Handlers retrieve services via [Rtx.Get] (or the rtk package's typed
+// Get/MustGet) and the raw argv via [Rtx.Args]; typed inputs are an opt-in via the
+// rtk package's Parser.
 type Context = *Rtx
 
 // Exit records a non-zero exit code for the program and stops the current

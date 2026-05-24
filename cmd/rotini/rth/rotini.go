@@ -2,8 +2,6 @@ package rth
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -21,23 +19,12 @@ func (*rotiniHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	parser, ok := rtx.Get("parser").(*rtk.Parser)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "Error: parser not bound")
-		rtx.Exit(1)
-		return
-	}
-
-	io, ok := rtx.Get("io").(*rtk.IO)
-	if !ok {
-		fmt.Fprintln(os.Stderr, "Error: io not bound")
-		rtx.Exit(1)
-		return
-	}
+	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
+	io := rtk.MustGet[*rtk.IO](rtx, "io")
 
 	var inputs rtg.RotiniInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		io.Stderr.Printf("Error:", err)
+		io.Stderr.Println("Error:", err)
 		io.Stdout.Println(helpTextRotini)
 		rtx.Exit(1)
 		return

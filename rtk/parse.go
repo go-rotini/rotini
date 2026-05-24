@@ -57,7 +57,7 @@ func (e *usageError) Error() string { return e.msg }
 //	rth.Program.Bind("parser", rtk.NewParser()).Execute()
 //
 //	// a handler
-//	parser := rtx.MustGet("parser").(*rtk.Parser)
+//	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
 //	var in rtg.MycliInputs
 //	err := parser.Parse(rtx, &in)
 type Parser struct{}
