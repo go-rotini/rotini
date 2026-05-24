@@ -1,9 +1,7 @@
 package rth
 
-type helpKey int
-
 const (
-	helpTextRotini = `The rotini cli framework companion cli.
+	helpTextRotini string = `The rotini cli framework companion cli.
 
 Find more information at: https://rotini.dev
 
@@ -29,7 +27,7 @@ rotini validate .rotini.yaml
 rotini generate ./path/to/.rotini.json
 
 Use "rotini help <command>" for more information about a command.`
-	helpTextRotiniCompletion = `Generate shell completion scripts.
+	helpTextRotiniCompletion string = `Generate shell completion scripts.
 
 Usage:
 rotini completion <shell> [-h | --help]
@@ -49,7 +47,7 @@ rotini completion nushell | save -f ~/.config/nushell/rotini.nu
 rotini completion elvish | save -f ~/.config/elvish/lib/rotini.elv
 
 Use "rotini help <command>" for more information about a command.`
-	helpTextRotiniGenerate = `Generate a cli program from a rotini spec file.
+	helpTextRotiniGenerate string = `Generate a cli program from a rotini spec file.
 
 Usage:
 rotini generate [./path/to/.rotini.yaml] [-w | --watch] [-h | --help]
@@ -66,7 +64,7 @@ rotini generate
 rotini generate ./path/to/.rotini.json --watch
 
 Use "rotini help <command>" for more information about a command.`
-	helpTextRotiniHelp = `Print help for a specific command.
+	helpTextRotiniHelp string = `Print help for a specific command.
 
 Usage:
 rotini help [command] [-h | --help]
@@ -83,7 +81,7 @@ rotini help generate
 rotini help init
 
 Use "rotini help <command>" for more information about a command.`
-	helpTextRotiniInitialize = `Initialize a new rotini cli program spec file.
+	helpTextRotiniInitialize string = `Initialize a new rotini cli program spec file.
 
 Usage:
 rotini initialize <name> [--format=yaml|json] [--force] [-h | --help]
@@ -102,7 +100,7 @@ rotini init mycli --format json
 rotini init mycli --force
 
 Use "rotini help <command>" for more information about a command.`
-	helpTextRotiniValidate = `Validate a rotini spec file for correctness.
+	helpTextRotiniValidate string = `Validate a rotini spec file for correctness.
 
 Usage:
 rotini validate [./path/to/.rotini.yaml] [-h | --help]
@@ -118,7 +116,7 @@ rotini validate
 rotini val ./path/to/.rotini.yaml
 
 Use "rotini help <command>" for more information about a command.`
-	helpTextRotiniVersion = `Print the rotini cli version.
+	helpTextRotiniVersion string = `Print the rotini cli version.
 
 Usage:
 rotini version [-h | --help]
