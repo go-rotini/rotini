@@ -14,8 +14,8 @@ import (
 // rtx, so a handler can opt into standard usage on -h/--help or on a parse error
 // without re-deriving it from the Definition:
 //
-//	in, err := rtk.Parse[rtg.Inputs](rtx)
-//	if err != nil {
+//	var in rtg.Inputs
+//	if err := parser.Parse(rtx, &in); err != nil {
 //		fmt.Fprintln(os.Stderr, err)
 //		fmt.Fprint(os.Stderr, rtk.Usage(rtx))
 //		rtx.Exit(2)

@@ -4,45 +4,27 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 )
 
-// ErrServiceNotFound is the sentinel reported by [Get]/[MustGet] when a registry
-// key is unbound. A wrong-type binding reports [ErrServiceWrongType]. Both are
-// carried by a [*ServiceError] (use errors.As to recover the key/types):
+// ErrServiceNotFound is the sentinel [Rtx.MustGet] panics with (wrapped in a
+// [*ServiceError]) when a registry key is unbound. A handler's OnError funnel
+// classifies it with errors.Is:
 //
-//	if _, err := rotini.Get[*myService](rtx, "svc"); errors.Is(err, rotini.ErrServiceNotFound) {
-//		// bind a default, or fail the command
-//	}
-var (
-	ErrServiceNotFound  = errors.New("rotini: service not found")
-	ErrServiceWrongType = errors.New("rotini: service has wrong type")
-)
+//	case errors.Is(err, rotini.ErrServiceNotFound):
+var ErrServiceNotFound = errors.New("rotini: service not found")
 
-// ServiceError describes a failed [Get]/[MustGet]: the key requested, the type
-// the caller asked for, and the type actually bound (nil when nothing was). It
-// unwraps to [ErrServiceNotFound] or [ErrServiceWrongType], so handlers can
-// branch with errors.Is and recover the details with errors.As.
+// ServiceError is the error [Rtx.MustGet] panics with when key is unbound. It
+// unwraps to [ErrServiceNotFound]; recover the key with errors.As.
 type ServiceError struct {
-	Key  string       // the registry key that was requested
-	Want reflect.Type // the type the caller asked for
-	Got  reflect.Type // the type actually bound, or nil if the key was unbound
+	Key string // the registry key that was requested
 }
 
 func (e *ServiceError) Error() string {
-	if e.Got == nil {
-		return fmt.Sprintf("rotini: no service bound under key %q", e.Key)
-	}
-	return fmt.Sprintf("rotini: service %q is %s, not %s", e.Key, e.Got, e.Want)
+	return fmt.Sprintf("rotini: no service bound under key %q", e.Key)
 }
 
-func (e *ServiceError) Unwrap() error {
-	if e.Got == nil {
-		return ErrServiceNotFound
-	}
-	return ErrServiceWrongType
-}
+func (e *ServiceError) Unwrap() error { return ErrServiceNotFound }
 
 // Rtx is rotini's per-invocation context: the service registry plus the bits the
 // runtime resolves before dispatch — the raw argument vector (read via [Rtx.Args])
@@ -52,8 +34,8 @@ func (e *ServiceError) Unwrap() error {
 //
 // The registry is the dependency-injection seam: bind any service with [Rtx.Bind]
 // (a real implementation in production, a double in tests) and retrieve it with
-// the package-level [Get]/[MustGet]. Bindings persist for the lifetime of the Rtx.
-// Opt-in input parsing (the rtk package's Parse) reads [Rtx.Args]/[Rtx.Chain]; the
+// [Rtx.Get]/[Rtx.MustGet]. Bindings persist for the lifetime of the Rtx. Opt-in
+// input parsing (the rtk package's Parser) reads [Rtx.Args]/[Rtx.Chain]; the
 // runtime itself never parses flags.
 //
 // An Rtx is safe for concurrent registry access; reads and writes are guarded by
@@ -79,7 +61,9 @@ func NewRtx() *Rtx {
 // and Usage helpers, in isolation:
 //
 //	rtx := rotini.NewContext(rtg.Definition, []string{"generate", "x.yaml"})
-//	in, err := rtk.Parse[rtg.RotiniGenerateInputs](rtx)
+//	parser := rtx.MustGet("parser").(*rtk.Parser)
+//	var in rtg.RotiniGenerateInputs
+//	err := parser.Parse(rtx, &in)
 //
 // A remote/co-located token resolves to as much of the chain as precedes it; the
 // runtime would exec the sibling binary, which NewContext does not.
@@ -138,58 +122,50 @@ func (r *Rtx) Chain() []ResolvedCommand {
 	return r.chain
 }
 
-// Get retrieves the binding under key and type-asserts it to T. On success it
-// returns the value and a nil error; otherwise it returns the zero value of T
-// and a [*ServiceError] that unwraps to [ErrServiceNotFound] (key unbound) or
-// [ErrServiceWrongType] (bound value does not satisfy T). The handler owns the
-// failure — inspect it with errors.Is/errors.As and decide inline:
+// Get returns the service bound under key, or nil if none is bound — mirroring
+// [context.Context.Value]. Callers type-assert to the expected type, using the
+// comma-ok form to handle an unbound (or wrong-type) service:
 //
-//	io, err := rotini.Get[IO](rtx, "io")
-//	if err != nil {
-//		io = defaultIO // recover locally
+//	parser, ok := rtx.Get("parser").(*rtk.Parser)
+//	if !ok {
+//		// not bound — fail the command, or fall back
 //	}
 //
-// Get is a package-level function, not a method, because Go forbids type
-// parameters on methods. Use [MustGet] to route failures to the OnError funnel
-// instead of handling them here.
-func Get[T any](r *Rtx, key string) (T, error) {
-	var zero T
-	want := reflect.TypeFor[T]()
+// Get reports a miss as nil and never panics; use [Rtx.MustGet] to route a
+// missing service through the OnError funnel instead.
+func (r *Rtx) Get(key string) any {
 	if r == nil {
-		return zero, &ServiceError{Key: key, Want: want}
+		return nil
 	}
 	r.mu.RLock()
-	v, ok := r.services[key]
-	r.mu.RUnlock()
-	if !ok {
-		return zero, &ServiceError{Key: key, Want: want}
-	}
-	typed, ok := v.(T)
-	if !ok {
-		return zero, &ServiceError{Key: key, Want: want, Got: reflect.TypeOf(v)}
-	}
-	return typed, nil
+	defer r.mu.RUnlock()
+	return r.services[key]
 }
 
-// MustGet retrieves the binding under key as T or panics with the [*ServiceError]
-// from [Get]. The panic is not a dead end: the runtime recovers it inside dispatch
-// and routes it through the program's OnError funnel (see [program.OnError]),
-// which classifies/logs/prints it and returns the process exit code. Use MustGet
-// for services a handler cannot run without, and centralize the failure handling
-// in one OnError funnel rather than at every call site.
-func MustGet[T any](r *Rtx, key string) T {
-	v, err := Get[T](r, key)
-	if err != nil {
-		panic(err)
+// MustGet returns the service bound under key, or panics with a [*ServiceError]
+// (unwrapping to [ErrServiceNotFound]) when key is unbound. The panic is not a
+// dead end: the runtime recovers it inside dispatch and routes it through the
+// program's OnError funnel (see [program.OnError]). Callers type-assert the
+// result; use MustGet for services a handler cannot run without:
+//
+//	parser := rtx.MustGet("parser").(*rtk.Parser)
+func (r *Rtx) MustGet(key string) any {
+	if r != nil {
+		r.mu.RLock()
+		v, ok := r.services[key]
+		r.mu.RUnlock()
+		if ok {
+			return v
+		}
 	}
-	return v
+	panic(&ServiceError{Key: key})
 }
 
 // Context is the per-command context passed into every handler hook
 // (CascadingPreRun, PreRun, Run, PostRun, CascadingPostRun). It is a pointer to
 // the per-invocation [Rtx], so every hook shares the same registry, argv, and
-// exit state. Handlers retrieve services via [Get]/[MustGet] and the raw argv via
-// [Rtx.Args]; typed inputs are an opt-in via the rtk package's Parse.
+// exit state. Handlers retrieve services via [Rtx.Get]/[Rtx.MustGet] and the raw
+// argv via [Rtx.Args]; typed inputs are an opt-in via the rtk package's Parser.
 type Context = *Rtx
 
 // Exit records a non-zero exit code for the program and stops the current

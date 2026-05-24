@@ -136,7 +136,7 @@ func TestRun_exitCodePropagates(t *testing.T) {
 func TestRun_mustGetRoutesToOnError(t *testing.T) {
 	var seen error
 	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
-		_ = MustGet[*bytes.Buffer](rtx, "no-such-service") // panics; recovered into the funnel
+		_ = rtx.MustGet("no-such-service") // panics *ServiceError; recovered into the funnel
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	p.OnError(func(_ context.Context, rtx Context, err error) {
@@ -160,7 +160,7 @@ func TestRun_onErrorWithoutExitStillFails(t *testing.T) {
 	// A funnel that classifies/logs but forgets to call rtx.Exit must not leak a
 	// success code out of a panic: dispatch floors the panic path to 1.
 	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
-		_ = MustGet[*bytes.Buffer](rtx, "missing")
+		_ = rtx.MustGet("missing")
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	p.OnError(func(_ context.Context, _ Context, _ error) {}) // no rtx.Exit

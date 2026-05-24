@@ -4,8 +4,6 @@ import (
 	"reflect"
 	"testing"
 	"time"
-
-	"github.com/go-rotini/rotini"
 )
 
 // The structs below mirror the shape the framework package (rtg) generates for a
@@ -107,15 +105,6 @@ func TestInputs_scopesMatchByCommandNameNotPath(t *testing.T) {
 	}})
 	if !in.App.Flags.Verbose || in.Run.Flags.Count != 3 || in.Run.Arguments.Name != "x" {
 		t.Errorf("composed binding failed: %+v", in)
-	}
-}
-
-func TestInputs_unresolvedReturnsZero(t *testing.T) {
-	// A fresh context has no resolved command chain, so Inputs (which ignores the
-	// Parse error) yields the zero value rather than panicking.
-	in := Inputs[runInputs](NewParser(), rotini.NewRtx())
-	if in.Run.Flags.Count != 0 || in.App.Flags.Verbose || in.Run.Arguments.Name != "" {
-		t.Errorf("expected zero value for an unresolved context, got %+v", in)
 	}
 }
 

@@ -13,6 +13,7 @@ package rtk
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -41,39 +42,67 @@ type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
 
-// ParserKey is the service-registry key under which a CLI binds the parser that
-// [Parse] uses. Binding the parser is the explicit opt-in into rotini-flavored
-// argument parsing:
+// Parser is rotini's argument parser, and it is a *service*: a CLI binds it to the
+// context registry under the key "parser" so that (1) parsing is opt-in — a CLI
+// that wants raw argv binds nothing and reads rotini.Context.Args itself — and
+// (2) the registry is a dependency-injection seam (the same handler code runs
+// whether you bound the production parser or a double). A handler retrieves it and
+// calls [Parser.Parse]:
 //
-//	rth.Program.Bind(rtk.ParserKey, rtk.NewParser()).Execute()
-const ParserKey = "parser"
-
-// Parser binds a resolved command's raw argument vector into a name-scoped store
-// of values, applying defaults and validating (required, enum). It is rotini's
-// default parser, and it is a *service*: a CLI binds it under [ParserKey] so that
-// (1) parsing is opt-in — a CLI that wants raw argv binds nothing and reads
-// rotini.Context.Args itself — and (2) the registry is a dependency-injection
-// seam: the same handler code runs whether you bound the production parser or a
-// test double. [Parse] retrieves the bound Parser via rotini.Get and runs it
-// before reflectively binding the typed inputs struct.
+//	// main.go
+//	rth.Program.Bind("parser", rtk.NewParser()).Execute()
+//
+//	// a handler
+//	parser := rtx.MustGet("parser").(*rtk.Parser)
+//	var in rtg.MycliInputs
+//	err := parser.Parse(rtx, &in)
 type Parser struct{}
 
-// NewParser returns rotini's default [Parser], ready to bind under [ParserKey].
+// NewParser returns rotini's default [Parser], ready to bind under the "parser"
+// registry key.
 func NewParser() *Parser {
 	return &Parser{}
 }
 
-// parse binds argv to the resolved chain and validates it, returning the parsed
-// store or the first usage error.
-func (*Parser) parse(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, error) {
-	store, err := parseInto(chain, argv)
+// Parse binds the running command's arguments into out — a non-nil pointer to the
+// typed inputs struct rtg emits (e.g. &rtg.MycliInputs{}) — using the resolved
+// command and raw argv on rtx, in the json.Unmarshal style:
+//
+//	var in rtg.MycliInputs
+//	if err := parser.Parse(rtx, &in); err != nil { /* handler owns it */ }
+//
+// It applies declared defaults and validates required/enum, then fills out by
+// reflection from the `rotini:"…"` struct tags (each per-command field carries
+// `scope=<command-name>`, each flag/argument field its logical name; built-ins and
+// any encoding.TextUnmarshaler are coerced; a trailing []string absorbs remaining
+// positionals). Parse returns an error when out is not a non-nil pointer, an
+// unknown flag is given, a flag's value is missing, a required input is absent, or
+// a value is outside a declared enum — print it (see [Usage]), rtx.Exit, or fall
+// back to rotini.Context.Args.
+func (p *Parser) Parse(rtx rotini.Context, out any) error {
+	if p == nil {
+		return &usageError{msg: "rotini: nil parser"}
+	}
+	if rtx == nil {
+		return &usageError{msg: "rotini: parse on nil context"}
+	}
+	rv := reflect.ValueOf(out)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return &usageError{msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
+	}
+	chain := rtx.Chain()
+	if len(chain) == 0 {
+		return &usageError{msg: "rotini: no command resolved for this context"}
+	}
+	store, err := parseInto(chain, rtx.Args())
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err := validate(chain, store); err != nil {
-		return nil, err
+		return err
 	}
-	return store, nil
+	bindInputs(rv.Elem(), store)
+	return nil
 }
 
 // parseInto binds argv to an already-resolved chain, strictly: an unrecognized

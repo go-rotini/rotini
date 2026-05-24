@@ -21,15 +21,15 @@ func (*rotiniHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	parser, err := rotini.Get[*rtk.Parser](rtx, rtk.ParserKey)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+	parser, ok := rtx.Get("parser").(*rtk.Parser)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "Error: parser not bound")
 		rtx.Exit(1)
 		return
 	}
 
-	inputs, err := rtk.Parse[rtg.RotiniInputs](parser, rtx)
-	if err != nil {
+	var inputs rtg.RotiniInputs
+	if err := parser.Parse(rtx, &inputs); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		fmt.Println(helpTextRotini)
 		rtx.Exit(1)
