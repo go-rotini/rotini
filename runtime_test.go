@@ -126,7 +126,7 @@ func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 }
 
 func TestRun_exitCodePropagates(t *testing.T) {
-	h := &testHandlers{log: new([]string), onRun: func(rtx Context) { Exit(rtx, 5) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx Context) { rtx.Exit(5) }}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	if code := p.run(p.args); code != 5 {
 		t.Errorf("run() = %d, want 5 (handler called Exit)", code)
@@ -139,13 +139,13 @@ func TestRun_mustGetRoutesToOnError(t *testing.T) {
 		_ = MustGet[*Parser](rtx, "no-such-service") // panics; recovered into the funnel
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.OnError(func(_ Context, err error) int {
+	p.OnError(func(_ context.Context, rtx Context, err error) {
 		seen = err
-		return 7
+		rtx.Exit(7)
 	})
 
 	if code := p.run(p.args); code != 7 {
-		t.Fatalf("run() = %d, want 7 (OnError's code)", code)
+		t.Fatalf("run() = %d, want 7 (OnError's exit code)", code)
 	}
 	if !errors.Is(seen, ErrServiceNotFound) {
 		t.Errorf("OnError got %v, want it to wrap ErrServiceNotFound", seen)
@@ -153,6 +153,19 @@ func TestRun_mustGetRoutesToOnError(t *testing.T) {
 	var se *ServiceError
 	if !errors.As(seen, &se) || se.Key != "no-such-service" {
 		t.Errorf("OnError error did not carry the key: %v", seen)
+	}
+}
+
+func TestRun_onErrorWithoutExitStillFails(t *testing.T) {
+	// A funnel that classifies/logs but forgets to call rtx.Exit must not leak a
+	// success code out of a panic: dispatch floors the panic path to 1.
+	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
+		_ = MustGet[*Parser](rtx, "missing")
+	}}
+	p, _, _ := newTestProgram(h, []string{"run"})
+	p.OnError(func(_ context.Context, _ Context, _ error) {}) // no rtx.Exit
+	if code := p.run(p.args); code != 1 {
+		t.Errorf("run() = %d, want 1 (panic path floors to non-zero)", code)
 	}
 }
 

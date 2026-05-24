@@ -138,8 +138,10 @@ func (p *program) dispatch(chain []frame, rtx *Rtx) (code int) {
 		handlers[i] = h
 	}
 
-	// A MustGet failure or any panic from a hook unwinds to here; the funnel
-	// classifies/prints it and yields the exit code run returns.
+	// A MustGet failure or any panic from a hook unwinds to here, skipping the
+	// `return rtx.exitCode` below — so the funnel runs and we lift its exit code
+	// (set via rtx.Exit) into the named return ourselves. The panic path is always
+	// a failure: if the funnel left the code at 0, floor it to 1.
 	defer func() {
 		if r := recover(); r != nil {
 			err, ok := r.(error)
@@ -147,6 +149,10 @@ func (p *program) dispatch(chain []frame, rtx *Rtx) (code int) {
 				err = fmt.Errorf("%v", r)
 			}
 			rtx.onError(p.ctx, rtx, err)
+			code = rtx.exitCode
+			if code == 0 {
+				code = 1
+			}
 		}
 	}()
 
