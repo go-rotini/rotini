@@ -67,12 +67,16 @@ func newTestProgram(h any, args []string) (*program, *bytes.Buffer, *bytes.Buffe
 	return p, out, errb
 }
 
-func TestRun_lifecycleOrderAndInputs(t *testing.T) {
+func TestRun_lifecycleOrderAndContext(t *testing.T) {
 	var log []string
-	var got runInputs
-	h := &testHandlers{log: &log, onRun: func(rtx Context) { got = Inputs[runInputs](rtx) }}
+	var gotChain []ResolvedCommand
+	var gotArgs []string
+	args := []string{"--verbose", "run", "alice", "x", "y", "--count", "3"}
+	h := &testHandlers{log: &log, onRun: func(rtx Context) {
+		gotChain, gotArgs = rtx.Chain(), rtx.Args()
+	}}
 
-	p, _, errb := newTestProgram(h, []string{"--verbose", "run", "alice", "x", "y", "--count", "3"})
+	p, _, errb := newTestProgram(h, args)
 	if code := p.run(p.args); code != 0 {
 		t.Fatalf("run() = %d, want 0 (stderr: %s)", code, errb)
 	}
@@ -85,17 +89,13 @@ func TestRun_lifecycleOrderAndInputs(t *testing.T) {
 	if !reflect.DeepEqual(log, want) {
 		t.Errorf("hook order:\n got=%v\nwant=%v", log, want)
 	}
-	if !got.App.Flags.Verbose {
-		t.Errorf("ancestor flag not bound during Run: App.Flags.Verbose = false")
+	// The runtime resolves the chain + exposes raw argv; binding those into typed
+	// inputs is the rtk package's job (tested there).
+	if names := chainNames(gotChain); len(names) != 2 || names[0] != "app" || names[1] != "run" {
+		t.Errorf("Chain() during Run = %v, want [app run]", names)
 	}
-	if got.Run.Flags.Count != 3 {
-		t.Errorf("Count = %d, want 3", got.Run.Flags.Count)
-	}
-	if got.Run.Arguments.Name != "alice" {
-		t.Errorf("Name = %q, want alice", got.Run.Arguments.Name)
-	}
-	if r := got.Run.Arguments.Rest; len(r) != 2 || r[0] != "x" || r[1] != "y" {
-		t.Errorf("Rest = %v, want [x y]", r)
+	if !reflect.DeepEqual(gotArgs, args) {
+		t.Errorf("Args() during Run = %v, want %v", gotArgs, args)
 	}
 }
 
@@ -136,7 +136,7 @@ func TestRun_exitCodePropagates(t *testing.T) {
 func TestRun_mustGetRoutesToOnError(t *testing.T) {
 	var seen error
 	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
-		_ = MustGet[*Parser](rtx, "no-such-service") // panics; recovered into the funnel
+		_ = MustGet[*bytes.Buffer](rtx, "no-such-service") // panics; recovered into the funnel
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	p.OnError(func(_ context.Context, rtx Context, err error) {
@@ -160,7 +160,7 @@ func TestRun_onErrorWithoutExitStillFails(t *testing.T) {
 	// A funnel that classifies/logs but forgets to call rtx.Exit must not leak a
 	// success code out of a panic: dispatch floors the panic path to 1.
 	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
-		_ = MustGet[*Parser](rtx, "missing")
+		_ = MustGet[*bytes.Buffer](rtx, "missing")
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	p.OnError(func(_ context.Context, _ Context, _ error) {}) // no rtx.Exit
@@ -179,54 +179,6 @@ func TestRun_defaultOnErrorPrintsAndReturns1(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "boom") {
 		t.Errorf("default OnError should print the error, stderr: %s", errb)
-	}
-}
-
-func TestUsage_fromContext(t *testing.T) {
-	chain, _ := resolveChain(testDef(), []string{"run"})
-	rtx := NewRtx()
-	rtx.chain = chain
-	s := Usage(rtx)
-	if !strings.Contains(s, "Usage:") || !strings.Contains(s, "app run") {
-		t.Errorf("Usage(rtx) unexpected:\n%s", s)
-	}
-	if Usage(NewRtx()) != "" {
-		t.Errorf("Usage on an unresolved context should be empty")
-	}
-}
-
-func TestPrintUsage_rich(t *testing.T) {
-	def := Definition{
-		Name:        "app",
-		Handler:     "App",
-		Summary:     "Do things.",
-		Description: "A longer description of app.",
-		Flags:       []FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool", Description: "Be loud."}},
-		Commands: []CommandDef{
-			{
-				Name: "run", Handler: "AppRun", Aliases: []string{"r"}, Summary: "Run it.",
-				Flags:     []FlagDef{{Name: "count", Identifiers: []string{"--count"}, Type: "int", Description: "How many.", Default: "1"}},
-				Arguments: []ArgDef{{Name: "name", Description: "Who to run."}},
-			},
-		},
-	}
-
-	var buf bytes.Buffer
-	writeUsage(&buf, []frame{rootFrame(def)})
-	root := buf.String()
-	for _, want := range []string{"Do things.", "Usage:", "A longer description of app.", "Commands:", "run, r", "Run it.", "Be loud."} {
-		if !strings.Contains(root, want) {
-			t.Errorf("root help missing %q:\n%s", want, root)
-		}
-	}
-
-	buf.Reset()
-	writeUsage(&buf, []frame{rootFrame(def), cmdFrame(def.Commands[0])})
-	leaf := buf.String()
-	for _, want := range []string{"Run it.", "app run", "Arguments:", "Who to run.", "Flags:", "--count int", "How many.", `(default "1")`} {
-		if !strings.Contains(leaf, want) {
-			t.Errorf("run help missing %q:\n%s", want, leaf)
-		}
 	}
 }
 

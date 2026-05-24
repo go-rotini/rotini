@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 )
@@ -23,7 +22,7 @@ func complete(def Definition, words []string) []string {
 
 	// Resolve the command chain from the context words, leniently skipping
 	// anything that isn't a known sub-command (flags, flag values, arguments).
-	chain := []frame{rootFrame(def)}
+	chain := []ResolvedCommand{rootFrame(def)}
 	for _, w := range context {
 		if isFlag(w) {
 			continue
@@ -48,7 +47,7 @@ func complete(def Definition, words []string) []string {
 	if strings.HasPrefix(partial, "-") {
 		ids := []string{"-h", "--help"}
 		for i := len(chain) - 1; i >= 0; i-- {
-			for _, f := range chain[i].flags {
+			for _, f := range chain[i].Flags {
 				ids = append(ids, f.Identifiers...)
 			}
 		}
@@ -57,11 +56,11 @@ func complete(def Definition, words []string) []string {
 
 	// Completing a sub-command or remote-command name.
 	var names []string
-	for _, c := range cur.commands {
+	for _, c := range cur.Commands {
 		names = append(names, c.Name)
 		names = append(names, c.Aliases...)
 	}
-	for _, r := range cur.remotes {
+	for _, r := range cur.Remotes {
 		names = append(names, r.Name)
 		names = append(names, r.Aliases...)
 	}
@@ -80,50 +79,3 @@ func filterPrefix(candidates []string, prefix string) []string {
 	sort.Strings(out)
 	return out
 }
-
-// CompletionScript returns a shell completion script for prog (the installed
-// binary name) and shell. The script delegates to the binary's hidden
-// completion entrypoint, so completions always reflect the live command tree.
-// Supported shells: bash, zsh, fish.
-func CompletionScript(prog, shell string) (string, error) {
-	var tmpl string
-	switch shell {
-	case "bash":
-		tmpl = bashCompletionTemplate
-	case "zsh":
-		tmpl = zshCompletionTemplate
-	case "fish":
-		tmpl = fishCompletionTemplate
-	case "":
-		return "", fmt.Errorf("a shell is required (bash, zsh, or fish)")
-	default:
-		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish)", shell)
-	}
-	return strings.ReplaceAll(tmpl, "PROG", prog), nil
-}
-
-const bashCompletionTemplate = `# bash completion for PROG
-_PROG_complete() {
-    local args IFS=$'\n'
-    args=("${COMP_WORDS[@]:1:$COMP_CWORD}")
-    COMPREPLY=($(PROG __complete "${args[@]}" 2>/dev/null))
-}
-complete -o default -F _PROG_complete PROG
-`
-
-const zshCompletionTemplate = `#compdef PROG
-_PROG() {
-    local -a completions
-    completions=(${(f)"$(PROG __complete ${words[2,$CURRENT]} 2>/dev/null)"})
-    compadd -a completions
-}
-compdef _PROG PROG
-`
-
-const fishCompletionTemplate = `# fish completion for PROG
-function __PROG_complete
-    set -l tokens (commandline -opc) (commandline -ct)
-    PROG __complete $tokens[2..-1] 2>/dev/null
-end
-complete -c PROG -f -a '(__PROG_complete)'
-`

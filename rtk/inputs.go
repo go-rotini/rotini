@@ -1,4 +1,4 @@
-package rotini
+package rtk
 
 import (
 	"encoding"
@@ -6,36 +6,18 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-rotini/rotini"
 )
-
-// parsedInputs is one invocation's parsed argv, keyed by command-name scope.
-// [Parse] builds it (via the bound "parser" service) on demand and reads it back
-// through the reflective binder. Keying by command name — not the parent-prefixed
-// path — is what lets a statically-composed child read its inputs through its own
-// generated types unchanged.
-type parsedInputs struct {
-	scopes map[string]scopeInputs
-}
-
-// scopeInputs holds one command scope's parsed values: flag values by logical
-// name (a repeatable flag keeps every value) and the positional arguments.
-type scopeInputs struct {
-	flags map[string][]string
-	args  []string
-}
-
-// parserKey is the well-known registry key under which the runtime auto-binds the
-// default [*Parser] that [Parse] retrieves.
-const parserKey = "parser"
 
 // Parse resolves the running command's raw arguments into the typed inputs struct
 // T (e.g. Parse[rtg.MycliGreetInputs](rtx)) and validates them. It is the opt-in,
-// error-returning entry point to rotini's flag/argument parsing: the runtime
-// resolves which command ran and hands the handler the raw argv (via [Rtx.Args]),
-// but it does not parse or validate until the handler asks.
+// error-returning entry point to rotini's flag/argument parsing: the core runtime
+// resolves which command ran and hands the handler the raw argv (via Context.Args)
+// and the resolved chain (via Context.Chain), but it does not parse or validate
+// until the handler calls Parse.
 //
-// Parse retrieves the bound "parser" service (falling back to a default [Parser]),
-// runs it over rtx.Args against the resolved command's declared flags/arguments —
+// Parse binds rtx.Args against the resolved command's declared flags/arguments —
 // applying defaults and checking required/enum constraints — then builds T by
 // reflection using the `rotini:"…"` struct tags the framework package emits: each
 // per-command field carries a `scope=<command-name>` tag, and each flag or
@@ -44,21 +26,24 @@ const parserKey = "parser"
 // arguments bind by declaration order, and a trailing []string field absorbs the
 // remaining positionals.
 //
-// Parse returns a *usageError when an unknown flag is given, a flag's value is
-// missing, a required input is absent, or a value is outside a declared enum. The
-// handler owns the error — print it (see [Usage]), exit (see [Exit]), or fall back
-// to [Rtx.Args] and a parser of its own.
-func Parse[T any](rtx Context) (T, error) {
+// Parse returns an error when an unknown flag is given, a flag's value is missing,
+// a required input is absent, or a value is outside a declared enum. The handler
+// owns it — print it (see [Usage]), exit (rtx.Exit), or fall back to rtx.Args and
+// a parser of its own.
+func Parse[T any](rtx rotini.Context) (T, error) {
 	var out T
-	if rtx == nil || len(rtx.chain) == 0 {
+	if rtx == nil {
+		return out, &usageError{msg: "rotini: parse on nil context"}
+	}
+	chain := rtx.Chain()
+	if len(chain) == 0 {
 		return out, &usageError{msg: "rotini: no command resolved for this context"}
 	}
-	p, err := Get[*Parser](rtx, parserKey)
-	if err != nil || p == nil {
-		p = &Parser{} // no parser bound (e.g. a hand-built rtx): use the default
-	}
-	store, err := p.parse(rtx.chain, rtx.args)
+	store, err := parseInto(chain, rtx.Args())
 	if err != nil {
+		return out, err
+	}
+	if err := validate(chain, store); err != nil {
 		return out, err
 	}
 	bindInputs(reflect.ValueOf(&out).Elem(), store)
@@ -66,11 +51,11 @@ func Parse[T any](rtx Context) (T, error) {
 }
 
 // Inputs is the error-ignoring convenience form of [Parse]: it binds whatever it
-// can and discards parse/validation errors, returning the zero value of T on a
-// nil context or when parsing fails outright. Prefer [Parse] in handlers that
-// should react to bad input; Inputs suits handlers that have already validated or
-// that tolerate partial input.
-func Inputs[T any](rtx Context) T {
+// can and discards parse/validation errors, returning the zero value of T on a nil
+// context or when parsing fails outright. Prefer [Parse] in handlers that should
+// react to bad input; Inputs suits handlers that have already validated or that
+// tolerate partial input.
+func Inputs[T any](rtx rotini.Context) T {
 	out, _ := Parse[T](rtx)
 	return out
 }
@@ -127,8 +112,8 @@ func bindFlags(v reflect.Value, flags map[string][]string) {
 	}
 }
 
-// bindArgs fills a <Cmd>Arguments struct positionally; a trailing []string
-// field is variadic and absorbs all remaining positionals.
+// bindArgs fills a <Cmd>Arguments struct positionally; a trailing []string field
+// is variadic and absorbs all remaining positionals.
 func bindArgs(v reflect.Value, args []string) {
 	if v.Kind() != reflect.Struct {
 		return
@@ -153,9 +138,9 @@ var (
 	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
 )
 
-// coerce sets f from the raw string value(s). It is best-effort: malformed
-// values (which the parser should have rejected) leave the field at its zero
-// value rather than panicking.
+// coerce sets f from the raw string value(s). It is best-effort: malformed values
+// (which validation should have rejected) leave the field at its zero value rather
+// than panicking.
 func coerce(f reflect.Value, raw []string) {
 	if len(raw) == 0 {
 		return

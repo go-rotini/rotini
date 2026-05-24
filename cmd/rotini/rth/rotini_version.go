@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
+	"github.com/go-rotini/rotini/rtk"
 )
 
 type rotiniVersionHandlers struct{}
@@ -20,7 +21,7 @@ func (*rotiniVersionHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	inputs, err := rotini.Parse[rtg.RotiniVersionInputs](rtx)
+	inputs, err := rtk.Parse[rtg.RotiniVersionInputs](rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rotini:", err)
 		rtx.Exit(1)

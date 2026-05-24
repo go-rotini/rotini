@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
+	"github.com/go-rotini/rotini/rtk"
 )
 
 type rotiniHandlers struct{}
@@ -20,7 +21,7 @@ func (*rotiniHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	inputs, err := rotini.Parse[rtg.RotiniInputs](rtx)
+	inputs, err := rtk.Parse[rtg.RotiniInputs](rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		fmt.Println(helpTextRotini)

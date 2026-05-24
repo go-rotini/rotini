@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
+	"github.com/go-rotini/rotini/rtk"
 )
 
 type rotiniCompletionHandlers struct{}
@@ -21,7 +22,7 @@ func (*rotiniCompletionHandlers) PreRun(ctx context.Context, rtx rotini.Context)
 }
 
 func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	inputs, err := rotini.Parse[rtg.RotiniCompletionInputs](rtx)
+	inputs, err := rtk.Parse[rtg.RotiniCompletionInputs](rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rotini:", err)
 		rtx.Exit(2)
@@ -34,7 +35,7 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx rotini.Context) {
 		return
 	}
 
-	script, err := rotini.CompletionScript(filepath.Base(os.Args[0]), in.Arguments.Shell)
+	script, err := rtk.CompletionScript(filepath.Base(os.Args[0]), in.Arguments.Shell)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		rtx.Exit(1)

@@ -101,9 +101,6 @@ func (p *program) run(argv []string) int {
 	if rtx.onError == nil {
 		rtx.onError = p.defaultOnError
 	}
-	if !rtx.Has(parserKey) {
-		rtx.Bind(parserKey, &Parser{})
-	}
 	return p.dispatch(chain, rtx)
 }
 
@@ -120,19 +117,19 @@ func (p *program) defaultOnError(_ context.Context, rtx Context, err error) {
 // and PostRun, then CascadingPostRun leaf→root. A [MustGet] failure or any panic
 // raised inside a hook is recovered and routed through the registry's OnError
 // funnel, whose returned code becomes the process exit code.
-func (p *program) dispatch(chain []frame, rtx *Rtx) (code int) {
+func (p *program) dispatch(chain []ResolvedCommand, rtx *Rtx) (code int) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
-		m := hv.MethodByName(f.handler)
+		m := hv.MethodByName(f.Handler)
 		if !m.IsValid() {
-			fmt.Fprintf(p.stderr, "%s: no handler for command %q (missing method %q)\n", p.def.Name, f.name, f.handler)
+			fmt.Fprintf(p.stderr, "%s: no handler for command %q (missing method %q)\n", p.def.Name, f.Name, f.Handler)
 			return 1
 		}
 		out := m.Call(nil)
 		h, ok := out[0].Interface().(CommandHandlers)
 		if !ok || h == nil {
-			fmt.Fprintf(p.stderr, "%s: handler %q does not implement CommandHandlers\n", p.def.Name, f.handler)
+			fmt.Fprintf(p.stderr, "%s: handler %q does not implement CommandHandlers\n", p.def.Name, f.Handler)
 			return 1
 		}
 		handlers[i] = h

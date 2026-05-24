@@ -45,16 +45,16 @@ func (e *ServiceError) Unwrap() error {
 }
 
 // Rtx is rotini's per-invocation context: the service registry plus the bits the
-// runtime resolves before dispatch — the raw argument vector (read via [Args] or
-// [Parse]) and the resolved command chain. A single Rtx is built per invocation
-// and passed (as [Context], a pointer) into every handler hook, so all hooks
-// share the same bindings and exit state.
+// runtime resolves before dispatch — the raw argument vector (read via [Rtx.Args])
+// and the resolved command chain (read via [Rtx.Chain]). A single Rtx is built per
+// invocation and passed (as [Context], a pointer) into every handler hook, so all
+// hooks share the same bindings and exit state.
 //
 // The registry is the dependency-injection seam: bind any service with [Rtx.Bind]
 // (a real implementation in production, a double in tests) and retrieve it with
-// the package-level [Get]/[MustGet]. The runtime auto-binds a default "parser"
-// service that [Parse] uses; a CLI can override it via [program.Bind]. Bindings
-// persist for the lifetime of the Rtx.
+// the package-level [Get]/[MustGet]. Bindings persist for the lifetime of the Rtx.
+// Opt-in input parsing (the rtk package's Parse) reads [Rtx.Args]/[Rtx.Chain]; the
+// runtime itself never parses flags.
 //
 // An Rtx is safe for concurrent registry access; reads and writes are guarded by
 // an internal sync.RWMutex.
@@ -62,15 +62,33 @@ type Rtx struct {
 	mu       sync.RWMutex
 	services map[string]any
 	args     []string                                          // raw argument vector for this invocation
-	chain    []frame                                           // resolved command path, root → leaf
+	chain    []ResolvedCommand                                 // resolved command path, root → leaf
 	onError  func(ctx context.Context, rtx Context, err error) // funnel for MustGet/panic failures (see Program.OnError)
-	exitCode int                                               // process exit code requested via [Exit]
-	stopped  bool                                              // [Exit] was called; remaining leaf hooks are skipped
+	exitCode int                                               // process exit code requested via [Rtx.Exit]
+	stopped  bool                                              // [Rtx.Exit] was called; remaining leaf hooks are skipped
 }
 
 // NewRtx returns an empty Rtx with an initialized registry.
 func NewRtx() *Rtx {
 	return &Rtx{services: make(map[string]any)}
+}
+
+// NewContext builds a [Context] with argv resolved against def — the same context
+// the runtime hands a handler at dispatch (raw [Rtx.Args] + the resolved
+// [Rtx.Chain]). It is the entry point for exercising a handler, or the rtk Parse
+// and Usage helpers, in isolation:
+//
+//	rtx := rotini.NewContext(rtg.Definition, []string{"generate", "x.yaml"})
+//	in, err := rtk.Parse[rtg.RotiniGenerateInputs](rtx)
+//
+// A remote/co-located token resolves to as much of the chain as precedes it; the
+// runtime would exec the sibling binary, which NewContext does not.
+func NewContext(def Definition, argv []string) Context {
+	chain, _ := resolveChain(def, argv)
+	rtx := NewRtx()
+	rtx.args = argv
+	rtx.chain = chain
+	return rtx
 }
 
 // Bind associates value with key, overwriting any prior binding. It returns the
@@ -99,12 +117,25 @@ func (r *Rtx) Has(key string) bool {
 
 // Args returns the raw argument vector for this invocation: everything after the
 // resolved command path is still present, so a handler can run its own parser
-// instead of [Parse]. The slice is the runtime's; treat it as read-only.
+// instead of the rtk package's Parse. The slice is the runtime's; treat it as
+// read-only.
 func (r *Rtx) Args() []string {
 	if r == nil {
 		return nil
 	}
 	return r.args
+}
+
+// Chain returns the resolved command path for this invocation, root → leaf — the
+// command tree the runtime descended to choose this handler. Opt-in tooling (the
+// rtk package's Parse and Usage) reads it to bind inputs and render help against
+// the exact command whose handler ran. The slice is the runtime's; treat it as
+// read-only.
+func (r *Rtx) Chain() []ResolvedCommand {
+	if r == nil {
+		return nil
+	}
+	return r.chain
 }
 
 // Get retrieves the binding under key and type-asserts it to T. On success it
@@ -157,8 +188,8 @@ func MustGet[T any](r *Rtx, key string) T {
 // Context is the per-command context passed into every handler hook
 // (CascadingPreRun, PreRun, Run, PostRun, CascadingPostRun). It is a pointer to
 // the per-invocation [Rtx], so every hook shares the same registry, argv, and
-// exit state. Handlers retrieve services via [Get]/[MustGet], typed inputs via
-// [Parse], and the raw argv via [Rtx.Args].
+// exit state. Handlers retrieve services via [Get]/[MustGet] and the raw argv via
+// [Rtx.Args]; typed inputs are an opt-in via the rtk package's Parse.
 type Context = *Rtx
 
 // Exit records a non-zero exit code for the program and stops the current

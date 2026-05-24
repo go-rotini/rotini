@@ -1,22 +1,15 @@
-package rotini
+package rtk
 
 import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/go-rotini/rotini"
 )
 
-// bindStore runs the reflective binder over a hand-built parsed store, the same
-// way [Parse] does after the parser fills it. It isolates coercion/scoping from
-// argv parsing.
-func bindStore[T any](store *parsedInputs) T {
-	var out T
-	bindInputs(reflect.ValueOf(&out).Elem(), store)
-	return out
-}
-
-// The structs below mirror the shape the framework package (rtg) generates for
-// a root command "app" with a sub-command "run".
+// The structs below mirror the shape the framework package (rtg) generates for a
+// root command "app" with a sub-command "run".
 
 type appFlags struct {
 	Verbose bool `rotini:"verbose"`
@@ -49,6 +42,15 @@ type runCommandInputs struct {
 type runInputs struct {
 	App appCommandInputs `rotini:"scope=app"`
 	Run runCommandInputs `rotini:"scope=run"`
+}
+
+// bindStore runs the reflective binder over a hand-built parsed store, the same
+// way [Parse] does after parsing fills it. It isolates coercion/scoping from argv
+// parsing.
+func bindStore[T any](store *parsedInputs) T {
+	var out T
+	bindInputs(reflect.ValueOf(&out).Elem(), store)
+	return out
 }
 
 func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
@@ -99,8 +101,6 @@ func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
 // A composed child's input type carries child-relative scope tags; binding must
 // match by command name regardless of any parent prefix in the argv path.
 func TestInputs_scopesMatchByCommandNameNotPath(t *testing.T) {
-	// Parsed as if invoked through a parent ("parent run …"): the store is still
-	// keyed by command name, so the child's "run"/"app" scopes resolve.
 	in := bindStore[runInputs](&parsedInputs{scopes: map[string]scopeInputs{
 		"app": {flags: map[string][]string{"verbose": {"true"}}},
 		"run": {flags: map[string][]string{"count": {"3"}}, args: []string{"x"}},
@@ -113,7 +113,7 @@ func TestInputs_scopesMatchByCommandNameNotPath(t *testing.T) {
 func TestInputs_unresolvedReturnsZero(t *testing.T) {
 	// A fresh context has no resolved command chain, so Inputs (which ignores the
 	// Parse error) yields the zero value rather than panicking.
-	in := Inputs[runInputs](NewRtx())
+	in := Inputs[runInputs](rotini.NewRtx())
 	if in.Run.Flags.Count != 0 || in.App.Flags.Verbose || in.Run.Arguments.Name != "" {
 		t.Errorf("expected zero value for an unresolved context, got %+v", in)
 	}
