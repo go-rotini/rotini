@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -38,27 +39,76 @@ type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
 
-// parseResult is the outcome of resolving argv against a [Definition]. When
-// remote is set, argv selected a remote/co-located sub-command and the runtime
-// should exec it instead of dispatching the chain.
-type parseResult struct {
-	chain   []frame // root → leaf
-	parsed  *parsedInputs
-	help    bool // built-in help was requested (-h/--help)
-	version bool // built-in version was requested (-v/--version)
-	remote  *remoteDispatch
+// Parser turns a resolved command's raw argument vector into a name-scoped store
+// of parsed values: it binds flags/arguments against the command's declared defs,
+// applies defaults, and validates (required, enum). The runtime auto-binds a
+// default *Parser under the "parser" service key, which [Parse] retrieves before
+// reflectively binding the result into the caller's typed inputs struct. A CLI
+// can swap it via Program.Bind("parser", …); a handler that wants a different
+// flag syntax entirely can ignore [Parse] and read [Rtx.Args] instead.
+type Parser struct{}
+
+// parse binds argv to the resolved chain and validates it, returning the parsed
+// store or the first usage error.
+func (*Parser) parse(chain []frame, argv []string) (*parsedInputs, error) {
+	store, err := parseInto(chain, argv)
+	if err != nil {
+		return nil, err
+	}
+	if err := validate(chain, store); err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
-// parse resolves argv against def: it walks the command tree by name/alias,
-// matches flags by identifier against the resolved chain (leaf→root), and
-// collects positional arguments for the leaf command. The parsed inputs are
-// keyed by command name so [Inputs] can bind them — including for a statically
-// composed child, whose scope tags are relative to its own root.
-func parse(def Definition, argv []string) (*parseResult, error) {
+// resolveChain walks argv against def to find the invoked command path without
+// validating inputs. It descends sub-commands by name/alias, skips flags (and a
+// flag's separate value, so it is never mistaken for a command), and stops at the
+// first positional argument. If a token names a remote/co-located command it
+// returns the chain so far plus a non-nil remoteDispatch the runtime should exec
+// instead of dispatching the chain.
+//
+// Resolution is intentionally lenient — unknown flags, missing values, and bad
+// input are not errors here. Parsing and validation are opt-in, performed by the
+// handler via [Parse].
+func resolveChain(def Definition, argv []string) ([]frame, *remoteDispatch) {
 	chain := []frame{rootFrame(def)}
+	for i := 0; i < len(argv); i++ {
+		tok := argv[i]
+		if tok == "--" {
+			break // the rest are positional; no further command descent
+		}
+		if isFlag(tok) {
+			name, _, hasInline := splitFlag(tok)
+			// Skip a separate value token so it is not mistaken for a command.
+			if fd, _, ok := findFlag(chain, name); ok && fd.Type != "bool" && !hasInline {
+				i++
+			}
+			continue
+		}
+		cur := chain[len(chain)-1]
+		if child, ok := findChild(cur, tok); ok {
+			chain = append(chain, cmdFrame(child))
+			continue
+		}
+		if rd, ok := findRemote(cur, tok); ok {
+			return chain, &remoteDispatch{def: rd, args: append([]string{}, argv[i+1:]...)}
+		}
+		break // first positional argument; stop descending
+	}
+	return chain, nil
+}
+
+// parseInto binds argv to an already-resolved chain, strictly: an unrecognized
+// flag, or a flag missing its value, is a usageError. Command tokens already in
+// the chain are consumed; everything after the leaf command (and after "--") is a
+// positional argument of the leaf. Declared defaults are applied. parseInto does
+// not check required inputs or enums — that is [validate]'s job — so a handler
+// can inspect what was supplied before deciding how strict to be.
+func parseInto(chain []frame, argv []string) (*parsedInputs, error) {
 	store := &parsedInputs{scopes: map[string]scopeInputs{}}
-	help := false
-	version := false
+	leaf := chain[len(chain)-1].name
+	depth := 1 // index of the next chain frame we might descend into
 	startedArgs := false
 
 	addFlag := func(scope, name, value string) {
@@ -69,10 +119,10 @@ func parse(def Definition, argv []string) (*parseResult, error) {
 		si.flags[name] = append(si.flags[name], value)
 		store.scopes[scope] = si
 	}
-	addArg := func(scope, value string) {
-		si := store.scopes[scope]
+	addArg := func(value string) {
+		si := store.scopes[leaf]
 		si.args = append(si.args, value)
-		store.scopes[scope] = si
+		store.scopes[leaf] = si
 	}
 
 	for i := 0; i < len(argv); i++ {
@@ -87,15 +137,7 @@ func parse(def Definition, argv []string) (*parseResult, error) {
 			name, inline, hasInline := splitFlag(tok)
 			fdef, scope, ok := findFlag(chain, name)
 			if !ok {
-				switch name {
-				case "-h", "--help":
-					help = true
-				case "-v", "--version":
-					version = true
-				default:
-					return nil, &usageError{msg: fmt.Sprintf("unknown flag %q", name)}
-				}
-				continue
+				return nil, &usageError{msg: fmt.Sprintf("unknown flag %q", name)}
 			}
 			var value string
 			switch {
@@ -117,31 +159,71 @@ func parse(def Definition, argv []string) (*parseResult, error) {
 			continue
 		}
 
-		// A non-flag token is a sub-command (until positional args begin) or an
-		// argument of the leaf command.
-		if !startedArgs {
-			cur := chain[len(chain)-1]
-			if child, ok := findChild(cur, tok); ok {
-				chain = append(chain, cmdFrame(child))
+		// A non-flag token: consume it as the next command in the chain if it is
+		// one, otherwise it (and everything after) is a positional of the leaf.
+		if !startedArgs && depth < len(chain) {
+			if c, ok := findChild(chain[depth-1], tok); ok && c.Name == chain[depth].name {
+				depth++
 				continue
-			}
-			if rd, ok := findRemote(cur, tok); ok {
-				// A remote/co-located command: exec its binary with the rest of
-				// argv passed through untouched.
-				return &parseResult{remote: &remoteDispatch{def: rd, args: append([]string{}, argv[i+1:]...)}}, nil
-			}
-			// Not a sub-command. If this command branches but takes no
-			// arguments, the token is a mistyped command, not an argument.
-			if (len(cur.commands) > 0 || len(cur.remotes) > 0) && len(cur.arguments) == 0 {
-				return nil, &usageError{msg: unknownCommandMsg(cur, tok)}
 			}
 		}
 		startedArgs = true
-		addArg(chain[len(chain)-1].name, tok)
+		addArg(tok)
 	}
 
 	applyDefaults(chain, store)
-	return &parseResult{chain: chain, parsed: store, help: help, version: version}, nil
+	return store, nil
+}
+
+// validate enforces the declarative constraints on the resolved chain against a
+// parsed store: a stray positional on a branch-only command is a mistyped
+// sub-command; required flags/arguments must be present (or defaulted); and any
+// value for a flag or argument that declares an Enum must be one of its members.
+// It is the strict half of [Parse]; a handler that wants laxer behavior can bind
+// inputs without it.
+func validate(chain []frame, store *parsedInputs) error {
+	leaf := chain[len(chain)-1]
+	si := store.scopes[leaf.name]
+
+	// A stray positional on a command that branches but takes no arguments is a
+	// mistyped sub-command, not an argument.
+	if len(leaf.commands) > 0 && len(leaf.arguments) == 0 && len(si.args) > 0 {
+		return &usageError{msg: unknownCommandMsg(leaf, si.args[0])}
+	}
+
+	if err := requiredErrors(chain, store); err != nil {
+		return err
+	}
+
+	for _, f := range chain {
+		fsi := store.scopes[f.name]
+		for _, fd := range f.flags {
+			if len(fd.Enum) == 0 {
+				continue
+			}
+			for _, v := range fsi.flags[fd.Name] {
+				if !slices.Contains(fd.Enum, v) {
+					return &usageError{msg: fmt.Sprintf("invalid value %q for %s (one of: %s)", v, flagLabel(fd), strings.Join(fd.Enum, ", "))}
+				}
+			}
+		}
+	}
+
+	for i, ad := range leaf.arguments {
+		if len(ad.Enum) == 0 || i >= len(si.args) {
+			continue
+		}
+		vals := si.args[i : i+1]
+		if ad.Variadic {
+			vals = si.args[i:]
+		}
+		for _, v := range vals {
+			if !slices.Contains(ad.Enum, v) {
+				return &usageError{msg: fmt.Sprintf("invalid value %q for <%s> (one of: %s)", v, ad.Name, strings.Join(ad.Enum, ", "))}
+			}
+		}
+	}
+	return nil
 }
 
 // findRemote returns the remote sub-command of f matching tok by name or alias.

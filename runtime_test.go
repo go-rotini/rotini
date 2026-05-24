@@ -3,6 +3,7 @@ package rotini
 import (
 	"bytes"
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -109,65 +110,75 @@ func TestRun_aliasResolves(t *testing.T) {
 	}
 }
 
-func TestRun_unknownCommandSuggests(t *testing.T) {
+// Under §17 the runtime no longer rejects an unknown command itself: it resolves
+// what it can and dispatches the leaf handler. A typo of a sub-command lands on
+// the (branching) root handler, which surfaces the error only if it opts into
+// Parse — see TestParse_unknownCommand. run itself succeeds and runs that handler.
+func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 	var log []string
-	p, _, errb := newTestProgram(&testHandlers{log: &log}, []string{"ru"}) // typo of "run"
-	code := p.run(p.args)
-	if code != 2 {
-		t.Fatalf("run() = %d, want 2", code)
-	}
-	if !strings.Contains(errb.String(), `unknown command "ru"`) {
-		t.Errorf("stderr missing unknown-command message: %s", errb)
-	}
-	if !strings.Contains(errb.String(), `Did you mean "run"?`) {
-		t.Errorf("stderr missing suggestion: %s", errb)
-	}
-	if len(log) != 0 {
-		t.Errorf("no handler should run on parse failure: %v", log)
-	}
-}
-
-func TestRun_unknownFlag(t *testing.T) {
-	p, _, errb := newTestProgram(&testHandlers{log: new([]string)}, []string{"run", "--nope"})
-	if code := p.run(p.args); code != 2 {
-		t.Fatalf("run() = %d, want 2", code)
-	}
-	if !strings.Contains(errb.String(), `unknown flag "--nope"`) {
-		t.Errorf("stderr missing unknown-flag message: %s", errb)
-	}
-}
-
-func TestRun_flagNeedsValue(t *testing.T) {
-	p, _, errb := newTestProgram(&testHandlers{log: new([]string)}, []string{"run", "--count"})
-	if code := p.run(p.args); code != 2 {
-		t.Fatalf("run() = %d, want 2", code)
-	}
-	if !strings.Contains(errb.String(), "needs a value") {
-		t.Errorf("stderr missing needs-a-value message: %s", errb)
-	}
-}
-
-func TestRun_helpFlag(t *testing.T) {
-	p, out, _ := newTestProgram(&testHandlers{log: new([]string)}, []string{"run", "--help"})
+	p, _, _ := newTestProgram(&testHandlers{log: &log}, []string{"ru"}) // typo of "run"
 	if code := p.run(p.args); code != 0 {
-		t.Fatalf("run() = %d, want 0", code)
+		t.Fatalf("run() = %d, want 0 (the root handler runs; it owns input errors)", code)
 	}
-	if s := out.String(); !strings.Contains(s, "Usage:") || !strings.Contains(s, "app run") {
-		t.Errorf("help output unexpected: %s", s)
+	if !contains(log, "app.Run") {
+		t.Errorf("expected the root handler to run, got %v", log)
 	}
 }
 
-func TestRun_bareNamespacePrintsHelp(t *testing.T) {
-	var log []string
-	p, out, _ := newTestProgram(&testHandlers{log: &log}, []string{})
-	if code := p.run(p.args); code != 0 {
-		t.Fatalf("run() = %d, want 0", code)
+func TestRun_exitCodePropagates(t *testing.T) {
+	h := &testHandlers{log: new([]string), onRun: func(rtx Context) { Exit(rtx, 5) }}
+	p, _, _ := newTestProgram(h, []string{"run"})
+	if code := p.run(p.args); code != 5 {
+		t.Errorf("run() = %d, want 5 (handler called Exit)", code)
 	}
-	if s := out.String(); !strings.Contains(s, "Commands:") || !strings.Contains(s, "run") {
-		t.Errorf("bare help output unexpected: %s", s)
+}
+
+func TestRun_mustGetRoutesToOnError(t *testing.T) {
+	var seen error
+	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
+		_ = MustGet[*Parser](rtx, "no-such-service") // panics; recovered into the funnel
+	}}
+	p, _, _ := newTestProgram(h, []string{"run"})
+	p.OnError(func(_ Context, err error) int {
+		seen = err
+		return 7
+	})
+
+	if code := p.run(p.args); code != 7 {
+		t.Fatalf("run() = %d, want 7 (OnError's code)", code)
 	}
-	if len(log) != 0 {
-		t.Errorf("bare namespace should not run a handler: %v", log)
+	if !errors.Is(seen, ErrServiceNotFound) {
+		t.Errorf("OnError got %v, want it to wrap ErrServiceNotFound", seen)
+	}
+	var se *ServiceError
+	if !errors.As(seen, &se) || se.Key != "no-such-service" {
+		t.Errorf("OnError error did not carry the key: %v", seen)
+	}
+}
+
+func TestRun_defaultOnErrorPrintsAndReturns1(t *testing.T) {
+	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
+		panic("boom") // a non-error panic value is wrapped before the funnel
+	}}
+	p, _, errb := newTestProgram(h, []string{"run"})
+	if code := p.run(p.args); code != 1 {
+		t.Fatalf("run() = %d, want 1 (default OnError)", code)
+	}
+	if !strings.Contains(errb.String(), "boom") {
+		t.Errorf("default OnError should print the error, stderr: %s", errb)
+	}
+}
+
+func TestUsage_fromContext(t *testing.T) {
+	chain, _ := resolveChain(testDef(), []string{"run"})
+	rtx := NewRtx()
+	rtx.chain = chain
+	s := Usage(rtx)
+	if !strings.Contains(s, "Usage:") || !strings.Contains(s, "app run") {
+		t.Errorf("Usage(rtx) unexpected:\n%s", s)
+	}
+	if Usage(NewRtx()) != "" {
+		t.Errorf("Usage on an unresolved context should be empty")
 	}
 }
 
@@ -188,7 +199,7 @@ func TestPrintUsage_rich(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	printUsage(&buf, []frame{rootFrame(def)})
+	writeUsage(&buf, []frame{rootFrame(def)})
 	root := buf.String()
 	for _, want := range []string{"Do things.", "Usage:", "A longer description of app.", "Commands:", "run, r", "Run it.", "Be loud."} {
 		if !strings.Contains(root, want) {
@@ -197,26 +208,11 @@ func TestPrintUsage_rich(t *testing.T) {
 	}
 
 	buf.Reset()
-	printUsage(&buf, []frame{rootFrame(def), cmdFrame(def.Commands[0])})
+	writeUsage(&buf, []frame{rootFrame(def), cmdFrame(def.Commands[0])})
 	leaf := buf.String()
 	for _, want := range []string{"Run it.", "app run", "Arguments:", "Who to run.", "Flags:", "--count int", "How many.", `(default "1")`} {
 		if !strings.Contains(leaf, want) {
 			t.Errorf("run help missing %q:\n%s", want, leaf)
-		}
-	}
-}
-
-func TestRun_versionFlag(t *testing.T) {
-	def := Definition{Name: "app", Handler: "App", Version: "1.2.3"}
-	for _, arg := range []string{"--version", "-v"} {
-		out := &bytes.Buffer{}
-		p := NewProgram(def, &testHandlers{log: new([]string)}).WithArguments([]string{arg})
-		p.stdout, p.stderr = out, &bytes.Buffer{}
-		if code := p.run(p.args); code != 0 {
-			t.Fatalf("%s: run = %d, want 0", arg, code)
-		}
-		if got := strings.TrimSpace(out.String()); got != "app 1.2.3" {
-			t.Errorf("%s: version output = %q, want %q", arg, got, "app 1.2.3")
 		}
 	}
 }

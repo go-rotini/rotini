@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +13,8 @@ type program struct {
 	args     []string
 	def      Definition
 	handlers any
+	rtx      *Rtx                     // pre-seeded registry; user Bind calls land here
+	onError  func(Context, error) int // funnel for MustGet/panic failures; nil → defaultOnError
 	stdout   io.Writer
 	stderr   io.Writer
 }
@@ -29,6 +30,7 @@ func NewProgram(def Definition, handlers any) *program {
 		args:     os.Args[1:],
 		def:      def,
 		handlers: handlers,
+		rtx:      NewRtx(),
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
 	}
@@ -42,16 +44,41 @@ func (p *program) WithArguments(args []string) *program {
 	return p
 }
 
-// Execute parses the arguments, dispatches to the resolved command, runs its
-// lifecycle, and exits the process with the resulting status code.
+// Bind registers a service on the program's registry under key, overwriting any
+// prior binding, and returns the receiver so it chains with [program.OnError] and
+// [program.WithArguments] before [program.Execute]. It is the dependency-injection
+// seam: bind a real implementation in production or a double in tests, with the
+// same handler code retrieving it via [Get]/[MustGet]. Binding "parser" overrides
+// the default [Parser] that [Parse] uses.
+func (p *program) Bind(key string, value any) *program {
+	p.rtx.Bind(key, value)
+	return p
+}
+
+// OnError sets the funnel that handles a [MustGet] failure or any panic raised
+// inside a hook: the runtime recovers it during dispatch, calls fn(rtx, err), and
+// exits the process with the int fn returns. It is the single place to classify
+// (errors.Is/errors.As), log (file, error-tracking service), and print errors in
+// the CLI's own style. With no funnel set, the default prints the error to stderr
+// and returns 1. OnError returns the receiver so it chains with [program.Bind].
+func (p *program) OnError(fn func(Context, error) int) *program {
+	p.onError = fn
+	return p
+}
+
+// Execute resolves the command, runs its lifecycle, and exits the process with
+// the resulting status code.
 func (p *program) Execute() {
 	os.Exit(p.run(p.args))
 }
 
-// run is the testable core of Execute: it returns the process exit code instead
-// of calling os.Exit. 0 = success, 2 = usage error, 1 = other failure.
+// run is the testable core of Execute: it resolves the invoked command (no eager
+// flag parsing — that is the handler's opt-in via [Parse]), execs a remote
+// sub-command if one was selected, otherwise builds the per-invocation [Rtx] and
+// dispatches the lifecycle. It returns the process exit code instead of calling
+// os.Exit. The only retained protocol intercept is the hidden __complete entry
+// the generated shell scripts invoke.
 func (p *program) run(argv []string) int {
-	// Hidden completion entrypoint invoked by the generated shell scripts.
 	if len(argv) > 0 && argv[0] == completeCommand {
 		for _, c := range complete(p.def, argv[1:]) {
 			fmt.Fprintln(p.stdout, c)
@@ -59,80 +86,41 @@ func (p *program) run(argv []string) int {
 		return 0
 	}
 
-	res, err := parse(p.def, argv)
-	if err != nil {
-		fmt.Fprintf(p.stderr, "%s: %s\n", p.def.Name, err)
-		var ue *usageError
-		if errors.As(err, &ue) {
-			fmt.Fprintf(p.stderr, "\nRun '%s --help' for usage.\n", p.def.Name)
-			return 2
-		}
-		return 1
+	chain, remote := resolveChain(p.def, argv)
+	if remote != nil {
+		return p.execRemote(remote)
 	}
 
-	if res.remote != nil {
-		return p.execRemote(res.remote)
+	rtx := p.rtx
+	if rtx == nil {
+		rtx = NewRtx()
 	}
-
-	if res.version {
-		fmt.Fprintln(p.stdout, versionString(p.def))
-		return 0
+	rtx.args = argv
+	rtx.chain = chain
+	rtx.onError = p.onError
+	if rtx.onError == nil {
+		rtx.onError = p.defaultOnError
 	}
-
-	if res.help || bareNamespace(p.def, argv) {
-		printUsage(p.stdout, res.chain)
-		return 0
+	if !rtx.Has(parserKey) {
+		rtx.Bind(parserKey, &Parser{})
 	}
-
-	if err := requiredErrors(res.chain, res.parsed); err != nil {
-		fmt.Fprintf(p.stderr, "%s: %s\n\nRun '%s --help' for usage.\n", p.def.Name, err, p.def.Name)
-		return 2
-	}
-
-	rtx := NewRtx()
-	rtx.bindParsed(res.parsed)
-	return p.dispatch(res.chain, rtx)
+	return p.dispatch(chain, rtx)
 }
 
-// versionString renders the built-in --version output, falling back to
-// "(devel)" when no version metadata was provided.
-func versionString(def Definition) string {
-	v := def.Version
-	if v == "" {
-		v = "(devel)"
-	}
-	return def.Name + " " + v
-}
-
-// bareNamespace reports whether the program was invoked with no arguments while
-// the root command branches into sub-commands — the conventional "print help"
-// case (git, kubectl). Non-root commands always dispatch and decide for
-// themselves.
-func bareNamespace(def Definition, argv []string) bool {
-	if declaresHelp(def) {
-		return false // the program declares its own help; let it dispatch and handle bare invocation
-	}
-	return len(argv) == 0 && (len(def.Commands) > 0 || len(def.RemoteCommands) > 0)
-}
-
-// declaresHelp reports whether the root command declares its own -h/--help flag,
-// in which case the runtime defers all help handling to the program's handlers.
-func declaresHelp(def Definition) bool {
-	for _, f := range def.Flags {
-		for _, id := range f.Identifiers {
-			if id == "-h" || id == "--help" {
-				return true
-			}
-		}
-	}
-	return false
+// defaultOnError is the OnError funnel used when the program supplies none: it
+// prints the error to stderr and fails with exit code 1.
+func (p *program) defaultOnError(_ Context, err error) int {
+	fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
+	return 1
 }
 
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the
 // recorded Handler method name, via reflection on the aggregate handlers) and
 // runs the lifecycle: CascadingPreRun root→leaf, then the leaf's PreRun, Run,
-// and PostRun, then CascadingPostRun leaf→root.
-func (p *program) dispatch(chain []frame, rtx *Rtx) int {
+// and PostRun, then CascadingPostRun leaf→root. A [MustGet] failure or any panic
+// raised inside a hook is recovered and routed through the registry's OnError
+// funnel, whose returned code becomes the process exit code.
+func (p *program) dispatch(chain []frame, rtx *Rtx) (code int) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
@@ -149,6 +137,18 @@ func (p *program) dispatch(chain []frame, rtx *Rtx) int {
 		}
 		handlers[i] = h
 	}
+
+	// A MustGet failure or any panic from a hook unwinds to here; the funnel
+	// classifies/prints it and yields the exit code run returns.
+	defer func() {
+		if r := recover(); r != nil {
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("%v", r)
+			}
+			code = rtx.onError(rtx, err)
+		}
+	}()
 
 	leaf := handlers[len(handlers)-1]
 	// CascadingPreRun (root→leaf), then the leaf's Pre/Run/Post — short-circuited

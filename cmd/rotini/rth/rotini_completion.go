@@ -21,7 +21,13 @@ func (*rotiniCompletionHandlers) PreRun(ctx context.Context, rtx rotini.Context)
 }
 
 func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	in := rotini.Inputs[rtg.RotiniCompletionInputs](rtx).RotiniCompletion
+	inputs, err := rotini.Parse[rtg.RotiniCompletionInputs](rtx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rotini:", err)
+		rotini.Exit(rtx, 2)
+		return
+	}
+	in := inputs.RotiniCompletion
 
 	if in.Flags.Help {
 		fmt.Println(helpTextRotiniCompletion)

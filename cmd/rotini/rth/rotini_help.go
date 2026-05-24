@@ -44,21 +44,27 @@ func (*rotiniHelpHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniHelpHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	in := rotini.Inputs[rtg.RotiniHelpInputs](rtx).RotiniHelp
+	inputs, err := rotini.Parse[rtg.RotiniHelpInputs](rtx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rotini:", err)
+		rotini.Exit(rtx, 2)
+		return
+	}
+	in := inputs.RotiniHelp
 	if in.Flags.Help {
 		fmt.Println(helpTextRotiniHelp)
 		return
 	}
 
 	path := strings.Join(in.Arguments.Command, " ")
-	key, ok := helpTextForPath(path)
+	text, ok := helpTextForPath(path)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\n", path)
 		fmt.Println(helpTextRotiniHelp)
 		rotini.Exit(rtx, 1)
 		return
 	}
-	fmt.Println(helpTextForPath(key))
+	fmt.Println(text)
 }
 
 func (*rotiniHelpHandlers) PostRun(ctx context.Context, rtx rotini.Context) {

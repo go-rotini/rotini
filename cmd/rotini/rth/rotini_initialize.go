@@ -21,7 +21,13 @@ func (*rotiniInitializeHandlers) PreRun(ctx context.Context, rtx rotini.Context)
 }
 
 func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	in := rotini.Inputs[rtg.RotiniInitializeInputs](rtx).RotiniInitialize
+	inputs, err := rotini.Parse[rtg.RotiniInitializeInputs](rtx)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "rotini:", err)
+		rotini.Exit(rtx, 2)
+		return
+	}
+	in := inputs.RotiniInitialize
 
 	if in.Flags.Help {
 		fmt.Println(helpTextRotiniInitialize)

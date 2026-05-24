@@ -6,11 +6,36 @@ import (
 	"strings"
 )
 
-// printUsage renders help for the leaf of chain: an optional summary, the usage
+// Usage renders help text for the command rotini resolved for this invocation:
+// summary, usage line, description, then sub-commands, arguments, flags, and any
+// plugin commands as aligned two-column lists. It reads the resolved chain from
+// rtx, so a handler can opt into standard usage on -h/--help or on a parse error
+// without re-deriving it from the Definition:
+//
+//	in, err := rotini.Parse[rtg.Inputs](rtx)
+//	if err != nil {
+//		fmt.Fprintln(os.Stderr, err)
+//		fmt.Fprint(os.Stderr, rotini.Usage(rtx))
+//		rotini.Exit(rtx, 2)
+//		return
+//	}
+//
+// CLIs that hand-author their help text simply ignore it. Usage returns "" for a
+// nil context or before the runtime has resolved a command.
+func Usage(rtx Context) string {
+	if rtx == nil || len(rtx.chain) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	writeUsage(&b, rtx.chain)
+	return b.String()
+}
+
+// writeUsage renders help for the leaf of chain: an optional summary, the usage
 // line, an optional description, then the sub-commands, arguments, and flags
 // (each as an aligned two-column list), and a footer pointing at per-command
 // help. Sections with nothing to show are omitted.
-func printUsage(w io.Writer, chain []frame) {
+func writeUsage(w io.Writer, chain []frame) {
 	leaf := chain[len(chain)-1]
 	path := make([]string, len(chain))
 	for i, f := range chain {

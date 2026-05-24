@@ -1,9 +1,19 @@
 package rotini
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
+
+// bindStore runs the reflective binder over a hand-built parsed store, the same
+// way [Parse] does after the parser fills it. It isolates coercion/scoping from
+// argv parsing.
+func bindStore[T any](store *parsedInputs) T {
+	var out T
+	bindInputs(reflect.ValueOf(&out).Elem(), store)
+	return out
+}
 
 // The structs below mirror the shape the framework package (rtg) generates for
 // a root command "app" with a sub-command "run".
@@ -42,8 +52,7 @@ type runInputs struct {
 }
 
 func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
-	rtx := NewRtx()
-	rtx.bindParsed(&parsedInputs{scopes: map[string]scopeInputs{
+	in := bindStore[runInputs](&parsedInputs{scopes: map[string]scopeInputs{
 		"app": {flags: map[string][]string{"verbose": {"true"}}},
 		"run": {
 			flags: map[string][]string{
@@ -57,8 +66,6 @@ func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
 			args: []string{"world", "extra1", "extra2"},
 		},
 	}})
-
-	in := Inputs[runInputs](rtx)
 
 	if !in.App.Flags.Verbose {
 		t.Errorf("ancestor scope flag not bound: App.Flags.Verbose = false")
@@ -92,34 +99,30 @@ func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
 // A composed child's input type carries child-relative scope tags; binding must
 // match by command name regardless of any parent prefix in the argv path.
 func TestInputs_scopesMatchByCommandNameNotPath(t *testing.T) {
-	rtx := NewRtx()
 	// Parsed as if invoked through a parent ("parent run …"): the store is still
 	// keyed by command name, so the child's "run"/"app" scopes resolve.
-	rtx.bindParsed(&parsedInputs{scopes: map[string]scopeInputs{
+	in := bindStore[runInputs](&parsedInputs{scopes: map[string]scopeInputs{
 		"app": {flags: map[string][]string{"verbose": {"true"}}},
 		"run": {flags: map[string][]string{"count": {"3"}}, args: []string{"x"}},
 	}})
-
-	in := Inputs[runInputs](rtx)
 	if !in.App.Flags.Verbose || in.Run.Flags.Count != 3 || in.Run.Arguments.Name != "x" {
 		t.Errorf("composed binding failed: %+v", in)
 	}
 }
 
-func TestInputs_unparsedReturnsZero(t *testing.T) {
-	rtx := NewRtx()
-	in := Inputs[runInputs](rtx)
+func TestInputs_unresolvedReturnsZero(t *testing.T) {
+	// A fresh context has no resolved command chain, so Inputs (which ignores the
+	// Parse error) yields the zero value rather than panicking.
+	in := Inputs[runInputs](NewRtx())
 	if in.Run.Flags.Count != 0 || in.App.Flags.Verbose || in.Run.Arguments.Name != "" {
-		t.Errorf("expected zero value when argv unparsed, got %+v", in)
+		t.Errorf("expected zero value for an unresolved context, got %+v", in)
 	}
 }
 
 func TestInputs_missingFlagKeepsZero(t *testing.T) {
-	rtx := NewRtx()
-	rtx.bindParsed(&parsedInputs{scopes: map[string]scopeInputs{
+	in := bindStore[runInputs](&parsedInputs{scopes: map[string]scopeInputs{
 		"run": {flags: map[string][]string{"count": {"5"}}}, // rate/wait/level absent
 	}})
-	in := Inputs[runInputs](rtx)
 	if in.Run.Flags.Count != 5 || in.Run.Flags.Rate != 0 || in.Run.Flags.Wait != 0 || in.Run.Flags.Level != nil {
 		t.Errorf("absent flags should stay zero: %+v", in.Run.Flags)
 	}
