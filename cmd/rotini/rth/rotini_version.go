@@ -22,7 +22,7 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	flags := rotini.Inputs[rtg.RotiniVersionInputs](rtx).RotiniVersion.Flags
 
 	if flags.Help {
-		fmt.Println(getRotiniHelp(helpKeyRotiniVersion))
+		fmt.Println(helpTextRotiniVersion)
 		return
 	}
 

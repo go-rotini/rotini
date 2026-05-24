@@ -24,7 +24,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	in := rotini.Inputs[rtg.RotiniGenerateInputs](rtx).RotiniGenerate
 
 	if in.Flags.Help {
-		fmt.Println(getRotiniHelp(helpKeyRotiniGenerate))
+		fmt.Println(helpTextRotiniGenerate)
 		return
 	}
 

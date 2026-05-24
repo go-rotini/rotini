@@ -24,7 +24,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	in := rotini.Inputs[rtg.RotiniInitializeInputs](rtx).RotiniInitialize
 
 	if in.Flags.Help {
-		fmt.Println(getRotiniHelp(helpKeyRotiniInitialize))
+		fmt.Println(helpTextRotiniInitialize)
 		return
 	}
 

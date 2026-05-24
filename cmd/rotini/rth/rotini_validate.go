@@ -24,7 +24,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	in := rotini.Inputs[rtg.RotiniValidateInputs](rtx).RotiniValidate
 
 	if in.Flags.Help {
-		fmt.Println(getRotiniHelp(helpKeyRotiniValidate))
+		fmt.Println(helpTextRotiniValidate)
 		return
 	}
 

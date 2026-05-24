@@ -16,24 +16,24 @@ var _ rotini.CommandHandlers = (*rotiniHelpHandlers)(nil)
 
 // helpKeyForPath maps a command path (e.g. "generate" or its alias "gen") to its
 // help key. The second return is false for an unrecognized path.
-func helpKeyForPath(path string) (helpKey, bool) {
+func helpTextForPath(path string) (string, bool) {
 	switch path {
 	case "":
-		return helpKeyRotini, true
+		return helpTextRotini, true
 	case "initialize", "init":
-		return helpKeyRotiniInitialize, true
+		return helpTextRotiniInitialize, true
 	case "generate", "gen":
-		return helpKeyRotiniGenerate, true
+		return helpTextRotiniGenerate, true
 	case "validate", "val":
-		return helpKeyRotiniValidate, true
+		return helpTextRotiniValidate, true
 	case "completion":
-		return helpKeyRotiniCompletion, true
+		return helpTextRotiniCompletion, true
 	case "version":
-		return helpKeyRotiniVersion, true
+		return helpTextRotiniVersion, true
 	case "help":
-		return helpKeyRotiniHelp, true
+		return helpTextRotiniHelp, true
 	default:
-		return helpKeyRotini, false
+		return helpTextRotini, false
 	}
 }
 
@@ -46,19 +46,19 @@ func (*rotiniHelpHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 func (*rotiniHelpHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	in := rotini.Inputs[rtg.RotiniHelpInputs](rtx).RotiniHelp
 	if in.Flags.Help {
-		fmt.Println(getRotiniHelp(helpKeyRotiniHelp))
+		fmt.Println(helpTextRotiniHelp)
 		return
 	}
 
 	path := strings.Join(in.Arguments.Command, " ")
-	key, ok := helpKeyForPath(path)
+	key, ok := helpTextForPath(path)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\n", path)
-		fmt.Println(getRotiniHelp(helpKeyRotini))
+		fmt.Println(helpTextRotiniHelp)
 		rotini.Exit(rtx, 1)
 		return
 	}
-	fmt.Println(getRotiniHelp(key))
+	fmt.Println(helpTextForPath(key))
 }
 
 func (*rotiniHelpHandlers) PostRun(ctx context.Context, rtx rotini.Context) {

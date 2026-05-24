@@ -23,11 +23,11 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
 
 	switch {
 	case flags.Help:
-		fmt.Println(getRotiniHelp(helpKeyRotini))
+		fmt.Println(helpTextRotini)
 	case flags.Version:
 		fmt.Println(rtg.Version)
 	default:
-		fmt.Println(getRotiniHelp(helpKeyRotini))
+		fmt.Println(helpTextRotini)
 		rotini.Exit(rtx, 1)
 	}
 }

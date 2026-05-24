@@ -24,7 +24,7 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	in := rotini.Inputs[rtg.RotiniCompletionInputs](rtx).RotiniCompletion
 
 	if in.Flags.Help {
-		fmt.Println(getRotiniHelp(helpKeyRotiniCompletion))
+		fmt.Println(helpTextRotiniCompletion)
 		return
 	}
 
