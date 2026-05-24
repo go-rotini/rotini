@@ -23,7 +23,7 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	inputs, err := rotini.Parse[rtg.RotiniVersionInputs](rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rotini:", err)
-		rotini.Exit(rtx, 2)
+		rtx.Exit(1)
 		return
 	}
 

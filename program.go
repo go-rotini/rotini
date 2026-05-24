@@ -13,8 +13,8 @@ type program struct {
 	args     []string
 	def      Definition
 	handlers any
-	rtx      *Rtx                     // pre-seeded registry; user Bind calls land here
-	onError  func(Context, error) int // funnel for MustGet/panic failures; nil → defaultOnError
+	rtx      *Rtx                                              // pre-seeded registry; user Bind calls land here
+	onError  func(ctx context.Context, rtx Context, err error) // funnel for MustGet/panic failures; nil → defaultOnError
 	stdout   io.Writer
 	stderr   io.Writer
 }
@@ -61,7 +61,7 @@ func (p *program) Bind(key string, value any) *program {
 // (errors.Is/errors.As), log (file, error-tracking service), and print errors in
 // the CLI's own style. With no funnel set, the default prints the error to stderr
 // and returns 1. OnError returns the receiver so it chains with [program.Bind].
-func (p *program) OnError(fn func(Context, error) int) *program {
+func (p *program) OnError(fn func(ctx context.Context, rtx Context, err error)) *program {
 	p.onError = fn
 	return p
 }
@@ -109,9 +109,9 @@ func (p *program) run(argv []string) int {
 
 // defaultOnError is the OnError funnel used when the program supplies none: it
 // prints the error to stderr and fails with exit code 1.
-func (p *program) defaultOnError(_ Context, err error) int {
+func (p *program) defaultOnError(_ context.Context, rtx Context, err error) {
 	fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
-	return 1
+	rtx.Exit(1)
 }
 
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the
@@ -146,7 +146,7 @@ func (p *program) dispatch(chain []frame, rtx *Rtx) (code int) {
 			if !ok {
 				err = fmt.Errorf("%v", r)
 			}
-			code = rtx.onError(rtx, err)
+			rtx.onError(p.ctx, rtx, err)
 		}
 	}()
 
@@ -171,17 +171,4 @@ func (p *program) dispatch(chain []frame, rtx *Rtx) (code int) {
 		handlers[i].CascadingPostRun(p.ctx, rtx)
 	}
 	return rtx.exitCode
-}
-
-// Exit records a non-zero exit code for the program and stops the current
-// command's remaining leaf hooks (PreRun/Run/PostRun); CascadingPostRun still
-// runs so cleanup is not skipped. The process exits with code once the lifecycle
-// completes. It is the handler-facing way to fail a command until lifecycle
-// hooks themselves return errors.
-func Exit(rtx Context, code int) {
-	if rtx == nil {
-		return
-	}
-	rtx.exitCode = code
-	rtx.stopped = true
 }

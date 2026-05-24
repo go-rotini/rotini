@@ -24,7 +24,7 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	inputs, err := rotini.Parse[rtg.RotiniCompletionInputs](rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rotini:", err)
-		rotini.Exit(rtx, 2)
+		rtx.Exit(2)
 		return
 	}
 	in := inputs.RotiniCompletion
@@ -37,7 +37,7 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	script, err := rotini.CompletionScript(filepath.Base(os.Args[0]), in.Arguments.Shell)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
-		rotini.Exit(rtx, 1)
+		rtx.Exit(1)
 		return
 	}
 	fmt.Print(script)

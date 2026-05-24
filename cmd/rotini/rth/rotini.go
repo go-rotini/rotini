@@ -24,7 +24,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		fmt.Println(helpTextRotini)
-		rotini.Exit(rtx, 1)
+		rtx.Exit(1)
 		return
 	}
 
@@ -36,7 +36,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
 		fmt.Println(rtg.Version)
 	default:
 		fmt.Println(helpTextRotini)
-		rotini.Exit(rtx, 1)
+		rtx.Exit(1)
 	}
 }
 

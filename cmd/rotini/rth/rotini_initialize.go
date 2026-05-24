@@ -24,7 +24,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	inputs, err := rotini.Parse[rtg.RotiniInitializeInputs](rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rotini:", err)
-		rotini.Exit(rtx, 2)
+		rtx.Exit(1)
 		return
 	}
 	in := inputs.RotiniInitialize
@@ -36,7 +36,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx rotini.Context) {
 
 	if err := internal.Initialize(in.Arguments.Name, in.Flags.Format, in.Flags.Force, in.Flags.Into); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
-		rotini.Exit(rtx, 1)
+		rtx.Exit(1)
 		return
 	}
 }

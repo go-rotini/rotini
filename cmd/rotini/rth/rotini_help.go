@@ -47,7 +47,7 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	inputs, err := rotini.Parse[rtg.RotiniHelpInputs](rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rotini:", err)
-		rotini.Exit(rtx, 2)
+		rtx.Exit(1)
 		return
 	}
 	in := inputs.RotiniHelp
@@ -61,7 +61,7 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Error: unknown command %q\n\n", path)
 		fmt.Println(helpTextRotiniHelp)
-		rotini.Exit(rtx, 1)
+		rtx.Exit(1)
 		return
 	}
 	fmt.Println(text)

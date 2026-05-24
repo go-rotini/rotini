@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -60,11 +61,11 @@ func (e *ServiceError) Unwrap() error {
 type Rtx struct {
 	mu       sync.RWMutex
 	services map[string]any
-	args     []string                 // raw argument vector for this invocation
-	chain    []frame                  // resolved command path, root → leaf
-	onError  func(Context, error) int // funnel for MustGet/panic failures (see Program.OnError)
-	exitCode int                      // process exit code requested via [Exit]
-	stopped  bool                     // [Exit] was called; remaining leaf hooks are skipped
+	args     []string                                          // raw argument vector for this invocation
+	chain    []frame                                           // resolved command path, root → leaf
+	onError  func(ctx context.Context, rtx Context, err error) // funnel for MustGet/panic failures (see Program.OnError)
+	exitCode int                                               // process exit code requested via [Exit]
+	stopped  bool                                              // [Exit] was called; remaining leaf hooks are skipped
 }
 
 // NewRtx returns an empty Rtx with an initialized registry.
@@ -159,3 +160,16 @@ func MustGet[T any](r *Rtx, key string) T {
 // exit state. Handlers retrieve services via [Get]/[MustGet], typed inputs via
 // [Parse], and the raw argv via [Rtx.Args].
 type Context = *Rtx
+
+// Exit records a non-zero exit code for the program and stops the current
+// command's remaining leaf hooks (PreRun/Run/PostRun); CascadingPostRun still
+// runs so cleanup is not skipped. The process exits with code once the lifecycle
+// completes. It is the handler-facing way to fail a command until lifecycle
+// hooks themselves return errors.
+func (rtx *Rtx) Exit(code int) {
+	if rtx == nil {
+		return
+	}
+	rtx.exitCode = code
+	rtx.stopped = true
+}

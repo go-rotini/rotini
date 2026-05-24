@@ -24,7 +24,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	inputs, err := rotini.Parse[rtg.RotiniValidateInputs](rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "rotini:", err)
-		rotini.Exit(rtx, 2)
+		rtx.Exit(1)
 		return
 	}
 	in := inputs.RotiniValidate
@@ -36,7 +36,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx rotini.Context) {
 
 	if err := internal.Validate(in.Arguments.File, ""); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
-		rotini.Exit(rtx, 1)
+		rtx.Exit(1)
 		return
 	}
 }
