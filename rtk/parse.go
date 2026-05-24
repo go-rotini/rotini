@@ -2,13 +2,17 @@
 // can choose to use on top of the core runtime, but does not have to. Core rotini
 // (the github.com/go-rotini/rotini package) guarantees only two things — codegen
 // of the handler files, and command resolution + lifecycle dispatch. Everything
-// else is opt-in and lives here: parsing the resolved command's arguments into a
-// typed inputs struct ([Parse]/[Inputs]), rendering standard help ([Usage]), and
-// generating shell completion scripts ([CompletionScript]).
+// else is opt-in and lives here, each piece a service a CLI binds to the context
+// and a handler retrieves with rtx.Get:
+//
+//   - [Parser] — parse the resolved command's arguments into a typed inputs
+//     struct ([Parser.Parse]); render standard help with [Usage].
+//   - [IO] — injectable, testable stdin/stdout/stderr.
+//   - [CompletionScript] — generate bash/zsh/fish shell completion scripts.
 //
 // A handler reaches for rtk when it wants rotini's conventions; a handler that
-// disagrees ignores rtk entirely and reads the raw argument vector via
-// rotini.Context.Args, parsing however it likes.
+// disagrees ignores rtk entirely — reading the raw argument vector via
+// rotini.Context.Args and writing to os.Stdout however it likes.
 package rtk
 
 import (
@@ -63,6 +67,8 @@ type Parser struct{}
 func NewParser() *Parser {
 	return &Parser{}
 }
+
+var DefaultParser = NewParser()
 
 // Parse binds the running command's arguments into out — a non-nil pointer to the
 // typed inputs struct rtg emits (e.g. &rtg.MycliInputs{}) — using the resolved

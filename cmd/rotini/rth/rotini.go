@@ -28,10 +28,17 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
 		return
 	}
 
+	io, ok := rtx.Get("io").(*rtk.IO)
+	if !ok {
+		fmt.Fprintln(os.Stderr, "Error: io not bound")
+		rtx.Exit(1)
+		return
+	}
+
 	var inputs rtg.RotiniInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		fmt.Println(helpTextRotini)
+		io.Stderr.Printf("Error:", err)
+		io.Stdout.Println(helpTextRotini)
 		rtx.Exit(1)
 		return
 	}
@@ -39,11 +46,11 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	flags := inputs.Rotini.Flags
 	switch {
 	case flags.Help:
-		fmt.Println(helpTextRotini)
+		io.Stdout.Println(helpTextRotini)
 	case flags.Version:
-		fmt.Println(rtg.Version)
+		io.Stdout.Println(rtg.Version)
 	default:
-		fmt.Println(helpTextRotini)
+		io.Stdout.Println(helpTextRotini)
 		rtx.Exit(1)
 	}
 }

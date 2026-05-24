@@ -11,5 +11,8 @@ import (
 func main() {
 	// Opt into rotini's parser by binding it to the program's service registry;
 	// the handlers retrieve it via rtk.Parse.
-	rth.Program.Bind("parser", rtk.NewParser()).Execute()
+	rth.Program.
+		Bind("parser", rtk.DefaultParser).
+		Bind("io", rtk.DefaultIO).
+		Execute()
 }
