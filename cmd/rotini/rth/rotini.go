@@ -21,7 +21,14 @@ func (*rotiniHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
 }
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.Context) {
-	inputs, err := rtk.Parse[rtg.RotiniInputs](rtx)
+	parser, err := rotini.Get[*rtk.Parser](rtx, rtk.ParserKey)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		rtx.Exit(1)
+		return
+	}
+
+	inputs, err := rtk.Parse[rtg.RotiniInputs](parser, rtx)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		fmt.Println(helpTextRotini)

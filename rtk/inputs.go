@@ -26,12 +26,28 @@ import (
 // arguments bind by declaration order, and a trailing []string field absorbs the
 // remaining positionals.
 //
-// Parse returns an error when an unknown flag is given, a flag's value is missing,
-// a required input is absent, or a value is outside a declared enum. The handler
-// owns it — print it (see [Usage]), exit (rtx.Exit), or fall back to rtx.Args and
-// a parser of its own.
-func Parse[T any](rtx rotini.Context) (T, error) {
+// Parse binds the running command's arguments into the typed inputs struct T
+// using p, the [Parser] the handler retrieved from the service registry:
+//
+//	parser, err := rotini.Get[*rtk.Parser](rtx, rtk.ParserKey)
+//	if err != nil { /* parser not bound — see main.go */ }
+//	in, err := rtk.Parse[rtg.MycliInputs](parser, rtx)
+//
+// Taking the parser as an argument (rather than looking it up internally) keeps
+// the dependency-injection seam visible in every handler and lets a test pass a
+// double. Parse runs p over rtx.Args against the resolved command (rtx.Chain) —
+// applying defaults and checking required/enum — then builds T by reflection from
+// the `rotini:"…"` struct tags rtg emits.
+//
+// Parse returns an error when p is nil, an unknown flag is given, a flag's value
+// is missing, a required input is absent, or a value is outside a declared enum.
+// The handler owns it — print it (see [Usage]), exit (rtx.Exit), or fall back to
+// rtx.Args and a parser of its own.
+func Parse[T any](p *Parser, rtx rotini.Context) (T, error) {
 	var out T
+	if p == nil {
+		return out, &usageError{msg: "rotini: nil parser — retrieve it with rotini.Get[*rtk.Parser](rtx, rtk.ParserKey)"}
+	}
 	if rtx == nil {
 		return out, &usageError{msg: "rotini: parse on nil context"}
 	}
@@ -39,11 +55,8 @@ func Parse[T any](rtx rotini.Context) (T, error) {
 	if len(chain) == 0 {
 		return out, &usageError{msg: "rotini: no command resolved for this context"}
 	}
-	store, err := parseInto(chain, rtx.Args())
+	store, err := p.parse(chain, rtx.Args())
 	if err != nil {
-		return out, err
-	}
-	if err := validate(chain, store); err != nil {
 		return out, err
 	}
 	bindInputs(reflect.ValueOf(&out).Elem(), store)
@@ -51,12 +64,12 @@ func Parse[T any](rtx rotini.Context) (T, error) {
 }
 
 // Inputs is the error-ignoring convenience form of [Parse]: it binds whatever it
-// can and discards parse/validation errors, returning the zero value of T on a nil
-// context or when parsing fails outright. Prefer [Parse] in handlers that should
-// react to bad input; Inputs suits handlers that have already validated or that
-// tolerate partial input.
-func Inputs[T any](rtx rotini.Context) T {
-	out, _ := Parse[T](rtx)
+// can and discards parse/validation errors, returning the zero value of T on a
+// nil parser/context or when parsing fails outright. Prefer [Parse] in handlers
+// that should react to bad input; Inputs suits handlers that have already
+// validated or that tolerate partial input.
+func Inputs[T any](p *Parser, rtx rotini.Context) T {
+	out, _ := Parse[T](p, rtx)
 	return out
 }
 

@@ -3,8 +3,13 @@
 //go:generate go run . generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
 package main
 
-import "github.com/go-rotini/rotini/cmd/rotini/rth"
+import (
+	"github.com/go-rotini/rotini/cmd/rotini/rth"
+	"github.com/go-rotini/rotini/rtk"
+)
 
 func main() {
-	rth.Program.Execute()
+	// Opt into rotini's parser by binding it to the program's service registry;
+	// the handlers retrieve it via rtk.Parse.
+	rth.Program.Bind(rtk.ParserKey, rtk.NewParser()).Execute()
 }

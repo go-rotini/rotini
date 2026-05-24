@@ -113,7 +113,7 @@ func TestInputs_scopesMatchByCommandNameNotPath(t *testing.T) {
 func TestInputs_unresolvedReturnsZero(t *testing.T) {
 	// A fresh context has no resolved command chain, so Inputs (which ignores the
 	// Parse error) yields the zero value rather than panicking.
-	in := Inputs[runInputs](rotini.NewRtx())
+	in := Inputs[runInputs](NewParser(), rotini.NewRtx())
 	if in.Run.Flags.Count != 0 || in.App.Flags.Verbose || in.Run.Arguments.Name != "" {
 		t.Errorf("expected zero value for an unresolved context, got %+v", in)
 	}

@@ -41,6 +41,41 @@ type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
 
+// ParserKey is the service-registry key under which a CLI binds the parser that
+// [Parse] uses. Binding the parser is the explicit opt-in into rotini-flavored
+// argument parsing:
+//
+//	rth.Program.Bind(rtk.ParserKey, rtk.NewParser()).Execute()
+const ParserKey = "parser"
+
+// Parser binds a resolved command's raw argument vector into a name-scoped store
+// of values, applying defaults and validating (required, enum). It is rotini's
+// default parser, and it is a *service*: a CLI binds it under [ParserKey] so that
+// (1) parsing is opt-in — a CLI that wants raw argv binds nothing and reads
+// rotini.Context.Args itself — and (2) the registry is a dependency-injection
+// seam: the same handler code runs whether you bound the production parser or a
+// test double. [Parse] retrieves the bound Parser via rotini.Get and runs it
+// before reflectively binding the typed inputs struct.
+type Parser struct{}
+
+// NewParser returns rotini's default [Parser], ready to bind under [ParserKey].
+func NewParser() *Parser {
+	return &Parser{}
+}
+
+// parse binds argv to the resolved chain and validates it, returning the parsed
+// store or the first usage error.
+func (*Parser) parse(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, error) {
+	store, err := parseInto(chain, argv)
+	if err != nil {
+		return nil, err
+	}
+	if err := validate(chain, store); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
 // parseInto binds argv to an already-resolved chain, strictly: an unrecognized
 // flag, or a flag missing its value, is a usageError. Command tokens already in
 // the chain are consumed; everything after the leaf command (and after "--") is a
