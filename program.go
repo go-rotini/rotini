@@ -138,7 +138,7 @@ func (p *program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
 		handlers[i] = h
 	}
 
-	// A panic from a hook (e.g. rtk.MustGet) unwinds to here, skipping the
+	// A panic from a hook (e.g. rotini.MustGet) unwinds to here, skipping the
 	// `return rtx.exitCode` below — so the funnel runs and we lift its exit code
 	// (set via rtx.Exit) into the named return ourselves. The panic path is always
 	// a failure: if the funnel left the code at 0, floor it to 1.

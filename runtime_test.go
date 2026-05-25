@@ -136,7 +136,7 @@ func TestRun_exitCodePropagates(t *testing.T) {
 func TestRun_mustGetRoutesToOnError(t *testing.T) {
 	var seen error
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		// What rtk.MustGet panics on a missing service; recovered into the funnel.
+		// What rotini.MustGet panics on a missing service; recovered into the funnel.
 		panic(&ServiceError{Key: "no-such-service"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})

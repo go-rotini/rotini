@@ -66,7 +66,7 @@ func NewContext() *Context {
 // the rtk Parser/Usage helpers, in isolation:
 //
 //	rtx := rotini.NewContextFor(rtg.Definition, []string{"generate", "x.yaml"})
-//	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
+//	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
 //	var in rtg.RotiniGenerateInputs
 //	err := parser.Parse(rtx, &in)
 //
@@ -136,8 +136,8 @@ func (rtx *Context) Chain() []ResolvedCommand {
 //		// not bound — fail the command, or fall back
 //	}
 //
-// Value reports a miss as nil and never panics; prefer the rtk package's typed Get
-// (comma-ok) or MustGet (panics → OnError funnel) for type-safe retrieval.
+// Value reports a miss as nil and never panics; prefer the typed [Get] (comma-ok)
+// or [MustGet] (panics → OnError funnel) for type-safe retrieval.
 func (rtx *Context) Value(key string) any {
 	if rtx == nil {
 		return nil
@@ -161,10 +161,10 @@ func (rtx *Context) Exit(code int) {
 }
 
 // Get returns the service bound under key as T — the typed, comma-ok form of the
-// raw rotini.Context.Value (which returns any). ok is false when no service is
-// bound under key or the bound value is not a T:
+// raw [Context.Value] (which returns any). ok is false when no service is bound
+// under key or the bound value is not a T:
 //
-//	parser, ok := rtk.Get[*rtk.Parser](rtx, "parser")
+//	parser, ok := rotini.Get[*rtk.Parser](rtx, "parser")
 //	if !ok {
 //		// not bound — fail the command, or fall back
 //	}
@@ -177,13 +177,13 @@ func Get[T any](rtx *Context, key string) (T, bool) {
 }
 
 // MustGet returns the service bound under key as T, or panics with a
-// [rotini.ServiceError] (unwrapping to [rotini.ErrServiceNotFound]) when it is
-// absent or not a T. The panic is intentional and recoverable: the runtime
-// recovers it inside dispatch and routes it through the program's OnError funnel —
-// so a handler that cannot run without a service reaches for MustGet instead of
-// handling a miss inline:
+// [*ServiceError] (unwrapping to [ErrServiceNotFound]) when it is absent or not a
+// T. The panic is intentional and recoverable: the runtime recovers it inside
+// dispatch and routes it through the program's OnError funnel — so a handler that
+// cannot run without a service reaches for MustGet instead of handling a miss
+// inline:
 //
-//	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
+//	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
 //	var in rtg.MycliInputs
 //	err := parser.Parse(rtx, &in)
 func MustGet[T any](rtx *Context, key string) T {
