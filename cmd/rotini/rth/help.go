@@ -6,7 +6,7 @@ const (
 Find more information at: https://rotini.dev
 
 Usage:
-  rotini <command> <argument> [flags]
+  rotini <command> <arguments> [flags]
          [-v | --version] [-h | --help]
 
 Commands:
