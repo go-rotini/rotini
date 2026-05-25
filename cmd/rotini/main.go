@@ -9,10 +9,11 @@ import (
 )
 
 func main() {
-	// Opt into rotini's parser by binding it to the program's service registry;
-	// the handlers retrieve it via rtk.Parse.
+	parser := rtk.NewParser()
+	io := rtk.NewIO()
+
 	rth.Program.
-		Bind("parser", rtk.DefaultParser).
-		Bind("io", rtk.DefaultIO).
+		Bind("parser", parser).
+		Bind("io", io).
 		Execute()
 }

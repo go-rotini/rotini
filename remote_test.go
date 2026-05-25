@@ -21,7 +21,7 @@ func writeFakeBinary(t *testing.T, name, body string) {
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
-func remoteProgram(def Definition, args []string) (*program, *bytes.Buffer, *bytes.Buffer) {
+func remoteProgram(def Definition, args []string) (*Program, *bytes.Buffer, *bytes.Buffer) {
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
 	p := NewProgram(def, &testHandlers{log: new([]string)}).WithArguments(args)
 	p.stdout, p.stderr = out, errb

@@ -8,7 +8,7 @@ import (
 	"reflect"
 )
 
-type program struct {
+type Program struct {
 	ctx      context.Context
 	args     []string
 	def      Definition
@@ -24,8 +24,8 @@ type program struct {
 // rotini runtime. handlers is any so the runtime need not import the generated
 // framework package; dispatch resolves the per-command handlers from it at
 // execution time, via the Handler names recorded in def.
-func NewProgram(def Definition, handlers any) *program {
-	return &program{
+func NewProgram(def Definition, handlers any) *Program {
+	return &Program{
 		ctx:      context.Background(),
 		args:     os.Args[1:],
 		def:      def,
@@ -37,7 +37,7 @@ func NewProgram(def Definition, handlers any) *program {
 }
 
 // WithArguments overrides the argument vector (defaults to os.Args[1:]).
-func (p *program) WithArguments(args []string) *program {
+func (p *Program) WithArguments(args []string) *Program {
 	if args != nil {
 		p.args = args
 	}
@@ -50,7 +50,7 @@ func (p *program) WithArguments(args []string) *program {
 // seam: bind a real implementation in production or a double in tests, with the
 // same handler code retrieving it via [Rtx.Get] (or the rtk package's typed
 // Get/MustGet). Binding "parser" overrides the default parser the rtk package uses.
-func (p *program) Bind(key string, value any) *program {
+func (p *Program) Bind(key string, value any) *Program {
 	p.rtx.Bind(key, value)
 	return p
 }
@@ -63,14 +63,14 @@ func (p *program) Bind(key string, value any) *program {
 // set, the default prints the error to stderr and exits 1 (and the panic path
 // floors a 0 to 1, so a funnel that forgets rtx.Exit still fails). OnError returns
 // the receiver so it chains with [program.Bind].
-func (p *program) OnError(fn func(ctx context.Context, rtx *Context, err error)) *program {
+func (p *Program) OnError(fn func(ctx context.Context, rtx *Context, err error)) *Program {
 	p.onError = fn
 	return p
 }
 
 // Execute resolves the command, runs its lifecycle, and exits the process with
 // the resulting status code.
-func (p *program) Execute() {
+func (p *Program) Execute() {
 	os.Exit(p.run(p.args))
 }
 
@@ -80,7 +80,7 @@ func (p *program) Execute() {
 // dispatches the lifecycle. It returns the process exit code instead of calling
 // os.Exit. The only retained protocol intercept is the hidden __complete entry
 // the generated shell scripts invoke.
-func (p *program) run(argv []string) int {
+func (p *Program) run(argv []string) int {
 	if len(argv) > 0 && argv[0] == completeCommand {
 		for _, c := range complete(p.def, argv[1:]) {
 			fmt.Fprintln(p.stdout, c)
@@ -108,7 +108,7 @@ func (p *program) run(argv []string) int {
 
 // defaultOnError is the OnError funnel used when the program supplies none: it
 // prints the error to stderr and fails with exit code 1.
-func (p *program) defaultOnError(_ context.Context, rtx *Context, err error) {
+func (p *Program) defaultOnError(_ context.Context, rtx *Context, err error) {
 	fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
 	rtx.Exit(1)
 }
@@ -120,7 +120,7 @@ func (p *program) defaultOnError(_ context.Context, rtx *Context, err error) {
 // (e.g. the rtk package's MustGet on a missing service) is recovered and routed
 // through the registry's OnError funnel, whose rtx.Exit code becomes the process
 // exit code.
-func (p *program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
+func (p *Program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {

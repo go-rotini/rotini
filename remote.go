@@ -18,7 +18,7 @@ type remoteDispatch struct {
 
 // execRemote locates and runs the co-located plugin binary, passing stdio
 // through, honoring any timeout, and returning the plugin's exit code.
-func (p *program) execRemote(r *remoteDispatch) int {
+func (p *Program) execRemote(r *remoteDispatch) int {
 	path, err := resolveRemoteBinary(r.def.Binary)
 	if err != nil {
 		fmt.Fprintf(p.stderr, "%s: %s\n", p.def.Name, err)
