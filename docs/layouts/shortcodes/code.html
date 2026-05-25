@@ -1,0 +1,80 @@
+{{ $id := delimit (shuffle (seq 1 9)) "" }}
+{{ $open := .Get "open" }}
+{{ $lang := .Get "language" }}
+{{ $opts := .Get "opts" }}
+{{ $collapsible := ne (.Get "collapsible") "false" }}
+{{ $copy := ne (.Get "copy") "false" }}
+
+{{- if $lang -}}
+{{- if $collapsible -}}
+{{ $collapseKey := printf "%s_%s_%d" .Page.RelPermalink (or (.Get "title") "block") .Ordinal | replaceRE "[^a-zA-Z0-9]+" "_" | replaceRE "^_|_$" "" }}
+<details class="collapsable_code" data-collapse-key="{{ $collapseKey }}" {{ if eq $open "true" -}} open {{- end }}>
+  <summary title="Click to interact">
+    {{- if .Get "title" }}<span class="collapsable_code_title">{{ .Get "title" | markdownify }}</span>{{ end -}}
+    {{- if $copy }}<button class="copy_btn" data-code-id="code-{{ $id }}" title="copy to clipboard">copy</button>{{ end
+    -}}
+  </summary>
+  {{ $trInner := trim .Inner "\n" }}
+  <div id="code-{{ $id }}" class="code-content">
+    {{- transform.Highlight $trInner $lang $opts -}}
+  </div>
+</details>
+{{- else -}}
+<details class="collapsable_code collapsable_code_static" open>
+  <summary tabindex="-1">
+    {{- if .Get "title" }}<span class="collapsable_code_title">{{ .Get "title" | markdownify }}</span>{{ end -}}
+    {{- if $copy }}<button class="copy_btn" data-code-id="code-{{ $id }}" title="copy to clipboard">copy</button>{{ end
+    -}}
+  </summary>
+  {{ $trInner := trim .Inner "\n" }}
+  <div id="code-{{ $id }}" class="code-content">
+    {{- transform.Highlight $trInner $lang $opts -}}
+  </div>
+</details>
+{{- end -}}
+{{- if $copy -}}
+<script>
+  (function () {
+    var btn = document.querySelector('[data-code-id="code-{{ $id }}"]');
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var code = document.getElementById('code-{{ $id }}').querySelector('code').textContent;
+      function onCopied() {
+        btn.textContent = 'copied';
+        setTimeout(function () { btn.textContent = 'copy'; }, 2000);
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(code).then(onCopied).catch(function () {
+          fallbackCopy(code);
+          onCopied();
+        });
+      } else {
+        fallbackCopy(code);
+        onCopied();
+      }
+    });
+    function fallbackCopy(text) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    var details = btn.closest('details');
+    var pre = details.querySelector('pre');
+    if (pre) pre.removeAttribute('tabindex');
+    {{- if not $collapsible }}
+    details.addEventListener('toggle', function () {
+      if (!details.open) details.open = true;
+    });
+    {{- end }}
+  })();
+</script>
+{{- end -}}
+{{ else }}
+{{ errorf "If you want to use the \"collapsable code\" shortcode, you need to pass a mandatory \"language\" param. The issue occured in %q (%q)" .Page.File .Page.Permalink }}
+{{- end -}}

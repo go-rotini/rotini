@@ -1,0 +1,18 @@
+<article class="blog_post" id="{{ .File.BaseFileName }}">
+  <h2 id="{{ .File.BaseFileName }}"><a class="heading_anchor" href="#{{ .File.BaseFileName }}--title">{{ .Title }}</a></h2>
+  <div class="blog_post_meta">
+    <span class="blog_post_date">{{ .Date.Format "January 2, 2006" }}</span>
+    <span class="blog_post_sep">&middot;</span>
+    <span class="blog_post_reading_time">{{ .ReadingTime }} min read</span>
+  </div>
+  <div class="blog_post_author">
+    <img class="blog_post_avatar" src="{{ .Params.author_image }}" alt="{{ .Params.author_name }}" width="40" height="40">
+    <div class="blog_post_author_info">
+      <a class="blog_post_author_name" href="{{ .Permalink }}">{{ .Params.author_name }}</a>
+      <div class="blog_post_author_tagline">{{ .Params.author_tagline }}</div>
+    </div>
+  </div>
+  <div class="blog_post_content">
+    {{ .Content }}
+  </div>
+</article>

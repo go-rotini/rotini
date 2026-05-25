@@ -1,0 +1,23 @@
+{{ define "head" }}
+  {{ $seen := slice }}
+  {{ range .Pages }}
+    {{ with .Params.author_image }}
+      {{ if not (in $seen .) }}
+        {{ $seen = $seen | append . }}
+  <link rel="preload" as="image" href="{{ . }}">
+      {{ end }}
+    {{ end }}
+  {{ end }}
+{{ end }}
+
+{{ define "main" }}
+  <div class="index_content">
+    {{ with .Content }}{{ . }}{{ end }}
+    {{ range .Pages.GroupByDate "2006" "desc" }}
+    <h1 id="{{ .Key }}"><a class="heading_anchor" href="#{{ .Key }}">{{ .Key }}</a></h1>
+      {{ range .Pages.ByDate.Reverse }}
+        {{ partial "blog-post.html" . }}
+      {{ end }}
+    {{ end }}
+  </div>
+{{ end }}

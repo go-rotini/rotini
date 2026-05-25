@@ -1,0 +1,13 @@
+{{- $result := slice -}}
+{{- range . -}}
+  {{- if and .ID .Title -}}
+    {{- $result = $result | append (dict "id" .ID "title" .Title) -}}
+  {{- end -}}
+  {{- with .Headings -}}
+    {{- $children := partial "flatten-headings.html" . -}}
+    {{- range $children -}}
+      {{- $result = $result | append . -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
+{{- return $result -}}

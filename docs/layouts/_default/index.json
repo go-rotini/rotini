@@ -1,0 +1,14 @@
+{{- $pages := where .Site.RegularPages "Kind" "page" -}}
+{{- $sections := where .Site.Pages "Kind" "section" -}}
+{{- $all := union $pages $sections -}}
+[
+  {{- range $i, $p := $all -}}
+  {{- if $i }},{{ end }}
+  {
+    "title": {{ $p.Title | jsonify }},
+    "url": {{ $p.RelPermalink | jsonify }},
+    "content": {{ $p.Plain | jsonify }},
+    "headings": {{ partial "flatten-headings.html" $p.Fragments.Headings | jsonify }}
+  }
+  {{- end }}
+]

@@ -1,0 +1,18 @@
+baseURL = "https://rotini.dev/"
+languageCode = "en-us"
+title = "rotini"
+
+[outputs]
+  home = ["HTML", "JSON"]
+  section = ["HTML", "RSS"]
+
+[outputFormats.RSS]
+  baseName = "rss"
+
+disableKinds = ["taxonomy"]
+
+[markup.goldmark.renderer]
+  unsafe = true
+
+[markup.highlight]
+  noClasses = false

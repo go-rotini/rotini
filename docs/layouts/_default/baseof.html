@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="{{ .Site.LanguageCode | default "en-us" }}">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>{{ if not .IsHome }}{{ .Title }} · {{ end }}{{ .Site.Title }}</title>
+  <link rel="stylesheet" href="{{ "style.css" | relURL }}">
+  <link rel="alternate" type="application/rss+xml" title="rotini blog" href="/blog/rss.xml">
+  {{ range .Site.RegularPages }}
+  <link rel="prefetch" href="{{ .RelPermalink }}">
+  {{ end }}
+  {{ block "head" . }}{{ end }}
+  <script>
+    (function () {
+      var t = localStorage.getItem('theme');
+      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
+      else if (t === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+      var widths = { small: '700px', medium: '900px', large: '1100px' };
+      var w = widths[localStorage.getItem('width')];
+      if (w) document.documentElement.style.setProperty('--container-width', w);
+      var f = localStorage.getItem('text');
+      if (f === 'small') document.documentElement.style.setProperty('--font-size', '0.8rem');
+      else if (f === 'large') document.documentElement.style.setProperty('--font-size', '1rem');
+      else if (f === 'medium') document.documentElement.style.setProperty('--font-size', '0.9rem');
+      if (document.cookie.indexOf('typing_seen=') !== -1) {
+        document.documentElement.classList.add('title_skip');
+      }
+    })();
+  </script>
+</head>
+
+<body>
+  <div class="layout">
+    {{ partial "sidebars.html" . }}
+    <div class="container">
+      {{ partial "header.html" . }}
+      <main>
+        {{ block "main" . }}{{ end }}
+      </main>
+      {{ partial "footer.html" . }}
+    </div>
+  </div>
+  <script defer src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mark.js@8.11.1/dist/mark.min.js"></script>
+  <script defer src="{{ "main.js" | relURL }}"></script>
+  <script defer src="{{ "animation.js" | relURL }}"></script>
+  <script defer src="{{ "search.js" | relURL }}"></script>
+  <script defer src="{{ "menu.js" | relURL }}"></script>
+  <script defer src="{{ "sidebars.js" | relURL }}"></script>
+</body>
+
+</html>

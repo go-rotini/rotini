@@ -1,0 +1,18 @@
+{{ $home := relURL .Site.Home.RelPermalink }}
+<header class="header">
+  <div class="header_inner">
+    <a href="{{ $home }}" class="title">
+      <span class="title_cursor">❯</span>&nbsp;<span class="title_text">rotini</span><span
+        class="title_typed">&nbsp;--documentation</span><span class="title_cursor_wrapper"><span class="title_blink">&#9608;</span><span
+          class="title_cursor_char"></span></span><span class="title_ghost"></span>
+    </a>
+    <div class="search">
+      <div class="search_input_wrapper">
+        <input type="text" class="search_input" placeholder="/" aria-label="Search" />
+        <button class="search_clear" aria-label="Clear search (Ctrl+U)">&lt;ctrl+u&gt;</button>
+      </div>
+      <div class="search_results"></div>
+    </div>
+    {{ partial "menu.html" . }}
+  </div>
+</header>

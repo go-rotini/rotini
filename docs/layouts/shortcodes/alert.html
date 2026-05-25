@@ -1,0 +1,10 @@
+{{ $type := .Get "type" | default "info" }}
+{{ $title := .Get "title" }}
+<div class="alert_wrapper">
+  <div class="alert alert_{{ $type }}">
+    {{ with $title }}<div class="alert_title">{{ . }}</div>{{ end }}
+    <div class="alert_content">
+      {{ .Inner | markdownify }}
+    </div>
+  </div>
+</div>
