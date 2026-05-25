@@ -20,6 +20,9 @@ type genProgram struct {
 	rootAliases     []string
 	rootSummary     string
 	rootDescription string
+	rootUsage       string              // usage-line override for the root's help
+	rootExamples    []string            // example invocation lines for the root's help
+	rootHomepage    string              // "Find more information at: …" link in the root's help
 	metadata        []MetadataEntry     // ldflag-settable vars emitted in rtg
 	versionVar      string              // metadata var feeding Definition.Version (Var == "Version")
 	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
@@ -38,6 +41,8 @@ type rnode struct {
 	aliases     []string
 	summary     string
 	description string
+	usage       string   // usage-line override for this command's help
+	examples    []string // example invocation lines for this command's help
 	inputs      *Inputs
 	children    []rnode
 }
@@ -73,8 +78,11 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootPascal:      toPascalCase(spec.Name),
 		rootInputs:      spec.Inputs,
 		rootAliases:     spec.Aliases,
-		rootSummary:     spec.Summary,
-		rootDescription: spec.Description,
+		rootSummary:     firstNonEmpty(spec.ShortDescription, spec.Summary),
+		rootDescription: firstNonEmpty(spec.LongDescription, spec.Description),
+		rootUsage:       spec.Usage,
+		rootExamples:    spec.Examples,
+		rootHomepage:    spec.Homepage,
 		metadata:        spec.Metadata,
 		rootRemotes:     spec.RemoteCommands,
 	}
@@ -155,7 +163,17 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, rnode{name: c.Name, prefix: prefix, aliases: c.Aliases, summary: c.Summary, description: c.Description, inputs: c.Inputs, children: children})
+		out = append(out, rnode{
+			name:        c.Name,
+			prefix:      prefix,
+			aliases:     c.Aliases,
+			summary:     firstNonEmpty(c.ShortDescription, c.Summary),
+			description: firstNonEmpty(c.LongDescription, c.Description),
+			usage:       c.Usage,
+			examples:    c.Examples,
+			inputs:      c.Inputs,
+			children:    children,
+		})
 	}
 	if err := checkCollisions(out); err != nil {
 		return nil, err
@@ -208,9 +226,14 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	summary := orDefault(c.Summary, childSpec.Summary)
-	description := orDefault(c.Description, childSpec.Description)
-	return rnode{name: childSpec.Name, prefix: prefix, aliases: c.Aliases, summary: summary, description: description, inputs: childSpec.Inputs, children: children}, nil
+	summary := firstNonEmpty(c.ShortDescription, c.Summary, childSpec.ShortDescription, childSpec.Summary)
+	description := firstNonEmpty(c.LongDescription, c.Description, childSpec.LongDescription, childSpec.Description)
+	usage := firstNonEmpty(c.Usage, childSpec.Usage)
+	examples := c.Examples
+	if len(examples) == 0 {
+		examples = childSpec.Examples
+	}
+	return rnode{name: childSpec.Name, prefix: prefix, aliases: c.Aliases, summary: summary, description: description, usage: usage, examples: examples, inputs: childSpec.Inputs, children: children}, nil
 }
 
 func (gp *genProgram) addImport(alias, path string) {
@@ -242,14 +265,6 @@ func childRthImport(childSpecPath, moduleRoot, moduleName string) (string, error
 		return "", fmt.Errorf("locate composed child rth package: %w", err)
 	}
 	return moduleName + "/" + filepath.ToSlash(rel), nil
-}
-
-// orDefault returns s, or fallback when s is empty.
-func orDefault(s, fallback string) string {
-	if s != "" {
-		return s
-	}
-	return fallback
 }
 
 // identAlias derives a valid, reasonably unique Go import alias from a command

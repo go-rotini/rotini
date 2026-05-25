@@ -18,6 +18,8 @@ generate:
   framework:
     package: cmd/rotini/rtg
     gen_file: rotini.go
+  help:
+    enabled: true
 `
 
 // minimalGoMod uses the same module path the committed handlers rollup imports,
@@ -113,6 +115,77 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(handlersDir, "rotini_generate.go")); err != nil {
 		t.Errorf("current command stub missing: %v", err)
+	}
+}
+
+// TestGenerateHelpEnabled verifies that, with generate.help enabled, the
+// framework file gains the embedded Help<Prefix> vars + an alias-aware Help
+// resolver, and that the rendered help .txt payloads are written with the
+// expected (authored + auto-derived) sections.
+func TestGenerateHelpEnabled(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"name: mycli\n"+
+			"short_description: My CLI.\n"+
+			"long_description: My CLI does things.\n"+
+			"homepage: https://mycli.example\n"+
+			"commands:\n"+
+			"  - name: build\n"+
+			"    short_description: Build it.\n"+
+			"    aliases: [b]\n"+
+			"    examples:\n"+
+			"      - mycli build ./x\n"+
+			"    inputs:\n"+
+			"      arguments:\n"+
+			"        - name: target\n"+
+			"          schema:\n"+
+			"            type: string\n"+
+			"            required: true\n"+
+			"            description: thing to build\n")
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
+		"generate:\n  help:\n    enabled: true\n")
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	mustContain(t, filepath.Join(tmp, "rtg", "rotini.go"),
+		`_ "embed"`,
+		"//go:embed help/mycli.txt",
+		"var HelpMycli string",
+		"var HelpMycliBuild string",
+		"func Help(path ...string) (string, error)",
+		`case "":`,
+		`case "build", "b":`,
+	)
+	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"),
+		"My CLI does things.",
+		"Find more information at: https://mycli.example",
+		"Usage:",
+		"Commands:",
+		"build;b",
+		`Use "mycli help <command>" for more information about a command.`,
+	)
+	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli_build.txt"),
+		"Build it.",
+		"mycli build <target>", // auto-derived usage: required arg
+		"Arguments:",
+		"thing to build",
+		"Examples:",
+		"mycli build ./x",
+	)
+
+	// Regenerating produces identical output (idempotent).
+	before := readAndFormat(t, filepath.Join(tmp, "rtg", "rotini.go"))
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
+		t.Fatalf("Generate (second pass): %v", err)
+	}
+	after := readAndFormat(t, filepath.Join(tmp, "rtg", "rotini.go"))
+	if !bytes.Equal(before, after) {
+		t.Errorf("help generation is not idempotent:\n--- before ---\n%s\n--- after ---\n%s", before, after)
 	}
 }
 

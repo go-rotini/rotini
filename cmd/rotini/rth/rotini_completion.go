@@ -33,7 +33,7 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in := inputs.RotiniCompletion
 
 	if in.Flags.Help {
-		io.Stdout.Println(helpTextRotiniCompletion)
+		io.Stdout.Println(rtg.HelpRotiniCompletion)
 		return
 	}
 

@@ -2,7 +2,10 @@
 package rtg
 
 import (
+	_ "embed"
+	"fmt"
 	"github.com/go-rotini/rotini"
+	"strings"
 )
 
 type ProgramHandlers interface {
@@ -19,87 +22,92 @@ type ProgramHandlers interface {
 var Version = "dev"
 
 var Definition = rotini.Definition{
-	Name:        "rotini",
-	Handler:     "Rotini",
-	Summary:     "Generate type-safe Go CLIs from a declarative spec.",
-	Description: "rotini scaffolds and generates command-line programs from a .rotini.spec file, wiring typed inputs and lifecycle handlers for you.",
+	Name:    "rotini",
+	Handler: "Rotini",
+	Summary: "The rotini cli framework companion cli.",
 	Flags: []rotini.FlagDef{
-		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool"},
+		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool", Description: "print version"},
+		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", Description: "print help"},
 	},
 	Version: Version,
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
-			Handler: "RotiniInitialize",
-			Aliases: []string{"init"},
-			Summary: "Scaffold a new CLI under cmd/<name>.",
+			Handler:     "RotiniInitialize",
+			Aliases:     []string{"init"},
+			Summary:     "initialize a cli program",
+			Description: "Initialize a new rotini cli program spec file.",
 			Flags: []rotini.FlagDef{
-				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Description: "Serialization for the scaffolded spec and conf.", Default: "yaml", Enum: []string{"json", "yaml"}},
-				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
-				{Name: "into", Identifiers: []string{"--into"}, Type: "string", Description: "Also compose the new CLI into this parent CLI."},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Description: "the created rotini spec file format", Default: "yaml", Enum: []string{"json", "yaml"}},
+				{Name: "force", Identifiers: []string{"--force"}, Type: "bool", Description: "force re-initialization if files exist that init would overwrite"},
+				{Name: "into", Identifiers: []string{"--into"}, Type: "string", Description: "also compose the new cli into this parent cli"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", Description: "print help"},
 			},
 			Arguments: []rotini.ArgDef{
-				{Name: "name", Type: "string"},
+				{Name: "name", Type: "string", Description: "the root command name written to the created spec file (expected binary name)"},
 			},
 		},
 		{Name: "generate",
-			Handler: "RotiniGenerate",
-			Aliases: []string{"gen"},
-			Summary: "Generate framework + handler code from a spec.",
+			Handler:     "RotiniGenerate",
+			Aliases:     []string{"gen"},
+			Summary:     "generate a cli program",
+			Description: "Generate a cli program from a rotini spec file.",
 			Flags: []rotini.FlagDef{
-				{Name: "config", Identifiers: []string{"-c", "--config"}, Type: "string"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool"},
+				{Name: "config", Identifiers: []string{"-c", "--config"}, Type: "string", Description: "path to the rotini conf file"},
+				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool", Description: "watch a rotini spec file for changes and re-generate"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", Description: "print help"},
 			},
 			Arguments: []rotini.ArgDef{
-				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
+				{Name: "file", Type: "string", Description: "path to the spec file", Default: ".rotini.spec.yaml"},
 			},
 		},
 		{Name: "validate",
-			Handler: "RotiniValidate",
-			Aliases: []string{"val"},
-			Summary: "Validate a spec (and optional conf) against the schema.",
+			Handler:     "RotiniValidate",
+			Aliases:     []string{"val"},
+			Summary:     "validate a spec file",
+			Description: "Validate a rotini spec file for correctness.",
 			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", Description: "print help"},
 			},
 			Arguments: []rotini.ArgDef{
-				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
+				{Name: "file", Type: "string", Description: "path to the spec file", Default: ".rotini.spec.yaml"},
 			},
 		},
 		{Name: "help",
-			Handler: "RotiniHelp",
-			Summary: "Show help for a command.",
+			Handler:     "RotiniHelp",
+			Summary:     "print help",
+			Description: "Print help for a specific command.",
 			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", Description: "print help"},
 			},
 			Arguments: []rotini.ArgDef{
-				{Name: "command", Type: "[]string", Variadic: true},
+				{Name: "command", Type: "[]string", Variadic: true, Description: "name of the command to print help for"},
 			},
 		},
 		{Name: "version",
-			Handler: "RotiniVersion",
-			Summary: "Print the rotini version.",
+			Handler:     "RotiniVersion",
+			Summary:     "print version",
+			Description: "Print the rotini cli version.",
 			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", Description: "print help"},
 			},
 		},
 		{Name: "completion",
-			Handler: "RotiniCompletion",
-			Summary: "Generate a shell completion script.",
+			Handler:     "RotiniCompletion",
+			Summary:     "generate shell completion",
+			Description: "Generate shell completion scripts.",
 			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool", Description: "print help"},
 			},
 			Arguments: []rotini.ArgDef{
-				{Name: "shell", Type: "string", Enum: []string{"zsh", "bash", "fish", "powershell", "nushell", "elvish"}},
+				{Name: "shell", Type: "string", Description: "the shell to generate completions for", Enum: []string{"zsh", "bash", "fish", "powershell", "nushell", "elvish"}},
 			},
 		},
 	},
 }
 
 type RotiniFlags struct {
-	Help    bool `rotini:"help"`
 	Version bool `rotini:"version"`
+	Help    bool `rotini:"help"`
 }
 
 type RotiniArguments struct{}
@@ -133,8 +141,8 @@ type RotiniCompletionInputs struct {
 
 type RotiniGenerateFlags struct {
 	Config string `rotini:"config"`
-	Help   bool   `rotini:"help"`
 	Watch  bool   `rotini:"watch"`
+	Help   bool   `rotini:"help"`
 }
 
 type RotiniGenerateArguments struct {
@@ -222,4 +230,49 @@ type RotiniVersionCommandInputs struct {
 type RotiniVersionInputs struct {
 	Rotini        RotiniCommandInputs        `rotini:"scope=rotini"`
 	RotiniVersion RotiniVersionCommandInputs `rotini:"scope=version"`
+}
+
+//go:embed help/rotini.txt
+var HelpRotini string
+
+//go:embed help/rotini_initialize.txt
+var HelpRotiniInitialize string
+
+//go:embed help/rotini_generate.txt
+var HelpRotiniGenerate string
+
+//go:embed help/rotini_validate.txt
+var HelpRotiniValidate string
+
+//go:embed help/rotini_help.txt
+var HelpRotiniHelp string
+
+//go:embed help/rotini_version.txt
+var HelpRotiniVersion string
+
+//go:embed help/rotini_completion.txt
+var HelpRotiniCompletion string
+
+// Help returns the generated help text for the command identified by path
+// (command names or aliases; no arguments for the root command). It returns an
+// error when path does not match a known command.
+func Help(path ...string) (string, error) {
+	switch strings.Join(path, " ") {
+	case "":
+		return HelpRotini, nil
+	case "initialize", "init":
+		return HelpRotiniInitialize, nil
+	case "generate", "gen":
+		return HelpRotiniGenerate, nil
+	case "validate", "val":
+		return HelpRotiniValidate, nil
+	case "help":
+		return HelpRotiniHelp, nil
+	case "version":
+		return HelpRotiniVersion, nil
+	case "completion":
+		return HelpRotiniCompletion, nil
+	default:
+		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
+	}
 }

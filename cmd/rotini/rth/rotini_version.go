@@ -30,7 +30,7 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	if inputs.RotiniVersion.Flags.Help {
-		io.Stdout.Println(helpTextRotiniVersion)
+		io.Stdout.Println(rtg.HelpRotiniVersion)
 		return
 	}
 

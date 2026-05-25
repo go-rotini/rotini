@@ -2,7 +2,6 @@ package rth
 
 import (
 	"context"
-	"strings"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -12,29 +11,6 @@ import (
 type rotiniHelpHandlers struct{}
 
 var _ rotini.CommandHandlers = (*rotiniHelpHandlers)(nil)
-
-// helpKeyForPath maps a command path (e.g. "generate" or its alias "gen") to its
-// help key. The second return is false for an unrecognized path.
-func helpTextForPath(path string) (string, bool) {
-	switch path {
-	case "":
-		return helpTextRotini, true
-	case "initialize", "init":
-		return helpTextRotiniInitialize, true
-	case "generate", "gen":
-		return helpTextRotiniGenerate, true
-	case "validate", "val":
-		return helpTextRotiniValidate, true
-	case "completion":
-		return helpTextRotiniCompletion, true
-	case "version":
-		return helpTextRotiniVersion, true
-	case "help":
-		return helpTextRotiniHelp, true
-	default:
-		return helpTextRotini, false
-	}
-}
 
 func (*rotiniHelpHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 }
@@ -54,15 +30,16 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	in := inputs.RotiniHelp
 	if in.Flags.Help {
-		io.Stdout.Println(helpTextRotiniHelp)
+		io.Stdout.Println(rtg.HelpRotiniHelp)
 		return
 	}
 
-	path := strings.Join(in.Arguments.Command, " ")
-	text, ok := helpTextForPath(path)
-	if !ok {
-		io.Stderr.Printf("Error: unknown command %q\n\n", path)
-		io.Stdout.Println(helpTextRotiniHelp)
+	// rtg.Help resolves the command path (names or aliases; no args = root) to
+	// its generated help text.
+	text, err := rtg.Help(in.Arguments.Command...)
+	if err != nil {
+		io.Stderr.Printf("Error: %v\n\n", err)
+		io.Stdout.Println(rtg.HelpRotini)
 		rtx.Exit(1)
 		return
 	}

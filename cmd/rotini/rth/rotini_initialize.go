@@ -32,7 +32,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in := inputs.RotiniInitialize
 
 	if in.Flags.Help {
-		io.Stdout.Println(helpTextRotiniInitialize)
+		io.Stdout.Println(rtg.HelpRotiniInitialize)
 		return
 	}
 

@@ -1,0 +1,26 @@
+The rotini cli framework companion cli.
+
+Find more information at: https://rotini.dev
+
+Usage:
+  rotini <command> <arguments> [flags]
+         [-v | --version] [-h | --help]
+
+Flags:
+  -v,--version    print version
+  -h,--help       print help
+
+Commands:
+  initialize;init    initialize a cli program
+  generate;gen       generate a cli program
+  validate;val       validate a spec file
+  help               print help
+  version            print version
+  completion         generate shell completion
+
+Examples:
+  rotini init mycli
+  rotini validate .rotini.yaml
+  rotini generate ./path/to/.rotini.json
+
+Use "rotini help <command>" for more information about a command.

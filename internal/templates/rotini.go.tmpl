@@ -5,6 +5,11 @@ import (
 {{- range .StdImports}}
 	"{{.}}"
 {{- end}}
+{{- if .Help}}
+	_ "embed"
+	"fmt"
+	"strings"
+{{- end}}
 	"{{.RotiniImport}}"
 )
 
@@ -49,5 +54,24 @@ type {{.Prefix}}Inputs struct {
 {{- range .InputsFields}}
 	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
 {{- end}}
+}
+{{- end}}
+{{if .Help}}
+{{range .Help.Vars}}
+//go:embed {{.Embed}}
+var {{.Name}} string
+{{end}}
+// Help returns the generated help text for the command identified by path
+// (command names or aliases; no arguments for the root command). It returns an
+// error when path does not match a known command.
+func Help(path ...string) (string, error) {
+	switch strings.Join(path, " ") {
+{{- range .Help.Cases}}
+	case {{.PathsLiteral}}:
+		return {{.Var}}, nil
+{{- end}}
+	default:
+		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
+	}
 }
 {{- end}}

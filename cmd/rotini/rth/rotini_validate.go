@@ -32,7 +32,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in := inputs.RotiniValidate
 
 	if in.Flags.Help {
-		io.Stdout.Println(helpTextRotiniValidate)
+		io.Stdout.Println(rtg.HelpRotiniValidate)
 		return
 	}
 

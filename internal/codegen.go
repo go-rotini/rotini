@@ -89,8 +89,24 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		return err
 	}
 
-	if err := writeFrameworkFile(gp, lay); err != nil {
+	// When command-help generation is enabled, the framework file gains embedded
+	// "Help<Prefix>" vars + a Help(path…) resolver, and the rendered help text is
+	// written as .txt payloads under the framework package's help dir.
+	helpOn := conf.Generate.Help != nil && conf.Generate.Help.Enabled
+	var hnodes []helpNode
+	var hf *helpFramework
+	if helpOn {
+		hnodes = flattenHelp(gp)
+		hf = buildHelpFramework(hnodes, conf.Generate.Help.Dir)
+	}
+
+	if err := writeFrameworkFile(gp, lay, hf); err != nil {
 		return err
+	}
+	if helpOn {
+		if err := writeHelpFiles(lay, conf.Generate.Help.Dir, hnodes, gp.rootName); err != nil {
+			return err
+		}
 	}
 	if err := writeHandlerStubs(gp, lay); err != nil {
 		return err
@@ -368,7 +384,7 @@ func defaultString(v any) string {
 // aggregate interface plus the typed input structs for every command. It is
 // always (over)written — it is fully generated and carries a DO NOT EDIT
 // banner.
-func writeFrameworkFile(gp *genProgram, lay layout) error {
+func writeFrameworkFile(gp *genProgram, lay layout, help *helpFramework) error {
 	own := append([]genCommand{gp.root}, gp.own...)
 
 	blocks := make([]inputBlock, 0, len(own))
@@ -397,6 +413,7 @@ func writeFrameworkFile(gp *genProgram, lay layout) error {
 		"Blocks":       blocks,
 		"Definition":   renderDefinition(gp),
 		"Metadata":     gp.metadata,
+		"Help":         help,
 	}
 	content, err := renderGo("framework", "templates/rotini.go.tmpl", data)
 	if err != nil {
@@ -560,6 +577,9 @@ func applyConfDefaults(conf *Conf) {
 	}
 	if cmd.GenFile == "" {
 		cmd.GenFile = "handlers.go"
+	}
+	if h := conf.Generate.Help; h != nil && h.Dir == "" {
+		h.Dir = "help"
 	}
 }
 

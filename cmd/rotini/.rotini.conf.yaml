@@ -5,12 +5,9 @@ generate:
     gen_file: handlers.go
     prune:
       enabled: true
-      keep:
-        # help.go holds the user-facing help strings (helpKey enum +
-        # getHelp lookup + Version var). Not a generated handler stub,
-        # so the pruner must leave it alone.
-        - help.go
   framework:
     package: cmd/rotini/rtg
     gen_file: rotini.go
     additional_imports: []
+  help:
+    enabled: true

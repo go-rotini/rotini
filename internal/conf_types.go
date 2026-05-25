@@ -20,6 +20,7 @@ type GenerateCmdConfig struct {
 type GenerateConfig struct {
 	Cmd       *GenerateCmdConfig       `json:"cmd,omitempty"`
 	Framework *GenerateFrameworkConfig `json:"framework,omitempty"`
+	Help      *GenerateHelpConfig      `json:"help,omitempty"`
 }
 
 type GenerateFrameworkConfig struct {
@@ -29,6 +30,14 @@ type GenerateFrameworkConfig struct {
 	GenFile string `json:"gen_file,omitempty"`
 	// Import path (relative to module root) for the framework package. Package name is derived from the last path segment.
 	Package string `json:"package,omitempty"`
+}
+
+// Controls generation of embedded, spec-driven command help.
+type GenerateHelpConfig struct {
+	// Subdirectory under the framework package where the per-command help .txt payloads are written and embedded. The whole directory is framework-owned and rewritten on every generate.
+	Dir string `json:"dir,omitempty"`
+	// When true, rotini renders each command's help text from the spec and embeds it in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver.
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 // Controls pruning of stub files in the command handler package.

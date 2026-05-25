@@ -10,14 +10,20 @@ type Spec struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of the root command.
 	Commands []Command `json:"commands,omitempty"`
-	// Longer description of the program, shown in its help.
+	// Deprecated alias of 'long_description'. Longer description of the program; 'long_description' wins when both are set.
 	Description string `json:"description,omitempty"`
 	// Events this program can emit. Each name must be unique.
 	Events []EventSpec `json:"events,omitempty"`
+	// Example invocation lines, shown verbatim under the "Examples:" section of help.
+	Examples []string `json:"examples,omitempty"`
 	// Config files to load at startup.
 	Files []ConfigSpec `json:"files,omitempty"`
+	// Project homepage or docs URL, shown as the "Find more information at: <url>" line in the root command's help.
+	Homepage string `json:"homepage,omitempty"`
 	// Typed inputs for the root command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
+	// Longer description of the program, shown in the body of its help. Canonical replacement for the deprecated 'description'.
+	LongDescription string `json:"long_description,omitempty"`
 	// Build-time metadata vars injected via go ldflags.
 	Metadata []MetadataEntry `json:"metadata,omitempty"`
 	// Root command name used in routing.
@@ -26,10 +32,14 @@ type Spec struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>".
 	Schemas map[string]Schema `json:"schemas,omitempty"`
-	// One-line summary of the program, shown at the top of its help.
+	// One-line summary of the program, shown as the header of its help. Canonical replacement for the deprecated 'summary'.
+	ShortDescription string `json:"short_description,omitempty"`
+	// Deprecated alias of 'short_description'. One-line summary of the program; 'short_description' wins when both are set.
 	Summary string `json:"summary,omitempty"`
 	// Root command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
+	// Override for the usage line shown in help. When omitted, rotini derives one from the program's arguments and flags.
+	Usage string `json:"usage,omitempty"`
 }
 
 type ArgumentInput struct {
@@ -73,18 +83,26 @@ type Command struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of this command.
 	Commands []Command `json:"commands,omitempty"`
-	// Longer description of this command, shown in its help.
+	// Deprecated alias of 'long_description'. 'long_description' wins when both are set.
 	Description string `json:"description,omitempty"`
+	// Example invocation lines, shown verbatim under the "Examples:" section of this command's help.
+	Examples []string `json:"examples,omitempty"`
 	// Typed inputs for this command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
+	// Longer description of this command, shown in the body of its help. Canonical replacement for the deprecated 'description'.
+	LongDescription string `json:"long_description,omitempty"`
 	// Command name used in routing.
 	Name string `json:"name,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
-	// One-line summary of this command, shown in the parent's command list and at the top of this command's help.
+	// One-line summary of this command, shown in the parent's command list and as the header of this command's help. Canonical replacement for the deprecated 'summary'.
+	ShortDescription string `json:"short_description,omitempty"`
+	// Deprecated alias of 'short_description'. 'short_description' wins when both are set.
 	Summary string `json:"summary,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
+	// Override for the usage line shown in this command's help. When omitted, rotini derives one from the command's arguments and flags.
+	Usage string `json:"usage,omitempty"`
 }
 
 type ConfigInput struct {
