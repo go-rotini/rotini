@@ -34,12 +34,9 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	// rtg.Help resolves the command path (names or aliases; no args = root) to
-	// its generated help text.
 	text, err := rtg.Help(in.Arguments.Command...)
 	if err != nil {
-		io.Stderr.Printf("Error: %v\n\n", err)
-		io.Stdout.Println(rtg.HelpRotini)
+		io.Stderr.Printf("Error: %v\n\n%s", err, rtg.HelpRotini)
 		rtx.Exit(1)
 		return
 	}
