@@ -36,13 +36,13 @@ func helpTextForPath(path string) (string, bool) {
 	}
 }
 
-func (*rotiniHelpHandlers) CascadingPreRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniHelpHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniHelpHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniHelpHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniHelpHandlers) Run(ctx context.Context, rtx rotini.Context) {
+func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
 	io := rtk.MustGet[*rtk.IO](rtx, "io")
 
@@ -69,8 +69,8 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	io.Stdout.Println(text)
 }
 
-func (*rotiniHelpHandlers) PostRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniHelpHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniHelpHandlers) CascadingPostRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniHelpHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 }

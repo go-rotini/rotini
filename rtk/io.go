@@ -17,7 +17,7 @@ import (
 //	rth.Program.Bind("io", rtk.NewIO()).Execute()
 //
 //	// a handler
-//	out, ok := rtx.Get("io").(*rtk.IO)
+//	out, ok := rtx.Value("io").(*rtk.IO)
 //	if !ok { /* not bound */ }
 //	out.Stdout.Println("done")
 //	piped, _ := out.Stdin.ReadString()

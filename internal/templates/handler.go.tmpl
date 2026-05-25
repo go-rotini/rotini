@@ -10,17 +10,17 @@ type {{.HandlerType}} struct{}
 
 var _ {{.RotiniPkg}}.CommandHandlers = (*{{.HandlerType}})(nil)
 
-func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
+func (*{{.HandlerType}}) CascadingPreRun(ctx context.Context, rtx *{{.RotiniPkg}}.Context) {
 }
 
-func (*{{.HandlerType}}) PreRun(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
+func (*{{.HandlerType}}) PreRun(ctx context.Context, rtx *{{.RotiniPkg}}.Context) {
 }
 
-func (*{{.HandlerType}}) Run(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
+func (*{{.HandlerType}}) Run(ctx context.Context, rtx *{{.RotiniPkg}}.Context) {
 }
 
-func (*{{.HandlerType}}) PostRun(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
+func (*{{.HandlerType}}) PostRun(ctx context.Context, rtx *{{.RotiniPkg}}.Context) {
 }
 
-func (*{{.HandlerType}}) CascadingPostRun(ctx context.Context, rtx {{.RotiniPkg}}.Context) {
+func (*{{.HandlerType}}) CascadingPostRun(ctx context.Context, rtx *{{.RotiniPkg}}.Context) {
 }

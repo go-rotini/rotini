@@ -85,7 +85,7 @@ var DefaultParser = NewParser()
 // unknown flag is given, a flag's value is missing, a required input is absent, or
 // a value is outside a declared enum — print it (see [Usage]), rtx.Exit, or fall
 // back to rotini.Context.Args.
-func (p *Parser) Parse(rtx rotini.Context, out any) error {
+func (p *Parser) Parse(rtx *rotini.Context, out any) error {
 	if p == nil {
 		return &usageError{msg: "rotini: nil parser"}
 	}

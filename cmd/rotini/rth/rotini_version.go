@@ -12,13 +12,13 @@ type rotiniVersionHandlers struct{}
 
 var _ rotini.CommandHandlers = (*rotiniVersionHandlers)(nil)
 
-func (*rotiniVersionHandlers) CascadingPreRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniVersionHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniVersionHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniVersionHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniVersionHandlers) Run(ctx context.Context, rtx rotini.Context) {
+func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
 	io := rtk.MustGet[*rtk.IO](rtx, "io")
 
@@ -37,8 +37,8 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	io.Stdout.Println(rtg.Version)
 }
 
-func (*rotiniVersionHandlers) PostRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniVersionHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniVersionHandlers) CascadingPostRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniVersionHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 }

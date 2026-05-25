@@ -14,14 +14,14 @@ import (
 type recHandler struct {
 	name  string
 	log   *[]string
-	onRun func(rtx Context)
+	onRun func(rtx *Context)
 }
 
-func (h *recHandler) CascadingPreRun(_ context.Context, _ Context)  { h.note("CascadingPreRun") }
-func (h *recHandler) PreRun(_ context.Context, _ Context)           { h.note("PreRun") }
-func (h *recHandler) PostRun(_ context.Context, _ Context)          { h.note("PostRun") }
-func (h *recHandler) CascadingPostRun(_ context.Context, _ Context) { h.note("CascadingPostRun") }
-func (h *recHandler) Run(_ context.Context, rtx Context) {
+func (h *recHandler) CascadingPreRun(_ context.Context, _ *Context)  { h.note("CascadingPreRun") }
+func (h *recHandler) PreRun(_ context.Context, _ *Context)           { h.note("PreRun") }
+func (h *recHandler) PostRun(_ context.Context, _ *Context)          { h.note("PostRun") }
+func (h *recHandler) CascadingPostRun(_ context.Context, _ *Context) { h.note("CascadingPostRun") }
+func (h *recHandler) Run(_ context.Context, rtx *Context) {
 	h.note("Run")
 	if h.onRun != nil {
 		h.onRun(rtx)
@@ -32,7 +32,7 @@ func (h *recHandler) note(hook string) { *h.log = append(*h.log, h.name+"."+hook
 // testHandlers is the aggregate the runtime dispatches against by reflection.
 type testHandlers struct {
 	log   *[]string
-	onRun func(rtx Context)
+	onRun func(rtx *Context)
 }
 
 func (t *testHandlers) App() CommandHandlers { return &recHandler{name: "app", log: t.log} }
@@ -72,7 +72,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 	var gotChain []ResolvedCommand
 	var gotArgs []string
 	args := []string{"--verbose", "run", "alice", "x", "y", "--count", "3"}
-	h := &testHandlers{log: &log, onRun: func(rtx Context) {
+	h := &testHandlers{log: &log, onRun: func(rtx *Context) {
 		gotChain, gotArgs = rtx.Chain(), rtx.Args()
 	}}
 
@@ -126,7 +126,7 @@ func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 }
 
 func TestRun_exitCodePropagates(t *testing.T) {
-	h := &testHandlers{log: new([]string), onRun: func(rtx Context) { rtx.Exit(5) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.Exit(5) }}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	if code := p.run(p.args); code != 5 {
 		t.Errorf("run() = %d, want 5 (handler called Exit)", code)
@@ -135,12 +135,12 @@ func TestRun_exitCodePropagates(t *testing.T) {
 
 func TestRun_mustGetRoutesToOnError(t *testing.T) {
 	var seen error
-	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		// What rtk.MustGet panics on a missing service; recovered into the funnel.
 		panic(&ServiceError{Key: "no-such-service"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.OnError(func(_ context.Context, rtx Context, err error) {
+	p.OnError(func(_ context.Context, rtx *Context, err error) {
 		seen = err
 		rtx.Exit(7)
 	})
@@ -160,18 +160,18 @@ func TestRun_mustGetRoutesToOnError(t *testing.T) {
 func TestRun_onErrorWithoutExitStillFails(t *testing.T) {
 	// A funnel that classifies/logs but forgets to call rtx.Exit must not leak a
 	// success code out of a panic: dispatch floors the panic path to 1.
-	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic(&ServiceError{Key: "missing"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.OnError(func(_ context.Context, _ Context, _ error) {}) // no rtx.Exit
+	p.OnError(func(_ context.Context, _ *Context, _ error) {}) // no rtx.Exit
 	if code := p.run(p.args); code != 1 {
 		t.Errorf("run() = %d, want 1 (panic path floors to non-zero)", code)
 	}
 }
 
 func TestRun_defaultOnErrorPrintsAndReturns1(t *testing.T) {
-	h := &testHandlers{log: new([]string), onRun: func(rtx Context) {
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic("boom") // a non-error panic value is wrapped before the funnel
 	}}
 	p, _, errb := newTestProgram(h, []string{"run"})

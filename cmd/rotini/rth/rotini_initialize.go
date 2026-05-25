@@ -13,13 +13,13 @@ type rotiniInitializeHandlers struct{}
 
 var _ rotini.CommandHandlers = (*rotiniInitializeHandlers)(nil)
 
-func (*rotiniInitializeHandlers) CascadingPreRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniInitializeHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniInitializeHandlers) PreRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniInitializeHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx rotini.Context) {
+func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
 	io := rtk.MustGet[*rtk.IO](rtx, "io")
 
@@ -43,8 +43,8 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx rotini.Context) {
 	}
 }
 
-func (*rotiniInitializeHandlers) PostRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniInitializeHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
 }
 
-func (*rotiniInitializeHandlers) CascadingPostRun(ctx context.Context, rtx rotini.Context) {
+func (*rotiniInitializeHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 }

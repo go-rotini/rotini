@@ -9,12 +9,12 @@ import (
 )
 
 func TestUsage_fromContext(t *testing.T) {
-	rtx := rotini.NewContext(testDef(), []string{"run"})
+	rtx := rotini.NewContextFor(testDef(), []string{"run"})
 	s := Usage(rtx)
 	if !strings.Contains(s, "Usage:") || !strings.Contains(s, "app run") {
 		t.Errorf("Usage(rtx) unexpected:\n%s", s)
 	}
-	if Usage(rotini.NewRtx()) != "" {
+	if Usage(rotini.NewContext()) != "" {
 		t.Errorf("Usage on an unresolved context should be empty")
 	}
 }
@@ -36,7 +36,7 @@ func TestWriteUsage_rich(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	writeUsage(&buf, rotini.NewContext(def, nil).Chain())
+	writeUsage(&buf, rotini.NewContextFor(def, nil).Chain())
 	root := buf.String()
 	for _, want := range []string{"Do things.", "Usage:", "A longer description of app.", "Commands:", "run, r", "Run it.", "Be loud."} {
 		if !strings.Contains(root, want) {
@@ -45,7 +45,7 @@ func TestWriteUsage_rich(t *testing.T) {
 	}
 
 	buf.Reset()
-	writeUsage(&buf, rotini.NewContext(def, []string{"run"}).Chain())
+	writeUsage(&buf, rotini.NewContextFor(def, []string{"run"}).Chain())
 	leaf := buf.String()
 	for _, want := range []string{"Run it.", "app run", "Arguments:", "Who to run.", "Flags:", "--count int", "How many.", `(default "1")`} {
 		if !strings.Contains(leaf, want) {

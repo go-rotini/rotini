@@ -13,8 +13,8 @@ type program struct {
 	args     []string
 	def      Definition
 	handlers any
-	rtx      *Rtx                                              // pre-seeded registry; user Bind calls land here
-	onError  func(ctx context.Context, rtx Context, err error) // funnel for MustGet/panic failures; nil → defaultOnError
+	rtx      *Context                                           // pre-seeded registry; user Bind calls land here
+	onError  func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures; nil → defaultOnError
 	stdout   io.Writer
 	stderr   io.Writer
 }
@@ -30,7 +30,7 @@ func NewProgram(def Definition, handlers any) *program {
 		args:     os.Args[1:],
 		def:      def,
 		handlers: handlers,
-		rtx:      NewRtx(),
+		rtx:      NewContext(),
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
 	}
@@ -63,7 +63,7 @@ func (p *program) Bind(key string, value any) *program {
 // set, the default prints the error to stderr and exits 1 (and the panic path
 // floors a 0 to 1, so a funnel that forgets rtx.Exit still fails). OnError returns
 // the receiver so it chains with [program.Bind].
-func (p *program) OnError(fn func(ctx context.Context, rtx Context, err error)) *program {
+func (p *program) OnError(fn func(ctx context.Context, rtx *Context, err error)) *program {
 	p.onError = fn
 	return p
 }
@@ -95,7 +95,7 @@ func (p *program) run(argv []string) int {
 
 	rtx := p.rtx
 	if rtx == nil {
-		rtx = NewRtx()
+		rtx = NewContext()
 	}
 	rtx.args = argv
 	rtx.chain = chain
@@ -108,7 +108,7 @@ func (p *program) run(argv []string) int {
 
 // defaultOnError is the OnError funnel used when the program supplies none: it
 // prints the error to stderr and fails with exit code 1.
-func (p *program) defaultOnError(_ context.Context, rtx Context, err error) {
+func (p *program) defaultOnError(_ context.Context, rtx *Context, err error) {
 	fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
 	rtx.Exit(1)
 }
@@ -120,7 +120,7 @@ func (p *program) defaultOnError(_ context.Context, rtx Context, err error) {
 // (e.g. the rtk package's MustGet on a missing service) is recovered and routed
 // through the registry's OnError funnel, whose rtx.Exit code becomes the process
 // exit code.
-func (p *program) dispatch(chain []ResolvedCommand, rtx *Rtx) (code int) {
+func (p *program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {

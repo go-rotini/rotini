@@ -24,7 +24,7 @@ import (
 //
 // CLIs that hand-author their help text simply ignore it. Usage returns "" for a
 // nil context or before the runtime has resolved a command.
-func Usage(rtx rotini.Context) string {
+func Usage(rtx *rotini.Context) string {
 	if rtx == nil {
 		return ""
 	}

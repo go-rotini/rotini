@@ -30,7 +30,7 @@ func testDef() rotini.Definition {
 }
 
 func TestParse_bindsInputs(t *testing.T) {
-	rtx := rotini.NewContext(testDef(), []string{"--verbose", "run", "alice", "x", "y", "--count", "3"})
+	rtx := rotini.NewContextFor(testDef(), []string{"--verbose", "run", "alice", "x", "y", "--count", "3"})
 	var in runInputs
 	if err := NewParser().Parse(rtx, &in); err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -46,10 +46,10 @@ func TestParse_bindsInputs(t *testing.T) {
 // TestParse_viaRegistryGet exercises the full handler flow: the parser is bound to
 // the registry, retrieved via rtx.Get (ctx.Value style), then used to parse.
 func TestParse_viaRegistryGet(t *testing.T) {
-	rtx := rotini.NewContext(testDef(), []string{"run", "alice"})
+	rtx := rotini.NewContextFor(testDef(), []string{"run", "alice"})
 	rtx.Bind("parser", NewParser())
 
-	parser, ok := rtx.Get("parser").(*Parser)
+	parser, ok := rtx.Value("parser").(*Parser)
 	if !ok {
 		t.Fatal("parser not retrievable from registry")
 	}
@@ -65,13 +65,13 @@ func TestParse_viaRegistryGet(t *testing.T) {
 func TestParse_nilParser(t *testing.T) {
 	var p *Parser
 	var in runInputs
-	if err := p.Parse(rotini.NewContext(testDef(), []string{"run"}), &in); err == nil || !strings.Contains(err.Error(), "nil parser") {
+	if err := p.Parse(rotini.NewContextFor(testDef(), []string{"run"}), &in); err == nil || !strings.Contains(err.Error(), "nil parser") {
 		t.Errorf("Parse on nil parser = %v, want nil-parser error", err)
 	}
 }
 
 func TestParse_outMustBePointer(t *testing.T) {
-	rtx := rotini.NewContext(testDef(), []string{"run"})
+	rtx := rotini.NewContextFor(testDef(), []string{"run"})
 	var in runInputs
 	if err := NewParser().Parse(rtx, in); err == nil || !strings.Contains(err.Error(), "pointer") {
 		t.Errorf("Parse with non-pointer out = %v, want pointer error", err)
@@ -80,7 +80,7 @@ func TestParse_outMustBePointer(t *testing.T) {
 
 func TestParse_unresolvedContext(t *testing.T) {
 	var in runInputs
-	if err := NewParser().Parse(rotini.NewRtx(), &in); err == nil {
+	if err := NewParser().Parse(rotini.NewContext(), &in); err == nil {
 		t.Error("Parse on an unresolved context should error")
 	}
 	if in.Run.Flags.Count != 0 || in.App.Flags.Verbose {
@@ -89,7 +89,7 @@ func TestParse_unresolvedContext(t *testing.T) {
 }
 
 func TestParse_unknownFlag(t *testing.T) {
-	rtx := rotini.NewContext(testDef(), []string{"run", "--nope"})
+	rtx := rotini.NewContextFor(testDef(), []string{"run", "--nope"})
 	var in runInputs
 	if err := NewParser().Parse(rtx, &in); err == nil || !strings.Contains(err.Error(), `unknown flag "--nope"`) {
 		t.Errorf("Parse error = %v, want unknown-flag", err)
@@ -97,7 +97,7 @@ func TestParse_unknownFlag(t *testing.T) {
 }
 
 func TestParse_flagNeedsValue(t *testing.T) {
-	rtx := rotini.NewContext(testDef(), []string{"run", "--count"})
+	rtx := rotini.NewContextFor(testDef(), []string{"run", "--count"})
 	var in runInputs
 	if err := NewParser().Parse(rtx, &in); err == nil || !strings.Contains(err.Error(), "needs a value") {
 		t.Errorf("Parse error = %v, want needs-a-value", err)
@@ -106,7 +106,7 @@ func TestParse_flagNeedsValue(t *testing.T) {
 
 func TestParse_unknownCommand(t *testing.T) {
 	// "ru" is a stray positional on a branch-only root: a mistyped sub-command.
-	rtx := rotini.NewContext(testDef(), []string{"ru"})
+	rtx := rotini.NewContextFor(testDef(), []string{"ru"})
 	var in runInputs
 	err := NewParser().Parse(rtx, &in)
 	if err == nil || !strings.Contains(err.Error(), `unknown command "ru"`) {
@@ -122,7 +122,7 @@ func TestParse_missingRequired(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []rotini.FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true}},
 	}
-	rtx := rotini.NewContext(def, []string{})
+	rtx := rotini.NewContextFor(def, []string{})
 	var in struct{}
 	err := NewParser().Parse(rtx, &in)
 	if err == nil || !strings.Contains(err.Error(), "missing required") || !strings.Contains(err.Error(), "--token") {
@@ -135,7 +135,7 @@ func TestParse_badEnumValue(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []rotini.FlagDef{{Name: "level", Identifiers: []string{"--level"}, Type: "string", Enum: []string{"low", "high"}}},
 	}
-	rtx := rotini.NewContext(def, []string{"--level", "medium"})
+	rtx := rotini.NewContextFor(def, []string{"--level", "medium"})
 	var in struct{}
 	err := NewParser().Parse(rtx, &in)
 	if err == nil || !strings.Contains(err.Error(), "invalid value") || !strings.Contains(err.Error(), "one of: low, high") {
@@ -156,7 +156,7 @@ func TestParse_defaultsApplied(t *testing.T) {
 			Arguments struct{}
 		} `rotini:"scope=app"`
 	}
-	rtx := rotini.NewContext(def, []string{})
+	rtx := rotini.NewContextFor(def, []string{})
 	var in inputs
 	if err := NewParser().Parse(rtx, &in); err != nil {
 		t.Fatalf("Parse: %v", err)

@@ -8,7 +8,7 @@ import (
 )
 
 func TestGet_typed(t *testing.T) {
-	rtx := rotini.NewRtx()
+	rtx := rotini.NewContext()
 	rtx.Bind("parser", NewParser())
 
 	if p, ok := Get[*Parser](rtx, "parser"); !ok || p == nil {
@@ -23,7 +23,7 @@ func TestGet_typed(t *testing.T) {
 }
 
 func TestMustGet_returnsBoundService(t *testing.T) {
-	rtx := rotini.NewRtx()
+	rtx := rotini.NewContext()
 	rtx.Bind("parser", NewParser())
 	if MustGet[*Parser](rtx, "parser") == nil {
 		t.Fatal("MustGet returned nil for a bound service")
@@ -31,7 +31,7 @@ func TestMustGet_returnsBoundService(t *testing.T) {
 }
 
 func TestMustGet_panicsServiceError(t *testing.T) {
-	rtx := rotini.NewRtx() // nothing bound
+	rtx := rotini.NewContext() // nothing bound
 
 	defer func() {
 		r := recover()
@@ -52,7 +52,7 @@ func TestMustGet_panicsServiceError(t *testing.T) {
 }
 
 func TestMustGet_panicsOnWrongType(t *testing.T) {
-	rtx := rotini.NewRtx()
+	rtx := rotini.NewContext()
 	rtx.Bind("parser", NewParser())
 
 	defer func() {

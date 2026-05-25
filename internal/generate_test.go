@@ -57,7 +57,7 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 		"rotini_help", "rotini_initialize", "rotini_validate", "rotini_version",
 	} {
 		mustContain(t, filepath.Join(tmp, "cmd/rotini/rth", name+".go"),
-			"package rth", "rotini.CommandHandlers", "rotini.Context")
+			"package rth", "rotini.CommandHandlers", "*rotini.Context")
 	}
 }
 

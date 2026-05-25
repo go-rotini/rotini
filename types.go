@@ -9,11 +9,11 @@ import (
 // implements. The runtime invokes the hooks in order, sharing one [Context]
 // across the chain; handlers read their typed inputs with the rtk package's Parse.
 type CommandHandlers interface {
-	CascadingPreRun(ctx context.Context, rtx Context)
-	PreRun(ctx context.Context, rtx Context)
-	Run(ctx context.Context, rtx Context)
-	PostRun(ctx context.Context, rtx Context)
-	CascadingPostRun(ctx context.Context, rtx Context)
+	CascadingPreRun(ctx context.Context, rtx *Context)
+	PreRun(ctx context.Context, rtx *Context)
+	Run(ctx context.Context, rtx *Context)
+	PostRun(ctx context.Context, rtx *Context)
+	CascadingPostRun(ctx context.Context, rtx *Context)
 }
 
 // Definition is the compiled command tree for a generated rotini program. The
