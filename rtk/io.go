@@ -36,8 +36,6 @@ func NewIO() *IO {
 	}
 }
 
-var DefaultIO = NewIO()
-
 // WithStdin replaces the input source and returns the receiver so overrides chain.
 // A nil reader becomes an immediate-EOF nop. Use it to feed a test an in-memory
 // reader.
