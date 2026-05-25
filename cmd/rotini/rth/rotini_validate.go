@@ -20,8 +20,8 @@ func (*rotiniValidateHandlers) PreRun(ctx context.Context, rtx *rotini.Context) 
 }
 
 func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rtk.MustGet[*rtk.Parser](rtx, "parser")
-	io := rtk.MustGet[*rtk.IO](rtx, "io")
+	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
+	io := rotini.MustGet[*rtk.IO](rtx, "io")
 
 	var inputs rtg.RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
