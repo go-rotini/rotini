@@ -1,11 +1,13 @@
 package internal
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"text/template"
 )
 
 // helpNode is one command's fully-resolved help model: enough to render its
@@ -139,7 +141,7 @@ func buildHelpFramework(hnodes []helpNode, dir string) *helpFramework {
 // writeHelpFiles renders each command's help text and writes it under the help
 // dir in the framework package. The whole dir is framework-owned: it is removed
 // and rewritten each pass, so help for a removed command does not linger.
-func writeHelpFiles(lay layout, dir string, hnodes []helpNode, rootName string) error {
+func writeHelpFiles(lay layout, dir string, hnodes []helpNode, rootName string, tmpl *template.Template) error {
 	if dir == "" {
 		return fmt.Errorf("generate.help.dir must not be empty")
 	}
@@ -151,55 +153,159 @@ func writeHelpFiles(lay layout, dir string, hnodes []helpNode, rootName string) 
 		return fmt.Errorf("create help dir %s: %w", helpDir, err)
 	}
 	for _, hn := range hnodes {
+		text, err := renderHelpText(tmpl, hn, rootName)
+		if err != nil {
+			return err
+		}
 		path := filepath.Join(helpDir, hn.file)
-		if err := os.WriteFile(path, []byte(renderHelpText(hn, rootName)), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
 			return fmt.Errorf("write help %s: %w", hn.file, err)
 		}
 	}
 	return nil
 }
 
-// renderHelpText assembles one command's help text from its model. Structural
-// sections (usage, arguments, flags, commands, footer) are derived from spec
-// data; the author supplies only the description, examples, and an optional
-// usage override. The result has no trailing newline (handlers print it with a
-// newline-adding Println, matching the previous hand-written help consts).
-func renderHelpText(hn helpNode, rootName string) string {
-	var b strings.Builder
+// helpRow is one aligned row in a help section (a flag/argument/command and its
+// description). Fields are exported so the help template can read them.
+type helpRow struct {
+	Left  string
+	Right string
+}
 
-	if header := firstNonEmpty(hn.long, hn.short); header != "" {
-		b.WriteString(header)
-		if hn.homepage != "" {
-			b.WriteString("\n\nFind more information at: " + hn.homepage)
+// helpData is the per-command view passed to the help template. Fields are
+// exported for template access; the contract is documented at the top of
+// internal/templates/help.text.tmpl.
+type helpData struct {
+	Root      string
+	Name      string
+	Path      string
+	Short     string
+	Long      string
+	Intro     string
+	Usage     string
+	Homepage  string
+	Examples  []string
+	Arguments []helpRow
+	Flags     []helpRow
+	Commands  []helpRow
+	Footer    string
+	ArgWidth  int
+	FlagWidth int
+	CmdWidth  int
+}
+
+// helpFuncs are the template helpers available to both the built-in and any
+// user-supplied help template.
+var helpFuncs = template.FuncMap{
+	// indent prefixes every line of s with n spaces.
+	"indent": func(n int, s string) string {
+		pad := strings.Repeat(" ", n)
+		return pad + strings.ReplaceAll(s, "\n", "\n"+pad)
+	},
+	// row renders an aligned "  left<gutter>right" line. With no right value it
+	// prints just the un-padded left column, so there is no trailing whitespace.
+	"row": func(left, right string, width int) string {
+		if right == "" {
+			return "  " + left
 		}
-		b.WriteString("\n\n")
-	} else if hn.homepage != "" {
-		b.WriteString("Find more information at: " + hn.homepage + "\n\n")
-	}
+		return fmt.Sprintf("  %-*s    %s", width, left, right)
+	},
+}
 
-	usage := usageLine(rootName, hn)
-	b.WriteString("Usage:\n  " + strings.ReplaceAll(usage, "\n", "\n  ") + "\n")
+// loadHelpTemplate parses the help template: the user-supplied one at custom
+// (resolved against moduleRoot when relative), or rotini's built-in template.
+func loadHelpTemplate(custom, moduleRoot string) (*template.Template, error) {
+	if custom != "" {
+		path := custom
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(moduleRoot, filepath.FromSlash(custom))
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read help template %s: %w", path, err)
+		}
+		t, err := template.New(filepath.Base(path)).Funcs(helpFuncs).Parse(string(src))
+		if err != nil {
+			return nil, fmt.Errorf("parse help template %s: %w", path, err)
+		}
+		return t, nil
+	}
+	src, err := templateFS.ReadFile("templates/help.text.tmpl")
+	if err != nil {
+		return nil, fmt.Errorf("read built-in help template: %w", err)
+	}
+	t, err := template.New("help.text.tmpl").Funcs(helpFuncs).Parse(string(src))
+	if err != nil {
+		return nil, fmt.Errorf("parse built-in help template: %w", err)
+	}
+	return t, nil
+}
 
-	if hn.inputs != nil && len(hn.inputs.Arguments) > 0 {
-		b.WriteString("\n" + section("Arguments", argRows(hn.inputs.Arguments)))
+// renderHelpText renders one command's help text through tmpl. Trailing newlines
+// are trimmed (handlers print it with a newline-adding Println, matching the
+// previous hand-written help consts).
+func renderHelpText(tmpl *template.Template, hn helpNode, rootName string) (string, error) {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, buildHelpData(hn, rootName)); err != nil {
+		return "", fmt.Errorf("render help %s: %w", hn.file, err)
 	}
-	if hn.inputs != nil && len(hn.inputs.Flags) > 0 {
-		b.WriteString("\n" + section("Flags", flagRows(hn.inputs.Flags)))
-	}
-	if len(hn.children) > 0 {
-		b.WriteString("\n" + section("Commands", childRows(hn.children)))
-	}
-	if len(hn.examples) > 0 {
-		b.WriteString("\nExamples:\n")
-		for _, e := range hn.examples {
-			b.WriteString("  " + e + "\n")
+	return strings.TrimRight(buf.String(), "\n"), nil
+}
+
+// buildHelpData projects a help model node into the template's view, deriving
+// the intro block, usage line, aligned rows, and footer.
+func buildHelpData(hn helpNode, rootName string) helpData {
+	intro := firstNonEmpty(hn.long, hn.short)
+	if hn.homepage != "" {
+		if intro != "" {
+			intro += "\n\nFind more information at: " + hn.homepage
+		} else {
+			intro = "Find more information at: " + hn.homepage
 		}
 	}
+	footer := ""
 	if len(hn.children) > 0 {
-		b.WriteString("\nUse \"" + rootName + " help <command>\" for more information about a command.\n")
+		footer = "Use \"" + rootName + " help <command>\" for more information about a command."
 	}
+	name := ""
+	if n := len(hn.pathNames); n > 0 {
+		name = hn.pathNames[n-1]
+	}
+	var args, flags []helpRow
+	if hn.inputs != nil {
+		args = argRows(hn.inputs.Arguments)
+		flags = flagRows(hn.inputs.Flags)
+	}
+	cmds := childRows(hn.children)
+	return helpData{
+		Root:      rootName,
+		Name:      name,
+		Path:      strings.Join(hn.pathNames, " "),
+		Short:     hn.short,
+		Long:      hn.long,
+		Intro:     intro,
+		Usage:     usageLine(rootName, hn),
+		Homepage:  hn.homepage,
+		Examples:  hn.examples,
+		Arguments: args,
+		Flags:     flags,
+		Commands:  cmds,
+		Footer:    footer,
+		ArgWidth:  colWidth(args),
+		FlagWidth: colWidth(flags),
+		CmdWidth:  colWidth(cmds),
+	}
+}
 
-	return strings.TrimRight(b.String(), "\n")
+// colWidth returns the width of the widest Left column across rows.
+func colWidth(rows []helpRow) int {
+	w := 0
+	for _, r := range rows {
+		if len(r.Left) > w {
+			w = len(r.Left)
+		}
+	}
+	return w
 }
 
 // usageLine returns the command's usage override, or an auto-derived line:
@@ -238,8 +344,8 @@ func argToken(a ArgumentInput) string {
 
 // argRows builds the Arguments-section rows: the name and its description, with
 // a declared default appended.
-func argRows(args []ArgumentInput) [][2]string {
-	rows := make([][2]string, 0, len(args))
+func argRows(args []ArgumentInput) []helpRow {
+	rows := make([]helpRow, 0, len(args))
 	for _, a := range args {
 		desc := ""
 		var def any
@@ -250,15 +356,15 @@ func argRows(args []ArgumentInput) [][2]string {
 		if d := defaultString(def); d != "" {
 			desc = appendDefault(desc, d)
 		}
-		rows = append(rows, [2]string{a.Name, desc})
+		rows = append(rows, helpRow{Left: a.Name, Right: desc})
 	}
 	return rows
 }
 
 // flagRows builds the Flags-section rows: the comma-joined identifiers (or the
 // auto-derived "--<name>") and the description, with a declared default appended.
-func flagRows(flags []FlagInput) [][2]string {
-	rows := make([][2]string, 0, len(flags))
+func flagRows(flags []FlagInput) []helpRow {
+	rows := make([]helpRow, 0, len(flags))
 	for _, f := range flags {
 		ids := f.Identifiers
 		if len(ids) == 0 {
@@ -273,41 +379,19 @@ func flagRows(flags []FlagInput) [][2]string {
 		if d := defaultString(def); d != "" {
 			desc = appendDefault(desc, d)
 		}
-		rows = append(rows, [2]string{strings.Join(ids, ","), desc})
+		rows = append(rows, helpRow{Left: strings.Join(ids, ","), Right: desc})
 	}
 	return rows
 }
 
 // childRows builds the Commands-section rows: "name;alias…" and the child's
 // short description.
-func childRows(children []helpChild) [][2]string {
-	rows := make([][2]string, 0, len(children))
+func childRows(children []helpChild) []helpRow {
+	rows := make([]helpRow, 0, len(children))
 	for _, c := range children {
-		rows = append(rows, [2]string{strings.Join(c.idents, ";"), c.short})
+		rows = append(rows, helpRow{Left: strings.Join(c.idents, ";"), Right: c.short})
 	}
 	return rows
-}
-
-// section renders a titled, column-aligned block. Each row's left column is
-// padded to the section's widest left value plus a four-space gutter; a row
-// with no description prints just its left column.
-func section(title string, rows [][2]string) string {
-	maxL := 0
-	for _, r := range rows {
-		if len(r[0]) > maxL {
-			maxL = len(r[0])
-		}
-	}
-	var b strings.Builder
-	b.WriteString(title + ":\n")
-	for _, r := range rows {
-		b.WriteString("  " + r[0])
-		if r[1] != "" {
-			b.WriteString(strings.Repeat(" ", maxL-len(r[0])+4) + r[1])
-		}
-		b.WriteString("\n")
-	}
-	return b.String()
 }
 
 // appendDefault appends a "(default: …)" note to a description.

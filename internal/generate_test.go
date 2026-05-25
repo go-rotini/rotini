@@ -189,6 +189,46 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	}
 }
 
+// TestGenerateHelpCustomTemplate verifies that generate.help.template selects a
+// user-supplied template (resolved against the module root) and that the help
+// FuncMap (indent/row) is available to it.
+func TestGenerateHelpCustomTemplate(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"name: mycli\n"+
+			"short_description: My CLI.\n"+
+			"commands:\n"+
+			"  - name: build\n"+
+			"    short_description: Build it.\n")
+	// A custom template with a distinctive marker that also exercises a helper.
+	writeTestFile(t, filepath.Join(tmp, "help.tmpl"),
+		"CUSTOM {{.Root}}{{if .Name}} {{.Name}}{{end}} :: {{.Short}}\n{{indent 4 .Usage}}\n")
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
+		"generate:\n  help:\n    enabled: true\n    template: help.tmpl\n")
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"),
+		"CUSTOM mycli :: My CLI.",
+		"    mycli", // indent 4 of the auto usage line
+	)
+	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli_build.txt"),
+		"CUSTOM mycli build :: Build it.",
+	)
+
+	// A missing template path is a generation error.
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
+		"generate:\n  help:\n    enabled: true\n    template: nope.tmpl\n")
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err == nil {
+		t.Error("expected an error for a missing help template, got nil")
+	}
+}
+
 // repoRoot returns the rotini module root (the parent of the internal package
 // directory the test runs in).
 func repoRoot(t *testing.T) string {

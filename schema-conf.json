@@ -47,6 +47,10 @@
           "type": "string",
           "default": "help",
           "description": "Subdirectory under the framework package where the per-command help .txt payloads are written and embedded. The whole directory is framework-owned and rewritten on every generate."
+        },
+        "template": {
+          "type": "string",
+          "description": "Path (relative to the module root) to a custom Go text/template used to render each command's help text. When omitted, rotini's built-in help template is used."
         }
       }
     },

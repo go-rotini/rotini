@@ -38,6 +38,8 @@ type GenerateHelpConfig struct {
 	Dir string `json:"dir,omitempty"`
 	// When true, rotini renders each command's help text from the spec and embeds it in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver.
 	Enabled bool `json:"enabled,omitempty"`
+	// Path (relative to the module root) to a custom Go text/template used to render each command's help text. When omitted, rotini's built-in help template is used.
+	Template string `json:"template,omitempty"`
 }
 
 // Controls pruning of stub files in the command handler package.

@@ -23,7 +23,7 @@ const (
 	rotiniPkgName    = "rotini"
 )
 
-//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl
+//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.text.tmpl
 var templateFS embed.FS
 
 // fieldDef is one generated struct field: a Go identifier, its type, and its
@@ -95,16 +95,21 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	helpOn := conf.Generate.Help != nil && conf.Generate.Help.Enabled
 	var hnodes []helpNode
 	var hf *helpFramework
+	var helpTmpl *template.Template
 	if helpOn {
 		hnodes = flattenHelp(gp)
 		hf = buildHelpFramework(hnodes, conf.Generate.Help.Dir)
+		helpTmpl, err = loadHelpTemplate(conf.Generate.Help.Template, moduleRoot)
+		if err != nil {
+			return err
+		}
 	}
 
 	if err := writeFrameworkFile(gp, lay, hf); err != nil {
 		return err
 	}
 	if helpOn {
-		if err := writeHelpFiles(lay, conf.Generate.Help.Dir, hnodes, gp.rootName); err != nil {
+		if err := writeHelpFiles(lay, conf.Generate.Help.Dir, hnodes, gp.rootName, helpTmpl); err != nil {
 			return err
 		}
 	}
