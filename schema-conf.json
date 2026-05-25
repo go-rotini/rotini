@@ -27,6 +27,26 @@
         },
         "framework": {
           "$ref": "#/definitions/GenerateFrameworkConfig"
+        },
+        "help": {
+          "$ref": "#/definitions/GenerateHelpConfig"
+        }
+      }
+    },
+    "GenerateHelpConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Controls generation of embedded, spec-driven command help.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, rotini renders each command's help text from the spec and embeds it in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver."
+        },
+        "dir": {
+          "type": "string",
+          "default": "help",
+          "description": "Subdirectory under the framework package where the per-command help .txt payloads are written and embedded. The whole directory is framework-owned and rewritten on every generate."
         }
       }
     },

@@ -21,11 +21,34 @@
     },
     "summary": {
       "type": "string",
-      "description": "One-line summary of the program, shown at the top of its help."
+      "description": "Deprecated alias of 'short_description'. One-line summary of the program; 'short_description' wins when both are set."
     },
     "description": {
       "type": "string",
-      "description": "Longer description of the program, shown in its help."
+      "description": "Deprecated alias of 'long_description'. Longer description of the program; 'long_description' wins when both are set."
+    },
+    "short_description": {
+      "type": "string",
+      "description": "One-line summary of the program, shown as the header of its help. Canonical replacement for the deprecated 'summary'."
+    },
+    "long_description": {
+      "type": "string",
+      "description": "Longer description of the program, shown in the body of its help. Canonical replacement for the deprecated 'description'."
+    },
+    "usage": {
+      "type": "string",
+      "description": "Override for the usage line shown in help. When omitted, rotini derives one from the program's arguments and flags."
+    },
+    "examples": {
+      "type": "array",
+      "description": "Example invocation lines, shown verbatim under the \"Examples:\" section of help.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "homepage": {
+      "type": "string",
+      "description": "Project homepage or docs URL, shown as the \"Find more information at: <url>\" line in the root command's help."
     },
     "aliases": {
       "type": "array",
@@ -448,11 +471,30 @@
         },
         "summary": {
           "type": "string",
-          "description": "One-line summary of this command, shown in the parent's command list and at the top of this command's help."
+          "description": "Deprecated alias of 'short_description'. 'short_description' wins when both are set."
         },
         "description": {
           "type": "string",
-          "description": "Longer description of this command, shown in its help."
+          "description": "Deprecated alias of 'long_description'. 'long_description' wins when both are set."
+        },
+        "short_description": {
+          "type": "string",
+          "description": "One-line summary of this command, shown in the parent's command list and as the header of this command's help. Canonical replacement for the deprecated 'summary'."
+        },
+        "long_description": {
+          "type": "string",
+          "description": "Longer description of this command, shown in the body of its help. Canonical replacement for the deprecated 'description'."
+        },
+        "usage": {
+          "type": "string",
+          "description": "Override for the usage line shown in this command's help. When omitted, rotini derives one from the command's arguments and flags."
+        },
+        "examples": {
+          "type": "array",
+          "description": "Example invocation lines, shown verbatim under the \"Examples:\" section of this command's help.",
+          "items": {
+            "type": "string"
+          }
         },
         "$ref": {
           "type": "string",
