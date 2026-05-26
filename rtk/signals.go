@@ -5,79 +5,78 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	"syscall"
 )
 
-// SignalHandler is a callback run when a registered OS signal is received. The
-// signal that fired is passed in, so one handler can serve several signals.
+// SignalHandler is the callback run when its registered OS signal is received.
+// The signal that fired is passed in.
 type SignalHandler func(os.Signal)
 
 // Signals is an opt-in rtk service for reacting to OS signals with callbacks —
 // rotini's answer to "do X when SIGHUP arrives" without putting behavior in the
-// spec. It is a registry: register any number of handlers for any signals you
-// care about, then arm it; a background goroutine delivers received signals to
-// their handlers in registration order.
+// spec. It is a one-handler-per-signal registry: register the handler for each
+// signal you want to act on, then arm it. There is no "catch any signal" mode —
+// every signal you handle is named explicitly.
 //
-// Like the other rtk services it is bound once and retrieved by handlers, and it
-// is driven from the lifecycle hooks — register + [Signals.Start] in a
-// CascadingPreRun/PreRun, [Signals.Stop] in a CascadingPostRun/PostRun:
+// Listening does not begin until [Signals.Start]; a background goroutine then
+// delivers each received signal to its handler. Like the other rtk services it
+// is bound once and retrieved by handlers, and it is driven from the lifecycle
+// hooks — register + [Signals.Start] in a CascadingPreRun/PreRun, [Signals.Stop]
+// in a CascadingPostRun/PostRun:
 //
 //	// main.go
 //	rth.Program.Bind("signals", rtk.NewSignals()).Execute()
 //
 //	// a handler
 //	sig := rotini.MustGet[*rtk.Signals](rtx, "signals")
-//	sig.On(syscall.SIGHUP, func(os.Signal) { reload() })
+//	sig.Add(syscall.SIGHUP, func(os.Signal) { reload() })
 //	sig.Start(ctx)
 //
-// Start and Stop are idempotent, so it is safe for a cascading (program-wide)
-// hook and a leaf hook to both arm/tear-down the same service.
+// Every method is safe to call in any order and any number of times: Start and
+// Stop are idempotent, Stop before Start is a no-op, and the control methods
+// (Add/Pause/Remove and their All variants) are safe before or after Start/Stop.
 type Signals struct {
 	mu       sync.Mutex
-	handlers map[os.Signal][]SignalHandler
+	handlers map[os.Signal]SignalHandler
 	ch       chan os.Signal
 	stop     chan struct{}
 	running  bool
 }
 
-// NewSignals returns an unstarted [Signals] service, ready to bind under the
+// NewSignals returns a new, unstarted signals client, ready to bind under the
 // "signals" registry key.
 func NewSignals() *Signals {
 	return &Signals{
-		handlers: make(map[os.Signal][]SignalHandler),
+		handlers: make(map[os.Signal]SignalHandler),
 		ch:       make(chan os.Signal, 4),
 	}
 }
 
-// On registers fn to run when sig is received. Multiple handlers for the same
-// signal run in registration order. It is safe to call before or after
-// [Signals.Start] — the OS notification is wired immediately, so a signal that
-// arrives between On and Start is buffered, not lost. A nil fn is ignored.
-// On returns the receiver so registrations chain.
-func (s *Signals) On(sig os.Signal, fn SignalHandler) *Signals {
+// Add registers fn as the handler for sig, replacing any handler previously
+// registered for that signal — each signal has at most one handler. It may be
+// called before or after [Signals.Start]; registering after Start begins
+// delivery for that signal immediately. A nil fn is ignored. Chainable.
+func (s *Signals) Add(sig os.Signal, fn SignalHandler) *Signals {
 	if fn == nil {
 		return s
 	}
 	s.mu.Lock()
-	s.handlers[sig] = append(s.handlers[sig], fn)
-	s.mu.Unlock()
-	signal.Notify(s.ch, sig)
-	return s
-}
-
-// OnAny registers fn for each signal in sigs (see [Signals.On]).
-func (s *Signals) OnAny(fn SignalHandler, sigs ...os.Signal) *Signals {
-	for _, sig := range sigs {
-		s.On(sig, fn)
+	defer s.mu.Unlock()
+	s.handlers[sig] = fn
+	if s.running {
+		signal.Notify(s.ch, sig)
 	}
 	return s
 }
 
-// Start begins delivering received signals to their handlers from a background
-// goroutine. It is idempotent (a second call while running is a no-op) and stops
-// when [Signals.Stop] is called or ctx is cancelled. Call it from a
-// CascadingPreRun or PreRun hook.
+// Start begins listening for the registered signals and dispatching them to
+// their handlers from a background goroutine. Listening does not begin until
+// Start is called. It is idempotent (a second call while running is a no-op) and
+// stops when [Signals.Stop] is called or ctx is cancelled; a nil ctx is treated
+// as context.Background(). Call it from a CascadingPreRun or PreRun hook.
 func (s *Signals) Start(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.mu.Lock()
 	if s.running {
 		s.mu.Unlock()
@@ -86,6 +85,13 @@ func (s *Signals) Start(ctx context.Context) {
 	s.running = true
 	s.stop = make(chan struct{})
 	stop := s.stop
+	if len(s.handlers) > 0 {
+		sigs := make([]os.Signal, 0, len(s.handlers))
+		for sig := range s.handlers {
+			sigs = append(sigs, sig)
+		}
+		signal.Notify(s.ch, sigs...)
+	}
 	s.mu.Unlock()
 
 	go func() {
@@ -102,20 +108,20 @@ func (s *Signals) Start(ctx context.Context) {
 	}()
 }
 
-// dispatch runs, in registration order, the handlers registered for sig. It
-// copies the slice under the lock so a handler may register more handlers
-// without deadlocking.
+// dispatch runs the handler registered for sig, if any. The handler runs outside
+// the lock so it may itself call Add/Remove/etc. without deadlocking.
 func (s *Signals) dispatch(sig os.Signal) {
 	s.mu.Lock()
-	hs := append([]SignalHandler(nil), s.handlers[sig]...)
+	h := s.handlers[sig]
 	s.mu.Unlock()
-	for _, h := range hs {
+	if h != nil {
 		h(sig)
 	}
 }
 
-// Stop stops delivery and releases the OS notification (signal.Stop). It is
-// idempotent. Call it from a CascadingPostRun or PostRun hook.
+// Stop stops listening and dispatch, and releases the OS notification
+// (signal.Stop). It is idempotent — calling it before Start, or more than once,
+// is a no-op. Call it from a CascadingPostRun or PostRun hook.
 func (s *Signals) Stop() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,56 +133,63 @@ func (s *Signals) Stop() {
 	close(s.stop)
 }
 
-// Ignore makes the program ignore the given signals — they are caught and
-// discarded, suppressing their default OS action (e.g. ignore SIGHUP so a
-// terminal hang-up does not kill the program). It overrides any handlers
-// registered with [Signals.On] for those signals (the OS no longer delivers
-// them). Wraps signal.Ignore; chainable.
-func (s *Signals) Ignore(sigs ...os.Signal) *Signals {
+// Pause makes the program ignore the given signals that currently have a handler
+// registered — the OS discards them, so the handler stops firing — while keeping
+// the registration, so re-registering with [Signals.Add] re-enables delivery.
+// Signals without a registered handler are skipped. Wraps signal.Ignore.
+// Chainable.
+func (s *Signals) Pause(sigs ...os.Signal) *Signals {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	paused := make([]os.Signal, 0, len(sigs))
+	for _, sig := range sigs {
+		if _, ok := s.handlers[sig]; ok {
+			paused = append(paused, sig)
+		}
+	}
+	if len(paused) > 0 {
+		signal.Ignore(paused...)
+	}
+	return s
+}
+
+// PauseAll pauses every signal that currently has a handler (see [Signals.Pause]).
+func (s *Signals) PauseAll() *Signals {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.handlers) == 0 {
+		return s
+	}
+	sigs := make([]os.Signal, 0, len(s.handlers))
+	for sig := range s.handlers {
+		sigs = append(sigs, sig)
+	}
 	signal.Ignore(sigs...)
 	return s
 }
 
-// Reset undoes the effect of [Signals.On] and [Signals.Ignore] for the given
-// signals, restoring their default OS behavior, and drops their registered
-// handlers. With no arguments it resets every signal and clears all handlers.
-// Wraps signal.Reset; chainable.
-func (s *Signals) Reset(sigs ...os.Signal) *Signals {
-	signal.Reset(sigs...)
-	s.mu.Lock()
+// Remove resets the given signals to their default OS behavior and drops their
+// handlers. With no arguments it is a no-op (use [Signals.RemoveAll]). Wraps
+// signal.Reset. Chainable.
+func (s *Signals) Remove(sigs ...os.Signal) *Signals {
 	if len(sigs) == 0 {
-		s.handlers = make(map[os.Signal][]SignalHandler)
-	} else {
-		for _, sig := range sigs {
-			delete(s.handlers, sig)
-		}
+		return s
 	}
-	s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	signal.Reset(sigs...)
+	for _, sig := range sigs {
+		delete(s.handlers, sig)
+	}
 	return s
 }
 
-// GracefulContext returns a context derived from parent that is cancelled the
-// first time one of sigs is received — the common "stop work on Ctrl-C, then
-// drain and exit" pattern. A second signal force-exits the process with code
-// 128+signum, so a hung shutdown is still killable. Delivery begins when
-// [Signals.Start] runs; this is a convenience built on the same handler registry
-// (the plain [Signals.On] registry stays unopinionated — it never exits for you).
-func (s *Signals) GracefulContext(parent context.Context, sigs ...os.Signal) context.Context {
-	ctx, cancel := context.WithCancel(parent)
-	go func() { <-ctx.Done(); cancel() }() // release resources once cancelled (also satisfies vet)
-
-	var once sync.Once
-	s.OnAny(func(sig os.Signal) {
-		graceful := false
-		once.Do(func() { graceful = true; cancel() })
-		if graceful {
-			return
-		}
-		code := 130
-		if sg, ok := sig.(syscall.Signal); ok {
-			code = 128 + int(sg)
-		}
-		os.Exit(code)
-	}, sigs...)
-	return ctx
+// RemoveAll resets every signal to its default OS behavior and drops all
+// handlers. Chainable.
+func (s *Signals) RemoveAll() *Signals {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	signal.Reset()
+	s.handlers = make(map[os.Signal]SignalHandler)
+	return s
 }

@@ -88,9 +88,12 @@ func (t *Tickers) add(interval time.Duration, fn TickHandler, immediate bool) *T
 
 // Start launches one goroutine per registered interval. It is idempotent (a
 // second call while running is a no-op) and each goroutine stops when
-// [Tickers.Stop] is called or ctx is cancelled. Call it from a CascadingPreRun
-// or PreRun hook.
+// [Tickers.Stop] is called or ctx is cancelled; a nil ctx is treated as
+// context.Background(). Call it from a CascadingPreRun or PreRun hook.
 func (t *Tickers) Start(ctx context.Context) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	t.mu.Lock()
 	if t.running {
 		t.mu.Unlock()

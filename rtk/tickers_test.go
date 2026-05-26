@@ -69,6 +69,22 @@ func TestTickersStopIdempotent(t *testing.T) {
 	tk.Stop() // must not panic or hang
 }
 
+func TestTickersStopBeforeStartIsNoop(t *testing.T) {
+	NewTickers().Stop() // never started: no-op, no panic
+}
+
+func TestTickersStartNilContextNoPanic(t *testing.T) {
+	var n int64
+	var nilCtx context.Context // exercise the nil-ctx guard without a literal nil (SA1012)
+	tk := NewTickers().Every(10*time.Millisecond, func(context.Context) { atomic.AddInt64(&n, 1) })
+	tk.Start(nilCtx) // must default to Background, not panic the ticker goroutine
+	time.Sleep(35 * time.Millisecond)
+	tk.Stop()
+	if atomic.LoadInt64(&n) < 1 {
+		t.Fatal("ticker should have run with a nil (defaulted) context")
+	}
+}
+
 func TestTickersIgnoresInvalidRegistrations(t *testing.T) {
 	tk := NewTickers().Every(0, func(context.Context) {}).Every(time.Second, nil)
 	tk.Start(context.Background()) // nothing registered → no goroutines
