@@ -50,6 +50,18 @@ func TestTickersIndependentIntervals(t *testing.T) {
 	}
 }
 
+func TestTickersDynamicAddAfterStart(t *testing.T) {
+	var n int64
+	tk := NewTickers()
+	tk.Start(context.Background())
+	tk.Every(10*time.Millisecond, func(context.Context) { atomic.AddInt64(&n, 1) }) // added after Start
+	time.Sleep(55 * time.Millisecond)
+	tk.Stop()
+	if atomic.LoadInt64(&n) < 3 {
+		t.Fatalf("a ticker registered after Start should run, got %d ticks", n)
+	}
+}
+
 func TestTickersStopIdempotent(t *testing.T) {
 	tk := NewTickers().Every(time.Hour, func(context.Context) {})
 	tk.Start(context.Background())

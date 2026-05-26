@@ -127,6 +127,34 @@ func (s *Signals) Stop() {
 	close(s.stop)
 }
 
+// Ignore makes the program ignore the given signals — they are caught and
+// discarded, suppressing their default OS action (e.g. ignore SIGHUP so a
+// terminal hang-up does not kill the program). It overrides any handlers
+// registered with [Signals.On] for those signals (the OS no longer delivers
+// them). Wraps signal.Ignore; chainable.
+func (s *Signals) Ignore(sigs ...os.Signal) *Signals {
+	signal.Ignore(sigs...)
+	return s
+}
+
+// Reset undoes the effect of [Signals.On] and [Signals.Ignore] for the given
+// signals, restoring their default OS behavior, and drops their registered
+// handlers. With no arguments it resets every signal and clears all handlers.
+// Wraps signal.Reset; chainable.
+func (s *Signals) Reset(sigs ...os.Signal) *Signals {
+	signal.Reset(sigs...)
+	s.mu.Lock()
+	if len(sigs) == 0 {
+		s.handlers = make(map[os.Signal][]SignalHandler)
+	} else {
+		for _, sig := range sigs {
+			delete(s.handlers, sig)
+		}
+	}
+	s.mu.Unlock()
+	return s
+}
+
 // GracefulContext returns a context derived from parent that is cancelled the
 // first time one of sigs is received — the common "stop work on Ctrl-C, then
 // drain and exit" pattern. A second signal force-exits the process with code

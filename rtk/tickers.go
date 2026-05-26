@@ -34,6 +34,7 @@ type Tickers struct {
 	mu      sync.Mutex
 	entries []tick
 	running bool
+	ctx     context.Context // set by Start; used to launch tickers registered after Start
 	stop    chan struct{}
 	wg      sync.WaitGroup
 }
@@ -69,8 +70,18 @@ func (t *Tickers) add(interval time.Duration, fn TickHandler, immediate bool) *T
 	if fn == nil || interval <= 0 {
 		return t
 	}
+	e := tick{interval: interval, fn: fn, immediate: immediate}
 	t.mu.Lock()
-	t.entries = append(t.entries, tick{interval: interval, fn: fn, immediate: immediate})
+	t.entries = append(t.entries, e)
+	// Registered after Start: launch it now against the running context so
+	// Every/EveryNow behave the same whether called before or after Start.
+	if t.running {
+		ctx, stop := t.ctx, t.stop
+		t.wg.Add(1)
+		t.mu.Unlock()
+		go t.run(ctx, e, stop)
+		return t
+	}
 	t.mu.Unlock()
 	return t
 }
@@ -86,6 +97,7 @@ func (t *Tickers) Start(ctx context.Context) {
 		return
 	}
 	t.running = true
+	t.ctx = ctx
 	t.stop = make(chan struct{})
 	stop := t.stop
 	entries := append([]tick(nil), t.entries...)
@@ -128,6 +140,7 @@ func (t *Tickers) Stop() {
 		return
 	}
 	t.running = false
+	t.ctx = nil
 	close(t.stop)
 	t.mu.Unlock()
 	t.wg.Wait()

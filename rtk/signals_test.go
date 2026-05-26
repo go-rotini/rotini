@@ -56,6 +56,24 @@ func TestSignalsStartStopIdempotent(t *testing.T) {
 	s.Stop() // must not panic
 }
 
+func TestSignalsIgnoreResetChainable(t *testing.T) {
+	s := NewSignals()
+	if s.Ignore(os.Interrupt) != s {
+		t.Fatal("Ignore should return the receiver for chaining")
+	}
+	if s.Reset(os.Interrupt) != s { // restore default SIGINT disposition
+		t.Fatal("Reset should return the receiver for chaining")
+	}
+}
+
+func TestSignalsResetClearsHandlers(t *testing.T) {
+	s := NewSignals().On(os.Interrupt, func(os.Signal) {
+		t.Fatal("handler should have been cleared by Reset")
+	})
+	s.Reset(os.Interrupt)
+	s.dispatch(os.Interrupt) // no handlers remain → nothing runs
+}
+
 func TestSignalsStartCancelsWithContext(t *testing.T) {
 	s := NewSignals().On(os.Interrupt, func(os.Signal) {})
 	ctx, cancel := context.WithCancel(context.Background())
