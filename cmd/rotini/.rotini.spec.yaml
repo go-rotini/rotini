@@ -137,4 +137,4 @@ commands:
             type: bool
 metadata:
   - var: Version
-    default: dev
+    default: 0.0.0
