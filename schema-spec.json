@@ -16,33 +16,6 @@
       "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
       "description": "Root command name used in routing."
     },
-    "header": {
-      "type": "string",
-      "description": "Meant for use in the command help output as the first text that appears in the string."
-    },
-    "footer": {
-      "type": "string",
-      "description": "Meant for use in the command help output as the last text that appears in the string."
-    },
-    "short_description": {
-      "type": "string",
-      "description": "A short description of the command, meant for use in help output to describe subcommands briefly."
-    },
-    "long_description": {
-      "type": "string",
-      "description": "A long description of the command, meant for use in help output to describe the command fully."
-    },
-    "usage": {
-      "type": "string",
-      "description": "Override for the usage line shown in help. When omitted, rotini derives one from the program's arguments and flags."
-    },
-    "examples": {
-      "type": "array",
-      "description": "Example invocation lines, shown verbatim under the \"Examples:\" section of help.",
-      "items": {
-        "type": "string"
-      }
-    },
     "aliases": {
       "type": "array",
       "description": "Additional names that invoke the root command.",
@@ -135,9 +108,6 @@
         "nullable": {
           "type": "boolean",
           "default": false
-        },
-        "description": {
-          "type": "string"
         },
         "enum": {
           "type": "array",
@@ -437,25 +407,6 @@
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
           "description": "Command name used in routing."
-        },
-        "short_description": {
-          "type": "string",
-          "description": "One-line summary of this command, shown in the parent's command list and as the header of this command's help. Canonical replacement for the deprecated 'summary'."
-        },
-        "long_description": {
-          "type": "string",
-          "description": "Longer description of this command, shown in the body of its help. Canonical replacement for the deprecated 'description'."
-        },
-        "usage": {
-          "type": "string",
-          "description": "Override for the usage line shown in this command's help. When omitted, rotini derives one from the command's arguments and flags."
-        },
-        "examples": {
-          "type": "array",
-          "description": "Example invocation lines, shown verbatim under the \"Examples:\" section of this command's help.",
-          "items": {
-            "type": "string"
-          }
         },
         "$ref": {
           "type": "string",

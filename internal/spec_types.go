@@ -12,18 +12,10 @@ type Spec struct {
 	Commands []Command `json:"commands,omitempty"`
 	// Events this program can emit. Each name must be unique.
 	Events []EventSpec `json:"events,omitempty"`
-	// Example invocation lines, shown verbatim under the "Examples:" section of help.
-	Examples []string `json:"examples,omitempty"`
 	// Config files to load at startup.
 	Files []ConfigSpec `json:"files,omitempty"`
-	// Meant for use in the command help output as the last text that appears in the string.
-	Footer string `json:"footer,omitempty"`
-	// Meant for use in the command help output as the first text that appears in the string.
-	Header string `json:"header,omitempty"`
 	// Typed inputs for the root command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
-	// A long description of the command, meant for use in help output to describe the command fully.
-	LongDescription string `json:"long_description,omitempty"`
 	// Build-time metadata vars injected via go ldflags.
 	Metadata []MetadataEntry `json:"metadata,omitempty"`
 	// Root command name used in routing.
@@ -32,12 +24,8 @@ type Spec struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>".
 	Schemas map[string]Schema `json:"schemas,omitempty"`
-	// A short description of the command, meant for use in help output to describe subcommands briefly.
-	ShortDescription string `json:"short_description,omitempty"`
 	// Root command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
-	// Override for the usage line shown in help. When omitted, rotini derives one from the program's arguments and flags.
-	Usage string `json:"usage,omitempty"`
 }
 
 type ArgumentInput struct {
@@ -50,8 +38,7 @@ type ArgumentInput struct {
 // Shared fields for Schema and InputSchema. JSON Schema Draft 7 does not support additionalProperties: false on schemas that use allOf for inheritance — strictness is enforced by Go's DisallowUnknownFields at parse time.
 type BaseSchema struct {
 	// Reference to a named schema in the top-level schemas map (e.g. '#/schemas/MySchema'). Resolved at codegen time.
-	Ref         string `json:"$ref,omitempty"`
-	Description string `json:"description,omitempty"`
+	Ref string `json:"$ref,omitempty"`
 	// Allowed values; parsed values are validated against this list
 	Enum     []string `json:"enum,omitempty"`
 	Items    *Schema  `json:"items,omitempty"`
@@ -81,22 +68,14 @@ type Command struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of this command.
 	Commands []Command `json:"commands,omitempty"`
-	// Example invocation lines, shown verbatim under the "Examples:" section of this command's help.
-	Examples []string `json:"examples,omitempty"`
 	// Typed inputs for this command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
-	// Longer description of this command, shown in the body of its help. Canonical replacement for the deprecated 'description'.
-	LongDescription string `json:"long_description,omitempty"`
 	// Command name used in routing.
 	Name string `json:"name,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
-	// One-line summary of this command, shown in the parent's command list and as the header of this command's help. Canonical replacement for the deprecated 'summary'.
-	ShortDescription string `json:"short_description,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
-	// Override for the usage line shown in this command's help. When omitted, rotini derives one from the command's arguments and flags.
-	Usage string `json:"usage,omitempty"`
 }
 
 type ConfigInput struct {

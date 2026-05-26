@@ -24,8 +24,6 @@ type Definition struct {
 	Name           string
 	Aliases        []string
 	Handler        string // ProgramHandlers method for the root command, e.g. "Rotini"
-	Summary        string
-	Description    string
 	Version        string // value of the program's version metadata var (ldflag-settable)
 	Flags          []FlagDef
 	Arguments      []ArgDef
@@ -47,14 +45,12 @@ type RemoteDef struct {
 // ProgramHandlers method name the runtime invokes (via reflection) to obtain
 // this command's [CommandHandlers].
 type CommandDef struct {
-	Name        string
-	Aliases     []string
-	Handler     string // ProgramHandlers method, e.g. "RotiniGenerate"
-	Summary     string
-	Description string
-	Flags       []FlagDef
-	Arguments   []ArgDef
-	Commands    []CommandDef
+	Name      string
+	Aliases   []string
+	Handler   string // ProgramHandlers method, e.g. "RotiniGenerate"
+	Flags     []FlagDef
+	Arguments []ArgDef
+	Commands  []CommandDef
 }
 
 // FlagDef describes a single flag of a command. Name is the logical name and
@@ -63,7 +59,6 @@ type FlagDef struct {
 	Name        string
 	Identifiers []string // CLI forms, e.g. {"--loud", "-l"}
 	Type        string   // resolved Go type, e.g. "bool", "string", "[]string", "int", "time.Duration"
-	Description string
 	Required    bool
 	Default     string
 	Enum        []string
@@ -72,11 +67,10 @@ type FlagDef struct {
 // ArgDef describes a single positional argument of a command. Variadic is true
 // for a trailing slice argument that absorbs the remaining positionals.
 type ArgDef struct {
-	Name        string
-	Type        string
-	Description string
-	Required    bool
-	Variadic    bool
-	Default     string
-	Enum        []string
+	Name     string
+	Type     string
+	Required bool
+	Variadic bool
+	Default  string
+	Enum     []string
 }

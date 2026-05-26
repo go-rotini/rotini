@@ -32,14 +32,12 @@ type GenerateFrameworkConfig struct {
 	Package string `json:"package,omitempty"`
 }
 
-// Controls generation of embedded, spec-driven command help.
+// Controls generation of embedded, per-command help text.
 type GenerateHelpConfig struct {
-	// Subdirectory under the framework package where the per-command help .txt payloads are written and embedded. The whole directory is framework-owned and rewritten on every generate.
+	// Subdirectory under the framework package where the per-command help .txt files live and are embedded. Files are seeded once when missing and are otherwise user-owned; rotini never rewrites or deletes them.
 	Dir string `json:"dir,omitempty"`
-	// When true, rotini renders each command's help text from the spec and embeds it in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver.
+	// When true, rotini seeds a per-command help .txt file (containing the command name) for any command that lacks one, then embeds every command's help file in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Existing files are never overwritten — the help text is yours to edit.
 	Enabled bool `json:"enabled,omitempty"`
-	// Path (relative to the module root) to a custom Go text/template used to render each command's help text. When omitted, rotini's built-in help template is used.
-	Template string `json:"template,omitempty"`
 }
 
 // Controls pruning of stub files in the command handler package.

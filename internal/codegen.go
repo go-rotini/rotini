@@ -23,7 +23,7 @@ const (
 	rotiniPkgName    = "rotini"
 )
 
-//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.text.tmpl
+//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl
 var templateFS embed.FS
 
 // fieldDef is one generated struct field: a Go identifier, its type, and its
@@ -90,26 +90,22 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	}
 
 	// When command-help generation is enabled, the framework file gains embedded
-	// "Help<Prefix>" vars + a Help(path…) resolver, and the rendered help text is
-	// written as .txt payloads under the framework package's help dir.
+	// "Help<Prefix>" vars + a Help(path…) resolver, and a best-effort help .txt is
+	// seeded (once) for any command that lacks one under the framework package's
+	// help dir. Existing files are left untouched — they are the user's to edit.
 	helpOn := conf.Generate.Help != nil && conf.Generate.Help.Enabled
 	var hnodes []helpNode
 	var hf *helpFramework
-	var helpTmpl *template.Template
 	if helpOn {
 		hnodes = flattenHelp(gp)
 		hf = buildHelpFramework(hnodes, conf.Generate.Help.Dir)
-		helpTmpl, err = loadHelpTemplate(conf.Generate.Help.Template, moduleRoot)
-		if err != nil {
-			return err
-		}
 	}
 
 	if err := writeFrameworkFile(gp, lay, hf); err != nil {
 		return err
 	}
 	if helpOn {
-		if err := writeHelpFiles(lay, conf.Generate.Help.Dir, hnodes, gp.rootName, helpTmpl); err != nil {
+		if err := writeHelpFiles(lay, conf.Generate.Help.Dir, hnodes); err != nil {
 			return err
 		}
 	}
@@ -238,12 +234,6 @@ func renderDefinition(gp *genProgram) string {
 	if len(gp.rootAliases) > 0 {
 		b.WriteString("Aliases: " + goStringSlice(gp.rootAliases) + ",\n")
 	}
-	if gp.rootSummary != "" {
-		b.WriteString("Summary: " + strconv.Quote(gp.rootSummary) + ",\n")
-	}
-	if gp.rootDescription != "" {
-		b.WriteString("Description: " + strconv.Quote(gp.rootDescription) + ",\n")
-	}
 	if fl := flagDefsLiteral(gp.rootInputs); fl != "" {
 		b.WriteString("Flags: " + fl + ",\n")
 	}
@@ -332,9 +322,6 @@ func argDefsLiteral(in *Inputs) string {
 func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	if schema == nil {
 		return
-	}
-	if schema.Description != "" {
-		b.WriteString(", Description: " + strconv.Quote(schema.Description))
 	}
 	if schema.Required {
 		b.WriteString(", Required: true")

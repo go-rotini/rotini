@@ -14,17 +14,13 @@ import (
 // local stub) plus any statically composed commands pulled in via `$ref` (emit
 // a rollup method that delegates to the child's rth package; no types or stubs).
 type genProgram struct {
-	rootName        string
-	rootPascal      string
-	rootInputs      *Inputs
-	rootAliases     []string
-	rootSummary     string
-	rootDescription string
-	rootUsage       string              // usage-line override for the root's help
-	rootExamples    []string            // example invocation lines for the root's help
-	metadata        []MetadataEntry     // ldflag-settable vars emitted in rtg
-	versionVar      string              // metadata var feeding Definition.Version (Var == "Version")
-	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
+	rootName    string
+	rootPascal  string
+	rootInputs  *Inputs
+	rootAliases []string
+	metadata    []MetadataEntry     // ldflag-settable vars emitted in rtg
+	versionVar  string              // metadata var feeding Definition.Version (Var == "Version")
+	rootRemotes []RemoteCommandSpec // root-level remote/co-located sub-commands
 
 	root         genCommand    // the root command (own)
 	own          []genCommand  // inline sub-commands, sorted by prefix
@@ -35,15 +31,11 @@ type genProgram struct {
 
 // rnode is one node of the resolved command tree used to render the Definition.
 type rnode struct {
-	name        string
-	prefix      string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
-	aliases     []string
-	summary     string
-	description string
-	usage       string   // usage-line override for this command's help
-	examples    []string // example invocation lines for this command's help
-	inputs      *Inputs
-	children    []rnode
+	name     string
+	prefix   string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
+	aliases  []string
+	inputs   *Inputs
+	children []rnode
 }
 
 // composedCmd is a command supplied by a composed child: the parent's rollup
@@ -73,16 +65,12 @@ type composeCtx struct {
 // (relative to specPath) and grafting them as composed subtrees.
 func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgram, error) {
 	gp := &genProgram{
-		rootName:        spec.Name,
-		rootPascal:      toPascalCase(spec.Name),
-		rootInputs:      spec.Inputs,
-		rootAliases:     spec.Aliases,
-		rootSummary:     spec.ShortDescription,
-		rootDescription: spec.LongDescription,
-		rootUsage:       spec.Usage,
-		rootExamples:    spec.Examples,
-		metadata:        spec.Metadata,
-		rootRemotes:     spec.RemoteCommands,
+		rootName:    spec.Name,
+		rootPascal:  toPascalCase(spec.Name),
+		rootInputs:  spec.Inputs,
+		rootAliases: spec.Aliases,
+		metadata:    spec.Metadata,
+		rootRemotes: spec.RemoteCommands,
 	}
 	for _, m := range spec.Metadata {
 		if m.Var == "Version" {
@@ -162,15 +150,11 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			return nil, err
 		}
 		out = append(out, rnode{
-			name:        c.Name,
-			prefix:      prefix,
-			aliases:     c.Aliases,
-			summary:     c.ShortDescription,
-			description: c.LongDescription,
-			usage:       c.Usage,
-			examples:    c.Examples,
-			inputs:      c.Inputs,
-			children:    children,
+			name:     c.Name,
+			prefix:   prefix,
+			aliases:  c.Aliases,
+			inputs:   c.Inputs,
+			children: children,
 		})
 	}
 	if err := checkCollisions(out); err != nil {
@@ -224,14 +208,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	summary := firstNonEmpty(c.ShortDescription, childSpec.ShortDescription)
-	description := firstNonEmpty(c.LongDescription, childSpec.LongDescription)
-	usage := firstNonEmpty(c.Usage, childSpec.Usage)
-	examples := c.Examples
-	if len(examples) == 0 {
-		examples = childSpec.Examples
-	}
-	return rnode{name: childSpec.Name, prefix: prefix, aliases: c.Aliases, summary: summary, description: description, usage: usage, examples: examples, inputs: childSpec.Inputs, children: children}, nil
+	return rnode{name: childSpec.Name, prefix: prefix, aliases: c.Aliases, inputs: childSpec.Inputs, children: children}, nil
 }
 
 func (gp *genProgram) addImport(alias, path string) {
@@ -297,12 +274,6 @@ func rnodesLiteral(nodes []rnode) string {
 		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
 		if len(n.aliases) > 0 {
 			b.WriteString("Aliases: " + goStringSlice(n.aliases) + ",\n")
-		}
-		if n.summary != "" {
-			b.WriteString("Summary: " + strconv.Quote(n.summary) + ",\n")
-		}
-		if n.description != "" {
-			b.WriteString("Description: " + strconv.Quote(n.description) + ",\n")
 		}
 		if fl := flagDefsLiteral(n.inputs); fl != "" {
 			b.WriteString("Flags: " + fl + ",\n")

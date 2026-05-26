@@ -120,29 +120,24 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 
 // TestGenerateHelpEnabled verifies that, with generate.help enabled, the
 // framework file gains the embedded Help<Prefix> vars + an alias-aware Help
-// resolver, and that the rendered help .txt payloads are written with the
-// expected (authored + auto-derived) sections.
+// resolver, that each command's help .txt is seeded with just its invocation
+// name, and that the files are create-once: user edits survive regeneration and
+// a deleted file is re-seeded so the embed stays valid.
 func TestGenerateHelpEnabled(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
 			"name: mycli\n"+
-			"short_description: My CLI.\n"+
-			"long_description: My CLI does things.\n"+
 			"commands:\n"+
 			"  - name: build\n"+
-			"    short_description: Build it.\n"+
 			"    aliases: [b]\n"+
-			"    examples:\n"+
-			"      - mycli build ./x\n"+
 			"    inputs:\n"+
 			"      arguments:\n"+
 			"        - name: target\n"+
 			"          schema:\n"+
 			"            type: string\n"+
-			"            required: true\n"+
-			"            description: thing to build\n")
+			"            required: true\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
 		"generate:\n  help:\n    enabled: true\n")
 
@@ -160,70 +155,36 @@ func TestGenerateHelpEnabled(t *testing.T) {
 		`case "":`,
 		`case "build", "b":`,
 	)
-	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"),
-		"My CLI does things.",
-		"Usage:",
-		"Commands:",
-		"build;b",
-		`Use "mycli help <command>" for more information about a command.`,
-	)
-	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli_build.txt"),
-		"Build it.",
-		"mycli build <target>", // auto-derived usage: required arg
-		"Arguments:",
-		"thing to build",
-		"Examples:",
-		"mycli build ./x",
-	)
 
-	// Regenerating produces identical output (idempotent).
+	// Each help file is seeded with the command's invocation name — nothing more.
+	root := filepath.Join(tmp, "rtg", "help", "mycli.txt")
+	build := filepath.Join(tmp, "rtg", "help", "mycli_build.txt")
+	mustFileEqual(t, root, "mycli")
+	mustFileEqual(t, build, "mycli build")
+
+	// Capture the framework file, then prove the help files are create-once.
 	before := readAndFormat(t, filepath.Join(tmp, "rtg", "rotini.go"))
+
+	// A user edit survives regeneration.
+	writeTestFile(t, build, "hand-written help for build\n")
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
 		t.Fatalf("Generate (second pass): %v", err)
 	}
+	mustFileEqual(t, build, "hand-written help for build\n")
+
+	// A deleted help file is re-seeded so the //go:embed directive stays valid.
+	if err := os.Remove(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
+		t.Fatalf("Generate (reseed): %v", err)
+	}
+	mustFileEqual(t, root, "mycli")
+
+	// The framework file itself regenerates identically (idempotent).
 	after := readAndFormat(t, filepath.Join(tmp, "rtg", "rotini.go"))
 	if !bytes.Equal(before, after) {
 		t.Errorf("help generation is not idempotent:\n--- before ---\n%s\n--- after ---\n%s", before, after)
-	}
-}
-
-// TestGenerateHelpCustomTemplate verifies that generate.help.template selects a
-// user-supplied template (resolved against the module root) and that the help
-// FuncMap (indent/row) is available to it.
-func TestGenerateHelpCustomTemplate(t *testing.T) {
-	tmp := t.TempDir()
-	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
-	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"name: mycli\n"+
-			"short_description: My CLI.\n"+
-			"commands:\n"+
-			"  - name: build\n"+
-			"    short_description: Build it.\n")
-	// A custom template with a distinctive marker that also exercises a helper.
-	writeTestFile(t, filepath.Join(tmp, "help.tmpl"),
-		"CUSTOM {{.Root}}{{if .Name}} {{.Name}}{{end}} :: {{.Short}}\n{{indent 4 .Usage}}\n")
-	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
-		"generate:\n  help:\n    enabled: true\n    template: help.tmpl\n")
-
-	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-
-	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"),
-		"CUSTOM mycli :: My CLI.",
-		"    mycli", // indent 4 of the auto usage line
-	)
-	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli_build.txt"),
-		"CUSTOM mycli build :: Build it.",
-	)
-
-	// A missing template path is a generation error.
-	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
-		"generate:\n  help:\n    enabled: true\n    template: nope.tmpl\n")
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err == nil {
-		t.Error("expected an error for a missing help template, got nil")
 	}
 }
 
@@ -284,5 +245,16 @@ func mustContain(t *testing.T, path string, substrs ...string) {
 		if !bytes.Contains(data, []byte(s)) {
 			t.Errorf("%s missing %q\n%s", path, s, data)
 		}
+	}
+}
+
+func mustFileEqual(t *testing.T, path, want string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	if string(data) != want {
+		t.Errorf("%s = %q, want %q", path, data, want)
 	}
 }

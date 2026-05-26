@@ -5,31 +5,28 @@ import "strings"
 // ResolvedCommand is one node on the invoked command path (root → leaf): the
 // flattened command-tree data the runtime resolved for this invocation. The
 // runtime computes the chain in order to dispatch the correct handler, and
-// exposes it via [Rtx.Chain] so opt-in tooling (the rtk parser and usage
-// helpers) binds inputs and renders help against the exact command whose handler
-// ran — including for a statically composed child, whose chain is relative to its
-// own root.
+// exposes it via [Rtx.Chain] so opt-in tooling (the rtk parser) binds inputs
+// against the exact command whose handler ran — including for a statically
+// composed child, whose chain is relative to its own root.
 type ResolvedCommand struct {
-	Name        string
-	Handler     string
-	Summary     string
-	Description string
-	Flags       []FlagDef
-	Arguments   []ArgDef
-	Commands    []CommandDef
-	Remotes     []RemoteDef
+	Name      string
+	Handler   string
+	Flags     []FlagDef
+	Arguments []ArgDef
+	Commands  []CommandDef
+	Remotes   []RemoteDef
 }
 
 func rootFrame(def Definition) ResolvedCommand {
 	return ResolvedCommand{
-		Name: def.Name, Handler: def.Handler, Summary: def.Summary, Description: def.Description,
+		Name: def.Name, Handler: def.Handler,
 		Flags: def.Flags, Arguments: def.Arguments, Commands: def.Commands, Remotes: def.RemoteCommands,
 	}
 }
 
 func cmdFrame(c CommandDef) ResolvedCommand {
 	return ResolvedCommand{
-		Name: c.Name, Handler: c.Handler, Summary: c.Summary, Description: c.Description,
+		Name: c.Name, Handler: c.Handler,
 		Flags: c.Flags, Arguments: c.Arguments, Commands: c.Commands,
 	}
 }
