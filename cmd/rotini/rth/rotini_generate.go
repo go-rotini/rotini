@@ -15,18 +15,18 @@ type rotiniGenerateHandlers struct{}
 var _ rotini.CommandHandlers = (*rotiniGenerateHandlers)(nil)
 
 func (*rotiniGenerateHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+}
+
+func (*rotiniGenerateHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
 	signals := rotini.MustGet[*rtk.Signals](rtx, "signals")
 	// Derive a cancellable run context and hand it to Run through the registry
 	// (hooks each receive the program ctx, so a child ctx can't be threaded via
 	// the ctx arg). SIGINT cancels it; --watch honours it and returns, then
 	// teardown runs in CascadingPostRun.
-	runCtx, cancel := context.WithCancel(ctx)
-	rtx.Bind("runctx", runCtx)
+	genCtx, cancel := context.WithCancel(ctx)
+	rtx.Bind("genctx", genCtx)
 	signals.Add(os.Interrupt, func() { cancel() })
 	signals.Start(ctx)
-}
-
-func (*rotiniGenerateHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
 }
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
@@ -39,23 +39,25 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.Exit(1)
 		return
 	}
-	in := inputs.RotiniGenerate
 
-	if in.Flags.Help {
+	args := inputs.RotiniGenerate.Arguments
+	flags := inputs.RotiniGenerate.Flags
+
+	if flags.Help {
 		io.Stdout.Println(rtg.HelpRotiniGenerate)
 		return
 	}
 
-	if in.Flags.Watch {
-		runCtx := rotini.MustGet[context.Context](rtx, "runctx")
-		if err := internal.GenerateWatch(runCtx, in.Arguments.File, in.Flags.Config, io.Stdout); err != nil {
+	if flags.Watch {
+		genCtx := rotini.MustGet[context.Context](rtx, "genctx")
+		if err := internal.GenerateWatch(genCtx, args.SpecFilePath, flags.ConfFilePath, io.Stdout); err != nil {
 			io.Stderr.Println("Error:", err)
 			rtx.Exit(1)
 		}
 		return
 	}
 
-	if err := internal.Generate(in.Arguments.File, in.Flags.Config); err != nil {
+	if err := internal.Generate(args.SpecFilePath, flags.ConfFilePath); err != nil {
 		io.Stderr.Println("Error:", err)
 		rtx.Exit(1)
 		return
@@ -63,10 +65,8 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 }
 
 func (*rotiniGenerateHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+	rotini.MustGet[*rtk.Signals](rtx, "signals").Stop()
 }
 
-// CascadingPostRun always runs — even when Run calls rtx.Exit — so it is the
-// reliable place to stop the signal listener.
 func (*rotiniGenerateHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
-	rotini.MustGet[*rtk.Signals](rtx, "signals").Stop()
 }

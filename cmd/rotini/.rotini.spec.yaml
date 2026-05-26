@@ -54,12 +54,12 @@ commands:
       - gen
     inputs:
       arguments:
-        - name: file
+        - name: spec_file_path
           schema:
             type: string
             default: .rotini.spec.yaml
       flags:
-        - name: config
+        - name: conf_file_path
           identifiers:
             - -c
             - --config

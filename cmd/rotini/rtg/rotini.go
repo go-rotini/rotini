@@ -47,12 +47,12 @@ var Definition = rotini.Definition{
 			Handler: "RotiniGenerate",
 			Aliases: []string{"gen"},
 			Flags: []rotini.FlagDef{
-				{Name: "config", Identifiers: []string{"-c", "--config"}, Type: "string"},
+				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Type: "string"},
 				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool"},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
-				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
+				{Name: "spec_file_path", Type: "string", Default: ".rotini.spec.yaml"},
 			},
 		},
 		{Name: "validate",
@@ -127,13 +127,13 @@ type RotiniCompletionInputs struct {
 }
 
 type RotiniGenerateFlags struct {
-	Config string `rotini:"config"`
-	Watch  bool   `rotini:"watch"`
-	Help   bool   `rotini:"help"`
+	ConfFilePath string `rotini:"conf_file_path"`
+	Watch        bool   `rotini:"watch"`
+	Help         bool   `rotini:"help"`
 }
 
 type RotiniGenerateArguments struct {
-	File string `rotini:"file"`
+	SpecFilePath string `rotini:"spec_file_path"`
 }
 
 type RotiniGenerateCommandInputs struct {
