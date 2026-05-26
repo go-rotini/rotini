@@ -109,6 +109,30 @@ func TestSignalsControlMethodsBeforeStartNoPanic(t *testing.T) {
 	s.Remove(os.Interrupt) // restore default disposition
 }
 
+func TestSignalsHasAndSignals(t *testing.T) {
+	s := NewSignals()
+	if s.Has(os.Interrupt) {
+		t.Fatal("Has should be false before Add")
+	}
+	if len(s.Signals()) != 0 {
+		t.Fatal("Signals should be empty initially")
+	}
+	s.Add(os.Interrupt, func(os.Signal) {})
+	if !s.Has(os.Interrupt) {
+		t.Fatal("Has should be true after Add")
+	}
+	if got := s.Signals(); len(got) != 1 || got[0] != os.Interrupt {
+		t.Fatalf("Signals should list the registered signal, got %v", got)
+	}
+	s.Remove(os.Interrupt)
+	if s.Has(os.Interrupt) {
+		t.Fatal("Has should be false after Remove")
+	}
+	if len(s.Signals()) != 0 {
+		t.Fatal("Signals should be empty after Remove")
+	}
+}
+
 func TestSignalsStartCancelsWithContext(t *testing.T) {
 	s := NewSignals().Add(os.Interrupt, func(os.Signal) {})
 	ctx, cancel := context.WithCancel(context.Background())

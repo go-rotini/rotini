@@ -127,6 +127,56 @@ func TestTickersRemoveDropsRegistration(t *testing.T) {
 	}
 }
 
+func TestTickersAfterRunsOnceAndSelfRemoves(t *testing.T) {
+	var n int64
+	tk := NewTickers().After("once", 25*time.Millisecond, func(context.Context) { atomic.AddInt64(&n, 1) })
+	tk.Start(context.Background())
+	time.Sleep(80 * time.Millisecond)
+	if got := atomic.LoadInt64(&n); got != 1 {
+		t.Fatalf("After should fire exactly once, got %d", got)
+	}
+	if tk.Has("once") {
+		t.Fatal("After should self-remove from the registry once it has fired")
+	}
+	tk.Stop()
+}
+
+func TestTickersAfterDynamicAndStoppedBeforeFire(t *testing.T) {
+	var n int64
+	tk := NewTickers()
+	tk.Start(context.Background())
+	tk.After("later", time.Hour, func(context.Context) { atomic.AddInt64(&n, 1) }) // armed after Start
+	tk.Stop()                                                                      // before the 1h delay
+	if atomic.LoadInt64(&n) != 0 {
+		t.Fatal("After must not fire if stopped before its delay")
+	}
+	if !tk.Has("later") {
+		t.Fatal("an un-fired After should remain registered after Stop")
+	}
+}
+
+func TestTickersHasAndNames(t *testing.T) {
+	tk := NewTickers().
+		Add("b", time.Hour, func(context.Context) {}).
+		Add("a", time.Hour, func(context.Context) {})
+	if !tk.Has("a") || !tk.Has("b") {
+		t.Fatal("Has should report registered entries")
+	}
+	if tk.Has("zzz") {
+		t.Fatal("Has should be false for an unregistered name")
+	}
+	if got := tk.Names(); len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("Names should return sorted registered names, got %v", got)
+	}
+	tk.Remove("a")
+	if tk.Has("a") {
+		t.Fatal("Remove should drop the name from Has")
+	}
+	if got := tk.Names(); len(got) != 1 || got[0] != "b" {
+		t.Fatalf("Names after Remove, got %v", got)
+	}
+}
+
 func TestTickersStopBeforeStartIsNoop(t *testing.T) {
 	NewTickers().Stop() // never started: no-op, no panic
 }

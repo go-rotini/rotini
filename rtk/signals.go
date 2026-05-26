@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"sort"
 	"sync"
 )
 
@@ -192,4 +193,25 @@ func (s *Signals) RemoveAll() *Signals {
 	signal.Reset()
 	s.handlers = make(map[os.Signal]SignalHandler)
 	return s
+}
+
+// Has reports whether a handler is currently registered for sig.
+func (s *Signals) Has(sig os.Signal) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.handlers[sig]
+	return ok
+}
+
+// Signals returns the signals that currently have a registered handler, sorted
+// by name.
+func (s *Signals) Signals() []os.Signal {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sigs := make([]os.Signal, 0, len(s.handlers))
+	for sig := range s.handlers {
+		sigs = append(sigs, sig)
+	}
+	sort.Slice(sigs, func(i, j int) bool { return sigs[i].String() < sigs[j].String() })
+	return sigs
 }
