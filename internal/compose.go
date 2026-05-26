@@ -78,8 +78,8 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootPascal:      toPascalCase(spec.Name),
 		rootInputs:      spec.Inputs,
 		rootAliases:     spec.Aliases,
-		rootSummary:     firstNonEmpty(spec.ShortDescription, spec.Summary),
-		rootDescription: firstNonEmpty(spec.LongDescription, spec.Description),
+		rootSummary:     spec.ShortDescription,
+		rootDescription: spec.LongDescription,
 		rootUsage:       spec.Usage,
 		rootExamples:    spec.Examples,
 		rootHomepage:    spec.Homepage,
@@ -167,8 +167,8 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			name:        c.Name,
 			prefix:      prefix,
 			aliases:     c.Aliases,
-			summary:     firstNonEmpty(c.ShortDescription, c.Summary),
-			description: firstNonEmpty(c.LongDescription, c.Description),
+			summary:     c.ShortDescription,
+			description: c.LongDescription,
 			usage:       c.Usage,
 			examples:    c.Examples,
 			inputs:      c.Inputs,
@@ -226,8 +226,8 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	summary := firstNonEmpty(c.ShortDescription, c.Summary, childSpec.ShortDescription, childSpec.Summary)
-	description := firstNonEmpty(c.LongDescription, c.Description, childSpec.LongDescription, childSpec.Description)
+	summary := firstNonEmpty(c.ShortDescription, childSpec.ShortDescription)
+	description := firstNonEmpty(c.LongDescription, childSpec.LongDescription)
 	usage := firstNonEmpty(c.Usage, childSpec.Usage)
 	examples := c.Examples
 	if len(examples) == 0 {

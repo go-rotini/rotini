@@ -3,15 +3,12 @@
   "title": "Rotini Spec Schema",
   "description": "Schema for a Rotini CLI definition spec file.",
   "type": "object",
-  "required": [
-    "$schema",
-    "name"
-  ],
+  "required": ["$schema", "name"],
   "additionalProperties": false,
   "properties": {
     "$schema": {
       "type": "string",
-      "description": "URL identifying the rotini spec schema version. The version segment must match the installed rotini binary version.",
+      "description": "URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.",
       "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-spec\\.json$"
     },
     "name": {
@@ -19,21 +16,21 @@
       "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
       "description": "Root command name used in routing."
     },
-    "summary": {
+    "header": {
       "type": "string",
-      "description": "Deprecated alias of 'short_description'. One-line summary of the program; 'short_description' wins when both are set."
+      "description": "Meant for use in the command help output as the first text that appears in the string."
     },
-    "description": {
+    "footer": {
       "type": "string",
-      "description": "Deprecated alias of 'long_description'. Longer description of the program; 'long_description' wins when both are set."
+      "description": "Meant for use in the command help output as the last text that appears in the string."
     },
     "short_description": {
       "type": "string",
-      "description": "One-line summary of the program, shown as the header of its help. Canonical replacement for the deprecated 'summary'."
+      "description": "A short description of the command, meant for use in help output to describe subcommands briefly."
     },
     "long_description": {
       "type": "string",
-      "description": "Longer description of the program, shown in the body of its help. Canonical replacement for the deprecated 'description'."
+      "description": "A long description of the command, meant for use in help output to describe the command fully."
     },
     "usage": {
       "type": "string",
@@ -45,10 +42,6 @@
       "items": {
         "type": "string"
       }
-    },
-    "homepage": {
-      "type": "string",
-      "description": "Project homepage or docs URL, shown as the \"Find more information at: <url>\" line in the root command's help."
     },
     "aliases": {
       "type": "array",
@@ -112,9 +105,7 @@
   "definitions": {
     "MetadataEntry": {
       "type": "object",
-      "required": [
-        "var"
-      ],
+      "required": ["var"],
       "additionalProperties": false,
       "properties": {
         "var": {
@@ -252,9 +243,7 @@
     },
     "FlagInput": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -279,9 +268,7 @@
     },
     "ArgumentInput": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -297,9 +284,7 @@
     },
     "ConfigInput": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -315,9 +300,7 @@
     },
     "EnvInput": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -381,9 +364,7 @@
     },
     "EventSpec": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -399,9 +380,7 @@
     },
     "RemoteCommandSpec": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -425,10 +404,7 @@
     },
     "ConfigSpec": {
       "type": "object",
-      "required": [
-        "name",
-        "path"
-      ],
+      "required": ["name", "path"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -441,11 +417,7 @@
         },
         "format": {
           "type": "string",
-          "enum": [
-            "json",
-            "yaml",
-            "toml"
-          ],
+          "enum": ["json", "yaml", "toml"],
           "default": "json",
           "description": "File format"
         },
@@ -458,24 +430,13 @@
     "Command": {
       "description": "A command node in the CLI command tree. A command is either declared inline (with 'name') or composed from another spec file (with '$ref').",
       "type": "object",
-      "anyOf": [
-        { "required": ["name"] },
-        { "required": ["$ref"] }
-      ],
+      "anyOf": [{ "required": ["name"] }, { "required": ["$ref"] }],
       "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
           "description": "Command name used in routing."
-        },
-        "summary": {
-          "type": "string",
-          "description": "Deprecated alias of 'short_description'. 'short_description' wins when both are set."
-        },
-        "description": {
-          "type": "string",
-          "description": "Deprecated alias of 'long_description'. 'long_description' wins when both are set."
         },
         "short_description": {
           "type": "string",

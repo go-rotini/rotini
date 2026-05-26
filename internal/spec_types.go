@@ -10,8 +10,6 @@ type Spec struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of the root command.
 	Commands []Command `json:"commands,omitempty"`
-	// Deprecated alias of 'long_description'. Longer description of the program; 'long_description' wins when both are set.
-	Description string `json:"description,omitempty"`
 	// Events this program can emit. Each name must be unique.
 	Events []EventSpec `json:"events,omitempty"`
 	// Example invocation lines, shown verbatim under the "Examples:" section of help.
@@ -34,8 +32,6 @@ type Spec struct {
 	Schemas map[string]Schema `json:"schemas,omitempty"`
 	// One-line summary of the program, shown as the header of its help. Canonical replacement for the deprecated 'summary'.
 	ShortDescription string `json:"short_description,omitempty"`
-	// Deprecated alias of 'short_description'. One-line summary of the program; 'short_description' wins when both are set.
-	Summary string `json:"summary,omitempty"`
 	// Root command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
 	// Override for the usage line shown in help. When omitted, rotini derives one from the program's arguments and flags.
@@ -83,8 +79,6 @@ type Command struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of this command.
 	Commands []Command `json:"commands,omitempty"`
-	// Deprecated alias of 'long_description'. 'long_description' wins when both are set.
-	Description string `json:"description,omitempty"`
 	// Example invocation lines, shown verbatim under the "Examples:" section of this command's help.
 	Examples []string `json:"examples,omitempty"`
 	// Typed inputs for this command: flags, arguments, file values, and variables.
@@ -97,8 +91,6 @@ type Command struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// One-line summary of this command, shown in the parent's command list and as the header of this command's help. Canonical replacement for the deprecated 'summary'.
 	ShortDescription string `json:"short_description,omitempty"`
-	// Deprecated alias of 'short_description'. 'short_description' wins when both are set.
-	Summary string `json:"summary,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
 	// Override for the usage line shown in this command's help. When omitted, rotini derives one from the command's arguments and flags.
