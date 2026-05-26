@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/go-rotini/fs"
@@ -125,12 +124,10 @@ func GenerateWatch(ctx context.Context, specPath, confPath string, out io.Writer
 	}
 
 	regenerate(specPath, confPath, out) // initial pass
-	fmt.Fprintf(out, "rotini: watching %s (ctrl-c to stop)\n", strings.Join(paths, ", "))
 
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintln(out, "rotini: stopped watching")
 			return nil
 		case <-changed:
 			regenerate(specPath, confPath, out)
@@ -164,5 +161,4 @@ func regenerate(specPath, confPath string, out io.Writer) {
 		fmt.Fprintf(out, "rotini: %v\n", err)
 		return
 	}
-	fmt.Fprintln(out, "rotini: generated")
 }
