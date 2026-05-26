@@ -12,3 +12,5 @@ Flags:
 Examples:
   rotini validate
   rotini val ./path/to/.rotini.yaml
+
+Use "rotini help <command>" for more information about a command.

@@ -14,3 +14,5 @@ Flags:
 Examples:
   rotini generate
   rotini generate ./path/to/.rotini.json --watch
+
+Use "rotini help <command>" for more information about a command.

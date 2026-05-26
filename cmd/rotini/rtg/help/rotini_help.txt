@@ -13,3 +13,5 @@ Examples:
   rotini help
   rotini help generate
   rotini help init
+
+Use "rotini help <command>" for more information about a command.

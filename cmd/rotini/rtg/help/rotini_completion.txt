@@ -16,3 +16,5 @@ Examples:
   rotini completion powershell | Out-String | Invoke-Expression
   rotini completion nushell | save -f ~/.config/nushell/rotini.nu
   rotini completion elvish | save -f ~/.config/elvish/lib/rotini.elv
+
+Use "rotini help <command>" for more information about a command.
