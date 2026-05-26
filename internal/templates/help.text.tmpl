@@ -8,9 +8,8 @@ Rendered once per command. Available data (see internal/help.go, helpData):
   .Path      string    space-joined command path from the root ("" for the root)
   .Short     string    short_description
   .Long      string    long_description
-  .Intro     string    Long (or Short) plus the homepage line — the default header block
+  .Intro     string    Long (or Short) — the default header block
   .Usage     string    resolved usage line(s) (override or auto-derived), un-indented
-  .Homepage  string    homepage URL (root only)
   .Examples  []string  example invocation lines
   .Arguments []HelpRow {.Left, .Right}: argument name + description
   .Flags     []HelpRow {.Left, .Right}: "-x,--xxx" + description

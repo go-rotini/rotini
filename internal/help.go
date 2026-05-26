@@ -22,7 +22,6 @@ type helpNode struct {
 	long      string      // normalized long_description (falls back to description)
 	usage     string      // usage override; empty means auto-derive
 	examples  []string    // example invocation lines
-	homepage  string      // root only; the "Find more information at: …" line
 	inputs    *Inputs     // for the Arguments/Flags sections + auto usage
 	children  []helpChild // for the Commands section
 }
@@ -62,7 +61,6 @@ func flattenHelp(gp *genProgram) []helpNode {
 		long:     gp.rootDescription,
 		usage:    gp.rootUsage,
 		examples: gp.rootExamples,
-		homepage: gp.rootHomepage,
 		inputs:   gp.rootInputs,
 		children: childrenOf(gp.tree),
 	}}
@@ -183,7 +181,6 @@ type helpData struct {
 	Long      string
 	Intro     string
 	Usage     string
-	Homepage  string
 	Examples  []string
 	Arguments []helpRow
 	Flags     []helpRow
@@ -256,13 +253,6 @@ func renderHelpText(tmpl *template.Template, hn helpNode, rootName string) (stri
 // the intro block, usage line, aligned rows, and footer.
 func buildHelpData(hn helpNode, rootName string) helpData {
 	intro := firstNonEmpty(hn.long, hn.short)
-	if hn.homepage != "" {
-		if intro != "" {
-			intro += "\n\nFind more information at: " + hn.homepage
-		} else {
-			intro = "Find more information at: " + hn.homepage
-		}
-	}
 	footer := ""
 	if len(hn.children) > 0 {
 		footer = "Use \"" + rootName + " help <command>\" for more information about a command."
@@ -285,7 +275,6 @@ func buildHelpData(hn helpNode, rootName string) helpData {
 		Long:      hn.long,
 		Intro:     intro,
 		Usage:     usageLine(rootName, hn),
-		Homepage:  hn.homepage,
 		Examples:  hn.examples,
 		Arguments: args,
 		Flags:     flags,

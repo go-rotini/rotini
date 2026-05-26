@@ -9,8 +9,9 @@ import (
 )
 
 // SignalHandler is the callback run when its registered OS signal is received.
-// The signal that fired is passed in.
-type SignalHandler func(os.Signal)
+// It takes no argument: a handler is registered for exactly one signal (the one
+// passed to [Signals.Add]), so the signal is already known at the call site.
+type SignalHandler func()
 
 // Signals is an opt-in rtk service for reacting to OS signals with callbacks —
 // rotini's answer to "do X when SIGHUP arrives" without putting behavior in the
@@ -29,7 +30,7 @@ type SignalHandler func(os.Signal)
 //
 //	// a handler
 //	sig := rotini.MustGet[*rtk.Signals](rtx, "signals")
-//	sig.Add(syscall.SIGHUP, func(os.Signal) { reload() })
+//	sig.Add(syscall.SIGHUP, func() { reload() })
 //	sig.Start(ctx)
 //
 // Every method is safe to call in any order and any number of times: Start and
@@ -116,7 +117,7 @@ func (s *Signals) dispatch(sig os.Signal) {
 	h := s.handlers[sig]
 	s.mu.Unlock()
 	if h != nil {
-		h(sig)
+		h()
 	}
 }
 

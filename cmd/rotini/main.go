@@ -9,11 +9,9 @@ import (
 )
 
 func main() {
-	parser := rtk.NewParser()
-	io := rtk.NewIO()
-
 	rth.Program.
-		Bind("parser", parser).
-		Bind("io", io).
+		Bind("parser", rtk.NewParser()).
+		Bind("io", rtk.NewIO()).
+		Bind("signals", rtk.NewSignals()).
 		Execute()
 }

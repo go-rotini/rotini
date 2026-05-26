@@ -130,7 +130,6 @@ func TestGenerateHelpEnabled(t *testing.T) {
 			"name: mycli\n"+
 			"short_description: My CLI.\n"+
 			"long_description: My CLI does things.\n"+
-			"homepage: https://mycli.example\n"+
 			"commands:\n"+
 			"  - name: build\n"+
 			"    short_description: Build it.\n"+
@@ -163,7 +162,6 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	)
 	mustContain(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"),
 		"My CLI does things.",
-		"Find more information at: https://mycli.example",
 		"Usage:",
 		"Commands:",
 		"build;b",

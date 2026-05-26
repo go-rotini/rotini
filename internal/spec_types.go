@@ -4,7 +4,7 @@ package internal
 
 // Schema for a Rotini CLI definition spec file.
 type Spec struct {
-	// URL identifying the rotini spec schema version. The version segment must match the installed rotini binary version.
+	// URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.
 	Schema string `json:"$schema"`
 	// Additional names that invoke the root command.
 	Aliases []string `json:"aliases,omitempty"`
@@ -16,11 +16,13 @@ type Spec struct {
 	Examples []string `json:"examples,omitempty"`
 	// Config files to load at startup.
 	Files []ConfigSpec `json:"files,omitempty"`
-	// Project homepage or docs URL, shown as the "Find more information at: <url>" line in the root command's help.
-	Homepage string `json:"homepage,omitempty"`
+	// Meant for use in the command help output as the last text that appears in the string.
+	Footer string `json:"footer,omitempty"`
+	// Meant for use in the command help output as the first text that appears in the string.
+	Header string `json:"header,omitempty"`
 	// Typed inputs for the root command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
-	// Longer description of the program, shown in the body of its help. Canonical replacement for the deprecated 'description'.
+	// A long description of the command, meant for use in help output to describe the command fully.
 	LongDescription string `json:"long_description,omitempty"`
 	// Build-time metadata vars injected via go ldflags.
 	Metadata []MetadataEntry `json:"metadata,omitempty"`
@@ -30,7 +32,7 @@ type Spec struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>".
 	Schemas map[string]Schema `json:"schemas,omitempty"`
-	// One-line summary of the program, shown as the header of its help. Canonical replacement for the deprecated 'summary'.
+	// A short description of the command, meant for use in help output to describe subcommands briefly.
 	ShortDescription string `json:"short_description,omitempty"`
 	// Root command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`

@@ -22,7 +22,6 @@ type genProgram struct {
 	rootDescription string
 	rootUsage       string              // usage-line override for the root's help
 	rootExamples    []string            // example invocation lines for the root's help
-	rootHomepage    string              // "Find more information at: …" link in the root's help
 	metadata        []MetadataEntry     // ldflag-settable vars emitted in rtg
 	versionVar      string              // metadata var feeding Definition.Version (Var == "Version")
 	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
@@ -82,7 +81,6 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootDescription: spec.LongDescription,
 		rootUsage:       spec.Usage,
 		rootExamples:    spec.Examples,
-		rootHomepage:    spec.Homepage,
 		metadata:        spec.Metadata,
 		rootRemotes:     spec.RemoteCommands,
 	}

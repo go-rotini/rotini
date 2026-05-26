@@ -23,25 +23,35 @@ import (
 //     Program var, and one method per command. Always (over)written; orphaned
 //     stubs are pruned when generate.cmd.prune is enabled.
 func Generate(specPath, confPath string) error {
+	return generateOnce(specPath, resolveConfPath(specPath, confPath))
+}
+
+// resolveConfPath returns confPath when set, otherwise the .rotini.conf.* file
+// discovered next to the spec (e.g. for the scaffolded `//go:generate rotini
+// generate`), or "" when none is found. Watch mode also uses this to learn which
+// conf file, if any, to watch.
+func resolveConfPath(specPath, confPath string) string {
+	if confPath != "" {
+		return confPath
+	}
+	if p, err := discoverFile(filepath.Dir(specPath), ".rotini.conf."); err == nil {
+		return p
+	}
+	return ""
+}
+
+// generateOnce runs a single generation pass against an already-resolved conf
+// path (which may be empty or point at a missing file, meaning "use defaults").
+func generateOnce(specPath, confPath string) error {
 	spec, err := ReadSpec(specPath)
 	if err != nil {
 		return err
 	}
-
-	// When no conf is given (e.g. the scaffolded `//go:generate rotini generate`),
-	// discover a .rotini.conf.* next to the spec before falling back to defaults.
-	if confPath == "" {
-		if p, derr := discoverFile(filepath.Dir(specPath), ".rotini.conf."); derr == nil {
-			confPath = p
-		}
-	}
-
 	conf, err := loadConfOrDefaults(confPath)
 	if err != nil {
 		return err
 	}
 	applyConfDefaults(conf)
-
 	return generateAll(spec, conf, specPath)
 }
 
