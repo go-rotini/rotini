@@ -19,7 +19,7 @@ type ProgramHandlers interface {
 }
 
 // Version is set at build time via -ldflags "-X <pkg>.Version=<value>".
-var Version = "dev"
+var Version = "0.0.0"
 
 var Definition = rotini.Definition{
 	Name:    "rotini",
