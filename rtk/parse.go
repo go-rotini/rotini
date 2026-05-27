@@ -27,17 +27,18 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// parsedInputs is one invocation's parsed argv, keyed by command-name scope.
-// [Parse] builds it via [parseInto] and reads it back through the reflective
-// binder. Keying by command name — not the parent-prefixed path — is what lets a
-// statically-composed child read its inputs through its own generated types
-// unchanged.
+// parsedInputs is one invocation's parsed argv, indexed by position in the
+// resolved command chain (root = 0 … leaf). [Parse] builds it via [parseInto] and
+// reads it back through the reflective binder. Keying by chain position — not by
+// command name — means two commands on a single path can never collide, and a
+// statically-composed child still reads its inputs through its own generated types
+// unchanged: those describe its own root→leaf tail of the chain, bound leaf-first.
 type parsedInputs struct {
-	scopes map[string]scopeInputs
+	scopes []scopeInputs // one entry per resolved chain frame, root → leaf
 }
 
-// scopeInputs holds one command scope's parsed values: flag values by logical
-// name (a repeatable flag keeps every value) and the positional arguments.
+// scopeInputs holds one chain frame's parsed values: flag values by logical name
+// (a repeatable flag keeps every value) and the positional arguments.
 type scopeInputs struct {
 	flags map[string][]string
 	args  []string
@@ -119,23 +120,19 @@ func (p *Parser) Parse(rtx *rotini.Context, out any) error {
 // not check required inputs or enums — that is [validate]'s job — so a handler can
 // inspect what was supplied before deciding how strict to be.
 func parseInto(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, error) {
-	store := &parsedInputs{scopes: map[string]scopeInputs{}}
-	leaf := chain[len(chain)-1].Name
-	depth := 1 // index of the next chain frame we might descend into
+	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
+	leaf := len(chain) - 1 // chain index of the leaf command
+	depth := 1             // index of the next chain frame we might descend into
 	startedArgs := false
 
-	addFlag := func(scope, name, value string) {
-		si := store.scopes[scope]
-		if si.flags == nil {
-			si.flags = map[string][]string{}
+	addFlag := func(idx int, name, value string) {
+		if store.scopes[idx].flags == nil {
+			store.scopes[idx].flags = map[string][]string{}
 		}
-		si.flags[name] = append(si.flags[name], value)
-		store.scopes[scope] = si
+		store.scopes[idx].flags[name] = append(store.scopes[idx].flags[name], value)
 	}
 	addArg := func(value string) {
-		si := store.scopes[leaf]
-		si.args = append(si.args, value)
-		store.scopes[leaf] = si
+		store.scopes[leaf].args = append(store.scopes[leaf].args, value)
 	}
 
 	for i := 0; i < len(argv); i++ {
@@ -148,7 +145,7 @@ func parseInto(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, er
 
 		if isFlag(tok) {
 			name, inline, hasInline := splitFlag(tok)
-			fdef, scope, ok := findFlag(chain, name)
+			fdef, idx, ok := findFlag(chain, name)
 			if !ok {
 				return nil, &usageError{msg: fmt.Sprintf("unknown flag %q", name)}
 			}
@@ -168,7 +165,7 @@ func parseInto(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, er
 				}
 				value = argv[i]
 			}
-			addFlag(scope, fdef.Name, value)
+			addFlag(idx, fdef.Name, value)
 			continue
 		}
 
@@ -196,7 +193,7 @@ func parseInto(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, er
 // inputs without it.
 func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 	leaf := chain[len(chain)-1]
-	si := store.scopes[leaf.Name]
+	si := store.scopes[len(chain)-1]
 
 	// A stray positional on a command that branches but takes no arguments is a
 	// mistyped sub-command, not an argument.
@@ -208,8 +205,8 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 		return err
 	}
 
-	for _, f := range chain {
-		fsi := store.scopes[f.Name]
+	for i, f := range chain {
+		fsi := store.scopes[i]
 		for _, fd := range f.Flags {
 			if len(fd.Enum) == 0 {
 				continue
@@ -242,41 +239,27 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 // applyDefaults fills in declared flag and trailing-argument defaults for inputs
 // the user did not provide, so handlers and required-checks see them.
 func applyDefaults(chain []rotini.ResolvedCommand, store *parsedInputs) {
-	for _, f := range chain {
-		var si scopeInputs
-		touched := false
+	for i, f := range chain {
 		for _, fd := range f.Flags {
 			if fd.Default == "" {
 				continue
 			}
-			if !touched {
-				si = store.scopes[f.Name]
-				if si.flags == nil {
-					si.flags = map[string][]string{}
-				}
-				touched = true
+			if store.scopes[i].flags == nil {
+				store.scopes[i].flags = map[string][]string{}
 			}
-			if _, ok := si.flags[fd.Name]; !ok {
-				si.flags[fd.Name] = []string{fd.Default}
+			if _, ok := store.scopes[i].flags[fd.Name]; !ok {
+				store.scopes[i].flags[fd.Name] = []string{fd.Default}
 			}
-		}
-		if touched {
-			store.scopes[f.Name] = si
 		}
 	}
 
-	leaf := chain[len(chain)-1]
-	si := store.scopes[leaf.Name]
-	changed := false
-	for i := len(si.args); i < len(leaf.Arguments); i++ {
-		if leaf.Arguments[i].Default == "" {
+	leaf := len(chain) - 1
+	args := chain[leaf].Arguments
+	for i := len(store.scopes[leaf].args); i < len(args); i++ {
+		if args[i].Default == "" {
 			break // can't fill a gap before a defaultless argument
 		}
-		si.args = append(si.args, leaf.Arguments[i].Default)
-		changed = true
-	}
-	if changed {
-		store.scopes[leaf.Name] = si
+		store.scopes[leaf].args = append(store.scopes[leaf].args, args[i].Default)
 	}
 }
 
@@ -284,8 +267,8 @@ func applyDefaults(chain []rotini.ResolvedCommand, store *parsedInputs) {
 // chain / on the leaf) that were neither provided nor defaulted.
 func requiredErrors(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 	var missing []string
-	for _, f := range chain {
-		si := store.scopes[f.Name]
+	for i, f := range chain {
+		si := store.scopes[i]
 		for _, fd := range f.Flags {
 			if fd.Required {
 				if _, ok := si.flags[fd.Name]; !ok {
@@ -295,7 +278,7 @@ func requiredErrors(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 		}
 	}
 	leaf := chain[len(chain)-1]
-	si := store.scopes[leaf.Name]
+	si := store.scopes[len(chain)-1]
 	for i, ad := range leaf.Arguments {
 		if ad.Required && i >= len(si.args) {
 			missing = append(missing, "<"+ad.Name+">")
@@ -337,18 +320,19 @@ func splitFlag(tok string) (name, value string, hasValue bool) {
 }
 
 // findFlag searches the resolved chain leaf→root for a flag whose identifiers
-// include name, returning its definition and the owning command-name scope.
-func findFlag(chain []rotini.ResolvedCommand, name string) (rotini.FlagDef, string, bool) {
+// include name, returning its definition and the chain index of the command that
+// owns it.
+func findFlag(chain []rotini.ResolvedCommand, name string) (rotini.FlagDef, int, bool) {
 	for i := len(chain) - 1; i >= 0; i-- {
 		for _, f := range chain[i].Flags {
 			for _, id := range f.Identifiers {
 				if id == name {
-					return f, chain[i].Name, true
+					return f, i, true
 				}
 			}
 		}
 	}
-	return rotini.FlagDef{}, "", false
+	return rotini.FlagDef{}, -1, false
 }
 
 // findChild returns the sub-command of f matching tok by name or alias.
@@ -407,21 +391,21 @@ func levenshtein(a, b string) int {
 	return prev[len(b)]
 }
 
-// bindInputs fills a <Cmd>Inputs struct: one field per command scope, each
-// tagged `rotini:"scope=<command-name>"`.
+// bindInputs fills a <Cmd>Inputs struct: one field per command on the resolved
+// path, in root→leaf order. The fields bind to the tail of the chain aligned at
+// the leaf, so each command's inputs come from the right frame no matter how deep
+// it was reached — including a statically-composed subtree reached under extra
+// parent frames, which simply go unbound.
 func bindInputs(v reflect.Value, p *parsedInputs) {
 	if v.Kind() != reflect.Struct {
 		return
 	}
-	t := v.Type()
+	offset := len(p.scopes) - v.NumField()
+	if offset < 0 {
+		return // the struct names more commands than the chain has frames
+	}
 	for i := range v.NumField() {
-		scope, ok := strings.CutPrefix(t.Field(i).Tag.Get("rotini"), "scope=")
-		if !ok {
-			continue
-		}
-		if si, ok := p.scopes[scope]; ok {
-			bindCommandInputs(v.Field(i), si)
-		}
+		bindCommandInputs(v.Field(i), p.scopes[offset+i])
 	}
 }
 

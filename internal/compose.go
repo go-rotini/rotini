@@ -83,7 +83,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		filename: spec.Name + ".go",
 		flags:    flagFields(spec.Inputs),
 		args:     argFields(spec.Inputs),
-		inputs:   []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs", Tag: "scope=" + spec.Name}},
+		inputs:   []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
 	}
 
 	specDir := filepath.Dir(specPath)
@@ -141,7 +141,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 				filename: gp.rootName + "_" + path + ".go",
 				flags:    flagFields(c.Inputs),
 				args:     argFields(c.Inputs),
-				inputs:   inputsFields(gp.rootName, gp.rootPascal, path),
+				inputs:   inputsFields(gp.rootPascal, path),
 			})
 		}
 

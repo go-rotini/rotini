@@ -156,7 +156,7 @@ func TestParse_defaultsApplied(t *testing.T) {
 				Count int `rotini:"count"`
 			}
 			Arguments struct{}
-		} `rotini:"scope=app"`
+		}
 	}
 	rtx := rotini.NewContextFor(def, []string{})
 	var in inputs
@@ -165,6 +165,138 @@ func TestParse_defaultsApplied(t *testing.T) {
 	}
 	if in.App.Flags.Count != 9 {
 		t.Errorf("default not applied: Count = %d, want 9", in.App.Flags.Count)
+	}
+}
+
+// TestParse_repeatedNameOnPath is the collision case: "app cmd1 cmd1" is a legal
+// tree where a command name repeats on a single path. Each cmd1 declares its own
+// flag; positional (not name-based) scoping must keep them in separate frames so
+// the middle command's flag and the leaf's never merge.
+func TestParse_repeatedNameOnPath(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Commands: []rotini.CommandDef{{
+			Name: "cmd1", Handler: "AppCmd1",
+			Flags: []rotini.FlagDef{{Name: "mid", Identifiers: []string{"--mid"}, Type: "string"}},
+			Commands: []rotini.CommandDef{{
+				Name: "cmd1", Handler: "AppCmd1Cmd1",
+				Flags: []rotini.FlagDef{{Name: "leaf", Identifiers: []string{"--leaf"}, Type: "string"}},
+			}},
+		}},
+	}
+	type midInputs struct {
+		Flags struct {
+			Mid string `rotini:"mid"`
+		}
+		Arguments struct{}
+	}
+	type leafInputs struct {
+		Flags struct {
+			Leaf string `rotini:"leaf"`
+		}
+		Arguments struct{}
+	}
+	// One field per command on the path: app, the middle cmd1, the leaf cmd1.
+	type inputs struct {
+		App         appCommandInputs
+		AppCmd1     midInputs
+		AppCmd1Cmd1 leafInputs
+	}
+
+	rtx := rotini.NewContextFor(def, []string{"cmd1", "cmd1", "--mid", "M", "--leaf", "L"})
+	var in inputs
+	if err := NewParser().Parse(rtx, &in); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if in.AppCmd1.Flags.Mid != "M" {
+		t.Errorf("middle cmd1 --mid = %q, want M", in.AppCmd1.Flags.Mid)
+	}
+	if in.AppCmd1Cmd1.Flags.Leaf != "L" {
+		t.Errorf("leaf cmd1 --leaf = %q, want L", in.AppCmd1Cmd1.Flags.Leaf)
+	}
+}
+
+// TestParse_sameLeafNameDifferentPaths covers the other shape from the original
+// question: a tree with BOTH "app cmd1 cmd1" and "app cmd2 cmd1" — two distinct
+// leaf commands that happen to share the name "cmd1". Each invocation must resolve
+// down its own branch and bind that branch's flags only; the other branch's leaf
+// flag must not be accepted.
+func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Commands: []rotini.CommandDef{
+			{
+				Name: "cmd1", Handler: "AppCmd1",
+				Flags: []rotini.FlagDef{{Name: "m1", Identifiers: []string{"--m1"}, Type: "string"}},
+				Commands: []rotini.CommandDef{{
+					Name: "cmd1", Handler: "AppCmd1Cmd1",
+					Flags: []rotini.FlagDef{{Name: "leaf1", Identifiers: []string{"--leaf1"}, Type: "string"}},
+				}},
+			},
+			{
+				Name: "cmd2", Handler: "AppCmd2",
+				Flags: []rotini.FlagDef{{Name: "m2", Identifiers: []string{"--m2"}, Type: "string"}},
+				Commands: []rotini.CommandDef{{
+					Name: "cmd1", Handler: "AppCmd2Cmd1",
+					Flags: []rotini.FlagDef{{Name: "leaf2", Identifiers: []string{"--leaf2"}, Type: "string"}},
+				}},
+			},
+		},
+	}
+	type cmd1Inputs struct {
+		App     appCommandInputs
+		AppCmd1 struct {
+			Flags struct {
+				M1 string `rotini:"m1"`
+			}
+			Arguments struct{}
+		}
+		AppCmd1Cmd1 struct {
+			Flags struct {
+				Leaf1 string `rotini:"leaf1"`
+			}
+			Arguments struct{}
+		}
+	}
+	type cmd2Inputs struct {
+		App     appCommandInputs
+		AppCmd2 struct {
+			Flags struct {
+				M2 string `rotini:"m2"`
+			}
+			Arguments struct{}
+		}
+		AppCmd2Cmd1 struct {
+			Flags struct {
+				Leaf2 string `rotini:"leaf2"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	// app cmd1 cmd1 — descends the cmd1 branch; binds --m1 and --leaf1.
+	var in1 cmd1Inputs
+	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"cmd1", "cmd1", "--m1", "M1", "--leaf1", "L1"}), &in1); err != nil {
+		t.Fatalf("cmd1 cmd1: Parse: %v", err)
+	}
+	if in1.AppCmd1.Flags.M1 != "M1" || in1.AppCmd1Cmd1.Flags.Leaf1 != "L1" {
+		t.Errorf("cmd1 cmd1 bound wrong: %+v", in1)
+	}
+
+	// app cmd2 cmd1 — descends the cmd2 branch; binds --m2 and --leaf2, with no
+	// bleed from the identically-named cmd1-branch leaf.
+	var in2 cmd2Inputs
+	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"cmd2", "cmd1", "--m2", "M2", "--leaf2", "L2"}), &in2); err != nil {
+		t.Fatalf("cmd2 cmd1: Parse: %v", err)
+	}
+	if in2.AppCmd2.Flags.M2 != "M2" || in2.AppCmd2Cmd1.Flags.Leaf2 != "L2" {
+		t.Errorf("cmd2 cmd1 bound wrong: %+v", in2)
+	}
+
+	// Isolation: the cmd1-branch leaf flag is not a flag of the cmd2-branch leaf.
+	var in3 cmd2Inputs
+	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"cmd2", "cmd1", "--leaf1", "X"}), &in3); err == nil || !strings.Contains(err.Error(), `unknown flag "--leaf1"`) {
+		t.Errorf("cross-branch flag should be unknown under cmd2 cmd1, got: %v", err)
 	}
 }
 
@@ -200,8 +332,8 @@ type runCommandInputs struct {
 }
 
 type runInputs struct {
-	App appCommandInputs `rotini:"scope=app"`
-	Run runCommandInputs `rotini:"scope=run"`
+	App appCommandInputs
+	Run runCommandInputs
 }
 
 // bindStore runs the reflective binder over a hand-built parsed store, the same
@@ -214,9 +346,9 @@ func bindStore[T any](store *parsedInputs) T {
 }
 
 func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
-	in := bindStore[runInputs](&parsedInputs{scopes: map[string]scopeInputs{
-		"app": {flags: map[string][]string{"verbose": {"true"}}},
-		"run": {
+	in := bindStore[runInputs](&parsedInputs{scopes: []scopeInputs{
+		{flags: map[string][]string{"verbose": {"true"}}}, // app  (chain[0]) → in.App
+		{ // run (chain[1]) → in.Run
 			flags: map[string][]string{
 				"count": {"7"},
 				"rate":  {"2.5"},
@@ -258,21 +390,26 @@ func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
 	}
 }
 
-// A composed child's input type carries child-relative scope tags; binding must
-// match by command name regardless of any parent prefix in the argv path.
-func TestInputs_scopesMatchByCommandNameNotPath(t *testing.T) {
-	in := bindStore[runInputs](&parsedInputs{scopes: map[string]scopeInputs{
-		"app": {flags: map[string][]string{"verbose": {"true"}}},
-		"run": {flags: map[string][]string{"count": {"3"}}, args: []string{"x"}},
+// A composed child's input type describes only its own root→leaf path, so it has
+// fewer fields than the full resolved chain when reached under a parent. Binding
+// is leaf-aligned: the struct's fields map to the trailing chain frames, and any
+// extra parent frame is left unbound. (This is also what makes repeated names on a
+// path — e.g. "app run run" — safe: position, not name, is the key.)
+func TestInputs_bindsLeafAlignedUnderComposition(t *testing.T) {
+	in := bindStore[runInputs](&parsedInputs{scopes: []scopeInputs{
+		{flags: map[string][]string{"verbose": {"ignored"}}},              // parent frame (chain[0]) — unbound
+		{flags: map[string][]string{"verbose": {"true"}}},                 // app  (chain[1]) → in.App
+		{flags: map[string][]string{"count": {"3"}}, args: []string{"x"}}, // run  (chain[2]) → in.Run
 	}})
 	if !in.App.Flags.Verbose || in.Run.Flags.Count != 3 || in.Run.Arguments.Name != "x" {
-		t.Errorf("composed binding failed: %+v", in)
+		t.Errorf("leaf-aligned composed binding failed: %+v", in)
 	}
 }
 
 func TestInputs_missingFlagKeepsZero(t *testing.T) {
-	in := bindStore[runInputs](&parsedInputs{scopes: map[string]scopeInputs{
-		"run": {flags: map[string][]string{"count": {"5"}}}, // rate/wait/level absent
+	in := bindStore[runInputs](&parsedInputs{scopes: []scopeInputs{
+		{}, // app (chain[0])
+		{flags: map[string][]string{"count": {"5"}}}, // run (chain[1]); rate/wait/level absent
 	}})
 	if in.Run.Flags.Count != 5 || in.Run.Flags.Rate != 0 || in.Run.Flags.Wait != 0 || in.Run.Flags.Level != nil {
 		t.Errorf("absent flags should stay zero: %+v", in.Run.Flags)

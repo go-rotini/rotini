@@ -52,7 +52,7 @@ type {{.Prefix}}CommandInputs struct {
 
 type {{.Prefix}}Inputs struct {
 {{- range .InputsFields}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
+	{{.Field}} {{.GoType}}
 {{- end}}
 }
 {{- end}}

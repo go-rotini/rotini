@@ -105,7 +105,7 @@ type RotiniCommandInputs struct {
 }
 
 type RotiniInputs struct {
-	Rotini RotiniCommandInputs `rotini:"scope=rotini"`
+	Rotini RotiniCommandInputs
 }
 
 type RotiniCompletionFlags struct {
@@ -122,8 +122,8 @@ type RotiniCompletionCommandInputs struct {
 }
 
 type RotiniCompletionInputs struct {
-	Rotini           RotiniCommandInputs           `rotini:"scope=rotini"`
-	RotiniCompletion RotiniCompletionCommandInputs `rotini:"scope=completion"`
+	Rotini           RotiniCommandInputs
+	RotiniCompletion RotiniCompletionCommandInputs
 }
 
 type RotiniGenerateFlags struct {
@@ -142,8 +142,8 @@ type RotiniGenerateCommandInputs struct {
 }
 
 type RotiniGenerateInputs struct {
-	Rotini         RotiniCommandInputs         `rotini:"scope=rotini"`
-	RotiniGenerate RotiniGenerateCommandInputs `rotini:"scope=generate"`
+	Rotini         RotiniCommandInputs
+	RotiniGenerate RotiniGenerateCommandInputs
 }
 
 type RotiniHelpFlags struct {
@@ -160,8 +160,8 @@ type RotiniHelpCommandInputs struct {
 }
 
 type RotiniHelpInputs struct {
-	Rotini     RotiniCommandInputs     `rotini:"scope=rotini"`
-	RotiniHelp RotiniHelpCommandInputs `rotini:"scope=help"`
+	Rotini     RotiniCommandInputs
+	RotiniHelp RotiniHelpCommandInputs
 }
 
 type RotiniInitializeFlags struct {
@@ -181,8 +181,8 @@ type RotiniInitializeCommandInputs struct {
 }
 
 type RotiniInitializeInputs struct {
-	Rotini           RotiniCommandInputs           `rotini:"scope=rotini"`
-	RotiniInitialize RotiniInitializeCommandInputs `rotini:"scope=initialize"`
+	Rotini           RotiniCommandInputs
+	RotiniInitialize RotiniInitializeCommandInputs
 }
 
 type RotiniValidateFlags struct {
@@ -199,8 +199,8 @@ type RotiniValidateCommandInputs struct {
 }
 
 type RotiniValidateInputs struct {
-	Rotini         RotiniCommandInputs         `rotini:"scope=rotini"`
-	RotiniValidate RotiniValidateCommandInputs `rotini:"scope=validate"`
+	Rotini         RotiniCommandInputs
+	RotiniValidate RotiniValidateCommandInputs
 }
 
 type RotiniVersionFlags struct {
@@ -215,8 +215,8 @@ type RotiniVersionCommandInputs struct {
 }
 
 type RotiniVersionInputs struct {
-	Rotini        RotiniCommandInputs        `rotini:"scope=rotini"`
-	RotiniVersion RotiniVersionCommandInputs `rotini:"scope=version"`
+	Rotini        RotiniCommandInputs
+	RotiniVersion RotiniVersionCommandInputs
 }
 
 //go:embed help/rotini.txt

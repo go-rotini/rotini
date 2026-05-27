@@ -27,8 +27,8 @@ const (
 var templateFS embed.FS
 
 // fieldDef is one generated struct field: a Go identifier, its type, and its
-// `rotini` struct-tag content — a flag/argument logical name, or
-// "scope=<command-name>" for the per-command fields of an <Cmd>Inputs struct.
+// `rotini` struct-tag content — a flag/argument logical name (empty for the
+// per-command fields of an <Cmd>Inputs struct, which the binder maps by position).
 type fieldDef struct {
 	Field  string
 	GoType string
@@ -138,16 +138,17 @@ func (gp *genProgram) methods() []string {
 }
 
 // inputsFields returns the fields of a command's <Prefix>Inputs struct: one per
-// ancestor command (root first, then each intermediate) plus the command
-// itself. Each field is named after the command's PascalCase prefix, typed as
-// that prefix's CommandInputs, and tagged `scope=<command-name>` so the binder
-// matches it to the parsed scope (by command name, never the parent prefix).
-func inputsFields(rootName, rootPascal, path string) []fieldDef {
-	fields := []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs", Tag: "scope=" + rootName}}
+// ancestor command (root first, then each intermediate) plus the command itself,
+// in root→leaf order. Each field is named after the command's PascalCase prefix
+// and typed as that prefix's CommandInputs. There is deliberately no struct tag:
+// the binder maps fields to resolved-chain frames by position (aligned at the
+// leaf), so command names can never collide along a path.
+func inputsFields(rootPascal, path string) []fieldDef {
+	fields := []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs"}}
 	segments := strings.Split(path, "_")
 	for i := 1; i <= len(segments); i++ {
 		prefix := rootPascal + toPascalCase(strings.Join(segments[:i], "_"))
-		fields = append(fields, fieldDef{Field: prefix, GoType: prefix + "CommandInputs", Tag: "scope=" + segments[i-1]})
+		fields = append(fields, fieldDef{Field: prefix, GoType: prefix + "CommandInputs"})
 	}
 	return fields
 }
