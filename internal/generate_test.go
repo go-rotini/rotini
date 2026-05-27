@@ -304,7 +304,7 @@ func TestGenerateWatchInitialAndStop(t *testing.T) {
 	defer cancel()
 	var buf bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- GenerateWatch(ctx, specPath, "", &buf) }()
+	go func() { done <- watch(ctx, specPath, "", &buf) }()
 
 	rtg := filepath.Join(tmp, "rtg", "rotini.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
@@ -335,7 +335,7 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 	defer cancel()
 	var buf bytes.Buffer
 	done := make(chan error, 1)
-	go func() { done <- GenerateWatch(ctx, specPath, "", &buf) }()
+	go func() { done <- watch(ctx, specPath, "", &buf) }()
 
 	rtg := filepath.Join(tmp, "rtg", "rotini.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {

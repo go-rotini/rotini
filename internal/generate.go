@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"time"
 
@@ -83,16 +84,19 @@ const watchDebounce = 200 * time.Millisecond
 // GenerateWatch generates once from the spec at specPath (and the conf at
 // confPath, or the one discovered next to the spec when confPath is empty), then
 // watches the spec and conf files and re-generates whenever either changes, until
-// ctx is cancelled. It returns nil on clean cancellation.
+// interrupted with ctrl-c (SIGINT). It returns nil on a clean interrupt.
 //
 // A failed pass (e.g. a malformed save) is reported to out and watching
-// continues, so the file can be fixed in place without restarting. Progress is
-// written to out. ctx is the cancellation handle the caller wires to a signal —
-// e.g. SIGINT cancels ctx, this returns, and the lifecycle teardown runs.
-func GenerateWatch(ctx context.Context, specPath, confPath string, out io.Writer) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
+// continues, so the file can be fixed in place without restarting.
+func GenerateWatch(specPath, confPath string, out io.Writer) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return watch(ctx, specPath, confPath, out)
+}
+
+// watch is the cancelable core of [GenerateWatch]: it runs until ctx is done. It
+// is split out so tests can drive it with a context rather than a real signal.
+func watch(ctx context.Context, specPath, confPath string, out io.Writer) error {
 	confPath = resolveConfPath(specPath, confPath)
 
 	// Watch the spec always, and the conf only when it exists (conf is optional).
