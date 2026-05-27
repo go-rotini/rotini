@@ -38,6 +38,8 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
+	io.Stdout.Printf("spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
+
 	err := internal.Generate(
 		args.SpecFilePath,
 		flags.ConfFilePath,
