@@ -115,12 +115,22 @@ func (p *Program) defaultOnError(_ context.Context, rtx *Context, err error) {
 
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the
 // recorded Handler method name, via reflection on the aggregate handlers) and
-// runs the lifecycle: CascadingPreRun root→leaf, then the leaf's PreRun, Run,
-// and PostRun, then CascadingPostRun leaf→root. Any panic raised inside a hook
-// (e.g. the rtk package's MustGet on a missing service) is recovered and routed
-// through the registry's OnError funnel, whose rtx.Exit code becomes the process
-// exit code.
-func (p *Program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
+// runs the lifecycle as a balanced, LIFO setup/teardown:
+//
+//   - Setup runs forward, root→leaf: CascadingPreRun for each command, then the
+//     leaf's PreRun, then the leaf's Run (the innermost "work"). It halts the
+//     moment a hook calls rtx.Exit or panics.
+//   - Teardown runs in reverse for every hook that BEGAN: the leaf's PostRun (if
+//     its PreRun began), then CascadingPostRun leaf→root for each command whose
+//     CascadingPreRun began. Teardown always runs to completion — a panic or
+//     rtx.Exit inside a teardown hook neither aborts the rest nor displaces the
+//     first failure or exit code.
+//
+// rtx.Exit is a clean stop. A panic anywhere (e.g. the rtk package's MustGet on a
+// missing service) is recovered, does not abort the remaining teardown, and is
+// routed once — after all teardown — to the OnError funnel, last. See
+// .docs/ROTINI_RTX_EXIT.md.
+func (p *Program) dispatch(chain []ResolvedCommand, rtx *Context) int {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
@@ -137,44 +147,57 @@ func (p *Program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
 		}
 		handlers[i] = h
 	}
-
-	// A panic from a hook (e.g. rotini.MustGet) unwinds to here, skipping the
-	// `return rtx.exitCode` below — so the funnel runs and we lift its exit code
-	// (set via rtx.Exit) into the named return ourselves. The panic path is always
-	// a failure: if the funnel left the code at 0, floor it to 1.
-	defer func() {
-		if r := recover(); r != nil {
-			err, ok := r.(error)
-			if !ok {
-				err = fmt.Errorf("%v", r)
-			}
-			rtx.onError(p.ctx, rtx, err)
-			code = rtx.exitCode
-			if code == 0 {
-				code = 1
-			}
-		}
-	}()
-
 	leaf := handlers[len(handlers)-1]
-	// CascadingPreRun (root→leaf), then the leaf's Pre/Run/Post — short-circuited
-	// once a hook calls Exit. CascadingPostRun (leaf→root) always runs for cleanup.
+
+	// failure is the first panic seen anywhere in the lifecycle. run wraps every
+	// hook so a panic is recovered (keeping only the first) rather than unwinding —
+	// this is what lets teardown still run and OnError fire exactly once, last.
+	var failure error
+	run := func(hook func(context.Context, *Context)) {
+		defer func() {
+			if r := recover(); r != nil && failure == nil {
+				if err, ok := r.(error); ok {
+					failure = err
+				} else {
+					failure = fmt.Errorf("%v", r)
+				}
+			}
+		}()
+		hook(p.ctx, rtx)
+	}
+
+	// Setup + work, forward — halting on rtx.Exit (rtx.stopped) or a panic. began
+	// and preRan record how far setup got, so teardown unwinds only what began.
+	began, preRan := 0, false
 	func() {
-		for _, h := range handlers {
-			if h.CascadingPreRun(p.ctx, rtx); rtx.stopped {
+		for i, h := range handlers {
+			began = i + 1
+			if run(h.CascadingPreRun); rtx.stopped || failure != nil {
 				return
 			}
 		}
-		if leaf.PreRun(p.ctx, rtx); rtx.stopped {
+		preRan = true
+		if run(leaf.PreRun); rtx.stopped || failure != nil {
 			return
 		}
-		if leaf.Run(p.ctx, rtx); rtx.stopped {
-			return
-		}
-		leaf.PostRun(p.ctx, rtx)
+		run(leaf.Run)
 	}()
-	for i := len(handlers) - 1; i >= 0; i-- {
-		handlers[i].CascadingPostRun(p.ctx, rtx)
+
+	// Teardown, reverse — every begun hook's pair, always to completion.
+	if preRan {
+		run(leaf.PostRun)
+	}
+	for i := began - 1; i >= 0; i-- {
+		run(handlers[i].CascadingPostRun)
+	}
+
+	// A panic is funneled to OnError last, after teardown. The panic path is always
+	// a failure: if the funnel left the code at 0, floor it to 1.
+	if failure != nil {
+		rtx.onError(p.ctx, rtx, failure)
+		if rtx.exitCode == 0 {
+			rtx.exitCode = 1
+		}
 	}
 	return rtx.exitCode
 }

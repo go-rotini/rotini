@@ -48,8 +48,8 @@ type Context struct {
 	args     []string                                           // raw argument vector for this invocation
 	chain    []ResolvedCommand                                  // resolved command path, root → leaf
 	onError  func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures (see Program.OnError)
-	exitCode int                                                // process exit code requested via [Context.Exit]
-	stopped  bool                                               // [Context.Exit] was called; remaining leaf hooks are skipped
+	exitCode int                                                // process exit code requested via [Context.Exit] (first non-zero wins)
+	stopped  bool                                               // [Context.Exit] was called; forward progress (setup/PreRun/Run) halts, teardown still runs
 }
 
 // NewContext returns an empty [Context] with an initialized registry and no
@@ -147,17 +147,22 @@ func (rtx *Context) Value(key string) any {
 	return rtx.services[key]
 }
 
-// Exit records a non-zero exit code for the program and stops the current
-// command's remaining leaf hooks (PreRun/Run/PostRun); CascadingPostRun still
-// runs so cleanup is not skipped. The process exits with code once the lifecycle
-// completes. It is the handler-facing way to fail a command until lifecycle
-// hooks themselves return errors.
+// Exit records the program's exit code and stops the lifecycle's forward
+// progress — no further setup hook (CascadingPreRun), PreRun, or Run runs.
+// Teardown is unaffected: every PostRun/CascadingPostRun whose paired setup hook
+// began still runs, in reverse, so cleanup is never skipped. The first non-zero
+// code wins, so a later Exit (e.g. from a teardown hook) cannot change the
+// verdict. Exit does not trigger OnError — it is a clean, deliberate stop, not an
+// error. The process exits with the recorded code once the lifecycle, teardown
+// included, completes.
 func (rtx *Context) Exit(code int) {
 	if rtx == nil {
 		return
 	}
-	rtx.exitCode = code
 	rtx.stopped = true
+	if rtx.exitCode == 0 {
+		rtx.exitCode = code
+	}
 }
 
 // Get returns the service bound under key as T — the typed, comma-ok form of the
