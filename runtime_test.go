@@ -339,6 +339,62 @@ func TestRun_panicRunsTeardownThenOnErrorLast(t *testing.T) {
 	}
 }
 
+// ExitNow aborts the whole chain: no teardown runs after the calling hook.
+func TestRun_exitNowSkipsTeardown(t *testing.T) {
+	code, log := runActs(t, []string{"run"}, map[string]act{
+		"run": {at: "Run", do: func(rtx *Context) { rtx.ExitNow(3) }},
+	})
+	want := []string{
+		"app.CascadingPreRun", "run.CascadingPreRun",
+		"run.PreRun", "run.Run",
+	}
+	if !reflect.DeepEqual(log, want) {
+		t.Errorf("ExitNow should skip all teardown:\n got=%v\nwant=%v", log, want)
+	}
+	if code != 3 {
+		t.Errorf("code = %d, want 3", code)
+	}
+}
+
+// ExitNow in the first hook runs nothing else at all.
+func TestRun_exitNowInRootCascadingPreRunRunsNothingElse(t *testing.T) {
+	code, log := runActs(t, []string{"run"}, map[string]act{
+		"app": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.ExitNow(2) }},
+	})
+	if !reflect.DeepEqual(log, []string{"app.CascadingPreRun"}) {
+		t.Errorf("ExitNow should abort immediately, ran: %v", log)
+	}
+	if code != 2 {
+		t.Errorf("code = %d, want 2", code)
+	}
+}
+
+// ExitNow does not route through OnError — it is a deliberate hard exit.
+func TestRun_exitNowSkipsOnError(t *testing.T) {
+	var log []string
+	called := false
+	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
+		"run": {at: "Run", do: func(rtx *Context) { rtx.ExitNow(4) }},
+	}}, []string{"run"})
+	p.OnError(func(_ context.Context, _ *Context, _ error) { called = true })
+	if code := p.run(p.args); code != 4 {
+		t.Errorf("code = %d, want 4", code)
+	}
+	if called {
+		t.Error("ExitNow must not trigger OnError")
+	}
+}
+
+// ExitNow's code is final — it overrides a prior Exit (unlike Exit's first-non-zero).
+func TestRun_exitNowOverridesPriorExit(t *testing.T) {
+	code, _ := runActs(t, []string{"run"}, map[string]act{
+		"run": {at: "Run", do: func(rtx *Context) { rtx.Exit(1); rtx.ExitNow(5) }},
+	})
+	if code != 5 {
+		t.Errorf("code = %d, want 5 (ExitNow overrides the prior Exit(1))", code)
+	}
+}
+
 // A panic inside a teardown hook is recovered: the remaining teardown still runs
 // and OnError is funneled exactly once.
 func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {

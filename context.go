@@ -165,6 +165,30 @@ func (rtx *Context) Exit(code int) {
 	}
 }
 
+// exitNow is the sentinel [Context.ExitNow] panics with; dispatch recovers it to
+// unwind the entire handler chain — skipping teardown and OnError — and return the
+// recorded exit code.
+type exitNow struct{}
+
+// ExitNow is the hard counterpart to [Context.Exit]: it aborts the lifecycle
+// immediately, abandoning the current hook and skipping the rest of the chain —
+// no remaining setup, work, OR teardown hook runs, and OnError is not called. The
+// code is recorded as the final verdict (it overrides any prior Exit and is not
+// floored) and the process exits with it.
+//
+// Prefer [Context.Exit], which stops forward progress but still runs teardown for
+// cleanup; reach for ExitNow only when cleanup must be skipped. It is implemented
+// as a recovered sentinel panic, so a handler that blanket-recover()s panics could
+// swallow it — don't.
+func (rtx *Context) ExitNow(code int) {
+	if rtx == nil {
+		return
+	}
+	rtx.exitCode = code
+	rtx.stopped = true
+	panic(exitNow{})
+}
+
 // Get returns the service bound under key as T — the typed, comma-ok form of the
 // raw [Context.Value] (which returns any). ok is false when no service is bound
 // under key or the bound value is not a T:

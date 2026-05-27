@@ -2,6 +2,7 @@ package rth
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -43,7 +44,9 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 }
 
 func (*rotiniHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Println("rotini PostRun")
 }
 
 func (*rotiniHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Println("rotini CascadingPostRun")
 }
