@@ -54,10 +54,10 @@ func TestGenerate_staticComposition(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.conf.yaml"), parentConfYAML)
 
 	// Children must be generated before parents (the parent imports the child rth).
-	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml"); err != nil {
+	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("generate child: %v", err)
 	}
-	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml"); err != nil {
+	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("generate parent: %v", err)
 	}
 
@@ -105,7 +105,7 @@ commands:
 	writeTestFile(t, filepath.Join(tmp, "cmd/a/.rotini.spec.yaml"), selfRef)
 	writeTestFile(t, filepath.Join(tmp, "cmd/a/.rotini.conf.yaml"), conf)
 
-	err := Generate("cmd/a/.rotini.spec.yaml", "cmd/a/.rotini.conf.yaml")
+	err := Generate("cmd/a/.rotini.spec.yaml", "cmd/a/.rotini.conf.yaml", false, nil)
 	if err == nil || !strings.Contains(err.Error(), "cyclic") {
 		t.Fatalf("expected cyclic $ref error, got %v", err)
 	}

@@ -11,9 +11,19 @@ import (
 	"github.com/go-rotini/fs"
 )
 
-// Generate reads the rotini spec at specPath and the conf at confPath, then
-// emits the generated program files. confPath may be empty (or point at a file
-// that does not exist), in which case the sane rotini conf defaults are used.
+// Generate emits the generated program files from the rotini spec at specPath and
+// the conf at confPath (empty or missing → sane defaults; a .rotini.conf.* beside
+// the spec is auto-discovered).
+//
+// onGenerate, which may be nil, is called after each generation pass with a
+// "[HH:MM:SS] <took>" summary and that pass's error (nil on success); Generate
+// prints nothing itself, so the caller reports results through it. When watch is
+// false it runs a single pass and returns that pass's error (not routed through
+// onGenerate) so the caller can treat the run as failed. When watch is true it
+// generates once and then re-generates whenever the spec or conf changes, until
+// interrupted with ctrl-c (SIGINT); there every pass — success or failure — goes
+// to onGenerate and watching continues, so a malformed save can be fixed in place,
+// and only a failure to start watching is returned.
 //
 // A pass produces three things, mirroring the "commands all the way down" model
 // where a root command owns sub-commands that own their own sub-commands:
@@ -27,8 +37,22 @@ import (
 //  3. The handler rollup file (default handlers.go): the handlers struct, the
 //     Program var, and one method per command. Always (over)written; orphaned
 //     stubs are pruned when generate.cmd.prune is enabled.
-func Generate(specPath, confPath string) error {
-	return generateOnce(specPath, resolveConfPath(specPath, confPath))
+func Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error)) error {
+	if onGenerate == nil {
+		onGenerate = func(string, error) {}
+	}
+	confPath = resolveConfPath(specPath, confPath)
+	if watch {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return watchLoop(ctx, specPath, confPath, onGenerate)
+	}
+	result, err := generateTimed(specPath, confPath)
+	if err != nil {
+		return err
+	}
+	onGenerate(result, nil)
+	return nil
 }
 
 // resolveConfPath returns confPath when set, otherwise the .rotini.conf.* file
@@ -80,28 +104,12 @@ func loadConfOrDefaults(confPath string) (*Conf, error) {
 // saving a file (write + chmod + the rename of an atomic save).
 const watchDebounce = 200 * time.Millisecond
 
-// GenerateWatch generates once from the spec at specPath (and the conf at
-// confPath, or the one discovered next to the spec when confPath is empty), then
-// watches the spec and conf files and re-generates whenever either changes, until
-// interrupted with ctrl-c (SIGINT). It returns nil on a clean interrupt.
-//
-// onGenerate is called after every generation pass — the initial one and each
-// re-generation triggered by a change — with a summary line ("[HH:MM:SS] <took>")
-// and that pass's error (nil on success). GenerateWatch prints nothing itself, so
-// the caller owns all output; watching continues whatever a pass returns, so a
-// malformed save can be fixed in place. (A failure to set up the file watchers is
-// fatal and returned instead.)
-func GenerateWatch(specPath, confPath string, onGenerate func(result string, err error)) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
-	return watch(ctx, specPath, confPath, onGenerate)
-}
-
-// watch is the cancelable core of [GenerateWatch]: it runs until ctx is done. It
-// is split out so tests can drive it with a context rather than a real signal.
-func watch(ctx context.Context, specPath, confPath string, onGenerate func(result string, err error)) error {
-	confPath = resolveConfPath(specPath, confPath)
-
+// watchLoop is the cancelable core of watch mode: it generates once, then
+// re-generates on each change, handing every pass to onGenerate, until ctx is
+// done (a clean interrupt → nil). It is split out so tests can drive it with a
+// context rather than a real signal. Only a failure to set up the watchers is
+// returned.
+func watchLoop(ctx context.Context, specPath, confPath string, onGenerate func(result string, err error)) error {
 	// Watch the spec always, and the conf only when it exists (conf is optional).
 	paths := []string{specPath}
 	if confPath != "" {

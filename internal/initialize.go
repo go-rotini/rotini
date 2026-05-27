@@ -72,7 +72,7 @@ func Initialize(name, format string, force bool, into string) error {
 	if err := writeMainGo(mainPath, moduleName, name); err != nil {
 		return err
 	}
-	if err := Generate(specPath, confPath); err != nil {
+	if err := Generate(specPath, confPath, false, nil); err != nil {
 		return err
 	}
 	if into != "" {
@@ -98,14 +98,14 @@ func composeInto(moduleRoot, parent, child, childExt string) error {
 	ref := "../" + child + "/.rotini.spec." + childExt
 	for _, c := range spec.Commands {
 		if c.Ref == ref {
-			return Generate(parentSpec, parentConf) // already referenced
+			return Generate(parentSpec, parentConf, false, nil) // already referenced
 		}
 	}
 	spec.Commands = append(spec.Commands, Command{Ref: ref})
 	if err := WriteSpec(parentSpec, spec); err != nil {
 		return err
 	}
-	return Generate(parentSpec, parentConf)
+	return Generate(parentSpec, parentConf, false, nil)
 }
 
 // discoverFile returns the first dir/<prefix><ext> file that exists, trying the

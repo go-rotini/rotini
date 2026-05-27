@@ -43,7 +43,7 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 	writeTestFile(t, confPath, companionConf)
 
 	t.Chdir(tmp)
-	if err := Generate(specPath, confPath); err != nil {
+	if err := Generate(specPath, confPath, false, nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestGenerateDefaultLayout(t *testing.T) {
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: rotini\ncommands:\n  - name: generate\n")
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ""); err != nil {
+	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	writeTestFile(t, confPath, conf)
 
 	t.Chdir(tmp)
-	if err := Generate(specPath, confPath); err != nil {
+	if err := Generate(specPath, confPath, false, nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -146,7 +146,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 		"generate:\n  help:\n    enabled: true\n")
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -171,7 +171,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 
 	// A user edit survives regeneration.
 	writeTestFile(t, build, "hand-written help for build\n")
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate (second pass): %v", err)
 	}
 	mustFileEqual(t, build, "hand-written help for build\n")
@@ -180,7 +180,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	if err := os.Remove(root); err != nil {
 		t.Fatal(err)
 	}
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml"); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate (reseed): %v", err)
 	}
 	mustFileEqual(t, root, "mycli")
@@ -293,7 +293,7 @@ func waitForCond(timeout time.Duration, cond func() bool) bool {
 }
 
 // TestGenerateWatchInitialAndStop verifies the initial pass runs and that
-// cancelling ctx makes GenerateWatch return cleanly (the signal-driven exit).
+// cancelling ctx makes watchLoop return cleanly (the signal-driven exit).
 func TestGenerateWatchInitialAndStop(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
@@ -310,7 +310,7 @@ func TestGenerateWatchInitialAndStop(t *testing.T) {
 		}
 	}
 	done := make(chan error, 1)
-	go func() { done <- watch(ctx, specPath, "", onGen) }()
+	go func() { done <- watchLoop(ctx, specPath, "", onGen) }()
 
 	rtg := filepath.Join(tmp, "rtg", "rotini.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
@@ -321,10 +321,10 @@ func TestGenerateWatchInitialAndStop(t *testing.T) {
 	select {
 	case err := <-done:
 		if err != nil {
-			t.Fatalf("GenerateWatch returned error after cancel: %v", err)
+			t.Fatalf("watchLoop returned error after cancel: %v", err)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("GenerateWatch did not return after ctx cancellation")
+		t.Fatal("watchLoop did not return after ctx cancellation")
 	}
 }
 
@@ -346,7 +346,7 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 		}
 	}
 	done := make(chan error, 1)
-	go func() { done <- watch(ctx, specPath, "", onGen) }()
+	go func() { done <- watchLoop(ctx, specPath, "", onGen) }()
 
 	rtg := filepath.Join(tmp, "rtg", "rotini.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
@@ -366,7 +366,7 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(3 * time.Second):
-		t.Fatal("GenerateWatch did not return after cancel")
+		t.Fatal("watchLoop did not return after cancel")
 	}
 }
 
