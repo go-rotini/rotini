@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -86,17 +85,21 @@ const watchDebounce = 200 * time.Millisecond
 // watches the spec and conf files and re-generates whenever either changes, until
 // interrupted with ctrl-c (SIGINT). It returns nil on a clean interrupt.
 //
-// A failed pass (e.g. a malformed save) is reported to out and watching
-// continues, so the file can be fixed in place without restarting.
-func GenerateWatch(specPath, confPath string, out io.Writer) error {
+// onGenerate is called after every generation pass — the initial one and each
+// re-generation triggered by a change — with a summary line ("[HH:MM:SS] <took>")
+// and that pass's error (nil on success). GenerateWatch prints nothing itself, so
+// the caller owns all output; watching continues whatever a pass returns, so a
+// malformed save can be fixed in place. (A failure to set up the file watchers is
+// fatal and returned instead.)
+func GenerateWatch(specPath, confPath string, onGenerate func(result string, err error)) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	return watch(ctx, specPath, confPath, out)
+	return watch(ctx, specPath, confPath, onGenerate)
 }
 
 // watch is the cancelable core of [GenerateWatch]: it runs until ctx is done. It
 // is split out so tests can drive it with a context rather than a real signal.
-func watch(ctx context.Context, specPath, confPath string, out io.Writer) error {
+func watch(ctx context.Context, specPath, confPath string, onGenerate func(result string, err error)) error {
 	confPath = resolveConfPath(specPath, confPath)
 
 	// Watch the spec always, and the conf only when it exists (conf is optional).
@@ -127,16 +130,41 @@ func watch(ctx context.Context, specPath, confPath string, out io.Writer) error 
 		go forwardChanges(ctx, events, changed)
 	}
 
-	regenerate(specPath, confPath, out) // initial pass
+	onGenerate(generateTimed(specPath, confPath)) // initial pass
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-changed:
-			regenerate(specPath, confPath, out)
+			onGenerate(generateTimed(specPath, confPath))
 		}
 	}
+}
+
+// generateTimed runs one generation pass and returns a "[HH:MM:SS] <took>"
+// summary alongside the pass's error, so a watcher can report both when a
+// generation ran and how long it took. The elapsed time renders in whatever unit
+// fits best (ns/µs/ms/s).
+func generateTimed(specPath, confPath string) (string, error) {
+	start := time.Now()
+	err := generateOnce(specPath, confPath)
+	result := fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start)))
+	return result, err
+}
+
+// roundDuration trims d to roughly three significant figures so its String()
+// stays compact while still rendering in the unit that fits best — ns, µs, ms,
+// or s, which Duration.String already selects (e.g. 312ns, 45.7µs, 2.79ms, 1.23s).
+func roundDuration(d time.Duration) time.Duration {
+	if d <= 0 {
+		return d
+	}
+	unit := time.Nanosecond
+	for d/unit >= 1000 {
+		unit *= 10
+	}
+	return d.Round(unit)
 }
 
 // forwardChanges fans one watcher's events into changed, coalescing to at most
@@ -155,14 +183,5 @@ func forwardChanges(ctx context.Context, events <-chan fs.WatchEvent, changed ch
 			default: // a regeneration is already pending; fold this change into it
 			}
 		}
-	}
-}
-
-// regenerate runs one generation pass, reporting the outcome to out without
-// aborting the watch on failure.
-func regenerate(specPath, confPath string, out io.Writer) {
-	if err := generateOnce(specPath, confPath); err != nil {
-		fmt.Fprintf(out, "rotini: %v\n", err)
-		return
 	}
 }

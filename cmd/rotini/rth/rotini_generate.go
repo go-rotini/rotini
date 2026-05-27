@@ -37,7 +37,14 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	case flags.Help:
 		io.Stdout.Println(rtg.HelpRotiniGenerate)
 	case flags.Watch:
-		if err := internal.GenerateWatch(args.SpecFilePath, flags.ConfFilePath, io.Stdout); err != nil {
+		onGenerate := func(result string, err error) {
+			if err != nil {
+				io.Stderr.Println("rotini:", err)
+				return
+			}
+			io.Stdout.Println("rotini:", result)
+		}
+		if err := internal.GenerateWatch(args.SpecFilePath, flags.ConfFilePath, onGenerate); err != nil {
 			io.Stderr.Println("Error:", err)
 			rtx.Exit(1)
 		}

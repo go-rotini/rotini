@@ -3,6 +3,7 @@ package internal
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"go/format"
 	"os"
 	"path/filepath"
@@ -303,8 +304,13 @@ func TestGenerateWatchInitialAndStop(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var buf bytes.Buffer
+	onGen := func(_ string, err error) {
+		if err != nil {
+			fmt.Fprintln(&buf, err)
+		}
+	}
 	done := make(chan error, 1)
-	go func() { done <- watch(ctx, specPath, "", &buf) }()
+	go func() { done <- watch(ctx, specPath, "", onGen) }()
 
 	rtg := filepath.Join(tmp, "rtg", "rotini.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
@@ -334,8 +340,13 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var buf bytes.Buffer
+	onGen := func(_ string, err error) {
+		if err != nil {
+			fmt.Fprintln(&buf, err)
+		}
+	}
 	done := make(chan error, 1)
-	go func() { done <- watch(ctx, specPath, "", &buf) }()
+	go func() { done <- watch(ctx, specPath, "", onGen) }()
 
 	rtg := filepath.Join(tmp, "rtg", "rotini.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
@@ -356,5 +367,25 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 	case <-done:
 	case <-time.After(3 * time.Second):
 		t.Fatal("GenerateWatch did not return after cancel")
+	}
+}
+
+// TestRoundDuration checks that the watch summary's elapsed time renders in the
+// best-fitting unit, trimmed to ~3 significant figures.
+func TestRoundDuration(t *testing.T) {
+	cases := []struct {
+		in   time.Duration
+		want string
+	}{
+		{312 * time.Nanosecond, "312ns"},
+		{2793 * time.Nanosecond, "2.79µs"},
+		{45678 * time.Nanosecond, "45.7µs"},
+		{2793256 * time.Nanosecond, "2.79ms"},
+		{1234567890 * time.Nanosecond, "1.23s"},
+	}
+	for _, c := range cases {
+		if got := roundDuration(c.in).String(); got != c.want {
+			t.Errorf("roundDuration(%d ns) = %q, want %q", c.in.Nanoseconds(), got, c.want)
+		}
 	}
 }
