@@ -25,8 +25,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		io.Stderr.Println("Error:", err)
-		io.Stdout.Println(rtg.HelpRotini)
+		io.Stderr.Printf("Error: %v\n\n%s", err, rtg.HelpRotini)
 		rtx.Exit(1)
 		return
 	}
@@ -35,11 +34,13 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	switch {
 	case flags.Help:
 		io.Stdout.Println(rtg.HelpRotini)
+		rtx.ExitNow(0)
 	case flags.Version:
 		io.Stdout.Println(rtg.Version)
+		rtx.ExitNow(0)
 	default:
 		io.Stdout.Println(rtg.HelpRotini)
-		rtx.Exit(1)
+		rtx.ExitNow(1)
 	}
 }
 
