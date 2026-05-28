@@ -147,6 +147,16 @@ func parseInto(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, er
 			name, inline, hasInline := splitFlag(tok)
 			fdef, idx, ok := findFlag(chain, name)
 			if !ok {
+				// No exact identifier — try POSIX clustered short flags: -vh → -v
+				// -h, -n5 → -n 5. Long flags ("--" prefix) never cluster.
+				if isShortCluster(name) {
+					consumed, err := parseCluster(chain, name[1:], inline, hasInline, argv, i, addFlag)
+					if err != nil {
+						return nil, err
+					}
+					i += consumed
+					continue
+				}
 				return nil, &usageError{msg: fmt.Sprintf("unknown flag %q", name)}
 			}
 			var value string
@@ -317,6 +327,54 @@ func splitFlag(tok string) (name, value string, hasValue bool) {
 		return tok[:eq], tok[eq+1:], true
 	}
 	return tok, "", false
+}
+
+// isShortCluster reports whether name is a candidate POSIX short-flag cluster: a
+// single-dash token with more than one character (e.g. "-vh", "-n5") — as opposed
+// to a long flag ("--x") or a bare short flag ("-v", which the exact match already
+// handled). Clustering is tried only after an exact-identifier lookup misses.
+func isShortCluster(name string) bool {
+	return len(name) > 2 && name[0] == '-' && name[1] != '-'
+}
+
+// parseCluster expands a POSIX short-flag cluster (body is the characters after
+// the leading '-', e.g. "vh" from -vh, or "n5" from -n5) against the chain. Each
+// character is a single short flag, looked up as "-<c>": booleans are set in turn,
+// and the first value-taking flag consumes the rest of the cluster, then the
+// inline "=value", then the next argv token — whichever is present. It returns how
+// many extra argv tokens it consumed (0 or 1).
+func parseCluster(chain []rotini.ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, name, value string)) (int, error) {
+	for k := 0; k < len(body); k++ {
+		short := "-" + body[k:k+1]
+		fdef, idx, ok := findFlag(chain, short)
+		if !ok {
+			return 0, &usageError{msg: fmt.Sprintf("unknown flag %q", short)}
+		}
+		if fdef.Type == "bool" {
+			addFlag(idx, fdef.Name, "true")
+			continue
+		}
+		// A value-taking flag ends the cluster: its value is whatever follows.
+		switch rest := body[k+1:]; {
+		case rest != "":
+			addFlag(idx, fdef.Name, rest)
+			return 0, nil
+		case hasInline:
+			addFlag(idx, fdef.Name, inline)
+			return 0, nil
+		default:
+			if i+1 >= len(argv) {
+				return 0, &usageError{msg: fmt.Sprintf("flag %q needs a value", short)}
+			}
+			addFlag(idx, fdef.Name, argv[i+1])
+			return 1, nil
+		}
+	}
+	// Every flag in the cluster was boolean; a trailing "=value" has nothing to bind.
+	if hasInline {
+		return 0, &usageError{msg: fmt.Sprintf("flag %q does not take a value", "-"+body)}
+	}
+	return 0, nil
 }
 
 // findFlag searches the resolved chain leaf→root for a flag whose identifiers

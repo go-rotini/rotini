@@ -168,6 +168,149 @@ func TestParse_defaultsApplied(t *testing.T) {
 	}
 }
 
+// TestParse_clusteredShortFlags covers POSIX short-flag grouping in every shape:
+// joined booleans, separate flags, an attached value, a next-token value, and
+// mixes — they should all "just work".
+func TestParse_clusteredShortFlags(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+			{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
+			{Name: "num", Identifiers: []string{"-n"}, Type: "int"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Verbose bool `rotini:"verbose"`
+				Help    bool `rotini:"help"`
+				Num     int  `rotini:"num"`
+			}
+			Arguments struct{}
+		}
+	}
+	cases := []struct {
+		argv []string
+		v, h bool
+		n    int
+	}{
+		{[]string{"-v"}, true, false, 0},       // exact short
+		{[]string{"-vh"}, true, true, 0},       // clustered booleans
+		{[]string{"-v", "-h"}, true, true, 0},  // separate
+		{[]string{"-n", "5"}, false, false, 5}, // exact short + next-token value
+		{[]string{"-n5"}, false, false, 5},     // short + attached value
+		{[]string{"-n=5"}, false, false, 5},    // short + inline value
+		{[]string{"-vn5"}, true, false, 5},     // cluster ending in attached value
+		{[]string{"-vn", "5"}, true, false, 5}, // cluster ending in next-token value
+		{[]string{"-vn=5"}, true, false, 5},    // cluster ending in inline value
+		{[]string{"-hvn5"}, true, true, 5},     // booleans then a value flag
+	}
+	for _, c := range cases {
+		var got inputs
+		if err := NewParser().Parse(rotini.NewContextFor(def, c.argv), &got); err != nil {
+			t.Errorf("%v: Parse: %v", c.argv, err)
+			continue
+		}
+		f := got.App.Flags
+		if f.Verbose != c.v || f.Help != c.h || f.Num != c.n {
+			t.Errorf("%v: got v=%v h=%v n=%d, want v=%v h=%v n=%d", c.argv, f.Verbose, f.Help, f.Num, c.v, c.h, c.n)
+		}
+	}
+}
+
+// An exact multi-char identifier wins over cluster decomposition.
+func TestParse_exactIdentifierBeatsCluster(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{
+			{Name: "vh", Identifiers: []string{"-vh"}, Type: "bool"},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+			{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				VH      bool `rotini:"vh"`
+				Verbose bool `rotini:"verbose"`
+				Help    bool `rotini:"help"`
+			}
+			Arguments struct{}
+		}
+	}
+	var got inputs
+	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"-vh"}), &got); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !got.App.Flags.VH {
+		t.Error("-vh should match the exact -vh identifier")
+	}
+	if got.App.Flags.Verbose || got.App.Flags.Help {
+		t.Error("exact -vh matched, so -v/-h must not also be set")
+	}
+}
+
+// An unrecognized character in a cluster is an unknown-flag error naming it.
+func TestParse_clusterUnknownFlag(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"}},
+	}
+	var got struct{}
+	err := NewParser().Parse(rotini.NewContextFor(def, []string{"-vx"}), &got)
+	if err == nil || !strings.Contains(err.Error(), `unknown flag "-x"`) {
+		t.Errorf("err = %v, want unknown flag -x", err)
+	}
+}
+
+// TestParse_multiCharShortVsCluster pins behavior when -x, -y, and -xy all exist,
+// none bool, with different types. The exact multi-char identifier wins for the
+// literal token; clustering is single-char and only on an exact miss.
+func TestParse_multiCharShortVsCluster(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{
+			{Name: "ex", Identifiers: []string{"-x"}, Type: "string"},
+			{Name: "why", Identifiers: []string{"-y"}, Type: "int"},
+			{Name: "exy", Identifiers: []string{"-xy"}, Type: "string"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Ex  string `rotini:"ex"`
+				Why int    `rotini:"why"`
+				Exy string `rotini:"exy"`
+			}
+			Arguments struct{}
+		}
+	}
+	parse := func(argv ...string) (inputs, error) {
+		var in inputs
+		err := NewParser().Parse(rotini.NewContextFor(def, argv), &in)
+		return in, err
+	}
+
+	// Exact -xy wins over -x+-y; it takes its own next-token value.
+	if in, err := parse("-xy", "V"); err != nil || in.App.Flags.Exy != "V" || in.App.Flags.Ex != "" || in.App.Flags.Why != 0 {
+		t.Errorf("-xy V: %+v err=%v; want only Exy=V", in.App.Flags, err)
+	}
+	// -x and -y each take their own value.
+	if in, err := parse("-x", "A", "-y", "7"); err != nil || in.App.Flags.Ex != "A" || in.App.Flags.Why != 7 {
+		t.Errorf("-x A -y 7: %+v err=%v", in.App.Flags, err)
+	}
+	// A non-exact short token clusters single-char from the left: -x is value-taking,
+	// so -xA → Ex="A" (NOT the -xy flag; multi-char ids aren't matched as prefixes).
+	if in, err := parse("-xA"); err != nil || in.App.Flags.Ex != "A" || in.App.Flags.Exy != "" {
+		t.Errorf("-xA: %+v err=%v; want Ex=A", in.App.Flags, err)
+	}
+	// Exact -xy with no value errors (it's value-taking), not silently clustered.
+	if _, err := parse("-xy"); err == nil || !strings.Contains(err.Error(), "needs a value") {
+		t.Errorf("-xy alone: err=%v, want needs-a-value", err)
+	}
+}
+
 // TestParse_repeatedNameOnPath is the collision case: "app cmd1 cmd1" is a legal
 // tree where a command name repeats on a single path. Each cmd1 declares its own
 // flag; positional (not name-based) scoping must keep them in separate frames so
