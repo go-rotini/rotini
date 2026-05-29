@@ -33,3 +33,15 @@ go.work.sum
 
 # Mutation testing output
 test_mutation.json
+
+# Hugo docs site (docs/)
+docs/public/
+docs/resources/_gen/
+docs/.hugo_build.lock
+docs/.hugo_cache/
+docs/hugo_stats.json
+docs/assets/jsconfig.json
+docs/node_modules/
+docs/package-lock.json
+docs/yarn.lock
+docs/pnpm-lock.yaml
