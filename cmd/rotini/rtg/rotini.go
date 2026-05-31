@@ -4,9 +4,8 @@ package rtg
 import (
 	_ "embed"
 	"fmt"
-	"strings"
-
 	"github.com/go-rotini/rotini"
+	"strings"
 )
 
 type ProgramHandlers interface {

@@ -59,6 +59,66 @@ func TestValidate_unknownField(t *testing.T) {
 	}
 }
 
+func TestValidate_helpKeys(t *testing.T) {
+	spec := validSpecHeader +
+		"name: demo\n" +
+		"help:\n" +
+		"  summary: a demo\n" +
+		"  description: A demo CLI.\n" +
+		"  usage: demo [flags]\n" +
+		"  headings:\n" +
+		"    commands: Subcommands\n" +
+		"  examples: [demo run]\n" +
+		"commands:\n" +
+		"  - name: run\n" +
+		"    hidden: true\n" +
+		"    deprecated: use start\n" +
+		"    help:\n" +
+		"      summary: run it\n" +
+		"    inputs:\n" +
+		"      flags:\n" +
+		"        - name: force\n" +
+		"          summary: force it\n" +
+		"          hidden: true\n" +
+		"          deprecated: no longer needed\n"
+	path := writeTemp(t, "spec.yaml", spec)
+	if err := Validate(path, ""); err != nil {
+		t.Errorf("Validate(spec with help keys) = %v, want nil", err)
+	}
+}
+
+func TestValidate_helpTextRequiresManual(t *testing.T) {
+	// help.text without mode: manual must fail the if/then conditional.
+	spec := validSpecHeader + "name: demo\nhelp:\n  text: just text\n"
+	path := writeTemp(t, "spec.yaml", spec)
+	if err := Validate(path, ""); err == nil {
+		t.Fatal("expected error for help.text without mode: manual")
+	}
+
+	// With mode: manual it is valid.
+	ok := validSpecHeader + "name: demo\nhelp:\n  mode: manual\n  text: just text\n"
+	okPath := writeTemp(t, "ok.yaml", ok)
+	if err := Validate(okPath, ""); err != nil {
+		t.Errorf("Validate(help.text + manual) = %v, want nil", err)
+	}
+}
+
+func TestValidate_invalidHelpMode(t *testing.T) {
+	spec := validSpecHeader + "name: demo\nhelp:\n  mode: bogus\n"
+	path := writeTemp(t, "spec.yaml", spec)
+	if err := Validate(path, ""); err == nil {
+		t.Fatal("expected error for invalid help.mode")
+	}
+}
+
+func TestValidate_unknownHelpKey(t *testing.T) {
+	doc := `{"$schema":"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json","name":"demo","help":{"bogus":true}}`
+	path := writeTemp(t, "spec.json", doc)
+	if err := Validate(path, ""); err == nil {
+		t.Fatal("expected error for unknown key under help")
+	}
+}
+
 func TestValidate_badSchemaURL(t *testing.T) {
 	path := writeTemp(t, "spec.yaml", "$schema: https://example.com/wrong\nname: demo\n")
 	if err := Validate(path, ""); err == nil {

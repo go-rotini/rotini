@@ -32,6 +32,10 @@
       "$ref": "#/definitions/Inputs",
       "description": "Typed inputs for the root command: flags, arguments, file values, and variables."
     },
+    "help": {
+      "$ref": "#/definitions/CommandHelp",
+      "description": "Help-page configuration for the root command."
+    },
     "commands": {
       "type": "array",
       "description": "Sub-commands of the root command.",
@@ -76,6 +80,87 @@
     }
   },
   "definitions": {
+    "CommandHelp": {
+      "type": "object",
+      "description": "Per-command help-page configuration. In generate mode rotini renders the page from the structured fields via the help template; in manual mode you author it verbatim via 'text' (in the spec) or by hand-editing the command's .txt file.",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["generate", "manual"],
+          "default": "generate",
+          "description": "How this command's help .txt is produced. 'generate' (default): rotini renders it from the structured fields via the help template. 'manual': you author it — via 'text' (verbatim, in the spec) or by hand-editing the .txt file."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown in the PARENT command's list next to this command's name. Applies in all modes."
+        },
+        "text": {
+          "type": "string",
+          "description": "Verbatim help page, written byte-exact into the embedded .txt. Requires mode: manual; mutually exclusive with the rendered fields (description/usage/header/footer/examples/headings)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Long description block shown atop this command's own help page (generate mode)."
+        },
+        "header": {
+          "type": "string",
+          "description": "Text rendered above the description block (generate mode)."
+        },
+        "footer": {
+          "type": "string",
+          "description": "Text rendered at the bottom of the page (generate mode)."
+        },
+        "usage": {
+          "type": "string",
+          "description": "Usage-line override (generate mode). When omitted, rotini derives a usage line from the command's shape."
+        },
+        "headings": {
+          "$ref": "#/definitions/CommandHelpHeadings",
+          "description": "Section heading overrides (generate mode); sane defaults are used for any heading left unset."
+        },
+        "examples": {
+          "type": "array",
+          "description": "Example command-line invocations (generate mode), rendered verbatim, one per line.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "if": {
+        "required": ["text"]
+      },
+      "then": {
+        "properties": {
+          "mode": {
+            "const": "manual"
+          }
+        },
+        "required": ["mode"]
+      }
+    },
+    "CommandHelpHeadings": {
+      "type": "object",
+      "description": "Section heading overrides for generated help pages.",
+      "additionalProperties": false,
+      "properties": {
+        "usage": {
+          "type": "string"
+        },
+        "commands": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "string"
+        },
+        "flags": {
+          "type": "string"
+        },
+        "examples": {
+          "type": "string"
+        }
+      }
+    },
     "MetadataEntry": {
       "type": "object",
       "required": ["var"],
@@ -223,7 +308,20 @@
         },
         "schema": {
           "$ref": "#/definitions/InputSchema",
-          "description": "Type definition and input-level metadata (required, deprecated, default, hidden)"
+          "description": "Type definition and input-level metadata (type, required, default, enum, nullable, constraints)"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this flag in the Flags section of generated help."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the flag is omitted from generated help (it still parses on the command line)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the flag is annotated as deprecated in generated help."
         },
         "identifiers": {
           "type": "array",
@@ -248,7 +346,20 @@
         },
         "schema": {
           "$ref": "#/definitions/InputSchema",
-          "description": "Type definition and input-level metadata (required, deprecated, default)"
+          "description": "Type definition and input-level metadata (type, required, default, enum, nullable, constraints)"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this argument in the Arguments section of generated help."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the argument is omitted from generated help (it still parses on the command line)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the argument is annotated as deprecated in generated help."
         }
       }
     },
@@ -427,6 +538,19 @@
         "inputs": {
           "$ref": "#/definitions/Inputs",
           "description": "Typed inputs for this command: flags, arguments, file values, and variables."
+        },
+        "help": {
+          "$ref": "#/definitions/CommandHelp",
+          "description": "Help-page configuration for this command."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the command is annotated as deprecated in its parent's generated Commands list."
         },
         "commands": {
           "type": "array",

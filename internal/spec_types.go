@@ -14,6 +14,8 @@ type Spec struct {
 	Events []EventSpec `json:"events,omitempty"`
 	// Config files to load at startup.
 	Files []ConfigSpec `json:"files,omitempty"`
+	// Help-page configuration for the root command.
+	Help *CommandHelp `json:"help,omitempty"`
 	// Typed inputs for the root command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
 	// Build-time metadata vars injected via go ldflags.
@@ -29,10 +31,16 @@ type Spec struct {
 }
 
 type ArgumentInput struct {
+	// Deprecation message; the argument is annotated as deprecated in generated help.
+	Deprecated string `json:"deprecated,omitempty"`
+	// When true, the argument is omitted from generated help (it still parses on the command line).
+	Hidden bool `json:"hidden,omitempty"`
 	// Logical name for the argument
 	Name string `json:"name"`
-	// Type definition and input-level metadata (required, deprecated, default)
+	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
+	// Short one-liner shown next to this argument in the Arguments section of generated help.
+	Summary string `json:"summary,omitempty"`
 }
 
 // Shared fields for Schema and InputSchema. JSON Schema Draft 7 does not support additionalProperties: false on schemas that use allOf for inheritance — strictness is enforced by Go's DisallowUnknownFields at parse time.
@@ -68,6 +76,12 @@ type Command struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of this command.
 	Commands []Command `json:"commands,omitempty"`
+	// Deprecation message; the command is annotated as deprecated in its parent's generated Commands list.
+	Deprecated string `json:"deprecated,omitempty"`
+	// Help-page configuration for this command.
+	Help *CommandHelp `json:"help,omitempty"`
+	// When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line).
+	Hidden bool `json:"hidden,omitempty"`
 	// Typed inputs for this command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
 	// Command name used in routing.
@@ -76,6 +90,37 @@ type Command struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
+}
+
+// Per-command help-page configuration. In generate mode rotini renders the page from the structured fields via the help template; in manual mode you author it verbatim via 'text' (in the spec) or by hand-editing the command's .txt file.
+type CommandHelp struct {
+	// Long description block shown atop this command's own help page (generate mode).
+	Description string `json:"description,omitempty"`
+	// Example command-line invocations (generate mode), rendered verbatim, one per line.
+	Examples []string `json:"examples,omitempty"`
+	// Text rendered at the bottom of the page (generate mode).
+	Footer string `json:"footer,omitempty"`
+	// Text rendered above the description block (generate mode).
+	Header string `json:"header,omitempty"`
+	// Section heading overrides (generate mode); sane defaults are used for any heading left unset.
+	Headings *CommandHelpHeadings `json:"headings,omitempty"`
+	// How this command's help .txt is produced. 'generate' (default): rotini renders it from the structured fields via the help template. 'manual': you author it — via 'text' (verbatim, in the spec) or by hand-editing the .txt file.
+	Mode string `json:"mode,omitempty"`
+	// Short one-liner shown in the PARENT command's list next to this command's name. Applies in all modes.
+	Summary string `json:"summary,omitempty"`
+	// Verbatim help page, written byte-exact into the embedded .txt. Requires mode: manual; mutually exclusive with the rendered fields (description/usage/header/footer/examples/headings).
+	Text string `json:"text,omitempty"`
+	// Usage-line override (generate mode). When omitted, rotini derives a usage line from the command's shape.
+	Usage string `json:"usage,omitempty"`
+}
+
+// Section heading overrides for generated help pages.
+type CommandHelpHeadings struct {
+	Arguments string `json:"arguments,omitempty"`
+	Commands  string `json:"commands,omitempty"`
+	Examples  string `json:"examples,omitempty"`
+	Flags     string `json:"flags,omitempty"`
+	Usage     string `json:"usage,omitempty"`
 }
 
 type ConfigInput struct {
@@ -111,12 +156,18 @@ type EventSpec struct {
 }
 
 type FlagInput struct {
+	// Deprecation message; the flag is annotated as deprecated in generated help.
+	Deprecated string `json:"deprecated,omitempty"`
+	// When true, the flag is omitted from generated help (it still parses on the command line).
+	Hidden bool `json:"hidden,omitempty"`
 	// CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is auto-derived.
 	Identifiers []string `json:"identifiers,omitempty"`
 	// Logical name for the flag
 	Name string `json:"name"`
-	// Type definition and input-level metadata (required, deprecated, default, hidden)
+	// Type definition and input-level metadata (type, required, default, enum, nullable, constraints)
 	Schema *InputSchema `json:"schema,omitempty"`
+	// Short one-liner shown next to this flag in the Flags section of generated help.
+	Summary string `json:"summary,omitempty"`
 }
 
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.

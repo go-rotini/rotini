@@ -34,9 +34,9 @@ type GenerateFrameworkConfig struct {
 
 // Controls generation of embedded, per-command help text.
 type GenerateHelpConfig struct {
-	// Subdirectory under the framework package where the per-command help .txt files live and are embedded. Files are seeded once when missing and are otherwise user-owned; rotini never rewrites or deletes them.
+	// Subdirectory under the framework package where the per-command help .txt files (and the editable help.txt.tmpl) live and are embedded.
 	Dir string `json:"dir,omitempty"`
-	// When true, rotini seeds a per-command help .txt file (containing the command name) for any command that lacks one, then embeds every command's help file in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Existing files are never overwritten — the help text is yours to edit.
+	// When true, rotini produces a per-command help .txt for every command and embeds them in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. How each .txt is produced is set per command by the spec's help.mode: 'generate' (default) renders it from the spec via the help template; 'manual' uses your verbatim help.text or your hand-edited file.
 	Enabled bool `json:"enabled,omitempty"`
 }
 

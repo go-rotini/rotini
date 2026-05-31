@@ -1,10 +1,10 @@
 Print help for a specific command.
 
 Usage:
-  rotini help [<command>…] [flags]
+  rotini help [command...] [flags]
 
 Arguments:
-  command    name of the command to print help for
+  [command...]    name of the command to print help for
 
 Flags:
   -h,--help    print help
@@ -13,5 +13,3 @@ Examples:
   rotini help
   rotini help generate
   rotini help init
-
-Use "rotini help <command>" for more information about a command.

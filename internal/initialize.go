@@ -135,17 +135,23 @@ func normalizeFormat(format string) (string, error) {
 	}
 }
 
-// scaffoldSpec builds a minimal valid spec: just the schema URL and root name.
+// scaffoldSpec builds a minimal valid spec: the schema URL, root name, a version
+// metadata var, and example help content so spec-driven help works out of the box.
 // The user adds commands from there.
 func scaffoldSpec(name string) *Spec {
 	return &Spec{
-		Schema:   specSchemaURL(),
-		Name:     name,
+		Schema: specSchemaURL(),
+		Name:   name,
+		Help: &CommandHelp{
+			Summary:     name + " command-line program",
+			Description: "Describe " + name + " here. This text appears at the top of `" + name + " --help`.",
+		},
 		Metadata: []MetadataEntry{{Var: "Version", Default: "dev"}},
 	}
 }
 
 // scaffoldConf builds the conf for the standard per-CLI layout under cmd/<name>.
+// Help generation is enabled so a freshly scaffolded CLI has working help.
 func scaffoldConf(name string) *Conf {
 	return &Conf{
 		Schema: confSchemaURL(),
@@ -159,6 +165,7 @@ func scaffoldConf(name string) *Conf {
 				Package: "cmd/" + name + "/rtg",
 				GenFile: "rotini.go",
 			},
+			Help: &GenerateHelpConfig{Enabled: true},
 		},
 	}
 }

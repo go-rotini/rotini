@@ -23,7 +23,7 @@ const (
 	rotiniPkgName    = "rotini"
 )
 
-//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl
+//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.txt.tmpl
 var templateFS embed.FS
 
 // fieldDef is one generated struct field: a Go identifier, its type, and its

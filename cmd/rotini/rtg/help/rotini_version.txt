@@ -8,5 +8,3 @@ Flags:
 
 Examples:
   rotini version
-
-Use "rotini help <command>" for more information about a command.

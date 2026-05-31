@@ -122,28 +122,43 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	}
 }
 
+// helpSpecYAML is a spec exercising generate-mode help: root summary/description
+// plus a sub-command with a summary, a required argument, and a bool flag.
+const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+	"name: mycli\n" +
+	"help:\n" +
+	"  summary: my cli\n" +
+	"  description: A demo CLI.\n" +
+	"commands:\n" +
+	"  - name: build\n" +
+	"    aliases: [b]\n" +
+	"    help:\n" +
+	"      summary: build the project\n" +
+	"    inputs:\n" +
+	"      arguments:\n" +
+	"        - name: target\n" +
+	"          summary: thing to build\n" +
+	"          schema:\n" +
+	"            type: string\n" +
+	"            required: true\n" +
+	"      flags:\n" +
+	"        - name: verbose\n" +
+	"          summary: chattier output\n" +
+	"          identifiers: [-v, --verbose]\n" +
+	"          schema:\n" +
+	"            type: bool\n"
+
+const helpEnabledConf = "generate:\n  help:\n    enabled: true\n"
+
 // TestGenerateHelpEnabled verifies that, with generate.help enabled, the
 // framework file gains the embedded Help<Prefix> vars + an alias-aware Help
-// resolver, that each command's help .txt is seeded with just its invocation
-// name, and that the files are create-once: user edits survive regeneration and
-// a deleted file is re-seeded so the embed stays valid.
+// resolver, and that each command's help .txt is rendered from the spec (the
+// default generate mode), with a second pass producing byte-identical output.
 func TestGenerateHelpEnabled(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
-	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"name: mycli\n"+
-			"commands:\n"+
-			"  - name: build\n"+
-			"    aliases: [b]\n"+
-			"    inputs:\n"+
-			"      arguments:\n"+
-			"        - name: target\n"+
-			"          schema:\n"+
-			"            type: string\n"+
-			"            required: true\n")
-	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
-		"generate:\n  help:\n    enabled: true\n")
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), helpSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
@@ -160,35 +175,157 @@ func TestGenerateHelpEnabled(t *testing.T) {
 		`case "build", "b":`,
 	)
 
-	// Each help file is seeded with the command's invocation name — nothing more.
+	// The editable default template was seeded.
+	if _, err := os.Stat(filepath.Join(tmp, "rtg", "help", "help.txt.tmpl")); err != nil {
+		t.Errorf("default help template not seeded: %v", err)
+	}
+
+	// The root page renders the description, a derived usage line, the commands
+	// list (with the alias and summary), and the auto sub-command hint.
 	root := filepath.Join(tmp, "rtg", "help", "mycli.txt")
+	mustContain(t, root,
+		"A demo CLI.",
+		"Usage:",
+		"mycli <command>",
+		"Commands:",
+		"build;b",
+		"build the project",
+		`Use "mycli help <command>" for more information about a command.`,
+	)
+	// The leaf page renders derived usage, the decorated required arg, and the flag.
 	build := filepath.Join(tmp, "rtg", "help", "mycli_build.txt")
-	mustFileEqual(t, root, "mycli")
-	mustFileEqual(t, build, "mycli build")
+	mustContain(t, build,
+		"mycli build <target> [flags]",
+		"Arguments:",
+		"<target>",
+		"thing to build",
+		"Flags:",
+		"-v,--verbose",
+		"chattier output",
+	)
 
-	// Capture the framework file, then prove the help files are create-once.
-	before := readAndFormat(t, filepath.Join(tmp, "rtg", "rotini.go"))
+	// Capture rendered output + framework file, then prove a second pass is a
+	// byte-identical no-op (determinism + overwrite-guard "identical => skip").
+	rootBefore := readFileString(t, root)
+	buildBefore := readFileString(t, build)
+	fwBefore := readAndFormat(t, filepath.Join(tmp, "rtg", "rotini.go"))
 
-	// A user edit survives regeneration.
-	writeTestFile(t, build, "hand-written help for build\n")
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate (second pass): %v", err)
 	}
-	mustFileEqual(t, build, "hand-written help for build\n")
+	mustFileEqual(t, root, rootBefore)
+	mustFileEqual(t, build, buildBefore)
 
-	// A deleted help file is re-seeded so the //go:embed directive stays valid.
-	if err := os.Remove(root); err != nil {
+	after := readAndFormat(t, filepath.Join(tmp, "rtg", "rotini.go"))
+	if !bytes.Equal(fwBefore, after) {
+		t.Errorf("help generation is not idempotent:\n--- before ---\n%s\n--- after ---\n%s", fwBefore, after)
+	}
+}
+
+// TestGenerateHelpRegenerates verifies that generate-mode help .txt files are
+// rotini-managed: each pass (re)writes the rendered content, so a hand edit to a
+// generate-mode file is replaced on the next generation (hand-author via
+// mode: manual instead).
+func TestGenerateHelpRegenerates(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), helpSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	// A hand edit to a generate-mode file is overwritten on the next pass.
+	build := filepath.Join(tmp, "rtg", "help", "mycli_build.txt")
+	writeTestFile(t, build, "hand-written help for build\n")
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate (regenerate): %v", err)
+	}
+	mustContain(t, build, "mycli build <target> [flags]")
+	mustNotContain(t, build, "hand-written help for build")
+}
+
+// TestGenerateHelpManualMode verifies that mode: manual without help.text keeps
+// the legacy seed-once / user-owned behavior, including re-seed on delete.
+func TestGenerateHelpManualMode(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"name: mycli\n"+
+			"help:\n"+
+			"  mode: manual\n"+
+			"commands:\n"+
+			"  - name: build\n"+
+			"    help:\n"+
+			"      mode: manual\n")
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	build := filepath.Join(tmp, "rtg", "help", "mycli_build.txt")
+	mustFileEqual(t, build, "mycli build")
+
+	// A user edit survives regeneration (never overwritten).
+	writeTestFile(t, build, "hand-written help\n")
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate (second pass): %v", err)
+	}
+	mustFileEqual(t, build, "hand-written help\n")
+
+	// A deleted file is re-seeded so the //go:embed directive stays valid.
+	if err := os.Remove(build); err != nil {
 		t.Fatal(err)
 	}
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate (reseed): %v", err)
 	}
-	mustFileEqual(t, root, "mycli")
+	mustFileEqual(t, build, "mycli build")
 
-	// The framework file itself regenerates identically (idempotent).
-	after := readAndFormat(t, filepath.Join(tmp, "rtg", "rotini.go"))
-	if !bytes.Equal(before, after) {
-		t.Errorf("help generation is not idempotent:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	// No template is seeded when every command is manual.
+	if _, err := os.Stat(filepath.Join(tmp, "rtg", "help", "help.txt.tmpl")); !os.IsNotExist(err) {
+		t.Errorf("help.txt.tmpl should not be seeded for an all-manual program (err=%v)", err)
+	}
+}
+
+// TestGenerateHelpText verifies that mode: manual + help.text writes the string
+// verbatim, and that help.text without mode: manual is rejected.
+func TestGenerateHelpText(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
+	t.Chdir(tmp)
+
+	// manual + help.text: written byte-exact (with a single trailing newline).
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"name: mycli\n"+
+			"help:\n"+
+			"  mode: manual\n"+
+			"  text: |\n"+
+			"    my exact help page\n"+
+			"    line two\n")
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	mustFileEqual(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"), "my exact help page\nline two\n")
+
+	// help.text without mode: manual is a generate-time error.
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"name: mycli\n"+
+			"help:\n"+
+			"  text: just text, no manual mode\n")
+	err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil)
+	if err == nil {
+		t.Fatal("expected an error for help.text without mode: manual")
+	}
+	if !strings.Contains(err.Error(), "help.text is set") {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 
@@ -261,6 +398,15 @@ func mustFileEqual(t *testing.T, path, want string) {
 	if string(data) != want {
 		t.Errorf("%s = %q, want %q", path, data, want)
 	}
+}
+
+func readFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
 }
 
 // specWith builds a minimal mycli spec declaring the given top-level commands.
