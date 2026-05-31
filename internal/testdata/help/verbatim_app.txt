@@ -1,0 +1,3 @@
+EXACT ROOT PAGE
+  indented line kept as-is
+no trailing newline

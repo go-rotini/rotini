@@ -1,0 +1,18 @@
+Build the project from sources.
+
+Usage:
+  app build <target> [extra...] [flags]
+
+Arguments:
+  <target>      what to build
+  [extra...]    extra targets
+
+Flags:
+  -o,--output string    output directory (default ./dist)
+  --format string       archive format (default tar) [tar|zip]
+  -f,--force            overwrite existing output (required)
+  --legacy              legacy flag (deprecated: use --modern)
+
+Examples:
+  app build ./src
+  app build ./src --force

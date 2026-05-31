@@ -55,6 +55,24 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 		assertGoEqual(t, filepath.Join(tmp, rel), filepath.Join(repoRoot, rel))
 	}
 
+	// The companion's generated help files (and the seeded template) are golden:
+	// the dogfooded output is reproduced byte-for-byte from the committed spec.
+	helpRel := "cmd/rotini/rtg/help"
+	entries, err := os.ReadDir(filepath.Join(repoRoot, helpRel))
+	if err != nil {
+		t.Fatalf("read companion help dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		got := readFileString(t, filepath.Join(tmp, helpRel, e.Name()))
+		want := readFileString(t, filepath.Join(repoRoot, helpRel, e.Name()))
+		if got != want {
+			t.Errorf("companion help %s not reproduced:\n--- generated ---\n%s\n--- committed ---\n%s", e.Name(), got, want)
+		}
+	}
+
 	// Handler stubs are create-if-missing user code, so the committed copies are
 	// edited (wired to internal funcs) and intentionally diverge from a fresh
 	// stub. Assert the generator produced each with the expected stub shape.
