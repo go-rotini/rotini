@@ -192,6 +192,10 @@ func TestGenerateHelpEnabled(t *testing.T) {
 		"build the project",
 		"run 'mycli help <command>' for details",
 	)
+	// Generated pages end exactly at their last line — no trailing newline.
+	if got := readFileString(t, root); strings.HasSuffix(got, "\n") {
+		t.Errorf("generated help should not end with a trailing newline; got %q", got)
+	}
 	// The leaf page renders derived usage, the decorated required arg, and the flag.
 	build := filepath.Join(tmp, "rtg", "help", "mycli_build.txt")
 	mustContain(t, build,
@@ -248,8 +252,9 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 }
 
 // TestGenerateHelpVerbatim verifies that a populated `help` string is written
-// byte-exact (single trailing newline normalized), and that when every command
-// supplies verbatim help no template is seeded (nothing renders).
+// EXACTLY as supplied — byte-for-byte, with no trailing-newline normalization (a
+// YAML `|-` strip block yields no trailing newline, and rotini keeps it that way) —
+// and that when every command supplies verbatim help no template is seeded.
 func TestGenerateHelpVerbatim(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
@@ -257,14 +262,15 @@ func TestGenerateHelpVerbatim(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
 			"name: mycli\n"+
-			"help: |\n"+
+			"help: |-\n"+ // strip: no trailing newline
 			"  my exact help page\n"+
 			"  line two\n")
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	mustFileEqual(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"), "my exact help page\nline two\n")
+	// Exactly the supplied bytes — no trailing newline added.
+	mustFileEqual(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"), "my exact help page\nline two")
 
 	// Nothing renders (root supplies verbatim help, no sub-commands) → no template.
 	if _, err := os.Stat(filepath.Join(tmp, "rtg", "help", "help.txt.tmpl")); !os.IsNotExist(err) {
@@ -277,7 +283,7 @@ func TestGenerateHelpVerbatim(t *testing.T) {
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate (regenerate): %v", err)
 	}
-	mustFileEqual(t, root, "my exact help page\nline two\n")
+	mustFileEqual(t, root, "my exact help page\nline two")
 }
 
 // repoRoot returns the rotini module root (the parent of the internal package

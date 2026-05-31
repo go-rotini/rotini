@@ -404,7 +404,9 @@ func writeHelpFiles(lay layout, dir string, hnodes []helpNode) error {
 	for _, hn := range hnodes {
 		path := filepath.Join(helpDir, hn.file)
 		if hn.verbatim != "" {
-			if err := writeIfChanged(path, normalizeTrailingNewline(hn.verbatim)); err != nil {
+			// Verbatim: write exactly what the spec supplied — byte-for-byte, no
+			// trailing-newline normalization (the author controls it via YAML).
+			if err := writeIfChanged(path, hn.verbatim); err != nil {
 				return fmt.Errorf("write help %s: %w", hn.file, err)
 			}
 			continue
@@ -513,8 +515,9 @@ func tabAlign(s string) (string, error) {
 	return buf.String(), nil
 }
 
-// tidy trims trailing whitespace per line, collapses runs of blank lines to a
-// single blank line, and ensures exactly one trailing newline.
+// tidy trims trailing whitespace per line and collapses runs of blank lines to a
+// single blank line, then strips leading and trailing blank lines entirely — the
+// rendered page ends exactly at its last line of content, with no trailing newline.
 func tidy(s string) string {
 	lines := strings.Split(s, "\n")
 	for i := range lines {
@@ -524,13 +527,7 @@ func tidy(s string) string {
 	for strings.Contains(out, "\n\n\n") {
 		out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
 	}
-	return strings.Trim(out, "\n") + "\n"
-}
-
-// normalizeTrailingNewline returns s with exactly one trailing newline,
-// preserving the rest of the content byte-for-byte.
-func normalizeTrailingNewline(s string) string {
-	return strings.TrimRight(s, "\n") + "\n"
+	return strings.Trim(out, "\n")
 }
 
 // helpFuncMap is the deterministic, dependency-free helper set available to the

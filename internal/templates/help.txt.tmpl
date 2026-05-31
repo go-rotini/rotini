@@ -6,8 +6,9 @@
        COLUMNS: a single tab separates columns. rotini aligns each contiguous
        block of tabbed lines via tabwriter; blank/heading lines reset alignment,
        so each section aligns independently. After rendering, rotini trims
-       trailing whitespace, collapses blank-line runs, and normalizes the final
-       newline — so you don't have to fight template whitespace to get clean output.
+       trailing whitespace and collapses blank-line runs, and the page ends exactly
+       at its last line (no trailing newline) — so you don't have to fight template
+       whitespace to get clean output.
 
        DATA (see helpData):
          .Header .Summary .Description .Footer   strings
