@@ -129,6 +129,7 @@ const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotin
 	"name: mycli\n" +
 	"summary: my cli\n" +
 	"description: A demo CLI.\n" +
+	"footer: run 'mycli help <command>' for details\n" +
 	"commands:\n" +
 	"  - name: build\n" +
 	"    aliases: [b]\n" +
@@ -180,7 +181,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	}
 
 	// The root page renders the description, a derived usage line, the commands
-	// list (with the alias and summary), and the auto sub-command hint.
+	// list (with the alias and summary), and the footer.
 	root := filepath.Join(tmp, "rtg", "help", "mycli.txt")
 	mustContain(t, root,
 		"A demo CLI.",
@@ -189,7 +190,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 		"Commands:",
 		"build;b",
 		"build the project",
-		`Use "mycli help <command>" for more information about a command.`,
+		"run 'mycli help <command>' for details",
 	)
 	// The leaf page renders derived usage, the decorated required arg, and the flag.
 	build := filepath.Join(tmp, "rtg", "help", "mycli_build.txt")

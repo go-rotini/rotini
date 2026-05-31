@@ -11,6 +11,7 @@ examples:
   - rotini init mycli
   - rotini validate .rotini.yaml
   - rotini generate ./path/to/.rotini.json
+footer: Use "rotini help <command>" for more information about a command.
 inputs:
   flags:
     - name: version

@@ -10,7 +10,7 @@
        newline — so you don't have to fight template whitespace to get clean output.
 
        DATA (see helpData):
-         .Header .Summary .Description .Footer .SubcommandHint   strings
+         .Header .Summary .Description .Footer   strings
          .Invocation     full command path, e.g. "rotini generate"
          .Usage          spec override (may be empty)
          .UsageDerived   computed usage line (always set)
@@ -50,7 +50,4 @@
 {{end}}
 {{end -}}
 {{- with .Footer}}{{.}}
-
-{{end -}}
-{{- with .SubcommandHint}}{{.}}
 {{end -}}

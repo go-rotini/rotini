@@ -33,19 +33,18 @@ type helpHeadings struct {
 // helpData is the per-command template context. Fields are exported because
 // text/template can only read exported fields.
 type helpData struct {
-	Header         string
-	Invocation     string // full command path, e.g. "rotini generate"
-	Summary        string // help.summary (this command's own one-liner)
-	Description    string // help.description (long block)
-	Usage          string // help.usage override ("" when unset)
-	UsageDerived   string // always-computed usage line
-	Footer         string
-	Headings       helpHeadings
-	Commands       []helpCmdRow  // visible direct children
-	Arguments      []helpArgRow  // visible own arguments
-	Flags          []helpFlagRow // visible own flags
-	Examples       []string
-	SubcommandHint string // set only when the command has visible children
+	Header       string
+	Invocation   string // full command path, e.g. "rotini generate"
+	Summary      string // command.summary (this command's own one-liner)
+	Description  string // command.description (long block)
+	Usage        string // command.usage override ("" when unset)
+	UsageDerived string // always-computed usage line
+	Footer       string
+	Headings     helpHeadings
+	Commands     []helpCmdRow  // visible direct children
+	Arguments    []helpArgRow  // visible own arguments
+	Flags        []helpFlagRow // visible own flags
+	Examples     []string
 }
 
 type helpCmdRow struct {
@@ -239,11 +238,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			})
 		}
 	}
-	hasChildren := hasVisibleChildren(children)
-	d.UsageDerived = deriveUsage(invocation, inputs, hasChildren)
-	if hasChildren {
-		d.SubcommandHint = fmt.Sprintf("Use %q for more information about a command.", invocation+" help <command>")
-	}
+	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children))
 	return d
 }
 
