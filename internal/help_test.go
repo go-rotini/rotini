@@ -44,12 +44,12 @@ func TestGenerateHelpHiddenDeprecated(t *testing.T) {
 			"commands:\n"+
 			"  - name: secret\n"+
 			"    hidden: true\n"+
-			"    help: { summary: a hidden command }\n"+
+			"    summary: a hidden command\n"+
 			"  - name: legacy\n"+
 			"    deprecated: use modern instead\n"+
-			"    help: { summary: an old command }\n"+
+			"    summary: an old command\n"+
 			"  - name: run\n"+
-			"    help: { summary: run it }\n"+
+			"    summary: run it\n"+
 			"    inputs:\n"+
 			"      arguments:\n"+
 			"        - name: target\n"+
@@ -90,10 +90,11 @@ func TestGenerateHelpComposition(t *testing.T) {
 
 	childSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
 		"name: child\n" +
-		"help: { summary: the child program, description: A composed child. }\n" +
+		"summary: the child program\n" +
+		"description: A composed child.\n" +
 		"commands:\n" +
 		"  - name: greet\n" +
-		"    help: { summary: say hello }\n"
+		"    summary: say hello\n"
 	helpConf := func(dir string) string {
 		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 			"generate:\n" +

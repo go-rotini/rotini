@@ -41,7 +41,7 @@
         "enabled": {
           "type": "boolean",
           "default": false,
-          "description": "When true, rotini produces a per-command help .txt for every command and embeds them in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. How each .txt is produced is set per command by the spec's help.mode: 'generate' (default) renders it from the spec via the help template; 'manual' uses your verbatim help.text or your hand-edited file."
+          "description": "When true, rotini produces a per-command help .txt for every command and embeds them in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the help template."
         },
         "dir": {
           "type": "string",

@@ -21,7 +21,7 @@ type genProgram struct {
 	metadata    []MetadataEntry     // ldflag-settable vars emitted in rtg
 	versionVar  string              // metadata var feeding Definition.Version (Var == "Version")
 	rootRemotes []RemoteCommandSpec // root-level remote/co-located sub-commands
-	rootHelp    *CommandHelp        // root command's help-page config (may be nil)
+	rootHelp    cmdHelp             // root command's flattened help fields
 
 	root         genCommand    // the root command (own)
 	own          []genCommand  // inline sub-commands, sorted by prefix
@@ -36,9 +36,9 @@ type rnode struct {
 	prefix     string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
 	aliases    []string
 	inputs     *Inputs
-	help       *CommandHelp // help-page config (may be nil); for a composed root, the child spec's
-	hidden     bool         // omit from the parent's generated Commands list
-	deprecated string       // deprecation note for the parent's Commands list
+	help       cmdHelp // flattened help fields; for a composed root, from the child spec
+	hidden     bool    // omit from the parent's generated Commands list
+	deprecated string  // deprecation note for the parent's Commands list
 	children   []rnode
 }
 
@@ -75,7 +75,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootAliases: spec.Aliases,
 		metadata:    spec.Metadata,
 		rootRemotes: spec.RemoteCommands,
-		rootHelp:    spec.Help,
+		rootHelp:    specRootHelp(spec),
 	}
 	for _, m := range spec.Metadata {
 		if m.Var == "Version" {
@@ -159,7 +159,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			prefix:     prefix,
 			aliases:    c.Aliases,
 			inputs:     c.Inputs,
-			help:       c.Help,
+			help:       commandHelp(c),
 			hidden:     c.Hidden,
 			deprecated: c.Deprecated,
 			children:   children,
@@ -216,7 +216,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	return rnode{name: childSpec.Name, prefix: prefix, aliases: c.Aliases, inputs: childSpec.Inputs, help: childSpec.Help, hidden: c.Hidden, deprecated: c.Deprecated, children: children}, nil
+	return rnode{name: childSpec.Name, prefix: prefix, aliases: c.Aliases, inputs: childSpec.Inputs, help: specRootHelp(childSpec), hidden: c.Hidden, deprecated: c.Deprecated, children: children}, nil
 }
 
 func (gp *genProgram) addImport(alias, path string) {

@@ -122,18 +122,17 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	}
 }
 
-// helpSpecYAML is a spec exercising generate-mode help: root summary/description
-// plus a sub-command with a summary, a required argument, and a bool flag.
+// helpSpecYAML is a spec exercising generated help: root summary/description plus
+// a sub-command with a summary, a required argument, and a bool flag. Help fields
+// live directly on the command (flattened).
 const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
 	"name: mycli\n" +
-	"help:\n" +
-	"  summary: my cli\n" +
-	"  description: A demo CLI.\n" +
+	"summary: my cli\n" +
+	"description: A demo CLI.\n" +
 	"commands:\n" +
 	"  - name: build\n" +
 	"    aliases: [b]\n" +
-	"    help:\n" +
-	"      summary: build the project\n" +
+	"    summary: build the project\n" +
 	"    inputs:\n" +
 	"      arguments:\n" +
 	"        - name: target\n" +
@@ -222,10 +221,10 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	}
 }
 
-// TestGenerateHelpRegenerates verifies that generate-mode help .txt files are
+// TestGenerateHelpRegenerates verifies that rendered help .txt files are
 // rotini-managed: each pass (re)writes the rendered content, so a hand edit to a
-// generate-mode file is replaced on the next generation (hand-author via
-// mode: manual instead).
+// rendered file is replaced on the next generation (to own a command's words,
+// set its verbatim `help` string in the spec instead).
 func TestGenerateHelpRegenerates(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
@@ -247,86 +246,37 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 	mustNotContain(t, build, "hand-written help for build")
 }
 
-// TestGenerateHelpManualMode verifies that mode: manual without help.text keeps
-// the legacy seed-once / user-owned behavior, including re-seed on delete.
-func TestGenerateHelpManualMode(t *testing.T) {
-	tmp := t.TempDir()
-	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
-	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"name: mycli\n"+
-			"help:\n"+
-			"  mode: manual\n"+
-			"commands:\n"+
-			"  - name: build\n"+
-			"    help:\n"+
-			"      mode: manual\n")
-	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
-
-	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
-	build := filepath.Join(tmp, "rtg", "help", "mycli_build.txt")
-	mustFileEqual(t, build, "mycli build")
-
-	// A user edit survives regeneration (never overwritten).
-	writeTestFile(t, build, "hand-written help\n")
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
-		t.Fatalf("Generate (second pass): %v", err)
-	}
-	mustFileEqual(t, build, "hand-written help\n")
-
-	// A deleted file is re-seeded so the //go:embed directive stays valid.
-	if err := os.Remove(build); err != nil {
-		t.Fatal(err)
-	}
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
-		t.Fatalf("Generate (reseed): %v", err)
-	}
-	mustFileEqual(t, build, "mycli build")
-
-	// No template is seeded when every command is manual.
-	if _, err := os.Stat(filepath.Join(tmp, "rtg", "help", "help.txt.tmpl")); !os.IsNotExist(err) {
-		t.Errorf("help.txt.tmpl should not be seeded for an all-manual program (err=%v)", err)
-	}
-}
-
-// TestGenerateHelpText verifies that mode: manual + help.text writes the string
-// verbatim, and that help.text without mode: manual is rejected.
-func TestGenerateHelpText(t *testing.T) {
+// TestGenerateHelpVerbatim verifies that a populated `help` string is written
+// byte-exact (single trailing newline normalized), and that when every command
+// supplies verbatim help no template is seeded (nothing renders).
+func TestGenerateHelpVerbatim(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
-	t.Chdir(tmp)
-
-	// manual + help.text: written byte-exact (with a single trailing newline).
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
 			"name: mycli\n"+
-			"help:\n"+
-			"  mode: manual\n"+
-			"  text: |\n"+
-			"    my exact help page\n"+
-			"    line two\n")
+			"help: |\n"+
+			"  my exact help page\n"+
+			"  line two\n")
+	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	mustFileEqual(t, filepath.Join(tmp, "rtg", "help", "mycli.txt"), "my exact help page\nline two\n")
 
-	// help.text without mode: manual is a generate-time error.
-	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"name: mycli\n"+
-			"help:\n"+
-			"  text: just text, no manual mode\n")
-	err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil)
-	if err == nil {
-		t.Fatal("expected an error for help.text without mode: manual")
+	// Nothing renders (root supplies verbatim help, no sub-commands) → no template.
+	if _, err := os.Stat(filepath.Join(tmp, "rtg", "help", "help.txt.tmpl")); !os.IsNotExist(err) {
+		t.Errorf("help.txt.tmpl should not be seeded when no command renders (err=%v)", err)
 	}
-	if !strings.Contains(err.Error(), "help.text is set") {
-		t.Errorf("unexpected error: %v", err)
+
+	// The verbatim string wins; a hand edit is overwritten back to the spec value.
+	root := filepath.Join(tmp, "rtg", "help", "mycli.txt")
+	writeTestFile(t, root, "tampered\n")
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate (regenerate): %v", err)
 	}
+	mustFileEqual(t, root, "my exact help page\nline two\n")
 }
 
 // repoRoot returns the rotini module root (the parent of the internal package

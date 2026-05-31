@@ -10,12 +10,22 @@ type Spec struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of the root command.
 	Commands []Command `json:"commands,omitempty"`
+	// Long description block shown atop the root command's generated help page. Ignored when 'help' (verbatim) is set.
+	Description string `json:"description,omitempty"`
 	// Events this program can emit. Each name must be unique.
 	Events []EventSpec `json:"events,omitempty"`
+	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
+	Examples []string `json:"examples,omitempty"`
 	// Config files to load at startup.
 	Files []ConfigSpec `json:"files,omitempty"`
-	// Help-page configuration for the root command.
-	Help *CommandHelp `json:"help,omitempty"`
+	// Text rendered at the bottom of the page. Ignored when 'help' is set.
+	Footer string `json:"footer,omitempty"`
+	// Text rendered above the description block. Ignored when 'help' is set.
+	Header string `json:"header,omitempty"`
+	// Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set.
+	Headings *HelpHeadings `json:"headings,omitempty"`
+	// Exact, verbatim help page for the root command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings). When unset, rotini generates the page from those fields.
+	Help string `json:"help,omitempty"`
 	// Typed inputs for the root command: flags, arguments, file values, and variables.
 	Inputs *Inputs `json:"inputs,omitempty"`
 	// Build-time metadata vars injected via go ldflags.
@@ -26,8 +36,12 @@ type Spec struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>".
 	Schemas map[string]Schema `json:"schemas,omitempty"`
+	// Short one-liner describing the root command (used by a parent program that composes this CLI as a sub-command).
+	Summary string `json:"summary,omitempty"`
 	// Root command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
+	// Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set.
+	Usage string `json:"usage,omitempty"`
 }
 
 type ArgumentInput struct {
@@ -78,8 +92,18 @@ type Command struct {
 	Commands []Command `json:"commands,omitempty"`
 	// Deprecation message; the command is annotated as deprecated in its parent's generated Commands list.
 	Deprecated string `json:"deprecated,omitempty"`
-	// Help-page configuration for this command.
-	Help *CommandHelp `json:"help,omitempty"`
+	// Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set.
+	Description string `json:"description,omitempty"`
+	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
+	Examples []string `json:"examples,omitempty"`
+	// Text rendered at the bottom of the page. Ignored when 'help' is set.
+	Footer string `json:"footer,omitempty"`
+	// Text rendered above the description block. Ignored when 'help' is set.
+	Header string `json:"header,omitempty"`
+	// Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set.
+	Headings *HelpHeadings `json:"headings,omitempty"`
+	// Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields.
+	Help string `json:"help,omitempty"`
 	// When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line).
 	Hidden bool `json:"hidden,omitempty"`
 	// Typed inputs for this command: flags, arguments, file values, and variables.
@@ -88,39 +112,12 @@ type Command struct {
 	Name string `json:"name,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
+	// Short one-liner shown next to this command in its parent's generated Commands list.
+	Summary string `json:"summary,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
-}
-
-// Per-command help-page configuration. In generate mode rotini renders the page from the structured fields via the help template; in manual mode you author it verbatim via 'text' (in the spec) or by hand-editing the command's .txt file.
-type CommandHelp struct {
-	// Long description block shown atop this command's own help page (generate mode).
-	Description string `json:"description,omitempty"`
-	// Example command-line invocations (generate mode), rendered verbatim, one per line.
-	Examples []string `json:"examples,omitempty"`
-	// Text rendered at the bottom of the page (generate mode).
-	Footer string `json:"footer,omitempty"`
-	// Text rendered above the description block (generate mode).
-	Header string `json:"header,omitempty"`
-	// Section heading overrides (generate mode); sane defaults are used for any heading left unset.
-	Headings *CommandHelpHeadings `json:"headings,omitempty"`
-	// How this command's help .txt is produced. 'generate' (default): rotini renders it from the structured fields via the help template. 'manual': you author it — via 'text' (verbatim, in the spec) or by hand-editing the .txt file.
-	Mode string `json:"mode,omitempty"`
-	// Short one-liner shown in the PARENT command's list next to this command's name. Applies in all modes.
-	Summary string `json:"summary,omitempty"`
-	// Verbatim help page, written byte-exact into the embedded .txt. Requires mode: manual; mutually exclusive with the rendered fields (description/usage/header/footer/examples/headings).
-	Text string `json:"text,omitempty"`
-	// Usage-line override (generate mode). When omitted, rotini derives a usage line from the command's shape.
+	// Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set.
 	Usage string `json:"usage,omitempty"`
-}
-
-// Section heading overrides for generated help pages.
-type CommandHelpHeadings struct {
-	Arguments string `json:"arguments,omitempty"`
-	Commands  string `json:"commands,omitempty"`
-	Examples  string `json:"examples,omitempty"`
-	Flags     string `json:"flags,omitempty"`
-	Usage     string `json:"usage,omitempty"`
 }
 
 type ConfigInput struct {
@@ -168,6 +165,15 @@ type FlagInput struct {
 	Schema *InputSchema `json:"schema,omitempty"`
 	// Short one-liner shown next to this flag in the Flags section of generated help.
 	Summary string `json:"summary,omitempty"`
+}
+
+// Section heading overrides for generated help pages.
+type HelpHeadings struct {
+	Arguments string `json:"arguments,omitempty"`
+	Commands  string `json:"commands,omitempty"`
+	Examples  string `json:"examples,omitempty"`
+	Flags     string `json:"flags,omitempty"`
+	Usage     string `json:"usage,omitempty"`
 }
 
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.

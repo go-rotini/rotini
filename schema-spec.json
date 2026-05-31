@@ -32,9 +32,38 @@
       "$ref": "#/definitions/Inputs",
       "description": "Typed inputs for the root command: flags, arguments, file values, and variables."
     },
+    "summary": {
+      "type": "string",
+      "description": "Short one-liner describing the root command (used by a parent program that composes this CLI as a sub-command)."
+    },
+    "description": {
+      "type": "string",
+      "description": "Long description block shown atop the root command's generated help page. Ignored when 'help' (verbatim) is set."
+    },
+    "usage": {
+      "type": "string",
+      "description": "Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set."
+    },
+    "header": {
+      "type": "string",
+      "description": "Text rendered above the description block. Ignored when 'help' is set."
+    },
+    "footer": {
+      "type": "string",
+      "description": "Text rendered at the bottom of the page. Ignored when 'help' is set."
+    },
+    "headings": {
+      "$ref": "#/definitions/HelpHeadings",
+      "description": "Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set."
+    },
+    "examples": {
+      "type": "array",
+      "description": "Example command-line invocations, rendered one per line. Ignored when 'help' is set.",
+      "items": { "type": "string" }
+    },
     "help": {
-      "$ref": "#/definitions/CommandHelp",
-      "description": "Help-page configuration for the root command."
+      "type": "string",
+      "description": "Exact, verbatim help page for the root command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings). When unset, rotini generates the page from those fields."
     },
     "commands": {
       "type": "array",
@@ -80,66 +109,7 @@
     }
   },
   "definitions": {
-    "CommandHelp": {
-      "type": "object",
-      "description": "Per-command help-page configuration. In generate mode rotini renders the page from the structured fields via the help template; in manual mode you author it verbatim via 'text' (in the spec) or by hand-editing the command's .txt file.",
-      "additionalProperties": false,
-      "properties": {
-        "mode": {
-          "type": "string",
-          "enum": ["generate", "manual"],
-          "default": "generate",
-          "description": "How this command's help .txt is produced. 'generate' (default): rotini renders it from the structured fields via the help template. 'manual': you author it — via 'text' (verbatim, in the spec) or by hand-editing the .txt file."
-        },
-        "summary": {
-          "type": "string",
-          "description": "Short one-liner shown in the PARENT command's list next to this command's name. Applies in all modes."
-        },
-        "text": {
-          "type": "string",
-          "description": "Verbatim help page, written byte-exact into the embedded .txt. Requires mode: manual; mutually exclusive with the rendered fields (description/usage/header/footer/examples/headings)."
-        },
-        "description": {
-          "type": "string",
-          "description": "Long description block shown atop this command's own help page (generate mode)."
-        },
-        "header": {
-          "type": "string",
-          "description": "Text rendered above the description block (generate mode)."
-        },
-        "footer": {
-          "type": "string",
-          "description": "Text rendered at the bottom of the page (generate mode)."
-        },
-        "usage": {
-          "type": "string",
-          "description": "Usage-line override (generate mode). When omitted, rotini derives a usage line from the command's shape."
-        },
-        "headings": {
-          "$ref": "#/definitions/CommandHelpHeadings",
-          "description": "Section heading overrides (generate mode); sane defaults are used for any heading left unset."
-        },
-        "examples": {
-          "type": "array",
-          "description": "Example command-line invocations (generate mode), rendered verbatim, one per line.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "if": {
-        "required": ["text"]
-      },
-      "then": {
-        "properties": {
-          "mode": {
-            "const": "manual"
-          }
-        },
-        "required": ["mode"]
-      }
-    },
-    "CommandHelpHeadings": {
+    "HelpHeadings": {
       "type": "object",
       "description": "Section heading overrides for generated help pages.",
       "additionalProperties": false,
@@ -539,9 +509,38 @@
           "$ref": "#/definitions/Inputs",
           "description": "Typed inputs for this command: flags, arguments, file values, and variables."
         },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this command in its parent's generated Commands list."
+        },
+        "description": {
+          "type": "string",
+          "description": "Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set."
+        },
+        "usage": {
+          "type": "string",
+          "description": "Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set."
+        },
+        "header": {
+          "type": "string",
+          "description": "Text rendered above the description block. Ignored when 'help' is set."
+        },
+        "footer": {
+          "type": "string",
+          "description": "Text rendered at the bottom of the page. Ignored when 'help' is set."
+        },
+        "headings": {
+          "$ref": "#/definitions/HelpHeadings",
+          "description": "Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set."
+        },
+        "examples": {
+          "type": "array",
+          "description": "Example command-line invocations, rendered one per line. Ignored when 'help' is set.",
+          "items": { "type": "string" }
+        },
         "help": {
-          "$ref": "#/definitions/CommandHelp",
-          "description": "Help-page configuration for this command."
+          "type": "string",
+          "description": "Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields."
         },
         "hidden": {
           "type": "boolean",

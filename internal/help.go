@@ -13,17 +13,16 @@ import (
 
 // helpNode is one command's help wiring: the embed var/resolver identity plus
 // everything needed to produce its .txt. One is produced per command (root +
-// every own and composed sub-command). The .txt is produced one of three ways,
-// selected by mode/text: generate (render data through the template), manual with
-// help.text (write text verbatim), or manual without (seed the name once).
+// every own and composed sub-command). The .txt is produced one of two ways,
+// selected by whether the command's verbatim `help` string is set: non-empty →
+// write it verbatim; empty → render `data` through the template.
 type helpNode struct {
-	prefix string   // PascalCase command prefix; the embed var is "Help"+prefix
-	file   string   // .txt file name within the help dir
-	paths  []string // resolver case values (name/alias permutations); root = [""]
-	name   string   // the command's invocation name, e.g. "rotini generate"
-	mode   string   // resolved help.mode: "generate" or "manual"
-	text   string   // help.text (manual verbatim page); "" when unset
-	data   helpData // rendering inputs (used in generate mode)
+	prefix   string   // PascalCase command prefix; the embed var is "Help"+prefix
+	file     string   // .txt file name within the help dir
+	paths    []string // resolver case values (name/alias permutations); root = [""]
+	name     string   // the command's invocation name, e.g. "rotini generate"
+	verbatim string   // command.help — the exact page; "" means render from data
+	data     helpData // rendering inputs (used when verbatim == "")
 }
 
 // helpHeadings holds the resolved section headings (defaults applied).
@@ -93,18 +92,49 @@ type helpFramework struct {
 	Cases []helpCase
 }
 
+// cmdHelp bundles a command's resolved help-presentation fields, which live
+// directly on the spec's command (and root). Help, when non-empty, is the exact
+// verbatim page; otherwise the page is rendered from the structured fields.
+type cmdHelp struct {
+	Summary     string
+	Description string
+	Usage       string
+	Header      string
+	Footer      string
+	Headings    *HelpHeadings
+	Examples    []string
+	Help        string // verbatim page (command.help / spec.help)
+}
+
+// commandHelp gathers the flattened help fields off a sub-command.
+func commandHelp(c Command) cmdHelp {
+	return cmdHelp{
+		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
+		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
+		Examples: c.Examples, Help: c.Help,
+	}
+}
+
+// specRootHelp gathers the flattened help fields off a spec's root command.
+func specRootHelp(s *Spec) cmdHelp {
+	return cmdHelp{
+		Summary: s.Summary, Description: s.Description, Usage: s.Usage,
+		Header: s.Header, Footer: s.Footer, Headings: s.Headings,
+		Examples: s.Examples, Help: s.Help,
+	}
+}
+
 // flattenHelp produces a help node per command for the whole resolved tree: the
-// root first, then every sub-command in tree order. Each node carries its
-// resolved mode and (for generate mode) its built helpData.
+// root first, then every sub-command in tree order. Each node carries its verbatim
+// help (when set) and its built helpData (used when no verbatim help is given).
 func flattenHelp(gp *genProgram) []helpNode {
 	out := []helpNode{{
-		prefix: gp.rootPascal,
-		file:   gp.rootName + ".txt",
-		paths:  []string{""},
-		name:   gp.rootName,
-		mode:   resolveMode(gp.rootHelp),
-		text:   helpTextOf(gp.rootHelp),
-		data:   buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree),
+		prefix:   gp.rootPascal,
+		file:     gp.rootName + ".txt",
+		paths:    []string{""},
+		name:     gp.rootName,
+		verbatim: gp.rootHelp.Help,
+		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree),
 	}}
 
 	var walk func(nodes []rnode, identChain [][]string, names []string)
@@ -115,13 +145,12 @@ func flattenHelp(gp *genProgram) []helpNode {
 			childNames := append(append([]string{}, names...), n.name)
 			invocation := gp.rootName + " " + strings.Join(childNames, " ")
 			out = append(out, helpNode{
-				prefix: n.prefix,
-				file:   gp.rootName + "_" + strings.Join(childNames, "_") + ".txt",
-				paths:  permute(childChain),
-				name:   invocation,
-				mode:   resolveMode(n.help),
-				text:   helpTextOf(n.help),
-				data:   buildHelpData(invocation, n.help, n.inputs, n.children),
+				prefix:   n.prefix,
+				file:     gp.rootName + "_" + strings.Join(childNames, "_") + ".txt",
+				paths:    permute(childChain),
+				name:     invocation,
+				verbatim: n.help.Help,
+				data:     buildHelpData(invocation, n.help, n.inputs, n.children),
 			})
 			walk(n.children, childChain, childNames)
 		}
@@ -130,27 +159,11 @@ func flattenHelp(gp *genProgram) []helpNode {
 	return out
 }
 
-// resolveMode returns the command's help mode, defaulting to "generate".
-func resolveMode(h *CommandHelp) string {
-	if h != nil && h.Mode != "" {
-		return h.Mode
-	}
-	return "generate"
-}
-
-// helpTextOf returns the verbatim help.text, or "" when unset.
-func helpTextOf(h *CommandHelp) string {
-	if h == nil {
-		return ""
-	}
-	return h.Text
-}
-
 // resolveHeadings applies the section-heading defaults, overriding with any set
 // in the spec.
-func resolveHeadings(h *CommandHelp) helpHeadings {
+func resolveHeadings(h cmdHelp) helpHeadings {
 	hd := helpHeadings{Usage: "Usage", Commands: "Commands", Arguments: "Arguments", Flags: "Flags", Examples: "Examples"}
-	if h == nil || h.Headings == nil {
+	if h.Headings == nil {
 		return hd
 	}
 	o := h.Headings
@@ -173,26 +186,28 @@ func resolveHeadings(h *CommandHelp) helpHeadings {
 }
 
 // buildHelpData assembles the template context for one command from its help
-// config, inputs, and direct children. Hidden children/inputs are excluded.
-func buildHelpData(invocation string, h *CommandHelp, inputs *Inputs, children []rnode) helpData {
-	d := helpData{Invocation: invocation, Headings: resolveHeadings(h)}
-	if h != nil {
-		d.Header = h.Header
-		d.Summary = h.Summary
-		d.Description = h.Description
-		d.Usage = h.Usage
-		d.Footer = h.Footer
-		d.Examples = h.Examples
+// fields, inputs, and direct children. Hidden children/inputs are excluded.
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode) helpData {
+	d := helpData{
+		Invocation:  invocation,
+		Headings:    resolveHeadings(h),
+		Header:      h.Header,
+		Summary:     h.Summary,
+		Description: h.Description,
+		Usage:       h.Usage,
+		Footer:      h.Footer,
+		Examples:    h.Examples,
 	}
 	for _, c := range children {
 		if c.hidden {
 			continue
 		}
-		row := helpCmdRow{Name: c.name, Aliases: c.aliases, Deprecated: c.deprecated}
-		if c.help != nil {
-			row.Summary = c.help.Summary
-		}
-		d.Commands = append(d.Commands, row)
+		d.Commands = append(d.Commands, helpCmdRow{
+			Name:       c.name,
+			Summary:    c.help.Summary,
+			Aliases:    c.aliases,
+			Deprecated: c.deprecated,
+		})
 	}
 	if inputs != nil {
 		for _, a := range inputs.Arguments {
@@ -359,15 +374,12 @@ func buildHelpFramework(hnodes []helpNode, dir string) *helpFramework {
 }
 
 // writeHelpFiles produces each command's help .txt under the help dir in the
-// framework package. The .txt is generated (rendered via the template), written
-// from help.text verbatim (manual + text), or seeded name-only and left for the
-// user (manual, no text). The help template is loaded (seeding the editable
-// default when missing) only when a command renders.
-//
-// Generate-mode files are rotini-managed, like rotini.go and handlers.go: each is
-// (re)written to the rendered content every pass (skipped when already identical
-// for clean diffs). Hand-author help via mode: manual; a generate-mode .txt is not
-// a place for hand edits, as they are replaced on the next generation.
+// framework package. When the command's verbatim `help` string is set, that string
+// is written byte-exact (only a single trailing newline is normalized); otherwise
+// the page is rendered from the structured fields via the template. Either way the
+// .txt is rotini-managed — (re)written every pass, skipped when already identical —
+// like rotini.go and handlers.go. The help template is loaded (seeding the editable
+// default when missing) only when at least one command renders.
 func writeHelpFiles(lay layout, dir string, hnodes []helpNode) error {
 	if dir == "" {
 		return fmt.Errorf("generate.help.dir must not be empty")
@@ -377,16 +389,16 @@ func writeHelpFiles(lay layout, dir string, hnodes []helpNode) error {
 		return fmt.Errorf("create help dir %s: %w", helpDir, err)
 	}
 
-	hasGenerate := false
+	renders := false
 	for _, hn := range hnodes {
-		if hn.mode == "generate" {
-			hasGenerate = true
+		if hn.verbatim == "" {
+			renders = true
 			break
 		}
 	}
 
 	var tmpl *template.Template
-	if hasGenerate {
+	if renders {
 		t, err := loadHelpTemplate(helpDir)
 		if err != nil {
 			return err
@@ -396,41 +408,19 @@ func writeHelpFiles(lay layout, dir string, hnodes []helpNode) error {
 
 	for _, hn := range hnodes {
 		path := filepath.Join(helpDir, hn.file)
-		switch {
-		case hn.mode == "manual" && hn.text != "":
-			if err := writeIfChanged(path, normalizeTrailingNewline(hn.text)); err != nil {
+		if hn.verbatim != "" {
+			if err := writeIfChanged(path, normalizeTrailingNewline(hn.verbatim)); err != nil {
 				return fmt.Errorf("write help %s: %w", hn.file, err)
 			}
-		case hn.mode == "manual":
-			if err := seedHelpFile(path, hn.name); err != nil {
-				return err
-			}
-		default: // generate
-			if hn.text != "" {
-				return fmt.Errorf("help.text is set for %q but help.mode is not \"manual\"; set help.mode: manual to use it", hn.name)
-			}
-			rendered, err := renderHelpText(tmpl, hn.data)
-			if err != nil {
-				return fmt.Errorf("render help for %q: %w", hn.name, err)
-			}
-			if err := writeIfChanged(path, rendered); err != nil {
-				return fmt.Errorf("write help %s: %w", hn.file, err)
-			}
+			continue
 		}
-	}
-	return nil
-}
-
-// seedHelpFile writes the command's invocation name as a one-time seed when the
-// file is missing; an existing file is left untouched (user-owned).
-func seedHelpFile(path, name string) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat help %s: %w", filepath.Base(path), err)
-	}
-	if err := os.WriteFile(path, []byte(name), 0o644); err != nil {
-		return fmt.Errorf("write help %s: %w", filepath.Base(path), err)
+		rendered, err := renderHelpText(tmpl, hn.data)
+		if err != nil {
+			return fmt.Errorf("render help for %q: %w", hn.name, err)
+		}
+		if err := writeIfChanged(path, rendered); err != nil {
+			return fmt.Errorf("write help %s: %w", hn.file, err)
+		}
 	}
 	return nil
 }

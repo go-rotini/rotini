@@ -1,17 +1,16 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
 name: rotini
-help:
-  description: |
-    The rotini cli framework companion cli.
+description: |
+  The rotini cli framework companion cli.
 
-    Find more information at: https://rotini.dev
-  usage: |
-    rotini <command> <arguments> [flags]
-           [-v | --version] [-h | --help]
-  examples:
-    - rotini init mycli
-    - rotini validate .rotini.yaml
-    - rotini generate ./path/to/.rotini.json
+  Find more information at: https://rotini.dev
+usage: |
+  rotini <command> <arguments> [flags]
+         [-v | --version] [-h | --help]
+examples:
+  - rotini init mycli
+  - rotini validate .rotini.yaml
+  - rotini generate ./path/to/.rotini.json
 inputs:
   flags:
     - name: version
@@ -32,13 +31,12 @@ commands:
   - name: initialize
     aliases:
       - init
-    help:
-      summary: initialize a cli program
-      description: Initialize a new rotini cli program spec file.
-      examples:
-        - rotini initialize mycli
-        - rotini init mycli --format json
-        - rotini init mycli --force
+    summary: initialize a cli program
+    description: Initialize a new rotini cli program spec file.
+    examples:
+      - rotini initialize mycli
+      - rotini init mycli --format json
+      - rotini init mycli --force
     inputs:
       arguments:
         - name: name
@@ -78,12 +76,11 @@ commands:
   - name: generate
     aliases:
       - gen
-    help:
-      summary: generate a cli program
-      description: Generate a cli program from a rotini spec file.
-      examples:
-        - rotini generate
-        - rotini generate ./path/to/.rotini.json --watch
+    summary: generate a cli program
+    description: Generate a cli program from a rotini spec file.
+    examples:
+      - rotini generate
+      - rotini generate ./path/to/.rotini.json --watch
     inputs:
       arguments:
         - name: spec_file_path
@@ -116,12 +113,11 @@ commands:
   - name: validate
     aliases:
       - val
-    help:
-      summary: validate a spec file
-      description: Validate a rotini spec file for correctness.
-      examples:
-        - rotini validate
-        - rotini val ./path/to/.rotini.yaml
+    summary: validate a spec file
+    description: Validate a rotini spec file for correctness.
+    examples:
+      - rotini validate
+      - rotini val ./path/to/.rotini.yaml
     inputs:
       arguments:
         - name: file
@@ -138,13 +134,12 @@ commands:
           schema:
             type: bool
   - name: help
-    help:
-      summary: print help
-      description: Print help for a specific command.
-      examples:
-        - rotini help
-        - rotini help generate
-        - rotini help init
+    summary: print help
+    description: Print help for a specific command.
+    examples:
+      - rotini help
+      - rotini help generate
+      - rotini help init
     inputs:
       arguments:
         - name: command
@@ -160,11 +155,10 @@ commands:
           schema:
             type: bool
   - name: version
-    help:
-      summary: print version
-      description: Print the rotini cli version.
-      examples:
-        - rotini version
+    summary: print version
+    description: Print the rotini cli version.
+    examples:
+      - rotini version
     inputs:
       flags:
         - name: help
@@ -175,16 +169,15 @@ commands:
           schema:
             type: bool
   - name: completion
-    help:
-      summary: generate shell completion
-      description: Generate shell completion scripts.
-      examples:
-        - rotini completion bash
-        - rotini completion zsh >> ~/.zshrc (eval "$(rotini completion zsh)")
-        - rotini completion fish > ~/.config/fish/completions/rotini.fish
-        - rotini completion powershell | Out-String | Invoke-Expression
-        - rotini completion nushell | save -f ~/.config/nushell/rotini.nu
-        - rotini completion elvish | save -f ~/.config/elvish/lib/rotini.elv
+    summary: generate shell completion
+    description: Generate shell completion scripts.
+    examples:
+      - rotini completion bash
+      - rotini completion zsh >> ~/.zshrc (eval "$(rotini completion zsh)")
+      - rotini completion fish > ~/.config/fish/completions/rotini.fish
+      - rotini completion powershell | Out-String | Invoke-Expression
+      - rotini completion nushell | save -f ~/.config/nushell/rotini.nu
+      - rotini completion elvish | save -f ~/.config/elvish/lib/rotini.elv
     inputs:
       arguments:
         - name: shell
