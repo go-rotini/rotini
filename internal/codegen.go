@@ -97,7 +97,12 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	frameworks := make([]*helpFramework, 0, len(feats))
 	outputs := make([]featureOutput, 0, len(feats))
 	for _, f := range feats {
-		nodes := flattenFeature(gp, f.desc)
+		var nodes []helpNode
+		if f.desc.perShell {
+			nodes = completionNodes() // completion: per shell, not per command
+		} else {
+			nodes = flattenFeature(gp, f.desc)
+		}
 		frameworks = append(frameworks, buildFeatureFramework(nodes, f.cfg.Dir, f.desc))
 		outputs = append(outputs, featureOutput{desc: f.desc, dir: f.cfg.Dir, nodes: nodes})
 	}
@@ -106,6 +111,12 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		return err
 	}
 	for _, o := range outputs {
+		if o.desc.perShell {
+			if err := writeCompletionFiles(lay, o.dir, gp.rootName, o.nodes); err != nil {
+				return err
+			}
+			continue
+		}
 		if err := writeFeatureFiles(lay, o.dir, o.nodes, o.desc); err != nil {
 			return err
 		}
@@ -153,6 +164,7 @@ func featureConfigs(conf *Conf) []confFeature {
 		{helpFeatureDesc, feats.Help},
 		{manFeatureDesc, feats.Man},
 		{markdownFeatureDesc, feats.Markdown},
+		{completionFeatureDesc, feats.Completion},
 	}
 }
 

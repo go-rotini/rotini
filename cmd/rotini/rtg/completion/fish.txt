@@ -1,0 +1,6 @@
+# fish completion for rotini
+function __rotini_complete
+    set -l tokens (commandline -opc) (commandline -ct)
+    rotini __complete $tokens[2..-1] 2>/dev/null
+end
+complete -c rotini -f -a '(__rotini_complete)'

@@ -13,3 +13,5 @@ generate:
         enabled: true
       markdown:
         enabled: true
+      completion:
+        enabled: true

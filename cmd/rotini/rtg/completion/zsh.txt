@@ -1,0 +1,7 @@
+#compdef rotini
+_rotini() {
+    local -a completions
+    completions=(${(f)"$(rotini __complete ${words[2,$CURRENT]} 2>/dev/null)"})
+    compadd -a completions
+}
+compdef _rotini rotini

@@ -2,8 +2,6 @@ package rth
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -37,7 +35,7 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	script, err := rtk.CompletionScript(filepath.Base(os.Args[0]), in.Arguments.Shell)
+	script, err := rtg.Completion(in.Arguments.Shell)
 	if err != nil {
 		io.Stderr.Println("Error:", err)
 		rtx.Exit(1)

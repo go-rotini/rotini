@@ -5,8 +5,10 @@ package internal
 // Schema for a Rotini CLI configuration file.
 type Conf struct {
 	// URL identifying the rotini configuration schema version. The version segment must match the installed rotini binary version.
-	Schema   string          `json:"$schema"`
-	Generate *GenerateConfig `json:"generate,omitempty"`
+	Schema     string            `json:"$schema"`
+	Generate   *GenerateConfig   `json:"generate,omitempty"`
+	Initialize *InitializeConfig `json:"initialize,omitempty"`
+	Validate   *ValidateConfig   `json:"validate,omitempty"`
 }
 
 // A rendered/derived codegen feature: a toggle plus the output subdirectory under the rtg package.
@@ -19,6 +21,8 @@ type Feature struct {
 
 // Rendered/derived codegen features generated into the rtg package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the rtg file.
 type FeaturesConfig struct {
+	// Embedded shell completion scripts — the features group's exception: generated per supported shell (bash/zsh/fish) from the program name, not per command, with no doc-data, no editable template, and no verbatim escape. Emits 'Completion<Shell>' vars plus a 'Completion(shell string) (string, error)' resolver; a handler reads rtg.Completion(shell) instead of importing rtk.
+	Completion *Feature `json:"completion,omitempty"`
 	// Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the rtg package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir.
 	Help *Feature `json:"help,omitempty"`
 	// Embedded, per-command man pages. Same render-or-verbatim contract as help: each command's .txt is rendered from its doc-fields through the editable man template in the feature's dir, or written verbatim when the command sets a 'man' string in the spec. Emits 'Man<Prefix>' vars plus a 'Man(path ...string) (string, error)' resolver.
@@ -51,4 +55,18 @@ type GenerateRthConfig struct {
 	Keep []string `json:"keep,omitempty"`
 	// Import path (relative to module root) for the handler package. Package name is derived from the last path segment.
 	Package string `json:"package,omitempty"`
+}
+
+// Defaults for `rotini init`, read from the .rotini.conf.* at the module root when present. A project without such a conf gets rotini's built-in defaults. Explicit `rotini init` flags override these.
+type InitializeConfig struct {
+	// Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default "yaml".
+	Format string `json:"format,omitempty"`
+	// Directory under the module root where `rotini init` creates new CLIs (each new CLI becomes a Go package beneath it). Default "cmd".
+	Package string `json:"package,omitempty"`
+}
+
+// Controls how `rotini validate` reports problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. The `--fail` flag overrides this.
+type ValidateConfig struct {
+	// fast = stop at and report the first problem; collect = run to completion and report every problem at once (default).
+	Fail string `json:"fail,omitempty"`
 }

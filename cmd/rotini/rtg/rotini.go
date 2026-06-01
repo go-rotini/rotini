@@ -34,7 +34,7 @@ var Definition = rotini.Definition{
 			Handler: "RotiniInitialize",
 			Aliases: []string{"init"},
 			Flags: []rotini.FlagDef{
-				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Default: "yaml", Enum: []string{"json", "yaml"}},
+				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Enum: []string{"json", "yaml"}},
 				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
 				{Name: "into", Identifiers: []string{"--into"}, Type: "string"},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
@@ -59,6 +59,7 @@ var Definition = rotini.Definition{
 			Handler: "RotiniValidate",
 			Aliases: []string{"val"},
 			Flags: []rotini.FlagDef{
+				{Name: "fail", Identifiers: []string{"--fail"}, Type: "string", Enum: []string{"fast", "collect"}},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
@@ -186,7 +187,8 @@ type RotiniInitializeInputs struct {
 }
 
 type RotiniValidateFlags struct {
-	Help bool `rotini:"help"`
+	Fail string `rotini:"fail"`
+	Help bool   `rotini:"help"`
 }
 
 type RotiniValidateArguments struct {
@@ -359,5 +361,29 @@ func Markdown(path ...string) (string, error) {
 		return MarkdownRotiniVersion, nil
 	default:
 		return "", fmt.Errorf("no markdown for command %q", strings.Join(path, " "))
+	}
+}
+
+//go:embed completion/bash.txt
+var CompletionBash string
+
+//go:embed completion/zsh.txt
+var CompletionZsh string
+
+//go:embed completion/fish.txt
+var CompletionFish string
+
+// Completion returns the embedded completion script for shell, or an error when
+// shell is not one rotini generated a script for.
+func Completion(shell string) (string, error) {
+	switch shell {
+	case "bash":
+		return CompletionBash, nil
+	case "zsh":
+		return CompletionZsh, nil
+	case "fish":
+		return CompletionFish, nil
+	default:
+		return "", fmt.Errorf("no completion for shell %q", shell)
 	}
 }

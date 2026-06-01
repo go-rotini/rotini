@@ -29,6 +29,8 @@ generate:
         enabled: true
       markdown:
         enabled: true
+      completion:
+        enabled: true
 `
 
 // minimalGoMod uses the same module path the committed handlers rollup imports,
@@ -63,7 +65,7 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 	// The companion's generated feature files (help/man/markdown, plus the seeded
 	// templates) are golden: the dogfooded output is reproduced byte-for-byte from
 	// the committed spec.
-	for _, feat := range []string{"help", "man", "markdown"} {
+	for _, feat := range []string{"help", "man", "markdown", "completion"} {
 		featRel := "cmd/rotini/rtg/" + feat
 		entries, err := os.ReadDir(filepath.Join(repoRoot, featRel))
 		if err != nil {
@@ -186,6 +188,51 @@ func TestGeneratePrunesOrphanHelp(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(helpDir, "mycli.txt")); err != nil {
 		t.Errorf("current command help .txt missing: %v", err)
+	}
+}
+
+// completionConf enables only the completion feature.
+const completionConf = "generate:\n  rtg:\n    features:\n      completion:\n        enabled: true\n"
+
+// TestGenerateCompletionEnabled verifies the features group's exception: completion
+// emits per-shell embed vars + a shell-keyed resolver (not a command-path one),
+// writes a script per supported shell with the program name substituted, and seeds
+// no editable template (rotini-owned, Q9 = no template).
+func TestGenerateCompletionEnabled(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), helpSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), completionConf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	mustContain(t, filepath.Join(tmp, "rtg", "rotini.go"),
+		`_ "embed"`,
+		"//go:embed completion/bash.txt", "var CompletionBash string",
+		"var CompletionZsh string", "var CompletionFish string",
+		"func Completion(shell string) (string, error)",
+		`case "bash":`,
+	)
+	// Scripts written per shell, program name substituted.
+	mustContain(t, filepath.Join(tmp, "rtg", "completion", "bash.txt"),
+		"mycli __complete", "complete -o default -F _mycli_complete mycli")
+	for _, sh := range []string{"bash.txt", "zsh.txt", "fish.txt"} {
+		if _, err := os.Stat(filepath.Join(tmp, "rtg", "completion", sh)); err != nil {
+			t.Errorf("missing completion script %s: %v", sh, err)
+		}
+	}
+	// Completion is rotini-owned — no editable template is seeded.
+	entries, err := os.ReadDir(filepath.Join(tmp, "rtg", "completion"))
+	if err != nil {
+		t.Fatalf("read completion dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmpl") {
+			t.Errorf("completion must not seed a template, found %s", e.Name())
+		}
 	}
 }
 

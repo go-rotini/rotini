@@ -36,7 +36,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	if err := internal.Validate(in.Arguments.File, ""); err != nil {
+	if err := internal.Validate(in.Arguments.File, "", in.Flags.Fail); err != nil {
 		io.Stderr.Println("Error:", err)
 		rtx.Exit(1)
 		return

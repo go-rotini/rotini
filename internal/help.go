@@ -9,6 +9,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"text/template"
+
+	"github.com/go-rotini/rotini/rtk"
 )
 
 // helpTemplateName is the editable, seed-once help template file living in the
@@ -25,9 +27,10 @@ type docFeature struct {
 	varPrefix string               // embed-var prefix, e.g. "Help" → HelpRotiniGenerate
 	resolver  string               // resolver func name, e.g. "Help"
 	ext       string               // output file extension, e.g. ".txt" / ".md"
-	tmplFile  string               // editable template file name in the feature dir
-	embedTmpl string               // embedded default template path under templates/
-	verbatim  func(cmdHelp) string // the per-command verbatim escape for this feature
+	tmplFile  string               // editable template file name in the feature dir ("" = none)
+	embedTmpl string               // embedded default template path under templates/ ("" = none)
+	verbatim  func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
+	perShell  bool                 // completion: keyed by shell name, not command path
 }
 
 var (
@@ -46,7 +49,17 @@ var (
 		ext: ".md", tmplFile: "markdown.md.tmpl", embedTmpl: "templates/markdown.md.tmpl",
 		verbatim: func(h cmdHelp) string { return h.Markdown },
 	}
+	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
+	// no template, no verbatim. Scripts come from rtk.CompletionScript at codegen.
+	completionFeatureDesc = docFeature{
+		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "Completion",
+		ext: ".txt", perShell: true,
+	}
 )
+
+// completionShells are the shells rotini generates completion scripts for, in a
+// deterministic order (matches rtk.CompletionScript's supported set).
+var completionShells = []string{"bash", "zsh", "fish"}
 
 // helpNode is one command's help wiring: the embed var/resolver identity plus
 // everything needed to produce its .txt. One is produced per command (root +
@@ -124,8 +137,9 @@ type helpCase struct {
 }
 
 type helpFramework struct {
-	Resolver string // resolver func name, e.g. "Help"/"Man"/"Markdown"
+	Resolver string // resolver func name, e.g. "Help"/"Man"/"Markdown"/"Completion"
 	Noun     string // word used in the doc comment + error, e.g. "help"
+	PerShell bool   // completion: resolver takes a shell string, not a command path
 	Vars     []helpVar
 	Cases    []helpCase
 }
@@ -190,6 +204,47 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 	}
 	walk(gp.tree, nil, nil)
 	return out
+}
+
+// completionNodes produces one node per supported shell for the completion
+// feature: keyed by shell name (the resolver case), file <shell>.txt, embed var
+// Completion<Shell>. No doc-data or verbatim — the script comes from
+// writeCompletionFiles.
+func completionNodes() []helpNode {
+	out := make([]helpNode, 0, len(completionShells))
+	for _, sh := range completionShells {
+		out = append(out, helpNode{
+			prefix: toPascalCase(sh),
+			file:   sh + completionFeatureDesc.ext,
+			paths:  []string{sh},
+			name:   sh,
+		})
+	}
+	return out
+}
+
+// writeCompletionFiles writes one rotini-managed completion script per supported
+// shell under the completion dir, generated from the program name via
+// rtk.CompletionScript (the shared source of the bash/zsh/fish templates). Each
+// file is (re)written every pass, skipped when already identical.
+func writeCompletionFiles(lay layout, dir, prog string, nodes []helpNode) error {
+	if dir == "" {
+		return fmt.Errorf("generate.rtg.features.completion.dir must not be empty")
+	}
+	cdir := filepath.Join(lay.frameworkDir, filepath.FromSlash(dir))
+	if err := os.MkdirAll(cdir, 0o755); err != nil {
+		return fmt.Errorf("create completion dir %s: %w", cdir, err)
+	}
+	for _, n := range nodes {
+		script, err := rtk.CompletionScript(prog, n.name)
+		if err != nil {
+			return fmt.Errorf("generate %s completion: %w", n.name, err)
+		}
+		if err := writeIfChanged(filepath.Join(cdir, n.file), script); err != nil {
+			return fmt.Errorf("write completion %s: %w", n.file, err)
+		}
+	}
+	return nil
 }
 
 // resolveHeadings applies the section-heading defaults, overriding with any set
@@ -389,7 +444,7 @@ func permute(chain [][]string) []string {
 // buildFeatureFramework turns a feature's nodes into the embed vars + resolver
 // cases the framework template emits (one resolver per feature).
 func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) *helpFramework {
-	h := &helpFramework{Resolver: feat.resolver, Noun: feat.noun}
+	h := &helpFramework{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
 	for _, hn := range nodes {
 		name := feat.varPrefix + hn.prefix
 		h.Vars = append(h.Vars, helpVar{Name: name, Embed: dir + "/" + hn.file})

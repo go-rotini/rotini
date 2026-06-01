@@ -15,9 +15,46 @@
     },
     "generate": {
       "$ref": "#/definitions/GenerateConfig"
+    },
+    "initialize": {
+      "$ref": "#/definitions/InitializeConfig"
+    },
+    "validate": {
+      "$ref": "#/definitions/ValidateConfig"
     }
   },
   "definitions": {
+    "InitializeConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Defaults for `rotini init`, read from the .rotini.conf.* at the module root when present. A project without such a conf gets rotini's built-in defaults. Explicit `rotini init` flags override these.",
+      "properties": {
+        "format": {
+          "type": "string",
+          "enum": ["yaml", "jsonc", "json"],
+          "default": "yaml",
+          "description": "Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default \"yaml\"."
+        },
+        "package": {
+          "type": "string",
+          "default": "cmd",
+          "description": "Directory under the module root where `rotini init` creates new CLIs (each new CLI becomes a Go package beneath it). Default \"cmd\"."
+        }
+      }
+    },
+    "ValidateConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Controls how `rotini validate` reports problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. The `--fail` flag overrides this.",
+      "properties": {
+        "fail": {
+          "type": "string",
+          "enum": ["fast", "collect"],
+          "default": "collect",
+          "description": "fast = stop at and report the first problem; collect = run to completion and report every problem at once (default)."
+        }
+      }
+    },
     "GenerateConfig": {
       "type": "object",
       "additionalProperties": false,
@@ -97,6 +134,10 @@
         "markdown": {
           "$ref": "#/definitions/Feature",
           "description": "Embedded, per-command markdown pages (e.g. for a docs site). Same render-or-verbatim contract as help, via the editable markdown template in the feature's dir or a command's verbatim 'markdown' string. Emits 'Markdown<Prefix>' vars plus a 'Markdown(path ...string) (string, error)' resolver."
+        },
+        "completion": {
+          "$ref": "#/definitions/Feature",
+          "description": "Embedded shell completion scripts — the features group's exception: generated per supported shell (bash/zsh/fish) from the program name, not per command, with no doc-data, no editable template, and no verbatim escape. Emits 'Completion<Shell>' vars plus a 'Completion(shell string) (string, error)' resolver; a handler reads rtg.Completion(shell) instead of importing rtk."
         }
       }
     },

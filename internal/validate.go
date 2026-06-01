@@ -78,19 +78,48 @@ func loadConfSchema() (*jsonschema.Schema, error) {
 // as a single error via [errors.Join]; the calling handler unwraps it for
 // display. Validate returns nil when the spec (and conf, if given) are
 // valid.
-func Validate(specPath, confPath string) error {
-	var problems []error
+func Validate(specPath, confPath, failMode string) error {
+	fast := resolveFailMode(failMode) == "fast"
 
+	var problems []error
 	if specPath == "" {
 		problems = append(problems, errSpecPathRequired)
 	} else {
 		problems = append(problems, validateDocument(specPath, "spec", loadSpecSchema)...)
 	}
+	if fast && len(problems) > 0 {
+		return problems[0]
+	}
 	if confPath != "" {
 		problems = append(problems, validateDocument(confPath, "conf", loadConfSchema)...)
 	}
+	if fast && len(problems) > 0 {
+		return problems[0]
+	}
 
 	return errors.Join(problems...)
+}
+
+// resolveFailMode resolves the validate failure-reporting mode: an explicit value
+// (the --fail flag) wins; otherwise the module-root conf's validate.fail is used,
+// defaulting to "collect". Only "fast" enables fast mode; anything else collects.
+func resolveFailMode(failMode string) string {
+	if failMode != "" {
+		return failMode
+	}
+	root, _, err := findModule()
+	if err != nil {
+		return "collect"
+	}
+	confPath, err := discoverFile(root, ".rotini.conf.")
+	if err != nil {
+		return "collect"
+	}
+	conf, err := ReadConf(confPath)
+	if err != nil || conf.Validate == nil {
+		return "collect"
+	}
+	return conf.Validate.Fail
 }
 
 // validateDocument reads the document at path, compiles its schema, and

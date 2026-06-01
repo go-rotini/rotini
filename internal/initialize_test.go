@@ -1,10 +1,37 @@
 package internal
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// TestInitialize_confDefaults verifies `rotini init` honors the module-root conf's
+// `initialize` block (format + package), and that an explicit --format overrides it.
+func TestInitialize_confDefaults(t *testing.T) {
+	tmp := initTestModule(t)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n"+
+			"initialize:\n  format: jsonc\n  package: tools\n")
+
+	// No explicit --format → conf's format (jsonc) and package (tools).
+	if err := Initialize("mycli", "", false, ""); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	dir := filepath.Join(tmp, "tools", "mycli")
+	mustContain(t, filepath.Join(dir, ".rotini.spec.jsonc"), `"name": "mycli"`)
+	mustContain(t, filepath.Join(dir, ".rotini.conf.jsonc"), `"tools/mycli/rth"`, `"tools/mycli/rtg"`)
+	mustContain(t, filepath.Join(dir, "main.go"), `"example.com/myclis/tools/mycli/rth"`)
+
+	// An explicit --format overrides the conf default (still under the conf package).
+	if err := Initialize("other", "yaml", false, ""); err != nil {
+		t.Fatalf("Initialize (explicit format): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "tools", "other", ".rotini.spec.yaml")); err != nil {
+		t.Errorf("explicit --format=yaml not honored: %v", err)
+	}
+}
 
 func initTestModule(t *testing.T) string {
 	t.Helper()

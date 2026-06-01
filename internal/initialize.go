@@ -40,16 +40,26 @@ func Initialize(name, format string, force bool, into string) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
-	ext, err := normalizeFormat(format)
-	if err != nil {
-		return err
-	}
 
 	moduleRoot, moduleName, err := findModule()
 	if err != nil {
 		return err
 	}
-	cliDir := filepath.Join(moduleRoot, "cmd", name)
+
+	// Defaults come from the module-root conf's `initialize` block (when present);
+	// an explicit --format overrides the format. A project without that conf gets
+	// rotini's built-ins (yaml, "cmd").
+	defaults := moduleInitDefaults(moduleRoot)
+	if format == "" {
+		format = defaults.format
+	}
+	ext, err := normalizeFormat(format)
+	if err != nil {
+		return err
+	}
+	pkgDir := defaults.pkg
+
+	cliDir := filepath.Join(moduleRoot, filepath.FromSlash(pkgDir), name)
 	specPath := filepath.Join(cliDir, ".rotini.spec."+ext)
 	confPath := filepath.Join(cliDir, ".rotini.conf."+ext)
 	mainPath := filepath.Join(cliDir, "main.go")
@@ -66,25 +76,52 @@ func Initialize(name, format string, force bool, into string) error {
 	if err := WriteSpec(specPath, scaffoldSpec(name)); err != nil {
 		return err
 	}
-	if err := WriteConf(confPath, scaffoldConf(name)); err != nil {
+	if err := WriteConf(confPath, scaffoldConf(name, pkgDir)); err != nil {
 		return err
 	}
-	if err := writeMainGo(mainPath, moduleName, name); err != nil {
+	if err := writeMainGo(mainPath, moduleName, name, pkgDir); err != nil {
 		return err
 	}
 	if err := Generate(specPath, confPath, false, nil); err != nil {
 		return err
 	}
 	if into != "" {
-		return composeInto(moduleRoot, into, name, ext)
+		return composeInto(moduleRoot, pkgDir, into, name, ext)
 	}
 	return nil
 }
 
+// initDefaults holds the resolved `rotini init` defaults.
+type initDefaults struct {
+	format string
+	pkg    string
+}
+
+// moduleInitDefaults reads the `initialize` block from the module-root conf (when
+// present), falling back to rotini's built-ins (yaml format, "cmd" package dir).
+func moduleInitDefaults(moduleRoot string) initDefaults {
+	d := initDefaults{format: "yaml", pkg: "cmd"}
+	confPath, err := discoverFile(moduleRoot, ".rotini.conf.")
+	if err != nil {
+		return d
+	}
+	conf, err := ReadConf(confPath)
+	if err != nil || conf.Initialize == nil {
+		return d
+	}
+	if conf.Initialize.Format != "" {
+		d.format = conf.Initialize.Format
+	}
+	if conf.Initialize.Package != "" {
+		d.pkg = conf.Initialize.Package
+	}
+	return d
+}
+
 // composeInto registers child as a $ref sub-command of the parent CLI and
 // re-generates the parent so the composition takes effect.
-func composeInto(moduleRoot, parent, child, childExt string) error {
-	parentDir := filepath.Join(moduleRoot, "cmd", parent)
+func composeInto(moduleRoot, pkgDir, parent, child, childExt string) error {
+	parentDir := filepath.Join(moduleRoot, filepath.FromSlash(pkgDir), parent)
 	parentSpec, err := discoverFile(parentDir, ".rotini.spec.")
 	if err != nil {
 		return fmt.Errorf("compose into %q: %w", parent, err)
@@ -150,18 +187,19 @@ func scaffoldSpec(name string) *Spec {
 	}
 }
 
-// scaffoldConf builds the conf for the standard per-CLI layout under cmd/<name>.
-// Help generation is enabled so a freshly scaffolded CLI has working help.
-func scaffoldConf(name string) *Conf {
+// scaffoldConf builds the conf for the standard per-CLI layout under
+// <pkgDir>/<name>. Help generation is enabled so a freshly scaffolded CLI has
+// working help.
+func scaffoldConf(name, pkgDir string) *Conf {
 	return &Conf{
 		Schema: confSchemaURL(),
 		Generate: &GenerateConfig{
 			Rth: &GenerateRthConfig{
-				Package: "cmd/" + name + "/rth",
+				Package: pkgDir + "/" + name + "/rth",
 				File:    "handlers.go",
 			},
 			Rtg: &GenerateRtgConfig{
-				Package: "cmd/" + name + "/rtg",
+				Package: pkgDir + "/" + name + "/rtg",
 				File:    "rotini.go",
 				Features: &FeaturesConfig{
 					Help: &Feature{Enabled: true},
@@ -172,9 +210,9 @@ func scaffoldConf(name string) *Conf {
 }
 
 // writeMainGo renders the binary entrypoint that runs the generated program.
-func writeMainGo(path, moduleName, name string) error {
+func writeMainGo(path, moduleName, name, pkgDir string) error {
 	content, err := renderGo("main", "templates/main.go.tmpl", map[string]any{
-		"Import": moduleName + "/cmd/" + name + "/rth",
+		"Import": moduleName + "/" + pkgDir + "/" + name + "/rth",
 		"Pkg":    "rth",
 	})
 	if err != nil {

@@ -16,6 +16,7 @@ rotini validate [file] [flags]
 
 ## Flags
 
+- `--fail string` — failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]
 - `-h, --help` — print help
 
 ## Examples

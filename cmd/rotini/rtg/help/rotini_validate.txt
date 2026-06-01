@@ -7,7 +7,8 @@ Arguments:
   [file]    path to the spec file (default .rotini.spec.yaml)
 
 Flags:
-  -h,--help    print help
+  --fail string    failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]
+  -h,--help        print help
 
 Examples:
   rotini validate
