@@ -2,7 +2,6 @@ package rth
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -25,7 +24,8 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		io.Stderr.Printf("Error: %v\n\n%s", err, rtg.HelpRotini)
+		io.Stderr.Printf("Error: %v\n\n", err)
+		io.Stdout.Println(rtg.HelpRotini)
 		rtx.Exit(1)
 		return
 	}
@@ -45,9 +45,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 }
 
 func (*rotiniHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Println("rotini PostRun")
 }
 
 func (*rotiniHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Println("rotini CascadingPostRun")
 }
