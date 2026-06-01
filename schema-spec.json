@@ -188,7 +188,11 @@
         },
         "type": {
           "type": "string",
-          "description": "The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent."
+          "description": "The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path."
+        },
+        "import": {
+          "type": "string",
+          "description": "Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec."
         },
         "nullable": {
           "type": "boolean",

@@ -161,6 +161,44 @@ func TestValidate_failModeFromConf(t *testing.T) {
 	}
 }
 
+func TestValidate_importConsistency(t *testing.T) {
+	// Same type `foo.Bar` declared with two different imports → a consistency error.
+	bad := validSpecHeader +
+		"command:\n" +
+		"  name: mycli\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: a\n" +
+		"        identifiers: [--a]\n" +
+		"        schema: { type: foo.Bar, import: github.com/x/foo }\n" +
+		"      - name: b\n" +
+		"        identifiers: [--b]\n" +
+		"        schema: { type: foo.Bar, import: github.com/y/foo }\n"
+	err := Validate(writeTemp(t, "bad.yaml", bad), "", "collect")
+	if err == nil {
+		t.Fatal("expected an import-consistency error for one type with two imports")
+	}
+	if !strings.Contains(err.Error(), "conflicting imports") || !strings.Contains(err.Error(), "foo.Bar") {
+		t.Errorf("error does not identify the conflict: %v", err)
+	}
+
+	// The same type with the SAME import everywhere is fine.
+	ok := validSpecHeader +
+		"command:\n" +
+		"  name: mycli\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: a\n" +
+		"        identifiers: [--a]\n" +
+		"        schema: { type: foo.Bar, import: github.com/x/foo }\n" +
+		"      - name: b\n" +
+		"        identifiers: [--b]\n" +
+		"        schema: { type: foo.Bar, import: github.com/x/foo }\n"
+	if err := Validate(writeTemp(t, "ok.yaml", ok), "", "collect"); err != nil {
+		t.Errorf("consistent imports should validate, got: %v", err)
+	}
+}
+
 func TestValidate_badSchemaURL(t *testing.T) {
 	path := writeTemp(t, "spec.yaml", "$schema: https://example.com/wrong\ncommand:\n  name: demo\n")
 	if err := Validate(path, "", ""); err == nil {

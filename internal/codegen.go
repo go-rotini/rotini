@@ -33,6 +33,7 @@ type fieldDef struct {
 	Field  string
 	GoType string
 	Tag    string
+	Import string // Go import path backing GoType ("" for builtins); aliased form "alias path"
 }
 
 // inputBlock is the set of generated input types for a single command. The
@@ -218,10 +219,10 @@ func flagFields(in *Inputs) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Flags)+len(in.Env))
 	for _, f := range in.Flags {
-		fields = append(fields, fieldDef{Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name})
+		fields = append(fields, fieldDef{Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name, Import: fieldImport(f.Schema)})
 	}
 	for _, v := range in.Env {
-		fields = append(fields, fieldDef{Field: toPascalCase(v.Name), GoType: goFieldType(v.Schema), Tag: v.Name})
+		fields = append(fields, fieldDef{Field: toPascalCase(v.Name), GoType: goFieldType(v.Schema), Tag: v.Name, Import: fieldImport(v.Schema)})
 	}
 	return fields
 }
@@ -233,7 +234,7 @@ func argFields(in *Inputs) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Arguments))
 	for _, a := range in.Arguments {
-		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name})
+		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema)})
 	}
 	return fields
 }
@@ -437,7 +438,12 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 	own := append([]genCommand{gp.root}, gp.own...)
 
 	blocks := make([]inputBlock, 0, len(own))
-	stdImports := map[string]bool{}
+	imports := map[string]bool{}
+	noteImport := func(imp string) {
+		if imp != "" {
+			imports[imp] = true
+		}
+	}
 	for _, c := range own {
 		blocks = append(blocks, inputBlock{
 			Prefix:       c.prefix,
@@ -446,10 +452,10 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 			InputsFields: c.inputs,
 		})
 		for _, f := range c.flags {
-			noteStdImport(stdImports, f.GoType)
+			noteImport(f.Import)
 		}
 		for _, a := range c.args {
-			noteStdImport(stdImports, a.GoType)
+			noteImport(a.Import)
 		}
 	}
 
@@ -462,7 +468,7 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 		"Package":      lay.frameworkPkgName,
 		"RotiniImport": rotiniImportPath,
 		"RotiniPkg":    rotiniPkgName,
-		"StdImports":   sortedKeys(stdImports),
+		"Imports":      renderImports(imports),
 		"Methods":      gp.methods(),
 		"Blocks":       blocks,
 		"Definition":   renderDefinition(gp),
@@ -750,20 +756,43 @@ func findModule() (root, name string, err error) {
 
 // noteStdImport records the standard-library import a Go type expression needs
 // (currently only the time package, for time.Duration / time.Time fields).
-func noteStdImport(set map[string]bool, goType string) {
-	if strings.Contains(goType, "time.") {
-		set["time"] = true
+// fieldImport returns the Go import path backing a field's schema: the explicit
+// spec `import:` when set, otherwise the import rotini knows is needed for its own
+// built-in type aliases (duration/time/datetime/date → "time"). "" means no import.
+func fieldImport(schema *InputSchema) string {
+	if schema == nil {
+		return ""
 	}
+	if imp := strings.TrimSpace(schema.Import); imp != "" {
+		return imp
+	}
+	return builtinImport(schema.Type)
 }
 
-// sortedKeys returns the keys of set in sorted order.
-func sortedKeys(set map[string]bool) []string {
-	keys := make([]string, 0, len(set))
-	for k := range set {
-		keys = append(keys, k)
+// builtinImport returns the import path rotini's own type vocabulary requires, or
+// "" when the type needs none. Only the time-family aliases (which jsonSchemaTypeToGo
+// maps to time.Time/time.Duration) carry an implicit import.
+func builtinImport(rotiniType string) string {
+	switch rotiniType {
+	case "duration", "time", "datetime", "date":
+		return "time"
 	}
-	sort.Strings(keys)
-	return keys
+	return ""
+}
+
+// renderImports turns a set of spec `import:` values into sorted Go import specs:
+// a plain path becomes "path"; the aliased form "alias path" becomes alias "path".
+func renderImports(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for imp := range set {
+		if i := strings.IndexByte(imp, ' '); i >= 0 {
+			out = append(out, imp[:i]+" "+strconv.Quote(strings.TrimSpace(imp[i+1:])))
+		} else {
+			out = append(out, strconv.Quote(imp))
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // toPascalCase converts a name to PascalCase, treating '-', '_' and ' ' as word

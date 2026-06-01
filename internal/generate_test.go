@@ -279,6 +279,50 @@ func TestGenerateOutputTypes(t *testing.T) {
 	mustNotContain(t, rotiniGo, outputRootSentinel)
 }
 
+// TestGenerateInputImports verifies the spec `import:` key drives the framework
+// file's import block: explicit imports (stdlib + third-party + aliased) are emitted,
+// rotini's own time-family aliases auto-import "time", and duplicates dedupe.
+func TestGenerateInputImports(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: widget\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: since\n" +
+		"        identifiers: [--since]\n" +
+		"        schema: { type: time.Time, import: time }\n" +
+		"      - name: ttl\n" +
+		"        identifiers: [--ttl]\n" +
+		"        schema: { type: duration }\n" + // rotini alias → auto "time", and dedupes with the above
+		"      - name: id\n" +
+		"        identifiers: [--id]\n" +
+		"        schema: { type: uuid.UUID, import: github.com/google/uuid }\n" +
+		"      - name: home\n" +
+		"        identifiers: [--home]\n" +
+		"        schema: { type: urlx.URL, import: urlx net/url }\n" // aliased import
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	rotiniGo := filepath.Join(tmp, "rtg", "rotini.go")
+	mustContain(t, rotiniGo,
+		"\"time\"",                   // time.Time + duration alias, deduped to one
+		"\"github.com/google/uuid\"", // third-party
+		"urlx \"net/url\"",           // aliased form rendered as `urlx "net/url"`
+		"type WidgetFlags struct {",
+		"uuid.UUID", "urlx.URL", // the typed flag fields
+	)
+	// "time" appears once in the import block (deduped), not twice.
+	if got := readFileString(t, rotiniGo); strings.Count(got, "\t\"time\"\n") != 1 {
+		t.Errorf("expected exactly one \"time\" import line, got %d:\n%s", strings.Count(got, "\t\"time\"\n"), got)
+	}
+}
+
 // helpSpecYAML is a spec exercising generated help: root summary/description plus
 // a sub-command with a summary, a required argument, and a bool flag. Help fields
 // live directly on the command (flattened).

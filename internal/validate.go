@@ -3,6 +3,8 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/go-rotini/jsonschema"
@@ -85,7 +87,15 @@ func Validate(specPath, confPath, failMode string) error {
 	if specPath == "" {
 		problems = append(problems, errSpecPathRequired)
 	} else {
-		problems = append(problems, validateDocument(specPath, "spec", loadSpecSchema)...)
+		specProblems := validateDocument(specPath, "spec", loadSpecSchema)
+		problems = append(problems, specProblems...)
+		// The import-consistency lint runs on the decoded spec, so only attempt it
+		// once the document is schema-valid (otherwise the decode is meaningless).
+		if len(specProblems) == 0 {
+			if spec, err := ReadSpec(specPath); err == nil {
+				problems = append(problems, lintImportConsistency(spec)...)
+			}
+		}
 	}
 	if fast && len(problems) > 0 {
 		return problems[0]
@@ -120,6 +130,91 @@ func resolveFailMode(failMode string) string {
 		return "collect"
 	}
 	return conf.Validate.Fail
+}
+
+// lintImportConsistency reports any `type:` declared with two or more different
+// `import:` values across the spec — the same type with two backing packages is
+// always a bug. (A wrong-but-consistent import is left to `go build`; this catches
+// the contradictory case at validate time.) One problem per offending type, sorted.
+func lintImportConsistency(spec *Spec) []error {
+	byType := map[string]map[string]bool{}
+	record := func(typ, imp string) {
+		typ, imp = strings.TrimSpace(typ), strings.TrimSpace(imp)
+		if typ == "" || imp == "" {
+			return
+		}
+		if byType[typ] == nil {
+			byType[typ] = map[string]bool{}
+		}
+		byType[typ][imp] = true
+	}
+	feedInput := func(s *InputSchema) {
+		if s != nil {
+			walkSchemaImports(s.BaseSchema, record)
+		}
+	}
+	var walkCmd func(c *Command)
+	walkCmd = func(c *Command) {
+		if c.Inputs != nil {
+			for i := range c.Inputs.Flags {
+				feedInput(c.Inputs.Flags[i].Schema)
+			}
+			for i := range c.Inputs.Arguments {
+				feedInput(c.Inputs.Arguments[i].Schema)
+			}
+			for i := range c.Inputs.Env {
+				feedInput(c.Inputs.Env[i].Schema)
+			}
+			for i := range c.Inputs.Config {
+				feedInput(c.Inputs.Config[i].Schema)
+			}
+			if c.Inputs.Stdin != nil {
+				feedInput(c.Inputs.Stdin.Schema)
+			}
+		}
+		if c.Output != nil {
+			walkSchemaImports(c.Output.BaseSchema, record)
+		}
+		for i := range c.Commands {
+			walkCmd(&c.Commands[i])
+		}
+	}
+	walkCmd(&spec.Command)
+	for name := range spec.Schemas {
+		s := spec.Schemas[name]
+		walkSchemaImports(s.BaseSchema, record)
+	}
+
+	var problems []error
+	for typ, imps := range byType {
+		if len(imps) < 2 {
+			continue
+		}
+		list := make([]string, 0, len(imps))
+		for imp := range imps {
+			list = append(list, imp)
+		}
+		sort.Strings(list)
+		problems = append(problems, &violationError{
+			kind: "spec",
+			loc:  "type " + typ,
+			msg:  "declared with conflicting imports (" + strings.Join(list, ", ") + "); a type must have one backing package",
+		})
+	}
+	sort.Slice(problems, func(i, j int) bool { return problems[i].Error() < problems[j].Error() })
+	return problems
+}
+
+// walkSchemaImports records (type, import) for a schema and recurses into its
+// object properties and array items.
+func walkSchemaImports(b BaseSchema, record func(typ, imp string)) {
+	record(b.Type, b.Import)
+	for _, p := range b.Properties {
+		walkSchemaImports(p.BaseSchema, record)
+	}
+	if b.Items != nil {
+		walkSchemaImports(b.Items.BaseSchema, record)
+	}
 }
 
 // validateDocument reads the document at path, compiles its schema, and

@@ -34,9 +34,11 @@ type BaseSchema struct {
 	// Reference to a named schema in the top-level schemas map (e.g. '#/schemas/MySchema'). Resolved at codegen time.
 	Ref string `json:"$ref,omitempty"`
 	// Allowed values; parsed values are validated against this list
-	Enum     []string `json:"enum,omitempty"`
-	Items    *Schema  `json:"items,omitempty"`
-	MaxItems int      `json:"maxItems,omitempty"`
+	Enum []string `json:"enum,omitempty"`
+	// Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.
+	Import   string  `json:"import,omitempty"`
+	Items    *Schema `json:"items,omitempty"`
+	MaxItems int     `json:"maxItems,omitempty"`
 	// Maximum string length (string type only)
 	MaxLength int `json:"maxLength,omitempty"`
 	// Maximum allowed value (numeric types only)
@@ -50,7 +52,7 @@ type BaseSchema struct {
 	// Regular expression the value must match (string type only)
 	Pattern    string            `json:"pattern,omitempty"`
 	Properties map[string]Schema `json:"properties,omitempty"`
-	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent.
+	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path.
 	Type string `json:"type,omitempty"`
 }
 

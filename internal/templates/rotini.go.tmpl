@@ -2,8 +2,8 @@
 package {{.Package}}
 
 import (
-{{- range .StdImports}}
-	"{{.}}"
+{{- range .Imports}}
+	{{.}}
 {{- end}}
 {{- if .Features}}
 	_ "embed"
