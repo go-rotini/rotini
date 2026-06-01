@@ -24,12 +24,12 @@ command:
 `
 	childConfYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
-  cmd:
+  rth:
     package: cmd/child/rth
-    gen_file: handlers.go
-  framework:
+    file: handlers.go
+  rtg:
     package: cmd/child/rtg
-    gen_file: rotini.go
+    file: rotini.go
 `
 	parentSpecYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
 command:
@@ -39,12 +39,12 @@ command:
 `
 	parentConfYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
-  cmd:
+  rth:
     package: cmd/parent/rth
-    gen_file: handlers.go
-  framework:
+    file: handlers.go
+  rtg:
     package: cmd/parent/rtg
-    gen_file: rotini.go
+    file: rotini.go
 `
 )
 
@@ -104,7 +104,7 @@ command:
     - $ref: ../a/.rotini.spec.yaml
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-		"generate:\n  cmd:\n    package: cmd/a/rth\n  framework:\n    package: cmd/a/rtg\n"
+		"generate:\n  rth:\n    package: cmd/a/rth\n  rtg:\n    package: cmd/a/rtg\n"
 	writeTestFile(t, filepath.Join(tmp, "cmd/a/.rotini.spec.yaml"), selfRef)
 	writeTestFile(t, filepath.Join(tmp, "cmd/a/.rotini.conf.yaml"), conf)
 

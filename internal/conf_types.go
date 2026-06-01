@@ -9,41 +9,42 @@ type Conf struct {
 	Generate *GenerateConfig `json:"generate,omitempty"`
 }
 
-type GenerateCmdConfig struct {
-	// Name of the framework-controlled gen file placed in the command handler package (e.g. 'handlers.gen.go'). Must end in .go.
-	GenFile string `json:"gen_file,omitempty"`
-	// Import path (relative to module root) for the command handler package. Package name is derived from the last path segment.
-	Package string       `json:"package,omitempty"`
-	Prune   *PruneConfig `json:"prune,omitempty"`
+// A rendered/derived codegen feature: a toggle plus the output subdirectory under the rtg package.
+type Feature struct {
+	// Subdirectory under the rtg package where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Defaults to the feature name (e.g. 'help').
+	Dir string `json:"dir,omitempty"`
+	// When true, rotini generates this feature's outputs into the rtg package and emits the embed vars + resolver. Opt-in only.
+	Enabled bool `json:"enabled,omitempty"`
+}
+
+// Rendered/derived codegen features generated into the rtg package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the rtg file.
+type FeaturesConfig struct {
+	// Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the rtg package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir.
+	Help *Feature `json:"help,omitempty"`
 }
 
 type GenerateConfig struct {
-	Cmd       *GenerateCmdConfig       `json:"cmd,omitempty"`
-	Framework *GenerateFrameworkConfig `json:"framework,omitempty"`
-	Help      *GenerateHelpConfig      `json:"help,omitempty"`
+	Rtg *GenerateRtgConfig `json:"rtg,omitempty"`
+	Rth *GenerateRthConfig `json:"rth,omitempty"`
 }
 
-type GenerateFrameworkConfig struct {
-	// Additional Go import paths included in the generated framework file. Use when input or output types reference third-party packages. Each entry is a package path (e.g., 'net/url') or an aliased import (e.g., 'myalias net/url').
-	AdditionalImports []string `json:"additional_imports,omitempty"`
-	// Name of the framework gen file placed in the framework package (e.g. 'rotini.gen.go'). Must end in .go.
-	GenFile string `json:"gen_file,omitempty"`
+// The rtg (framework) package: the generated framework file plus any rendered feature outputs (help, and — later — man/markdown/completion). Orphaned rendered outputs are pruned every pass (implicit/always-on); list package-relative paths under 'keep' to spare files.
+type GenerateRtgConfig struct {
+	Features *FeaturesConfig `json:"features,omitempty"`
+	// Name of the rotini-controlled framework file placed in the framework package (e.g. 'rotini.go'). Must end in .go.
+	File string `json:"file,omitempty"`
+	// Package-relative paths (e.g. 'help/legacy.txt') that pruning must never remove. The editable per-feature template (e.g. 'help/help.txt.tmpl') and test files are always kept automatically. Intended to stay empty in steady state.
+	Keep []string `json:"keep,omitempty"`
 	// Import path (relative to module root) for the framework package. Package name is derived from the last path segment.
 	Package string `json:"package,omitempty"`
 }
 
-// Controls generation of embedded, per-command help text.
-type GenerateHelpConfig struct {
-	// Subdirectory under the framework package where the per-command help .txt files (and the editable help.txt.tmpl) live and are embedded.
-	Dir string `json:"dir,omitempty"`
-	// When true, rotini produces a per-command help .txt for every command and embeds them in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the help template.
-	Enabled bool `json:"enabled,omitempty"`
-}
-
-// Controls pruning of stub files in the command handler package.
-type PruneConfig struct {
-	// When true, rotini removes stub files in the command handler package that no longer correspond to a command in the spec.
-	Enabled bool `json:"enabled,omitempty"`
-	// File names (not paths) that should never be removed by pruning, even when they do not correspond to a command in the spec.
+// The rth (handler) package: the per-command handler stubs and the generated rollup. Stubs that no longer correspond to a command are pruned every pass (implicit/always-on); list package-relative paths under 'keep' to spare hand-written files.
+type GenerateRthConfig struct {
+	// Name of the rotini-controlled rollup file placed in the handler package (e.g. 'handlers.go'). Must end in .go.
+	File string `json:"file,omitempty"`
+	// Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. Intended to stay empty in steady state.
 	Keep []string `json:"keep,omitempty"`
+	// Import path (relative to module root) for the handler package. Package name is derived from the last path segment.
+	Package string `json:"package,omitempty"`
 }

@@ -89,23 +89,24 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		return err
 	}
 
-	// When command-help generation is enabled, the framework file gains embedded
-	// "Help<Prefix>" vars + a Help(path…) resolver, and a best-effort help .txt is
-	// seeded (once) for any command that lacks one under the framework package's
-	// help dir. Existing files are left untouched — they are the user's to edit.
-	helpOn := conf.Generate.Help != nil && conf.Generate.Help.Enabled
+	// When the help feature is enabled, the framework file gains embedded
+	// "Help<Prefix>" vars + a Help(path…) resolver, and each command's help .txt is
+	// (re)written under the rtg package's help dir — rendered from the command's
+	// doc-fields, or written verbatim when the command sets a `help` string.
+	hcfg := helpFeature(conf)
+	helpOn := hcfg != nil && hcfg.Enabled
 	var hnodes []helpNode
 	var hf *helpFramework
 	if helpOn {
 		hnodes = flattenHelp(gp)
-		hf = buildHelpFramework(hnodes, conf.Generate.Help.Dir)
+		hf = buildHelpFramework(hnodes, hcfg.Dir)
 	}
 
 	if err := writeFrameworkFile(gp, lay, hf); err != nil {
 		return err
 	}
 	if helpOn {
-		if err := writeHelpFiles(lay, conf.Generate.Help.Dir, hnodes); err != nil {
+		if err := writeHelpFiles(lay, hcfg.Dir, hnodes); err != nil {
 			return err
 		}
 	}
@@ -115,12 +116,25 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	if err := writeHandlerRollup(gp, lay); err != nil {
 		return err
 	}
-	if c := conf.Generate.Cmd; c != nil && c.Prune != nil && c.Prune.Enabled {
-		if err := pruneStubs(gp, lay, c.Prune.Keep); err != nil {
-			return err
-		}
+	// Pruning is implicit (always-on): drop orphaned rth stubs and orphaned rtg
+	// feature outputs, sparing only the per-package `keep` paths (and test files
+	// and the editable feature templates).
+	if err := pruneStubs(gp, lay, conf.Generate.Rth.Keep); err != nil {
+		return err
+	}
+	if err := pruneRtg(lay, conf.Generate.Rtg.Keep, hcfg, hnodes); err != nil {
+		return err
 	}
 	return nil
+}
+
+// helpFeature returns the configured help feature, or nil when help generation
+// is not configured. Safe to call before applyConfDefaults.
+func helpFeature(conf *Conf) *Feature {
+	if conf.Generate == nil || conf.Generate.Rtg == nil || conf.Generate.Rtg.Features == nil {
+		return nil
+	}
+	return conf.Generate.Rtg.Features.Help
 }
 
 // methods returns the ProgramHandlers method names: the root, then every own
@@ -488,6 +502,8 @@ func writeHandlerRollup(gp *genProgram, lay layout) error {
 
 // pruneStubs removes handler .go files that no longer correspond to an own
 // command, preserving the rollup file, the keep list, and any test files.
+// keepList entries are package-relative paths; rth is a flat package, so for
+// its top-level stubs a path is just the file name.
 func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	protected := map[string]bool{
 		gp.root.filename: true,
@@ -497,7 +513,7 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 		protected[c.filename] = true
 	}
 	for _, k := range keepList {
-		protected[k] = true
+		protected[filepath.ToSlash(k)] = true
 	}
 
 	entries, err := os.ReadDir(lay.handlerDir)
@@ -519,27 +535,73 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	return nil
 }
 
+// pruneRtg removes orphaned rotini-managed outputs in the rtg package's feature
+// dirs — currently the per-command help .txt for commands no longer in the spec.
+// The editable per-feature template, test files, and any keep-listed
+// (package-relative) path are preserved. Top-level rtg files (the gen file) are
+// never auto-removed. keepList entries are package-relative to the rtg package.
+func pruneRtg(lay layout, keepList []string, hcfg *Feature, hnodes []helpNode) error {
+	if hcfg == nil || !hcfg.Enabled {
+		return nil
+	}
+	keep := make(map[string]bool, len(keepList))
+	for _, k := range keepList {
+		keep[filepath.ToSlash(k)] = true
+	}
+	// The current command set's .txt and the editable template are protected.
+	protected := map[string]bool{helpTemplateName: true}
+	for _, n := range hnodes {
+		protected[n.file] = true
+	}
+
+	dir := filepath.Join(lay.frameworkDir, filepath.FromSlash(hcfg.Dir))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read help dir %s: %w", dir, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".txt") || strings.HasSuffix(name, "_test.txt") {
+			continue
+		}
+		if protected[name] {
+			continue
+		}
+		rel := filepath.ToSlash(filepath.Join(hcfg.Dir, name))
+		if keep[rel] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("prune %s: %w", rel, err)
+		}
+	}
+	return nil
+}
+
 // resolveLayout turns the (defaulted) conf package settings into absolute
 // output directories, package names, and the framework import path.
 func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
-	fw := conf.Generate.Framework
-	cmd := conf.Generate.Cmd
+	rtg := conf.Generate.Rtg
+	rth := conf.Generate.Rth
 
-	fwPkgDir := filepath.ToSlash(fw.Package)
-	cmdPkgDir := filepath.ToSlash(cmd.Package)
-	if fwPkgDir == cmdPkgDir {
-		return layout{}, fmt.Errorf("generate.framework.package and generate.cmd.package must differ (both %q); the merged-package layout is not yet supported", fwPkgDir)
+	rtgPkgDir := filepath.ToSlash(rtg.Package)
+	rthPkgDir := filepath.ToSlash(rth.Package)
+	if rtgPkgDir == rthPkgDir {
+		return layout{}, fmt.Errorf("generate.rtg.package and generate.rth.package must differ (both %q); the merged-package layout is not yet supported", rtgPkgDir)
 	}
 
 	return layout{
-		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(fwPkgDir)),
-		frameworkPkgName: filepath.Base(fwPkgDir),
-		frameworkFile:    fw.GenFile,
-		frameworkImport:  moduleName + "/" + fwPkgDir,
+		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(rtgPkgDir)),
+		frameworkPkgName: filepath.Base(rtgPkgDir),
+		frameworkFile:    rtg.File,
+		frameworkImport:  moduleName + "/" + rtgPkgDir,
 
-		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
-		handlerPkgName: filepath.Base(cmdPkgDir),
-		rollupFile:     cmd.GenFile,
+		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(rthPkgDir)),
+		handlerPkgName: filepath.Base(rthPkgDir),
+		rollupFile:     rth.File,
 	}, nil
 }
 
@@ -551,28 +613,28 @@ func applyConfDefaults(conf *Conf) {
 	if conf.Generate == nil {
 		conf.Generate = &GenerateConfig{}
 	}
-	if conf.Generate.Framework == nil {
-		conf.Generate.Framework = &GenerateFrameworkConfig{}
+	if conf.Generate.Rtg == nil {
+		conf.Generate.Rtg = &GenerateRtgConfig{}
 	}
-	if conf.Generate.Cmd == nil {
-		conf.Generate.Cmd = &GenerateCmdConfig{}
+	if conf.Generate.Rth == nil {
+		conf.Generate.Rth = &GenerateRthConfig{}
 	}
-	fw := conf.Generate.Framework
-	if fw.Package == "" {
-		fw.Package = "rtg"
+	rtg := conf.Generate.Rtg
+	if rtg.Package == "" {
+		rtg.Package = "rtg"
 	}
-	if fw.GenFile == "" {
-		fw.GenFile = "rotini.go"
+	if rtg.File == "" {
+		rtg.File = "rotini.go"
 	}
-	cmd := conf.Generate.Cmd
-	if cmd.Package == "" {
-		cmd.Package = "rth"
+	rth := conf.Generate.Rth
+	if rth.Package == "" {
+		rth.Package = "rth"
 	}
-	if cmd.GenFile == "" {
-		cmd.GenFile = "handlers.go"
+	if rth.File == "" {
+		rth.File = "handlers.go"
 	}
-	if h := conf.Generate.Help; h != nil && h.Dir == "" {
-		h.Dir = "help"
+	if f := helpFeature(conf); f != nil && f.Dir == "" {
+		f.Dir = "help"
 	}
 }
 

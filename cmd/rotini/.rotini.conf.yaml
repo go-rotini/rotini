@@ -1,13 +1,11 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
-  cmd:
+  rth:
     package: cmd/rotini/rth
-    gen_file: handlers.go
-    prune:
-      enabled: true
-  framework:
+    file: handlers.go
+  rtg:
     package: cmd/rotini/rtg
-    gen_file: rotini.go
-    additional_imports: []
-  help:
-    enabled: true
+    file: rotini.go
+    features:
+      help:
+        enabled: true

@@ -11,6 +11,10 @@ import (
 	"text/template"
 )
 
+// helpTemplateName is the editable, seed-once help template file living in the
+// help feature's dir (the only user-owned file there). Pruning always keeps it.
+const helpTemplateName = "help.txt.tmpl"
+
 // helpNode is one command's help wiring: the embed var/resolver identity plus
 // everything needed to produce its .txt. One is produced per command (root +
 // every own and composed sub-command). The .txt is produced one of two ways,
@@ -432,7 +436,7 @@ func writeFileBytes(path, content string) error {
 // loadHelpTemplate reads the framework dir's help.txt.tmpl, seeding it from the
 // embedded default when missing, and parses it with the help FuncMap.
 func loadHelpTemplate(helpDir string) (*template.Template, error) {
-	path := filepath.Join(helpDir, "help.txt.tmpl")
+	path := filepath.Join(helpDir, helpTemplateName)
 	src, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		def, derr := templateFS.ReadFile("templates/help.txt.tmpl")

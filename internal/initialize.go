@@ -156,16 +156,17 @@ func scaffoldConf(name string) *Conf {
 	return &Conf{
 		Schema: confSchemaURL(),
 		Generate: &GenerateConfig{
-			Cmd: &GenerateCmdConfig{
+			Rth: &GenerateRthConfig{
 				Package: "cmd/" + name + "/rth",
-				GenFile: "handlers.go",
-				Prune:   &PruneConfig{Enabled: true},
+				File:    "handlers.go",
 			},
-			Framework: &GenerateFrameworkConfig{
+			Rtg: &GenerateRtgConfig{
 				Package: "cmd/" + name + "/rtg",
-				GenFile: "rotini.go",
+				File:    "rotini.go",
+				Features: &FeaturesConfig{
+					Help: &Feature{Enabled: true},
+				},
 			},
-			Help: &GenerateHelpConfig{Enabled: true},
 		},
 	}
 }

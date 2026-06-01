@@ -23,8 +23,8 @@ func TestInitialize_scaffoldsStandalone(t *testing.T) {
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli", "schema-spec.json")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"),
-		"package: cmd/mycli/rth", "gen_file: handlers.go",
-		"package: cmd/mycli/rtg", "gen_file: rotini.go", "schema-conf.json")
+		"package: cmd/mycli/rth", "file: handlers.go",
+		"package: cmd/mycli/rtg", "file: rotini.go", "schema-conf.json")
 	mustContain(t, filepath.Join(dir, "main.go"),
 		"//go:generate rotini generate",
 		`"example.com/myclis/cmd/mycli/rth"`, "rth.Program.Execute()")

@@ -22,92 +22,89 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "cmd": {
-          "$ref": "#/definitions/GenerateCmdConfig"
+        "rth": {
+          "$ref": "#/definitions/GenerateRthConfig"
         },
-        "framework": {
-          "$ref": "#/definitions/GenerateFrameworkConfig"
-        },
-        "help": {
-          "$ref": "#/definitions/GenerateHelpConfig"
+        "rtg": {
+          "$ref": "#/definitions/GenerateRtgConfig"
         }
       }
     },
-    "GenerateHelpConfig": {
+    "GenerateRthConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Controls generation of embedded, per-command help text.",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "When true, rotini produces a per-command help .txt for every command and embeds them in the framework package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the help template."
-        },
-        "dir": {
-          "type": "string",
-          "default": "help",
-          "description": "Subdirectory under the framework package where the per-command help .txt files (and the editable help.txt.tmpl) live and are embedded."
-        }
-      }
-    },
-    "GenerateCmdConfig": {
-      "type": "object",
-      "additionalProperties": false,
+      "description": "The rth (handler) package: the per-command handler stubs and the generated rollup. Stubs that no longer correspond to a command are pruned every pass (implicit/always-on); list package-relative paths under 'keep' to spare hand-written files.",
       "properties": {
         "package": {
           "type": "string",
-          "description": "Import path (relative to module root) for the command handler package. Package name is derived from the last path segment.",
-          "default": "internal/cli/cmd"
+          "description": "Import path (relative to module root) for the handler package. Package name is derived from the last path segment.",
+          "default": "rth"
         },
-        "gen_file": {
+        "file": {
           "type": "string",
-          "description": "Name of the framework-controlled gen file placed in the command handler package (e.g. 'handlers.gen.go'). Must end in .go.",
-          "default": "handlers.gen.go"
-        },
-        "prune": {
-          "$ref": "#/definitions/PruneConfig"
-        }
-      }
-    },
-    "PruneConfig": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Controls pruning of stub files in the command handler package.",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "When true, rotini removes stub files in the command handler package that no longer correspond to a command in the spec."
+          "description": "Name of the rotini-controlled rollup file placed in the handler package (e.g. 'handlers.go'). Must end in .go.",
+          "default": "handlers.go"
         },
         "keep": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "File names (not paths) that should never be removed by pruning, even when they do not correspond to a command in the spec."
+          "description": "Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. Intended to stay empty in steady state."
         }
       }
     },
-    "GenerateFrameworkConfig": {
+    "GenerateRtgConfig": {
       "type": "object",
       "additionalProperties": false,
+      "description": "The rtg (framework) package: the generated framework file plus any rendered feature outputs (help, and — later — man/markdown/completion). Orphaned rendered outputs are pruned every pass (implicit/always-on); list package-relative paths under 'keep' to spare files.",
       "properties": {
         "package": {
           "type": "string",
           "description": "Import path (relative to module root) for the framework package. Package name is derived from the last path segment.",
-          "default": "internal/cli/rotini"
+          "default": "rtg"
         },
-        "gen_file": {
+        "file": {
           "type": "string",
-          "description": "Name of the framework gen file placed in the framework package (e.g. 'rotini.gen.go'). Must end in .go.",
-          "default": "rotini.gen.go"
+          "description": "Name of the rotini-controlled framework file placed in the framework package (e.g. 'rotini.go'). Must end in .go.",
+          "default": "rotini.go"
         },
-        "additional_imports": {
+        "keep": {
           "type": "array",
-          "description": "Additional Go import paths included in the generated framework file. Use when input or output types reference third-party packages. Each entry is a package path (e.g., 'net/url') or an aliased import (e.g., 'myalias net/url').",
           "items": {
             "type": "string"
-          }
+          },
+          "description": "Package-relative paths (e.g. 'help/legacy.txt') that pruning must never remove. The editable per-feature template (e.g. 'help/help.txt.tmpl') and test files are always kept automatically. Intended to stay empty in steady state."
+        },
+        "features": {
+          "$ref": "#/definitions/FeaturesConfig"
+        }
+      }
+    },
+    "FeaturesConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Rendered/derived codegen features generated into the rtg package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the rtg file.",
+      "properties": {
+        "help": {
+          "$ref": "#/definitions/Feature",
+          "description": "Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the rtg package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir."
+        }
+      }
+    },
+    "Feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A rendered/derived codegen feature: a toggle plus the output subdirectory under the rtg package.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, rotini generates this feature's outputs into the rtg package and emits the embed vars + resolver. Opt-in only."
+        },
+        "dir": {
+          "type": "string",
+          "description": "Subdirectory under the rtg package where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Defaults to the feature name (e.g. 'help')."
         }
       }
     }

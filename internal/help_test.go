@@ -100,9 +100,8 @@ func TestGenerateHelpComposition(t *testing.T) {
 	helpConf := func(dir string) string {
 		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 			"generate:\n" +
-			"  cmd: { package: cmd/" + dir + "/rth, gen_file: handlers.go }\n" +
-			"  framework: { package: cmd/" + dir + "/rtg, gen_file: rotini.go }\n" +
-			"  help: { enabled: true }\n"
+			"  rth: { package: cmd/" + dir + "/rth, file: handlers.go }\n" +
+			"  rtg: { package: cmd/" + dir + "/rtg, file: rotini.go, features: { help: { enabled: true } } }\n"
 	}
 	parentSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
 		"command:\n" +

@@ -44,7 +44,7 @@ func TestConfRoundTrip(t *testing.T) {
 	want := &Conf{
 		Schema: "https://example.com/conf.json",
 		Generate: &GenerateConfig{
-			Cmd: &GenerateCmdConfig{Package: "internal/handlers", GenFile: "handlers.gen.go"},
+			Rth: &GenerateRthConfig{Package: "internal/handlers", File: "handlers.gen.go"},
 		},
 	}
 	for _, ext := range supportedExts {
@@ -66,7 +66,7 @@ func TestConfRoundTrip(t *testing.T) {
 
 // TestReadSpec_formatsAndTags reads hand-authored documents in each format
 // to confirm format detection and that the json struct tags ("$schema",
-// "gen_file") drive decoding across YAML/JSON/JSONC alike.
+// "command") drive decoding across YAML/JSON/JSONC alike.
 func TestReadSpec_formatsAndTags(t *testing.T) {
 	docs := map[string]string{
 		".yaml": "$schema: https://x/spec.json\ncommand:\n  name: demo\n  commands:\n    - name: sub\n",

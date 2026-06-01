@@ -16,14 +16,15 @@ import (
 // rotini companion CLI so the output can be compared against it.
 const companionConf = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
-  cmd:
+  rth:
     package: cmd/rotini/rth
-    gen_file: handlers.go
-  framework:
+    file: handlers.go
+  rtg:
     package: cmd/rotini/rtg
-    gen_file: rotini.go
-  help:
-    enabled: true
+    file: rotini.go
+    features:
+      help:
+        enabled: true
 `
 
 // minimalGoMod uses the same module path the committed handlers rollup imports,
@@ -105,9 +106,9 @@ func TestGenerateDefaultLayout(t *testing.T) {
 	mustContain(t, filepath.Join(tmp, "rth", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
 }
 
-// TestGeneratePrunesOrphanStubs verifies that, with prune enabled, a stub that
-// no longer maps to a command is removed while kept files survive and existing
-// command stubs are left untouched.
+// TestGeneratePrunesOrphanStubs verifies that pruning (implicit/always-on) drops
+// a stub that no longer maps to a command, while rth.keep files survive and
+// existing command stubs are left untouched.
 func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	repoRoot := repoRoot(t)
 	specPath := filepath.Join(repoRoot, "cmd", "rotini", ".rotini.spec.yaml")
@@ -120,7 +121,7 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	writeTestFile(t, orphan, "package rth\n")
 	writeTestFile(t, keep, "package rth\n")
 
-	conf := "generate:\n  cmd:\n    prune:\n      enabled: true\n      keep:\n        - help.go\n"
+	conf := "generate:\n  rth:\n    keep:\n      - help.go\n"
 	confPath := filepath.Join(tmp, ".rotini.conf.yaml")
 	writeTestFile(t, confPath, conf)
 
@@ -137,6 +138,47 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(handlersDir, "rotini_generate.go")); err != nil {
 		t.Errorf("current command stub missing: %v", err)
+	}
+}
+
+// helpKeepConf enables help and keeps one rtg feature-dir file by package-relative path.
+const helpKeepConf = "generate:\n  rtg:\n    keep:\n      - help/legacy.txt\n    features:\n      help:\n        enabled: true\n"
+
+// TestGeneratePrunesOrphanHelp verifies rtg pruning (implicit/always-on): a help
+// .txt for a command no longer in the spec is removed on regenerate, while the
+// editable template, current commands' .txt, and rtg.keep paths survive.
+func TestGeneratePrunesOrphanHelp(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), helpSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpKeepConf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("first Generate: %v", err)
+	}
+
+	helpDir := filepath.Join(tmp, "rtg", "help")
+	orphan := filepath.Join(helpDir, "mycli_obsolete.txt")
+	legacy := filepath.Join(helpDir, "legacy.txt")
+	writeTestFile(t, orphan, "stale\n")
+	writeTestFile(t, legacy, "kept\n")
+
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("second Generate: %v", err)
+	}
+
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("orphan help .txt was not pruned: %v", err)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Errorf("rtg.keep file was removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(helpDir, helpTemplateName)); err != nil {
+		t.Errorf("editable help template was removed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(helpDir, "mycli.txt")); err != nil {
+		t.Errorf("current command help .txt missing: %v", err)
 	}
 }
 
@@ -167,7 +209,7 @@ const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotin
 	"            schema:\n" +
 	"              type: bool\n"
 
-const helpEnabledConf = "generate:\n  help:\n    enabled: true\n"
+const helpEnabledConf = "generate:\n  rtg:\n    features:\n      help:\n        enabled: true\n"
 
 // TestGenerateHelpEnabled verifies that, with generate.help enabled, the
 // framework file gains the embedded Help<Prefix> vars + an alias-aware Help

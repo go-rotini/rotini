@@ -244,8 +244,8 @@ func childRthImport(childSpecPath, moduleRoot, moduleName string) (string, error
 			continue
 		}
 		cc, err := ReadConf(confPath)
-		if err == nil && cc.Generate != nil && cc.Generate.Cmd != nil && cc.Generate.Cmd.Package != "" {
-			return moduleName + "/" + filepath.ToSlash(cc.Generate.Cmd.Package), nil
+		if err == nil && cc.Generate != nil && cc.Generate.Rth != nil && cc.Generate.Rth.Package != "" {
+			return moduleName + "/" + filepath.ToSlash(cc.Generate.Rth.Package), nil
 		}
 	}
 	rel, err := filepath.Rel(moduleRoot, filepath.Join(childDir, "rth"))
