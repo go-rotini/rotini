@@ -13,7 +13,7 @@ type handlers struct{}
 
 var _ {{.FrameworkPkg}}.ProgramHandlers = (*handlers)(nil)
 
-var Program = {{.RotiniPkg}}.NewProgram({{.FrameworkPkg}}.Definition, &handlers{})
+var Program = {{.FrameworkPkg}}.NewProgram(&handlers{})
 
 func Handlers() {{.FrameworkPkg}}.ProgramHandlers {
 	return &handlers{}

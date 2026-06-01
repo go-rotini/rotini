@@ -219,6 +219,14 @@ type RotiniVersionInputs struct {
 	RotiniVersion RotiniVersionCommandInputs
 }
 
+// NewProgram builds the program from the generated Definition and the typed
+// ProgramHandlers, delegating to rotini.NewProgram (which takes the handlers
+// as an untyped value). Construct your program with this so the compiler verifies
+// your handlers satisfy ProgramHandlers.
+func NewProgram(handlers ProgramHandlers) *rotini.Program {
+	return rotini.NewProgram(Definition, handlers)
+}
+
 //go:embed help/rotini.txt
 var HelpRotini string
 

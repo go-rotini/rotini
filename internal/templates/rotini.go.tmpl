@@ -56,6 +56,14 @@ type {{.Prefix}}Inputs struct {
 {{- end}}
 }
 {{- end}}
+
+// NewProgram builds the program from the generated Definition and the typed
+// ProgramHandlers, delegating to {{.RotiniPkg}}.NewProgram (which takes the handlers
+// as an untyped value). Construct your program with this so the compiler verifies
+// your handlers satisfy ProgramHandlers.
+func NewProgram(handlers ProgramHandlers) *{{.RotiniPkg}}.Program {
+	return {{.RotiniPkg}}.NewProgram(Definition, handlers)
+}
 {{if .Help}}
 {{range .Help.Vars}}
 //go:embed {{.Embed}}

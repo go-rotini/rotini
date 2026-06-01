@@ -31,7 +31,7 @@ func TestInitialize_scaffoldsStandalone(t *testing.T) {
 	mustContain(t, filepath.Join(dir, "rtg", "rotini.go"),
 		"package rtg", "type ProgramHandlers interface", "var Definition")
 	mustContain(t, filepath.Join(dir, "rth", "handlers.go"),
-		"package rth", "rotini.NewProgram(rtg.Definition, &handlers{})")
+		"package rth", "var Program = rtg.NewProgram(&handlers{})")
 	mustContain(t, filepath.Join(dir, "rth", "mycli.go"), "type mycliHandlers struct{}")
 }
 

@@ -10,7 +10,7 @@ type handlers struct{}
 
 var _ rtg.ProgramHandlers = (*handlers)(nil)
 
-var Program = rotini.NewProgram(rtg.Definition, &handlers{})
+var Program = rtg.NewProgram(&handlers{})
 
 func Handlers() rtg.ProgramHandlers {
 	return &handlers{}
