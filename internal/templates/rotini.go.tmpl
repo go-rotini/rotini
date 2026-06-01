@@ -5,7 +5,7 @@ import (
 {{- range .StdImports}}
 	"{{.}}"
 {{- end}}
-{{- if .Help}}
+{{- if .Features}}
 	_ "embed"
 	"fmt"
 	"strings"
@@ -64,22 +64,22 @@ type {{.Prefix}}Inputs struct {
 func NewProgram(handlers ProgramHandlers) *{{.RotiniPkg}}.Program {
 	return {{.RotiniPkg}}.NewProgram(Definition, handlers)
 }
-{{if .Help}}
-{{range .Help.Vars}}
+{{range .Features}}
+{{range .Vars}}
 //go:embed {{.Embed}}
 var {{.Name}} string
 {{end}}
-// Help returns the generated help text for the command identified by path
+// {{.Resolver}} returns the generated {{.Noun}} text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
 // error when path does not match a known command.
-func Help(path ...string) (string, error) {
+func {{.Resolver}}(path ...string) (string, error) {
 	switch strings.Join(path, " ") {
-{{- range .Help.Cases}}
+{{- range .Cases}}
 	case {{.PathsLiteral}}:
 		return {{.Var}}, nil
 {{- end}}
 	default:
-		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
+		return "", fmt.Errorf("no {{.Noun}} for command %q", strings.Join(path, " "))
 	}
 }
 {{- end}}

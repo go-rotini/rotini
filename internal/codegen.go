@@ -23,7 +23,7 @@ const (
 	rotiniPkgName    = "rotini"
 )
 
-//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.txt.tmpl
+//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.txt.tmpl templates/man.txt.tmpl templates/markdown.md.tmpl
 var templateFS embed.FS
 
 // fieldDef is one generated struct field: a Go identifier, its type, and its
@@ -89,24 +89,24 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		return err
 	}
 
-	// When the help feature is enabled, the framework file gains embedded
-	// "Help<Prefix>" vars + a Help(path…) resolver, and each command's help .txt is
-	// (re)written under the rtg package's help dir — rendered from the command's
-	// doc-fields, or written verbatim when the command sets a `help` string.
-	hcfg := helpFeature(conf)
-	helpOn := hcfg != nil && hcfg.Enabled
-	var hnodes []helpNode
-	var hf *helpFramework
-	if helpOn {
-		hnodes = flattenHelp(gp)
-		hf = buildHelpFramework(hnodes, hcfg.Dir)
+	// For each enabled doc feature (help/man/markdown), the framework file gains
+	// embedded "<Prefix>" vars + a resolver, and each command's page is (re)written
+	// under that feature's rtg dir — rendered from the command's doc-fields, or
+	// written verbatim when the command sets the feature's spec string.
+	feats := enabledFeatures(conf)
+	frameworks := make([]*helpFramework, 0, len(feats))
+	outputs := make([]featureOutput, 0, len(feats))
+	for _, f := range feats {
+		nodes := flattenFeature(gp, f.desc)
+		frameworks = append(frameworks, buildFeatureFramework(nodes, f.cfg.Dir, f.desc))
+		outputs = append(outputs, featureOutput{desc: f.desc, dir: f.cfg.Dir, nodes: nodes})
 	}
 
-	if err := writeFrameworkFile(gp, lay, hf); err != nil {
+	if err := writeFrameworkFile(gp, lay, frameworks); err != nil {
 		return err
 	}
-	if helpOn {
-		if err := writeHelpFiles(lay, hcfg.Dir, hnodes); err != nil {
+	for _, o := range outputs {
+		if err := writeFeatureFiles(lay, o.dir, o.nodes, o.desc); err != nil {
 			return err
 		}
 	}
@@ -122,19 +122,49 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	if err := pruneStubs(gp, lay, conf.Generate.Rth.Keep); err != nil {
 		return err
 	}
-	if err := pruneRtg(lay, conf.Generate.Rtg.Keep, hcfg, hnodes); err != nil {
+	if err := pruneRtg(lay, conf.Generate.Rtg.Keep, outputs); err != nil {
 		return err
 	}
 	return nil
 }
 
-// helpFeature returns the configured help feature, or nil when help generation
-// is not configured. Safe to call before applyConfDefaults.
-func helpFeature(conf *Conf) *Feature {
-	if conf.Generate == nil || conf.Generate.Rtg == nil || conf.Generate.Rtg.Features == nil {
+// confFeature pairs a doc-feature descriptor with its conf entry.
+type confFeature struct {
+	desc docFeature
+	cfg  *Feature
+}
+
+// featureOutput is one enabled feature's resolved dir + per-command nodes, used
+// for writing and pruning its rtg output dir.
+type featureOutput struct {
+	desc  docFeature
+	dir   string
+	nodes []helpNode
+}
+
+// featureConfigs pairs every doc feature with its conf entry (nil when unset).
+// Requires conf.Generate.Rtg to be non-nil (guaranteed after applyConfDefaults).
+func featureConfigs(conf *Conf) []confFeature {
+	feats := conf.Generate.Rtg.Features
+	if feats == nil {
 		return nil
 	}
-	return conf.Generate.Rtg.Features.Help
+	return []confFeature{
+		{helpFeatureDesc, feats.Help},
+		{manFeatureDesc, feats.Man},
+		{markdownFeatureDesc, feats.Markdown},
+	}
+}
+
+// enabledFeatures returns the doc features toggled on, in help→man→markdown order.
+func enabledFeatures(conf *Conf) []confFeature {
+	var out []confFeature
+	for _, f := range featureConfigs(conf) {
+		if f.cfg != nil && f.cfg.Enabled {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // methods returns the ProgramHandlers method names: the root, then every own
@@ -391,7 +421,7 @@ func defaultString(v any) string {
 // aggregate interface plus the typed input structs for every command. It is
 // always (over)written — it is fully generated and carries a DO NOT EDIT
 // banner.
-func writeFrameworkFile(gp *genProgram, lay layout, help *helpFramework) error {
+func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) error {
 	own := append([]genCommand{gp.root}, gp.own...)
 
 	blocks := make([]inputBlock, 0, len(own))
@@ -420,7 +450,7 @@ func writeFrameworkFile(gp *genProgram, lay layout, help *helpFramework) error {
 		"Blocks":       blocks,
 		"Definition":   renderDefinition(gp),
 		"Metadata":     gp.metadata,
-		"Help":         help,
+		"Features":     features,
 	}
 	content, err := renderGo("framework", "templates/rotini.go.tmpl", data)
 	if err != nil {
@@ -535,47 +565,46 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	return nil
 }
 
-// pruneRtg removes orphaned rotini-managed outputs in the rtg package's feature
-// dirs — currently the per-command help .txt for commands no longer in the spec.
-// The editable per-feature template, test files, and any keep-listed
-// (package-relative) path are preserved. Top-level rtg files (the gen file) are
-// never auto-removed. keepList entries are package-relative to the rtg package.
-func pruneRtg(lay layout, keepList []string, hcfg *Feature, hnodes []helpNode) error {
-	if hcfg == nil || !hcfg.Enabled {
-		return nil
-	}
+// pruneRtg removes orphaned rotini-managed outputs in each enabled feature's rtg
+// dir — the per-command pages (matching the feature's extension) for commands no
+// longer in the spec. The editable per-feature template, test files, and any
+// keep-listed (package-relative) path are preserved. Top-level rtg files (the gen
+// file) are never auto-removed. keepList entries are package-relative to rtg.
+func pruneRtg(lay layout, keepList []string, outputs []featureOutput) error {
 	keep := make(map[string]bool, len(keepList))
 	for _, k := range keepList {
 		keep[filepath.ToSlash(k)] = true
 	}
-	// The current command set's .txt and the editable template are protected.
-	protected := map[string]bool{helpTemplateName: true}
-	for _, n := range hnodes {
-		protected[n.file] = true
-	}
+	for _, o := range outputs {
+		// The current command set's pages and the editable template are protected.
+		protected := map[string]bool{o.desc.tmplFile: true}
+		for _, n := range o.nodes {
+			protected[n.file] = true
+		}
 
-	dir := filepath.Join(lay.frameworkDir, filepath.FromSlash(hcfg.Dir))
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
+		dir := filepath.Join(lay.frameworkDir, filepath.FromSlash(o.dir))
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("read %s dir %s: %w", o.desc.name, dir, err)
 		}
-		return fmt.Errorf("read help dir %s: %w", dir, err)
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".txt") || strings.HasSuffix(name, "_test.txt") {
-			continue
-		}
-		if protected[name] {
-			continue
-		}
-		rel := filepath.ToSlash(filepath.Join(hcfg.Dir, name))
-		if keep[rel] {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil {
-			return fmt.Errorf("prune %s: %w", rel, err)
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
+				continue
+			}
+			if protected[name] {
+				continue
+			}
+			rel := filepath.ToSlash(filepath.Join(o.dir, name))
+			if keep[rel] {
+				continue
+			}
+			if err := os.Remove(filepath.Join(dir, name)); err != nil {
+				return fmt.Errorf("prune %s: %w", rel, err)
+			}
 		}
 	}
 	return nil
@@ -633,8 +662,11 @@ func applyConfDefaults(conf *Conf) {
 	if rth.File == "" {
 		rth.File = "handlers.go"
 	}
-	if f := helpFeature(conf); f != nil && f.Dir == "" {
-		f.Dir = "help"
+	// Each present feature defaults its output dir to the feature name.
+	for _, f := range featureConfigs(conf) {
+		if f.cfg != nil && f.cfg.Dir == "" {
+			f.cfg.Dir = f.desc.name
+		}
 	}
 }
 

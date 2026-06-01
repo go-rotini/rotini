@@ -1,0 +1,23 @@
+# rotini version
+
+print version
+
+Print the rotini cli version.
+
+## Usage
+
+```
+rotini version [flags]
+```
+
+## Flags
+
+- `-h, --help` — print help
+
+## Examples
+
+```
+rotini version
+```
+
+Use "rotini help <command>" for more information about a command.

@@ -1,0 +1,30 @@
+# rotini completion
+
+print shell completion
+
+Print shell completion scripts.
+
+## Usage
+
+```
+rotini completion [shell] [flags]
+```
+
+## Arguments
+
+- `[shell]` — the shell to generate completions for [zsh|bash|fish|powershell|nushell|elvish]
+
+## Flags
+
+- `-h, --help` — print help
+
+## Examples
+
+```
+rotini completion bash
+rotini completion zsh >> ~/.zshrc (eval "$(rotini completion zsh)")
+rotini completion fish > ~/.config/fish/completions/rotini.fish
+rotini completion powershell | Out-String | Invoke-Expression
+rotini completion nushell | save -f ~/.config/nushell/rotini.nu
+rotini completion elvish | save -f ~/.config/elvish/lib/rotini.elv
+```

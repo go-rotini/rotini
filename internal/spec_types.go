@@ -80,6 +80,10 @@ type Command struct {
 	Hidden bool `json:"hidden,omitempty"`
 	// Typed inputs for this command: flags, arguments, config values, env variables, and stdin.
 	Inputs *Inputs `json:"inputs,omitempty"`
+	// Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template.
+	Man string `json:"man,omitempty"`
+	// Exact, verbatim markdown page for this command (the markdown feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the markdown page; when unset, the markdown page is rendered from those fields through the markdown template.
+	Markdown string `json:"markdown,omitempty"`
 	// Command name used in routing. As the root command (the top-level 'command') this is the binary name and must be set — the root cannot use '$ref'.
 	Name string `json:"name,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.

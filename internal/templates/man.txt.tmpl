@@ -1,0 +1,44 @@
+{{- /* rotini man-page template (default — edit freely; the man flavor is yours,
+       e.g. plain/roff/mdoc). Renders the SAME per-command doc-data as help (see
+       helpData) in a plain man-style layout. COLUMNS use a single tab (rotini
+       aligns each contiguous tabbed block via tabwriter). After rendering, rotini
+       trims trailing whitespace, collapses blank-line runs, and drops the trailing
+       newline — so you don't fight template whitespace for clean output.
+
+       DATA (see helpData): .Header .Summary .Description .Footer .Invocation
+         .Usage/.UsageDerived .Commands[] .Arguments[] .Flags[] .Examples[]
+       HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
+                indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
+{{- with .Header}}{{.}}
+
+{{end -}}
+NAME
+{{if .Summary}}{{indent 4 (printf "%s - %s" .Invocation .Summary)}}{{else}}{{indent 4 .Invocation}}{{end}}
+
+{{$usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}
+{{- with $usage}}SYNOPSIS
+{{indent 4 .}}
+
+{{end -}}
+{{- with .Description}}DESCRIPTION
+{{indent 4 .}}
+
+{{end -}}
+{{- with .Commands}}COMMANDS
+{{range .}}    {{.Name}}{{with .Aliases}};{{join . ";"}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Arguments}}ARGUMENTS
+{{range .}}    {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Flags}}OPTIONS
+{{range .}}    {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Examples}}EXAMPLES
+{{range .}}    {{.}}
+{{end}}
+{{end -}}
+{{- with .Footer}}{{.}}
+{{end -}}

@@ -25,6 +25,10 @@ generate:
     features:
       help:
         enabled: true
+      man:
+        enabled: true
+      markdown:
+        enabled: true
 `
 
 // minimalGoMod uses the same module path the committed handlers rollup imports,
@@ -56,21 +60,24 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 		assertGoEqual(t, filepath.Join(tmp, rel), filepath.Join(repoRoot, rel))
 	}
 
-	// The companion's generated help files (and the seeded template) are golden:
-	// the dogfooded output is reproduced byte-for-byte from the committed spec.
-	helpRel := "cmd/rotini/rtg/help"
-	entries, err := os.ReadDir(filepath.Join(repoRoot, helpRel))
-	if err != nil {
-		t.Fatalf("read companion help dir: %v", err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
+	// The companion's generated feature files (help/man/markdown, plus the seeded
+	// templates) are golden: the dogfooded output is reproduced byte-for-byte from
+	// the committed spec.
+	for _, feat := range []string{"help", "man", "markdown"} {
+		featRel := "cmd/rotini/rtg/" + feat
+		entries, err := os.ReadDir(filepath.Join(repoRoot, featRel))
+		if err != nil {
+			t.Fatalf("read companion %s dir: %v", feat, err)
 		}
-		got := readFileString(t, filepath.Join(tmp, helpRel, e.Name()))
-		want := readFileString(t, filepath.Join(repoRoot, helpRel, e.Name()))
-		if got != want {
-			t.Errorf("companion help %s not reproduced:\n--- generated ---\n%s\n--- committed ---\n%s", e.Name(), got, want)
+		for _, e := range entries {
+			if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			got := readFileString(t, filepath.Join(tmp, featRel, e.Name()))
+			want := readFileString(t, filepath.Join(repoRoot, featRel, e.Name()))
+			if got != want {
+				t.Errorf("companion %s/%s not reproduced:\n--- generated ---\n%s\n--- committed ---\n%s", feat, e.Name(), got, want)
+			}
 		}
 	}
 
@@ -310,6 +317,82 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 	}
 	mustContain(t, build, "mycli build <target> [flags]")
 	mustNotContain(t, build, "hand-written help for build")
+}
+
+// manMarkdownConf enables man + markdown (but not help).
+const manMarkdownConf = "generate:\n  rtg:\n    features:\n      man:\n        enabled: true\n      markdown:\n        enabled: true\n"
+
+// TestGenerateManMarkdownEnabled verifies the help pipeline generalizes: with man
+// and markdown enabled, the framework gains per-feature embed vars + alias-aware
+// resolvers, each feature renders into its own dir with its own extension and
+// seeded template, and a disabled feature (help) produces nothing.
+func TestGenerateManMarkdownEnabled(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), helpSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manMarkdownConf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	mustContain(t, filepath.Join(tmp, "rtg", "rotini.go"),
+		`_ "embed"`,
+		"//go:embed man/mycli.txt", "var ManMycli string", "var ManMycliBuild string",
+		"func Man(path ...string) (string, error)",
+		"//go:embed markdown/mycli.md", "var MarkdownMycli string", "var MarkdownMycliBuild string",
+		"func Markdown(path ...string) (string, error)",
+		`case "build", "b":`,
+	)
+	// Help was not enabled — no Help resolver, no help dir.
+	mustNotContain(t, filepath.Join(tmp, "rtg", "rotini.go"), "func Help(")
+	if _, err := os.Stat(filepath.Join(tmp, "rtg", "help")); !os.IsNotExist(err) {
+		t.Errorf("help dir should not exist when help is off (err=%v)", err)
+	}
+
+	for _, p := range []string{
+		"rtg/man/man.txt.tmpl", "rtg/man/mycli.txt", "rtg/man/mycli_build.txt",
+		"rtg/markdown/markdown.md.tmpl", "rtg/markdown/mycli.md", "rtg/markdown/mycli_build.md",
+	} {
+		if _, err := os.Stat(filepath.Join(tmp, filepath.FromSlash(p))); err != nil {
+			t.Errorf("expected generated %s: %v", p, err)
+		}
+	}
+}
+
+// TestGenerateManMarkdownVerbatim verifies the per-command verbatim escapes: a
+// command's `man` / `markdown` strings are written byte-for-byte (no template
+// seeded when nothing renders), exactly like help's verbatim `help` string.
+func TestGenerateManMarkdownVerbatim(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manMarkdownConf)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"command:\n"+
+			"  name: mycli\n"+
+			"  man: |-\n"+
+			"    MYCLI(1)\n"+
+			"    exact man page\n"+
+			"  markdown: |-\n"+
+			"    # mycli\n"+
+			"    exact markdown page\n")
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	mustFileEqual(t, filepath.Join(tmp, "rtg", "man", "mycli.txt"), "MYCLI(1)\nexact man page")
+	mustFileEqual(t, filepath.Join(tmp, "rtg", "markdown", "mycli.md"), "# mycli\nexact markdown page")
+
+	// Nothing renders (root supplies verbatim, no sub-commands) → no templates seeded.
+	for _, p := range []string{"rtg/man/man.txt.tmpl", "rtg/markdown/markdown.md.tmpl"} {
+		if _, err := os.Stat(filepath.Join(tmp, filepath.FromSlash(p))); !os.IsNotExist(err) {
+			t.Errorf("%s should not be seeded when no command renders (err=%v)", p, err)
+		}
+	}
 }
 
 // TestGenerateHelpVerbatim verifies that a populated `help` string is written

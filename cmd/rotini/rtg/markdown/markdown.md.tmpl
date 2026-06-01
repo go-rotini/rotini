@@ -1,0 +1,54 @@
+{{- /* rotini markdown template (default — edit freely). Renders the SAME
+       per-command doc-data as help (see helpData) as Markdown, for a docs site or
+       `--docs` dump. Use Markdown syntax, NOT tabs — rotini's column aligner only
+       touches tab-separated text, so this template stays tab-free. After rendering,
+       rotini trims trailing whitespace, collapses blank-line runs, and drops the
+       trailing newline.
+
+       DATA (see helpData): .Header .Summary .Description .Footer .Invocation
+         .Usage/.UsageDerived .Commands[] .Arguments[] .Flags[] .Examples[]
+       HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
+                indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
+# {{.Invocation}}
+{{with .Summary}}
+{{.}}
+{{end -}}
+{{- with .Description}}
+{{.}}
+{{end -}}
+{{- $usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}
+{{- with $usage}}
+## Usage
+
+```
+{{.}}
+```
+{{end -}}
+{{- with .Commands}}
+## Commands
+
+{{range .}}- `{{.Name}}`{{with .Aliases}} ({{join . ", "}}){{end}}{{with .Summary}} — {{.}}{{end}}{{with .Deprecated}} _(deprecated: {{.}})_{{end}}
+{{end}}
+{{end -}}
+{{- with .Arguments}}
+## Arguments
+
+{{range .}}- `{{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}`{{with .Summary}} — {{.}}{{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} _(deprecated: {{.}})_{{end}}
+{{end}}
+{{end -}}
+{{- with .Flags}}
+## Flags
+
+{{range .}}- `{{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}`{{with .Summary}} — {{.}}{{end}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} _(deprecated: {{.}})_{{end}}
+{{end}}
+{{end -}}
+{{- with .Examples}}
+## Examples
+
+```
+{{range .}}{{.}}
+{{end}}```
+{{end -}}
+{{- with .Footer}}
+{{.}}
+{{end -}}

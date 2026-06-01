@@ -21,6 +21,10 @@ type Feature struct {
 type FeaturesConfig struct {
 	// Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the rtg package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir.
 	Help *Feature `json:"help,omitempty"`
+	// Embedded, per-command man pages. Same render-or-verbatim contract as help: each command's .txt is rendered from its doc-fields through the editable man template in the feature's dir, or written verbatim when the command sets a 'man' string in the spec. Emits 'Man<Prefix>' vars plus a 'Man(path ...string) (string, error)' resolver.
+	Man *Feature `json:"man,omitempty"`
+	// Embedded, per-command markdown pages (e.g. for a docs site). Same render-or-verbatim contract as help, via the editable markdown template in the feature's dir or a command's verbatim 'markdown' string. Emits 'Markdown<Prefix>' vars plus a 'Markdown(path ...string) (string, error)' resolver.
+	Markdown *Feature `json:"markdown,omitempty"`
 }
 
 type GenerateConfig struct {

@@ -1,0 +1,30 @@
+# rotini generate
+
+generate a cli program
+
+Generate a cli program from a rotini spec file.
+
+## Usage
+
+```
+rotini generate [spec_file_path] [flags]
+```
+
+## Arguments
+
+- `[spec_file_path]` — path to the spec file (default `.rotini.spec.yaml`)
+
+## Flags
+
+- `-c, --config string` — path to the rotini conf file
+- `--watch, -w` — watch a rotini spec file for changes and re-generate
+- `-h, --help` — print help
+
+## Examples
+
+```
+rotini generate
+rotini generate ./path/to/.rotini.json --watch
+```
+
+Use "rotini help <command>" for more information about a command.

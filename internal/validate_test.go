@@ -104,6 +104,21 @@ func TestValidate_verbatimHelpString(t *testing.T) {
 	}
 }
 
+func TestValidate_manMarkdownFields(t *testing.T) {
+	// Spec: verbatim man/markdown strings on a command validate (mirror of help).
+	spec := validSpecHeader + "command:\n  name: demo\n  man: |\n    DEMO(1)\n  markdown: |\n    # demo\n"
+	if err := Validate(writeTemp(t, "spec.yaml", spec), ""); err != nil {
+		t.Errorf("Validate(spec with man/markdown) = %v, want nil", err)
+	}
+
+	// Conf: features.man / features.markdown validate.
+	plainSpec := writeTemp(t, "spec2.yaml", validSpecHeader+"command:\n  name: demo\n")
+	conf := validConfHeader + "generate:\n  rtg:\n    features:\n      man: { enabled: true }\n      markdown: { enabled: true, dir: docs }\n"
+	if err := Validate(plainSpec, writeTemp(t, "conf.yaml", conf)); err != nil {
+		t.Errorf("Validate(conf with man/markdown features) = %v, want nil", err)
+	}
+}
+
 func TestValidate_badSchemaURL(t *testing.T) {
 	path := writeTemp(t, "spec.yaml", "$schema: https://example.com/wrong\ncommand:\n  name: demo\n")
 	if err := Validate(path, ""); err == nil {

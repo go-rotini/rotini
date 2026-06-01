@@ -1,0 +1,20 @@
+NAME
+    rotini validate - validate a spec file
+
+SYNOPSIS
+    rotini validate [file] [flags]
+
+DESCRIPTION
+    Validate a rotini spec file for correctness.
+
+ARGUMENTS
+    [file]    path to the spec file (default .rotini.spec.yaml)
+
+OPTIONS
+    -h,--help    print help
+
+EXAMPLES
+    rotini validate
+    rotini val ./path/to/.rotini.yaml
+
+Use "rotini help <command>" for more information about a command.

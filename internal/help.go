@@ -15,6 +15,39 @@ import (
 // help feature's dir (the only user-owned file there). Pruning always keeps it.
 const helpTemplateName = "help.txt.tmpl"
 
+// docFeature describes one doc-rendered codegen feature (help, man, markdown).
+// All three share the doc-data pipeline (buildHelpData → renderHelpText) and
+// differ only in their file extension, embed-var/resolver names, the editable
+// template, and which per-command verbatim spec string escapes the render.
+type docFeature struct {
+	name      string               // feature key + default dir, e.g. "help"
+	noun      string               // word used in the resolver doc comment / error, e.g. "help"
+	varPrefix string               // embed-var prefix, e.g. "Help" → HelpRotiniGenerate
+	resolver  string               // resolver func name, e.g. "Help"
+	ext       string               // output file extension, e.g. ".txt" / ".md"
+	tmplFile  string               // editable template file name in the feature dir
+	embedTmpl string               // embedded default template path under templates/
+	verbatim  func(cmdHelp) string // the per-command verbatim escape for this feature
+}
+
+var (
+	helpFeatureDesc = docFeature{
+		name: "help", noun: "help", varPrefix: "Help", resolver: "Help",
+		ext: ".txt", tmplFile: helpTemplateName, embedTmpl: "templates/help.txt.tmpl",
+		verbatim: func(h cmdHelp) string { return h.Help },
+	}
+	manFeatureDesc = docFeature{
+		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
+		ext: ".txt", tmplFile: "man.txt.tmpl", embedTmpl: "templates/man.txt.tmpl",
+		verbatim: func(h cmdHelp) string { return h.Man },
+	}
+	markdownFeatureDesc = docFeature{
+		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
+		ext: ".md", tmplFile: "markdown.md.tmpl", embedTmpl: "templates/markdown.md.tmpl",
+		verbatim: func(h cmdHelp) string { return h.Markdown },
+	}
+)
+
 // helpNode is one command's help wiring: the embed var/resolver identity plus
 // everything needed to produce its .txt. One is produced per command (root +
 // every own and composed sub-command). The .txt is produced one of two ways,
@@ -91,8 +124,10 @@ type helpCase struct {
 }
 
 type helpFramework struct {
-	Vars  []helpVar
-	Cases []helpCase
+	Resolver string // resolver func name, e.g. "Help"/"Man"/"Markdown"
+	Noun     string // word used in the doc comment + error, e.g. "help"
+	Vars     []helpVar
+	Cases    []helpCase
 }
 
 // cmdHelp bundles a command's resolved help-presentation fields, which live
@@ -106,28 +141,32 @@ type cmdHelp struct {
 	Footer      string
 	Headings    *HelpHeadings
 	Examples    []string
-	Help        string // verbatim page (command.help / spec.help)
+	Help        string // verbatim help page (command.help)
+	Man         string // verbatim man page (command.man)
+	Markdown    string // verbatim markdown page (command.markdown)
 }
 
-// commandHelp gathers the flattened help fields off a sub-command.
+// commandHelp gathers the flattened doc-fields off a command (root or sub).
 func commandHelp(c Command) cmdHelp {
 	return cmdHelp{
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
-		Examples: c.Examples, Help: c.Help,
+		Examples: c.Examples, Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 	}
 }
 
-// flattenHelp produces a help node per command for the whole resolved tree: the
-// root first, then every sub-command in tree order. Each node carries its verbatim
-// help (when set) and its built helpData (used when no verbatim help is given).
-func flattenHelp(gp *genProgram) []helpNode {
+// flattenFeature produces a node per command for one doc feature across the whole
+// resolved tree: the root first, then every sub-command in tree order. Each node
+// carries its verbatim page (the feature's spec escape, when set) and its built
+// helpData (the shared doc-data, used when no verbatim page is given). The file
+// extension is the feature's; the doc-data is identical across features.
+func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 	out := []helpNode{{
 		prefix:   gp.rootPascal,
-		file:     gp.rootName + ".txt",
+		file:     gp.rootName + feat.ext,
 		paths:    []string{""},
 		name:     gp.rootName,
-		verbatim: gp.rootHelp.Help,
+		verbatim: feat.verbatim(gp.rootHelp),
 		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree),
 	}}
 
@@ -140,10 +179,10 @@ func flattenHelp(gp *genProgram) []helpNode {
 			invocation := gp.rootName + " " + strings.Join(childNames, " ")
 			out = append(out, helpNode{
 				prefix:   n.prefix,
-				file:     gp.rootName + "_" + strings.Join(childNames, "_") + ".txt",
+				file:     gp.rootName + "_" + strings.Join(childNames, "_") + feat.ext,
 				paths:    permute(childChain),
 				name:     invocation,
-				verbatim: n.help.Help,
+				verbatim: feat.verbatim(n.help),
 				data:     buildHelpData(invocation, n.help, n.inputs, n.children),
 			})
 			walk(n.children, childChain, childNames)
@@ -347,12 +386,12 @@ func permute(chain [][]string) []string {
 	return out
 }
 
-// buildHelpFramework turns the help nodes into the embed vars + resolver cases
-// the framework template emits.
-func buildHelpFramework(hnodes []helpNode, dir string) *helpFramework {
-	h := &helpFramework{}
-	for _, hn := range hnodes {
-		name := "Help" + hn.prefix
+// buildFeatureFramework turns a feature's nodes into the embed vars + resolver
+// cases the framework template emits (one resolver per feature).
+func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) *helpFramework {
+	h := &helpFramework{Resolver: feat.resolver, Noun: feat.noun}
+	for _, hn := range nodes {
+		name := feat.varPrefix + hn.prefix
 		h.Vars = append(h.Vars, helpVar{Name: name, Embed: dir + "/" + hn.file})
 		quoted := make([]string, len(hn.paths))
 		for i, p := range hn.paths {
@@ -363,24 +402,24 @@ func buildHelpFramework(hnodes []helpNode, dir string) *helpFramework {
 	return h
 }
 
-// writeHelpFiles produces each command's help .txt under the help dir in the
-// framework package. When the command's verbatim `help` string is set, that string
-// is written byte-exact (only a single trailing newline is normalized); otherwise
-// the page is rendered from the structured fields via the template. Either way the
-// .txt is rotini-managed — (re)written every pass, skipped when already identical —
-// like rotini.go and handlers.go. The help template is loaded (seeding the editable
+// writeFeatureFiles produces each command's rendered page for one feature under
+// its dir in the framework package. When the command's verbatim spec string for
+// the feature is set, that string is written byte-exact; otherwise the page is
+// rendered from the shared doc-data via the feature's template. Either way the
+// file is rotini-managed — (re)written every pass, skipped when already identical —
+// like rotini.go and handlers.go. The template is loaded (seeding the editable
 // default when missing) only when at least one command renders.
-func writeHelpFiles(lay layout, dir string, hnodes []helpNode) error {
+func writeFeatureFiles(lay layout, dir string, nodes []helpNode, feat docFeature) error {
 	if dir == "" {
-		return fmt.Errorf("generate.help.dir must not be empty")
+		return fmt.Errorf("generate.rtg.features.%s.dir must not be empty", feat.name)
 	}
-	helpDir := filepath.Join(lay.frameworkDir, filepath.FromSlash(dir))
-	if err := os.MkdirAll(helpDir, 0o755); err != nil {
-		return fmt.Errorf("create help dir %s: %w", helpDir, err)
+	featDir := filepath.Join(lay.frameworkDir, filepath.FromSlash(dir))
+	if err := os.MkdirAll(featDir, 0o755); err != nil {
+		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
 	}
 
 	renders := false
-	for _, hn := range hnodes {
+	for _, hn := range nodes {
 		if hn.verbatim == "" {
 			renders = true
 			break
@@ -389,29 +428,29 @@ func writeHelpFiles(lay layout, dir string, hnodes []helpNode) error {
 
 	var tmpl *template.Template
 	if renders {
-		t, err := loadHelpTemplate(helpDir)
+		t, err := loadFeatureTemplate(featDir, feat)
 		if err != nil {
 			return err
 		}
 		tmpl = t
 	}
 
-	for _, hn := range hnodes {
-		path := filepath.Join(helpDir, hn.file)
+	for _, hn := range nodes {
+		path := filepath.Join(featDir, hn.file)
 		if hn.verbatim != "" {
 			// Verbatim: write exactly what the spec supplied — byte-for-byte, no
 			// trailing-newline normalization (the author controls it via YAML).
 			if err := writeIfChanged(path, hn.verbatim); err != nil {
-				return fmt.Errorf("write help %s: %w", hn.file, err)
+				return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
 			}
 			continue
 		}
 		rendered, err := renderHelpText(tmpl, hn.data)
 		if err != nil {
-			return fmt.Errorf("render help for %q: %w", hn.name, err)
+			return fmt.Errorf("render %s for %q: %w", feat.name, hn.name, err)
 		}
 		if err := writeIfChanged(path, rendered); err != nil {
-			return fmt.Errorf("write help %s: %w", hn.file, err)
+			return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
 		}
 	}
 	return nil
@@ -433,26 +472,26 @@ func writeFileBytes(path, content string) error {
 	return nil
 }
 
-// loadHelpTemplate reads the framework dir's help.txt.tmpl, seeding it from the
-// embedded default when missing, and parses it with the help FuncMap.
-func loadHelpTemplate(helpDir string) (*template.Template, error) {
-	path := filepath.Join(helpDir, helpTemplateName)
+// loadFeatureTemplate reads the feature dir's editable template, seeding it from
+// the embedded default when missing, and parses it with the shared FuncMap.
+func loadFeatureTemplate(featDir string, feat docFeature) (*template.Template, error) {
+	path := filepath.Join(featDir, feat.tmplFile)
 	src, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		def, derr := templateFS.ReadFile("templates/help.txt.tmpl")
+		def, derr := templateFS.ReadFile(feat.embedTmpl)
 		if derr != nil {
-			return nil, fmt.Errorf("read embedded default help template: %w", derr)
+			return nil, fmt.Errorf("read embedded default %s template: %w", feat.name, derr)
 		}
 		if werr := os.WriteFile(path, def, 0o644); werr != nil {
-			return nil, fmt.Errorf("seed help template %s: %w", path, werr)
+			return nil, fmt.Errorf("seed %s template %s: %w", feat.name, path, werr)
 		}
 		src = def
 	} else if err != nil {
-		return nil, fmt.Errorf("read help template %s: %w", path, err)
+		return nil, fmt.Errorf("read %s template %s: %w", feat.name, path, err)
 	}
-	tmpl, err := template.New("help.txt.tmpl").Funcs(helpFuncMap()).Parse(string(src))
+	tmpl, err := template.New(feat.tmplFile).Funcs(helpFuncMap()).Parse(string(src))
 	if err != nil {
-		return nil, fmt.Errorf("parse help template %s: %w", path, err)
+		return nil, fmt.Errorf("parse %s template %s: %w", feat.name, path, err)
 	}
 	return tmpl, nil
 }

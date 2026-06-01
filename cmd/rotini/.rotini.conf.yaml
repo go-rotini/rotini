@@ -9,3 +9,7 @@ generate:
     features:
       help:
         enabled: true
+      man:
+        enabled: true
+      markdown:
+        enabled: true
