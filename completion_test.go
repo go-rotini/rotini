@@ -2,10 +2,56 @@ package rotini
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestComplete_discoversPlugins(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"acme-foo", "acme-bar", "unrelated"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	def := Definition{
+		Name: "acme", Handler: "App",
+		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}}, // collides with acme-bar
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+	}
+
+	got := complete(def, []string{""})
+	if !contains(got, "foo") {
+		t.Errorf("discovered plugin %q missing from %v", "foo", got)
+	}
+	if !contains(got, "bar") {
+		t.Errorf("declared command %q missing from %v", "bar", got)
+	}
+	if n := countString(got, "bar"); n != 1 {
+		t.Errorf("%q should appear once (declared wins over discovered acme-bar), got %d in %v", "bar", n, got)
+	}
+	if contains(got, "unrelated") {
+		t.Errorf("non-prefixed executable should not be discovered: %v", got)
+	}
+
+	// Hidden discovery dispatches but lists nothing.
+	def.Discovery.Hidden = true
+	if hidden := complete(def, []string{""}); contains(hidden, "foo") {
+		t.Errorf("hidden discovery should not list plugins: %v", hidden)
+	}
+}
+
+func countString(ss []string, want string) int {
+	n := 0
+	for _, s := range ss {
+		if s == want {
+			n++
+		}
+	}
+	return n
+}
 
 func completionDef() Definition {
 	return Definition{

@@ -14,16 +14,17 @@ import (
 // local stub) plus any statically composed commands pulled in via `$ref` (emit
 // a rollup method that delegates to the child's rth package; no types or stubs).
 type genProgram struct {
-	rootName    string
-	rootPascal  string
-	rootInputs  *Inputs
-	rootAliases []string
-	metadata    []MetadataEntry     // ldflag-settable vars emitted in rtg
-	versionVar  string              // metadata var feeding Definition.Version (Var == "Version")
-	rootRemotes []RemoteCommandSpec // root-level remote/co-located sub-commands
-	rootHelp    cmdHelp             // root command's flattened help fields
-	rootOutput  *Schema             // root command's output type (nil when unset)
-	schemas     map[string]Schema   // document-level named schemas (for output codegen)
+	rootName      string
+	rootPascal    string
+	rootInputs    *Inputs
+	rootAliases   []string
+	metadata      []MetadataEntry     // ldflag-settable vars emitted in rtg
+	versionVar    string              // metadata var feeding Definition.Version (Var == "Version")
+	rootRemotes   []RemoteCommandSpec // root-level remote/co-located sub-commands
+	rootHelp      cmdHelp             // root command's flattened help fields
+	rootOutput    *Schema             // root command's output type (nil when unset)
+	rootDiscovery *RemoteDiscovery    // root command's plugin discovery (nil = off)
+	schemas       map[string]Schema   // document-level named schemas (for output codegen)
 
 	root         genCommand    // the root command (own)
 	own          []genCommand  // inline sub-commands, sorted by prefix
@@ -38,10 +39,11 @@ type rnode struct {
 	prefix     string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
 	aliases    []string
 	inputs     *Inputs
-	help       cmdHelp // flattened help fields; for a composed root, from the child spec
-	output     *Schema // command's output type (own commands only; nil for composed)
-	hidden     bool    // omit from the parent's generated Commands list
-	deprecated string  // deprecation note for the parent's Commands list
+	help       cmdHelp          // flattened help fields; for a composed root, from the child spec
+	output     *Schema          // command's output type (own commands only; nil for composed)
+	discovery  *RemoteDiscovery // command's plugin discovery (nil = off)
+	hidden     bool             // omit from the parent's generated Commands list
+	deprecated string           // deprecation note for the parent's Commands list
 	children   []rnode
 }
 
@@ -76,15 +78,16 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		return nil, fmt.Errorf("root command must have a name (the top-level \"command\" cannot use $ref)")
 	}
 	gp := &genProgram{
-		rootName:    root.Name,
-		rootPascal:  toPascalCase(root.Name),
-		rootInputs:  root.Inputs,
-		rootAliases: root.Aliases,
-		metadata:    spec.Metadata,
-		rootRemotes: root.RemoteCommands,
-		rootHelp:    commandHelp(root),
-		rootOutput:  root.Output,
-		schemas:     spec.Schemas,
+		rootName:      root.Name,
+		rootPascal:    toPascalCase(root.Name),
+		rootInputs:    root.Inputs,
+		rootAliases:   root.Aliases,
+		metadata:      spec.Metadata,
+		rootRemotes:   root.RemoteCommands,
+		rootHelp:      commandHelp(root),
+		rootOutput:    root.Output,
+		rootDiscovery: root.RemoteDiscovery,
+		schemas:       spec.Schemas,
 	}
 	for _, m := range spec.Metadata {
 		if m.Var == "Version" {
@@ -170,6 +173,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			inputs:     c.Inputs,
 			help:       commandHelp(c),
 			output:     c.Output,
+			discovery:  c.RemoteDiscovery,
 			hidden:     c.Hidden,
 			deprecated: c.Deprecated,
 			children:   children,
@@ -281,8 +285,9 @@ func checkCollisions(nodes []rnode) error {
 	return nil
 }
 
-// rnodesLiteral renders the []rotini.CommandDef literal for a resolved tree.
-func rnodesLiteral(nodes []rnode) string {
+// rnodesLiteral renders the []rotini.CommandDef literal for a resolved tree. host
+// is the root binary name, used for the default plugin-discovery prefix.
+func rnodesLiteral(host string, nodes []rnode) string {
 	if len(nodes) == 0 {
 		return ""
 	}
@@ -300,8 +305,11 @@ func rnodesLiteral(nodes []rnode) string {
 		if al := argDefsLiteral(n.inputs); al != "" {
 			b.WriteString("Arguments: " + al + ",\n")
 		}
-		if cl := rnodesLiteral(n.children); cl != "" {
+		if cl := rnodesLiteral(host, n.children); cl != "" {
 			b.WriteString("Commands: " + cl + ",\n")
+		}
+		if dl := discoveryLiteral(host, n.discovery); dl != "" {
+			b.WriteString("Discovery: " + dl + ",\n")
 		}
 		b.WriteString("},\n")
 	}

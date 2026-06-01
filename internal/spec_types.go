@@ -92,6 +92,8 @@ type Command struct {
 	Output *Schema `json:"output,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
+	// Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery.
+	RemoteDiscovery *RemoteDiscovery `json:"remote_discovery,omitempty"`
 	// Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page.
 	Summary string `json:"summary,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
@@ -195,6 +197,16 @@ type RemoteCommandSpec struct {
 	Summary string `json:"summary,omitempty"`
 	// Host-side timeout for the remote binary execution. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
+}
+
+// Auto-expose external '<prefix>*' executables as remote sub-commands (kubectl/git/gh plugin style), alongside any declared remote_commands. Presence enables discovery; a discovered name that collides with a declared command or remote is skipped.
+type RemoteDiscovery struct {
+	// When true, discovered plugins still dispatch but are omitted from completion listings.
+	Hidden bool `json:"hidden,omitempty"`
+	// Extra directory to scan for plugins, in addition to the host binary's directory and PATH.
+	Path string `json:"path,omitempty"`
+	// Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-').
+	Prefix string `json:"prefix,omitempty"`
 }
 
 // JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.

@@ -15,19 +15,21 @@ type ResolvedCommand struct {
 	Arguments []ArgDef
 	Commands  []CommandDef
 	Remotes   []RemoteDef
+	Discovery *RemoteDiscoveryDef
 }
 
 func rootFrame(def Definition) ResolvedCommand {
 	return ResolvedCommand{
 		Name: def.Name, Handler: def.Handler,
-		Flags: def.Flags, Arguments: def.Arguments, Commands: def.Commands, Remotes: def.RemoteCommands,
+		Flags: def.Flags, Arguments: def.Arguments, Commands: def.Commands,
+		Remotes: def.RemoteCommands, Discovery: def.Discovery,
 	}
 }
 
 func cmdFrame(c CommandDef) ResolvedCommand {
 	return ResolvedCommand{
 		Name: c.Name, Handler: c.Handler,
-		Flags: c.Flags, Arguments: c.Arguments, Commands: c.Commands,
+		Flags: c.Flags, Arguments: c.Arguments, Commands: c.Commands, Discovery: c.Discovery,
 	}
 }
 
@@ -63,6 +65,13 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *remoteDisp
 		}
 		if rd, ok := findRemote(cur, tok); ok {
 			return chain, &remoteDispatch{def: rd, args: append([]string{}, argv[i+1:]...)}
+		}
+		// Plugin discovery: at a discovery-enabled command, an unmatched token is
+		// dispatched to the sibling executable <prefix><token> (kubectl-plugin style).
+		// The binary is resolved (and any error reported) at exec time.
+		if d := cur.Discovery; d != nil {
+			rd := RemoteDef{Name: tok, Binary: d.Prefix + tok}
+			return chain, &remoteDispatch{def: rd, args: append([]string{}, argv[i+1:]...), dir: d.Path}
 		}
 		break // first positional argument; stop descending
 	}

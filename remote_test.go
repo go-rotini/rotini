@@ -66,3 +66,29 @@ func TestRun_remoteNotFound(t *testing.T) {
 		t.Errorf("stderr = %q, want 'not found'", errb)
 	}
 }
+
+func TestRun_discoveryDispatch(t *testing.T) {
+	writeFakeBinary(t, "acme-foo", "#!/bin/sh\necho \"plugin: $*\"\nexit 0\n")
+	def := Definition{Name: "acme", Handler: "App", Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}}
+
+	// `acme foo x y` is not a declared command → discovery execs acme-foo with [x y].
+	p, out, errb := remoteProgram(def, []string{"foo", "x", "y"})
+	if code := p.run(p.args); code != 0 {
+		t.Fatalf("run = %d, want 0 (stderr: %s)", code, errb)
+	}
+	if got := strings.TrimSpace(out.String()); got != "plugin: x y" {
+		t.Errorf("discovered plugin output = %q, want %q", got, "plugin: x y")
+	}
+}
+
+func TestRun_discoveryMissing(t *testing.T) {
+	def := Definition{Name: "acme", Handler: "App", Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}}
+
+	p, _, errb := remoteProgram(def, []string{"no-such-plugin-xyz"})
+	if code := p.run(p.args); code != 1 {
+		t.Errorf("missing discovered plugin exit = %d, want 1", code)
+	}
+	if !strings.Contains(errb.String(), "not found") {
+		t.Errorf("stderr = %q, want 'not found'", errb)
+	}
+}

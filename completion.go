@@ -1,6 +1,8 @@
 package rotini
 
 import (
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -56,15 +58,76 @@ func complete(def Definition, words []string) []string {
 
 	// Completing a sub-command or remote-command name.
 	var names []string
+	declared := map[string]bool{}
+	mark := func(n string) { declared[n] = true; names = append(names, n) }
 	for _, c := range cur.Commands {
-		names = append(names, c.Name)
-		names = append(names, c.Aliases...)
+		mark(c.Name)
+		for _, a := range c.Aliases {
+			mark(a)
+		}
 	}
 	for _, r := range cur.Remotes {
-		names = append(names, r.Name)
-		names = append(names, r.Aliases...)
+		mark(r.Name)
+		for _, a := range r.Aliases {
+			mark(a)
+		}
+	}
+	// Plugin discovery: offer `<prefix>*` executables (minus declared collisions),
+	// unless this command's discovery is hidden.
+	if d := cur.Discovery; d != nil && !d.Hidden {
+		for _, plugin := range discoverPlugins(d) {
+			if !declared[plugin] {
+				names = append(names, plugin)
+			}
+		}
 	}
 	return filterPrefix(names, partial)
+}
+
+// discoverPlugins lists the names (the part after the prefix) of `<prefix>*`
+// executables found next to the host binary, in d.Path, and on PATH — the
+// candidates plugin discovery exposes. Results are deduped and sorted; it is
+// best-effort and returns nothing on a read error.
+func discoverPlugins(d *RemoteDiscoveryDef) []string {
+	if d.Prefix == "" {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	scan := func(dir string) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if name == d.Prefix || !strings.HasPrefix(name, d.Prefix) {
+				continue
+			}
+			plugin := strings.TrimPrefix(name, d.Prefix)
+			if seen[plugin] {
+				continue
+			}
+			seen[plugin] = true
+			out = append(out, plugin)
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		scan(filepath.Dir(exe))
+	}
+	if d.Path != "" {
+		scan(d.Path)
+	}
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir != "" {
+			scan(dir)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 func filterPrefix(candidates []string, prefix string) []string {

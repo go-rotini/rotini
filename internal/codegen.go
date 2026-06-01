@@ -301,13 +301,39 @@ func renderDefinition(gp *genProgram) string {
 	if gp.versionVar != "" {
 		b.WriteString("Version: " + gp.versionVar + ",\n")
 	}
-	if cl := rnodesLiteral(gp.tree); cl != "" {
+	if cl := rnodesLiteral(gp.rootName, gp.tree); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
 	}
 	if rl := remoteDefsLiteral(gp.rootName, gp.rootRemotes); rl != "" {
 		b.WriteString("RemoteCommands: " + rl + ",\n")
 	}
+	if dl := discoveryLiteral(gp.rootName, gp.rootDiscovery); dl != "" {
+		b.WriteString("Discovery: " + dl + ",\n")
+	}
 	b.WriteString("}\n")
+	return b.String()
+}
+
+// discoveryLiteral renders the *rotini.RemoteDiscoveryDef literal for a command's
+// plugin discovery, or "" when discovery is off. The prefix defaults to "<host>-"
+// (the root binary name) when the spec leaves it unset.
+func discoveryLiteral(host string, d *RemoteDiscovery) string {
+	if d == nil {
+		return ""
+	}
+	prefix := d.Prefix
+	if prefix == "" {
+		prefix = host + "-"
+	}
+	var b strings.Builder
+	b.WriteString("&" + rotiniPkgName + ".RemoteDiscoveryDef{Prefix: " + strconv.Quote(prefix))
+	if d.Path != "" {
+		b.WriteString(", Path: " + strconv.Quote(d.Path))
+	}
+	if d.Hidden {
+		b.WriteString(", Hidden: true")
+	}
+	b.WriteString("}")
 	return b.String()
 }
 

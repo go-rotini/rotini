@@ -28,7 +28,8 @@ type Definition struct {
 	Flags          []FlagDef
 	Arguments      []ArgDef
 	Commands       []CommandDef
-	RemoteCommands []RemoteDef // co-located plugin sub-commands (Model 3)
+	RemoteCommands []RemoteDef         // co-located plugin sub-commands (Model 3)
+	Discovery      *RemoteDiscoveryDef // plugin auto-discovery on the root command (nil = off)
 }
 
 // RemoteDef describes a remote/co-located sub-command (kubectl/git plugin
@@ -41,6 +42,16 @@ type RemoteDef struct {
 	Timeout time.Duration // 0 means no timeout
 }
 
+// RemoteDiscoveryDef enables kubectl/git/gh-style plugin discovery on a command:
+// an unmatched token execs the sibling binary Prefix+<token>, and `<Prefix>*`
+// executables are offered as completion candidates (unless Hidden). A nil
+// *RemoteDiscoveryDef means discovery is off for that command.
+type RemoteDiscoveryDef struct {
+	Prefix string // executable-name prefix, e.g. "acme-"
+	Path   string // extra directory to scan, in addition to the host dir and PATH
+	Hidden bool   // dispatch discovered plugins but omit them from completion listings
+}
+
 // CommandDef describes one command node within a [Definition]. Handler is the
 // ProgramHandlers method name the runtime invokes (via reflection) to obtain
 // this command's [CommandHandlers].
@@ -51,6 +62,7 @@ type CommandDef struct {
 	Flags     []FlagDef
 	Arguments []ArgDef
 	Commands  []CommandDef
+	Discovery *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
 }
 
 // FlagDef describes a single flag of a command. Name is the logical name and

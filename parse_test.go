@@ -51,3 +51,38 @@ func TestResolveChain_detectsRemote(t *testing.T) {
 		t.Errorf("remote args = %v, want [a b]", remote.args)
 	}
 }
+
+func TestResolveChain_discoversPlugin(t *testing.T) {
+	def := Definition{
+		Name: "acme", Handler: "App",
+		Commands:  []CommandDef{{Name: "cluster", Handler: "AcmeCluster"}},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: "/opt/acme/plugins"},
+	}
+
+	// A declared sub-command still wins over discovery.
+	if _, remote := resolveChain(def, []string{"cluster"}); remote != nil {
+		t.Errorf("declared command should not be a discovery dispatch")
+	}
+
+	// An unmatched token at a discovery-enabled command dispatches to <prefix><token>.
+	chain, remote := resolveChain(def, []string{"foo", "x", "y"})
+	if remote == nil {
+		t.Fatal("expected a discovery dispatch for an unmatched token")
+	}
+	if remote.def.Name != "foo" || remote.def.Binary != "acme-foo" {
+		t.Errorf("discovery dispatch = {Name:%q Binary:%q}, want {foo acme-foo}", remote.def.Name, remote.def.Binary)
+	}
+	if remote.dir != "/opt/acme/plugins" {
+		t.Errorf("dispatch dir = %q, want /opt/acme/plugins", remote.dir)
+	}
+	if len(remote.args) != 2 || remote.args[0] != "x" || remote.args[1] != "y" {
+		t.Errorf("discovery args = %v, want [x y]", remote.args)
+	}
+	_ = chain
+
+	// Without discovery, an unmatched token is just a positional (no dispatch).
+	plain := Definition{Name: "acme", Handler: "App"}
+	if _, remote := resolveChain(plain, []string{"foo"}); remote != nil {
+		t.Errorf("no discovery → unmatched token should not dispatch")
+	}
+}

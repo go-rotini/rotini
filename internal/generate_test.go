@@ -323,6 +323,38 @@ func TestGenerateInputImports(t *testing.T) {
 	}
 }
 
+// TestGenerateRemoteDiscovery verifies remote_discovery is emitted into the
+// Definition: the root gets a default "<host>-" prefix, a sub-command keeps its
+// explicit prefix + hidden flag.
+func TestGenerateRemoteDiscovery(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: acme\n" +
+		"  remote_discovery:\n" +
+		"    path: /opt/acme/plugins\n" +
+		"  commands:\n" +
+		"    - name: cluster\n" +
+		"      remote_discovery:\n" +
+		"        prefix: acme-plugin-\n" +
+		"        hidden: true\n"
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	rotiniGo := filepath.Join(tmp, "rtg", "rotini.go")
+	mustContain(t, rotiniGo,
+		"RemoteDiscoveryDef{Prefix: \"acme-\"", // root: default prefix <host>-
+		"Path: \"/opt/acme/plugins\"",
+		"RemoteDiscoveryDef{Prefix: \"acme-plugin-\"", // sub: explicit prefix
+		"Hidden: true",
+	)
+}
+
 // helpSpecYAML is a spec exercising generated help: root summary/description plus
 // a sub-command with a summary, a required argument, and a bool flag. Help fields
 // live directly on the command (flattened).

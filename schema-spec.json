@@ -136,6 +136,30 @@
           "items": {
             "$ref": "#/definitions/RemoteCommandSpec"
           }
+        },
+        "remote_discovery": {
+          "$ref": "#/definitions/RemoteDiscovery",
+          "description": "Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery."
+        }
+      }
+    },
+    "RemoteDiscovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Auto-expose external '<prefix>*' executables as remote sub-commands (kubectl/git/gh plugin style), alongside any declared remote_commands. Presence enables discovery; a discovered name that collides with a declared command or remote is skipped.",
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "description": "Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-')."
+        },
+        "path": {
+          "type": "string",
+          "description": "Extra directory to scan for plugins, in addition to the host binary's directory and PATH."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, discovered plugins still dispatch but are omitted from completion listings."
         }
       }
     },
