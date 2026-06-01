@@ -9,8 +9,8 @@ usage: |
          [-v | --version] [-h | --help]
 examples:
   - rotini init mycli
-  - rotini validate .rotini.yaml
-  - rotini generate ./path/to/.rotini.json
+  - rotini validate .rotini.spec.yaml
+  - rotini generate ./path/to/.rotini.spec.json
 footer: Use "rotini help <command>" for more information about a command.
 inputs:
   flags:
@@ -32,12 +32,13 @@ commands:
   - name: initialize
     aliases:
       - init
-    summary: initialize a cli program
+    summary: scaffold a cli program
     description: Initialize a new rotini cli program spec file.
     examples:
       - rotini initialize mycli
       - rotini init mycli --format json
       - rotini init mycli --force
+    footer: Use "rotini help <command>" for more information about a command.
     inputs:
       arguments:
         - name: name
@@ -82,6 +83,7 @@ commands:
     examples:
       - rotini generate
       - rotini generate ./path/to/.rotini.json --watch
+    footer: Use "rotini help <command>" for more information about a command.
     inputs:
       arguments:
         - name: spec_file_path
@@ -119,6 +121,7 @@ commands:
     examples:
       - rotini validate
       - rotini val ./path/to/.rotini.yaml
+    footer: Use "rotini help <command>" for more information about a command.
     inputs:
       arguments:
         - name: file
@@ -134,44 +137,9 @@ commands:
             - --help
           schema:
             type: bool
-  - name: help
-    summary: print help
-    description: Print help for a specific command.
-    examples:
-      - rotini help
-      - rotini help generate
-      - rotini help init
-    inputs:
-      arguments:
-        - name: command
-          summary: name of the command to print help for
-          schema:
-            type: array
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
-  - name: version
-    summary: print version
-    description: Print the rotini cli version.
-    examples:
-      - rotini version
-    inputs:
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
   - name: completion
-    summary: generate shell completion
-    description: Generate shell completion scripts.
+    summary: print shell completion
+    description: Print shell completion scripts.
     examples:
       - rotini completion bash
       - rotini completion zsh >> ~/.zshrc (eval "$(rotini completion zsh)")
@@ -192,6 +160,43 @@ commands:
               - powershell
               - nushell
               - elvish
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+  - name: help
+    summary: print help
+    description: Print help for a specific command.
+    examples:
+      - rotini help
+      - rotini help generate
+      - rotini help init
+    footer: Use "rotini help <command>" for more information about a command.
+    inputs:
+      arguments:
+        - name: command
+          summary: name of the command to print help for
+          schema:
+            type: array
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+  - name: version
+    summary: print version
+    description: Print the rotini cli version.
+    examples:
+      - rotini version
+    footer: Use "rotini help <command>" for more information about a command.
+    inputs:
       flags:
         - name: help
           summary: print help

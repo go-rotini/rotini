@@ -16,3 +16,5 @@ Examples:
   rotini initialize mycli
   rotini init mycli --format json
   rotini init mycli --force
+
+Use "rotini help <command>" for more information about a command.

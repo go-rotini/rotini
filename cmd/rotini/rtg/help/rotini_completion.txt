@@ -1,4 +1,4 @@
-Generate shell completion scripts.
+Print shell completion scripts.
 
 Usage:
   rotini completion [shell] [flags]

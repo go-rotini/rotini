@@ -65,6 +65,15 @@ var Definition = rotini.Definition{
 				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
 			},
 		},
+		{Name: "completion",
+			Handler: "RotiniCompletion",
+			Flags: []rotini.FlagDef{
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "shell", Type: "string", Enum: []string{"zsh", "bash", "fish", "powershell", "nushell", "elvish"}},
+			},
+		},
 		{Name: "help",
 			Handler: "RotiniHelp",
 			Flags: []rotini.FlagDef{
@@ -78,15 +87,6 @@ var Definition = rotini.Definition{
 			Handler: "RotiniVersion",
 			Flags: []rotini.FlagDef{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-			},
-		},
-		{Name: "completion",
-			Handler: "RotiniCompletion",
-			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-			},
-			Arguments: []rotini.ArgDef{
-				{Name: "shell", Type: "string", Enum: []string{"zsh", "bash", "fish", "powershell", "nushell", "elvish"}},
 			},
 		},
 	},
@@ -231,14 +231,14 @@ var HelpRotiniGenerate string
 //go:embed help/rotini_validate.txt
 var HelpRotiniValidate string
 
+//go:embed help/rotini_completion.txt
+var HelpRotiniCompletion string
+
 //go:embed help/rotini_help.txt
 var HelpRotiniHelp string
 
 //go:embed help/rotini_version.txt
 var HelpRotiniVersion string
-
-//go:embed help/rotini_completion.txt
-var HelpRotiniCompletion string
 
 // Help returns the generated help text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
@@ -253,12 +253,12 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniGenerate, nil
 	case "validate", "val":
 		return HelpRotiniValidate, nil
+	case "completion":
+		return HelpRotiniCompletion, nil
 	case "help":
 		return HelpRotiniHelp, nil
 	case "version":
 		return HelpRotiniVersion, nil
-	case "completion":
-		return HelpRotiniCompletion, nil
 	default:
 		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
 	}

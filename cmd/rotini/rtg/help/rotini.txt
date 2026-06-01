@@ -7,12 +7,12 @@ Usage:
          [-v | --version] [-h | --help]
 
 Commands:
-  initialize;init    initialize a cli program
+  initialize;init    scaffold a cli program
   generate;gen       generate a cli program
   validate;val       validate a spec file
+  completion         print shell completion
   help               print help
   version            print version
-  completion         generate shell completion
 
 Flags:
   -v,--version    print version
@@ -20,7 +20,7 @@ Flags:
 
 Examples:
   rotini init mycli
-  rotini validate .rotini.yaml
-  rotini generate ./path/to/.rotini.json
+  rotini validate .rotini.spec.yaml
+  rotini generate ./path/to/.rotini.spec.json
 
 Use "rotini help <command>" for more information about a command.
