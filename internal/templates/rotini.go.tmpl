@@ -56,7 +56,9 @@ type {{.Prefix}}Inputs struct {
 {{- end}}
 }
 {{- end}}
-
+{{with .OutputTypes}}
+{{.}}
+{{end}}
 // NewProgram builds the program from the generated Definition and the typed
 // ProgramHandlers, delegating to {{.RotiniPkg}}.NewProgram (which takes the handlers
 // as an untyped value). Construct your program with this so the compiler verifies

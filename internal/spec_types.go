@@ -86,6 +86,8 @@ type Command struct {
 	Markdown string `json:"markdown,omitempty"`
 	// Command name used in routing. As the root command (the top-level 'command') this is the binary name and must be set — the root cannot use '$ref'.
 	Name string `json:"name,omitempty"`
+	// This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handlers have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract.
+	Output *Schema `json:"output,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page.

@@ -236,6 +236,49 @@ func TestGenerateCompletionEnabled(t *testing.T) {
 	}
 }
 
+// TestGenerateOutputTypes verifies the spec `output` key (and document-level
+// `schemas`) generate typed Go types into the framework file: a named schema type,
+// a "<Prefix>Output" alias for a bare $ref output, and a "<Prefix>Output" struct
+// for an inline output — with no flag, no rendering, and no leaked root sentinel.
+func TestGenerateOutputTypes(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: mycli\n" +
+		"  output:\n" +
+		"    type: object\n" +
+		"    properties:\n" +
+		"      count: { type: integer }\n" +
+		"      items: { type: array, items: { $ref: \"#/schemas/Widget\" } }\n" +
+		"  commands:\n" +
+		"    - name: get\n" +
+		"      output: { $ref: \"#/schemas/Widget\" }\n" +
+		"schemas:\n" +
+		"  Widget:\n" +
+		"    type: object\n" +
+		"    required: [id]\n" +
+		"    properties:\n" +
+		"      id: { type: string }\n" +
+		"      size: { type: integer }\n"
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	rotiniGo := filepath.Join(tmp, "rtg", "rotini.go")
+	mustContain(t, rotiniGo,
+		"type Widget struct {", "`json:\"id\"`", // the named schema
+		"type MycliGetOutput Widget", // sub-command bare-$ref output → named alias type
+		"type MycliOutput struct {",  // root inline output → struct
+		"[]Widget",                   // nested array of the named type
+	)
+	// The throwaway generation root never leaks into the output.
+	mustNotContain(t, rotiniGo, outputRootSentinel)
+}
+
 // helpSpecYAML is a spec exercising generated help: root summary/description plus
 // a sub-command with a summary, a required argument, and a bool flag. Help fields
 // live directly on the command (flattened).

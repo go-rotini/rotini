@@ -22,6 +22,8 @@ type genProgram struct {
 	versionVar  string              // metadata var feeding Definition.Version (Var == "Version")
 	rootRemotes []RemoteCommandSpec // root-level remote/co-located sub-commands
 	rootHelp    cmdHelp             // root command's flattened help fields
+	rootOutput  *Schema             // root command's output type (nil when unset)
+	schemas     map[string]Schema   // document-level named schemas (for output codegen)
 
 	root         genCommand    // the root command (own)
 	own          []genCommand  // inline sub-commands, sorted by prefix
@@ -37,6 +39,7 @@ type rnode struct {
 	aliases    []string
 	inputs     *Inputs
 	help       cmdHelp // flattened help fields; for a composed root, from the child spec
+	output     *Schema // command's output type (own commands only; nil for composed)
 	hidden     bool    // omit from the parent's generated Commands list
 	deprecated string  // deprecation note for the parent's Commands list
 	children   []rnode
@@ -80,6 +83,8 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		metadata:    spec.Metadata,
 		rootRemotes: root.RemoteCommands,
 		rootHelp:    commandHelp(root),
+		rootOutput:  root.Output,
+		schemas:     spec.Schemas,
 	}
 	for _, m := range spec.Metadata {
 		if m.Var == "Version" {
@@ -164,6 +169,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			aliases:    c.Aliases,
 			inputs:     c.Inputs,
 			help:       commandHelp(c),
+			output:     c.Output,
 			hidden:     c.Hidden,
 			deprecated: c.Deprecated,
 			children:   children,

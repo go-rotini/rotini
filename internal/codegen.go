@@ -453,6 +453,11 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 		}
 	}
 
+	outputTypes, err := buildOutputTypes(gp, lay.frameworkPkgName)
+	if err != nil {
+		return err
+	}
+
 	data := map[string]any{
 		"Package":      lay.frameworkPkgName,
 		"RotiniImport": rotiniImportPath,
@@ -463,6 +468,7 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 		"Definition":   renderDefinition(gp),
 		"Metadata":     gp.metadata,
 		"Features":     features,
+		"OutputTypes":  outputTypes,
 	}
 	content, err := renderGo("framework", "templates/rotini.go.tmpl", data)
 	if err != nil {
