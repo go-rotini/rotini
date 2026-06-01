@@ -93,7 +93,7 @@ func TestGenerateDefaultLayout(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	// A spec with NO adjacent conf, so generation falls back to the defaults.
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: rotini\ncommands:\n  - name: generate\n")
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: rotini\n  commands:\n    - name: generate\n")
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
@@ -144,27 +144,28 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 // a sub-command with a summary, a required argument, and a bool flag. Help fields
 // live directly on the command (flattened).
 const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-	"name: mycli\n" +
-	"summary: my cli\n" +
-	"description: A demo CLI.\n" +
-	"footer: run 'mycli help <command>' for details\n" +
-	"commands:\n" +
-	"  - name: build\n" +
-	"    aliases: [b]\n" +
-	"    summary: build the project\n" +
-	"    inputs:\n" +
-	"      arguments:\n" +
-	"        - name: target\n" +
-	"          summary: thing to build\n" +
-	"          schema:\n" +
-	"            type: string\n" +
-	"            required: true\n" +
-	"      flags:\n" +
-	"        - name: verbose\n" +
-	"          summary: chattier output\n" +
-	"          identifiers: [-v, --verbose]\n" +
-	"          schema:\n" +
-	"            type: bool\n"
+	"command:\n" +
+	"  name: mycli\n" +
+	"  summary: my cli\n" +
+	"  description: A demo CLI.\n" +
+	"  footer: run 'mycli help <command>' for details\n" +
+	"  commands:\n" +
+	"    - name: build\n" +
+	"      aliases: [b]\n" +
+	"      summary: build the project\n" +
+	"      inputs:\n" +
+	"        arguments:\n" +
+	"          - name: target\n" +
+	"            summary: thing to build\n" +
+	"            schema:\n" +
+	"              type: string\n" +
+	"              required: true\n" +
+	"        flags:\n" +
+	"          - name: verbose\n" +
+	"            summary: chattier output\n" +
+	"            identifiers: [-v, --verbose]\n" +
+	"            schema:\n" +
+	"              type: bool\n"
 
 const helpEnabledConf = "generate:\n  help:\n    enabled: true\n"
 
@@ -279,10 +280,11 @@ func TestGenerateHelpVerbatim(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"name: mycli\n"+
-			"help: |-\n"+ // strip: no trailing newline
-			"  my exact help page\n"+
-			"  line two\n")
+			"command:\n"+
+			"  name: mycli\n"+
+			"  help: |-\n"+ // strip: no trailing newline
+			"    my exact help page\n"+
+			"    line two\n")
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -387,9 +389,9 @@ func readFileString(t *testing.T, path string) string {
 // specWith builds a minimal mycli spec declaring the given top-level commands.
 func specWith(commands ...string) string {
 	var b strings.Builder
-	b.WriteString("$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: mycli\ncommands:\n")
+	b.WriteString("$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n  commands:\n")
 	for _, c := range commands {
-		b.WriteString("  - name: " + c + "\n")
+		b.WriteString("    - name: " + c + "\n")
 	}
 	return b.String()
 }

@@ -15,11 +15,13 @@ var supportedExts = []string{".yaml", ".yml", ".json", ".jsonc"}
 
 func TestSpecRoundTrip(t *testing.T) {
 	want := &Spec{
-		Schema:   "https://example.com/spec.json",
-		Name:     "demo",
-		Aliases:  []string{"d"},
-		Timeout:  "10s",
-		Commands: []Command{{Name: "sub", Aliases: []string{"s"}}},
+		Schema: "https://example.com/spec.json",
+		Command: Command{
+			Name:     "demo",
+			Aliases:  []string{"d"},
+			Timeout:  "10s",
+			Commands: []Command{{Name: "sub", Aliases: []string{"s"}}},
+		},
 	}
 	for _, ext := range supportedExts {
 		t.Run(ext, func(t *testing.T) {
@@ -67,10 +69,10 @@ func TestConfRoundTrip(t *testing.T) {
 // "gen_file") drive decoding across YAML/JSON/JSONC alike.
 func TestReadSpec_formatsAndTags(t *testing.T) {
 	docs := map[string]string{
-		".yaml": "$schema: https://x/spec.json\nname: demo\ncommands:\n  - name: sub\n",
-		".json": `{"$schema":"https://x/spec.json","name":"demo","commands":[{"name":"sub"}]}`,
+		".yaml": "$schema: https://x/spec.json\ncommand:\n  name: demo\n  commands:\n    - name: sub\n",
+		".json": `{"$schema":"https://x/spec.json","command":{"name":"demo","commands":[{"name":"sub"}]}}`,
 		".jsonc": "{\n  // leading comment\n  \"$schema\": \"https://x/spec.json\",\n" +
-			"  \"name\": \"demo\",\n  \"commands\": [{\"name\": \"sub\"}],\n}\n",
+			"  \"command\": { \"name\": \"demo\", \"commands\": [{\"name\": \"sub\"}] },\n}\n",
 	}
 	for ext, doc := range docs {
 		t.Run(ext, func(t *testing.T) {
@@ -82,10 +84,10 @@ func TestReadSpec_formatsAndTags(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReadSpec: %v", err)
 			}
-			if got.Schema != "https://x/spec.json" || got.Name != "demo" {
+			if got.Schema != "https://x/spec.json" || got.Command.Name != "demo" {
 				t.Errorf("tag mapping wrong: %+v", got)
 			}
-			if len(got.Commands) != 1 || got.Commands[0].Name != "sub" {
+			if len(got.Command.Commands) != 1 || got.Command.Commands[0].Name != "sub" {
 				t.Errorf("commands wrong: %+v", got)
 			}
 		})
@@ -104,7 +106,7 @@ func TestUnsupportedFormat(t *testing.T) {
 
 func TestWatchSpec(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "spec.yaml")
-	if err := WriteSpec(path, &Spec{Name: "v1"}); err != nil {
+	if err := WriteSpec(path, &Spec{Command: Command{Name: "v1"}}); err != nil {
 		t.Fatalf("seed WriteSpec: %v", err)
 	}
 
@@ -124,7 +126,7 @@ func TestWatchSpec(t *testing.T) {
 	// Give the watcher a moment to establish its baseline, then change the
 	// file in place.
 	time.Sleep(200 * time.Millisecond)
-	if err := os.WriteFile(path, []byte("name: v2\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("command:\n  name: v2\n"), 0o600); err != nil {
 		t.Fatalf("modify: %v", err)
 	}
 
@@ -132,7 +134,7 @@ func TestWatchSpec(t *testing.T) {
 	for {
 		select {
 		case s := <-updates:
-			if s.Name == "v2" {
+			if s.Command.Name == "v2" {
 				return
 			}
 		case <-deadline:

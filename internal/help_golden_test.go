@@ -73,64 +73,65 @@ func genHelp(t *testing.T, spec, preTmpl string) string {
 // required/optional/variadic args and flags with type/default/enum/required/
 // deprecated/hidden; a deprecated command; and a hidden command.
 const helpGoldenGeneratedSpec = goldenSpecSchema +
-	`name: app
-summary: the app
-description: |
-  A demo application.
+	`command:
+  name: app
+  summary: the app
+  description: |
+    A demo application.
 
-  A second paragraph.
-usage: app <command> [flags]
-header: '===== APP ====='
-footer: Use "app help <command>" for details.
-headings:
-  commands: Subcommands
-examples:
-  - app build ./src
-commands:
-  - name: build
-    aliases: [b, bld]
-    summary: build things
-    description: Build the project from sources.
-    examples:
-      - app build ./src
-      - app build ./src --force
-    inputs:
-      arguments:
-        - name: target
-          summary: what to build
-          schema: { type: string, required: true }
-        - name: extra
-          summary: extra targets
-          schema: { type: array }
-      flags:
-        - name: output
-          summary: output directory
-          identifiers: [-o, --output]
-          schema: { type: string, default: ./dist }
-        - name: format
-          summary: archive format
-          identifiers: [--format]
-          schema: { type: string, enum: [tar, zip], default: tar }
-        - name: force
-          summary: overwrite existing output
-          identifiers: [-f, --force]
-          schema: { type: bool, required: true }
-        - name: legacy
-          summary: legacy flag
-          identifiers: [--legacy]
-          deprecated: use --modern
-          schema: { type: bool }
-        - name: secret
-          summary: hidden flag
-          identifiers: [--secret]
-          hidden: true
-          schema: { type: bool }
-  - name: oldcmd
-    summary: an old command
-    deprecated: use build instead
-  - name: secretcmd
-    summary: a hidden command
-    hidden: true
+    A second paragraph.
+  usage: app <command> [flags]
+  header: '===== APP ====='
+  footer: Use "app help <command>" for details.
+  headings:
+    commands: Subcommands
+  examples:
+    - app build ./src
+  commands:
+    - name: build
+      aliases: [b, bld]
+      summary: build things
+      description: Build the project from sources.
+      examples:
+        - app build ./src
+        - app build ./src --force
+      inputs:
+        arguments:
+          - name: target
+            summary: what to build
+            schema: { type: string, required: true }
+          - name: extra
+            summary: extra targets
+            schema: { type: array }
+        flags:
+          - name: output
+            summary: output directory
+            identifiers: [-o, --output]
+            schema: { type: string, default: ./dist }
+          - name: format
+            summary: archive format
+            identifiers: [--format]
+            schema: { type: string, enum: [tar, zip], default: tar }
+          - name: force
+            summary: overwrite existing output
+            identifiers: [-f, --force]
+            schema: { type: bool, required: true }
+          - name: legacy
+            summary: legacy flag
+            identifiers: [--legacy]
+            deprecated: use --modern
+            schema: { type: bool }
+          - name: secret
+            summary: hidden flag
+            identifiers: [--secret]
+            hidden: true
+            schema: { type: bool }
+    - name: oldcmd
+      summary: an old command
+      deprecated: use build instead
+    - name: secretcmd
+      summary: a hidden command
+      hidden: true
 `
 
 // TestHelpGolden_Generated locks the default-template rendering across every
@@ -144,18 +145,19 @@ func TestHelpGolden_Generated(t *testing.T) {
 }
 
 const helpGoldenCustomSpec = goldenSpecSchema +
-	`name: app
-summary: my app
-footer: bye now
-commands:
-  - name: run
-    summary: run it
-    inputs:
-      flags:
-        - name: verbose
-          summary: be loud
-          identifiers: [-v, --verbose]
-          schema: { type: bool }
+	`command:
+  name: app
+  summary: my app
+  footer: bye now
+  commands:
+    - name: run
+      summary: run it
+      inputs:
+        flags:
+          - name: verbose
+            summary: be loud
+            identifiers: [-v, --verbose]
+            schema: { type: bool }
 `
 
 // helpGoldenCustomTmpl is a deliberately non-default template: it reorders/omits
@@ -186,17 +188,18 @@ func TestHelpGolden_CustomTemplate(t *testing.T) {
 }
 
 const helpGoldenVerbatimSpec = goldenSpecSchema +
-	`name: app
-help: |-
-  EXACT ROOT PAGE
-    indented line kept as-is
-  no trailing newline
-commands:
-  - name: run
-    summary: run it
-    help: |
-      EXACT RUN PAGE
-      keeps its trailing newline
+	`command:
+  name: app
+  help: |-
+    EXACT ROOT PAGE
+      indented line kept as-is
+    no trailing newline
+  commands:
+    - name: run
+      summary: run it
+      help: |
+        EXACT RUN PAGE
+        keeps its trailing newline
 `
 
 // TestHelpGolden_Verbatim proves an explicit command.help string is written

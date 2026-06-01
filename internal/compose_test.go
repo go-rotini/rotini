@@ -9,17 +9,18 @@ import (
 
 const (
 	childSpecYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-name: child
-commands:
-  - name: greet
-    inputs:
-      arguments:
-        - name: who
-          schema: { type: string }
-      flags:
-        - name: loud
-          identifiers: [--loud]
-          schema: { type: bool }
+command:
+  name: child
+  commands:
+    - name: greet
+      inputs:
+        arguments:
+          - name: who
+            schema: { type: string }
+        flags:
+          - name: loud
+            identifiers: [--loud]
+            schema: { type: bool }
 `
 	childConfYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
@@ -31,9 +32,10 @@ generate:
     gen_file: rotini.go
 `
 	parentSpecYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-name: parent
-commands:
-  - $ref: ../child/.rotini.spec.yaml
+command:
+  name: parent
+  commands:
+    - $ref: ../child/.rotini.spec.yaml
 `
 	parentConfYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
@@ -96,9 +98,10 @@ func TestGenerate_cyclicRefErrors(t *testing.T) {
 	tmp := initTestModule(t)
 	// A spec that composes itself — the simplest cycle.
 	selfRef := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-name: a
-commands:
-  - $ref: ../a/.rotini.spec.yaml
+command:
+  name: a
+  commands:
+    - $ref: ../a/.rotini.spec.yaml
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 		"generate:\n  cmd:\n    package: cmd/a/rth\n  framework:\n    package: cmd/a/rtg\n"

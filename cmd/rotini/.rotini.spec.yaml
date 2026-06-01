@@ -1,210 +1,211 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-name: rotini
-description: |
-  The rotini cli framework companion cli.
+command:
+  name: rotini
+  description: |
+    The rotini cli framework companion cli.
 
-  Find more information at: https://rotini.dev
-usage: |
-  rotini <command> <arguments> [flags]
-         [-v | --version] [-h | --help]
-examples:
-  - rotini init mycli
-  - rotini validate .rotini.spec.yaml
-  - rotini generate ./path/to/.rotini.spec.json
-footer: Use "rotini help <command>" for more information about a command.
-inputs:
-  flags:
-    - name: version
-      summary: print version
-      identifiers:
-        - -v
-        - --version
-      schema:
-        type: bool
+    Find more information at: https://rotini.dev
+  usage: |
+    rotini <command> <arguments> [flags]
+           [-v | --version] [-h | --help]
+  examples:
+    - rotini init mycli
+    - rotini validate .rotini.spec.yaml
+    - rotini generate ./path/to/.rotini.spec.json
+  footer: Use "rotini help <command>" for more information about a command.
+  inputs:
+    flags:
+      - name: version
+        summary: print version
+        identifiers:
+          - -v
+          - --version
+        schema:
+          type: bool
+      - name: help
+        summary: print help
+        identifiers:
+          - -h
+          - --help
+        schema:
+          type: bool
+  commands:
+    - name: initialize
+      aliases:
+        - init
+      summary: scaffold a cli program
+      description: Initialize a new rotini cli program spec file.
+      examples:
+        - rotini initialize mycli
+        - rotini init mycli --format json
+        - rotini init mycli --force
+      footer: Use "rotini help <command>" for more information about a command.
+      inputs:
+        arguments:
+          - name: name
+            summary: the root command name written to the created spec file (expected binary name)
+            schema:
+              type: string
+        flags:
+          - name: format
+            summary: the created rotini spec file format
+            identifiers:
+              - --format
+            schema:
+              type: string
+              enum:
+                - json
+                - yaml
+              default: yaml
+          - name: force
+            summary: force re-initialization if files exist that init would overwrite
+            identifiers:
+              - --force
+            schema:
+              type: bool
+          - name: into
+            summary: also compose the new cli into this parent cli
+            identifiers:
+              - --into
+            schema:
+              type: string
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
+    - name: generate
+      aliases:
+        - gen
+      summary: generate a cli program
+      description: Generate a cli program from a rotini spec file.
+      examples:
+        - rotini generate
+        - rotini generate ./path/to/.rotini.json --watch
+      footer: Use "rotini help <command>" for more information about a command.
+      inputs:
+        arguments:
+          - name: spec_file_path
+            summary: path to the spec file
+            schema:
+              type: string
+              default: .rotini.spec.yaml
+        flags:
+          - name: conf_file_path
+            summary: path to the rotini conf file
+            identifiers:
+              - -c
+              - --config
+            schema:
+              type: string
+          - name: watch
+            summary: watch a rotini spec file for changes and re-generate
+            identifiers:
+              - --watch
+              - -w
+            schema:
+              type: bool
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
+    - name: validate
+      aliases:
+        - val
+      summary: validate a spec file
+      description: Validate a rotini spec file for correctness.
+      examples:
+        - rotini validate
+        - rotini val ./path/to/.rotini.yaml
+      footer: Use "rotini help <command>" for more information about a command.
+      inputs:
+        arguments:
+          - name: file
+            summary: path to the spec file
+            schema:
+              type: string
+              default: .rotini.spec.yaml
+        flags:
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
+    - name: completion
+      summary: print shell completion
+      description: Print shell completion scripts.
+      examples:
+        - rotini completion bash
+        - rotini completion zsh >> ~/.zshrc (eval "$(rotini completion zsh)")
+        - rotini completion fish > ~/.config/fish/completions/rotini.fish
+        - rotini completion powershell | Out-String | Invoke-Expression
+        - rotini completion nushell | save -f ~/.config/nushell/rotini.nu
+        - rotini completion elvish | save -f ~/.config/elvish/lib/rotini.elv
+      inputs:
+        arguments:
+          - name: shell
+            summary: the shell to generate completions for
+            schema:
+              type: string
+              enum:
+                - zsh
+                - bash
+                - fish
+                - powershell
+                - nushell
+                - elvish
+        flags:
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
     - name: help
       summary: print help
-      identifiers:
-        - -h
-        - --help
-      schema:
-        type: bool
-commands:
-  - name: initialize
-    aliases:
-      - init
-    summary: scaffold a cli program
-    description: Initialize a new rotini cli program spec file.
-    examples:
-      - rotini initialize mycli
-      - rotini init mycli --format json
-      - rotini init mycli --force
-    footer: Use "rotini help <command>" for more information about a command.
-    inputs:
-      arguments:
-        - name: name
-          summary: the root command name written to the created spec file (expected binary name)
-          schema:
-            type: string
-      flags:
-        - name: format
-          summary: the created rotini spec file format
-          identifiers:
-            - --format
-          schema:
-            type: string
-            enum:
-              - json
-              - yaml
-            default: yaml
-        - name: force
-          summary: force re-initialization if files exist that init would overwrite
-          identifiers:
-            - --force
-          schema:
-            type: bool
-        - name: into
-          summary: also compose the new cli into this parent cli
-          identifiers:
-            - --into
-          schema:
-            type: string
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
-  - name: generate
-    aliases:
-      - gen
-    summary: generate a cli program
-    description: Generate a cli program from a rotini spec file.
-    examples:
-      - rotini generate
-      - rotini generate ./path/to/.rotini.json --watch
-    footer: Use "rotini help <command>" for more information about a command.
-    inputs:
-      arguments:
-        - name: spec_file_path
-          summary: path to the spec file
-          schema:
-            type: string
-            default: .rotini.spec.yaml
-      flags:
-        - name: conf_file_path
-          summary: path to the rotini conf file
-          identifiers:
-            - -c
-            - --config
-          schema:
-            type: string
-        - name: watch
-          summary: watch a rotini spec file for changes and re-generate
-          identifiers:
-            - --watch
-            - -w
-          schema:
-            type: bool
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
-  - name: validate
-    aliases:
-      - val
-    summary: validate a spec file
-    description: Validate a rotini spec file for correctness.
-    examples:
-      - rotini validate
-      - rotini val ./path/to/.rotini.yaml
-    footer: Use "rotini help <command>" for more information about a command.
-    inputs:
-      arguments:
-        - name: file
-          summary: path to the spec file
-          schema:
-            type: string
-            default: .rotini.spec.yaml
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
-  - name: completion
-    summary: print shell completion
-    description: Print shell completion scripts.
-    examples:
-      - rotini completion bash
-      - rotini completion zsh >> ~/.zshrc (eval "$(rotini completion zsh)")
-      - rotini completion fish > ~/.config/fish/completions/rotini.fish
-      - rotini completion powershell | Out-String | Invoke-Expression
-      - rotini completion nushell | save -f ~/.config/nushell/rotini.nu
-      - rotini completion elvish | save -f ~/.config/elvish/lib/rotini.elv
-    inputs:
-      arguments:
-        - name: shell
-          summary: the shell to generate completions for
-          schema:
-            type: string
-            enum:
-              - zsh
-              - bash
-              - fish
-              - powershell
-              - nushell
-              - elvish
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
-  - name: help
-    summary: print help
-    description: Print help for a specific command.
-    examples:
-      - rotini help
-      - rotini help generate
-      - rotini help init
-    footer: Use "rotini help <command>" for more information about a command.
-    inputs:
-      arguments:
-        - name: command
-          summary: name of the command to print help for
-          schema:
-            type: array
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
-  - name: version
-    summary: print version
-    description: Print the rotini cli version.
-    examples:
-      - rotini version
-    footer: Use "rotini help <command>" for more information about a command.
-    inputs:
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
+      description: Print help for a specific command.
+      examples:
+        - rotini help
+        - rotini help generate
+        - rotini help init
+      footer: Use "rotini help <command>" for more information about a command.
+      inputs:
+        arguments:
+          - name: command
+            summary: name of the command to print help for
+            schema:
+              type: array
+        flags:
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
+    - name: version
+      summary: print version
+      description: Print the rotini cli version.
+      examples:
+        - rotini version
+      footer: Use "rotini help <command>" for more information about a command.
+      inputs:
+        flags:
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
 metadata:
   - var: Version
     default: 0.0.0

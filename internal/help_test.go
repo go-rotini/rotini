@@ -40,32 +40,33 @@ func TestGenerateHelpHiddenDeprecated(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"name: mycli\n"+
-			"commands:\n"+
-			"  - name: secret\n"+
-			"    hidden: true\n"+
-			"    summary: a hidden command\n"+
-			"  - name: legacy\n"+
-			"    deprecated: use modern instead\n"+
-			"    summary: an old command\n"+
-			"  - name: run\n"+
-			"    summary: run it\n"+
-			"    inputs:\n"+
-			"      arguments:\n"+
-			"        - name: target\n"+
-			"          summary: the target\n"+
-			"          deprecated: positional is going away\n"+
-			"          schema: { type: string, required: true }\n"+
-			"      flags:\n"+
-			"        - name: secretflag\n"+
-			"          summary: a hidden flag\n"+
-			"          hidden: true\n"+
-			"          identifiers: [--secret]\n"+
-			"          schema: { type: bool }\n"+
-			"        - name: verbose\n"+
-			"          summary: chatty output\n"+
-			"          identifiers: [-v]\n"+
-			"          schema: { type: bool }\n")
+			"command:\n"+
+			"  name: mycli\n"+
+			"  commands:\n"+
+			"    - name: secret\n"+
+			"      hidden: true\n"+
+			"      summary: a hidden command\n"+
+			"    - name: legacy\n"+
+			"      deprecated: use modern instead\n"+
+			"      summary: an old command\n"+
+			"    - name: run\n"+
+			"      summary: run it\n"+
+			"      inputs:\n"+
+			"        arguments:\n"+
+			"          - name: target\n"+
+			"            summary: the target\n"+
+			"            deprecated: positional is going away\n"+
+			"            schema: { type: string, required: true }\n"+
+			"        flags:\n"+
+			"          - name: secretflag\n"+
+			"            summary: a hidden flag\n"+
+			"            hidden: true\n"+
+			"            identifiers: [--secret]\n"+
+			"            schema: { type: bool }\n"+
+			"          - name: verbose\n"+
+			"            summary: chatty output\n"+
+			"            identifiers: [-v]\n"+
+			"            schema: { type: bool }\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 
 	t.Chdir(tmp)
@@ -89,12 +90,13 @@ func TestGenerateHelpComposition(t *testing.T) {
 	tmp := initTestModule(t)
 
 	childSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"name: child\n" +
-		"summary: the child program\n" +
-		"description: A composed child.\n" +
-		"commands:\n" +
-		"  - name: greet\n" +
-		"    summary: say hello\n"
+		"command:\n" +
+		"  name: child\n" +
+		"  summary: the child program\n" +
+		"  description: A composed child.\n" +
+		"  commands:\n" +
+		"    - name: greet\n" +
+		"      summary: say hello\n"
 	helpConf := func(dir string) string {
 		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 			"generate:\n" +
@@ -103,9 +105,10 @@ func TestGenerateHelpComposition(t *testing.T) {
 			"  help: { enabled: true }\n"
 	}
 	parentSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"name: parent\n" +
-		"commands:\n" +
-		"  - $ref: ../child/.rotini.spec.yaml\n"
+		"command:\n" +
+		"  name: parent\n" +
+		"  commands:\n" +
+		"    - $ref: ../child/.rotini.spec.yaml\n"
 
 	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.spec.yaml"), childSpec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.conf.yaml"), helpConf("child"))

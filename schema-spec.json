@@ -3,7 +3,7 @@
   "title": "Rotini Spec Schema",
   "description": "Schema for a Rotini CLI definition spec file.",
   "type": "object",
-  "required": ["$schema", "name"],
+  "required": ["$schema", "command"],
   "additionalProperties": false,
   "properties": {
     "$schema": {
@@ -11,104 +11,122 @@
       "description": "URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.",
       "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-spec\\.json$"
     },
-    "name": {
-      "type": "string",
-      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
-      "description": "Root command name used in routing."
+    "command": {
+      "$ref": "#/definitions/Command",
+      "description": "The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, metadata, schemas) live at the document level beside it."
     },
-    "aliases": {
+    "configuration_files": {
       "type": "array",
-      "description": "Additional names that invoke the root command.",
+      "description": "Config-file sources the program loads at startup (document-level). Per-command 'config' inputs bind typed values from these by name + key.",
       "items": {
-        "type": "string",
-        "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
-      }
-    },
-    "timeout": {
-      "type": "string",
-      "description": "Root command execution timeout. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
-    },
-    "inputs": {
-      "$ref": "#/definitions/Inputs",
-      "description": "Typed inputs for the root command: flags, arguments, file values, and variables."
-    },
-    "summary": {
-      "type": "string",
-      "description": "Short one-liner describing the root command (used by a parent program that composes this CLI as a sub-command)."
-    },
-    "description": {
-      "type": "string",
-      "description": "Long description block shown atop the root command's generated help page. Ignored when 'help' (verbatim) is set."
-    },
-    "usage": {
-      "type": "string",
-      "description": "Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set."
-    },
-    "header": {
-      "type": "string",
-      "description": "Text rendered above the description block. Ignored when 'help' is set."
-    },
-    "footer": {
-      "type": "string",
-      "description": "Text rendered at the bottom of the page. Ignored when 'help' is set."
-    },
-    "headings": {
-      "$ref": "#/definitions/HelpHeadings",
-      "description": "Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set."
-    },
-    "examples": {
-      "type": "array",
-      "description": "Example command-line invocations, rendered one per line. Ignored when 'help' is set.",
-      "items": { "type": "string" }
-    },
-    "help": {
-      "type": "string",
-      "description": "Exact, verbatim help page for the root command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings). When unset, rotini generates the page from those fields."
-    },
-    "commands": {
-      "type": "array",
-      "description": "Sub-commands of the root command.",
-      "items": {
-        "$ref": "#/definitions/Command"
-      }
-    },
-    "remote_commands": {
-      "type": "array",
-      "description": "Co-located remote binaries dispatched as first-class sub-commands of the root command.",
-      "items": {
-        "$ref": "#/definitions/RemoteCommandSpec"
-      }
-    },
-    "files": {
-      "type": "array",
-      "description": "Config files to load at startup.",
-      "items": {
-        "$ref": "#/definitions/ConfigSpec"
-      }
-    },
-    "events": {
-      "type": "array",
-      "description": "Events this program can emit. Each name must be unique.",
-      "items": {
-        "$ref": "#/definitions/EventSpec"
+        "$ref": "#/definitions/ConfigurationFile"
       }
     },
     "metadata": {
       "type": "array",
-      "description": "Build-time metadata vars injected via go ldflags.",
+      "description": "Build-time metadata vars injected via go ldflags (document-level).",
       "items": {
         "$ref": "#/definitions/MetadataEntry"
       }
     },
     "schemas": {
       "type": "object",
-      "description": "Reusable named schema definitions. Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\".",
+      "description": "Reusable named schema definitions (document-level). Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\".",
       "additionalProperties": {
         "$ref": "#/definitions/Schema"
       }
     }
   },
   "definitions": {
+    "Command": {
+      "description": "A command node in the CLI command tree — the root command and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). When used as the root (the top-level 'command'), it must use 'name'.",
+      "type": "object",
+      "anyOf": [{ "required": ["name"] }, { "required": ["$ref"] }],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Command name used in routing. As the root command (the top-level 'command') this is the binary name and must be set — the root cannot use '$ref'."
+        },
+        "$ref": {
+          "type": "string",
+          "description": "Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name. Not valid on the root command."
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Command execution timeout. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
+        },
+        "inputs": {
+          "$ref": "#/definitions/Inputs",
+          "description": "Typed inputs for this command: flags, arguments, config values, env variables, and stdin."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page."
+        },
+        "description": {
+          "type": "string",
+          "description": "Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set."
+        },
+        "usage": {
+          "type": "string",
+          "description": "Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set."
+        },
+        "header": {
+          "type": "string",
+          "description": "Text rendered above the description block. Ignored when 'help' is set."
+        },
+        "footer": {
+          "type": "string",
+          "description": "Text rendered at the bottom of the page. Ignored when 'help' is set."
+        },
+        "headings": {
+          "$ref": "#/definitions/HelpHeadings",
+          "description": "Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set."
+        },
+        "examples": {
+          "type": "array",
+          "description": "Example command-line invocations, rendered one per line. Ignored when 'help' is set.",
+          "items": { "type": "string" }
+        },
+        "help": {
+          "type": "string",
+          "description": "Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the command is annotated as deprecated in its parent's generated Commands list."
+        },
+        "commands": {
+          "type": "array",
+          "description": "Sub-commands of this command (inline or composed via $ref).",
+          "items": {
+            "$ref": "#/definitions/Command"
+          }
+        },
+        "remote_commands": {
+          "type": "array",
+          "description": "Co-located remote binaries dispatched as first-class sub-commands of this command.",
+          "items": {
+            "$ref": "#/definitions/RemoteCommandSpec"
+          }
+        }
+      }
+    },
     "HelpHeadings": {
       "type": "object",
       "description": "Section heading overrides for generated help pages.",
@@ -251,16 +269,16 @@
             },
             "variable": {
               "type": "string",
-              "description": "Environment variable name (environment inputs only)",
+              "description": "Environment variable name (env inputs only)",
               "pattern": "^[A-Z_][A-Z0-9_]*$"
             },
             "file": {
               "type": "string",
-              "description": "Config file logical name to read from (config_values inputs only)"
+              "description": "Config file logical name to read from (config inputs only)"
             },
             "key": {
               "type": "string",
-              "description": "Key path within the config file (config_values inputs only, e.g., 'server.port')"
+              "description": "Key path within the config file (config inputs only, e.g., 'server.port')"
             }
           }
         }
@@ -393,16 +411,16 @@
             "$ref": "#/definitions/ArgumentInput"
           }
         },
-        "files": {
+        "config": {
           "type": "array",
-          "description": "Config file value inputs for this command",
+          "description": "Config-value inputs for this command, bound from a document-level configuration_files source by key.",
           "items": {
             "$ref": "#/definitions/ConfigInput"
           }
         },
-        "variables": {
+        "env": {
           "type": "array",
-          "description": "Environment variable inputs for this command",
+          "description": "Environment-variable inputs for this command",
           "items": {
             "$ref": "#/definitions/EnvInput"
           }
@@ -410,22 +428,6 @@
         "stdin": {
           "$ref": "#/definitions/StdinSpec",
           "description": "Declares expected stdin format and schema for this command"
-        }
-      }
-    },
-    "EventSpec": {
-      "type": "object",
-      "required": ["name"],
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_]*$",
-          "description": "Unique event name (snake_case). Used to name Emit{Name} methods and On{Name} handler fields."
-        },
-        "schema": {
-          "$ref": "#/definitions/Schema",
-          "description": "Shape of the event payload. When omitted, the emit method takes a *{BinName}{PascalName}EventMsg of an empty struct."
         }
       }
     },
@@ -447,13 +449,21 @@
             "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
           }
         },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this remote command in its parent's generated Commands list."
+        },
+        "description": {
+          "type": "string",
+          "description": "Long description block for this remote command's generated help page."
+        },
         "timeout": {
           "type": "string",
           "description": "Host-side timeout for the remote binary execution. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
         }
       }
     },
-    "ConfigSpec": {
+    "ConfigurationFile": {
       "type": "object",
       "required": ["name", "path"],
       "additionalProperties": false,
@@ -475,95 +485,6 @@
         "schema": {
           "$ref": "#/definitions/Schema",
           "description": "When set, generates a typed config struct and validates required fields at load time."
-        }
-      }
-    },
-    "Command": {
-      "description": "A command node in the CLI command tree. A command is either declared inline (with 'name') or composed from another spec file (with '$ref').",
-      "type": "object",
-      "anyOf": [{ "required": ["name"] }, { "required": ["$ref"] }],
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string",
-          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
-          "description": "Command name used in routing."
-        },
-        "$ref": {
-          "type": "string",
-          "description": "Path to another rotini spec file whose command tree is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name."
-        },
-        "aliases": {
-          "type": "array",
-          "description": "Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases.",
-          "items": {
-            "type": "string",
-            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
-          }
-        },
-        "timeout": {
-          "type": "string",
-          "description": "Command execution timeout. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
-        },
-        "inputs": {
-          "$ref": "#/definitions/Inputs",
-          "description": "Typed inputs for this command: flags, arguments, file values, and variables."
-        },
-        "summary": {
-          "type": "string",
-          "description": "Short one-liner shown next to this command in its parent's generated Commands list."
-        },
-        "description": {
-          "type": "string",
-          "description": "Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set."
-        },
-        "usage": {
-          "type": "string",
-          "description": "Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set."
-        },
-        "header": {
-          "type": "string",
-          "description": "Text rendered above the description block. Ignored when 'help' is set."
-        },
-        "footer": {
-          "type": "string",
-          "description": "Text rendered at the bottom of the page. Ignored when 'help' is set."
-        },
-        "headings": {
-          "$ref": "#/definitions/HelpHeadings",
-          "description": "Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set."
-        },
-        "examples": {
-          "type": "array",
-          "description": "Example command-line invocations, rendered one per line. Ignored when 'help' is set.",
-          "items": { "type": "string" }
-        },
-        "help": {
-          "type": "string",
-          "description": "Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields."
-        },
-        "hidden": {
-          "type": "boolean",
-          "default": false,
-          "description": "When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line)."
-        },
-        "deprecated": {
-          "type": "string",
-          "description": "Deprecation message; the command is annotated as deprecated in its parent's generated Commands list."
-        },
-        "commands": {
-          "type": "array",
-          "description": "Sub-commands of this command.",
-          "items": {
-            "$ref": "#/definitions/Command"
-          }
-        },
-        "remote_commands": {
-          "type": "array",
-          "description": "Co-located remote binaries dispatched as first-class sub-commands of this command.",
-          "items": {
-            "$ref": "#/definitions/RemoteCommandSpec"
-          }
         }
       }
     }

@@ -114,15 +114,6 @@ func commandHelp(c Command) cmdHelp {
 	}
 }
 
-// specRootHelp gathers the flattened help fields off a spec's root command.
-func specRootHelp(s *Spec) cmdHelp {
-	return cmdHelp{
-		Summary: s.Summary, Description: s.Description, Usage: s.Usage,
-		Header: s.Header, Footer: s.Footer, Headings: s.Headings,
-		Examples: s.Examples, Help: s.Help,
-	}
-}
-
 // flattenHelp produces a help node per command for the whole resolved tree: the
 // root first, then every sub-command in tree order. Each node carries its verbatim
 // help (when set) and its built helpData (used when no verbatim help is given).

@@ -160,11 +160,11 @@ func flagFields(in *Inputs) []fieldDef {
 	if in == nil {
 		return nil
 	}
-	fields := make([]fieldDef, 0, len(in.Flags)+len(in.Variables))
+	fields := make([]fieldDef, 0, len(in.Flags)+len(in.Env))
 	for _, f := range in.Flags {
 		fields = append(fields, fieldDef{Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name})
 	}
-	for _, v := range in.Variables {
+	for _, v := range in.Env {
 		fields = append(fields, fieldDef{Field: toPascalCase(v.Name), GoType: goFieldType(v.Schema), Tag: v.Name})
 	}
 	return fields

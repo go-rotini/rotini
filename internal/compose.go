@@ -68,14 +68,18 @@ type composeCtx struct {
 // resolveTree resolves spec into a genProgram, loading any `$ref`'d child specs
 // (relative to specPath) and grafting them as composed subtrees.
 func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgram, error) {
+	root := spec.Command
+	if root.Ref != "" || root.Name == "" {
+		return nil, fmt.Errorf("root command must have a name (the top-level \"command\" cannot use $ref)")
+	}
 	gp := &genProgram{
-		rootName:    spec.Name,
-		rootPascal:  toPascalCase(spec.Name),
-		rootInputs:  spec.Inputs,
-		rootAliases: spec.Aliases,
+		rootName:    root.Name,
+		rootPascal:  toPascalCase(root.Name),
+		rootInputs:  root.Inputs,
+		rootAliases: root.Aliases,
 		metadata:    spec.Metadata,
-		rootRemotes: spec.RemoteCommands,
-		rootHelp:    specRootHelp(spec),
+		rootRemotes: root.RemoteCommands,
+		rootHelp:    commandHelp(root),
 	}
 	for _, m := range spec.Metadata {
 		if m.Var == "Version" {
@@ -85,9 +89,9 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 	gp.root = genCommand{
 		prefix:   gp.rootPascal,
 		handler:  lowerFirst(gp.rootPascal) + "Handlers",
-		filename: spec.Name + ".go",
-		flags:    flagFields(spec.Inputs),
-		args:     argFields(spec.Inputs),
+		filename: root.Name + ".go",
+		flags:    flagFields(root.Inputs),
+		args:     argFields(root.Inputs),
 		inputs:   []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
 	}
 
@@ -97,7 +101,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		seen[filepath.Clean(abs)] = true
 	}
 
-	tree, err := gp.walk(spec.Commands, "", specDir, moduleRoot, moduleName, seen, composeCtx{})
+	tree, err := gp.walk(root.Commands, "", specDir, moduleRoot, moduleName, seen, composeCtx{})
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +194,8 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	if childSpec.Name == "" {
+	childRoot := childSpec.Command
+	if childRoot.Name == "" {
 		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
 	}
 
@@ -198,13 +203,13 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	childPascal := toPascalCase(childSpec.Name)
-	alias := identAlias(childSpec.Name)
+	childPascal := toPascalCase(childRoot.Name)
+	alias := identAlias(childRoot.Name)
 	gp.addImport(alias, imp)
 
-	composeRootPath := childSpec.Name
+	composeRootPath := childRoot.Name
 	if parentPath != "" {
-		composeRootPath = parentPath + "_" + childSpec.Name
+		composeRootPath = parentPath + "_" + childRoot.Name
 	}
 	prefix := gp.rootPascal + toPascalCase(composeRootPath)
 
@@ -212,11 +217,11 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	gp.composed = append(gp.composed, composedCmd{prefix: prefix, delegateAlias: alias, delegateMethod: childPascal})
 
 	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: childPascal, alias: alias}
-	children, err := gp.walk(childSpec.Commands, composeRootPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
+	children, err := gp.walk(childRoot.Commands, composeRootPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
 	}
-	return rnode{name: childSpec.Name, prefix: prefix, aliases: c.Aliases, inputs: childSpec.Inputs, help: specRootHelp(childSpec), hidden: c.Hidden, deprecated: c.Deprecated, children: children}, nil
+	return rnode{name: childRoot.Name, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, deprecated: c.Deprecated, children: children}, nil
 }
 
 func (gp *genProgram) addImport(alias, path string) {

@@ -96,12 +96,12 @@ func composeInto(moduleRoot, parent, child, childExt string) error {
 		return err
 	}
 	ref := "../" + child + "/.rotini.spec." + childExt
-	for _, c := range spec.Commands {
+	for _, c := range spec.Command.Commands {
 		if c.Ref == ref {
 			return Generate(parentSpec, parentConf, false, nil) // already referenced
 		}
 	}
-	spec.Commands = append(spec.Commands, Command{Ref: ref})
+	spec.Command.Commands = append(spec.Command.Commands, Command{Ref: ref})
 	if err := WriteSpec(parentSpec, spec); err != nil {
 		return err
 	}
@@ -140,11 +140,13 @@ func normalizeFormat(format string) (string, error) {
 // The user adds commands from there.
 func scaffoldSpec(name string) *Spec {
 	return &Spec{
-		Schema:      specSchemaURL(),
-		Name:        name,
-		Summary:     name + " command-line program",
-		Description: "Describe " + name + " here. This text appears at the top of `" + name + " --help`.",
-		Metadata:    []MetadataEntry{{Var: "Version", Default: "dev"}},
+		Schema: specSchemaURL(),
+		Command: Command{
+			Name:        name,
+			Summary:     name + " command-line program",
+			Description: "Describe " + name + " here. This text appears at the top of `" + name + " --help`.",
+		},
+		Metadata: []MetadataEntry{{Var: "Version", Default: "dev"}},
 	}
 }
 

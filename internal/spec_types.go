@@ -6,42 +6,14 @@ package internal
 type Spec struct {
 	// URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.
 	Schema string `json:"$schema"`
-	// Additional names that invoke the root command.
-	Aliases []string `json:"aliases,omitempty"`
-	// Sub-commands of the root command.
-	Commands []Command `json:"commands,omitempty"`
-	// Long description block shown atop the root command's generated help page. Ignored when 'help' (verbatim) is set.
-	Description string `json:"description,omitempty"`
-	// Events this program can emit. Each name must be unique.
-	Events []EventSpec `json:"events,omitempty"`
-	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
-	Examples []string `json:"examples,omitempty"`
-	// Config files to load at startup.
-	Files []ConfigSpec `json:"files,omitempty"`
-	// Text rendered at the bottom of the page. Ignored when 'help' is set.
-	Footer string `json:"footer,omitempty"`
-	// Text rendered above the description block. Ignored when 'help' is set.
-	Header string `json:"header,omitempty"`
-	// Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set.
-	Headings *HelpHeadings `json:"headings,omitempty"`
-	// Exact, verbatim help page for the root command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings). When unset, rotini generates the page from those fields.
-	Help string `json:"help,omitempty"`
-	// Typed inputs for the root command: flags, arguments, file values, and variables.
-	Inputs *Inputs `json:"inputs,omitempty"`
-	// Build-time metadata vars injected via go ldflags.
+	// The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, metadata, schemas) live at the document level beside it.
+	Command Command `json:"command"`
+	// Config-file sources the program loads at startup (document-level). Per-command 'config' inputs bind typed values from these by name + key.
+	ConfigurationFiles []ConfigurationFile `json:"configuration_files,omitempty"`
+	// Build-time metadata vars injected via go ldflags (document-level).
 	Metadata []MetadataEntry `json:"metadata,omitempty"`
-	// Root command name used in routing.
-	Name string `json:"name"`
-	// Co-located remote binaries dispatched as first-class sub-commands of the root command.
-	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
-	// Reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>".
+	// Reusable named schema definitions (document-level). Referenced elsewhere via "$ref": "#/schemas/<Name>".
 	Schemas map[string]Schema `json:"schemas,omitempty"`
-	// Short one-liner describing the root command (used by a parent program that composes this CLI as a sub-command).
-	Summary string `json:"summary,omitempty"`
-	// Root command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
-	Timeout string `json:"timeout,omitempty"`
-	// Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set.
-	Usage string `json:"usage,omitempty"`
 }
 
 type ArgumentInput struct {
@@ -82,13 +54,13 @@ type BaseSchema struct {
 	Type string `json:"type,omitempty"`
 }
 
-// A command node in the CLI command tree. A command is either declared inline (with 'name') or composed from another spec file (with '$ref').
+// A command node in the CLI command tree — the root command and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). When used as the root (the top-level 'command'), it must use 'name'.
 type Command struct {
-	// Path to another rotini spec file whose command tree is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name.
+	// Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name. Not valid on the root command.
 	Ref string `json:"$ref,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases.
 	Aliases []string `json:"aliases,omitempty"`
-	// Sub-commands of this command.
+	// Sub-commands of this command (inline or composed via $ref).
 	Commands []Command `json:"commands,omitempty"`
 	// Deprecation message; the command is annotated as deprecated in its parent's generated Commands list.
 	Deprecated string `json:"deprecated,omitempty"`
@@ -106,13 +78,13 @@ type Command struct {
 	Help string `json:"help,omitempty"`
 	// When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line).
 	Hidden bool `json:"hidden,omitempty"`
-	// Typed inputs for this command: flags, arguments, file values, and variables.
+	// Typed inputs for this command: flags, arguments, config values, env variables, and stdin.
 	Inputs *Inputs `json:"inputs,omitempty"`
-	// Command name used in routing.
+	// Command name used in routing. As the root command (the top-level 'command') this is the binary name and must be set — the root cannot use '$ref'.
 	Name string `json:"name,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
-	// Short one-liner shown next to this command in its parent's generated Commands list.
+	// Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page.
 	Summary string `json:"summary,omitempty"`
 	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
@@ -127,7 +99,7 @@ type ConfigInput struct {
 	Schema *InputSchema `json:"schema,omitempty"`
 }
 
-type ConfigSpec struct {
+type ConfigurationFile struct {
 	// File format
 	Format string `json:"format,omitempty"`
 	// Logical name for the config file (e.g., 'app-config')
@@ -143,13 +115,6 @@ type EnvInput struct {
 	Name string `json:"name"`
 	// Type definition and input-level metadata (required, default, variable)
 	Schema *InputSchema `json:"schema,omitempty"`
-}
-
-type EventSpec struct {
-	// Unique event name (snake_case). Used to name Emit{Name} methods and On{Name} handler fields.
-	Name string `json:"name"`
-	// Shape of the event payload. When omitted, the emit method takes a *{BinName}{PascalName}EventMsg of an empty struct.
-	Schema *Schema `json:"schema,omitempty"`
 }
 
 type FlagInput struct {
@@ -181,27 +146,27 @@ type InputSchema struct {
 	BaseSchema
 	// Default value applied when the input is not provided
 	Default any `json:"default,omitempty"`
-	// Config file logical name to read from (config_values inputs only)
+	// Config file logical name to read from (config inputs only)
 	File string `json:"file,omitempty"`
-	// Key path within the config file (config_values inputs only, e.g., 'server.port')
+	// Key path within the config file (config inputs only, e.g., 'server.port')
 	Key string `json:"key,omitempty"`
 	// When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean — unlike the string-array 'required' on Schema.
 	Required bool `json:"required,omitempty"`
-	// Environment variable name (environment inputs only)
+	// Environment variable name (env inputs only)
 	Variable string `json:"variable,omitempty"`
 }
 
 type Inputs struct {
 	// Positional argument inputs for this command
 	Arguments []ArgumentInput `json:"arguments,omitempty"`
-	// Config file value inputs for this command
-	Files []ConfigInput `json:"files,omitempty"`
+	// Config-value inputs for this command, bound from a document-level configuration_files source by key.
+	Config []ConfigInput `json:"config,omitempty"`
+	// Environment-variable inputs for this command
+	Env []EnvInput `json:"env,omitempty"`
 	// Flag inputs for this command
 	Flags []FlagInput `json:"flags,omitempty"`
 	// Declares expected stdin format and schema for this command
 	Stdin *StdinSpec `json:"stdin,omitempty"`
-	// Environment variable inputs for this command
-	Variables []EnvInput `json:"variables,omitempty"`
 }
 
 type MetadataEntry struct {
@@ -214,8 +179,12 @@ type MetadataEntry struct {
 type RemoteCommandSpec struct {
 	// Additional names that invoke this remote command.
 	Aliases []string `json:"aliases,omitempty"`
+	// Long description block for this remote command's generated help page.
+	Description string `json:"description,omitempty"`
 	// Name of the remote command. The dispatched binary must be named <program>-<name> and located in the same directory as the host binary.
 	Name string `json:"name"`
+	// Short one-liner shown next to this remote command in its parent's generated Commands list.
+	Summary string `json:"summary,omitempty"`
 	// Host-side timeout for the remote binary execution. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
 }
