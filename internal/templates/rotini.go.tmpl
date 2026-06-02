@@ -48,7 +48,7 @@ type {{.Prefix}}Arguments struct{}
 
 type {{.Prefix}}Env struct {
 {{- range .Env}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"{{with .EnvVar}} env:"{{.}}"{{end}}`
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"{{with .EnvVar}} env:"{{.}}"{{end}}{{with .Constraint}} {{.}}{{end}}`
 {{- end}}
 }
 {{- end}}
@@ -56,7 +56,7 @@ type {{.Prefix}}Env struct {
 
 type {{.Prefix}}Config struct {
 {{- range .Config}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"`
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"{{with .Constraint}} {{.}}{{end}}`
 {{- end}}
 }
 {{- end}}

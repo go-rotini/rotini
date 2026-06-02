@@ -377,6 +377,87 @@ func TestBinder_constraintCheckedOnReconciledValue(t *testing.T) {
 	}
 }
 
+// Channel-constraint shapes carry the validation struct-tags codegen emits on env/
+// config fields (A2d), which the binder enforces over the reconciled value.
+type tbEnvPort struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Env       struct {
+			Port int `rotini:"port" recon:"port" min:"1" max:"65535"`
+		}
+	}
+}
+
+type tbCfgName struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Config    struct {
+			Name string `rotini:"name" recon:"app.name" minlen:"2" maxlen:"5" pattern:"^[a-z]+$"`
+		}
+	}
+}
+
+func tbAppDef() rotini.Definition { return rotini.Definition{Name: "app", Handler: "App"} }
+
+func TestBinder_envConstraintEnforced(t *testing.T) {
+	t.Setenv("PORT", "70000") // above max
+	var in tbEnvPort
+	err := NewBinder(rotini.BindMeta{}).Bind(rotini.NewContextFor(tbAppDef(), nil), &in)
+	if err == nil || !strings.Contains(err.Error(), "<= 65535") {
+		t.Fatalf("Bind err = %v, want a max-bound violation for env PORT", err)
+	}
+}
+
+func TestBinder_envConstraintValid(t *testing.T) {
+	t.Setenv("PORT", "8080")
+	var in tbEnvPort
+	if err := NewBinder(rotini.BindMeta{}).Bind(rotini.NewContextFor(tbAppDef(), nil), &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Env.Port != 8080 {
+		t.Errorf("Port = %d, want 8080", in.App.Env.Port)
+	}
+}
+
+func TestBinder_channelConstraintAbsentSkipped(t *testing.T) {
+	// Genuinely unset (not empty): the field is never sourced, so the constraint is
+	// skipped and the value stays zero — absence is `required`'s job, not the bounds'.
+	if prev, had := os.LookupEnv("PORT"); had {
+		os.Unsetenv("PORT")
+		t.Cleanup(func() { os.Setenv("PORT", prev) })
+	}
+	var in tbEnvPort
+	if err := NewBinder(rotini.BindMeta{}).Bind(rotini.NewContextFor(tbAppDef(), nil), &in); err != nil {
+		t.Fatalf("absent env value should skip its constraint check: %v", err)
+	}
+	if in.App.Env.Port != 0 {
+		t.Errorf("Port = %d, want 0 (unset)", in.App.Env.Port)
+	}
+}
+
+func TestBinder_configConstraintEnforced(t *testing.T) {
+	cfg := writeConfig(t, "app:\n  name: TOOLONG\n") // length 7 > maxlen 5 (and not lowercase)
+	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	var in tbCfgName
+	if err := NewBinder(meta).Bind(rotini.NewContextFor(tbAppDef(), nil), &in); err == nil {
+		t.Fatal("expected a constraint violation for the config value app.name")
+	}
+}
+
+func TestBinder_configConstraintValid(t *testing.T) {
+	cfg := writeConfig(t, "app:\n  name: abc\n")
+	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	var in tbCfgName
+	if err := NewBinder(meta).Bind(rotini.NewContextFor(tbAppDef(), nil), &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Config.Name != "abc" {
+		t.Errorf("Name = %q, want abc", in.App.Config.Name)
+	}
+}
+
 // tbNoReqInputs mirrors tbInputs but with no required config field, so the
 // no-config-files case binds cleanly.
 type tbNoReqInputs struct{ App tbNoReqCmd }

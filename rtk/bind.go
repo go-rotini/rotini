@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/go-rotini/recon"
@@ -103,6 +104,12 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 	defer cfgReg.Close()
 
 	if err := fillChannels(v, envReg, cfgReg); err != nil {
+		return err
+	}
+
+	// 4b. validate the env/config channel values against their declared constraints
+	//     (the same checks A1 applies to argv), over the values actually provided.
+	if err := validateChannels(v, envReg, cfgReg); err != nil {
 		return err
 	}
 
@@ -472,4 +479,145 @@ func fillChannels(v reflect.Value, envReg, cfgReg *recon.Registry) error {
 		}
 	}
 	return nil
+}
+
+// validateChannels enforces the declared numeric/string/array constraints on each
+// command's Env and Config fields, reusing the same [checkConstraints] A1 applies to
+// argv. It is presence-aware: a field is checked only when its source actually provided
+// a value (reg.Get found), so absence is governed by `required` (recon), not by these.
+func validateChannels(v reflect.Value, envReg, cfgReg *recon.Registry) error {
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
+	for i := range v.NumField() {
+		ci := v.Field(i)
+		if ci.Kind() != reflect.Struct {
+			continue
+		}
+		t := ci.Type()
+		for j := range ci.NumField() {
+			switch t.Field(j).Name {
+			case "Env":
+				if err := validateChannelStruct(ci.Field(j), envReg); err != nil {
+					return err
+				}
+			case "Config":
+				if err := validateChannelStruct(ci.Field(j), cfgReg); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// validateChannelStruct checks every constrained field of an Env/Config sub-struct
+// against the value its registry resolved (when present).
+func validateChannelStruct(s reflect.Value, reg *recon.Registry) error {
+	if s.Kind() != reflect.Struct {
+		return nil
+	}
+	st := s.Type()
+	for j := range s.NumField() {
+		f := st.Field(j)
+		c, has := channelConstraints(f.Tag)
+		if !has {
+			continue
+		}
+		key := reconKey(f.Tag.Get("recon"))
+		if key == "" {
+			continue
+		}
+		val, found, err := reg.Get(key)
+		if err != nil {
+			return fmt.Errorf("rotini: read %q: %w", key, err)
+		}
+		if !found {
+			continue // only provided values are constraint-checked
+		}
+		typ := channelGoType(s.Field(j).Type())
+		label := f.Tag.Get("rotini")
+		if label == "" {
+			label = key
+		}
+		if err := checkConstraints(label, typ, c, channelValues(val, typ)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// channelConstraints reads the validation struct-tags codegen emits on a channel field
+// (min/max/minlen/maxlen/minitems/maxitems/pattern) into a [rotini.Constraints].
+func channelConstraints(tag reflect.StructTag) (rotini.Constraints, bool) {
+	var c rotini.Constraints
+	has := false
+	if v := tag.Get("min"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.Minimum, has = f, true
+		}
+	}
+	if v := tag.Get("max"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.Maximum, has = f, true
+		}
+	}
+	if v := tag.Get("minlen"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.MinLength, has = n, true
+		}
+	}
+	if v := tag.Get("maxlen"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.MaxLength, has = n, true
+		}
+	}
+	if v := tag.Get("minitems"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.MinItems, has = n, true
+		}
+	}
+	if v := tag.Get("maxitems"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			c.MaxItems, has = n, true
+		}
+	}
+	if v := tag.Get("pattern"); v != "" {
+		c.Pattern, has = v, true
+	}
+	return c, has
+}
+
+// channelGoType maps a channel field's Go type to the type string checkConstraints
+// expects (numeric bounds apply to int/float, length/pattern to strings, item counts
+// to slices).
+func channelGoType(t reflect.Type) string {
+	switch t.Kind() {
+	case reflect.Pointer:
+		return channelGoType(t.Elem())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "int"
+	case reflect.Float32, reflect.Float64:
+		return "float64"
+	case reflect.Slice:
+		return "[]string"
+	default:
+		return "string"
+	}
+}
+
+// channelValues renders a reconciled value as the string(s) checkConstraints consumes:
+// the elements for an array type, else the single canonical string.
+func channelValues(val recon.Value, typ string) []string {
+	if isArrayType(typ) {
+		if items, err := val.AsSlice(); err == nil {
+			out := make([]string, len(items))
+			for i, it := range items {
+				out[i] = it.String()
+			}
+			return out
+		}
+	}
+	return []string{val.String()}
 }

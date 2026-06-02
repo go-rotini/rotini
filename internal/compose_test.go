@@ -223,6 +223,37 @@ command:
 	}
 }
 
+func TestGenerate_channelConstraintTags(t *testing.T) {
+	tmp := initTestModule(t)
+	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+command:
+  name: app
+  inputs:
+    env:
+      - name: port
+        schema: { type: int, minimum: 1, maximum: 65535 }
+      - name: region
+        schema: { type: string, minLength: 2, pattern: "^[a-z]+$" }
+    config:
+      - name: name
+        schema: { type: string, key: app.name, maxLength: 5 }
+`
+	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
+
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	// The env/config struct fields carry the validation tags the binder reads.
+	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),
+		`min:"1"`, `max:"65535"`,
+		`minlen:"2"`, `pattern:"^[a-z]+$"`,
+		`maxlen:"5"`,
+	)
+}
+
 func mustNotContain(t *testing.T, path string, subs ...string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

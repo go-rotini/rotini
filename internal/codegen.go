@@ -36,6 +36,10 @@ type fieldDef struct {
 	Import string // Go import path backing GoType ("" for builtins); aliased form "alias path"
 	Recon  string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
 	EnvVar string // explicit environment variable name for an env field (schema.variable); "" = snake-upper default
+	// Constraint is the space-separated validation struct-tags for an env/config field
+	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), which the binder enforces over the
+	// reconciled value; "" when the input declares no numeric/string/array constraints.
+	Constraint string
 }
 
 // inputBlock is the set of generated input types for a single command. The
@@ -258,9 +262,43 @@ func envFields(in *Inputs) []fieldDef {
 		fields = append(fields, fieldDef{
 			Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name,
 			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema), EnvVar: envVarOf(e.Schema),
+			Constraint: constraintTags(e.Schema),
 		})
 	}
 	return fields
+}
+
+// constraintTags renders an input's numeric/string/array constraints as space-separated
+// validation struct-tags (e.g. `min:"1" max:"65535" pattern:"^x$"`) for the binder to
+// enforce, or "" when none are set. Mirrors the FlagDef/ArgDef constraints A1 enforces
+// for argv, but carried on the env/config field itself since channels have no Definition.
+func constraintTags(schema *InputSchema) string {
+	if schema == nil {
+		return ""
+	}
+	var parts []string
+	if schema.Minimum != 0 {
+		parts = append(parts, `min:"`+strconv.FormatFloat(schema.Minimum, 'g', -1, 64)+`"`)
+	}
+	if schema.Maximum != 0 {
+		parts = append(parts, `max:"`+strconv.FormatFloat(schema.Maximum, 'g', -1, 64)+`"`)
+	}
+	if schema.MinLength != 0 {
+		parts = append(parts, `minlen:"`+strconv.Itoa(schema.MinLength)+`"`)
+	}
+	if schema.MaxLength != 0 {
+		parts = append(parts, `maxlen:"`+strconv.Itoa(schema.MaxLength)+`"`)
+	}
+	if schema.MinItems != 0 {
+		parts = append(parts, `minitems:"`+strconv.Itoa(schema.MinItems)+`"`)
+	}
+	if schema.MaxItems != 0 {
+		parts = append(parts, `maxitems:"`+strconv.Itoa(schema.MaxItems)+`"`)
+	}
+	if schema.Pattern != "" {
+		parts = append(parts, `pattern:"`+schema.Pattern+`"`)
+	}
+	return strings.Join(parts, " ")
 }
 
 // envVarOf returns an env input's explicit environment variable (schema.variable),
@@ -283,6 +321,7 @@ func configFields(in *Inputs) []fieldDef {
 		fields = append(fields, fieldDef{
 			Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name,
 			Import: fieldImport(c.Schema), Recon: reconTag(configKey(c), c.Schema),
+			Constraint: constraintTags(c.Schema),
 		})
 	}
 	return fields
