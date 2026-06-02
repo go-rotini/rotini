@@ -369,15 +369,25 @@ func TestGenerateInputChannels(t *testing.T) {
 		"    flags:\n" +
 		"      - name: color\n" +
 		"        identifiers: [--color]\n" +
-		"        schema: { type: string }\n" +
+		"        schema: { type: string, key: create.color }\n" + // config-fallback flag
+		"      - name: quiet\n" +
+		"        identifiers: [--quiet]\n" +
+		"        schema: { type: bool }\n" + // argv-only flag (no recon tag)
+
 		"    env:\n" +
 		"      - name: region\n" +
 		"        schema: { type: string, variable: WIDGET_REGION }\n" +
 		"    config:\n" +
 		"      - name: endpoint\n" +
 		"        schema: { type: string, file: app, key: api.endpoint }\n" +
+		"      - name: token\n" +
+		"        schema: { type: string, key: api.token, secret: true, required: true }\n" +
 		"    stdin:\n" +
 		"      schema: { $ref: \"#/schemas/Manifest\" }\n" +
+		"configuration_files:\n" +
+		"  - name: app\n" +
+		"    path: ~/.config/widget.yaml\n" +
+		"    format: yaml\n" +
 		"schemas:\n" +
 		"  Manifest:\n" +
 		"    type: object\n" +
@@ -404,6 +414,15 @@ func TestGenerateInputChannels(t *testing.T) {
 		"Env       WidgetEnv",        // CommandInputs gains the channels
 		"Config    WidgetConfig",     //
 		"Stdin     *WidgetStdin",     //
+		// a config-fallback flag carries a recon key (the argv-only `quiet` flag does not).
+		"recon:\"create.color\"",
+		// recon tags drive the binder; env key = name, config key = schema.key, + secret/required.
+		"`rotini:\"region\" recon:\"region\"`",
+		"`rotini:\"endpoint\" recon:\"api.endpoint\"`",
+		"`rotini:\"token\" recon:\"api.token,required,secret\"`",
+		// the BindMeta descriptor carries the config-file sources.
+		"var BindMeta = rotini.BindMeta{",
+		"{Name: \"app\", Path: \"~/.config/widget.yaml\", Format: \"yaml\"}",
 	)
 	// env is NOT folded into the Flags struct (the channel break).
 	flags := readFileString(t, rotiniGo)

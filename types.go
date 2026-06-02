@@ -42,6 +42,21 @@ type RemoteDef struct {
 	Timeout time.Duration // 0 means no timeout
 }
 
+// BindMeta is the generated, data-only descriptor the default binder (rtk.Binder)
+// consumes to fill the non-argv input channels. It carries document-level concerns
+// that the dispatch-time Definition deliberately omits. The rtg package emits it as
+// `var BindMeta = rotini.BindMeta{…}`; main.go hands it to rtk.NewProgram's binder.
+type BindMeta struct {
+	ConfigFiles []ConfigFile // document-level configuration_files sources, in declared order
+}
+
+// ConfigFile is one configuration-file source the binder reads (reconciled by recon).
+type ConfigFile struct {
+	Name   string // logical name
+	Path   string // file path (may contain ~)
+	Format string // "json" | "yaml" | "toml"; "" lets the binder infer from the extension
+}
+
 // RemoteDiscoveryDef enables kubectl/git/gh-style plugin discovery on a command:
 // an unmatched token execs the sibling binary Prefix+<token>, and `<Prefix>*`
 // executables are offered as completion candidates (unless Hidden). A nil

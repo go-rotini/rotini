@@ -34,6 +34,7 @@ type fieldDef struct {
 	GoType string
 	Tag    string
 	Import string // Go import path backing GoType ("" for builtins); aliased form "alias path"
+	Recon  string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
 }
 
 // inputBlock is the set of generated input types for a single command. The
@@ -225,33 +226,80 @@ func flagFields(in *Inputs) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Flags))
 	for _, f := range in.Flags {
-		fields = append(fields, fieldDef{Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name, Import: fieldImport(f.Schema)})
+		fields = append(fields, fieldDef{
+			Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name,
+			Import: fieldImport(f.Schema), Recon: flagReconKey(f.Schema),
+		})
 	}
 	return fields
 }
 
+// flagReconKey is a flag's reconciliation key — its config key (schema.key) — when
+// the flag declares a config fallback, else "" (an argv-only flag, no recon tag).
+// The binder reconciles such a flag argv > env (SNAKE_UPPER of the key) > config > default.
+func flagReconKey(schema *InputSchema) string {
+	if schema != nil && schema.Key != "" {
+		return schema.Key
+	}
+	return ""
+}
+
 // envFields returns the <Prefix>Env struct fields: one per pure environment input.
+// The recon key is the input name (recon's env source maps it to SNAKE_UPPER).
 func envFields(in *Inputs) []fieldDef {
 	if in == nil {
 		return nil
 	}
 	fields := make([]fieldDef, 0, len(in.Env))
 	for _, e := range in.Env {
-		fields = append(fields, fieldDef{Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name, Import: fieldImport(e.Schema)})
+		fields = append(fields, fieldDef{
+			Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name,
+			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema),
+		})
 	}
 	return fields
 }
 
-// configFields returns the <Prefix>Config struct fields: one per pure config-file input.
+// configFields returns the <Prefix>Config struct fields: one per pure config-file
+// input. The recon key is the declared key path (schema.key), else the input name.
 func configFields(in *Inputs) []fieldDef {
 	if in == nil {
 		return nil
 	}
 	fields := make([]fieldDef, 0, len(in.Config))
 	for _, c := range in.Config {
-		fields = append(fields, fieldDef{Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name, Import: fieldImport(c.Schema)})
+		fields = append(fields, fieldDef{
+			Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name,
+			Import: fieldImport(c.Schema), Recon: reconTag(configKey(c), c.Schema),
+		})
 	}
 	return fields
+}
+
+// configKey is a config input's recon key: its declared schema.key, else its name.
+func configKey(c ConfigInput) string {
+	if c.Schema != nil && c.Schema.Key != "" {
+		return c.Schema.Key
+	}
+	return c.Name
+}
+
+// reconTag builds an env/config field's recon struct-tag body: the canonical key,
+// then default=/required/secret from the input schema.
+func reconTag(key string, schema *InputSchema) string {
+	parts := []string{key}
+	if schema != nil {
+		if d := defaultString(schema.Default); d != "" {
+			parts = append(parts, "default="+d)
+		}
+		if schema.Required {
+			parts = append(parts, "required")
+		}
+		if schema.Secret {
+			parts = append(parts, "secret")
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 // stdinTypeExpr returns the Go type for a command's Stdin field — "*<Prefix>Stdin"
@@ -347,6 +395,28 @@ func renderDefinition(gp *genProgram) string {
 		b.WriteString("Discovery: " + dl + ",\n")
 	}
 	b.WriteString("}\n")
+	return b.String()
+}
+
+// renderBindMeta renders the `var BindMeta = rotini.BindMeta{…}` descriptor the
+// default binder consumes — the document-level config-file sources. Returns "" when
+// there are none (so a CLI with no configuration_files stays unchanged).
+func renderBindMeta(files []ConfigurationFile) string {
+	if len(files) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("// BindMeta is the generated descriptor the default binder (rtk.Binder) consumes.\n")
+	b.WriteString("var BindMeta = " + rotiniPkgName + ".BindMeta{\n")
+	b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
+	for _, f := range files {
+		b.WriteString("{Name: " + strconv.Quote(f.Name) + ", Path: " + strconv.Quote(f.Path))
+		if f.Format != "" {
+			b.WriteString(", Format: " + strconv.Quote(f.Format))
+		}
+		b.WriteString("},\n")
+	}
+	b.WriteString("},\n}")
 	return b.String()
 }
 
@@ -539,6 +609,7 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 		"Metadata":     gp.metadata,
 		"Features":     features,
 		"OutputTypes":  outputTypes,
+		"BindMeta":     renderBindMeta(gp.configFiles),
 	}
 	content, err := renderGo("framework", "templates/rotini.go.tmpl", data)
 	if err != nil {

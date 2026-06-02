@@ -25,6 +25,7 @@ type genProgram struct {
 	rootOutput    *Schema             // root command's output type (nil when unset)
 	rootDiscovery *RemoteDiscovery    // root command's plugin discovery (nil = off)
 	schemas       map[string]Schema   // document-level named schemas (for output codegen)
+	configFiles   []ConfigurationFile // document-level config-file sources (for the binder)
 
 	root         genCommand    // the root command (own)
 	own          []genCommand  // inline sub-commands, sorted by prefix
@@ -88,6 +89,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootOutput:    root.Output,
 		rootDiscovery: root.RemoteDiscovery,
 		schemas:       spec.Schemas,
+		configFiles:   spec.ConfigurationFiles,
 	}
 	for _, m := range spec.Metadata {
 		if m.Var == "Version" {

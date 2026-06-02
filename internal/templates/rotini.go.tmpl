@@ -29,7 +29,7 @@ var {{.Var}} = {{printf "%q" .Default}}
 {{if .Flags}}
 type {{.Prefix}}Flags struct {
 {{- range .Flags}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"{{with .Recon}} recon:"{{.}}"{{end}}`
 {{- end}}
 }
 {{- else}}
@@ -48,7 +48,7 @@ type {{.Prefix}}Arguments struct{}
 
 type {{.Prefix}}Env struct {
 {{- range .Env}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"`
 {{- end}}
 }
 {{- end}}
@@ -56,7 +56,7 @@ type {{.Prefix}}Env struct {
 
 type {{.Prefix}}Config struct {
 {{- range .Config}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"`
 {{- end}}
 }
 {{- end}}
@@ -82,6 +82,9 @@ type {{.Prefix}}Inputs struct {
 }
 {{- end}}
 {{with .OutputTypes}}
+{{.}}
+{{end}}
+{{- with .BindMeta}}
 {{.}}
 {{end}}
 // NewProgram builds the program from the generated Definition and the typed
