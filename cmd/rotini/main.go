@@ -12,6 +12,8 @@ func main() {
 	rth.Program.
 		Bind("parser", rtk.NewParser()).
 		Bind("io", rtk.NewIO()).
+		Bind("terminal", rtk.NewTerminal()).
+		Bind("prompt", rtk.NewPrompter()).
 		Bind("signals", rtk.NewSignals()).
 		Execute()
 }

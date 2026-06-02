@@ -39,6 +39,7 @@ command:
         - rotini initialize mycli
         - rotini init mycli --format json
         - rotini init mycli --force
+        - rotini init -i
       footer: Use "rotini help <command>" for more information about a command.
       inputs:
         arguments:
@@ -68,6 +69,13 @@ command:
               - --into
             schema:
               type: string
+          - name: interactive
+            summary: interactively prompt for the name, format, and parent (the init wizard)
+            identifiers:
+              - -i
+              - --interactive
+            schema:
+              type: bool
           - name: help
             summary: print help
             identifiers:
