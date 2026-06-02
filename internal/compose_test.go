@@ -281,6 +281,43 @@ command:
 	)
 }
 
+func TestGenerate_inputSchemaRef(t *testing.T) {
+	tmp := initTestModule(t)
+	// A document-level named schema referenced by an input via $ref: the input's Go
+	// field takes the generated named type, and that type is emitted in the rtg.
+	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+schemas:
+  Endpoint:
+    type: object
+    properties:
+      host: { type: string }
+      port: { type: integer }
+command:
+  name: app
+  inputs:
+    config:
+      - name: server
+        schema:
+          $ref: "#/schemas/Endpoint"
+          key: server
+`
+	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
+
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	rtg := filepath.Join(tmp, "cmd/app/rtg/rotini.go")
+	// The named type is generated, and the config field is typed as it (not string).
+	mustContain(t, rtg,
+		"type Endpoint struct",
+		"Server Endpoint `",
+	)
+	mustNotContain(t, rtg, "Server string")
+}
+
 func mustNotContain(t *testing.T, path string, subs ...string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

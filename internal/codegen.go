@@ -392,7 +392,9 @@ func goFieldType(schema *InputSchema) string {
 	t := "string"
 	nullable := false
 	if schema != nil {
-		if schema.Type != "" {
+		if name := refTypeName(schema.Ref); name != "" {
+			t = name // a "#/schemas/X" ref → the generated named type X
+		} else if schema.Type != "" {
 			t = jsonSchemaTypeToGo(schema.Type)
 		}
 		nullable = schema.Nullable
@@ -401,6 +403,17 @@ func goFieldType(schema *InputSchema) string {
 		return "*" + t
 	}
 	return t
+}
+
+// refTypeName returns the named-schema type for an intra-document "$ref"
+// ("#/schemas/X" → "X"), or "" when ref is empty or external. The named type is
+// generated from the document-level `schemas` map (see buildOutputTypes).
+func refTypeName(ref string) string {
+	const prefix = "#/schemas/"
+	if strings.HasPrefix(ref, prefix) {
+		return strings.TrimPrefix(ref, prefix)
+	}
+	return ""
 }
 
 // jsonSchemaTypeToGo maps a schema type name to a Go type expression. It
@@ -652,8 +665,13 @@ func constraintsLiteral(schema *InputSchema) string {
 // schemaType resolves an input schema to the Definition's type string,
 // defaulting to "string".
 func schemaType(schema *InputSchema) string {
-	if schema != nil && schema.Type != "" {
-		return jsonSchemaTypeToGo(schema.Type)
+	if schema != nil {
+		if name := refTypeName(schema.Ref); name != "" {
+			return name
+		}
+		if schema.Type != "" {
+			return jsonSchemaTypeToGo(schema.Type)
+		}
 	}
 	return "string"
 }
