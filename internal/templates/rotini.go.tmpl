@@ -44,10 +44,35 @@ type {{.Prefix}}Arguments struct {
 {{- else}}
 type {{.Prefix}}Arguments struct{}
 {{- end}}
+{{- if .Env}}
+
+type {{.Prefix}}Env struct {
+{{- range .Env}}
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
+{{- end}}
+}
+{{- end}}
+{{- if .Config}}
+
+type {{.Prefix}}Config struct {
+{{- range .Config}}
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
+{{- end}}
+}
+{{- end}}
 
 type {{.Prefix}}CommandInputs struct {
 	Flags     {{.Prefix}}Flags
 	Arguments {{.Prefix}}Arguments
+{{- if .Env}}
+	Env       {{.Prefix}}Env
+{{- end}}
+{{- if .Config}}
+	Config    {{.Prefix}}Config
+{{- end}}
+{{- if .StdinType}}
+	Stdin     {{.StdinType}}
+{{- end}}
 }
 
 type {{.Prefix}}Inputs struct {

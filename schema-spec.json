@@ -319,6 +319,11 @@
             "key": {
               "type": "string",
               "description": "Key path within the config file (config inputs only, e.g., 'server.port')"
+            },
+            "secret": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag."
             }
           }
         }

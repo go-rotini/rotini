@@ -41,20 +41,26 @@ type fieldDef struct {
 // <Prefix>CommandInputs and <Prefix>Inputs.
 type inputBlock struct {
 	Prefix       string     // PascalCase type prefix, e.g. "RotiniGenerate"
-	Flags        []fieldDef // fields of <Prefix>Flags (flags + env variables)
+	Flags        []fieldDef // fields of <Prefix>Flags (argv flags)
 	Arguments    []fieldDef // fields of <Prefix>Arguments
+	Env          []fieldDef // fields of <Prefix>Env (pure environment inputs)
+	Config       []fieldDef // fields of <Prefix>Config (pure config-file inputs)
+	StdinType    string     // Stdin field type (e.g. "*RotiniGenerateStdin"); "" when none
 	InputsFields []fieldDef // root + ancestor + self CommandInputs fields of <Prefix>Inputs
 }
 
 // genCommand is the fully resolved description of one command node (root or
 // sub-command) that the renderers consume.
 type genCommand struct {
-	prefix   string // PascalCase type prefix, e.g. "RotiniGenerate"
-	handler  string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
-	filename string // handler stub file name, e.g. "rotini_generate.go"
-	flags    []fieldDef
-	args     []fieldDef
-	inputs   []fieldDef // InputsFields for this command's <Prefix>Inputs
+	prefix    string // PascalCase type prefix, e.g. "RotiniGenerate"
+	handler   string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
+	filename  string // handler stub file name, e.g. "rotini_generate.go"
+	flags     []fieldDef
+	args      []fieldDef
+	env       []fieldDef // <Prefix>Env fields (pure environment inputs)
+	config    []fieldDef // <Prefix>Config fields (pure config-file inputs)
+	stdinType string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
+	inputs    []fieldDef // InputsFields for this command's <Prefix>Inputs
 }
 
 // layout holds the resolved package locations and import paths for a single
@@ -210,21 +216,51 @@ func inputsFields(rootPascal, path string) []fieldDef {
 	return fields
 }
 
-// flagFields returns the <Prefix>Flags struct fields for a command's inputs:
-// declared flags followed by environment-variable inputs (both are flag-shaped
-// in the inputs model). Config-file values and stdin are not yet projected.
+// flagFields returns the <Prefix>Flags struct fields for a command's inputs: the
+// argv flags. The env/config channels are their own structs (envFields/configFields);
+// a flag with an env/config *fallback* still lives here and is reconciled by the binder.
 func flagFields(in *Inputs) []fieldDef {
 	if in == nil {
 		return nil
 	}
-	fields := make([]fieldDef, 0, len(in.Flags)+len(in.Env))
+	fields := make([]fieldDef, 0, len(in.Flags))
 	for _, f := range in.Flags {
 		fields = append(fields, fieldDef{Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name, Import: fieldImport(f.Schema)})
 	}
-	for _, v := range in.Env {
-		fields = append(fields, fieldDef{Field: toPascalCase(v.Name), GoType: goFieldType(v.Schema), Tag: v.Name, Import: fieldImport(v.Schema)})
+	return fields
+}
+
+// envFields returns the <Prefix>Env struct fields: one per pure environment input.
+func envFields(in *Inputs) []fieldDef {
+	if in == nil {
+		return nil
+	}
+	fields := make([]fieldDef, 0, len(in.Env))
+	for _, e := range in.Env {
+		fields = append(fields, fieldDef{Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name, Import: fieldImport(e.Schema)})
 	}
 	return fields
+}
+
+// configFields returns the <Prefix>Config struct fields: one per pure config-file input.
+func configFields(in *Inputs) []fieldDef {
+	if in == nil {
+		return nil
+	}
+	fields := make([]fieldDef, 0, len(in.Config))
+	for _, c := range in.Config {
+		fields = append(fields, fieldDef{Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name, Import: fieldImport(c.Schema)})
+	}
+	return fields
+}
+
+// stdinTypeExpr returns the Go type for a command's Stdin field — "*<Prefix>Stdin"
+// when the command declares a typed stdin payload, else "" (no Stdin field).
+func stdinTypeExpr(prefix string, in *Inputs) string {
+	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
+		return ""
+	}
+	return "*" + prefix + "Stdin"
 }
 
 // argFields returns the <Prefix>Arguments struct fields for a command's inputs.
@@ -475,13 +511,15 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 			Prefix:       c.prefix,
 			Flags:        c.flags,
 			Arguments:    c.args,
+			Env:          c.env,
+			Config:       c.config,
+			StdinType:    c.stdinType,
 			InputsFields: c.inputs,
 		})
-		for _, f := range c.flags {
-			noteImport(f.Import)
-		}
-		for _, a := range c.args {
-			noteImport(a.Import)
+		for _, fs := range [][]fieldDef{c.flags, c.args, c.env, c.config} {
+			for _, f := range fs {
+				noteImport(f.Import)
+			}
 		}
 	}
 

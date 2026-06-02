@@ -162,6 +162,8 @@ type InputSchema struct {
 	Key string `json:"key,omitempty"`
 	// When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean — unlike the string-array 'required' on Schema.
 	Required bool `json:"required,omitempty"`
+	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag.
+	Secret bool `json:"secret,omitempty"`
 	// Environment variable name (env inputs only)
 	Variable string `json:"variable,omitempty"`
 }

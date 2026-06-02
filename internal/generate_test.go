@@ -355,6 +355,66 @@ func TestGenerateRemoteDiscovery(t *testing.T) {
 	)
 }
 
+// TestGenerateInputChannels verifies the typed input channels (Phase 1, types only):
+// pure env/config inputs get their own <Prefix>Env/<Prefix>Config structs (env is NOT
+// folded into Flags), stdin gets a typed payload type + a *Stdin field, and
+// CommandInputs gains the new fields only when the channel is declared.
+func TestGenerateInputChannels(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: widget\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: color\n" +
+		"        identifiers: [--color]\n" +
+		"        schema: { type: string }\n" +
+		"    env:\n" +
+		"      - name: region\n" +
+		"        schema: { type: string, variable: WIDGET_REGION }\n" +
+		"    config:\n" +
+		"      - name: endpoint\n" +
+		"        schema: { type: string, file: app, key: api.endpoint }\n" +
+		"    stdin:\n" +
+		"      schema: { $ref: \"#/schemas/Manifest\" }\n" +
+		"schemas:\n" +
+		"  Manifest:\n" +
+		"    type: object\n" +
+		"    required: [kind]\n" +
+		"    properties:\n" +
+		"      kind: { type: string }\n"
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	rotiniGo := filepath.Join(tmp, "rtg", "rotini.go")
+	mustContain(t, rotiniGo,
+		"type WidgetFlags struct {",  // argv flag stays
+		"Color string",               //
+		"type WidgetEnv struct {",    // env channel — its own struct
+		"Region string",              //
+		"type WidgetConfig struct {", // config channel — its own struct
+		"Endpoint string",            //
+		"type WidgetStdin Manifest",  // stdin payload type (from $ref, via the type machinery)
+		"type Manifest struct {",     // the named schema
+		"Env       WidgetEnv",        // CommandInputs gains the channels
+		"Config    WidgetConfig",     //
+		"Stdin     *WidgetStdin",     //
+	)
+	// env is NOT folded into the Flags struct (the channel break).
+	flags := readFileString(t, rotiniGo)
+	if i := strings.Index(flags, "type WidgetFlags struct {"); i >= 0 {
+		block := flags[i:]
+		if end := strings.Index(block, "}"); end >= 0 && strings.Contains(block[:end], "Region") {
+			t.Errorf("env field Region must not be folded into WidgetFlags:\n%s", block[:end])
+		}
+	}
+}
+
 // helpSpecYAML is a spec exercising generated help: root summary/description plus
 // a sub-command with a summary, a required argument, and a bool flag. Help fields
 // live directly on the command (flattened).

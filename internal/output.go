@@ -59,11 +59,21 @@ func collectOutputDefs(gp *genProgram) map[string]any {
 			defs[prefix+"Output"] = schemaToDoc(*out)
 		}
 	}
+	// A command's stdin payload type "<Prefix>Stdin" comes from the schema-shape of
+	// its stdin InputSchema (only the BaseSchema part — required/default/etc. are
+	// input metadata, not JSON-schema type structure).
+	addStdin := func(prefix string, in *Inputs) {
+		if in != nil && in.Stdin != nil && in.Stdin.Schema != nil {
+			defs[prefix+"Stdin"] = schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema})
+		}
+	}
 	add(gp.rootPascal, gp.rootOutput)
+	addStdin(gp.rootPascal, gp.rootInputs)
 	var walk func(nodes []rnode)
 	walk = func(nodes []rnode) {
 		for _, n := range nodes {
 			add(n.prefix, n.output)
+			addStdin(n.prefix, n.inputs)
 			walk(n.children)
 		}
 	}
