@@ -2,6 +2,8 @@ package rtk
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"reflect"
 	"strings"
 
@@ -69,8 +71,10 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 	}
 
 	// 3. env + config → the Env/Config sub-structs, from independent registries
-	//    (so an env var never leaks into a config field, or vice versa).
-	envReg, err := recon.New(recon.WithSource(recon.NewOSEnvSource()))
+	//    (so an env var never leaks into a config field, or vice versa). The env
+	//    source honors an input's explicit `variable` (else recon's SNAKE_UPPER).
+	envReg, err := recon.New(recon.WithSource(
+		recon.NewOSEnvSource(recon.WithEnvTransform(envTransform(envExplicit(v))))))
 	if err != nil {
 		return fmt.Errorf("rotini: env registry: %w", err)
 	}
@@ -82,7 +86,76 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 	}
 	defer cfgReg.Close()
 
-	return fillChannels(v, envReg, cfgReg)
+	if err := fillChannels(v, envReg, cfgReg); err != nil {
+		return err
+	}
+
+	// 4. stdin → the leaf command's typed payload (decoded by its declared format).
+	return fillStdin(v)
+}
+
+// fillStdin decodes piped stdin into the leaf command's Stdin payload field, when it
+// declares one, using the format on its `stdin:"<format>"` tag. Stdin is a single
+// stream, so only the leaf (the running command) consumes it; when nothing is piped
+// the Stdin field is left nil.
+func fillStdin(v reflect.Value) error {
+	if v.Kind() != reflect.Struct || v.NumField() == 0 {
+		return nil
+	}
+	leaf := v.Field(v.NumField() - 1) // the running command's inputs
+	if leaf.Kind() != reflect.Struct {
+		return nil
+	}
+	sf := leaf.FieldByName("Stdin")
+	field, ok := leaf.Type().FieldByName("Stdin")
+	if !sf.IsValid() || sf.Kind() != reflect.Pointer || !ok {
+		return nil
+	}
+	format := field.Tag.Get("stdin")
+	if format == "" {
+		return nil
+	}
+
+	data, err := readPipedStdin()
+	if err != nil {
+		return fmt.Errorf("rotini: read stdin: %w", err)
+	}
+	if len(data) == 0 {
+		return nil // nothing piped → leave Stdin nil
+	}
+	codec, ok := recon.DefaultCodecs().ByName(format)
+	if !ok {
+		return fmt.Errorf("rotini: unsupported stdin format %q", format)
+	}
+	m, err := codec.Decode(data)
+	if err != nil {
+		return fmt.Errorf("rotini: decode stdin (%s): %w", format, err)
+	}
+	reg, err := recon.New(recon.WithSource(recon.NewMapSource("stdin", m)))
+	if err != nil {
+		return fmt.Errorf("rotini: stdin registry: %w", err)
+	}
+	defer reg.Close()
+
+	ptr := reflect.New(sf.Type().Elem()) // *<Prefix>Stdin
+	if err := reg.Bind(ptr.Interface()); err != nil {
+		return fmt.Errorf("rotini: bind stdin: %w", err)
+	}
+	sf.Set(ptr)
+	return nil
+}
+
+// readPipedStdin returns the bytes piped or redirected to stdin, or nil when stdin
+// is an interactive terminal (so it never blocks waiting for input).
+func readPipedStdin() ([]byte, error) {
+	info, err := os.Stdin.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeCharDevice != 0 {
+		return nil, nil // a terminal, not a pipe/redirect
+	}
+	return io.ReadAll(os.Stdin)
 }
 
 // reconcileFlags overrides each fallback flag (a Flags field carrying a recon tag)
@@ -268,6 +341,45 @@ func (b *Binder) fileSources() ([]recon.Source, error) {
 		srcs = append(srcs, src)
 	}
 	return srcs, nil
+}
+
+// envExplicit collects the recon-key → explicit-env-var mapping from every Env
+// field carrying an `env:"<VAR>"` tag (the spec's per-input `variable`), so the env
+// source reads that exact variable instead of the SNAKE_UPPER default.
+func envExplicit(v reflect.Value) map[string]string {
+	m := map[string]string{}
+	if v.Kind() != reflect.Struct {
+		return m
+	}
+	for i := range v.NumField() {
+		ci := v.Field(i)
+		if ci.Kind() != reflect.Struct {
+			continue
+		}
+		env := ci.FieldByName("Env")
+		if !env.IsValid() || env.Kind() != reflect.Struct {
+			continue
+		}
+		et := env.Type()
+		for j := range env.NumField() {
+			vr := et.Field(j).Tag.Get("env")
+			if key := reconKey(et.Field(j).Tag.Get("recon")); vr != "" && key != "" {
+				m[key] = vr
+			}
+		}
+	}
+	return m
+}
+
+// envTransform maps a recon key to its environment variable: an explicit `variable`
+// when the input declared one, else recon's snake-upper projection.
+func envTransform(explicit map[string]string) recon.KeyTransform {
+	return func(p recon.Path) string {
+		if v, ok := explicit[p.String()]; ok {
+			return v
+		}
+		return recon.SnakeUpperTransform(p)
+	}
 }
 
 // fillChannels walks a <Cmd>Inputs struct (one field per command on the resolved

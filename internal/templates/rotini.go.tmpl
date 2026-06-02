@@ -48,7 +48,7 @@ type {{.Prefix}}Arguments struct{}
 
 type {{.Prefix}}Env struct {
 {{- range .Env}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"`
+	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"{{with .EnvVar}} env:"{{.}}"{{end}}`
 {{- end}}
 }
 {{- end}}
@@ -71,7 +71,7 @@ type {{.Prefix}}CommandInputs struct {
 	Config    {{.Prefix}}Config
 {{- end}}
 {{- if .StdinType}}
-	Stdin     {{.StdinType}}
+	Stdin     {{.StdinType}} `stdin:"{{.StdinFormat}}"`
 {{- end}}
 }
 

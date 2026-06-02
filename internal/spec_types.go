@@ -219,6 +219,8 @@ type Schema struct {
 }
 
 type StdinSpec struct {
+	// Serialization the piped stdin payload is decoded from (into the generated <Prefix>Stdin type). Defaults to json.
+	Format string `json:"format,omitempty"`
 	// Type definition for stdin content. Set required: true in schema to error when stdin is empty.
 	Schema *InputSchema `json:"schema,omitempty"`
 }

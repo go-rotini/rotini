@@ -100,6 +100,87 @@ func TestBinder_noConfigFilesLeavesConfigZero(t *testing.T) {
 	}
 }
 
+// Explicit-env-var shape: an env field whose `env:"…"` tag pins the environment
+// variable (the spec's `variable`), overriding recon's SNAKE_UPPER default.
+type tbEnvVarInputs struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Env       struct {
+			Token string `rotini:"token" recon:"token" env:"WIDGET_TOKEN"`
+		}
+	}
+}
+
+func TestBinder_explicitEnvVar(t *testing.T) {
+	t.Setenv("WIDGET_TOKEN", "s3cret")
+	t.Setenv("TOKEN", "wrong-default") // the SNAKE_UPPER default — must be ignored
+
+	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+	var in tbEnvVarInputs
+	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Env.Token != "s3cret" {
+		t.Errorf("Env.Token = %q, want s3cret (from $WIDGET_TOKEN, not $TOKEN)", in.App.Env.Token)
+	}
+}
+
+// Stdin-payload shapes: a leaf command with a typed stdin payload (format on the tag).
+type tbStdinPayload struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+}
+type tbStdinCmd struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *tbStdinPayload `stdin:"yaml"`
+}
+type tbStdinInputs struct{ App tbStdinCmd }
+
+// withPipedStdin replaces os.Stdin with a pipe carrying body for the test, restoring
+// it afterward. An empty body yields an immediately-closed pipe (EOF, no data).
+func withPipedStdin(t *testing.T, body string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	old := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = old; _ = r.Close() })
+	go func() { _, _ = w.WriteString(body); _ = w.Close() }()
+}
+
+func TestBinder_decodesStdin(t *testing.T) {
+	withPipedStdin(t, "kind: Widget\nname: foo\n")
+	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+
+	var in tbStdinInputs
+	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Stdin == nil {
+		t.Fatal("Stdin payload was not decoded")
+	}
+	if in.App.Stdin.Kind != "Widget" || in.App.Stdin.Name != "foo" {
+		t.Errorf("Stdin = %+v, want {Widget foo}", in.App.Stdin)
+	}
+}
+
+func TestBinder_noStdinLeavesNil(t *testing.T) {
+	withPipedStdin(t, "") // nothing piped → EOF, no data
+	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+
+	var in tbStdinInputs
+	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Stdin != nil {
+		t.Errorf("Stdin = %+v, want nil with no piped input", in.App.Stdin)
+	}
+}
+
 // Fallback-flag shapes: a flag with a config key reconciles argv > env > config > default.
 type tbFbFlags struct {
 	Color string `rotini:"color" recon:"create.color"`

@@ -35,6 +35,7 @@ type fieldDef struct {
 	Tag    string
 	Import string // Go import path backing GoType ("" for builtins); aliased form "alias path"
 	Recon  string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
+	EnvVar string // explicit environment variable name for an env field (schema.variable); "" = snake-upper default
 }
 
 // inputBlock is the set of generated input types for a single command. The
@@ -47,21 +48,23 @@ type inputBlock struct {
 	Env          []fieldDef // fields of <Prefix>Env (pure environment inputs)
 	Config       []fieldDef // fields of <Prefix>Config (pure config-file inputs)
 	StdinType    string     // Stdin field type (e.g. "*RotiniGenerateStdin"); "" when none
+	StdinFormat  string     // stdin decode format for the Stdin field's tag (e.g. "yaml")
 	InputsFields []fieldDef // root + ancestor + self CommandInputs fields of <Prefix>Inputs
 }
 
 // genCommand is the fully resolved description of one command node (root or
 // sub-command) that the renderers consume.
 type genCommand struct {
-	prefix    string // PascalCase type prefix, e.g. "RotiniGenerate"
-	handler   string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
-	filename  string // handler stub file name, e.g. "rotini_generate.go"
-	flags     []fieldDef
-	args      []fieldDef
-	env       []fieldDef // <Prefix>Env fields (pure environment inputs)
-	config    []fieldDef // <Prefix>Config fields (pure config-file inputs)
-	stdinType string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
-	inputs    []fieldDef // InputsFields for this command's <Prefix>Inputs
+	prefix      string // PascalCase type prefix, e.g. "RotiniGenerate"
+	handler     string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
+	filename    string // handler stub file name, e.g. "rotini_generate.go"
+	flags       []fieldDef
+	args        []fieldDef
+	env         []fieldDef // <Prefix>Env fields (pure environment inputs)
+	config      []fieldDef // <Prefix>Config fields (pure config-file inputs)
+	stdinType   string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
+	stdinFormat string     // stdin decode format, e.g. "yaml"; "" when no stdin
+	inputs      []fieldDef // InputsFields for this command's <Prefix>Inputs
 }
 
 // layout holds the resolved package locations and import paths for a single
@@ -254,10 +257,19 @@ func envFields(in *Inputs) []fieldDef {
 	for _, e := range in.Env {
 		fields = append(fields, fieldDef{
 			Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name,
-			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema),
+			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema), EnvVar: envVarOf(e.Schema),
 		})
 	}
 	return fields
+}
+
+// envVarOf returns an env input's explicit environment variable (schema.variable),
+// or "" to let the binder use recon's snake-upper default for the key.
+func envVarOf(schema *InputSchema) string {
+	if schema != nil {
+		return schema.Variable
+	}
+	return ""
 }
 
 // configFields returns the <Prefix>Config struct fields: one per pure config-file
@@ -309,6 +321,18 @@ func stdinTypeExpr(prefix string, in *Inputs) string {
 		return ""
 	}
 	return "*" + prefix + "Stdin"
+}
+
+// stdinFormatExpr returns a command's stdin decode format (the binder reads it from
+// the Stdin field's `stdin:"<format>"` tag), defaulting to json. "" when no stdin.
+func stdinFormatExpr(in *Inputs) string {
+	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
+		return ""
+	}
+	if in.Stdin.Format != "" {
+		return in.Stdin.Format
+	}
+	return "json"
 }
 
 // argFields returns the <Prefix>Arguments struct fields for a command's inputs.
@@ -584,6 +608,7 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 			Env:          c.env,
 			Config:       c.config,
 			StdinType:    c.stdinType,
+			StdinFormat:  c.stdinFormat,
 			InputsFields: c.inputs,
 		})
 		for _, fs := range [][]fieldDef{c.flags, c.args, c.env, c.config} {

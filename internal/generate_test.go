@@ -383,6 +383,7 @@ func TestGenerateInputChannels(t *testing.T) {
 		"      - name: token\n" +
 		"        schema: { type: string, key: api.token, secret: true, required: true }\n" +
 		"    stdin:\n" +
+		"      format: yaml\n" +
 		"      schema: { $ref: \"#/schemas/Manifest\" }\n" +
 		"configuration_files:\n" +
 		"  - name: app\n" +
@@ -413,11 +414,13 @@ func TestGenerateInputChannels(t *testing.T) {
 		"type Manifest struct {",     // the named schema
 		"Env       WidgetEnv",        // CommandInputs gains the channels
 		"Config    WidgetConfig",     //
-		"Stdin     *WidgetStdin",     //
+		"Stdin     *WidgetStdin",     // the stdin payload field
+		"`stdin:\"yaml\"`",           // its decode format rides on a tag
 		// a config-fallback flag carries a recon key (the argv-only `quiet` flag does not).
 		"recon:\"create.color\"",
 		// recon tags drive the binder; env key = name, config key = schema.key, + secret/required.
-		"`rotini:\"region\" recon:\"region\"`",
+		// An env input's explicit `variable` rides on an `env:"…"` tag.
+		"recon:\"region\" env:\"WIDGET_REGION\"",
 		"`rotini:\"endpoint\" recon:\"api.endpoint\"`",
 		"`rotini:\"token\" recon:\"api.token,required,secret\"`",
 		// the BindMeta descriptor carries the config-file sources.

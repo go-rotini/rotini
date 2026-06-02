@@ -97,15 +97,16 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		}
 	}
 	gp.root = genCommand{
-		prefix:    gp.rootPascal,
-		handler:   lowerFirst(gp.rootPascal) + "Handlers",
-		filename:  root.Name + ".go",
-		flags:     flagFields(root.Inputs),
-		args:      argFields(root.Inputs),
-		env:       envFields(root.Inputs),
-		config:    configFields(root.Inputs),
-		stdinType: stdinTypeExpr(gp.rootPascal, root.Inputs),
-		inputs:    []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
+		prefix:      gp.rootPascal,
+		handler:     lowerFirst(gp.rootPascal) + "Handlers",
+		filename:    root.Name + ".go",
+		flags:       flagFields(root.Inputs),
+		args:        argFields(root.Inputs),
+		env:         envFields(root.Inputs),
+		config:      configFields(root.Inputs),
+		stdinType:   stdinTypeExpr(gp.rootPascal, root.Inputs),
+		stdinFormat: stdinFormatExpr(root.Inputs),
+		inputs:      []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
 	}
 
 	specDir := filepath.Dir(specPath)
@@ -158,15 +159,16 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			})
 		} else {
 			gp.own = append(gp.own, genCommand{
-				prefix:    prefix,
-				handler:   lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
-				filename:  gp.rootName + "_" + path + ".go",
-				flags:     flagFields(c.Inputs),
-				args:      argFields(c.Inputs),
-				env:       envFields(c.Inputs),
-				config:    configFields(c.Inputs),
-				stdinType: stdinTypeExpr(prefix, c.Inputs),
-				inputs:    inputsFields(gp.rootPascal, path),
+				prefix:      prefix,
+				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
+				filename:    gp.rootName + "_" + path + ".go",
+				flags:       flagFields(c.Inputs),
+				args:        argFields(c.Inputs),
+				env:         envFields(c.Inputs),
+				config:      configFields(c.Inputs),
+				stdinType:   stdinTypeExpr(prefix, c.Inputs),
+				stdinFormat: stdinFormatExpr(c.Inputs),
+				inputs:      inputsFields(gp.rootPascal, path),
 			})
 		}
 
