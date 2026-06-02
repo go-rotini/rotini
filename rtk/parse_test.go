@@ -278,6 +278,59 @@ func TestParse_variadicArgItemCount(t *testing.T) {
 	}
 }
 
+func TestParse_negativeNumberArguments(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Arguments: []rotini.ArgDef{{Name: "delta", Type: "float64"}},
+	}
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct {
+				Delta float64 `rotini:"delta"`
+			}
+		}
+	}
+	for _, c := range []struct {
+		argv []string
+		want float64
+	}{
+		{[]string{"-5"}, -5},
+		{[]string{"-0.5"}, -0.5},
+		{[]string{"-1.5e2"}, -150},
+	} {
+		var in inputs
+		if err := NewParser().Parse(rotini.NewContextFor(def, c.argv), &in); err != nil {
+			t.Fatalf("Parse(%v): %v", c.argv, err)
+		}
+		if in.App.Arguments.Delta != c.want {
+			t.Errorf("Delta for %v = %v, want %v", c.argv, in.App.Arguments.Delta, c.want)
+		}
+	}
+}
+
+func TestParse_negativeNumberFlagValue(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{Name: "offset", Identifiers: []string{"--offset"}, Type: "int"}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Offset int `rotini:"offset"`
+			}
+			Arguments struct{}
+		}
+	}
+	var in inputs
+	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"--offset", "-5"}), &in); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if in.App.Flags.Offset != -5 {
+		t.Errorf("Offset = %d, want -5", in.App.Flags.Offset)
+	}
+}
+
 // TestParse_clusteredShortFlags covers POSIX short-flag grouping in every shape:
 // joined booleans, separate flags, an attached value, a next-token value, and
 // mixes — they should all "just work".

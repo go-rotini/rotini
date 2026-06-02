@@ -1,6 +1,9 @@
 package rotini
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 // ResolvedCommand is one node on the invoked command path (root → leaf): the
 // flattened command-tree data the runtime resolved for this invocation. The
@@ -58,6 +61,12 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *remoteDisp
 			}
 			continue
 		}
+		// A non-flag token that still begins with "-" (a negative-number argument like
+		// "-5", or bare "-") is a positional, never a command/remote/plugin name — those
+		// begin with a letter. Stop descending so it is not mis-dispatched.
+		if strings.HasPrefix(tok, "-") {
+			break
+		}
 		cur := chain[len(chain)-1]
 		if child, ok := findChild(cur, tok); ok {
 			chain = append(chain, cmdFrame(child))
@@ -93,11 +102,18 @@ func findRemote(f ResolvedCommand, tok string) (RemoteDef, bool) {
 	return RemoteDef{}, false
 }
 
-// isFlag reports whether tok is a flag token (e.g. "-h", "--watch",
-// "--config=x"). Bare "-" and "--" are not flags. (Negative-number arguments
-// and clustered short flags like "-abc" are not yet supported.)
+// isFlag reports whether tok is a flag token (e.g. "-h", "--watch", "--config=x").
+// Bare "-" and "--" are not flags. A token that parses as a number (e.g. "-5",
+// "-0.5", "-1e3") is a negative-number argument, not a flag — flag identifiers always
+// have a letter after the dash(es) — so it is excluded here and handled as a positional.
 func isFlag(tok string) bool {
-	return len(tok) > 1 && tok[0] == '-' && tok != "--"
+	if len(tok) <= 1 || tok[0] != '-' || tok == "--" {
+		return false
+	}
+	if _, err := strconv.ParseFloat(tok, 64); err == nil {
+		return false
+	}
+	return true
 }
 
 // splitFlag splits a flag token into its identifier and an inline "=value".

@@ -86,3 +86,45 @@ func TestResolveChain_discoversPlugin(t *testing.T) {
 		t.Errorf("no discovery → unmatched token should not dispatch")
 	}
 }
+
+func TestResolveChain_negativeNumberStopsDescent(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Arguments: []ArgDef{{Name: "n", Type: "int"}},
+		Commands:  []CommandDef{{Name: "sub", Handler: "AppSub"}},
+	}
+	// "-5" is a negative-number positional, so it stops descent — the following "sub"
+	// is a second positional, not a sub-command.
+	chain, remote := resolveChain(def, []string{"-5", "sub"})
+	if remote != nil {
+		t.Fatalf("unexpected dispatch: %+v", remote)
+	}
+	if got := chainNames(chain); len(got) != 1 || got[0] != "app" {
+		t.Errorf("chain = %v, want [app] (-5 is a positional)", got)
+	}
+}
+
+func TestResolveChain_negativeNumberNotPluginDispatch(t *testing.T) {
+	def := Definition{
+		Name: "acme", Handler: "App",
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"},
+	}
+	// A negative number at a discovery-enabled command is a positional, not a plugin
+	// token — it must not dispatch acme--5.
+	if _, remote := resolveChain(def, []string{"-5"}); remote != nil {
+		t.Errorf("negative number triggered discovery dispatch: %+v", remote)
+	}
+}
+
+func TestResolveChain_negativeNumberAsFlagValue(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags:    []FlagDef{{Name: "offset", Identifiers: []string{"--offset"}, Type: "int"}},
+		Commands: []CommandDef{{Name: "sub", Handler: "AppSub"}},
+	}
+	// "--offset -5" — -5 is the flag's value; descent continues to "sub".
+	chain, _ := resolveChain(def, []string{"--offset", "-5", "sub"})
+	if got := chainNames(chain); len(got) != 2 || got[1] != "sub" {
+		t.Errorf("chain = %v, want [app sub] (-5 was --offset's value)", got)
+	}
+}

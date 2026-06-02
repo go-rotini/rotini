@@ -386,11 +386,18 @@ func plural(word string, n int) string {
 	return word + "s"
 }
 
-// isFlag reports whether tok is a flag token (e.g. "-h", "--watch",
-// "--config=x"). Bare "-" and "--" are not flags. It mirrors the core runtime's
-// resolver so binding agrees with the command the runtime dispatched.
+// isFlag reports whether tok is a flag token (e.g. "-h", "--watch", "--config=x").
+// Bare "-" and "--" are not flags, and a token that parses as a number (e.g. "-5",
+// "-0.5") is a negative-number argument rather than a flag. It mirrors the core
+// runtime's resolver so binding agrees with the command the runtime dispatched.
 func isFlag(tok string) bool {
-	return len(tok) > 1 && tok[0] == '-' && tok != "--"
+	if len(tok) <= 1 || tok[0] != '-' || tok == "--" {
+		return false
+	}
+	if _, err := strconv.ParseFloat(tok, 64); err == nil {
+		return false
+	}
+	return true
 }
 
 // splitFlag splits a flag token into its identifier and an inline "=value".
