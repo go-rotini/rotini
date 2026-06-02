@@ -72,6 +72,9 @@ func collectOutputDefs(gp *genProgram) map[string]any {
 	var walk func(nodes []rnode)
 	walk = func(nodes []rnode) {
 		for _, n := range nodes {
+			if n.composed {
+				continue // a composed command's output/stdin types live in the child's rtg
+			}
 			add(n.prefix, n.output)
 			addStdin(n.prefix, n.inputs)
 			walk(n.children)

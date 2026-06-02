@@ -45,6 +45,7 @@ type rnode struct {
 	discovery  *RemoteDiscovery // command's plugin discovery (nil = off)
 	hidden     bool             // omit from the parent's generated Commands list
 	deprecated string           // deprecation note for the parent's Commands list
+	composed   bool             // grafted from a $ref'd child (its types live in the child's rtg)
 	children   []rnode
 }
 
@@ -131,7 +132,15 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 	for _, c := range cmds {
 		if c.Ref != "" {
 			if ctx.composed {
-				return nil, fmt.Errorf("nested $ref inside a composed spec is not yet supported (%q)", c.Ref)
+				// Transitive $ref: the direct child already composed this grandchild
+				// and exposes handler methods for it, so graft its tree here and
+				// delegate to the child (no new import) — see composeNestedRef.
+				nodes, err := gp.composeNestedRef(c, parentPath, specDir, moduleRoot, moduleName, seen, ctx)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, nodes...)
+				continue
 			}
 			node, err := gp.composeRef(c, parentPath, specDir, moduleRoot, moduleName, seen)
 			if err != nil {
@@ -186,6 +195,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			discovery:  c.RemoteDiscovery,
 			hidden:     c.Hidden,
 			deprecated: c.Deprecated,
+			composed:   ctx.composed,
 			children:   children,
 		})
 	}
@@ -195,9 +205,11 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 	return out, nil
 }
 
-// composeRef loads a `$ref`'d child spec and grafts its command tree as a
-// composed subtree rooted at the child's own name. (A name override and
-// transitive $refs are not yet supported.)
+// composeRef loads a `$ref`'d child spec and grafts its command tree as a composed
+// subtree. The grafted command is named after the child's own root unless the ref
+// entry sets `name` to override it; the delegation still targets the child's real
+// handler methods either way. Transitive $refs (a composed child that itself $refs)
+// are handled by composeNestedRef during the walk.
 func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool) (rnode, error) {
 	childSpecPath := filepath.Clean(filepath.Join(specDir, filepath.FromSlash(c.Ref)))
 	abs := childSpecPath
@@ -227,9 +239,16 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	alias := identAlias(childRoot.Name)
 	gp.addImport(alias, imp)
 
-	composeRootPath := childRoot.Name
+	// The grafted command is named after the child's root unless the ref overrides it;
+	// the override changes only the parent-side name/path/method, never the delegation
+	// target (which is always the child's real handler).
+	graftName := childRoot.Name
+	if c.Name != "" {
+		graftName = c.Name
+	}
+	composeRootPath := graftName
 	if parentPath != "" {
-		composeRootPath = parentPath + "_" + childRoot.Name
+		composeRootPath = parentPath + "_" + graftName
 	}
 	prefix := gp.rootPascal + toPascalCase(composeRootPath)
 
@@ -241,7 +260,49 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	return rnode{name: childRoot.Name, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, deprecated: c.Deprecated, children: children}, nil
+	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, deprecated: c.Deprecated, composed: true, children: children}, nil
+}
+
+// composeNestedRef handles a `$ref` encountered *inside* an already-composed subtree
+// (a transitive ref: parent → child → grandchild). The direct child already composed
+// the grandchild and exposes handler methods for it, so the parent does not import the
+// grandchild's rth — it grafts the grandchild's command tree here and lets the normal
+// composed-walk delegate each node to the direct child (delegateMethod =
+// ctx.childPascal + the node's relative path, which matches the child's method names).
+// Ref-side overrides (name/aliases/hidden/deprecated) win, mirroring composeRef.
+func (gp *genProgram) composeNestedRef(c Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+	childSpecPath := filepath.Clean(filepath.Join(specDir, filepath.FromSlash(c.Ref)))
+	abs := childSpecPath
+	if a, err := filepath.Abs(childSpecPath); err == nil {
+		abs = filepath.Clean(a)
+	}
+	if seen[abs] {
+		return nil, fmt.Errorf("cyclic $ref: %q", c.Ref)
+	}
+	seen[abs] = true
+	defer delete(seen, abs)
+
+	gcSpec, err := ReadSpec(childSpecPath)
+	if err != nil {
+		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
+	}
+	gc := gcSpec.Command
+	if gc.Name == "" {
+		return nil, fmt.Errorf("composed spec %q has no name", c.Ref)
+	}
+
+	// Graft the grandchild as a named command in the current composed subtree: run it
+	// (and its descendants) through the normal walk so the standard composed
+	// delegation applies and the rnodes are marked composed (no types emitted here).
+	synth := gc
+	synth.Ref = ""
+	if c.Name != "" {
+		synth.Name = c.Name
+	}
+	synth.Aliases = c.Aliases
+	synth.Hidden = c.Hidden
+	synth.Deprecated = c.Deprecated
+	return gp.walk([]Command{synth}, parentPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
 }
 
 func (gp *genProgram) addImport(alias, path string) {
