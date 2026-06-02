@@ -8,15 +8,14 @@ import (
 	"github.com/go-rotini/rotini/rtk"
 )
 
-type rotiniVersionHandlers struct{}
+type rotiniVersionHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
 
 var _ rotini.CommandHandlers = (*rotiniVersionHandlers)(nil)
-
-func (*rotiniVersionHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-}
-
-func (*rotiniVersionHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
-}
 
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
@@ -35,10 +34,4 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	io.Stdout.Println(rtg.Version)
-}
-
-func (*rotiniVersionHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
-}
-
-func (*rotiniVersionHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 }
