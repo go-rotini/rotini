@@ -80,6 +80,24 @@ type CommandDef struct {
 	Discovery *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
 }
 
+// Constraints carries the optional JSON-schema-style validation bounds a spec may
+// declare on a flag or argument; the parser enforces them after reconciliation (so a
+// value supplied via env/config is checked too). A zero value means "unset",
+// consistent with the rest of a Definition: a 0 numeric bound, a 0 length/item bound,
+// or an empty Pattern is not enforced. A consequence of that zero-sentinel
+// representation is that `minimum: 0` and `maximum: 0` are treated as no bound — a
+// documented limitation (use a small epsilon, or rely on the unsigned type, if a
+// literal-zero bound matters).
+type Constraints struct {
+	Minimum   float64 // numeric lower bound (int/float types); 0 = unset
+	Maximum   float64 // numeric upper bound (int/float types); 0 = unset
+	MinLength int     // minimum string length in runes; 0 = unset
+	MaxLength int     // maximum string length in runes; 0 = unset
+	MinItems  int     // minimum item count (repeatable flag / variadic argument); 0 = unset
+	MaxItems  int     // maximum item count; 0 = unset
+	Pattern   string  // regular expression the value must contain (string types); "" = unset
+}
+
 // FlagDef describes a single flag of a command. Name is the logical name and
 // matches the `rotini:"<name>"` tag on the corresponding generated input field.
 type FlagDef struct {
@@ -89,6 +107,7 @@ type FlagDef struct {
 	Required    bool
 	Default     string
 	Enum        []string
+	Constraints
 }
 
 // ArgDef describes a single positional argument of a command. Variadic is true
@@ -100,4 +119,5 @@ type ArgDef struct {
 	Variadic bool
 	Default  string
 	Enum     []string
+	Constraints
 }

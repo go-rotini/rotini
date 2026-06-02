@@ -168,6 +168,116 @@ func TestParse_defaultsApplied(t *testing.T) {
 	}
 }
 
+// assertConstraint checks that err satisfies wantErr: when wantErr is "" the value
+// must pass; otherwise the error must contain wantErr.
+func assertConstraint(t *testing.T, val string, err error, wantErr string) {
+	t.Helper()
+	switch {
+	case wantErr == "" && err != nil:
+		t.Errorf("value %q: unexpected error %v", val, err)
+	case wantErr != "" && (err == nil || !strings.Contains(err.Error(), wantErr)):
+		t.Errorf("value %q: error = %v, want containing %q", val, err, wantErr)
+	}
+}
+
+func TestParse_numericConstraints(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{
+			Name: "port", Identifiers: []string{"--port"}, Type: "int",
+			Constraints: rotini.Constraints{Minimum: 1, Maximum: 65535},
+		}},
+	}
+	for _, c := range []struct{ val, wantErr string }{
+		{"8080", ""},
+		{"0", "must be >= 1"},
+		{"70000", "must be <= 65535"},
+	} {
+		var in struct{}
+		err := NewParser().Parse(rotini.NewContextFor(def, []string{"--port", c.val}), &in)
+		assertConstraint(t, c.val, err, c.wantErr)
+	}
+}
+
+func TestParse_stringLengthConstraints(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{
+			Name: "name", Identifiers: []string{"--name"}, Type: "string",
+			Constraints: rotini.Constraints{MinLength: 2, MaxLength: 5},
+		}},
+	}
+	for _, c := range []struct{ val, wantErr string }{
+		{"abc", ""},
+		{"a", "at least 2"},
+		{"toolong", "at most 5"},
+	} {
+		var in struct{}
+		err := NewParser().Parse(rotini.NewContextFor(def, []string{"--name", c.val}), &in)
+		assertConstraint(t, c.val, err, c.wantErr)
+	}
+}
+
+func TestParse_patternConstraint(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{
+			Name: "id", Identifiers: []string{"--id"}, Type: "string",
+			Constraints: rotini.Constraints{Pattern: "^[a-z]+$"},
+		}},
+	}
+	for _, c := range []struct{ val, wantErr string }{
+		{"abc", ""},
+		{"ABC", "must match"},
+	} {
+		var in struct{}
+		err := NewParser().Parse(rotini.NewContextFor(def, []string{"--id", c.val}), &in)
+		assertConstraint(t, c.val, err, c.wantErr)
+	}
+}
+
+func TestParse_itemCountConstraints(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{
+			Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
+			Constraints: rotini.Constraints{MinItems: 1, MaxItems: 2},
+		}},
+	}
+	for _, c := range []struct {
+		argv    []string
+		wantErr string
+	}{
+		{[]string{"--tag", "a"}, ""},
+		{[]string{"--tag", "a", "--tag", "b"}, ""},
+		{nil, "at least 1"},
+		{[]string{"--tag", "a", "--tag", "b", "--tag", "c"}, "at most 2"},
+	} {
+		var in struct{}
+		err := NewParser().Parse(rotini.NewContextFor(def, c.argv), &in)
+		assertConstraint(t, strings.Join(c.argv, " "), err, c.wantErr)
+	}
+}
+
+// A MinItems bound applies to a variadic argument even when it receives no values
+// (a distinct code path from a repeatable flag).
+func TestParse_variadicArgItemCount(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Arguments: []rotini.ArgDef{{
+			Name: "files", Type: "[]string", Variadic: true,
+			Constraints: rotini.Constraints{MinItems: 2},
+		}},
+	}
+	var in struct{}
+	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"only-one"}), &in); err == nil || !strings.Contains(err.Error(), "at least 2") {
+		t.Errorf("error = %v, want at-least-2 for variadic <files>", err)
+	}
+	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"a", "b"}), &in); err != nil {
+		t.Errorf("unexpected error for two files: %v", err)
+	}
+}
+
 // TestParse_clusteredShortFlags covers POSIX short-flag grouping in every shape:
 // joined booleans, separate flags, an attached value, a next-token value, and
 // mixes — they should all "just work".

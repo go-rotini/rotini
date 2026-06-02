@@ -546,6 +546,41 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	if len(schema.Enum) > 0 {
 		b.WriteString(", Enum: " + goStringSlice(schema.Enum))
 	}
+	if c := constraintsLiteral(schema); c != "" {
+		b.WriteString(", Constraints: " + c)
+	}
+}
+
+// constraintsLiteral renders a rotini.Constraints{…} literal from a schema's declared
+// numeric/string/array bounds, or "" when none are set (a zero bound or empty pattern
+// is "unset", matching the Definition's zero-sentinel convention).
+func constraintsLiteral(schema *InputSchema) string {
+	var parts []string
+	if schema.Minimum != 0 {
+		parts = append(parts, "Minimum: "+strconv.FormatFloat(schema.Minimum, 'g', -1, 64))
+	}
+	if schema.Maximum != 0 {
+		parts = append(parts, "Maximum: "+strconv.FormatFloat(schema.Maximum, 'g', -1, 64))
+	}
+	if schema.MinLength != 0 {
+		parts = append(parts, "MinLength: "+strconv.Itoa(schema.MinLength))
+	}
+	if schema.MaxLength != 0 {
+		parts = append(parts, "MaxLength: "+strconv.Itoa(schema.MaxLength))
+	}
+	if schema.MinItems != 0 {
+		parts = append(parts, "MinItems: "+strconv.Itoa(schema.MinItems))
+	}
+	if schema.MaxItems != 0 {
+		parts = append(parts, "MaxItems: "+strconv.Itoa(schema.MaxItems))
+	}
+	if schema.Pattern != "" {
+		parts = append(parts, "Pattern: "+strconv.Quote(schema.Pattern))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return rotiniPkgName + ".Constraints{" + strings.Join(parts, ", ") + "}"
 }
 
 // schemaType resolves an input schema to the Definition's type string,

@@ -19,10 +19,12 @@ import (
 	"encoding"
 	"fmt"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-rotini/rotini"
 )
@@ -88,29 +90,40 @@ func NewParser() *Parser {
 // a value is outside a declared enum — print it (see [Usage]), rtx.Exit, or fall
 // back to rotini.Context.Args.
 func (p *Parser) Parse(rtx *rotini.Context, out any) error {
-	if p == nil {
-		return &usageError{msg: "rotini: nil parser"}
-	}
-	if rtx == nil {
-		return &usageError{msg: "rotini: parse on nil context"}
-	}
-	rv := reflect.ValueOf(out)
-	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return &usageError{msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
-	}
-	chain := rtx.Chain()
-	if len(chain) == 0 {
-		return &usageError{msg: "rotini: no command resolved for this context"}
-	}
-	store, err := parseInto(chain, rtx.Args())
+	store, chain, err := p.parseBind(rtx, out)
 	if err != nil {
 		return err
 	}
-	if err := validate(chain, store); err != nil {
-		return err
+	return validate(chain, store)
+}
+
+// parseBind parses argv into a store and binds it into out, but performs no
+// required/enum/constraint validation — that is [validate]'s job. It is the shared
+// front half of [Parser.Parse] (which then validates the argv-only store) and of the
+// [Binder] (which first reconciles env/config fallbacks into the store, then
+// validates last — so a required input is satisfiable from any source, not just
+// argv). It returns the store and the resolved chain for that deferred validation.
+func (p *Parser) parseBind(rtx *rotini.Context, out any) (*parsedInputs, []rotini.ResolvedCommand, error) {
+	if p == nil {
+		return nil, nil, &usageError{msg: "rotini: nil parser"}
+	}
+	if rtx == nil {
+		return nil, nil, &usageError{msg: "rotini: parse on nil context"}
+	}
+	rv := reflect.ValueOf(out)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		return nil, nil, &usageError{msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
+	}
+	chain := rtx.Chain()
+	if len(chain) == 0 {
+		return nil, nil, &usageError{msg: "rotini: no command resolved for this context"}
+	}
+	store, err := parseInto(chain, rtx.Args())
+	if err != nil {
+		return nil, nil, err
 	}
 	bindInputs(rv.Elem(), store)
-	return nil
+	return store, chain, nil
 }
 
 // parseInto binds argv to an already-resolved chain, strictly: an unrecognized
@@ -218,33 +231,92 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 	for i, f := range chain {
 		fsi := store.scopes[i]
 		for _, fd := range f.Flags {
-			if len(fd.Enum) == 0 {
-				continue
-			}
-			for _, v := range fsi.flags[fd.Name] {
-				if !slices.Contains(fd.Enum, v) {
+			vals := fsi.flags[fd.Name]
+			for _, v := range vals {
+				if len(fd.Enum) > 0 && !slices.Contains(fd.Enum, v) {
 					return &usageError{msg: fmt.Sprintf("invalid value %q for %s (one of: %s)", v, flagLabel(fd), strings.Join(fd.Enum, ", "))}
 				}
+			}
+			if err := checkConstraints(flagLabel(fd), fd.Type, fd.Constraints, vals); err != nil {
+				return err
 			}
 		}
 	}
 
 	for i, ad := range leaf.Arguments {
-		if len(ad.Enum) == 0 || i >= len(si.args) {
-			continue
-		}
-		vals := si.args[i : i+1]
-		if ad.Variadic {
-			vals = si.args[i:]
+		var vals []string
+		switch {
+		case ad.Variadic:
+			if i < len(si.args) {
+				vals = si.args[i:]
+			} // an absent variadic still gets a MinItems check below
+		case i < len(si.args):
+			vals = si.args[i : i+1]
+		default:
+			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		}
 		for _, v := range vals {
-			if !slices.Contains(ad.Enum, v) {
+			if len(ad.Enum) > 0 && !slices.Contains(ad.Enum, v) {
 				return &usageError{msg: fmt.Sprintf("invalid value %q for <%s> (one of: %s)", v, ad.Name, strings.Join(ad.Enum, ", "))}
+			}
+		}
+		if err := checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkConstraints enforces an input's declared numeric/string/array bounds against
+// the value(s) supplied for it (one element for a scalar; possibly many for a
+// repeatable flag or variadic argument). label is the human-facing identifier; typ is
+// the resolved Go type. A zero bound (or empty pattern) is unset and skipped; numeric
+// bounds apply to int/float types, length/pattern to strings, and item counts to
+// arrays — a constraint declared on an incompatible type is silently ignored.
+func checkConstraints(label, typ string, c rotini.Constraints, values []string) error {
+	if isArrayType(typ) {
+		switch n := len(values); {
+		case c.MinItems > 0 && n < c.MinItems:
+			return &usageError{msg: fmt.Sprintf("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)}
+		case c.MaxItems > 0 && n > c.MaxItems:
+			return &usageError{msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)}
+		}
+	}
+	for _, v := range values {
+		switch {
+		case isNumericType(typ):
+			n, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				continue // not range-checkable; coerce already tolerates malformed input
+			}
+			if c.Minimum != 0 && n < c.Minimum {
+				return &usageError{msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(c.Minimum), v)}
+			}
+			if c.Maximum != 0 && n > c.Maximum {
+				return &usageError{msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(c.Maximum), v)}
+			}
+		case typ == "string":
+			if ln := utf8.RuneCountInString(v); c.MinLength > 0 && ln < c.MinLength {
+				return &usageError{msg: fmt.Sprintf("%s must be at least %d %s long (got %d)", label, c.MinLength, plural("character", c.MinLength), ln)}
+			} else if c.MaxLength > 0 && ln > c.MaxLength {
+				return &usageError{msg: fmt.Sprintf("%s must be at most %d %s long (got %d)", label, c.MaxLength, plural("character", c.MaxLength), ln)}
+			}
+			if c.Pattern != "" {
+				if ok, err := regexp.MatchString(c.Pattern, v); err == nil && !ok {
+					return &usageError{msg: fmt.Sprintf("%s must match %s (got %q)", label, c.Pattern, v)}
+				}
 			}
 		}
 	}
 	return nil
 }
+
+func isNumericType(typ string) bool { return typ == "int" || typ == "float64" }
+
+func isArrayType(typ string) bool { return strings.HasPrefix(typ, "[]") }
+
+// formatNum renders a numeric bound without a trailing ".000…".
+func formatNum(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
 
 // applyDefaults fills in declared flag and trailing-argument defaults for inputs
 // the user did not provide, so handlers and required-checks see them.

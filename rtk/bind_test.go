@@ -3,6 +3,7 @@ package rtk
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/go-rotini/rotini"
@@ -239,6 +240,123 @@ func TestBinder_flagFallbackPrecedence(t *testing.T) {
 			t.Errorf("Color = %q, want blue (FlagDef default)", in.App.Flags.Color)
 		}
 	})
+}
+
+// Required-fallback shapes: a *required* flag that declares a recon key, with no
+// default, must be satisfiable from env or config — not only from argv. (Regression
+// for the bug where the Parser's required-check fired before fallback ran.)
+type tbReqFlags struct {
+	Token string `rotini:"token" recon:"api.token"`
+}
+type tbReqCmd struct {
+	Flags     tbReqFlags
+	Arguments struct{}
+}
+type tbReqInputs struct{ App tbReqCmd }
+
+func tbReqDef() rotini.Definition {
+	return rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true}},
+	}
+}
+
+func TestBinder_requiredFlagSatisfiedByConfig(t *testing.T) {
+	cfg := writeConfig(t, "api:\n  token: from-config\n")
+	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+
+	rtx := rotini.NewContextFor(tbReqDef(), nil) // not on argv
+	var in tbReqInputs
+	if err := NewBinder(meta).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v (a required flag should be satisfiable via config)", err)
+	}
+	if in.App.Flags.Token != "from-config" {
+		t.Errorf("Token = %q, want from-config", in.App.Flags.Token)
+	}
+}
+
+func TestBinder_requiredFlagSatisfiedByEnv(t *testing.T) {
+	t.Setenv("API_TOKEN", "from-env") // SNAKE_UPPER of recon key "api.token"
+
+	// No config files: also exercises the path where env is the only fallback source.
+	rtx := rotini.NewContextFor(tbReqDef(), nil)
+	var in tbReqInputs
+	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v (a required flag should be satisfiable via env)", err)
+	}
+	if in.App.Flags.Token != "from-env" {
+		t.Errorf("Token = %q, want from-env", in.App.Flags.Token)
+	}
+}
+
+func TestBinder_requiredFlagMissingEverywhere(t *testing.T) {
+	rtx := rotini.NewContextFor(tbReqDef(), nil) // no argv, no env, no config
+	var in tbReqInputs
+	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err == nil {
+		t.Fatal("expected a missing-required error when a required fallback flag is in no source")
+	}
+}
+
+// Enum-on-reconciled: an env/config-supplied flag value must be enum-checked too
+// (previously the enum check was bypassed because it ran before reconciliation).
+type tbEnumFlags struct {
+	Color string `rotini:"color" recon:"create.color"`
+}
+type tbEnumCmd struct {
+	Flags     tbEnumFlags
+	Arguments struct{}
+}
+type tbEnumInputs struct{ App tbEnumCmd }
+
+func tbEnumDef() rotini.Definition {
+	return rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{Name: "color", Identifiers: []string{"--color"}, Type: "string", Enum: []string{"red", "green", "blue"}}},
+	}
+}
+
+func TestBinder_enumCheckedOnReconciledValue(t *testing.T) {
+	cfg := writeConfig(t, "create:\n  color: teal\n") // teal is not in the enum
+	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+
+	rtx := rotini.NewContextFor(tbEnumDef(), nil)
+	var in tbEnumInputs
+	if err := NewBinder(meta).Bind(rtx, &in); err == nil {
+		t.Fatal("expected an enum error for a config-supplied value outside the declared enum")
+	}
+}
+
+// Constraints are enforced over the fully-reconciled value, so a bound that a
+// config-supplied flag violates is caught (proving A1 runs at the single post-
+// reconciliation validation locus, not just on argv).
+type tbPortFlags struct {
+	Port int `rotini:"port" recon:"create.port"`
+}
+type tbPortCmd struct {
+	Flags     tbPortFlags
+	Arguments struct{}
+}
+type tbPortInputs struct{ App tbPortCmd }
+
+func tbPortDef() rotini.Definition {
+	return rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{
+			Name: "port", Identifiers: []string{"--port"}, Type: "int",
+			Constraints: rotini.Constraints{Minimum: 1, Maximum: 65535},
+		}},
+	}
+}
+
+func TestBinder_constraintCheckedOnReconciledValue(t *testing.T) {
+	cfg := writeConfig(t, "create:\n  port: 70000\n") // above the declared maximum
+	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+
+	rtx := rotini.NewContextFor(tbPortDef(), nil)
+	var in tbPortInputs
+	if err := NewBinder(meta).Bind(rtx, &in); err == nil || !strings.Contains(err.Error(), "must be <= 65535") {
+		t.Fatalf("Bind error = %v, want a max-bound violation for the config-supplied port", err)
+	}
 }
 
 // tbNoReqInputs mirrors tbInputs but with no required config field, so the

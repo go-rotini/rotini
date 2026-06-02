@@ -31,7 +31,8 @@ import (
 // field's recon key to its SNAKE_UPPER form); config-file values fill <Prefix>Config
 // from the document's configuration_files (carried in [rotini.BindMeta]). The two
 // channels use independent registries, so an env var never leaks into a config field
-// or vice versa. Flag fallback reconciliation and stdin are added in later phases.
+// or vice versa. Flags may also fall back to env/config, and a leaf command may decode
+// a typed stdin payload.
 type Binder struct {
 	parser      *Parser
 	configFiles []rotini.ConfigFile
@@ -44,10 +45,13 @@ func NewBinder(meta rotini.BindMeta) *Binder {
 }
 
 // Bind fills out — a non-nil pointer to the typed inputs struct rtg emits — from
-// every wired channel: argv flags + positional arguments first (via the parser,
-// including its required/enum validation), then the env and config channels via
-// recon. It returns the first error (a usage error from argv parsing, or a recon
-// bind/validation error for env/config).
+// every wired channel: argv flags + positional arguments (via the parser), env- and
+// config-file fallbacks for flags that declare them, the pure Env/Config channels,
+// and a leaf command's typed stdin payload. Required/enum/constraint validation of
+// the argv channel runs once over the fully-reconciled values — so a required flag is
+// satisfiable from env or config, not only from argv, and an env/config-supplied value
+// is enum-checked. It returns the first error (a usage error from parsing/validation,
+// or a recon bind/validation error for env/config/stdin).
 func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 	if b == nil {
 		return &usageError{msg: "rotini: nil binder"}
@@ -57,22 +61,34 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 		return &usageError{msg: "rotini: Bind out argument must be a non-nil pointer to an inputs struct"}
 	}
 
-	// 1. argv → Flags + Arguments (and required/enum validation).
-	if err := b.parser.Parse(rtx, out); err != nil {
+	// 1. argv → Flags + Arguments, WITHOUT validation: required/enum (and, later,
+	//    declared constraints) are checked once in step 3, over the fully-reconciled
+	//    store, so a required flag can be satisfied by env/config — not only by argv.
+	store, chain, err := b.parser.parseBind(rtx, out)
+	if err != nil {
 		return err
 	}
 	v := rv.Elem()
 
-	// 2. flag fallback: for flags that declare a config key, reconcile
+	// 2. flag fallback: for flags that declare a recon key, reconcile
 	//    argv-set > env (SNAKE_UPPER of the key) > config; otherwise keep the
-	//    Parser's value (an explicit argv value or the flag's default).
-	if err := b.reconcileFlags(v, rtx.Chain(), rtx.Args()); err != nil {
+	//    Parser's value (an explicit argv value or the flag's default). Each
+	//    reconciled value is recorded back into the store so step 3 validates it too.
+	if err := b.reconcileFlags(v, chain, rtx.Args(), store); err != nil {
 		return err
 	}
 
-	// 3. env + config → the Env/Config sub-structs, from independent registries
-	//    (so an env var never leaks into a config field, or vice versa). The env
-	//    source honors an input's explicit `variable` (else recon's SNAKE_UPPER).
+	// 3. validate the reconciled flags + arguments (required + enum) — the single
+	//    validation locus for the argv channel, run after fallback so it sees every
+	//    source. Argv errors surface before any channel error.
+	if err := validate(chain, store); err != nil {
+		return err
+	}
+
+	// 4. env + config → the Env/Config sub-structs, from independent registries
+	//    (so an env var never leaks into a config field, or vice versa); recon
+	//    enforces each channel's own required/validator. The env source honors an
+	//    input's explicit `variable` (else recon's SNAKE_UPPER).
 	envReg, err := recon.New(recon.WithSource(
 		recon.NewOSEnvSource(recon.WithEnvTransform(envTransform(envExplicit(v))))))
 	if err != nil {
@@ -90,7 +106,7 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 		return err
 	}
 
-	// 4. stdin → the leaf command's typed payload (decoded by its declared format).
+	// 5. stdin → the leaf command's typed payload (decoded by its declared format).
 	return fillStdin(v)
 }
 
@@ -159,21 +175,18 @@ func readPipedStdin() ([]byte, error) {
 }
 
 // reconcileFlags overrides each fallback flag (a Flags field carrying a recon tag)
-// with its reconciled value: argv-set flags (highest) > env > config files. A flag
-// not present in any source keeps the value the Parser already bound (its explicit
-// argv value or declared default). Argv-only flags (no recon tag) are untouched.
-//
-// Note: the Parser's required-check runs at argv-parse, so a *required* flag is not
-// yet satisfiable by env/config fallback (it must be on argv) — a later refinement.
-func (b *Binder) reconcileFlags(v reflect.Value, chain []rotini.ResolvedCommand, argv []string) error {
-	if v.Kind() != reflect.Struct {
-		return nil
+// with its reconciled value: argv-set flags (highest) > env (SNAKE_UPPER of the recon
+// key) > config files. A flag not present in any source keeps the value the Parser
+// already bound (its explicit argv value or declared default). Argv-only flags (no
+// recon tag) are untouched. Each reconciled value is also written back into store, so
+// the deferred [validate] pass sees an env/config-supplied flag as present (satisfying
+// a required check) and range-checks it against any enum.
+func (b *Binder) reconcileFlags(v reflect.Value, chain []rotini.ResolvedCommand, argv []string, store *parsedInputs) error {
+	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
+		return nil // no fallback flags → nothing to reconcile (env included)
 	}
-	overrides := flagOverrides(v, chain, argv)
-	if len(overrides) == 0 && len(b.configFiles) == 0 {
-		return nil // nothing can change a flag's value
-	}
-	srcs := []recon.Source{recon.NewMapSource("flags", overrides), recon.NewOSEnvSource()}
+	offset := len(chain) - v.NumField()
+	srcs := []recon.Source{recon.NewMapSource("flags", flagOverrides(v, chain, argv)), recon.NewOSEnvSource()}
 	files, err := b.fileSources()
 	if err != nil {
 		return err
@@ -200,13 +213,51 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []rotini.ResolvedCommand,
 			if err != nil {
 				return fmt.Errorf("rotini: reconcile flag %q: %w", key, err)
 			}
-			if found {
-				s, _ := val.AsString()
-				coerce(flags.Field(j), []string{s})
+			if !found {
+				continue
+			}
+			// Value.String stringifies any kind (int/float/bool config values too) —
+			// the strict AsString returns "" for non-strings, silently dropping a
+			// numeric/bool flag's env/config fallback.
+			s := val.String()
+			coerce(flags.Field(j), []string{s})
+			if name := ft.Field(j).Tag.Get("rotini"); name != "" && offset >= 0 {
+				recordFlag(store, offset+i, name, s)
 			}
 		}
 	}
 	return nil
+}
+
+// recordFlag writes a reconciled flag value into the parsed store at its chain frame,
+// so deferred validation treats it as present (for required) and enum-checks it.
+func recordFlag(store *parsedInputs, idx int, name, value string) {
+	if store == nil || idx < 0 || idx >= len(store.scopes) {
+		return
+	}
+	if store.scopes[idx].flags == nil {
+		store.scopes[idx].flags = map[string][]string{}
+	}
+	store.scopes[idx].flags[name] = []string{value}
+}
+
+// hasReconFlags reports whether any command's Flags sub-struct declares a recon key
+// (i.e. there is at least one env/config fallback flag to reconcile). When false, the
+// binder skips building a registry entirely.
+func hasReconFlags(v reflect.Value) bool {
+	for i := range v.NumField() {
+		flags := commandFlags(v.Field(i))
+		if !flags.IsValid() {
+			continue
+		}
+		ft := flags.Type()
+		for j := range flags.NumField() {
+			if reconKey(ft.Field(j).Tag.Get("recon")) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // flagOverrides maps the canonical key of every fallback flag explicitly set on
