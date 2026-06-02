@@ -1,8 +1,18 @@
 //go:generate rotini generate
 package main
 
-import "{{.Import}}"
+import (
+	"{{.Import}}"
+
+	"github.com/go-rotini/rotini/rtk"
+)
 
 func main() {
-	{{.Pkg}}.Program.Execute()
+	// Services are opt-in: bind the ones this CLI uses here, then retrieve them in a
+	// handler with rotini.MustGet[*rtk.Parser](rtx, "parser"). Add rtk.NewSignals(),
+	// rtk.NewTickers(), or rtk.NewBinder(rtg.BindMeta) (env/config/stdin) as you need them.
+	{{.Pkg}}.Program.
+		Bind("parser", rtk.NewParser()).
+		Bind("io", rtk.NewIO()).
+		Execute()
 }

@@ -96,7 +96,7 @@ type Command struct {
 	RemoteDiscovery *RemoteDiscovery `json:"remote_discovery,omitempty"`
 	// Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page.
 	Summary string `json:"summary,omitempty"`
-	// Command execution timeout. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
+	// Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
 	Timeout string `json:"timeout,omitempty"`
 	// Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set.
 	Usage string `json:"usage,omitempty"`

@@ -94,6 +94,7 @@ func Validate(specPath, confPath, failMode string) error {
 		if len(specProblems) == 0 {
 			if spec, err := ReadSpec(specPath); err == nil {
 				problems = append(problems, lintImportConsistency(spec)...)
+				problems = append(problems, lintLocalTimeout(spec)...)
 			}
 		}
 	}
@@ -202,6 +203,39 @@ func lintImportConsistency(spec *Spec) []error {
 		})
 	}
 	sort.Slice(problems, func(i, j int) bool { return problems[i].Error() < problems[j].Error() })
+	return problems
+}
+
+// lintLocalTimeout rejects a `timeout` declared on any command. A timeout is a
+// remote-only, host-side bound on a dispatched binary (set per remote_commands entry,
+// honored by the remote runtime); on a local command it is never honored, so accepting
+// it would be a silent lie. One problem per offending command, in tree order. The
+// remote_commands[].timeout is a separate field and is left untouched.
+func lintLocalTimeout(spec *Spec) []error {
+	var problems []error
+	var walk func(c *Command, path string)
+	walk = func(c *Command, path string) {
+		if strings.TrimSpace(c.Timeout) != "" {
+			problems = append(problems, &violationError{
+				kind: "spec",
+				loc:  "command " + path,
+				msg:  "timeout is not supported on a local command — it is a remote-only, host-side bound with no effect here; set it on a remote_commands entry's timeout instead",
+			})
+		}
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			seg := child.Name
+			if seg == "" {
+				seg = child.Ref
+			}
+			walk(child, path+"/"+seg)
+		}
+	}
+	name := spec.Command.Name
+	if name == "" {
+		name = "(root)"
+	}
+	walk(&spec.Command, name)
 	return problems
 }
 

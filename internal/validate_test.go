@@ -88,6 +88,36 @@ func TestValidate_helpKeys(t *testing.T) {
 	}
 }
 
+func TestValidate_localTimeoutRejected(t *testing.T) {
+	// timeout on a (local) sub-command is a remote-only concept — validation rejects
+	// it (and the walk reaches nested commands).
+	spec := validSpecHeader +
+		"command:\n" +
+		"  name: demo\n" +
+		"  commands:\n" +
+		"    - name: run\n" +
+		"      timeout: 5s\n"
+	path := writeTemp(t, "spec.yaml", spec)
+	err := Validate(path, "", "")
+	if err == nil || !strings.Contains(err.Error(), "timeout") || !strings.Contains(err.Error(), "remote") {
+		t.Errorf("Validate(local timeout) = %v, want a timeout/remote rejection", err)
+	}
+}
+
+func TestValidate_remoteTimeoutAccepted(t *testing.T) {
+	// timeout on a remote_commands entry (host-side) is valid.
+	spec := validSpecHeader +
+		"command:\n" +
+		"  name: demo\n" +
+		"  remote_commands:\n" +
+		"    - name: plugin\n" +
+		"      timeout: 10s\n"
+	path := writeTemp(t, "spec.yaml", spec)
+	if err := Validate(path, "", ""); err != nil {
+		t.Errorf("Validate(remote_commands timeout) = %v, want nil", err)
+	}
+}
+
 func TestValidate_verbatimHelpString(t *testing.T) {
 	// command.help / spec.help is a plain string (the verbatim page).
 	spec := validSpecHeader + "command:\n  name: demo\n  help: |\n    my exact help page\n"

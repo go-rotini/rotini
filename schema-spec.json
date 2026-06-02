@@ -63,7 +63,7 @@
         },
         "timeout": {
           "type": "string",
-          "description": "Command execution timeout. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
+          "description": "Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)"
         },
         "inputs": {
           "$ref": "#/definitions/Inputs",
