@@ -254,6 +254,33 @@ command:
 	)
 }
 
+func TestGenerate_stdinSchemaInBindMeta(t *testing.T) {
+	tmp := initTestModule(t)
+	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+command:
+  name: app
+  inputs:
+    stdin:
+      format: yaml
+      schema:
+        type: object
+        properties:
+          port: { type: integer, minimum: 1, maximum: 65535 }
+`
+	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
+
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	// BindMeta carries the stdin payload schema keyed by the <Prefix>Stdin type name.
+	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),
+		"var BindMeta", "StdinSchemas", `"AppStdin"`, "maximum", "65535",
+	)
+}
+
 func mustNotContain(t *testing.T, path string, subs ...string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

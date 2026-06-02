@@ -84,6 +84,63 @@ func collectOutputDefs(gp *genProgram) map[string]any {
 	return defs
 }
 
+// collectStdinSchemas builds the per-command stdin validation schemas for BindMeta:
+// each non-composed command that declares a stdin payload maps its "<Prefix>Stdin"
+// type name to a self-contained JSON Schema (the payload schema, plus the document's
+// named schemas as definitions so any "#/schemas/X" refs resolve). The binder
+// validates the decoded payload against it. Returns nil when no command has stdin.
+func collectStdinSchemas(gp *genProgram) map[string]string {
+	out := map[string]string{}
+	add := func(prefix string, in *Inputs) {
+		if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
+			return
+		}
+		if js := stdinValidationSchema(in.Stdin.Schema, gp.schemas); js != "" {
+			out[prefix+"Stdin"] = js
+		}
+	}
+	add(gp.rootPascal, gp.rootInputs)
+	var walk func(nodes []rnode)
+	walk = func(nodes []rnode) {
+		for _, n := range nodes {
+			if n.composed {
+				continue // composed commands' stdin schemas live in the child's rtg
+			}
+			add(n.prefix, n.inputs)
+			walk(n.children)
+		}
+	}
+	walk(gp.tree)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stdinValidationSchema renders a self-contained JSON Schema (as a JSON string) for a
+// stdin payload: the payload's type/properties/constraints, plus the document's named
+// schemas as `definitions` (so any "#/schemas/X" refs resolve). It uses only the
+// schema-shape of the InputSchema (the BaseSchema), matching the generated type.
+func stdinValidationSchema(stdin *InputSchema, docSchemas map[string]Schema) string {
+	body, ok := schemaToDoc(Schema{BaseSchema: stdin.BaseSchema}).(map[string]any)
+	if !ok {
+		return ""
+	}
+	body["$schema"] = "http://json-schema.org/draft-07/schema#"
+	if len(docSchemas) > 0 {
+		defs := map[string]any{}
+		for name, s := range docSchemas {
+			defs[name] = schemaToDoc(s)
+		}
+		body["definitions"] = defs
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
 // schemaToDoc marshals a spec Schema to a generic JSON-schema value and rewrites
 // its "#/schemas/" refs to "#/definitions/".
 func schemaToDoc(s Schema) any {

@@ -35,14 +35,16 @@ import (
 // or vice versa. Flags may also fall back to env/config, and a leaf command may decode
 // a typed stdin payload.
 type Binder struct {
-	parser      *Parser
-	configFiles []rotini.ConfigFile
+	parser       *Parser
+	configFiles  []rotini.ConfigFile
+	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
 }
 
 // NewBinder returns the default binder, configured from the generated descriptor
-// (the rtg package's BindMeta var) — primarily its configuration_files sources.
+// (the rtg package's BindMeta var) — its configuration_files sources and per-command
+// stdin payload schemas.
 func NewBinder(meta rotini.BindMeta) *Binder {
-	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles}
+	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas}
 }
 
 // Bind fills out — a non-nil pointer to the typed inputs struct rtg emits — from
@@ -114,7 +116,7 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 	}
 
 	// 5. stdin → the leaf command's typed payload (decoded by its declared format).
-	return fillStdin(rtx, v)
+	return b.fillStdin(rtx, v)
 }
 
 // fillStdin decodes piped stdin into the leaf command's Stdin payload field, when it
@@ -122,7 +124,9 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 // stream, so only the leaf (the running command) consumes it; when nothing is piped
 // the Stdin field is left nil. The bytes are read through the bound IO service (so a
 // test can supply them at the registry seam), falling back to os.Stdin — see readStdin.
-func fillStdin(rtx *rotini.Context, v reflect.Value) error {
+// The decoded payload is validated against the command's stdin JSON Schema (from
+// BindMeta) before binding, so a malformed document is rejected with a clear error.
+func (b *Binder) fillStdin(rtx *rotini.Context, v reflect.Value) error {
 	if v.Kind() != reflect.Struct || v.NumField() == 0 {
 		return nil
 	}
@@ -155,6 +159,19 @@ func fillStdin(rtx *rotini.Context, v reflect.Value) error {
 	if err != nil {
 		return fmt.Errorf("rotini: decode stdin (%s): %w", format, err)
 	}
+
+	// Validate the decoded payload against the command's stdin schema (when one was
+	// generated for this <Prefix>Stdin type), before binding.
+	if js := b.stdinSchemas[sf.Type().Elem().Name()]; js != "" {
+		validator, err := recon.NewJSONSchemaValidator([]byte(js))
+		if err != nil {
+			return fmt.Errorf("rotini: stdin schema: %w", err)
+		}
+		if err := validator.Validate(m); err != nil {
+			return fmt.Errorf("rotini: invalid stdin payload: %w", err)
+		}
+	}
+
 	reg, err := recon.New(recon.WithSource(recon.NewMapSource("stdin", m)))
 	if err != nil {
 		return fmt.Errorf("rotini: stdin registry: %w", err)

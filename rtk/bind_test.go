@@ -458,6 +458,45 @@ func TestBinder_configConstraintValid(t *testing.T) {
 	}
 }
 
+// Stdin-validation shape: a payload whose schema (in BindMeta) the binder checks
+// before binding.
+type tbStdinValPayload struct {
+	Port int `json:"port"`
+}
+type tbStdinValCmd struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *tbStdinValPayload `stdin:"yaml"`
+}
+type tbStdinValInputs struct{ App tbStdinValCmd }
+
+const tbStdinSchema = `{"type":"object","properties":{"port":{"type":"integer","minimum":1,"maximum":65535}}}`
+
+func tbStdinMeta() rotini.BindMeta {
+	return rotini.BindMeta{StdinSchemas: map[string]string{"tbStdinValPayload": tbStdinSchema}}
+}
+
+func TestBinder_stdinPayloadRejectedBySchema(t *testing.T) {
+	withPipedStdin(t, "port: 70000\n") // above the schema maximum
+	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+	var in tbStdinValInputs
+	if err := NewBinder(tbStdinMeta()).Bind(rtx, &in); err == nil {
+		t.Fatal("expected the stdin payload to be rejected (port above maximum)")
+	}
+}
+
+func TestBinder_stdinPayloadValid(t *testing.T) {
+	withPipedStdin(t, "port: 8080\n")
+	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+	var in tbStdinValInputs
+	if err := NewBinder(tbStdinMeta()).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Stdin == nil || in.App.Stdin.Port != 8080 {
+		t.Errorf("Stdin = %+v, want port 8080", in.App.Stdin)
+	}
+}
+
 // tbNoReqInputs mirrors tbInputs but with no required config field, so the
 // no-config-files case binds cleanly.
 type tbNoReqInputs struct{ App tbNoReqCmd }

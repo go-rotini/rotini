@@ -464,23 +464,50 @@ func renderDefinition(gp *genProgram) string {
 // renderBindMeta renders the `var BindMeta = rotini.BindMeta{…}` descriptor the
 // default binder consumes — the document-level config-file sources. Returns "" when
 // there are none (so a CLI with no configuration_files stays unchanged).
-func renderBindMeta(files []ConfigurationFile) string {
-	if len(files) == 0 {
+func renderBindMeta(gp *genProgram) string {
+	files := gp.configFiles
+	stdinSchemas := collectStdinSchemas(gp)
+	if len(files) == 0 && len(stdinSchemas) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("// BindMeta is the generated descriptor the default binder (rtk.Binder) consumes.\n")
 	b.WriteString("var BindMeta = " + rotiniPkgName + ".BindMeta{\n")
-	b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
-	for _, f := range files {
-		b.WriteString("{Name: " + strconv.Quote(f.Name) + ", Path: " + strconv.Quote(f.Path))
-		if f.Format != "" {
-			b.WriteString(", Format: " + strconv.Quote(f.Format))
+	if len(files) > 0 {
+		b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
+		for _, f := range files {
+			b.WriteString("{Name: " + strconv.Quote(f.Name) + ", Path: " + strconv.Quote(f.Path))
+			if f.Format != "" {
+				b.WriteString(", Format: " + strconv.Quote(f.Format))
+			}
+			b.WriteString("},\n")
 		}
 		b.WriteString("},\n")
 	}
-	b.WriteString("},\n}")
+	if len(stdinSchemas) > 0 {
+		b.WriteString("StdinSchemas: map[string]string{\n")
+		keys := make([]string, 0, len(stdinSchemas))
+		for k := range stdinSchemas {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString(strconv.Quote(k) + ": " + goRawString(stdinSchemas[k]) + ",\n")
+		}
+		b.WriteString("},\n")
+	}
+	b.WriteString("}")
 	return b.String()
+}
+
+// goRawString renders s as a Go string literal, preferring a backtick raw string
+// (clean for embedded JSON) and falling back to a quoted literal if s contains a
+// backtick.
+func goRawString(s string) string {
+	if !strings.Contains(s, "`") {
+		return "`" + s + "`"
+	}
+	return strconv.Quote(s)
 }
 
 // discoveryLiteral renders the *rotini.RemoteDiscoveryDef literal for a command's
@@ -708,7 +735,7 @@ func writeFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) e
 		"Metadata":     gp.metadata,
 		"Features":     features,
 		"OutputTypes":  outputTypes,
-		"BindMeta":     renderBindMeta(gp.configFiles),
+		"BindMeta":     renderBindMeta(gp),
 	}
 	content, err := renderGo("framework", "templates/rotini.go.tmpl", data)
 	if err != nil {

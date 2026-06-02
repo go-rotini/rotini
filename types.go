@@ -48,6 +48,9 @@ type RemoteDef struct {
 // `var BindMeta = rotini.BindMeta{…}`; main.go hands it to rtk.NewProgram's binder.
 type BindMeta struct {
 	ConfigFiles []ConfigFile // document-level configuration_files sources, in declared order
+	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
+	// self-contained JSON Schema the binder validates the decoded payload against.
+	StdinSchemas map[string]string
 }
 
 // ConfigFile is one configuration-file source the binder reads (reconciled by recon).
