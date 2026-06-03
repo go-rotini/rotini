@@ -19,7 +19,6 @@ type genProgram struct {
 	rootInputs    *Inputs
 	rootAliases   []string
 	metadata      []MetadataEntry     // ldflag-settable vars emitted in rtg
-	versionVar    string              // metadata var feeding Definition.Version (Var == "Version")
 	rootRemotes   []RemoteCommandSpec // root-level remote/co-located sub-commands
 	rootHelp      cmdHelp             // root command's flattened help fields
 	rootOutput    *Schema             // root command's output type (nil when unset)
@@ -92,11 +91,6 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootDiscovery: root.RemoteDiscovery,
 		schemas:       spec.Schemas,
 		configFiles:   spec.ConfigurationFiles,
-	}
-	for _, m := range spec.Metadata {
-		if m.Var == "Version" {
-			gp.versionVar = m.Var
-		}
 	}
 	gp.root = genCommand{
 		prefix:      gp.rootPascal,

@@ -28,7 +28,6 @@ var Definition = rotini.Definition{
 		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool"},
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 	},
-	Version: Version,
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
 			Handler: "RotiniInitialize",

@@ -24,7 +24,6 @@ type Definition struct {
 	Name             string
 	Aliases          []string
 	Handler          string // ProgramHandlers method for the root command, e.g. "Rotini"
-	Version          string // value of the program's version metadata var (ldflag-settable)
 	Flags            []FlagDef
 	Arguments        []ArgDef
 	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time

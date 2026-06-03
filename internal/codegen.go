@@ -464,9 +464,6 @@ func renderDefinition(gp *genProgram) string {
 	if fd := flagDependenciesLiteral(gp.rootInputs); fd != "" {
 		b.WriteString("FlagDependencies: " + fd + ",\n")
 	}
-	if gp.versionVar != "" {
-		b.WriteString("Version: " + gp.versionVar + ",\n")
-	}
 	if cl := rnodesLiteral(gp.rootName, gp.tree); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
 	}
