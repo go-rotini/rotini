@@ -234,10 +234,10 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 			vals := fsi.flags[fd.Name]
 			for _, v := range vals {
 				if len(fd.Enum) > 0 && !slices.Contains(fd.Enum, v) {
-					return &usageError{msg: fmt.Sprintf("invalid value %q for %s (one of: %s)", v, flagLabel(fd), strings.Join(fd.Enum, ", "))}
+					return &usageError{msg: fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), flagLabel(fd), strings.Join(fd.Enum, ", "))}
 				}
 			}
-			if err := checkConstraints(flagLabel(fd), fd.Type, fd.Constraints, vals); err != nil {
+			if err := checkConstraints(flagLabel(fd), fd.Type, fd.Constraints, vals, fd.Secret); err != nil {
 				return err
 			}
 		}
@@ -257,10 +257,10 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 		}
 		for _, v := range vals {
 			if len(ad.Enum) > 0 && !slices.Contains(ad.Enum, v) {
-				return &usageError{msg: fmt.Sprintf("invalid value %q for <%s> (one of: %s)", v, ad.Name, strings.Join(ad.Enum, ", "))}
+				return &usageError{msg: fmt.Sprintf("invalid value %q for <%s> (one of: %s)", redactValue(v, ad.Secret), ad.Name, strings.Join(ad.Enum, ", "))}
 			}
 		}
-		if err := checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals); err != nil {
+		if err := checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals, ad.Secret); err != nil {
 			return err
 		}
 	}
@@ -272,8 +272,9 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 // repeatable flag or variadic argument). label is the human-facing identifier; typ is
 // the resolved Go type. A zero bound (or empty pattern) is unset and skipped; numeric
 // bounds apply to int/float types, length/pattern to strings, and item counts to
-// arrays — a constraint declared on an incompatible type is silently ignored.
-func checkConstraints(label, typ string, c rotini.Constraints, values []string) error {
+// arrays — a constraint declared on an incompatible type is silently ignored. When
+// secret is true the offending value (and its length) is redacted in the error.
+func checkConstraints(label, typ string, c rotini.Constraints, values []string, secret bool) error {
 	if isArrayType(typ) {
 		switch n := len(values); {
 		case c.MinItems > 0 && n < c.MinItems:
@@ -290,25 +291,39 @@ func checkConstraints(label, typ string, c rotini.Constraints, values []string) 
 				continue // not range-checkable; coerce already tolerates malformed input
 			}
 			if c.Minimum != 0 && n < c.Minimum {
-				return &usageError{msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(c.Minimum), v)}
+				return &usageError{msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(c.Minimum), redactValue(v, secret))}
 			}
 			if c.Maximum != 0 && n > c.Maximum {
-				return &usageError{msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(c.Maximum), v)}
+				return &usageError{msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(c.Maximum), redactValue(v, secret))}
 			}
 		case typ == "string":
-			if ln := utf8.RuneCountInString(v); c.MinLength > 0 && ln < c.MinLength {
-				return &usageError{msg: fmt.Sprintf("%s must be at least %d %s long (got %d)", label, c.MinLength, plural("character", c.MinLength), ln)}
+			ln := utf8.RuneCountInString(v)
+			gotLen := strconv.Itoa(ln)
+			if secret {
+				gotLen = "[redacted]"
+			}
+			if c.MinLength > 0 && ln < c.MinLength {
+				return &usageError{msg: fmt.Sprintf("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)}
 			} else if c.MaxLength > 0 && ln > c.MaxLength {
-				return &usageError{msg: fmt.Sprintf("%s must be at most %d %s long (got %d)", label, c.MaxLength, plural("character", c.MaxLength), ln)}
+				return &usageError{msg: fmt.Sprintf("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)}
 			}
 			if c.Pattern != "" {
 				if ok, err := regexp.MatchString(c.Pattern, v); err == nil && !ok {
-					return &usageError{msg: fmt.Sprintf("%s must match %s (got %q)", label, c.Pattern, v)}
+					return &usageError{msg: fmt.Sprintf("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))}
 				}
 			}
 		}
 	}
 	return nil
+}
+
+// redactValue returns "[redacted]" for a secret input, else the value unchanged — so a
+// secret flag/argument's value never appears in usage or validation errors.
+func redactValue(v string, secret bool) string {
+	if secret {
+		return "[redacted]"
+	}
+	return v
 }
 
 func isNumericType(typ string) bool { return typ == "int" || typ == "float64" }

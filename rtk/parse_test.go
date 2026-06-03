@@ -331,6 +331,53 @@ func TestParse_negativeNumberFlagValue(t *testing.T) {
 	}
 }
 
+func TestParse_secretValueRedactedInErrors(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{
+			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Secret: true, Enum: []string{"a", "b"}},
+		},
+	}
+	var in struct{}
+	err := NewParser().Parse(rotini.NewContextFor(def, []string{"--token", "topsecret"}), &in)
+	if err == nil {
+		t.Fatal("expected an enum error")
+	}
+	if strings.Contains(err.Error(), "topsecret") {
+		t.Errorf("secret flag value leaked in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Errorf("error should redact the secret value: %v", err)
+	}
+}
+
+func TestParse_secretConstraintValueRedacted(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{
+			{Name: "pin", Identifiers: []string{"--pin"}, Type: "string", Secret: true,
+				Constraints: rotini.Constraints{Pattern: "^[0-9]{4}$"}},
+		},
+	}
+	var in struct{}
+	err := NewParser().Parse(rotini.NewContextFor(def, []string{"--pin", "supersecretpin"}), &in)
+	if err == nil || strings.Contains(err.Error(), "supersecretpin") {
+		t.Errorf("secret value should be redacted in the pattern error: %v", err)
+	}
+}
+
+func TestParse_nonSecretValueStillShown(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{{Name: "color", Identifiers: []string{"--color"}, Type: "string", Enum: []string{"red", "blue"}}},
+	}
+	var in struct{}
+	err := NewParser().Parse(rotini.NewContextFor(def, []string{"--color", "green"}), &in)
+	if err == nil || !strings.Contains(err.Error(), "green") {
+		t.Errorf("a non-secret value should appear in the error: %v", err)
+	}
+}
+
 // TestParse_clusteredShortFlags covers POSIX short-flag grouping in every shape:
 // joined booleans, separate flags, an attached value, a next-token value, and
 // mixes — they should all "just work".

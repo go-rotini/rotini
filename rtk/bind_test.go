@@ -497,6 +497,34 @@ func TestBinder_stdinPayloadValid(t *testing.T) {
 	}
 }
 
+// Secret channel shape: a config field marked secret (recon `,secret`) with a
+// constraint, whose value must be redacted in the constraint-violation error.
+type tbSecretCfg struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Config    struct {
+			Token string `rotini:"token" recon:"app.token,secret" minlen:"8"`
+		}
+	}
+}
+
+func TestBinder_secretChannelValueRedacted(t *testing.T) {
+	cfg := writeConfig(t, "app:\n  token: short\n") // length 5 < minlen 8
+	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	var in tbSecretCfg
+	err := NewBinder(meta).Bind(rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil), &in)
+	if err == nil {
+		t.Fatal("expected a length-constraint violation")
+	}
+	if strings.Contains(err.Error(), "short") {
+		t.Errorf("secret config value leaked in error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Errorf("error should redact the secret value/length: %v", err)
+	}
+}
+
 // tbNoReqInputs mirrors tbInputs but with no required config field, so the
 // no-config-files case binds cleanly.
 type tbNoReqInputs struct{ App tbNoReqCmd }

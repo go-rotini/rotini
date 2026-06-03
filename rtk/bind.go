@@ -365,6 +365,18 @@ func reconKey(tag string) string {
 	return tag
 }
 
+// reconHasSecret reports whether a recon struct-tag body carries the `secret` option,
+// so the channel's value is redacted in constraint-violation errors (recon itself
+// redacts it in the errors it raises).
+func reconHasSecret(tag string) bool {
+	for _, opt := range strings.Split(tag, ",")[1:] {
+		if strings.TrimSpace(opt) == "secret" {
+			return true
+		}
+	}
+	return false
+}
+
 // findFlagDef finds a flag definition by its logical name.
 func findFlagDef(defs []rotini.FlagDef, name string) (rotini.FlagDef, bool) {
 	for _, d := range defs {
@@ -557,7 +569,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry) error {
 		if label == "" {
 			label = key
 		}
-		if err := checkConstraints(label, typ, c, channelValues(val, typ)); err != nil {
+		if err := checkConstraints(label, typ, c, channelValues(val, typ), reconHasSecret(f.Tag.Get("recon"))); err != nil {
 			return err
 		}
 	}

@@ -110,6 +110,7 @@ type FlagDef struct {
 	Required    bool
 	Default     string
 	Enum        []string
+	Secret      bool // when true, the value is redacted in usage/validation error output
 	Constraints
 }
 
@@ -122,5 +123,6 @@ type ArgDef struct {
 	Variadic bool
 	Default  string
 	Enum     []string
+	Secret   bool // when true, the value is redacted in usage/validation error output
 	Constraints
 }

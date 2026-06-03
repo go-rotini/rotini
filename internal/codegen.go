@@ -625,6 +625,9 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	if len(schema.Enum) > 0 {
 		b.WriteString(", Enum: " + goStringSlice(schema.Enum))
 	}
+	if schema.Secret {
+		b.WriteString(", Secret: true")
+	}
 	if c := constraintsLiteral(schema); c != "" {
 		b.WriteString(", Constraints: " + c)
 	}
