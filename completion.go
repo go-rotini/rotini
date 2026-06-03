@@ -45,9 +45,11 @@ func complete(def Definition, words []string) []string {
 		}
 	}
 
-	// Completing a flag name.
+	// Completing a flag name. Only declared flags are offered — rotini auto-adds no
+	// flags, so `-h`/`--help` appear here exactly when the CLI declares them (as the
+	// companion does on every command), not by framework injection.
 	if strings.HasPrefix(partial, "-") {
-		ids := []string{"-h", "--help"}
+		var ids []string
 		for i := len(chain) - 1; i >= 0; i-- {
 			for _, f := range chain[i].Flags {
 				ids = append(ids, f.Identifiers...)

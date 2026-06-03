@@ -79,7 +79,7 @@ func TestComplete(t *testing.T) {
 		{"all commands + remotes", []string{""}, []string{"b", "build", "plugin", "test"}},
 		{"command prefix", []string{"bu"}, []string{"build"}},
 		{"remote prefix", []string{"plu"}, []string{"plugin"}},
-		{"flag names of chain", []string{"build", "-"}, []string{"--help", "--mode", "--verbose", "-h", "-m", "-v"}},
+		{"flag names of chain (declared only, no auto -h)", []string{"build", "-"}, []string{"--mode", "--verbose", "-m", "-v"}},
 		{"flag name prefix", []string{"build", "--m"}, []string{"--mode"}},
 		{"enum value of preceding flag", []string{"build", "--mode", ""}, []string{"debug", "release"}},
 		{"enum value prefix", []string{"build", "--mode", "r"}, []string{"release"}},
@@ -95,6 +95,25 @@ func TestComplete(t *testing.T) {
 				t.Errorf("complete(%v) = %v, want %v", c.words, got, c.want)
 			}
 		})
+	}
+}
+
+// TestComplete_noAutoHelpFlag pins the ethos: completion never auto-adds -h/--help.
+// They appear only when the CLI declares a help flag (Pillar 1 — no framework-injected
+// flags).
+func TestComplete_noAutoHelpFlag(t *testing.T) {
+	// No declared help flag → completion offers none.
+	bare := completionDef()
+	if got := complete(bare, []string{"-"}); contains(got, "--help") || contains(got, "-h") {
+		t.Errorf("completion auto-added a help flag the CLI never declared: %v", got)
+	}
+
+	// A declared help flag is offered like any other flag.
+	withHelp := completionDef()
+	withHelp.Flags = append(withHelp.Flags, FlagDef{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"})
+	got := complete(withHelp, []string{"-"})
+	if !contains(got, "--help") || !contains(got, "-h") {
+		t.Errorf("declared help flag missing from completion: %v", got)
 	}
 }
 
