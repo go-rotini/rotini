@@ -96,6 +96,8 @@ func Validate(specPath, confPath, failMode string) error {
 				problems = append(problems, lintImportConsistency(spec)...)
 				problems = append(problems, lintLocalTimeout(spec)...)
 				problems = append(problems, lintFlagGroups(spec)...)
+				problems = append(problems, lintFlagDependencies(spec)...)
+				problems = append(problems, lintDuplicateFlagIdentifiers(spec)...)
 			}
 		}
 	}
@@ -261,6 +263,99 @@ func lintFlagGroups(spec *Spec) []error {
 							msg:  fmt.Sprintf("flag_groups (%s) references unknown flag %q — it has no matching entry in this command's flags", g.Kind, name),
 						})
 					}
+				}
+			}
+		}
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			seg := child.Name
+			if seg == "" {
+				seg = child.Ref
+			}
+			walk(child, path+"/"+seg)
+		}
+	}
+	name := spec.Command.Name
+	if name == "" {
+		name = "(root)"
+	}
+	walk(&spec.Command, name)
+	return problems
+}
+
+// lintFlagDependencies rejects a flag_dependencies entry whose When or Requires
+// references a flag the command doesn't declare — the conditional could never fire (or
+// could never be satisfied), masking a typo.
+func lintFlagDependencies(spec *Spec) []error {
+	var problems []error
+	var walk func(c *Command, path string)
+	walk = func(c *Command, path string) {
+		if c.Inputs != nil && len(c.Inputs.FlagDependencies) > 0 {
+			known := map[string]bool{}
+			for _, f := range c.Inputs.Flags {
+				known[f.Name] = true
+			}
+			report := func(name string) {
+				problems = append(problems, &violationError{
+					kind: "spec",
+					loc:  "command " + path,
+					msg:  fmt.Sprintf("flag_dependencies references unknown flag %q — it has no matching entry in this command's flags", name),
+				})
+			}
+			for _, dep := range c.Inputs.FlagDependencies {
+				if !known[dep.When] {
+					report(dep.When)
+				}
+				for _, name := range dep.Requires {
+					if !known[name] {
+						report(name)
+					}
+				}
+			}
+		}
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			seg := child.Name
+			if seg == "" {
+				seg = child.Ref
+			}
+			walk(child, path+"/"+seg)
+		}
+	}
+	name := spec.Command.Name
+	if name == "" {
+		name = "(root)"
+	}
+	walk(&spec.Command, name)
+	return problems
+}
+
+// lintDuplicateFlagIdentifiers rejects a command that declares the same flag identifier
+// twice — a collision the parser would resolve silently (last/first wins), masking the
+// author's intent. Each flag's effective identifiers are its declared ones, or the
+// auto-derived "--<name>" when it declares none, so both explicit ("-o" on two flags)
+// and derived (two flags whose names both yield "--out") collisions are caught.
+func lintDuplicateFlagIdentifiers(spec *Spec) []error {
+	var problems []error
+	var walk func(c *Command, path string)
+	walk = func(c *Command, path string) {
+		if c.Inputs != nil {
+			claimedBy := map[string]string{} // identifier -> the flag name that first claimed it
+			for _, f := range c.Inputs.Flags {
+				ids := f.Identifiers
+				if len(ids) == 0 {
+					ids = []string{"--" + f.Name}
+				}
+				for _, id := range ids {
+					if prev, dup := claimedBy[id]; dup {
+						problems = append(problems, &violationError{
+							kind: "spec",
+							loc:  "command " + path,
+							msg:  fmt.Sprintf("flag identifier %q is declared by both %q and %q", id, prev, f.Name),
+						})
+						continue
+					}
+					claimedBy[id] = f.Name
 				}
 			}
 		}

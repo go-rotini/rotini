@@ -379,6 +379,9 @@ func rnodesLiteral(host string, nodes []rnode) string {
 		if fg := flagGroupsLiteral(n.inputs); fg != "" {
 			b.WriteString("FlagGroups: " + fg + ",\n")
 		}
+		if fd := flagDependenciesLiteral(n.inputs); fd != "" {
+			b.WriteString("FlagDependencies: " + fd + ",\n")
+		}
 		if cl := rnodesLiteral(host, n.children); cl != "" {
 			b.WriteString("Commands: " + cl + ",\n")
 		}

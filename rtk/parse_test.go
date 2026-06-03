@@ -422,6 +422,41 @@ func TestParse_flagGroups(t *testing.T) {
 	}
 }
 
+func TestParse_flagDependencies(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{
+			{Name: "tls", Identifiers: []string{"--tls"}, Type: "bool"},
+			{Name: "cert", Identifiers: []string{"--cert"}, Type: "string"},
+			{Name: "key", Identifiers: []string{"--key"}, Type: "string"},
+		},
+		FlagDependencies: []rotini.FlagDependency{{When: "tls", Requires: []string{"cert", "key"}}},
+	}
+	cases := []struct {
+		name    string
+		argv    []string
+		wantErr string // "" = should pass
+	}{
+		{"trigger absent → ok", nil, ""},
+		{"trigger absent, a required one set → ok", []string{"--cert", "c"}, ""},
+		{"trigger set, all required set → ok", []string{"--tls", "--cert", "c", "--key", "k"}, ""},
+		{"trigger set, one missing → err", []string{"--tls", "--cert", "c"}, "--key is required when --tls is set"},
+		{"trigger set, both missing → err", []string{"--tls"}, "required when --tls is set"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var in struct{}
+			err := NewParser().Parse(rotini.NewContextFor(def, c.argv), &in)
+			switch {
+			case c.wantErr == "" && err != nil:
+				t.Errorf("Parse(%v) = %v, want ok", c.argv, err)
+			case c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)):
+				t.Errorf("Parse(%v) = %v, want error containing %q", c.argv, err, c.wantErr)
+			}
+		})
+	}
+}
+
 // TestParse_clusteredShortFlags covers POSIX short-flag grouping in every shape:
 // joined booleans, separate flags, an attached value, a next-token value, and
 // mixes — they should all "just work".
@@ -702,6 +737,47 @@ func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 
 type appFlags struct {
 	Verbose bool `rotini:"verbose"`
+}
+
+// TestParse_rejectsTooManyPositionals pins command-level argument-count validation:
+// with no variadic argument to absorb them, extra positionals are a usage error rather
+// than silently dropped — both for a command that declares fewer args and for one that
+// declares none.
+func TestParse_rejectsTooManyPositionals(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Commands: []rotini.CommandDef{
+			{Name: "greet", Handler: "AppGreet", Arguments: []rotini.ArgDef{{Name: "name", Type: "string"}}},
+			{Name: "ping", Handler: "AppPing"},
+		},
+	}
+	type tmpInputs struct {
+		App   struct{ Flags, Arguments struct{} }
+		Greet struct {
+			Flags     struct{}
+			Arguments struct {
+				Name string `rotini:"name"`
+			}
+		}
+		Ping struct{ Flags, Arguments struct{} }
+	}
+	parse := func(argv ...string) error {
+		var in tmpInputs
+		return NewParser().Parse(rotini.NewContextFor(def, argv), &in)
+	}
+
+	if err := parse("greet", "alice"); err != nil {
+		t.Fatalf("one declared arg should parse: %v", err)
+	}
+	if err := parse("greet", "alice", "bob"); err == nil || !strings.Contains(err.Error(), "accepts at most 1 argument") {
+		t.Fatalf("two args for a one-arg command: want too-many error, got %v", err)
+	}
+	if err := parse("ping", "oops"); err == nil || !strings.Contains(err.Error(), "takes no arguments") {
+		t.Fatalf("positional for a no-arg command: want takes-no-arguments error, got %v", err)
+	}
+	if err := parse("ping"); err != nil {
+		t.Fatalf("no-arg command with no positionals should parse: %v", err)
+	}
 }
 
 type appCommandInputs struct {

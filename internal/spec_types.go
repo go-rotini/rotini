@@ -127,6 +127,14 @@ type EnvInput struct {
 	Schema *InputSchema `json:"schema,omitempty"`
 }
 
+// A conditional requirement: when the 'when' flag is explicitly set on the command line, every flag in 'requires' must also be set. Both reference flag logical names; 'set' means explicitly provided (a default or env/config fallback does not count).
+type FlagDependency struct {
+	// Flags that must also be set when 'when' is set.
+	Requires []string `json:"requires"`
+	// The flag whose presence triggers the requirement.
+	When string `json:"when"`
+}
+
 // A constraint on which of this command's flags may (or must) be set together. 'flags' references flag logical names; 'set' means explicitly provided on the command line (a default or env/config fallback does not count).
 type FlagGroup struct {
 	Flags []string `json:"flags"`
@@ -186,6 +194,8 @@ type Inputs struct {
 	Config []ConfigInput `json:"config,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
+	// Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).
+	FlagDependencies []FlagDependency `json:"flag_dependencies,omitempty"`
 	// Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).
 	FlagGroups []FlagGroup `json:"flag_groups,omitempty"`
 	// Flag inputs for this command

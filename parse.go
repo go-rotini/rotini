@@ -12,20 +12,22 @@ import (
 // against the exact command whose handler ran — including for a statically
 // composed child, whose chain is relative to its own root.
 type ResolvedCommand struct {
-	Name       string
-	Handler    string
-	Flags      []FlagDef
-	Arguments  []ArgDef
-	FlagGroups []FlagGroup
-	Commands   []CommandDef
-	Remotes    []RemoteDef
-	Discovery  *RemoteDiscoveryDef
+	Name             string
+	Handler          string
+	Flags            []FlagDef
+	Arguments        []ArgDef
+	FlagGroups       []FlagGroup
+	FlagDependencies []FlagDependency
+	Commands         []CommandDef
+	Remotes          []RemoteDef
+	Discovery        *RemoteDiscoveryDef
 }
 
 func rootFrame(def Definition) ResolvedCommand {
 	return ResolvedCommand{
 		Name: def.Name, Handler: def.Handler,
-		Flags: def.Flags, Arguments: def.Arguments, FlagGroups: def.FlagGroups,
+		Flags: def.Flags, Arguments: def.Arguments,
+		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Remotes: def.RemoteCommands, Discovery: def.Discovery,
 	}
 }
@@ -33,7 +35,8 @@ func rootFrame(def Definition) ResolvedCommand {
 func cmdFrame(c CommandDef) ResolvedCommand {
 	return ResolvedCommand{
 		Name: c.Name, Handler: c.Handler,
-		Flags: c.Flags, Arguments: c.Arguments, FlagGroups: c.FlagGroups,
+		Flags: c.Flags, Arguments: c.Arguments,
+		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Discovery: c.Discovery,
 	}
 }

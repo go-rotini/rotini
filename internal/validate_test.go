@@ -137,6 +137,74 @@ func TestValidate_flagGroupUnknownFlag(t *testing.T) {
 	}
 }
 
+func TestValidate_flagDependencyUnknownFlag(t *testing.T) {
+	// A flag_dependencies entry whose 'requires' names a flag the command doesn't
+	// declare is rejected (the 'when' flag is checked the same way).
+	spec := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: tls\n" +
+		"        schema: { type: bool }\n" +
+		"    flag_dependencies:\n" +
+		"      - when: tls\n" +
+		"        requires: [cert]\n"
+	err := Validate(writeTemp(t, "spec.yaml", spec), "", "")
+	if err == nil || !strings.Contains(err.Error(), "unknown flag") || !strings.Contains(err.Error(), "cert") {
+		t.Errorf("Validate(flag dependency requiring unknown flag) = %v, want an unknown-flag error", err)
+	}
+}
+
+func TestValidate_duplicateFlagIdentifier(t *testing.T) {
+	// Two flags claiming the same explicit identifier (-o) on one command is rejected.
+	spec := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: output\n" +
+		"        identifiers: [-o, --output]\n" +
+		"        schema: { type: string }\n" +
+		"      - name: organization\n" +
+		"        identifiers: [-o, --org]\n" +
+		"        schema: { type: string }\n"
+	err := Validate(writeTemp(t, "spec.yaml", spec), "", "")
+	if err == nil || !strings.Contains(err.Error(), `"-o"`) || !strings.Contains(err.Error(), "output") {
+		t.Errorf("Validate(duplicate -o) = %v, want a duplicate-identifier error naming -o and output", err)
+	}
+
+	// Auto-derived collision: two flags whose names both yield --out (no identifiers).
+	spec2 := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: out\n" +
+		"        schema: { type: string }\n" +
+		"      - name: out\n" +
+		"        schema: { type: bool }\n"
+	if err := Validate(writeTemp(t, "spec2.yaml", spec2), "", ""); err == nil || !strings.Contains(err.Error(), "--out") {
+		t.Errorf("Validate(derived --out collision) = %v, want a duplicate-identifier error", err)
+	}
+
+	// Distinct identifiers validate cleanly.
+	ok := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: output\n" +
+		"        identifiers: [-o, --output]\n" +
+		"        schema: { type: string }\n" +
+		"      - name: verbose\n" +
+		"        identifiers: [-v, --verbose]\n" +
+		"        schema: { type: bool }\n"
+	if err := Validate(writeTemp(t, "ok.yaml", ok), "", ""); err != nil {
+		t.Errorf("Validate(distinct identifiers) = %v, want nil", err)
+	}
+}
+
 func TestValidate_verbatimHelpString(t *testing.T) {
 	// command.help / spec.help is a plain string (the verbatim page).
 	spec := validSpecHeader + "command:\n  name: demo\n  help: |\n    my exact help page\n"

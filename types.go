@@ -21,16 +21,17 @@ type CommandHandlers interface {
 // [NewProgram]; the runtime uses it to parse argv, dispatch, and render help and
 // completion. It is data only — behavior lives in the handlers.
 type Definition struct {
-	Name           string
-	Aliases        []string
-	Handler        string // ProgramHandlers method for the root command, e.g. "Rotini"
-	Version        string // value of the program's version metadata var (ldflag-settable)
-	Flags          []FlagDef
-	Arguments      []ArgDef
-	FlagGroups     []FlagGroup // cross-flag presence rules validated at parse time
-	Commands       []CommandDef
-	RemoteCommands []RemoteDef         // co-located plugin sub-commands (Model 3)
-	Discovery      *RemoteDiscoveryDef // plugin auto-discovery on the root command (nil = off)
+	Name             string
+	Aliases          []string
+	Handler          string // ProgramHandlers method for the root command, e.g. "Rotini"
+	Version          string // value of the program's version metadata var (ldflag-settable)
+	Flags            []FlagDef
+	Arguments        []ArgDef
+	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
+	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
+	Commands         []CommandDef
+	RemoteCommands   []RemoteDef         // co-located plugin sub-commands (Model 3)
+	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on the root command (nil = off)
 }
 
 // FlagGroupKind names a cross-flag presence rule. The value is the spec's `kind`.
@@ -55,6 +56,15 @@ const (
 type FlagGroup struct {
 	Kind  FlagGroupKind
 	Flags []string // logical flag names that make up the group
+}
+
+// FlagDependency is a conditional cross-flag requirement: when the When flag is
+// explicitly set on argv, every flag in Requires must also be set. Flags are referenced
+// by their logical Name and "set" follows the same explicit-argv convention as
+// [FlagGroup]. Enforced by the rtk parser; a violation is a usage error.
+type FlagDependency struct {
+	When     string   // the flag whose presence triggers the requirement
+	Requires []string // flags that must also be set when When is set
 }
 
 // RemoteDef describes a remote/co-located sub-command (kubectl/git plugin
@@ -99,14 +109,15 @@ type RemoteDiscoveryDef struct {
 // ProgramHandlers method name the runtime invokes (via reflection) to obtain
 // this command's [CommandHandlers].
 type CommandDef struct {
-	Name       string
-	Aliases    []string
-	Handler    string // ProgramHandlers method, e.g. "RotiniGenerate"
-	Flags      []FlagDef
-	Arguments  []ArgDef
-	FlagGroups []FlagGroup // cross-flag presence rules validated at parse time
-	Commands   []CommandDef
-	Discovery  *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
+	Name             string
+	Aliases          []string
+	Handler          string // ProgramHandlers method, e.g. "RotiniGenerate"
+	Flags            []FlagDef
+	Arguments        []ArgDef
+	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
+	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
+	Commands         []CommandDef
+	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
 }
 
 // Constraints carries the optional JSON-schema-style validation bounds a spec may

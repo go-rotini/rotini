@@ -461,6 +461,9 @@ func renderDefinition(gp *genProgram) string {
 	if fg := flagGroupsLiteral(gp.rootInputs); fg != "" {
 		b.WriteString("FlagGroups: " + fg + ",\n")
 	}
+	if fd := flagDependenciesLiteral(gp.rootInputs); fd != "" {
+		b.WriteString("FlagDependencies: " + fd + ",\n")
+	}
 	if gp.versionVar != "" {
 		b.WriteString("Version: " + gp.versionVar + ",\n")
 	}
@@ -623,6 +626,21 @@ func flagGroupsLiteral(in *Inputs) string {
 	b.WriteString("[]" + rotiniPkgName + ".FlagGroup{\n")
 	for _, g := range in.FlagGroups {
 		b.WriteString("{Kind: " + strconv.Quote(g.Kind) + ", Flags: " + goStringSlice(g.Flags) + "},\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// flagDependenciesLiteral renders the []rotini.FlagDependency literal for a command's
+// conditional cross-flag requirements, or "" when none are declared.
+func flagDependenciesLiteral(in *Inputs) string {
+	if in == nil || len(in.FlagDependencies) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[]" + rotiniPkgName + ".FlagDependency{\n")
+	for _, d := range in.FlagDependencies {
+		b.WriteString("{When: " + strconv.Quote(d.When) + ", Requires: " + goStringSlice(d.Requires) + "},\n")
 	}
 	b.WriteString("}")
 	return b.String()

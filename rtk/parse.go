@@ -97,7 +97,10 @@ func (p *Parser) Parse(rtx *rotini.Context, out any) error {
 	if err := validate(chain, store); err != nil {
 		return err
 	}
-	return validateFlagGroups(chain, rtx.Args())
+	if err := validateFlagGroups(chain, rtx.Args()); err != nil {
+		return err
+	}
+	return validateFlagDependencies(chain, rtx.Args())
 }
 
 // parseBind parses argv into a store and binds it into out, but performs no
@@ -246,6 +249,16 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 		}
 	}
 
+	// With no variadic argument to absorb them, more positionals than declared
+	// arguments is a usage error rather than a silent drop. (A branch-only command's
+	// stray positional was handled above as a mistyped sub-command.)
+	if n := len(leaf.Arguments); !hasVariadicArg(leaf.Arguments) && len(si.args) > n {
+		if n == 0 {
+			return &usageError{msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args))}
+		}
+		return &usageError{msg: fmt.Sprintf("%q accepts at most %d %s (got %d)", leaf.Name, n, plural("argument", n), len(si.args))}
+	}
+
 	for i, ad := range leaf.Arguments {
 		var vals []string
 		switch {
@@ -268,6 +281,17 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 		}
 	}
 	return nil
+}
+
+// hasVariadicArg reports whether any of a command's arguments is variadic — when one
+// is, it slurps every trailing positional, so no "too many arguments" can occur.
+func hasVariadicArg(args []rotini.ArgDef) bool {
+	for _, a := range args {
+		if a.Variadic {
+			return true
+		}
+	}
+	return false
 }
 
 // checkConstraints enforces an input's declared numeric/string/array bounds against
@@ -352,6 +376,45 @@ func validateFlagGroups(chain []rotini.ResolvedCommand, argv []string) error {
 			}
 			if err := checkFlagGroup(g.Kind, set, all); err != nil {
 				return err
+			}
+		}
+	}
+	return nil
+}
+
+// validateFlagDependencies enforces each command's conditional cross-flag requirements:
+// when a dependency's When flag is explicitly set on argv, every flag it Requires must
+// also be set. "Set" follows the same explicit-argv convention as flag groups; a missing
+// requirement is a usage error naming the absent flag(s) and the trigger.
+func validateFlagDependencies(chain []rotini.ResolvedCommand, argv []string) error {
+	for _, f := range chain {
+		for _, dep := range f.FlagDependencies {
+			whenLabel := "--" + dep.When
+			whenFD, ok := findFlagDef(f.Flags, dep.When)
+			if !ok {
+				continue // unknown trigger flag (a spec lint rejects this) — nothing to enforce
+			}
+			whenLabel = flagLabel(whenFD)
+			if !flagWasSet(argv, whenFD.Identifiers) {
+				continue // the trigger is absent — the requirement does not apply
+			}
+			var missing []string
+			for _, name := range dep.Requires {
+				label := "--" + name
+				if fd, ok := findFlagDef(f.Flags, name); ok {
+					if flagWasSet(argv, fd.Identifiers) {
+						continue
+					}
+					label = flagLabel(fd)
+				}
+				missing = append(missing, label)
+			}
+			if len(missing) > 0 {
+				noun, verb := "flag", "is"
+				if len(missing) > 1 {
+					noun, verb = "flags", "are"
+				}
+				return &usageError{msg: fmt.Sprintf("%s %s %s required when %s is set", noun, joinAnd(missing), verb, whenLabel)}
 			}
 		}
 	}
