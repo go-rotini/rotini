@@ -103,10 +103,16 @@ type Command struct {
 }
 
 type ConfigInput struct {
+	// Deprecation message; the input is annotated as deprecated in generated help.
+	Deprecated string `json:"deprecated,omitempty"`
+	// When true, the input is omitted from generated help (it is still bound).
+	Hidden bool `json:"hidden,omitempty"`
 	// Logical name for this config value
 	Name string `json:"name"`
 	// Type definition and input-level metadata (required, default, file, key)
 	Schema *InputSchema `json:"schema,omitempty"`
+	// Short one-liner shown next to this input in the generated Environment/Configuration help section.
+	Summary string `json:"summary,omitempty"`
 }
 
 type ConfigurationFile struct {
@@ -121,10 +127,16 @@ type ConfigurationFile struct {
 }
 
 type EnvInput struct {
+	// Deprecation message; the input is annotated as deprecated in generated help.
+	Deprecated string `json:"deprecated,omitempty"`
+	// When true, the input is omitted from generated help (it is still bound).
+	Hidden bool `json:"hidden,omitempty"`
 	// Logical name for this env var input
 	Name string `json:"name"`
 	// Type definition and input-level metadata (required, default, variable)
 	Schema *InputSchema `json:"schema,omitempty"`
+	// Short one-liner shown next to this input in the generated Environment/Configuration help section.
+	Summary string `json:"summary,omitempty"`
 }
 
 // A conditional requirement: when the 'when' flag is explicitly set on the command line, every flag in 'requires' must also be set. Both reference flag logical names; 'set' means explicitly provided (a default or env/config fallback does not count).
@@ -163,11 +175,13 @@ type FlagInput struct {
 type HelpHeadings struct {
 	Arguments string `json:"arguments,omitempty"`
 	// Heading for the cascading-flags section on descendant pages. Defaults to 'Global Flags:'. The value is rendered verbatim, so include a trailing ':' if you want one.
-	Cascading string `json:"cascading,omitempty"`
-	Commands  string `json:"commands,omitempty"`
-	Examples  string `json:"examples,omitempty"`
-	Flags     string `json:"flags,omitempty"`
-	Usage     string `json:"usage,omitempty"`
+	Cascading     string `json:"cascading,omitempty"`
+	Commands      string `json:"commands,omitempty"`
+	Configuration string `json:"configuration,omitempty"`
+	Environment   string `json:"environment,omitempty"`
+	Examples      string `json:"examples,omitempty"`
+	Flags         string `json:"flags,omitempty"`
+	Usage         string `json:"usage,omitempty"`
 }
 
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.

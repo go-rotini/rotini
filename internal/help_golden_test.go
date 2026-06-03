@@ -265,3 +265,35 @@ func TestHelpGolden_Cascading(t *testing.T) {
 		assertHelpGolden(t, goldenDir, "cascading_"+f, readFileString(t, filepath.Join(helpDir, f)))
 	}
 }
+
+// helpGoldenEnvConfigSpec exercises the Environment + Configuration help sections: an
+// env input with an explicit variable and one whose variable is derived (snake-upper),
+// and config inputs with and without an explicit file/key location.
+const helpGoldenEnvConfigSpec = goldenSpecSchema +
+	`command:
+  name: app
+  summary: the app
+  inputs:
+    env:
+      - name: token
+        summary: API auth token
+        schema: { type: string, required: true, variable: APP_TOKEN }
+      - name: maxRetries
+        summary: retry budget
+        schema: { type: int, default: 3 }
+    config:
+      - name: endpoint
+        summary: API endpoint
+        schema: { type: string, file: app, key: api.endpoint }
+      - name: timeout
+        summary: request timeout
+        schema: { type: int, default: 30 }
+`
+
+// TestHelpGolden_EnvConfig locks the rendering of env-var and config inputs in the
+// generated help page (explicit vs derived env var, located vs bare config key).
+func TestHelpGolden_EnvConfig(t *testing.T) {
+	goldenDir := helpGoldenDir(t)
+	helpDir := genHelp(t, helpGoldenEnvConfigSpec, "")
+	assertHelpGolden(t, goldenDir, "envconfig_app.txt", readFileString(t, filepath.Join(helpDir, "app.txt")))
+}

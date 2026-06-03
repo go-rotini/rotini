@@ -41,7 +41,14 @@
     "Command": {
       "description": "A command node in the CLI command tree — the root command and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). When used as the root (the top-level 'command'), it must use 'name'.",
       "type": "object",
-      "anyOf": [{ "required": ["name"] }, { "required": ["$ref"] }],
+      "anyOf": [
+        {
+          "required": ["name"]
+        },
+        {
+          "required": ["$ref"]
+        }
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -96,7 +103,9 @@
         "examples": {
           "type": "array",
           "description": "Example command-line invocations, rendered one per line. Ignored when 'help' is set.",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         },
         "help": {
           "type": "string",
@@ -178,6 +187,12 @@
           "type": "string"
         },
         "flags": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "configuration": {
           "type": "string"
         },
         "cascading": {
@@ -415,6 +430,19 @@
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
           "description": "Logical name for this config value"
         },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this input in the generated Environment/Configuration help section."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the input is omitted from generated help (it is still bound)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the input is annotated as deprecated in generated help."
+        },
         "schema": {
           "$ref": "#/definitions/InputSchema",
           "description": "Type definition and input-level metadata (required, default, file, key)"
@@ -430,6 +458,19 @@
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
           "description": "Logical name for this env var input"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this input in the generated Environment/Configuration help section."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the input is omitted from generated help (it is still bound)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the input is annotated as deprecated in generated help."
         },
         "schema": {
           "$ref": "#/definitions/InputSchema",
@@ -535,7 +576,12 @@
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["mutually_exclusive", "required_together", "one_of", "at_least_one"],
+          "enum": [
+            "mutually_exclusive",
+            "required_together",
+            "one_of",
+            "at_least_one"
+          ],
           "description": "mutually_exclusive: at most one set. required_together: all or none. one_of: exactly one. at_least_one: one or more."
         },
         "flags": {

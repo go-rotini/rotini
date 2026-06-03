@@ -42,6 +42,18 @@
 {{range .}}- `{{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}`{{with .Summary}} — {{.}}{{end}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} _(deprecated: {{.}})_{{end}}
 {{end}}
 {{end -}}
+{{- with .Environment}}
+## Environment
+
+{{range .}}- `{{.Var}}`{{with .Type}} {{.}}{{end}}{{with .Summary}} — {{.}}{{end}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} _(deprecated: {{.}})_{{end}}
+{{end}}
+{{end -}}
+{{- with .Configuration}}
+## Configuration
+
+{{range .}}- `{{.Name}}`{{with .Location}} ({{.}}){{end}}{{with .Type}} {{.}}{{end}}{{with .Summary}} — {{.}}{{end}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} _(deprecated: {{.}})_{{end}}
+{{end}}
+{{end -}}
 {{- with .Cascading}}
 ## Global Flags
 

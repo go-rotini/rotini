@@ -9,6 +9,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"text/template"
+	"unicode"
 
 	"github.com/go-rotini/rotini/rtk"
 )
@@ -79,31 +80,54 @@ type helpNode struct {
 // is rendered verbatim by the template — the trailing ":" lives in the value (the
 // defaults carry it), so an override can drop or restyle it.
 type helpHeadings struct {
-	Usage, Commands, Arguments, Flags, Cascading, Examples string
+	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples string
 }
 
 // helpData is the per-command template context. Fields are exported because
 // text/template can only read exported fields.
 type helpData struct {
-	Header       string
-	Invocation   string // full command path, e.g. "rotini generate"
-	Summary      string // command.summary (this command's own one-liner)
-	Description  string // command.description (long block)
-	Usage        string // command.usage override ("" when unset)
-	UsageDerived string // always-computed usage line
-	Footer       string
-	Headings     helpHeadings
-	Commands     []helpCmdRow  // visible direct children
-	Arguments    []helpArgRow  // visible own arguments
-	Flags        []helpFlagRow // visible own flags
-	Cascading    []helpFlagRow // visible cascading flags inherited from ancestor commands
-	Examples     []string
+	Header        string
+	Invocation    string // full command path, e.g. "rotini generate"
+	Summary       string // command.summary (this command's own one-liner)
+	Description   string // command.description (long block)
+	Usage         string // command.usage override ("" when unset)
+	UsageDerived  string // always-computed usage line
+	Footer        string
+	Headings      helpHeadings
+	Commands      []helpCmdRow    // visible direct children
+	Arguments     []helpArgRow    // visible own arguments
+	Flags         []helpFlagRow   // visible own flags
+	Environment   []helpEnvRow    // visible env-var inputs
+	Configuration []helpConfigRow // visible config-value inputs
+	Cascading     []helpFlagRow   // visible cascading flags inherited from ancestor commands
+	Examples      []string
 }
 
 type helpCmdRow struct {
 	Name       string
 	Summary    string // ← the child command's help.summary
 	Aliases    []string
+	Deprecated string
+}
+
+type helpEnvRow struct {
+	Var        string // the environment variable (schema.variable, else snake-upper of the name)
+	Summary    string
+	Type       string
+	Required   bool
+	Default    string
+	Enum       []string
+	Deprecated string
+}
+
+type helpConfigRow struct {
+	Name       string
+	Location   string // "<file>.<key>" / "<key>" — where the value is read from
+	Summary    string
+	Type       string
+	Required   bool
+	Default    string
+	Enum       []string
 	Deprecated string
 }
 
@@ -258,7 +282,7 @@ func writeCompletionFiles(lay layout, dir, prog string, nodes []helpNode) error 
 func resolveHeadings(h cmdHelp) helpHeadings {
 	// Defaults carry the trailing ":" so an override is rendered verbatim — a spec
 	// author can drop or restyle the colon (the template adds nothing).
-	hd := helpHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Cascading: "Global Flags:", Examples: "Examples:"}
+	hd := helpHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -274,6 +298,12 @@ func resolveHeadings(h cmdHelp) helpHeadings {
 	}
 	if o.Flags != "" {
 		hd.Flags = o.Flags
+	}
+	if o.Environment != "" {
+		hd.Environment = o.Environment
+	}
+	if o.Configuration != "" {
+		hd.Configuration = o.Configuration
 	}
 	if o.Cascading != "" {
 		hd.Cascading = o.Cascading
@@ -330,9 +360,89 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			}
 			d.Flags = append(d.Flags, flagRow(f))
 		}
+		for _, e := range inputs.Env {
+			if e.Hidden {
+				continue
+			}
+			d.Environment = append(d.Environment, helpEnvRow{
+				Var:        envVarLabel(e),
+				Summary:    e.Summary,
+				Type:       flagDisplayType(e.Schema),
+				Required:   e.Schema != nil && e.Schema.Required,
+				Default:    schemaDefaultString(e.Schema),
+				Enum:       enumOf(e.Schema),
+				Deprecated: e.Deprecated,
+			})
+		}
+		for _, c := range inputs.Config {
+			if c.Hidden {
+				continue
+			}
+			d.Configuration = append(d.Configuration, helpConfigRow{
+				Name:       c.Name,
+				Location:   configLocation(c),
+				Summary:    c.Summary,
+				Type:       flagDisplayType(c.Schema),
+				Required:   c.Schema != nil && c.Schema.Required,
+				Default:    schemaDefaultString(c.Schema),
+				Enum:       enumOf(c.Schema),
+				Deprecated: c.Deprecated,
+			})
+		}
 	}
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children))
 	return d
+}
+
+// envVarLabel is the environment variable an env input reads: its explicit
+// schema.variable, else the snake-upper form of its logical name (mirroring the
+// binder's default key→env-var derivation, e.g. "apiKey" → "API_KEY").
+func envVarLabel(e EnvInput) string {
+	if e.Schema != nil && e.Schema.Variable != "" {
+		return e.Schema.Variable
+	}
+	return snakeUpper(e.Name)
+}
+
+// configLocation is where a config input is read from, for display: "<file>.<key>"
+// when a source file is named, the bare key when an explicit key differs from the
+// logical name, or "" when the input reads from its own name (nothing to add).
+func configLocation(c ConfigInput) string {
+	if c.Schema == nil {
+		return ""
+	}
+	key := c.Schema.Key
+	switch {
+	case c.Schema.File != "":
+		if key == "" {
+			key = c.Name
+		}
+		return c.Schema.File + "." + key
+	case key != "":
+		return key
+	default:
+		return ""
+	}
+}
+
+// snakeUpper converts a logical name to the conventional SCREAMING_SNAKE_CASE env-var
+// form: word boundaries are '-'/'_'/' ' and lower→upper case transitions.
+func snakeUpper(name string) string {
+	var b strings.Builder
+	var prev rune
+	for i, r := range name {
+		switch {
+		case r == '-' || r == '_' || r == ' ':
+			b.WriteByte('_')
+		case i > 0 && unicode.IsUpper(r) && (unicode.IsLower(prev) || unicode.IsDigit(prev)):
+			b.WriteByte('_')
+			b.WriteRune(unicode.ToUpper(r))
+		default:
+			b.WriteRune(unicode.ToUpper(r))
+		}
+		prev = r
+	}
+	return b.String()
 }
 
 // flagRow builds the help-row for a single flag (shared by a command's own Flags

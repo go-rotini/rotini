@@ -1,0 +1,10 @@
+Usage:
+  app
+
+Environment:
+  APP_TOKEN string    API auth token (required)
+  MAX_RETRIES int     retry budget (default 3)
+
+Configuration:
+  endpoint (app.api.endpoint) string    API endpoint
+  timeout int                           request timeout (default 30)

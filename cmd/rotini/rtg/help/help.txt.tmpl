@@ -15,13 +15,15 @@
          .Invocation     full command path, e.g. "rotini generate"
          .Usage          spec declarative (may be empty)
          .UsageDerived   spec computed (always set)
-         .Headings.{Usage,Commands,Arguments,Flags,Cascading,Examples}
+         .Headings.{Usage,Commands,Arguments,Flags,Environment,Configuration,Cascading,Examples}
                        resolved heading text, colon included (override is verbatim)
-         .Commands[]   {.Name .Summary .Aliases .Deprecated}
-         .Arguments[]  {.Name .Summary .Required .Variadic .Default .Enum .Deprecated}
-         .Flags[]      {.Identifiers .Summary .Type .Required .Default .Enum .Deprecated}
-         .Cascading[]  same shape as .Flags — cascading flags inherited from ancestors
-         .Examples[]   strings
+         .Commands[]      {.Name .Summary .Aliases .Deprecated}
+         .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .Deprecated}
+         .Flags[]         {.Identifiers .Summary .Type .Required .Default .Enum .Deprecated}
+         .Environment[]   {.Var .Summary .Type .Required .Default .Enum .Deprecated}
+         .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum .Deprecated}
+         .Cascading[]     same shape as .Flags — cascading flags inherited from ancestors
+         .Examples[]      strings
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last.
                 All deterministic (no clock/entropy) to keep rendering byte-stable. */ -}}
@@ -46,6 +48,14 @@
 {{end -}}
 {{- with .Flags}}{{$.Headings.Flags}}
 {{range .}}  {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Environment}}{{$.Headings.Environment}}
+{{range .}}  {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Configuration}}{{$.Headings.Configuration}}
+{{range .}}  {{.Name}}{{with .Location}} ({{.}}){{end}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Cascading}}{{$.Headings.Cascading}}

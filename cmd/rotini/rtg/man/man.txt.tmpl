@@ -6,7 +6,8 @@
        newline — so you don't fight template whitespace for clean output.
 
        DATA (see helpData): .Header .Summary .Description .Footer .Invocation
-         .Usage/.UsageDerived .Commands[] .Arguments[] .Flags[] .Cascading[] .Examples[]
+         .Usage/.UsageDerived .Commands[] .Arguments[] .Flags[] .Environment[]
+         .Configuration[] .Cascading[] .Examples[]
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
 {{- with .Header}}{{.}}
@@ -34,6 +35,14 @@ NAME
 {{end -}}
 {{- with .Flags}}OPTIONS
 {{range .}}    {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Environment}}ENVIRONMENT
+{{range .}}    {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Configuration}}CONFIGURATION FILES
+{{range .}}    {{.Name}}{{with .Location}} ({{.}}){{end}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Cascading}}GLOBAL OPTIONS
