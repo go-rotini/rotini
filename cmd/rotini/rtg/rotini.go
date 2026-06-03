@@ -21,7 +21,7 @@ type ProgramHandlers interface {
 // Version is set at build time via -ldflags "-X <pkg>.Version=<value>".
 var Version = "0.0.0"
 
-var Definition = rotini.Definition{
+var definition = rotini.Definition{
 	Name:    "rotini",
 	Handler: "Rotini",
 	Flags: []rotini.FlagDef{
@@ -222,12 +222,13 @@ type RotiniVersionInputs struct {
 	RotiniVersion RotiniVersionCommandInputs
 }
 
-// NewProgram builds the program from the generated Definition and the typed
+// NewProgram builds the program from the generated command tree and the typed
 // ProgramHandlers, delegating to rotini.NewProgram (which takes the handlers
 // as an untyped value). Construct your program with this so the compiler verifies
-// your handlers satisfy ProgramHandlers.
+// your handlers satisfy ProgramHandlers. The command tree is an unexported
+// implementation detail — you hold a *rotini.Program, never the Definition.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	return rotini.NewProgram(Definition, handlers)
+	return rotini.NewProgram(definition, handlers)
 }
 
 //go:embed help/rotini.txt

@@ -58,7 +58,7 @@ func TestInitialize_scaffoldsStandalone(t *testing.T) {
 		`"github.com/go-rotini/rotini/rtk"`,
 		`Bind("parser", rtk.NewParser())`, `Bind("io", rtk.NewIO())`, "Execute()")
 	mustContain(t, filepath.Join(dir, "rtg", "rotini.go"),
-		"package rtg", "type ProgramHandlers interface", "var Definition")
+		"package rtg", "type ProgramHandlers interface", "var definition")
 	mustContain(t, filepath.Join(dir, "rth", "handlers.go"),
 		"package rth", "var Program = rtg.NewProgram(&handlers{})")
 	mustContain(t, filepath.Join(dir, "rth", "mycli.go"), "type mycliHandlers struct{}")

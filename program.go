@@ -20,6 +20,7 @@ type Program struct {
 	onError  func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures; nil → defaultOnError
 	stdout   io.Writer
 	stderr   io.Writer
+	exit     func(int) // terminal action for Execute; defaults to os.Exit
 }
 
 // NewProgram wires a generated program's command tree (the rtg [Definition]) and
@@ -36,7 +37,41 @@ func NewProgram(def Definition, handlers any) *Program {
 		rtx:      NewContext(),
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
+		exit:     os.Exit,
 	}
+}
+
+// WithStdout overrides the program's standard-output stream (defaults to os.Stdout) —
+// the destination for the runtime's own writes (help/completion output, usage). A nil
+// writer is ignored. Pair it with binding an IO/Printer service wired to the same writer
+// to capture everything a run emits (e.g. in a test). It returns the receiver to chain.
+func (p *Program) WithStdout(w io.Writer) *Program {
+	if w != nil {
+		p.stdout = w
+	}
+	return p
+}
+
+// WithStderr overrides the program's standard-error stream (defaults to os.Stderr) — the
+// destination for the runtime's own diagnostics (dispatch errors, the default OnError). A
+// nil writer is ignored. It returns the receiver to chain.
+func (p *Program) WithStderr(w io.Writer) *Program {
+	if w != nil {
+		p.stderr = w
+	}
+	return p
+}
+
+// WithExit overrides the terminal action [Program.Execute] takes with the resolved exit
+// code — defaults to [os.Exit]. Supply a recording function to capture the code without
+// terminating the process (a test), or a custom exit when embedding rotini in a larger
+// program/REPL. If the supplied function returns, Execute returns to its caller. A nil
+// function is ignored. It returns the receiver to chain.
+func (p *Program) WithExit(fn func(int)) *Program {
+	if fn != nil {
+		p.exit = fn
+	}
+	return p
 }
 
 // WithArguments overrides the argument vector (defaults to os.Args[1:]).
@@ -99,10 +134,11 @@ func (p *Program) OnError(fn func(ctx context.Context, rtx *Context, err error))
 	return p
 }
 
-// Execute resolves the command, runs its lifecycle, and exits the process with
-// the resulting status code.
+// Execute resolves the command, runs its lifecycle, and ends with the resulting status
+// code via the program's exit action ([os.Exit] by default; override with
+// [Program.WithExit] to capture the code or embed without terminating).
 func (p *Program) Execute() {
-	os.Exit(p.run(p.args))
+	p.exit(p.run(p.args))
 }
 
 // run is the testable core of Execute: it resolves the invoked command (no eager

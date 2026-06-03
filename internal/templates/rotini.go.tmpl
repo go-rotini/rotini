@@ -87,12 +87,13 @@ type {{.Prefix}}Inputs struct {
 {{- with .BindMeta}}
 {{.}}
 {{end}}
-// NewProgram builds the program from the generated Definition and the typed
+// NewProgram builds the program from the generated command tree and the typed
 // ProgramHandlers, delegating to {{.RotiniPkg}}.NewProgram (which takes the handlers
 // as an untyped value). Construct your program with this so the compiler verifies
-// your handlers satisfy ProgramHandlers.
+// your handlers satisfy ProgramHandlers. The command tree is an unexported
+// implementation detail — you hold a *{{.RotiniPkg}}.Program, never the Definition.
 func NewProgram(handlers ProgramHandlers) *{{.RotiniPkg}}.Program {
-	return {{.RotiniPkg}}.NewProgram(Definition, handlers)
+	return {{.RotiniPkg}}.NewProgram(definition, handlers)
 }
 {{range .Features}}
 {{range .Vars}}

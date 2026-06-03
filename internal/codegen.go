@@ -440,13 +440,14 @@ func jsonSchemaTypeToGo(t string) string {
 	}
 }
 
-// renderDefinition renders the `var Definition = rotini.Definition{…}` literal —
-// the compiled command tree the runtime parses against. It is emitted into the
-// framework file and gofmt-formatted with the rest of it, so the produced text
-// only needs to be valid Go, not pretty.
+// renderDefinition renders the `var definition = rotini.Definition{…}` literal —
+// the compiled command tree the runtime parses against. It is unexported: end-users
+// hold the *Program (from the generated NewProgram), never the Definition. Emitted into
+// the framework file and gofmt-formatted with the rest of it, so the produced text only
+// needs to be valid Go, not pretty.
 func renderDefinition(gp *genProgram) string {
 	var b strings.Builder
-	b.WriteString("var Definition = " + rotiniPkgName + ".Definition{\n")
+	b.WriteString("var definition = " + rotiniPkgName + ".Definition{\n")
 	b.WriteString("Name: " + strconv.Quote(gp.rootName) + ",\n")
 	b.WriteString("Handler: " + strconv.Quote(gp.rootPascal) + ",\n")
 	if len(gp.rootAliases) > 0 {

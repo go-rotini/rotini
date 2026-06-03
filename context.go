@@ -60,15 +60,20 @@ func NewContext() *Context {
 	return &Context{services: make(map[string]any)}
 }
 
-// NewContextFor builds a [Context] with argv resolved against def — the same
-// context the runtime hands a handler at dispatch (raw [Context.Args] + the
-// resolved [Context.Chain]). It is the entry point for exercising a handler, or
-// the rtk Parser/Usage helpers, in isolation:
+// NewContextFor builds a [Context] with argv resolved against an explicit def — the
+// same context the runtime hands a handler at dispatch (raw [Context.Args] + the
+// resolved [Context.Chain]). It is for exercising the rtk Parser/Usage helpers, or a
+// single hook, against a Definition you construct:
 //
-//	rtx := rotini.NewContextFor(rtg.Definition, []string{"generate", "x.yaml"})
-//	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
-//	var in rtg.RotiniGenerateInputs
-//	err := parser.Parse(rtx, &in)
+//	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
+//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"}).Bind("parser", rtk.NewParser())
+//	var in appInputs
+//	err := rotini.MustGet[*rtk.Parser](rtx, "parser").Parse(rtx, &in)
+//
+// To drive a whole *generated* program end-to-end (the usual handler test), construct it
+// with the generated NewProgram and run it under a recording exit + capture streams —
+// see [Program.WithExit]/[Program.WithStdout]/[Program.WithStderr] — rather than building
+// a context by hand; the generated command tree is unexported.
 //
 // A remote/co-located token resolves to as much of the chain as precedes it; the
 // runtime would exec the sibling binary, which NewContextFor does not.
