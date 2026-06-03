@@ -3,6 +3,7 @@ package rotini
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -11,11 +12,29 @@ import (
 // ask the binary for completion candidates.
 const completeCommand = "__complete"
 
+// FlagValueCompleter is an optional interface a command's handler may implement to
+// supply dynamic completion candidates for one of its flags' values. When the hidden
+// __complete entry is completing a flag value, it resolves the handler of the command
+// that *declares* that flag (the same handler reflection dispatch uses) and, if it
+// implements this interface, calls CompleteFlagValue with the flag's logical Name and
+// the word being typed. A nil return falls back to the flag's static enum; a non-nil
+// (possibly empty) return is authoritative. rtx carries the resolved chain
+// (rtx.Chain()), the completion words (rtx.Args()), and every service bound on the
+// Program, so a completer can reach a bound API client, the filesystem, etc.
+//
+// It is entirely opt-in — rotini generates no stub for it and adds nothing if it is
+// absent — and, like any user callback (see Tickers), a panic in it is the caller's
+// bug, not recovered. It may be called on every keystroke, so it must be read-only and
+// fast.
+type FlagValueCompleter interface {
+	CompleteFlagValue(rtx *Context, flag, partial string) []string
+}
+
 // complete returns the completion candidates for the word currently being typed
 // (the last element of words; the rest are the preceding context). It completes
 // flag values (enum), flag names (when the word starts with "-"), and otherwise
 // sub-command / remote-command names — all filtered by the typed prefix.
-func complete(def Definition, words []string) []string {
+func complete(def Definition, words []string, handlers any, rtx *Context) []string {
 	if len(words) == 0 {
 		words = []string{""}
 	}
@@ -35,12 +54,19 @@ func complete(def Definition, words []string) []string {
 	}
 	cur := chain[len(chain)-1]
 
-	// Completing the value of the preceding flag → offer its enum.
+	// Completing the value of the preceding flag. The handler of the command that
+	// declares the flag may supply dynamic candidates (FlagValueCompleter); a nil
+	// return (or no completer) falls back to the flag's static enum.
 	if len(context) > 0 {
 		if prev := context[len(context)-1]; isFlag(prev) {
 			name, _, _ := splitFlag(prev)
-			if fd, _, ok := findFlag(chain, name); ok && fd.Type != "bool" && len(fd.Enum) > 0 {
-				return filterPrefix(fd.Enum, partial)
+			if fd, owner, ok := findFlag(chain, name); ok && fd.Type != "bool" {
+				if cands, dyn := dynamicFlagValues(handlers, rtx, chain, words, owner, fd.Name, partial); dyn {
+					return filterPrefix(cands, partial)
+				}
+				if len(fd.Enum) > 0 {
+					return filterPrefix(fd.Enum, partial)
+				}
 			}
 		}
 	}
@@ -84,6 +110,47 @@ func complete(def Definition, words []string) []string {
 		}
 	}
 	return filterPrefix(names, partial)
+}
+
+// dynamicFlagValues asks the handler of the command that declares the flag (owner) for
+// completion candidates, when it implements FlagValueCompleter. It returns (candidates,
+// true) only when a completer ran and returned a non-nil slice — the authoritative
+// result; otherwise (nil, false), so the caller falls back to the static enum. handlers
+// is the aggregate handler set (nil in pure-structural callers/tests); the owner's
+// handler is resolved by the same reflection dispatch uses. rtx is seeded with the
+// resolved chain and completion words so the completer can inspect them and reach bound
+// services.
+func dynamicFlagValues(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner, flag, partial string) ([]string, bool) {
+	if handlers == nil {
+		return nil, false
+	}
+	var handlerName string
+	for _, fr := range chain {
+		if fr.Name == owner {
+			handlerName = fr.Handler
+			break
+		}
+	}
+	if handlerName == "" {
+		return nil, false
+	}
+	m := reflect.ValueOf(handlers).MethodByName(handlerName)
+	if !m.IsValid() || m.Type().NumIn() != 0 || m.Type().NumOut() != 1 {
+		return nil, false
+	}
+	completer, ok := m.Call(nil)[0].Interface().(FlagValueCompleter)
+	if !ok {
+		return nil, false
+	}
+	if rtx != nil {
+		rtx.chain = chain
+		rtx.args = words
+	}
+	cands := completer.CompleteFlagValue(rtx, flag, partial)
+	if cands == nil {
+		return nil, false
+	}
+	return cands, true
 }
 
 // discoverPlugins lists the names (the part after the prefix) of `<prefix>*`

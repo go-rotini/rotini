@@ -113,7 +113,7 @@ func (p *Program) Execute() {
 // the generated shell scripts invoke.
 func (p *Program) run(argv []string) int {
 	if len(argv) > 0 && argv[0] == completeCommand {
-		for _, c := range complete(p.def, argv[1:]) {
+		for _, c := range complete(p.def, argv[1:], p.handlers, p.rtx) {
 			fmt.Fprintln(p.stdout, c)
 		}
 		return 0
