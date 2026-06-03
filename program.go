@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"reflect"
+	"syscall"
 )
 
 type Program struct {
 	ctx      context.Context
+	signals  []os.Signal // when set, the run's context cancels on one of these (graceful shutdown)
 	args     []string
 	def      Definition
 	handlers any
@@ -41,6 +44,34 @@ func (p *Program) WithArguments(args []string) *Program {
 	if args != nil {
 		p.args = args
 	}
+	return p
+}
+
+// WithContext sets the base [context.Context] threaded to every lifecycle hook (and to
+// the OnError funnel and any remote sub-command exec), so a caller — a server, a test,
+// a parent process — can cancel or time-bound the whole run. Defaults to
+// [context.Background]. A nil context is ignored. A handler observes cancellation by
+// selecting on its hook's ctx.Done(); cancellation is cooperative (it cannot preempt a
+// hook that ignores it), and teardown still runs.
+func (p *Program) WithContext(ctx context.Context) *Program {
+	if ctx != nil {
+		p.ctx = ctx
+	}
+	return p
+}
+
+// WithSignals makes the run's context cancel when one of the given OS signals arrives —
+// the standard graceful-shutdown wiring. With no arguments it traps SIGINT and SIGTERM.
+// On the first signal the context is canceled (so cooperative handlers stop and
+// teardown still runs); a second signal restores the default OS behavior (force-quit),
+// via [signal.NotifyContext]. It composes with [Program.WithContext] (the signal
+// context derives from the base). It is independent of the rtk Signals service — use
+// one or the other for a given signal unless you deliberately want both.
+func (p *Program) WithSignals(sigs ...os.Signal) *Program {
+	if len(sigs) == 0 {
+		sigs = []os.Signal{os.Interrupt, syscall.SIGTERM}
+	}
+	p.signals = sigs
 	return p
 }
 
@@ -88,9 +119,18 @@ func (p *Program) run(argv []string) int {
 		return 0
 	}
 
+	// The effective run context: the base context (WithContext, else Background),
+	// made cancelable on the configured signals (WithSignals) for graceful shutdown.
+	ctx := p.ctx
+	if len(p.signals) > 0 {
+		var stop context.CancelFunc
+		ctx, stop = signal.NotifyContext(p.ctx, p.signals...)
+		defer stop()
+	}
+
 	chain, remote := resolveChain(p.def, argv)
 	if remote != nil {
-		return p.execRemote(remote)
+		return p.execRemote(ctx, remote)
 	}
 
 	rtx := p.rtx
@@ -103,7 +143,7 @@ func (p *Program) run(argv []string) int {
 	if rtx.onError == nil {
 		rtx.onError = p.defaultOnError
 	}
-	return p.dispatch(chain, rtx)
+	return p.dispatch(ctx, chain, rtx)
 }
 
 // defaultOnError is the OnError funnel used when the program supplies none: it
@@ -130,7 +170,7 @@ func (p *Program) defaultOnError(_ context.Context, rtx *Context, err error) {
 // missing service) is recovered, does not abort the remaining teardown, and is
 // routed once — after all teardown — to the OnError funnel, last. See
 // .docs/ROTINI_RTX_EXIT.md.
-func (p *Program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
+func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (code int) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
@@ -183,7 +223,7 @@ func (p *Program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
 				}
 			}
 		}()
-		hook(p.ctx, rtx)
+		hook(ctx, rtx)
 	}
 
 	// Setup + work, forward — halting on rtx.Exit (rtx.stopped) or a panic. began
@@ -214,7 +254,7 @@ func (p *Program) dispatch(chain []ResolvedCommand, rtx *Context) (code int) {
 	// A panic is funneled to OnError last, after teardown. The panic path is always
 	// a failure: if the funnel left the code at 0, floor it to 1.
 	if failure != nil {
-		rtx.onError(p.ctx, rtx, failure)
+		rtx.onError(ctx, rtx, failure)
 		if rtx.exitCode == 0 {
 			rtx.exitCode = 1
 		}

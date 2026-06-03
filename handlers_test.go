@@ -5,9 +5,12 @@ import (
 	"testing"
 )
 
-// onlyRun is the common case: embed the bundle, supply only Run.
+// onlyRun is the common case: embed all four non-Run defaults, supply only Run.
 type onlyRun struct {
-	DefaultHooks
+	DefaultCascadingPreRun
+	DefaultPreRun
+	DefaultPostRun
+	DefaultCascadingPostRun
 	ran bool
 }
 
@@ -66,17 +69,22 @@ func TestDefaultHooks_granularAndOverride(t *testing.T) {
 	iface.CascadingPostRun(context.Background(), nil)
 }
 
-func TestDefaultHooks_overrideShadowsBundle(t *testing.T) {
-	// Embedding the bundle but defining a hook explicitly: the explicit one wins.
+func TestDefaultHooks_overrideShadowsDefault(t *testing.T) {
+	// Embedding the defaults but defining a hook explicitly: the explicit one wins.
 	var iface CommandHandlers = &overrider{}
 	iface.PreRun(context.Background(), nil)
 	if !overriderPreRan {
-		t.Error("explicit PreRun did not shadow the bundled DefaultPreRun")
+		t.Error("explicit PreRun did not shadow the embedded DefaultPreRun")
 	}
 	overriderPreRan = false
 }
 
-type overrider struct{ DefaultHooks }
+type overrider struct {
+	DefaultCascadingPreRun
+	DefaultPreRun
+	DefaultPostRun
+	DefaultCascadingPostRun
+}
 
 var overriderPreRan bool
 

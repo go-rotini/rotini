@@ -20,15 +20,15 @@ type remoteDispatch struct {
 }
 
 // execRemote locates and runs the co-located plugin binary, passing stdio
-// through, honoring any timeout, and returning the plugin's exit code.
-func (p *Program) execRemote(r *remoteDispatch) int {
+// through, honoring the run context (so a signal/cancellation kills the subprocess)
+// and any timeout, and returning the plugin's exit code.
+func (p *Program) execRemote(ctx context.Context, r *remoteDispatch) int {
 	path, err := resolveRemoteBinary(r.def.Binary, r.dir)
 	if err != nil {
 		fmt.Fprintf(p.stderr, "%s: %s\n", p.def.Name, err)
 		return 1
 	}
 
-	ctx := p.ctx
 	if r.def.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, r.def.Timeout)
