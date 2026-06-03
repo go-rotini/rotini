@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
+	"github.com/go-rotini/yaml"
 	xterm "golang.org/x/term"
 )
 
@@ -113,6 +115,98 @@ func (p *Printer) JSON(v any) error {
 	}
 	_, err = fmt.Fprintln(p.out, string(b))
 	return err
+}
+
+// YAML formats v as YAML to out — the formatter sibling of [Printer.JSON] for a
+// command's generated <Prefix>Output value (or any data a handler wants to emit as YAML).
+func (p *Printer) YAML(v any) error {
+	b, err := yaml.Marshal(v)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprint(p.out, ensureTrailingNewline(string(b)))
+	return err
+}
+
+// Wrap word-wraps s to the printer's [Printer.Width], breaking on whitespace and
+// measuring by visible width (ANSI escapes don't count), so styled text wraps by what the
+// eye sees. Existing newlines are preserved (each is wrapped independently); runs of
+// whitespace collapse to a single space; a word longer than the width overflows on its
+// own line rather than being split. It returns the wrapped string (print it yourself);
+// a width <= 0 returns s unchanged.
+func (p *Printer) Wrap(s string) string { return wrapText(s, p.width) }
+
+// Truncate shortens s to at most max visible columns, replacing the cut tail with a
+// single-column ellipsis ("…"). It measures by visible width; a string already within
+// max is returned unchanged. Truncating a *styled* string drops its ANSI styling (the
+// cut would otherwise leave an unterminated escape) — the common, plain-text case keeps
+// its content exactly. max <= 0 returns "".
+func (p *Printer) Truncate(s string, max int) string { return truncateVisible(s, max) }
+
+// ensureTrailingNewline guarantees exactly one trailing newline (yaml.Marshal already
+// ends with one; this keeps the contract stable if that ever changes).
+func ensureTrailingNewline(s string) string {
+	if s == "" || strings.HasSuffix(s, "\n") {
+		return s
+	}
+	return s + "\n"
+}
+
+// wrapText word-wraps each newline-separated line of s to width.
+func wrapText(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = wrapLine(line, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapLine greedily wraps one line's whitespace-separated words to width.
+func wrapLine(line string, width int) string {
+	words := strings.Fields(line)
+	if len(words) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	cur := 0
+	for i, w := range words {
+		ww := visibleWidth(w)
+		switch {
+		case i == 0:
+			b.WriteString(w)
+			cur = ww
+		case cur+1+ww > width:
+			b.WriteByte('\n')
+			b.WriteString(w)
+			cur = ww
+		default:
+			b.WriteByte(' ')
+			b.WriteString(w)
+			cur += 1 + ww
+		}
+	}
+	return b.String()
+}
+
+// truncateVisible shortens s to at most max visible columns with a trailing "…". ANSI
+// styling is stripped when a cut is needed (so the result never leaves a dangling
+// escape); strings within max are returned untouched.
+func truncateVisible(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if visibleWidth(s) <= max {
+		return s
+	}
+	r := []rune(StripANSI(s))
+	keep := max - 1
+	if keep < 0 {
+		keep = 0
+	}
+	return string(r[:keep]) + "…"
 }
 
 // detectFor resolves the color level and width for a writer: from the real terminal

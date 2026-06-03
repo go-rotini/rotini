@@ -2,6 +2,7 @@ package rtk
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -9,6 +10,37 @@ import (
 func testPrompter(in string) (*Prompter, *bytes.Buffer) {
 	var out bytes.Buffer
 	return NewPrompter().WithInput(strings.NewReader(in)).WithOutput(&out), &out
+}
+
+func TestPrompter_lineValid(t *testing.T) {
+	p, out := testPrompter("bad\ngood\n")
+	got, err := p.LineValid("Name", func(s string) error {
+		if s != "good" {
+			return fmt.Errorf("must be good")
+		}
+		return nil
+	})
+	if err != nil || got != "good" {
+		t.Fatalf("LineValid = %q, %v; want good, nil", got, err)
+	}
+	if !strings.Contains(out.String(), "must be good") {
+		t.Errorf("re-prompt did not show the validator reason: %q", out.String())
+	}
+	if n := strings.Count(out.String(), "Name:"); n != 2 {
+		t.Errorf("asked %d times, want 2 (re-prompt after invalid)", n)
+	}
+}
+
+func TestPrompter_secretConfirm(t *testing.T) {
+	// First pair mismatches (abc/xyz), second pair matches (secret/secret).
+	p, out := testPrompter("abc\nxyz\nsecret\nsecret\n")
+	got, err := p.SecretConfirm("Password")
+	if err != nil || got != "secret" {
+		t.Fatalf("SecretConfirm = %q, %v; want secret, nil", got, err)
+	}
+	if !strings.Contains(out.String(), "do not match") {
+		t.Errorf("mismatch was not reported: %q", out.String())
+	}
 }
 
 func TestPrompter_line(t *testing.T) {

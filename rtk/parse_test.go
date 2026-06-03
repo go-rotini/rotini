@@ -422,6 +422,54 @@ func TestParse_flagGroups(t *testing.T) {
 	}
 }
 
+func TestParse_mapFlag(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{
+			{Name: "label", Identifiers: []string{"--label", "-l"}, Type: "map[string]string"},
+			{Name: "port", Identifiers: []string{"--port"}, Type: "map[string]int"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Label map[string]string `rotini:"label"`
+				Port  map[string]int    `rotini:"port"`
+			}
+			Arguments struct{}
+		}
+	}
+	parse := func(argv ...string) (inputs, error) {
+		var in inputs
+		err := NewParser().Parse(rotini.NewContextFor(def, argv), &in)
+		return in, err
+	}
+
+	// Repeated occurrences accumulate into the map; a duplicate key's last value wins.
+	in, err := parse("--label", "env=prod", "-l", "team=core", "--label", "env=dev")
+	if err != nil {
+		t.Fatalf("parse map flag: %v", err)
+	}
+	if m := in.App.Flags.Label; len(m) != 2 || m["env"] != "dev" || m["team"] != "core" {
+		t.Errorf("Label = %v, want {env:dev team:core}", m)
+	}
+
+	// The value may contain '=' — only the first '=' splits key from value.
+	if in, _ := parse("--label", "url=http://x?a=b"); in.App.Flags.Label["url"] != "http://x?a=b" {
+		t.Errorf("value with '=' = %q, want %q", in.App.Flags.Label["url"], "http://x?a=b")
+	}
+
+	// Typed map values are coerced into the element type.
+	if in, _ := parse("--port", "web=8080"); in.App.Flags.Port["web"] != 8080 {
+		t.Errorf("Port[web] = %d, want 8080", in.App.Flags.Port["web"])
+	}
+
+	// A pair without '=' is rejected with a clear message.
+	if _, err := parse("--label", "oops"); err == nil || !strings.Contains(err.Error(), "key=value") {
+		t.Errorf("malformed pair: want a key=value error, got %v", err)
+	}
+}
+
 func TestParse_flagDependencies(t *testing.T) {
 	def := rotini.Definition{
 		Name: "app", Handler: "App",

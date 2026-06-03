@@ -242,6 +242,9 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 				if len(fd.Enum) > 0 && !slices.Contains(fd.Enum, v) {
 					return &usageError{msg: fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), flagLabel(fd), strings.Join(fd.Enum, ", "))}
 				}
+				if isMapType(fd.Type) && !strings.Contains(v, "=") {
+					return &usageError{msg: fmt.Sprintf("%s expects key=value pairs (got %q)", flagLabel(fd), redactValue(v, fd.Secret))}
+				}
 			}
 			if err := checkConstraints(flagLabel(fd), fd.Type, fd.Constraints, vals, fd.Secret); err != nil {
 				return err
@@ -302,7 +305,7 @@ func hasVariadicArg(args []rotini.ArgDef) bool {
 // arrays — a constraint declared on an incompatible type is silently ignored. When
 // secret is true the offending value (and its length) is redacted in the error.
 func checkConstraints(label, typ string, c rotini.Constraints, values []string, secret bool) error {
-	if isArrayType(typ) {
+	if isArrayType(typ) || isMapType(typ) {
 		switch n := len(values); {
 		case c.MinItems > 0 && n < c.MinItems:
 			return &usageError{msg: fmt.Sprintf("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)}
@@ -464,6 +467,10 @@ func joinAnd(items []string) string {
 func isNumericType(typ string) bool { return typ == "int" || typ == "float64" }
 
 func isArrayType(typ string) bool { return strings.HasPrefix(typ, "[]") }
+
+// isMapType reports whether typ is a map type ("map[...]…"), whose flag takes repeated
+// key=value pairs.
+func isMapType(typ string) bool { return strings.HasPrefix(typ, "map[") }
 
 // formatNum renders a numeric bound without a trailing ".000…".
 func formatNum(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
@@ -806,5 +813,34 @@ func coerce(f reflect.Value, raw []string) {
 		if f.Type().Elem().Kind() == reflect.String {
 			f.Set(reflect.ValueOf(append([]string{}, raw...)))
 		}
+	case reflect.Map:
+		coerceMap(f, raw)
 	}
+}
+
+// coerceMap fills a string-keyed map field from raw "key=value" pairs (one per repeated
+// flag occurrence), splitting on the first '='. The value is coerced into the map's
+// element type (string/int/…); an `any` element stores the raw string. Later pairs win
+// on a duplicate key. Malformed (no '=') pairs are skipped — validation rejects them.
+func coerceMap(f reflect.Value, raw []string) {
+	kt := f.Type().Key()
+	if kt.Kind() != reflect.String {
+		return // only string-keyed maps are supported
+	}
+	et := f.Type().Elem()
+	m := reflect.MakeMapWithSize(f.Type(), len(raw))
+	for _, pair := range raw {
+		k, v, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		ev := reflect.New(et).Elem()
+		if ev.Kind() == reflect.Interface {
+			ev.Set(reflect.ValueOf(v))
+		} else {
+			coerce(ev, []string{v})
+		}
+		m.SetMapIndex(reflect.ValueOf(k).Convert(kt), ev)
+	}
+	f.Set(m)
 }

@@ -282,6 +282,33 @@ func TestGenerateOutputTypes(t *testing.T) {
 // TestGenerateInputImports verifies the spec `import:` key drives the framework
 // file's import block: explicit imports (stdlib + third-party + aliased) are emitted,
 // rotini's own time-family aliases auto-import "time", and duplicates dedupe.
+func TestGenerateMapFlag(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: widget\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: label\n" +
+		"        identifiers: [--label]\n" +
+		"        schema: { type: 'map[string]string' }\n" +
+		"      - name: meta\n" +
+		"        identifiers: [--meta]\n" +
+		"        schema: { type: map }\n" // the rotini alias → map[string]any
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	mustContain(t, filepath.Join(tmp, "rtg", "rotini.go"),
+		"Label map[string]string", `rotini:"label"`, // explicit map type passes through
+		"Meta  map[string]any", `rotini:"meta"`, // the `map` alias → map[string]any
+		`Type: "map[string]string"`, // recorded in the Definition FlagDef
+	)
+}
+
 func TestGenerateInputImports(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)

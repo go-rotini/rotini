@@ -81,6 +81,27 @@ func (p *Prompter) LineDefault(question, def string) (string, error) {
 	return line, nil
 }
 
+// LineValid asks question and re-prompts until validate accepts the entered line,
+// printing validate's error as the reason before each re-ask. It returns the first
+// accepted line, or a read error (EOF) — a validator is not consulted on a read failure.
+// A nil validate behaves like [Prompter.Line].
+func (p *Prompter) LineValid(question string, validate func(string) error) (string, error) {
+	for {
+		line, err := p.Line(question)
+		if err != nil {
+			return line, err
+		}
+		if validate == nil {
+			return line, nil
+		}
+		if vErr := validate(line); vErr != nil {
+			fmt.Fprintf(p.out, "%v\n", vErr)
+			continue
+		}
+		return line, nil
+	}
+}
+
 // Confirm asks a yes/no question, re-prompting until the answer is recognizable. An
 // empty answer yields def; EOF returns def with the read error.
 func (p *Prompter) Confirm(question string, def bool) (bool, error) {
@@ -151,6 +172,27 @@ func (p *Prompter) Secret(question string) (string, error) {
 		return string(b), nil
 	}
 	return p.readLine()
+}
+
+// SecretConfirm reads a secret twice (the value, then a confirmation) without echoing,
+// re-prompting both until the two entries match — the standard "enter a new password,
+// confirm it" flow. It returns the confirmed value, or a read error (EOF). The
+// confirmation prompt is "Confirm <question>".
+func (p *Prompter) SecretConfirm(question string) (string, error) {
+	for {
+		first, err := p.Secret(question)
+		if err != nil {
+			return "", err
+		}
+		again, err := p.Secret("Confirm " + question)
+		if err != nil {
+			return "", err
+		}
+		if first == again {
+			return first, nil
+		}
+		fmt.Fprintln(p.out, "Entries do not match — please try again.")
+	}
 }
 
 // readLine reads one line from the input, trimming the trailing newline. A final line

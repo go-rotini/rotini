@@ -52,7 +52,7 @@ type BaseSchema struct {
 	// Regular expression the value must match (string type only)
 	Pattern    string            `json:"pattern,omitempty"`
 	Properties map[string]Schema `json:"properties,omitempty"`
-	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path.
+	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. A '[]…' flag is repeatable (--tag a --tag b → slice). A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path.
 	Type string `json:"type,omitempty"`
 }
 
