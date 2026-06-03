@@ -1,0 +1,12 @@
+Usage:
+  app <command>
+
+Commands:
+  version    print the version
+
+Basic Commands:
+  get      display a resource
+  apply    apply a configuration
+
+Cluster Management:
+  cluster-info    show cluster endpoints

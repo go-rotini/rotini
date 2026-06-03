@@ -6,7 +6,7 @@
        newline — so you don't fight template whitespace for clean output.
 
        DATA (see helpData): .Header .Summary .Description .Footer .Invocation
-         .Usage/.UsageDerived .Commands[] .Arguments[] .Flags[] .Environment[]
+         .Usage/.UsageDerived .CommandGroups[] .Arguments[] .Flags[] .Environment[]
          .Configuration[] .Cascading[] .Examples[]
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
@@ -25,8 +25,8 @@ NAME
 {{indent 4 .}}
 
 {{end -}}
-{{- with .Commands}}COMMANDS
-{{range .}}    {{.Name}}{{with .Aliases}};{{join . ";"}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{- range .CommandGroups}}{{if .Title}}{{upper .Title}}{{else}}COMMANDS{{end}}
+{{range .Commands}}    {{.Name}}{{with .Aliases}};{{join . ";"}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Arguments}}ARGUMENTS

@@ -3,7 +3,10 @@
   "title": "Rotini Spec Schema",
   "description": "Schema for a Rotini CLI definition spec file.",
   "type": "object",
-  "required": ["$schema", "command"],
+  "required": [
+    "$schema",
+    "command"
+  ],
   "additionalProperties": false,
   "properties": {
     "$schema": {
@@ -43,10 +46,14 @@
       "type": "object",
       "anyOf": [
         {
-          "required": ["name"]
+          "required": [
+            "name"
+          ]
         },
         {
-          "required": ["$ref"]
+          "required": [
+            "$ref"
+          ]
         }
       ],
       "additionalProperties": false,
@@ -128,6 +135,10 @@
           "default": false,
           "description": "When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line)."
         },
+        "group": {
+          "type": "string",
+          "description": "Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only."
+        },
         "deprecated": {
           "type": "string",
           "description": "Deprecation message; the command is annotated as deprecated in its parent's generated Commands list."
@@ -206,7 +217,9 @@
     },
     "MetadataEntry": {
       "type": "object",
-      "required": ["var"],
+      "required": [
+        "var"
+      ],
       "additionalProperties": false,
       "properties": {
         "var": {
@@ -350,7 +363,9 @@
     },
     "FlagInput": {
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -393,7 +408,9 @@
     },
     "ArgumentInput": {
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -422,7 +439,9 @@
     },
     "ConfigInput": {
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -451,7 +470,9 @@
     },
     "EnvInput": {
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -488,7 +509,12 @@
         },
         "format": {
           "type": "string",
-          "enum": ["json", "yaml", "jsonc", "toml"],
+          "enum": [
+            "json",
+            "yaml",
+            "jsonc",
+            "toml"
+          ],
           "default": "json",
           "description": "Serialization the piped stdin payload is decoded from (into the generated <Prefix>Stdin type). Defaults to json."
         }
@@ -548,7 +574,10 @@
     },
     "FlagDependency": {
       "type": "object",
-      "required": ["when", "requires"],
+      "required": [
+        "when",
+        "requires"
+      ],
       "additionalProperties": false,
       "description": "A conditional requirement: when the 'when' flag is explicitly set on the command line, every flag in 'requires' must also be set. Both reference flag logical names; 'set' means explicitly provided (a default or env/config fallback does not count).",
       "properties": {
@@ -570,7 +599,10 @@
     },
     "FlagGroup": {
       "type": "object",
-      "required": ["kind", "flags"],
+      "required": [
+        "kind",
+        "flags"
+      ],
       "additionalProperties": false,
       "description": "A constraint on which of this command's flags may (or must) be set together. 'flags' references flag logical names; 'set' means explicitly provided on the command line (a default or env/config fallback does not count).",
       "properties": {
@@ -596,7 +628,9 @@
     },
     "RemoteCommandSpec": {
       "type": "object",
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -628,7 +662,10 @@
     },
     "ConfigurationFile": {
       "type": "object",
-      "required": ["name", "path"],
+      "required": [
+        "name",
+        "path"
+      ],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -641,7 +678,11 @@
         },
         "format": {
           "type": "string",
-          "enum": ["json", "yaml", "toml"],
+          "enum": [
+            "json",
+            "yaml",
+            "toml"
+          ],
           "default": "json",
           "description": "File format"
         },

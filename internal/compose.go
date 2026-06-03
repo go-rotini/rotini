@@ -44,6 +44,7 @@ type rnode struct {
 	output     *Schema          // command's output type (own commands only; nil for composed)
 	discovery  *RemoteDiscovery // command's plugin discovery (nil = off)
 	hidden     bool             // omit from the parent's generated Commands list
+	group      string           // group label that buckets this command in the parent's Commands list
 	deprecated string           // deprecation note for the parent's Commands list
 	composed   bool             // grafted from a $ref'd child (its types live in the child's rtg)
 	children   []rnode
@@ -194,6 +195,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			output:     c.Output,
 			discovery:  c.RemoteDiscovery,
 			hidden:     c.Hidden,
+			group:      c.Group,
 			deprecated: c.Deprecated,
 			composed:   ctx.composed,
 			children:   children,
@@ -260,7 +262,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, deprecated: c.Deprecated, composed: true, children: children}, nil
+	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, group: c.Group, deprecated: c.Deprecated, composed: true, children: children}, nil
 }
 
 // composeNestedRef handles a `$ref` encountered *inside* an already-composed subtree

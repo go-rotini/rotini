@@ -72,6 +72,8 @@ type Command struct {
 	Examples []string `json:"examples,omitempty"`
 	// Text rendered at the bottom of the page. Ignored when 'help' is set.
 	Footer string `json:"footer,omitempty"`
+	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only.
+	Group string `json:"group,omitempty"`
 	// Text rendered above the description block. Ignored when 'help' is set.
 	Header string `json:"header,omitempty"`
 	// Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set.

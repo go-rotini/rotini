@@ -297,3 +297,32 @@ func TestHelpGolden_EnvConfig(t *testing.T) {
 	helpDir := genHelp(t, helpGoldenEnvConfigSpec, "")
 	assertHelpGolden(t, goldenDir, "envconfig_app.txt", readFileString(t, filepath.Join(helpDir, "app.txt")))
 }
+
+// helpGoldenGroupsSpec exercises command grouping: an ungrouped command (default
+// heading), then two named groups, with groups appearing in first-declaration order.
+const helpGoldenGroupsSpec = goldenSpecSchema +
+	`command:
+  name: app
+  summary: the app
+  commands:
+    - name: version
+      summary: print the version
+    - name: get
+      summary: display a resource
+      group: Basic Commands
+    - name: apply
+      summary: apply a configuration
+      group: Basic Commands
+    - name: cluster-info
+      summary: show cluster endpoints
+      group: Cluster Management
+`
+
+// TestHelpGolden_CommandGroups locks command grouping: ungrouped commands fall under the
+// default "Commands:" heading, grouped commands are bucketed under their group title (in
+// first-appearance order), all in one Commands section.
+func TestHelpGolden_CommandGroups(t *testing.T) {
+	goldenDir := helpGoldenDir(t)
+	helpDir := genHelp(t, helpGoldenGroupsSpec, "")
+	assertHelpGolden(t, goldenDir, "groups_app.txt", readFileString(t, filepath.Join(helpDir, "app.txt")))
+}

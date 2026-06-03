@@ -94,7 +94,7 @@ type helpData struct {
 	UsageDerived  string // always-computed usage line
 	Footer        string
 	Headings      helpHeadings
-	Commands      []helpCmdRow    // visible direct children
+	CommandGroups []helpCmdGroup  // visible direct children, bucketed by group (one default-titled bucket when ungrouped)
 	Arguments     []helpArgRow    // visible own arguments
 	Flags         []helpFlagRow   // visible own flags
 	Environment   []helpEnvRow    // visible env-var inputs
@@ -103,10 +103,20 @@ type helpData struct {
 	Examples      []string
 }
 
+// helpCmdGroup is one bucket of sub-commands in the Commands section. Title is the
+// command's `group` value; "" is the ungrouped bucket, which each template heads with
+// its own default ("Commands:" / "COMMANDS" / "## Commands"). Titled buckets the
+// template formats from Title (its format's convention).
+type helpCmdGroup struct {
+	Title    string // group label, verbatim; "" = ungrouped (default heading)
+	Commands []helpCmdRow
+}
+
 type helpCmdRow struct {
 	Name       string
 	Summary    string // ← the child command's help.summary
 	Aliases    []string
+	Group      string // ← the child command's `group` (buckets it in the Commands section)
 	Deprecated string
 }
 
@@ -328,17 +338,20 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Cascading:   ancestorCascading,
 		Examples:    h.Examples,
 	}
+	var cmds []helpCmdRow
 	for _, c := range children {
 		if c.hidden {
 			continue
 		}
-		d.Commands = append(d.Commands, helpCmdRow{
+		cmds = append(cmds, helpCmdRow{
 			Name:       c.name,
 			Summary:    c.help.Summary,
 			Aliases:    c.aliases,
+			Group:      c.group,
 			Deprecated: c.deprecated,
 		})
 	}
+	d.CommandGroups = groupCommands(cmds)
 	if inputs != nil {
 		for _, a := range inputs.Arguments {
 			if a.Hidden {
@@ -423,6 +436,29 @@ func configLocation(c ConfigInput) string {
 	default:
 		return ""
 	}
+}
+
+// groupCommands buckets command rows by their Group, preserving the order in which each
+// group first appears in the declared command list. Ungrouped rows (Group == "") form a
+// bucket with Title "" — each template heads it with its own default. When no row
+// declares a group, the result is a single Title-"" bucket holding every command in
+// order, so a non-grouped command list renders byte-identically to before.
+func groupCommands(rows []helpCmdRow) []helpCmdGroup {
+	if len(rows) == 0 {
+		return nil
+	}
+	idx := map[string]int{}
+	var groups []helpCmdGroup
+	for _, r := range rows {
+		i, ok := idx[r.Group]
+		if !ok {
+			i = len(groups)
+			idx[r.Group] = i
+			groups = append(groups, helpCmdGroup{Title: r.Group})
+		}
+		groups[i].Commands = append(groups[i].Commands, r)
+	}
+	return groups
 }
 
 // snakeUpper converts a logical name to the conventional SCREAMING_SNAKE_CASE env-var
@@ -718,20 +754,38 @@ func sanitizeHelpData(d helpData) helpData {
 	clean := func(s string) string {
 		return strings.ReplaceAll(strings.ReplaceAll(s, "\t", " "), "\n", " ")
 	}
-	d.Commands = append([]helpCmdRow(nil), d.Commands...)
-	for i := range d.Commands {
-		d.Commands[i].Summary = clean(d.Commands[i].Summary)
-		d.Commands[i].Deprecated = clean(d.Commands[i].Deprecated)
+	d.CommandGroups = append([]helpCmdGroup(nil), d.CommandGroups...)
+	for i := range d.CommandGroups {
+		d.CommandGroups[i].Commands = append([]helpCmdRow(nil), d.CommandGroups[i].Commands...)
+		for j := range d.CommandGroups[i].Commands {
+			d.CommandGroups[i].Commands[j].Summary = clean(d.CommandGroups[i].Commands[j].Summary)
+			d.CommandGroups[i].Commands[j].Deprecated = clean(d.CommandGroups[i].Commands[j].Deprecated)
+		}
 	}
 	d.Arguments = append([]helpArgRow(nil), d.Arguments...)
 	for i := range d.Arguments {
 		d.Arguments[i].Summary = clean(d.Arguments[i].Summary)
 		d.Arguments[i].Deprecated = clean(d.Arguments[i].Deprecated)
 	}
-	d.Flags = append([]helpFlagRow(nil), d.Flags...)
-	for i := range d.Flags {
-		d.Flags[i].Summary = clean(d.Flags[i].Summary)
-		d.Flags[i].Deprecated = clean(d.Flags[i].Deprecated)
+	cleanFlags := func(rows []helpFlagRow) []helpFlagRow {
+		rows = append([]helpFlagRow(nil), rows...)
+		for i := range rows {
+			rows[i].Summary = clean(rows[i].Summary)
+			rows[i].Deprecated = clean(rows[i].Deprecated)
+		}
+		return rows
+	}
+	d.Flags = cleanFlags(d.Flags)
+	d.Cascading = cleanFlags(d.Cascading)
+	d.Environment = append([]helpEnvRow(nil), d.Environment...)
+	for i := range d.Environment {
+		d.Environment[i].Summary = clean(d.Environment[i].Summary)
+		d.Environment[i].Deprecated = clean(d.Environment[i].Deprecated)
+	}
+	d.Configuration = append([]helpConfigRow(nil), d.Configuration...)
+	for i := range d.Configuration {
+		d.Configuration[i].Summary = clean(d.Configuration[i].Summary)
+		d.Configuration[i].Deprecated = clean(d.Configuration[i].Deprecated)
 	}
 	return d
 }

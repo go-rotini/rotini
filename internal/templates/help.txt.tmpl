@@ -17,7 +17,7 @@
          .UsageDerived   spec computed (always set)
          .Headings.{Usage,Commands,Arguments,Flags,Environment,Configuration,Cascading,Examples}
                        resolved heading text, colon included (override is verbatim)
-         .Commands[]      {.Name .Summary .Aliases .Deprecated}
+         .CommandGroups[] {.Title .Commands[]} — Title "" = default heading
          .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .Deprecated}
          .Flags[]         {.Identifiers .Summary .Type .Required .Default .Enum .Deprecated}
          .Environment[]   {.Var .Summary .Type .Required .Default .Enum .Deprecated}
@@ -38,8 +38,8 @@
 {{indent 2 .}}
 
 {{end -}}
-{{- with .Commands}}{{$.Headings.Commands}}
-{{range .}}  {{.Name}}{{with .Aliases}};{{join . ";"}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{- range .CommandGroups}}{{if .Title}}{{.Title}}:{{else}}{{$.Headings.Commands}}{{end}}
+{{range .Commands}}  {{.Name}}{{with .Aliases}};{{join . ";"}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Arguments}}{{$.Headings.Arguments}}
