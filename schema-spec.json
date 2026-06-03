@@ -479,6 +479,34 @@
         "stdin": {
           "$ref": "#/definitions/StdinSpec",
           "description": "Declares expected stdin format and schema for this command"
+        },
+        "flag_groups": {
+          "type": "array",
+          "description": "Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).",
+          "items": {
+            "$ref": "#/definitions/FlagGroup"
+          }
+        }
+      }
+    },
+    "FlagGroup": {
+      "type": "object",
+      "required": ["kind", "flags"],
+      "additionalProperties": false,
+      "description": "A constraint on which of this command's flags may (or must) be set together. 'flags' references flag logical names; 'set' means explicitly provided on the command line (a default or env/config fallback does not count).",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["mutually_exclusive", "required_together", "one_of", "at_least_one"],
+          "description": "mutually_exclusive: at most one set. required_together: all or none. one_of: exactly one. at_least_one: one or more."
+        },
+        "flags": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
         }
       }
     },

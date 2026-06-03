@@ -27,9 +27,34 @@ type Definition struct {
 	Version        string // value of the program's version metadata var (ldflag-settable)
 	Flags          []FlagDef
 	Arguments      []ArgDef
+	FlagGroups     []FlagGroup // cross-flag presence rules validated at parse time
 	Commands       []CommandDef
 	RemoteCommands []RemoteDef         // co-located plugin sub-commands (Model 3)
 	Discovery      *RemoteDiscoveryDef // plugin auto-discovery on the root command (nil = off)
+}
+
+// FlagGroupKind names a cross-flag presence rule. The value is the spec's `kind`.
+type FlagGroupKind string
+
+const (
+	// FlagGroupMutuallyExclusive: at most one of the group's flags may be set.
+	FlagGroupMutuallyExclusive FlagGroupKind = "mutually_exclusive"
+	// FlagGroupRequiredTogether: set all of the group's flags, or none.
+	FlagGroupRequiredTogether FlagGroupKind = "required_together"
+	// FlagGroupOneOf: exactly one of the group's flags must be set.
+	FlagGroupOneOf FlagGroupKind = "one_of"
+	// FlagGroupAtLeastOne: at least one of the group's flags must be set.
+	FlagGroupAtLeastOne FlagGroupKind = "at_least_one"
+)
+
+// FlagGroup is a constraint on which of a command's flags may (or must) appear
+// together on the command line. Flags are referenced by their logical Name; "set"
+// means explicitly provided on argv (a default or env/config fallback does not count,
+// matching the convention of cobra/clap). Enforced by the rtk parser; a violation is
+// a usage error.
+type FlagGroup struct {
+	Kind  FlagGroupKind
+	Flags []string // logical flag names that make up the group
 }
 
 // RemoteDef describes a remote/co-located sub-command (kubectl/git plugin
@@ -74,13 +99,14 @@ type RemoteDiscoveryDef struct {
 // ProgramHandlers method name the runtime invokes (via reflection) to obtain
 // this command's [CommandHandlers].
 type CommandDef struct {
-	Name      string
-	Aliases   []string
-	Handler   string // ProgramHandlers method, e.g. "RotiniGenerate"
-	Flags     []FlagDef
-	Arguments []ArgDef
-	Commands  []CommandDef
-	Discovery *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
+	Name       string
+	Aliases    []string
+	Handler    string // ProgramHandlers method, e.g. "RotiniGenerate"
+	Flags      []FlagDef
+	Arguments  []ArgDef
+	FlagGroups []FlagGroup // cross-flag presence rules validated at parse time
+	Commands   []CommandDef
+	Discovery  *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
 }
 
 // Constraints carries the optional JSON-schema-style validation bounds a spec may

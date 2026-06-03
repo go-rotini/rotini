@@ -87,6 +87,9 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 	if err := validate(chain, store); err != nil {
 		return err
 	}
+	if err := validateFlagGroups(chain, rtx.Args()); err != nil {
+		return err
+	}
 
 	// 4. env + config → the Env/Config sub-structs, from independent registries
 	//    (so an env var never leaks into a config field, or vice versa); recon

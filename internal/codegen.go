@@ -458,6 +458,9 @@ func renderDefinition(gp *genProgram) string {
 	if al := argDefsLiteral(gp.rootInputs); al != "" {
 		b.WriteString("Arguments: " + al + ",\n")
 	}
+	if fg := flagGroupsLiteral(gp.rootInputs); fg != "" {
+		b.WriteString("FlagGroups: " + fg + ",\n")
+	}
 	if gp.versionVar != "" {
 		b.WriteString("Version: " + gp.versionVar + ",\n")
 	}
@@ -605,6 +608,21 @@ func argDefsLiteral(in *Inputs) string {
 		}
 		writeSchemaCommon(&b, a.Schema)
 		b.WriteString("},\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// flagGroupsLiteral renders the []rotini.FlagGroup literal for a command's flag
+// groups, or "" when none are declared.
+func flagGroupsLiteral(in *Inputs) string {
+	if in == nil || len(in.FlagGroups) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[]" + rotiniPkgName + ".FlagGroup{\n")
+	for _, g := range in.FlagGroups {
+		b.WriteString("{Kind: " + strconv.Quote(g.Kind) + ", Flags: " + goStringSlice(g.Flags) + "},\n")
 	}
 	b.WriteString("}")
 	return b.String()

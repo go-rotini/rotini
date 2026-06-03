@@ -9,15 +9,14 @@ import (
 	"github.com/go-rotini/rotini/rtk"
 )
 
-type rotiniValidateHandlers struct{}
+type rotiniValidateHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
 
 var _ rotini.CommandHandlers = (*rotiniValidateHandlers)(nil)
-
-func (*rotiniValidateHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-}
-
-func (*rotiniValidateHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
-}
 
 func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
@@ -41,10 +40,4 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.Exit(1)
 		return
 	}
-}
-
-func (*rotiniValidateHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
-}
-
-func (*rotiniValidateHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 }

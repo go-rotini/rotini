@@ -378,6 +378,50 @@ func TestParse_nonSecretValueStillShown(t *testing.T) {
 	}
 }
 
+func TestParse_flagGroups(t *testing.T) {
+	def := func(kind rotini.FlagGroupKind) rotini.Definition {
+		return rotini.Definition{
+			Name: "app", Handler: "App",
+			Flags: []rotini.FlagDef{
+				{Name: "json", Identifiers: []string{"--json"}, Type: "bool"},
+				{Name: "yaml", Identifiers: []string{"--yaml"}, Type: "bool"},
+			},
+			FlagGroups: []rotini.FlagGroup{{Kind: kind, Flags: []string{"json", "yaml"}}},
+		}
+	}
+	cases := []struct {
+		name    string
+		kind    rotini.FlagGroupKind
+		argv    []string
+		wantErr string // "" = should pass
+	}{
+		{"exclusive: both → err", rotini.FlagGroupMutuallyExclusive, []string{"--json", "--yaml"}, "mutually exclusive"},
+		{"exclusive: one → ok", rotini.FlagGroupMutuallyExclusive, []string{"--json"}, ""},
+		{"exclusive: none → ok", rotini.FlagGroupMutuallyExclusive, nil, ""},
+		{"together: one → err", rotini.FlagGroupRequiredTogether, []string{"--json"}, "must be used together"},
+		{"together: both → ok", rotini.FlagGroupRequiredTogether, []string{"--json", "--yaml"}, ""},
+		{"together: none → ok", rotini.FlagGroupRequiredTogether, nil, ""},
+		{"one_of: none → err", rotini.FlagGroupOneOf, nil, "exactly one"},
+		{"one_of: one → ok", rotini.FlagGroupOneOf, []string{"--yaml"}, ""},
+		{"one_of: both → err", rotini.FlagGroupOneOf, []string{"--json", "--yaml"}, "mutually exclusive"},
+		{"at_least_one: none → err", rotini.FlagGroupAtLeastOne, nil, "at least one"},
+		{"at_least_one: one → ok", rotini.FlagGroupAtLeastOne, []string{"--json"}, ""},
+		{"at_least_one: both → ok", rotini.FlagGroupAtLeastOne, []string{"--json", "--yaml"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var in struct{}
+			err := NewParser().Parse(rotini.NewContextFor(def(c.kind), c.argv), &in)
+			switch {
+			case c.wantErr == "" && err != nil:
+				t.Errorf("Parse(%v) = %v, want ok", c.argv, err)
+			case c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)):
+				t.Errorf("Parse(%v) = %v, want error containing %q", c.argv, err, c.wantErr)
+			}
+		})
+	}
+}
+
 // TestParse_clusteredShortFlags covers POSIX short-flag grouping in every shape:
 // joined booleans, separate flags, an attached value, a next-token value, and
 // mixes — they should all "just work".

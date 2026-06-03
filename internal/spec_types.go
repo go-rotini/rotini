@@ -127,6 +127,13 @@ type EnvInput struct {
 	Schema *InputSchema `json:"schema,omitempty"`
 }
 
+// A constraint on which of this command's flags may (or must) be set together. 'flags' references flag logical names; 'set' means explicitly provided on the command line (a default or env/config fallback does not count).
+type FlagGroup struct {
+	Flags []string `json:"flags"`
+	// mutually_exclusive: at most one set. required_together: all or none. one_of: exactly one. at_least_one: one or more.
+	Kind string `json:"kind"`
+}
+
 type FlagInput struct {
 	// Deprecation message; the flag is annotated as deprecated in generated help.
 	Deprecated string `json:"deprecated,omitempty"`
@@ -175,6 +182,8 @@ type Inputs struct {
 	Config []ConfigInput `json:"config,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
+	// Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).
+	FlagGroups []FlagGroup `json:"flag_groups,omitempty"`
 	// Flag inputs for this command
 	Flags []FlagInput `json:"flags,omitempty"`
 	// Declares expected stdin format and schema for this command

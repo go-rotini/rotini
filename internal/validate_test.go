@@ -118,6 +118,25 @@ func TestValidate_remoteTimeoutAccepted(t *testing.T) {
 	}
 }
 
+func TestValidate_flagGroupUnknownFlag(t *testing.T) {
+	// A flag_groups entry referencing a flag the command doesn't declare is rejected.
+	spec := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: json\n" +
+		"        schema: { type: bool }\n" +
+		"    flag_groups:\n" +
+		"      - kind: mutually_exclusive\n" +
+		"        flags: [json, nope]\n"
+	path := writeTemp(t, "spec.yaml", spec)
+	err := Validate(path, "", "")
+	if err == nil || !strings.Contains(err.Error(), "unknown flag") || !strings.Contains(err.Error(), "nope") {
+		t.Errorf("Validate(flag group with unknown flag) = %v, want an unknown-flag error", err)
+	}
+}
+
 func TestValidate_verbatimHelpString(t *testing.T) {
 	// command.help / spec.help is a plain string (the verbatim page).
 	spec := validSpecHeader + "command:\n  name: demo\n  help: |\n    my exact help page\n"

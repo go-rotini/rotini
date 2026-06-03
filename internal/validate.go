@@ -95,6 +95,7 @@ func Validate(specPath, confPath, failMode string) error {
 			if spec, err := ReadSpec(specPath); err == nil {
 				problems = append(problems, lintImportConsistency(spec)...)
 				problems = append(problems, lintLocalTimeout(spec)...)
+				problems = append(problems, lintFlagGroups(spec)...)
 			}
 		}
 	}
@@ -221,6 +222,47 @@ func lintLocalTimeout(spec *Spec) []error {
 				loc:  "command " + path,
 				msg:  "timeout is not supported on a local command — it is a remote-only, host-side bound with no effect here; set it on a remote_commands entry's timeout instead",
 			})
+		}
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			seg := child.Name
+			if seg == "" {
+				seg = child.Ref
+			}
+			walk(child, path+"/"+seg)
+		}
+	}
+	name := spec.Command.Name
+	if name == "" {
+		name = "(root)"
+	}
+	walk(&spec.Command, name)
+	return problems
+}
+
+// lintFlagGroups checks that every flag_groups entry references flags that actually
+// exist on the same command (a typo'd flag name would otherwise silently never match
+// at runtime). One problem per bad reference, in tree order.
+func lintFlagGroups(spec *Spec) []error {
+	var problems []error
+	var walk func(c *Command, path string)
+	walk = func(c *Command, path string) {
+		if c.Inputs != nil && len(c.Inputs.FlagGroups) > 0 {
+			known := map[string]bool{}
+			for _, f := range c.Inputs.Flags {
+				known[f.Name] = true
+			}
+			for _, g := range c.Inputs.FlagGroups {
+				for _, name := range g.Flags {
+					if !known[name] {
+						problems = append(problems, &violationError{
+							kind: "spec",
+							loc:  "command " + path,
+							msg:  fmt.Sprintf("flag_groups (%s) references unknown flag %q — it has no matching entry in this command's flags", g.Kind, name),
+						})
+					}
+				}
+			}
 		}
 		for i := range c.Commands {
 			child := &c.Commands[i]

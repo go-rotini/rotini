@@ -94,7 +94,10 @@ func (p *Parser) Parse(rtx *rotini.Context, out any) error {
 	if err != nil {
 		return err
 	}
-	return validate(chain, store)
+	if err := validate(chain, store); err != nil {
+		return err
+	}
+	return validateFlagGroups(chain, rtx.Args())
 }
 
 // parseBind parses argv into a store and binds it into out, but performs no
@@ -324,6 +327,75 @@ func redactValue(v string, secret bool) string {
 		return "[redacted]"
 	}
 	return v
+}
+
+// validateFlagGroups enforces each command's cross-flag presence rules (mutually
+// exclusive / required together / one-of / at-least-one). "Set" means explicitly
+// provided on argv — a default or env/config fallback does not count (matching the
+// command-line-presence convention of cobra/clap). Each violation is a usage error.
+func validateFlagGroups(chain []rotini.ResolvedCommand, argv []string) error {
+	for _, f := range chain {
+		for _, g := range f.FlagGroups {
+			all := make([]string, 0, len(g.Flags))
+			var set []string
+			for _, name := range g.Flags {
+				label := "--" + name
+				provided := false
+				if fd, ok := findFlagDef(f.Flags, name); ok {
+					label = flagLabel(fd)
+					provided = flagWasSet(argv, fd.Identifiers)
+				}
+				all = append(all, label)
+				if provided {
+					set = append(set, label)
+				}
+			}
+			if err := checkFlagGroup(g.Kind, set, all); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkFlagGroup applies one group's rule given the labels set and the full membership.
+func checkFlagGroup(kind rotini.FlagGroupKind, set, all []string) error {
+	switch kind {
+	case rotini.FlagGroupMutuallyExclusive:
+		if len(set) > 1 {
+			return &usageError{msg: "flags " + joinAnd(set) + " are mutually exclusive"}
+		}
+	case rotini.FlagGroupRequiredTogether:
+		if n := len(set); n > 0 && n < len(all) {
+			return &usageError{msg: "flags " + strings.Join(all, ", ") + " must be used together"}
+		}
+	case rotini.FlagGroupOneOf:
+		switch {
+		case len(set) == 0:
+			return &usageError{msg: "exactly one of " + strings.Join(all, ", ") + " is required"}
+		case len(set) > 1:
+			return &usageError{msg: "flags " + joinAnd(set) + " are mutually exclusive"}
+		}
+	case rotini.FlagGroupAtLeastOne:
+		if len(set) == 0 {
+			return &usageError{msg: "at least one of " + strings.Join(all, ", ") + " is required"}
+		}
+	}
+	return nil
+}
+
+// joinAnd formats a list as "a", "a and b", or "a, b, and c".
+func joinAnd(items []string) string {
+	switch len(items) {
+	case 0:
+		return ""
+	case 1:
+		return items[0]
+	case 2:
+		return items[0] + " and " + items[1]
+	default:
+		return strings.Join(items[:len(items)-1], ", ") + ", and " + items[len(items)-1]
+	}
 }
 
 func isNumericType(typ string) bool { return typ == "int" || typ == "float64" }

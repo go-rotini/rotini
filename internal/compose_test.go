@@ -341,6 +341,35 @@ command:
 	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"), `Name: "token"`, "Secret: true")
 }
 
+func TestGenerate_flagGroupsInDefinition(t *testing.T) {
+	tmp := initTestModule(t)
+	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+command:
+  name: app
+  inputs:
+    flags:
+      - name: json
+        identifiers: [--json]
+        schema: { type: bool }
+      - name: yaml
+        identifiers: [--yaml]
+        schema: { type: bool }
+    flag_groups:
+      - kind: mutually_exclusive
+        flags: [json, yaml]
+`
+	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
+
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),
+		"FlagGroups:", `Kind: "mutually_exclusive"`, `Flags: []string{"json", "yaml"}`)
+}
+
 func mustNotContain(t *testing.T, path string, subs ...string) {
 	t.Helper()
 	data, err := os.ReadFile(path)

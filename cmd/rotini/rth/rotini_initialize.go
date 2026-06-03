@@ -10,15 +10,14 @@ import (
 	"github.com/go-rotini/rotini/rtk"
 )
 
-type rotiniInitializeHandlers struct{}
+type rotiniInitializeHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
 
 var _ rotini.CommandHandlers = (*rotiniInitializeHandlers)(nil)
-
-func (*rotiniInitializeHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-}
-
-func (*rotiniInitializeHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
-}
 
 func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
@@ -67,12 +66,6 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.Exit(1)
 		return
 	}
-}
-
-func (*rotiniInitializeHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
-}
-
-func (*rotiniInitializeHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 }
 
 // runInitWizard walks the user through the inputs `rotini init` needs — the binary
