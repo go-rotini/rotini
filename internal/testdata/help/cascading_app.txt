@@ -1,0 +1,10 @@
+Usage:
+  app <command> [flags]
+
+Commands:
+  run       run it
+  deploy    deploy it
+
+Flags:
+  -v,--verbose    verbose logging
+  --root-only     root-only flag

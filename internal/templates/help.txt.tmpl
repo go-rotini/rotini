@@ -15,10 +15,12 @@
          .Invocation     full command path, e.g. "rotini generate"
          .Usage          spec declarative (may be empty)
          .UsageDerived   spec computed (always set)
-         .Headings.{Usage,Commands,Arguments,Flags,Examples}
+         .Headings.{Usage,Commands,Arguments,Flags,Cascading,Examples}
+                       resolved heading text, colon included (override is verbatim)
          .Commands[]   {.Name .Summary .Aliases .Deprecated}
          .Arguments[]  {.Name .Summary .Required .Variadic .Default .Enum .Deprecated}
          .Flags[]      {.Identifiers .Summary .Type .Required .Default .Enum .Deprecated}
+         .Cascading[]  same shape as .Flags — cascading flags inherited from ancestors
          .Examples[]   strings
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last.
@@ -30,23 +32,27 @@
 
 {{end -}}
 {{- $usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}
-{{- with $usage}}{{$.Headings.Usage}}:
+{{- with $usage}}{{$.Headings.Usage}}
 {{indent 2 .}}
 
 {{end -}}
-{{- with .Commands}}{{$.Headings.Commands}}:
+{{- with .Commands}}{{$.Headings.Commands}}
 {{range .}}  {{.Name}}{{with .Aliases}};{{join . ";"}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
-{{- with .Arguments}}{{$.Headings.Arguments}}:
+{{- with .Arguments}}{{$.Headings.Arguments}}
 {{range .}}  {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
-{{- with .Flags}}{{$.Headings.Flags}}:
+{{- with .Flags}}{{$.Headings.Flags}}
 {{range .}}  {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
-{{- with .Examples}}{{$.Headings.Examples}}:
+{{- with .Cascading}}{{$.Headings.Cascading}}
+{{range .}}  {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Examples}}{{$.Headings.Examples}}
 {{range .}}  {{.}}
 {{end}}
 {{end -}}

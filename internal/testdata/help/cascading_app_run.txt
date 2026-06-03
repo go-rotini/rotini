@@ -1,0 +1,8 @@
+Usage:
+  app run [flags]
+
+Flags:
+  -j,--jobs int    parallelism
+
+Global Flags:
+  -v,--verbose    verbose logging

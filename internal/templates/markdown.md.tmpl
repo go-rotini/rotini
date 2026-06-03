@@ -6,7 +6,7 @@
        trailing newline.
 
        DATA (see helpData): .Header .Summary .Description .Footer .Invocation
-         .Usage/.UsageDerived .Commands[] .Arguments[] .Flags[] .Examples[]
+         .Usage/.UsageDerived .Commands[] .Arguments[] .Flags[] .Cascading[] .Examples[]
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
 # {{.Invocation}}
@@ -38,6 +38,12 @@
 {{end -}}
 {{- with .Flags}}
 ## Flags
+
+{{range .}}- `{{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}`{{with .Summary}} — {{.}}{{end}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} _(deprecated: {{.}})_{{end}}
+{{end}}
+{{end -}}
+{{- with .Cascading}}
+## Global Flags
 
 {{range .}}- `{{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}`{{with .Summary}} — {{.}}{{end}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} _(deprecated: {{.}})_{{end}}
 {{end}}

@@ -1,0 +1,8 @@
+Usage:
+  app deploy [flags]
+
+Flags:
+  --target string    where to deploy
+
+Inherited Flags
+  -v,--verbose    verbose logging

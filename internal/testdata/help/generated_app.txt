@@ -7,7 +7,7 @@ A second paragraph.
 Usage:
   app <command> [flags]
 
-Subcommands:
+Subcommands
   build;b;bld    build things
   oldcmd         an old command (deprecated: use build instead)
 

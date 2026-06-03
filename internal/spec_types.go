@@ -135,6 +135,8 @@ type FlagGroup struct {
 }
 
 type FlagInput struct {
+	// When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: all flags already resolve up the command chain at runtime regardless of this setting; cascading controls whether descendants document it.
+	Cascading bool `json:"cascading,omitempty"`
 	// Deprecation message; the flag is annotated as deprecated in generated help.
 	Deprecated string `json:"deprecated,omitempty"`
 	// When true, the flag is omitted from generated help (it still parses on the command line).
@@ -152,6 +154,8 @@ type FlagInput struct {
 // Section heading overrides for generated help pages.
 type HelpHeadings struct {
 	Arguments string `json:"arguments,omitempty"`
+	// Heading for the cascading-flags section on descendant pages. Defaults to 'Global Flags:'. The value is rendered verbatim, so include a trailing ':' if you want one.
+	Cascading string `json:"cascading,omitempty"`
 	Commands  string `json:"commands,omitempty"`
 	Examples  string `json:"examples,omitempty"`
 	Flags     string `json:"flags,omitempty"`

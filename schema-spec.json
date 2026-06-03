@@ -180,6 +180,10 @@
         "flags": {
           "type": "string"
         },
+        "cascading": {
+          "type": "string",
+          "description": "Heading for the cascading-flags section on descendant pages. Defaults to 'Global Flags:'. The value is rendered verbatim, so include a trailing ':' if you want one."
+        },
         "examples": {
           "type": "string"
         }
@@ -351,6 +355,11 @@
           "type": "boolean",
           "default": false,
           "description": "When true, the flag is omitted from generated help (it still parses on the command line)."
+        },
+        "cascading": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: all flags already resolve up the command chain at runtime regardless of this setting; cascading controls whether descendants document it."
         },
         "deprecated": {
           "type": "string",

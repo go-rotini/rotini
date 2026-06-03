@@ -168,7 +168,7 @@ const helpGoldenCustomTmpl = `{{- with .Summary}}{{upper .}}
 {{repeat 20 "="}}
 {{- with .Flags}}
 
-{{$.Headings.Flags}}:
+{{$.Headings.Flags}}
 {{range .}}  {{join .Identifiers ", "}} :: {{.Summary}}
 {{end}}
 {{end -}}
@@ -212,5 +212,56 @@ func TestHelpGolden_Verbatim(t *testing.T) {
 	assertHelpGolden(t, goldenDir, "verbatim_app_run.txt", readFileString(t, filepath.Join(helpDir, "app_run.txt")))
 	if _, err := os.Stat(filepath.Join(helpDir, "help.txt.tmpl")); !os.IsNotExist(err) {
 		t.Errorf("template should not be seeded when every command is verbatim (err=%v)", err)
+	}
+}
+
+// helpGoldenCascadingSpec: a root with one cascading flag (--verbose) and one
+// non-cascading flag (--root-only), plus two children. 'run' uses the default
+// cascading heading; 'deploy' overrides it with a colon-free value.
+const helpGoldenCascadingSpec = goldenSpecSchema +
+	`command:
+  name: app
+  summary: the app
+  inputs:
+    flags:
+      - name: verbose
+        summary: verbose logging
+        identifiers: [-v, --verbose]
+        cascading: true
+        schema: { type: bool }
+      - name: rootonly
+        summary: root-only flag
+        identifiers: [--root-only]
+        schema: { type: bool }
+  commands:
+    - name: run
+      summary: run it
+      inputs:
+        flags:
+          - name: jobs
+            summary: parallelism
+            identifiers: [-j, --jobs]
+            schema: { type: int }
+    - name: deploy
+      summary: deploy it
+      headings:
+        cascading: Inherited Flags
+      inputs:
+        flags:
+          - name: target
+            summary: where to deploy
+            identifiers: [--target]
+            schema: { type: string }
+`
+
+// TestHelpGolden_Cascading locks the cascading-flags reporting: a cascading flag
+// is advertised on descendants under the 'Global Flags:' section (default heading),
+// the root itself shows no such section, a non-cascading root flag never leaks down,
+// and headings.cascading overrides the heading verbatim (no forced colon).
+func TestHelpGolden_Cascading(t *testing.T) {
+	goldenDir := helpGoldenDir(t)
+	helpDir := genHelp(t, helpGoldenCascadingSpec, "")
+	for _, f := range []string{"app.txt", "app_run.txt", "app_deploy.txt"} {
+		assertHelpGolden(t, goldenDir, "cascading_"+f, readFileString(t, filepath.Join(helpDir, f)))
 	}
 }

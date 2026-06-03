@@ -75,9 +75,11 @@ type helpNode struct {
 	data     helpData // rendering inputs (used when verbatim == "")
 }
 
-// helpHeadings holds the resolved section headings (defaults applied).
+// helpHeadings holds the resolved section headings (defaults applied). Each value
+// is rendered verbatim by the template — the trailing ":" lives in the value (the
+// defaults carry it), so an override can drop or restyle it.
 type helpHeadings struct {
-	Usage, Commands, Arguments, Flags, Examples string
+	Usage, Commands, Arguments, Flags, Cascading, Examples string
 }
 
 // helpData is the per-command template context. Fields are exported because
@@ -94,6 +96,7 @@ type helpData struct {
 	Commands     []helpCmdRow  // visible direct children
 	Arguments    []helpArgRow  // visible own arguments
 	Flags        []helpFlagRow // visible own flags
+	Cascading    []helpFlagRow // visible cascading flags inherited from ancestor commands
 	Examples     []string
 }
 
@@ -181,11 +184,13 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootName,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree),
+		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree, nil),
 	}}
 
-	var walk func(nodes []rnode, identChain [][]string, names []string)
-	walk = func(nodes []rnode, identChain [][]string, names []string) {
+	// cascading carries the cascading flags accumulated from a node's ancestors
+	// (the root's own cascading flags seed the root's children, and so on down).
+	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []helpFlagRow)
+	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []helpFlagRow) {
 		for _, n := range nodes {
 			seg := append([]string{n.name}, n.aliases...)
 			childChain := append(append([][]string{}, identChain...), seg)
@@ -197,12 +202,13 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     buildHelpData(invocation, n.help, n.inputs, n.children),
+				data:     buildHelpData(invocation, n.help, n.inputs, n.children, cascading),
 			})
-			walk(n.children, childChain, childNames)
+			childCascading := append(append([]helpFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
+			walk(n.children, childChain, childNames, childCascading)
 		}
 	}
-	walk(gp.tree, nil, nil)
+	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs))
 	return out
 }
 
@@ -250,7 +256,9 @@ func writeCompletionFiles(lay layout, dir, prog string, nodes []helpNode) error 
 // resolveHeadings applies the section-heading defaults, overriding with any set
 // in the spec.
 func resolveHeadings(h cmdHelp) helpHeadings {
-	hd := helpHeadings{Usage: "Usage", Commands: "Commands", Arguments: "Arguments", Flags: "Flags", Examples: "Examples"}
+	// Defaults carry the trailing ":" so an override is rendered verbatim — a spec
+	// author can drop or restyle the colon (the template adds nothing).
+	hd := helpHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Cascading: "Global Flags:", Examples: "Examples:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -267,6 +275,9 @@ func resolveHeadings(h cmdHelp) helpHeadings {
 	if o.Flags != "" {
 		hd.Flags = o.Flags
 	}
+	if o.Cascading != "" {
+		hd.Cascading = o.Cascading
+	}
 	if o.Examples != "" {
 		hd.Examples = o.Examples
 	}
@@ -275,7 +286,7 @@ func resolveHeadings(h cmdHelp) helpHeadings {
 
 // buildHelpData assembles the template context for one command from its help
 // fields, inputs, and direct children. Hidden children/inputs are excluded.
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode) helpData {
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, ancestorCascading []helpFlagRow) helpData {
 	d := helpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
@@ -284,6 +295,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Description: h.Description,
 		Usage:       h.Usage,
 		Footer:      h.Footer,
+		Cascading:   ancestorCascading,
 		Examples:    h.Examples,
 	}
 	for _, c := range children {
@@ -316,19 +328,42 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if f.Hidden {
 				continue
 			}
-			d.Flags = append(d.Flags, helpFlagRow{
-				Identifiers: flagIdentifiers(f),
-				Summary:     f.Summary,
-				Type:        flagDisplayType(f.Schema),
-				Required:    f.Schema != nil && f.Schema.Required,
-				Default:     schemaDefaultString(f.Schema),
-				Enum:        enumOf(f.Schema),
-				Deprecated:  f.Deprecated,
-			})
+			d.Flags = append(d.Flags, flagRow(f))
 		}
 	}
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children))
 	return d
+}
+
+// flagRow builds the help-row for a single flag (shared by a command's own Flags
+// section and the Cascading section it contributes to its descendants).
+func flagRow(f FlagInput) helpFlagRow {
+	return helpFlagRow{
+		Identifiers: flagIdentifiers(f),
+		Summary:     f.Summary,
+		Type:        flagDisplayType(f.Schema),
+		Required:    f.Schema != nil && f.Schema.Required,
+		Default:     schemaDefaultString(f.Schema),
+		Enum:        enumOf(f.Schema),
+		Deprecated:  f.Deprecated,
+	}
+}
+
+// cascadingFlagsOf returns the help-rows for a command's own flags marked
+// cascading: true (and not hidden) — the flags it advertises on its descendants'
+// pages. Order follows declaration order, matching the Flags section.
+func cascadingFlagsOf(inputs *Inputs) []helpFlagRow {
+	if inputs == nil {
+		return nil
+	}
+	var rows []helpFlagRow
+	for _, f := range inputs.Flags {
+		if f.Hidden || !f.Cascading {
+			continue
+		}
+		rows = append(rows, flagRow(f))
+	}
+	return rows
 }
 
 // deriveUsage builds the default usage line: invocation, a <command> slot when
