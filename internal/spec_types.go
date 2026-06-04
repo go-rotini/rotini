@@ -66,6 +66,8 @@ type Command struct {
 	Commands []Command `json:"commands,omitempty"`
 	// Deprecation message; the command is annotated as deprecated in its parent's generated Commands list.
 	Deprecated string `json:"deprecated,omitempty"`
+	// Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected.
+	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
 	// Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set.
 	Description string `json:"description,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
@@ -161,6 +163,8 @@ type FlagInput struct {
 	Cascading bool `json:"cascading,omitempty"`
 	// Deprecation message; the flag is annotated as deprecated in generated help.
 	Deprecated string `json:"deprecated,omitempty"`
+	// CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rtk's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input.
+	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
 	// When true, the flag is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
 	// CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is auto-derived.

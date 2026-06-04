@@ -103,6 +103,54 @@ func (p *Parser) Parse(rtx *rotini.Context, out any) error {
 	return validateFlagDependencies(chain, rtx.Args())
 }
 
+// Deprecation is a deprecated CLI token found in this invocation's argv: the specific
+// deprecated identifier/alias used, the kind of input, and that input's logical name. It
+// is pure identification — the framework attaches no message and does nothing with it; the
+// handler decides (print a warning, emit telemetry, fail the run, ignore). It implements
+// error so it can be returned or printed directly.
+type Deprecation struct {
+	Kind       string // "flag" or "command"
+	Name       string // the input's logical name (the flag/command name)
+	Identifier string // the deprecated token actually used on argv (e.g. "--conf", "build")
+}
+
+func (d Deprecation) Error() string {
+	return fmt.Sprintf("deprecated %s identifier %q was used", d.Kind, d.Identifier)
+}
+
+// Deprecations scans this invocation's argv against the spec's deprecated_identifiers and
+// returns each deprecated token that was actually used — a command invoked via a deprecated
+// alias, or a flag set via a deprecated identifier (the non-deprecated spellings are
+// unaffected). It is a data feed only: the framework prints nothing; the handler decides
+// what to do with each (warn, telemetry, exit, ignore). It does not parse and holds no
+// parser state — call it any time the context's chain is resolved (typically after Parse).
+func (p *Parser) Deprecations(rtx *rotini.Context) []Deprecation {
+	if rtx == nil {
+		return nil
+	}
+	argv := rtx.Args()
+	var out []Deprecation
+	for _, frame := range rtx.Chain() {
+		// A command invoked via one of its deprecated aliases (frame.Matched is the token
+		// that resolved it).
+		for _, alias := range frame.DeprecatedIdentifiers {
+			if frame.Matched == alias {
+				out = append(out, Deprecation{Kind: "command", Name: frame.Name, Identifier: alias})
+				break
+			}
+		}
+		// A flag set via one of its deprecated identifiers.
+		for _, fd := range frame.Flags {
+			for _, id := range fd.DeprecatedIdentifiers {
+				if flagWasSet(argv, []string{id}) {
+					out = append(out, Deprecation{Kind: "flag", Name: fd.Name, Identifier: id})
+				}
+			}
+		}
+	}
+	return out
+}
+
 // parseBind parses argv into a store and binds it into out, but performs no
 // required/enum/constraint validation — that is [validate]'s job. It is the shared
 // front half of [Parser.Parse] (which then validates the argv-only store) and of the
@@ -128,7 +176,9 @@ func (p *Parser) parseBind(rtx *rotini.Context, out any) (*parsedInputs, []rotin
 	if err != nil {
 		return nil, nil, err
 	}
-	bindInputs(rv.Elem(), store)
+	if err := bindInputs(rv.Elem(), store, chain); err != nil {
+		return nil, nil, err
+	}
 	return store, chain, nil
 }
 
@@ -690,40 +740,49 @@ func levenshtein(a, b string) int {
 // the leaf, so each command's inputs come from the right frame no matter how deep
 // it was reached — including a statically-composed subtree reached under extra
 // parent frames, which simply go unbound.
-func bindInputs(v reflect.Value, p *parsedInputs) {
+func bindInputs(v reflect.Value, p *parsedInputs, chain []rotini.ResolvedCommand) error {
 	if v.Kind() != reflect.Struct {
-		return
+		return nil
 	}
 	offset := len(p.scopes) - v.NumField()
 	if offset < 0 {
-		return // the struct names more commands than the chain has frames
+		return nil // the struct names more commands than the chain has frames
 	}
 	for i := range v.NumField() {
-		bindCommandInputs(v.Field(i), p.scopes[offset+i])
+		if err := bindCommandInputs(v.Field(i), p.scopes[offset+i], chain[offset+i]); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // bindCommandInputs fills a <Cmd>CommandInputs struct's Flags and Arguments.
-func bindCommandInputs(v reflect.Value, si scopeInputs) {
+func bindCommandInputs(v reflect.Value, si scopeInputs, frame rotini.ResolvedCommand) error {
 	if v.Kind() != reflect.Struct {
-		return
+		return nil
 	}
 	t := v.Type()
 	for i := range v.NumField() {
 		switch t.Field(i).Name {
 		case "Flags":
-			bindFlags(v.Field(i), si.flags)
+			if err := bindFlags(v.Field(i), si.flags, frame.Flags); err != nil {
+				return err
+			}
 		case "Arguments":
-			bindArgs(v.Field(i), si.args)
+			if err := bindArgs(v.Field(i), si.args); err != nil {
+				return err
+			}
 		}
 	}
+	return nil
 }
 
 // bindFlags fills a <Cmd>Flags struct by matching each field's `rotini:"<name>"`
-// tag against the parsed flag values.
-func bindFlags(v reflect.Value, flags map[string][]string) {
+// tag against the parsed flag values, surfacing a coercion failure as a usage error
+// naming the flag (by its CLI identifiers).
+func bindFlags(v reflect.Value, flags map[string][]string, defs []rotini.FlagDef) error {
 	if v.Kind() != reflect.Struct {
-		return
+		return nil
 	}
 	t := v.Type()
 	for i := range v.NumField() {
@@ -731,31 +790,55 @@ func bindFlags(v reflect.Value, flags map[string][]string) {
 		if name == "" {
 			continue
 		}
-		if raw, ok := flags[name]; ok {
-			coerce(v.Field(i), raw)
+		raw, ok := flags[name]
+		if !ok {
+			continue
+		}
+		if err := coerce(v.Field(i), raw); err != nil {
+			return &usageError{msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
 		}
 	}
+	return nil
+}
+
+// labelForFlag is a flag's CLI label (its identifiers) for error messages, falling back
+// to the logical name when the definition isn't found.
+func labelForFlag(defs []rotini.FlagDef, name string) string {
+	for _, d := range defs {
+		if d.Name == name {
+			return flagLabel(d)
+		}
+	}
+	return name
 }
 
 // bindArgs fills a <Cmd>Arguments struct positionally; a trailing []string field
-// is variadic and absorbs all remaining positionals.
-func bindArgs(v reflect.Value, args []string) {
+// is variadic and absorbs all remaining positionals. A coercion failure is a usage
+// error naming the argument.
+func bindArgs(v reflect.Value, args []string) error {
 	if v.Kind() != reflect.Struct {
-		return
+		return nil
 	}
+	t := v.Type()
 	idx := 0
 	for i := range v.NumField() {
 		f := v.Field(i)
+		label := "<" + t.Field(i).Tag.Get("rotini") + ">"
 		if f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String {
-			coerce(f, args[min(idx, len(args)):])
+			if err := coerce(f, args[min(idx, len(args)):]); err != nil {
+				return &usageError{msg: fmt.Sprintf("%s: %v", label, err)}
+			}
 			idx = len(args)
 			continue
 		}
 		if idx < len(args) {
-			coerce(f, args[idx:idx+1])
+			if err := coerce(f, args[idx:idx+1]); err != nil {
+				return &usageError{msg: fmt.Sprintf("%s: %v", label, err)}
+			}
 			idx++
 		}
 	}
+	return nil
 }
 
 var (
@@ -763,69 +846,88 @@ var (
 	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
 )
 
-// coerce sets f from the raw string value(s). It is best-effort: malformed values
-// (which validation should have rejected) leave the field at its zero value rather
-// than panicking.
-func coerce(f reflect.Value, raw []string) {
+// coerce sets f from the raw string value(s), returning an error when a value cannot be
+// parsed into f's type — including a custom type's own [encoding.TextUnmarshaler] error,
+// the per-type parse+validate hook. (The caller turns that into a usage error naming the
+// flag/argument.) It never panics: an unparseable value is reported, not silently zeroed.
+func coerce(f reflect.Value, raw []string) error {
 	if len(raw) == 0 {
-		return
+		return nil
 	}
 	if f.Kind() == reflect.Pointer {
 		if f.IsNil() {
 			f.Set(reflect.New(f.Type().Elem()))
 		}
-		coerce(f.Elem(), raw)
-		return
+		return coerce(f.Elem(), raw)
 	}
 	last := raw[len(raw)-1]
 
 	if f.Type() == durationType {
-		if d, err := time.ParseDuration(last); err == nil {
-			f.SetInt(int64(d))
+		d, err := time.ParseDuration(last)
+		if err != nil {
+			return notValid(last, "duration")
 		}
-		return
+		f.SetInt(int64(d))
+		return nil
 	}
 	if f.CanAddr() && f.Addr().Type().Implements(textUnmarshalerType) {
-		_ = f.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(last))
-		return
+		if err := f.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(last)); err != nil {
+			return fmt.Errorf("%q is not a valid %s (%w)", last, f.Type(), err)
+		}
+		return nil
 	}
 
 	switch f.Kind() {
 	case reflect.Bool:
-		if b, err := strconv.ParseBool(last); err == nil {
-			f.SetBool(b)
+		b, err := strconv.ParseBool(last)
+		if err != nil {
+			return notValid(last, "boolean")
 		}
+		f.SetBool(b)
 	case reflect.String:
 		f.SetString(last)
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if n, err := strconv.ParseInt(last, 10, 64); err == nil {
-			f.SetInt(n)
+		n, err := strconv.ParseInt(last, 10, 64)
+		if err != nil {
+			return notValid(last, "integer")
 		}
+		f.SetInt(n)
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		if n, err := strconv.ParseUint(last, 10, 64); err == nil {
-			f.SetUint(n)
+		n, err := strconv.ParseUint(last, 10, 64)
+		if err != nil {
+			return notValid(last, "non-negative integer")
 		}
+		f.SetUint(n)
 	case reflect.Float32, reflect.Float64:
-		if x, err := strconv.ParseFloat(last, 64); err == nil {
-			f.SetFloat(x)
+		x, err := strconv.ParseFloat(last, 64)
+		if err != nil {
+			return notValid(last, "number")
 		}
+		f.SetFloat(x)
 	case reflect.Slice:
 		if f.Type().Elem().Kind() == reflect.String {
 			f.Set(reflect.ValueOf(append([]string{}, raw...)))
 		}
 	case reflect.Map:
-		coerceMap(f, raw)
+		return coerceMap(f, raw)
 	}
+	return nil
+}
+
+// notValid is the standard "value isn't a <type>" coercion error.
+func notValid(value, typeName string) error {
+	return fmt.Errorf("%q is not a valid %s", value, typeName)
 }
 
 // coerceMap fills a string-keyed map field from raw "key=value" pairs (one per repeated
 // flag occurrence), splitting on the first '='. The value is coerced into the map's
 // element type (string/int/…); an `any` element stores the raw string. Later pairs win
-// on a duplicate key. Malformed (no '=') pairs are skipped — validation rejects them.
-func coerceMap(f reflect.Value, raw []string) {
+// on a duplicate key. Malformed (no '=') pairs are skipped — validation rejects them. A
+// value that doesn't parse into the element type is returned as an error.
+func coerceMap(f reflect.Value, raw []string) error {
 	kt := f.Type().Key()
 	if kt.Kind() != reflect.String {
-		return // only string-keyed maps are supported
+		return nil // only string-keyed maps are supported
 	}
 	et := f.Type().Elem()
 	m := reflect.MakeMapWithSize(f.Type(), len(raw))
@@ -837,10 +939,11 @@ func coerceMap(f reflect.Value, raw []string) {
 		ev := reflect.New(et).Elem()
 		if ev.Kind() == reflect.Interface {
 			ev.Set(reflect.ValueOf(v))
-		} else {
-			coerce(ev, []string{v})
+		} else if err := coerce(ev, []string{v}); err != nil {
+			return fmt.Errorf("value for key %q: %w", k, err)
 		}
 		m.SetMapIndex(reflect.ValueOf(k).Convert(kt), ev)
 	}
 	f.Set(m)
+	return nil
 }

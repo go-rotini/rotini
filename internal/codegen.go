@@ -589,6 +589,9 @@ func flagDefsLiteral(in *Inputs) string {
 		b.WriteString("{Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(ids))
 		b.WriteString(", Type: " + strconv.Quote(schemaType(f.Schema)))
 		writeSchemaCommon(&b, f.Schema)
+		if len(f.DeprecatedIdentifiers) > 0 {
+			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
+		}
 		b.WriteString("},\n")
 	}
 	b.WriteString("}")

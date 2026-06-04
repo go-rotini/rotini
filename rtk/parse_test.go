@@ -422,6 +422,117 @@ func TestParse_flagGroups(t *testing.T) {
 	}
 }
 
+func TestParser_deprecations(t *testing.T) {
+	// A migration: command 'build' renamed to 'compile' (old name kept as a deprecated
+	// alias); flag --conf renamed to --config (old identifier kept but deprecated).
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Commands: []rotini.CommandDef{{
+			Name: "compile", Handler: "AppCompile",
+			Aliases:               []string{"build"},
+			DeprecatedIdentifiers: []string{"build"},
+			Flags: []rotini.FlagDef{
+				{Name: "config", Identifiers: []string{"--config", "--conf"}, Type: "string", DeprecatedIdentifiers: []string{"--conf"}},
+			},
+		}},
+	}
+	type inputs struct {
+		App     struct{ Flags, Arguments struct{} }
+		Compile struct {
+			Flags struct {
+				Config string `rotini:"config"`
+			}
+			Arguments struct{}
+		}
+	}
+	depsFor := func(argv ...string) []Deprecation {
+		rtx := rotini.NewContextFor(def, argv)
+		var in inputs
+		p := NewParser()
+		if err := p.Parse(rtx, &in); err != nil {
+			t.Fatalf("parse %v: %v", argv, err)
+		}
+		return p.Deprecations(rtx)
+	}
+
+	// Deprecation implements error, so a handler can return/print it.
+	var _ error = Deprecation{}
+
+	// Old alias 'build' + old flag spelling '--conf' → both reported, with the exact token.
+	deps := depsFor("build", "--conf", "x")
+	if len(deps) != 2 {
+		t.Fatalf("Deprecations(build --conf) = %v, want 2", deps)
+	}
+	var sawCmd, sawFlag bool
+	for _, d := range deps {
+		if d.Kind == "command" && d.Name == "compile" && d.Identifier == "build" {
+			sawCmd = true
+		}
+		if d.Kind == "flag" && d.Name == "config" && d.Identifier == "--conf" {
+			sawFlag = true
+		}
+	}
+	if !sawCmd {
+		t.Errorf("deprecated command alias 'build' not reported: %v", deps)
+	}
+	if !sawFlag {
+		t.Errorf("deprecated flag identifier '--conf' not reported: %v", deps)
+	}
+
+	// The current name + current flag spelling → nothing deprecated.
+	if got := depsFor("compile", "--config", "x"); len(got) != 0 {
+		t.Errorf("Deprecations(compile --config) = %v, want none", got)
+	}
+}
+
+func TestParse_coercionErrors(t *testing.T) {
+	def := rotini.Definition{
+		Name: "app", Handler: "App",
+		Flags: []rotini.FlagDef{
+			{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"},
+			{Name: "ttl", Identifiers: []string{"--ttl"}, Type: "time.Duration"},
+			{Name: "when", Identifiers: []string{"--when"}, Type: "time.Time"}, // custom: TextUnmarshaler
+		},
+		Arguments: []rotini.ArgDef{{Name: "n", Type: "int"}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Count int           `rotini:"count"`
+				TTL   time.Duration `rotini:"ttl"`
+				When  time.Time     `rotini:"when"`
+			}
+			Arguments struct {
+				N int `rotini:"n"`
+			}
+		}
+	}
+	parse := func(argv ...string) error {
+		var in inputs
+		return NewParser().Parse(rotini.NewContextFor(def, argv), &in)
+	}
+
+	cases := []struct {
+		argv []string
+		want string // substring; "" = should parse
+	}{
+		{[]string{"--count", "abc"}, "-c"},         // built-in int: was silently 0, now errors (label = first identifier)
+		{[]string{"--ttl", "soon"}, "--ttl"},       // built-in duration
+		{[]string{"--when", "tomorrow"}, "--when"}, // custom type (TextUnmarshaler error surfaced)
+		{[]string{"notanint"}, "<n>"},              // positional argument coercion
+		{[]string{"-c", "5", "42"}, ""},            // all valid → no error
+	}
+	for _, c := range cases {
+		err := parse(c.argv...)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("parse %v = %v, want ok", c.argv, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), "is not a valid")):
+			t.Errorf("parse %v = %v, want a coercion error mentioning %q", c.argv, err, c.want)
+		}
+	}
+}
+
 func TestParse_mapFlag(t *testing.T) {
 	def := rotini.Definition{
 		Name: "app", Handler: "App",
@@ -862,7 +973,8 @@ type runInputs struct {
 // parsing.
 func bindStore[T any](store *parsedInputs) T {
 	var out T
-	bindInputs(reflect.ValueOf(&out).Elem(), store)
+	chain := make([]rotini.ResolvedCommand, len(store.scopes))
+	_ = bindInputs(reflect.ValueOf(&out).Elem(), store, chain)
 	return out
 }
 

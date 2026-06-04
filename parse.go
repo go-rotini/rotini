@@ -12,15 +12,17 @@ import (
 // against the exact command whose handler ran — including for a statically
 // composed child, whose chain is relative to its own root.
 type ResolvedCommand struct {
-	Name             string
-	Handler          string
-	Flags            []FlagDef
-	Arguments        []ArgDef
-	FlagGroups       []FlagGroup
-	FlagDependencies []FlagDependency
-	Commands         []CommandDef
-	Remotes          []RemoteDef
-	Discovery        *RemoteDiscoveryDef
+	Name                  string
+	Handler               string
+	Matched               string   // the argv token that resolved this command (name or an alias); "" for the root
+	DeprecatedIdentifiers []string // aliases of this command that are deprecated
+	Flags                 []FlagDef
+	Arguments             []ArgDef
+	FlagGroups            []FlagGroup
+	FlagDependencies      []FlagDependency
+	Commands              []CommandDef
+	Remotes               []RemoteDef
+	Discovery             *RemoteDiscoveryDef
 }
 
 func rootFrame(def Definition) ResolvedCommand {
@@ -34,7 +36,7 @@ func rootFrame(def Definition) ResolvedCommand {
 
 func cmdFrame(c CommandDef) ResolvedCommand {
 	return ResolvedCommand{
-		Name: c.Name, Handler: c.Handler,
+		Name: c.Name, Handler: c.Handler, DeprecatedIdentifiers: c.DeprecatedIdentifiers,
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Discovery: c.Discovery,
@@ -74,7 +76,9 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *remoteDisp
 		}
 		cur := chain[len(chain)-1]
 		if child, ok := findChild(cur, tok); ok {
-			chain = append(chain, cmdFrame(child))
+			frame := cmdFrame(child)
+			frame.Matched = tok // record the token used (name or alias) for deprecation detection
+			chain = append(chain, frame)
 			continue
 		}
 		if rd, ok := findRemote(cur, tok); ok {

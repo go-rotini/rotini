@@ -35,18 +35,19 @@ type genProgram struct {
 
 // rnode is one node of the resolved command tree used to render the Definition.
 type rnode struct {
-	name       string
-	prefix     string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
-	aliases    []string
-	inputs     *Inputs
-	help       cmdHelp          // flattened help fields; for a composed root, from the child spec
-	output     *Schema          // command's output type (own commands only; nil for composed)
-	discovery  *RemoteDiscovery // command's plugin discovery (nil = off)
-	hidden     bool             // omit from the parent's generated Commands list
-	group      string           // group label that buckets this command in the parent's Commands list
-	deprecated string           // deprecation note for the parent's Commands list
-	composed   bool             // grafted from a $ref'd child (its types live in the child's rtg)
-	children   []rnode
+	name                  string
+	prefix                string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
+	aliases               []string
+	inputs                *Inputs
+	help                  cmdHelp          // flattened help fields; for a composed root, from the child spec
+	output                *Schema          // command's output type (own commands only; nil for composed)
+	discovery             *RemoteDiscovery // command's plugin discovery (nil = off)
+	hidden                bool             // omit from the parent's generated Commands list
+	group                 string           // group label that buckets this command in the parent's Commands list
+	deprecated            string           // deprecation note for the parent's Commands list (help annotation)
+	deprecatedIdentifiers []string         // deprecated aliases of this command (runtime Deprecations)
+	composed              bool             // grafted from a $ref'd child (its types live in the child's rtg)
+	children              []rnode
 }
 
 // composedCmd is a command supplied by a composed child: the parent's rollup
@@ -181,18 +182,19 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			return nil, err
 		}
 		out = append(out, rnode{
-			name:       c.Name,
-			prefix:     prefix,
-			aliases:    c.Aliases,
-			inputs:     c.Inputs,
-			help:       commandHelp(c),
-			output:     c.Output,
-			discovery:  c.RemoteDiscovery,
-			hidden:     c.Hidden,
-			group:      c.Group,
-			deprecated: c.Deprecated,
-			composed:   ctx.composed,
-			children:   children,
+			name:                  c.Name,
+			prefix:                prefix,
+			aliases:               c.Aliases,
+			inputs:                c.Inputs,
+			help:                  commandHelp(c),
+			output:                c.Output,
+			discovery:             c.RemoteDiscovery,
+			hidden:                c.Hidden,
+			group:                 c.Group,
+			deprecated:            c.Deprecated,
+			deprecatedIdentifiers: c.DeprecatedIdentifiers,
+			composed:              ctx.composed,
+			children:              children,
 		})
 	}
 	if err := checkCollisions(out); err != nil {
@@ -256,7 +258,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, group: c.Group, deprecated: c.Deprecated, composed: true, children: children}, nil
+	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, group: c.Group, deprecated: c.Deprecated, deprecatedIdentifiers: c.DeprecatedIdentifiers, composed: true, children: children}, nil
 }
 
 // composeNestedRef handles a `$ref` encountered *inside* an already-composed subtree
@@ -365,6 +367,9 @@ func rnodesLiteral(host string, nodes []rnode) string {
 		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
 		if len(n.aliases) > 0 {
 			b.WriteString("Aliases: " + goStringSlice(n.aliases) + ",\n")
+		}
+		if len(n.deprecatedIdentifiers) > 0 {
+			b.WriteString("DeprecatedIdentifiers: " + goStringSlice(n.deprecatedIdentifiers) + ",\n")
 		}
 		if fl := flagDefsLiteral(n.inputs); fl != "" {
 			b.WriteString("Flags: " + fl + ",\n")

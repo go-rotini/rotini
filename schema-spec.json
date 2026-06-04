@@ -75,6 +75,13 @@
             "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
           }
         },
+        "deprecated_identifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected."
+        },
         "timeout": {
           "type": "string",
           "description": "Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)"
@@ -403,6 +410,13 @@
             "type": "string",
             "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$"
           }
+        },
+        "deprecated_identifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rtk's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input."
         }
       }
     },

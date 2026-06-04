@@ -108,15 +108,16 @@ type RemoteDiscoveryDef struct {
 // ProgramHandlers method name the runtime invokes (via reflection) to obtain
 // this command's [CommandHandlers].
 type CommandDef struct {
-	Name             string
-	Aliases          []string
-	Handler          string // ProgramHandlers method, e.g. "RotiniGenerate"
-	Flags            []FlagDef
-	Arguments        []ArgDef
-	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
-	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
-	Commands         []CommandDef
-	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
+	Name                  string
+	Aliases               []string
+	Handler               string   // ProgramHandlers method, e.g. "RotiniGenerate"
+	DeprecatedIdentifiers []string // aliases (subset of Aliases) that rtk's Deprecations reports when used to invoke
+	Flags                 []FlagDef
+	Arguments             []ArgDef
+	FlagGroups            []FlagGroup      // cross-flag presence rules validated at parse time
+	FlagDependencies      []FlagDependency // conditional cross-flag requirements validated at parse time
+	Commands              []CommandDef
+	Discovery             *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
 }
 
 // Constraints carries the optional JSON-schema-style validation bounds a spec may
@@ -140,13 +141,14 @@ type Constraints struct {
 // FlagDef describes a single flag of a command. Name is the logical name and
 // matches the `rotini:"<name>"` tag on the corresponding generated input field.
 type FlagDef struct {
-	Name        string
-	Identifiers []string // CLI forms, e.g. {"--loud", "-l"}
-	Type        string   // resolved Go type, e.g. "bool", "string", "[]string", "int", "time.Duration"
-	Required    bool
-	Default     string
-	Enum        []string
-	Secret      bool // when true, the value is redacted in usage/validation error output
+	Name                  string
+	Identifiers           []string // CLI forms, e.g. {"--loud", "-l"}
+	Type                  string   // resolved Go type, e.g. "bool", "string", "[]string", "int", "time.Duration"
+	Required              bool
+	Default               string
+	Enum                  []string
+	Secret                bool     // when true, the value is redacted in usage/validation error output
+	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that rtk's Deprecations reports when used
 	Constraints
 }
 

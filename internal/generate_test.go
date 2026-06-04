@@ -282,6 +282,34 @@ func TestGenerateOutputTypes(t *testing.T) {
 // TestGenerateInputImports verifies the spec `import:` key drives the framework
 // file's import block: explicit imports (stdlib + third-party + aliased) are emitted,
 // rotini's own time-family aliases auto-import "time", and duplicates dedupe.
+func TestGenerateDeprecated(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: app\n" +
+		"  commands:\n" +
+		"    - name: compile\n" +
+		"      aliases: [build]\n" +
+		"      deprecated_identifiers: [build]\n" +
+		"      inputs:\n" +
+		"        flags:\n" +
+		"          - name: config\n" +
+		"            identifiers: [--config, --conf]\n" +
+		"            deprecated_identifiers: [--conf]\n" +
+		"            schema: { type: string }\n"
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	mustContain(t, filepath.Join(tmp, "rtg", "rotini.go"),
+		`DeprecatedIdentifiers: []string{"build"}`,  // command-level → CommandDef
+		`DeprecatedIdentifiers: []string{"--conf"}`, // flag-level → FlagDef
+	)
+}
+
 func TestGenerateMapFlag(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
