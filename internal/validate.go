@@ -98,6 +98,7 @@ func Validate(specPath, confPath, failMode string) error {
 				problems = append(problems, lintFlagGroups(spec)...)
 				problems = append(problems, lintFlagDependencies(spec)...)
 				problems = append(problems, lintDuplicateFlagIdentifiers(spec)...)
+				problems = append(problems, lintSchemaRefs(spec)...)
 			}
 		}
 	}
@@ -251,17 +252,19 @@ func lintFlagGroups(spec *Spec) []error {
 	walk = func(c *Command, path string) {
 		if c.Inputs != nil && len(c.Inputs.FlagGroups) > 0 {
 			known := map[string]bool{}
+			flagNames := make([]string, 0, len(c.Inputs.Flags))
 			for _, f := range c.Inputs.Flags {
 				known[f.Name] = true
+				flagNames = append(flagNames, f.Name)
 			}
 			for _, g := range c.Inputs.FlagGroups {
 				for _, name := range g.Flags {
 					if !known[name] {
-						problems = append(problems, &violationError{
-							kind: "spec",
-							loc:  "command " + path,
-							msg:  fmt.Sprintf("flag_groups (%s) references unknown flag %q — it has no matching entry in this command's flags", g.Kind, name),
-						})
+						msg := fmt.Sprintf("flag_groups (%s) references unknown flag %q — it has no matching entry in this command's flags", g.Kind, name)
+						if s := closestName(name, flagNames); s != "" {
+							msg += fmt.Sprintf("; did you mean %q?", s)
+						}
+						problems = append(problems, &violationError{kind: "spec", loc: "command " + path, msg: msg})
 					}
 				}
 			}
@@ -292,15 +295,17 @@ func lintFlagDependencies(spec *Spec) []error {
 	walk = func(c *Command, path string) {
 		if c.Inputs != nil && len(c.Inputs.FlagDependencies) > 0 {
 			known := map[string]bool{}
+			flagNames := make([]string, 0, len(c.Inputs.Flags))
 			for _, f := range c.Inputs.Flags {
 				known[f.Name] = true
+				flagNames = append(flagNames, f.Name)
 			}
 			report := func(name string) {
-				problems = append(problems, &violationError{
-					kind: "spec",
-					loc:  "command " + path,
-					msg:  fmt.Sprintf("flag_dependencies references unknown flag %q — it has no matching entry in this command's flags", name),
-				})
+				msg := fmt.Sprintf("flag_dependencies references unknown flag %q — it has no matching entry in this command's flags", name)
+				if s := closestName(name, flagNames); s != "" {
+					msg += fmt.Sprintf("; did you mean %q?", s)
+				}
+				problems = append(problems, &violationError{kind: "spec", loc: "command " + path, msg: msg})
 			}
 			for _, dep := range c.Inputs.FlagDependencies {
 				if !known[dep.When] {
@@ -374,6 +379,132 @@ func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 	}
 	walk(&spec.Command, name)
 	return problems
+}
+
+// lintSchemaRefs rejects an intra-document "$ref": "#/schemas/X" that points to a schema
+// the document doesn't declare — which would otherwise become an "undefined type X"
+// compile error in the generated code instead of a clear spec error. It walks every
+// place a ref can appear (each command's flag/argument/env/config/stdin input schemas and
+// output schema, plus the document-level schemas themselves, recursing into object
+// properties and array items) and offers the closest declared schema name as a suggestion.
+func lintSchemaRefs(spec *Spec) []error {
+	declared := map[string]bool{}
+	names := make([]string, 0, len(spec.Schemas))
+	for name := range spec.Schemas {
+		declared[name] = true
+		names = append(names, name)
+	}
+	var problems []error
+	reported := map[string]bool{}
+	checkAt := func(loc string) func(BaseSchema) {
+		return func(b BaseSchema) {
+			name := refTypeName(b.Ref)
+			if name == "" || declared[name] {
+				return
+			}
+			if key := name + "\x00" + loc; reported[key] {
+				return
+			} else {
+				reported[key] = true
+			}
+			msg := fmt.Sprintf("$ref %q points to an undeclared schema (no %q under the document-level \"schemas\")", b.Ref, name)
+			if s := closestName(name, names); s != "" {
+				msg += fmt.Sprintf("; did you mean %q?", s)
+			}
+			problems = append(problems, &violationError{kind: "spec", loc: loc, msg: msg})
+		}
+	}
+	feed := func(s *InputSchema, loc string) {
+		if s != nil {
+			walkSchemaRefs(s.BaseSchema, checkAt(loc))
+		}
+	}
+	var walkCmd func(c *Command, path string)
+	walkCmd = func(c *Command, path string) {
+		if c.Inputs != nil {
+			for i := range c.Inputs.Flags {
+				feed(c.Inputs.Flags[i].Schema, "command "+path+" flag "+c.Inputs.Flags[i].Name)
+			}
+			for i := range c.Inputs.Arguments {
+				feed(c.Inputs.Arguments[i].Schema, "command "+path+" argument "+c.Inputs.Arguments[i].Name)
+			}
+			for i := range c.Inputs.Env {
+				feed(c.Inputs.Env[i].Schema, "command "+path+" env "+c.Inputs.Env[i].Name)
+			}
+			for i := range c.Inputs.Config {
+				feed(c.Inputs.Config[i].Schema, "command "+path+" config "+c.Inputs.Config[i].Name)
+			}
+			if c.Inputs.Stdin != nil {
+				feed(c.Inputs.Stdin.Schema, "command "+path+" stdin")
+			}
+		}
+		if c.Output != nil {
+			walkSchemaRefs(c.Output.BaseSchema, checkAt("command "+path+" output"))
+		}
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			seg := child.Name
+			if seg == "" {
+				seg = child.Ref
+			}
+			walkCmd(child, path+"/"+seg)
+		}
+	}
+	rootName := spec.Command.Name
+	if rootName == "" {
+		rootName = "(root)"
+	}
+	walkCmd(&spec.Command, rootName)
+	for name := range spec.Schemas {
+		s := spec.Schemas[name]
+		walkSchemaRefs(s.BaseSchema, checkAt("schema "+name))
+	}
+	return problems
+}
+
+// walkSchemaRefs invokes visit for a schema and recurses into its object properties and
+// array items, so a "$ref" at any nesting depth is seen.
+func walkSchemaRefs(b BaseSchema, visit func(BaseSchema)) {
+	visit(b)
+	for _, p := range b.Properties {
+		walkSchemaRefs(p.BaseSchema, visit)
+	}
+	if b.Items != nil {
+		walkSchemaRefs(b.Items.BaseSchema, visit)
+	}
+}
+
+// levenshtein is the edit distance between a and b (Wagner–Fischer).
+func levenshtein(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
+}
+
+// closestName returns the candidate within edit distance 2 of target (the nearest typo
+// fix), or "" when none is close enough.
+func closestName(target string, candidates []string) string {
+	best, bestDist := "", 3
+	for _, c := range candidates {
+		if d := levenshtein(target, c); d < bestDist {
+			best, bestDist = c, d
+		}
+	}
+	return best
 }
 
 // walkSchemaImports records (type, import) for a schema and recurses into its

@@ -137,6 +137,60 @@ func TestValidate_flagGroupUnknownFlag(t *testing.T) {
 	}
 }
 
+func TestValidate_danglingSchemaRef(t *testing.T) {
+	// A $ref to a schema the document doesn't declare is rejected (it would otherwise be
+	// an "undefined type" compile error in the generated code), with a suggestion.
+	spec := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    config:\n" +
+		"      - name: server\n" +
+		"        schema: { $ref: '#/schemas/Endpiont' }\n" +
+		"schemas:\n" +
+		"  Endpoint:\n" +
+		"    type: object\n" +
+		"    properties:\n" +
+		"      host: { type: string }\n"
+	err := Validate(writeTemp(t, "spec.yaml", spec), "", "")
+	if err == nil || !strings.Contains(err.Error(), "undeclared schema") || !strings.Contains(err.Error(), `did you mean "Endpoint"`) {
+		t.Errorf("Validate(dangling $ref) = %v, want an undeclared-schema error suggesting Endpoint", err)
+	}
+
+	// A valid $ref to a declared schema passes.
+	ok := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    config:\n" +
+		"      - name: server\n" +
+		"        schema: { $ref: '#/schemas/Endpoint' }\n" +
+		"schemas:\n" +
+		"  Endpoint:\n" +
+		"    type: object\n"
+	if err := Validate(writeTemp(t, "ok.yaml", ok), "", ""); err != nil {
+		t.Errorf("Validate(valid $ref) = %v, want nil", err)
+	}
+}
+
+func TestValidate_flagGroupSuggestion(t *testing.T) {
+	// A flag_groups reference that's a near-typo of a real flag gets a "did you mean".
+	spec := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: json\n" +
+		"        schema: { type: bool }\n" +
+		"    flag_groups:\n" +
+		"      - kind: mutually_exclusive\n" +
+		"        flags: [json, jsno]\n"
+	err := Validate(writeTemp(t, "spec.yaml", spec), "", "")
+	if err == nil || !strings.Contains(err.Error(), `did you mean "json"`) {
+		t.Errorf("Validate(flag group typo) = %v, want a did-you-mean suggestion", err)
+	}
+}
+
 func TestValidate_flagDependencyUnknownFlag(t *testing.T) {
 	// A flag_dependencies entry whose 'requires' names a flag the command doesn't
 	// declare is rejected (the 'when' flag is checked the same way).
