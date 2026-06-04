@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/go-rotini/fs"
 )
 
 // CompletionTarget describes where a shell's completion script conventionally installs,
@@ -89,6 +91,47 @@ func CompletionInstallTarget(prog, shell string) (CompletionTarget, error) {
 		return CompletionTarget{}, fmt.Errorf("a shell is required (bash, zsh, fish, or powershell)")
 	default:
 		return CompletionTarget{}, fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell)", shell)
+	}
+}
+
+// InstallCompletion writes prog's completion script for shell to its conventional
+// location (the path [CompletionInstallTarget] resolves), creating the directory and
+// writing the file atomically, and returns the path written. script is the script bytes —
+// typically the program's embedded `Completion(shell)` resolver or [CompletionScript].
+//
+// Unlike [CompletionInstallTarget] (which only returns data), this DOES touch the user's
+// machine — so it is something a handler calls deliberately, never something rotini runs on
+// its own (Pillar 1). Confirmation is the handler's: prompt with [Prompter.Confirm] first if
+// you want one; rotini neither prompts nor logs here. The write is atomic (temp file then
+// rename, so an interruption never leaves a torn file) and the completion file is
+// rotini-managed, so re-installing simply overwrites it.
+//
+// Installable shells are bash, zsh, and fish, whose completions live in a writable file.
+// powershell loads completions from $PROFILE — a path the shell resolves, not one this can
+// write — so it returns an error pointing at the manual command from CompletionInstallTarget.
+//
+//	script, _ := rtg.Completion(shell)            // the embedded script
+//	path, err := rtk.InstallCompletion(prog, shell, script)
+//	if err != nil { /* handler owns it */ }
+//	pr.Success("installed %s completion to %s", shell, path)
+func InstallCompletion(prog, shell, script string) (string, error) {
+	switch shell {
+	case "bash", "zsh", "fish":
+		target, err := CompletionInstallTarget(prog, shell)
+		if err != nil {
+			return "", err
+		}
+		if err := fs.WriteString(target.Path, script, fs.WithMkdirAll(true), fs.WithAtomic(true)); err != nil {
+			return "", fmt.Errorf("rotini: install %s completion: %w", shell, err)
+		}
+		return target.Path, nil
+	case "powershell":
+		t, _ := CompletionInstallTarget(prog, "powershell")
+		return "", fmt.Errorf("rotini: cannot auto-install powershell completion ($PROFILE is resolved by the shell); run:\n  %s", t.Command)
+	case "":
+		return "", fmt.Errorf("a shell is required (bash, zsh, or fish)")
+	default:
+		return "", fmt.Errorf("unsupported shell %q (installable: bash, zsh, fish)", shell)
 	}
 }
 
