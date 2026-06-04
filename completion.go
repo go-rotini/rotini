@@ -118,11 +118,39 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 //	}
 //
 // It touches the filesystem (reading the candidate directories) on every call and is
-// best-effort: an unreadable directory contributes nothing rather than erroring.
+// best-effort: an unreadable directory contributes nothing rather than erroring. To learn
+// whether the author-configured discovery path itself failed, call [DiscoveryDiagnostics].
 func DiscoveredPlugins(cmd ResolvedCommand) []string {
+	plugins, _ := discoveredFor(cmd)
+	return plugins
+}
+
+// DiscoveryDiagnostics returns the problems encountered while scanning cmd's
+// author-configured discovery path (remote_discovery.path) for plugins — typically the
+// path is missing or unreadable. It returns nil when cmd has no discovery, discovery is
+// hidden, none is configured, or the configured path scanned cleanly. Incidental
+// locations — next to the binary and the entries of $PATH — are deliberately NOT reported:
+// a missing $PATH entry is normal, not a misconfiguration.
+//
+// It is the data feed for a health/`doctor` or completion handler that wants to tell the
+// author their discovery path is wrong. rotini surfaces the problem as data and prints no
+// warning itself — auto-printing here would both corrupt completion output and impose
+// behavior (Pillar 1). The handler decides whether and how to report it. Each error
+// carries the offending path and cause, so a caller can classify with
+// errors.Is(err, fs.ErrNotExist). Like [DiscoveredPlugins] it touches the filesystem on
+// each call.
+func DiscoveryDiagnostics(cmd ResolvedCommand) []error {
+	_, problems := discoveredFor(cmd)
+	return problems
+}
+
+// discoveredFor returns cmd's discovered plugin tokens (collision-filtered against its
+// declared sub-commands and remotes) plus any problems scanning the author-configured
+// discovery path. It is the shared core of [DiscoveredPlugins] and [DiscoveryDiagnostics].
+func discoveredFor(cmd ResolvedCommand) ([]string, []error) {
 	d := cmd.Discovery
 	if d == nil || d.Hidden {
-		return nil
+		return nil, nil
 	}
 	declared := map[string]bool{}
 	for _, c := range cmd.Commands {
@@ -137,13 +165,14 @@ func DiscoveredPlugins(cmd ResolvedCommand) []string {
 			declared[a] = true
 		}
 	}
+	all, problems := discoverPlugins(d)
 	var out []string
-	for _, plugin := range discoverPlugins(d) {
+	for _, plugin := range all {
 		if !declared[plugin] {
 			out = append(out, plugin)
 		}
 	}
-	return out
+	return out, problems
 }
 
 // dynamicFlagValues asks the handler of the command that declares the flag (owner) for
@@ -188,18 +217,23 @@ func dynamicFlagValues(handlers any, rtx *Context, chain []ResolvedCommand, word
 }
 
 // discoverPlugins lists the names (the part after the prefix) of `<prefix>*`
-// executables found next to the host binary, in d.Path, and on PATH — the
-// candidates plugin discovery exposes. Results are deduped and sorted; it is
-// best-effort and returns nothing on a read error.
-func discoverPlugins(d *RemoteDiscoveryDef) []string {
+// executables found next to the host binary, in d.Path, and on PATH — the candidates
+// plugin discovery exposes — deduped and sorted. It also returns any errors scanning the
+// author-configured d.Path (a missing or unreadable path); failures scanning the
+// incidental locations (the binary's own dir, $PATH entries) are ignored as normal.
+func discoverPlugins(d *RemoteDiscoveryDef) ([]string, []error) {
 	if d.Prefix == "" {
-		return nil
+		return nil, nil
 	}
 	seen := map[string]bool{}
 	var out []string
-	scan := func(dir string) {
+	var problems []error
+	scan := func(dir string, report bool) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
+			if report {
+				problems = append(problems, err)
+			}
 			return
 		}
 		for _, e := range entries {
@@ -219,18 +253,18 @@ func discoverPlugins(d *RemoteDiscoveryDef) []string {
 		}
 	}
 	if exe, err := os.Executable(); err == nil {
-		scan(filepath.Dir(exe))
+		scan(filepath.Dir(exe), false)
 	}
 	if d.Path != "" {
-		scan(d.Path)
+		scan(d.Path, true) // the author-configured path: a scan failure is a real diagnostic
 	}
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir != "" {
-			scan(dir)
+			scan(dir, false)
 		}
 	}
 	sort.Strings(out)
-	return out
+	return out, problems
 }
 
 func filterPrefix(candidates []string, prefix string) []string {

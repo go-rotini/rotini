@@ -3,6 +3,8 @@ package rotini
 import (
 	"bytes"
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -80,6 +82,55 @@ func TestDiscoveredPlugins(t *testing.T) {
 	// No discovery configured → nil.
 	if got := DiscoveredPlugins(ResolvedCommand{Name: "acme"}); got != nil {
 		t.Errorf("no discovery should yield nil, got %v", got)
+	}
+}
+
+// TestDiscoveryDiagnostics surfaces a misconfigured discovery path as data: a missing or
+// unreadable author-configured `path` is reported (with the offending path + cause), a
+// clean path reports nothing, and listing still works (DiscoveredPlugins never errors).
+func TestDiscoveryDiagnostics(t *testing.T) {
+	// A bad CONFIGURED path is a real diagnostic.
+	bad := ResolvedCommand{
+		Name:      "acme",
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: filepath.Join(t.TempDir(), "no-such-subdir")},
+	}
+	problems := DiscoveryDiagnostics(bad)
+	if len(problems) != 1 {
+		t.Fatalf("DiscoveryDiagnostics = %v, want exactly one problem for the missing path", problems)
+	}
+	if !errors.Is(problems[0], fs.ErrNotExist) {
+		t.Errorf("problem = %v, want a not-exist error a caller can classify", problems[0])
+	}
+	// Listing degrades gracefully: the bad path contributes nothing but never errors.
+	if got := DiscoveredPlugins(bad); got != nil {
+		t.Errorf("DiscoveredPlugins with only a bad path = %v, want nil", got)
+	}
+
+	// A clean configured path reports no problems.
+	clean := ResolvedCommand{
+		Name:      "acme",
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: t.TempDir()},
+	}
+	if probs := DiscoveryDiagnostics(clean); probs != nil {
+		t.Errorf("clean path produced diagnostics: %v", probs)
+	}
+
+	// No discovery → nil.
+	if probs := DiscoveryDiagnostics(ResolvedCommand{Name: "acme"}); probs != nil {
+		t.Errorf("no discovery produced diagnostics: %v", probs)
+	}
+}
+
+// Incidental scan locations are not reported: a missing $PATH entry is normal, not a
+// misconfiguration, so it must never surface as a diagnostic (only the configured path does).
+func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "missing-path-entry"))
+	cmd := ResolvedCommand{
+		Name:      "acme",
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, // no configured Path
+	}
+	if probs := DiscoveryDiagnostics(cmd); probs != nil {
+		t.Errorf("a bad $PATH entry was reported as a diagnostic: %v", probs)
 	}
 }
 
