@@ -47,10 +47,13 @@ type scopeInputs struct {
 }
 
 // usageError is a parse-time failure caused by bad input; handlers conventionally
-// map it to exit code 2 (the usual CLI usage-error code).
+// map it to exit code 2 (the usual CLI usage-error code). It unwraps to
+// [rotini.ErrUsage], so rotini.CategoryOf classifies it as rotini.CategoryUsage.
 type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
+
+func (e *usageError) Unwrap() error { return rotini.ErrUsage }
 
 // Parser is rotini's argument parser, and it is a *service*: a CLI binds it to the
 // context registry under the key "parser" so that (1) parsing is opt-in — a CLI

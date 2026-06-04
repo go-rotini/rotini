@@ -25,7 +25,10 @@ func (e *ServiceError) Error() string {
 	return fmt.Sprintf("rotini: no service bound under key %q", e.Key)
 }
 
-func (e *ServiceError) Unwrap() error { return ErrServiceNotFound }
+// Unwrap exposes both the [ErrServiceNotFound] sentinel and [ErrInternal], so a missing
+// service matches errors.Is for either — and [CategoryOf] classifies it as
+// [CategoryInternal] (a wiring bug, not the end-user's fault).
+func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, ErrInternal} }
 
 // Context is rotini's per-invocation context: the service registry plus the bits
 // the runtime resolves before dispatch — the raw argument vector (read via
