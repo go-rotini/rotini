@@ -81,6 +81,46 @@ func TestRun_discoveryDispatch(t *testing.T) {
 	}
 }
 
+// resolveRemoteBinary searches adjacent-to-executable → discovery dir → PATH, in that
+// order. This pins the dir > PATH precedence, the fall-through to PATH when dir misses,
+// and the not-found error naming all three locations. (The adjacent step uses the live
+// os.Executable() dir, which a test cannot seed, so the plugin name is one that never
+// sits beside the test binary — exercising the dir/PATH tail.)
+func TestResolveRemoteBinary_resolutionOrder(t *testing.T) {
+	const name = "rotini-resolveorder-plugin-xyz"
+
+	dir := t.TempDir()
+	dirBin := filepath.Join(dir, name)
+	if err := os.WriteFile(dirBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pathDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(pathDir, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", pathDir)
+
+	// dir (discovery path) wins over a same-named binary on PATH.
+	if got, err := resolveRemoteBinary(name, dir); err != nil {
+		t.Fatalf("resolve via dir: %v", err)
+	} else if got != dirBin {
+		t.Errorf("resolved %q, want the discovery-path copy %q (dir beats PATH)", got, dirBin)
+	}
+
+	// dir misses → fall through to PATH.
+	if got, err := resolveRemoteBinary(name, t.TempDir()); err != nil {
+		t.Fatalf("resolve via PATH: %v", err)
+	} else if filepath.Dir(got) != pathDir {
+		t.Errorf("resolved %q, want the PATH copy under %q", got, pathDir)
+	}
+
+	// Nowhere → an error naming every search location.
+	_, err := resolveRemoteBinary("rotini-absent-plugin-zzz", "")
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("absent binary: err = %v, want a 'not found' error", err)
+	}
+}
+
 func TestRun_discoveryMissing(t *testing.T) {
 	def := Definition{Name: "acme", Handler: "App", Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}}
 

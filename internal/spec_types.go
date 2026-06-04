@@ -72,6 +72,8 @@ type Command struct {
 	Description string `json:"description,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
 	Examples []string `json:"examples,omitempty"`
+	// Exit codes this command documents, rendered as an EXIT STATUS section in the man page. Data only: rotini sets no exit code itself (handlers own exits via rtx.Exit), so this section is whatever you declare. Ignored when 'man' (verbatim) is set.
+	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
 	// Text rendered at the bottom of the page. Ignored when 'help' is set.
 	Footer string `json:"footer,omitempty"`
 	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only.
@@ -98,6 +100,8 @@ type Command struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery.
 	RemoteDiscovery *RemoteDiscovery `json:"remote_discovery,omitempty"`
+	// Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.
+	SeeAlso []string `json:"see_also,omitempty"`
 	// Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page.
 	Summary string `json:"summary,omitempty"`
 	// Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
@@ -140,6 +144,13 @@ type EnvInput struct {
 	// Type definition and input-level metadata (required, default, variable)
 	Schema *InputSchema `json:"schema,omitempty"`
 	// Short one-liner shown next to this input in the generated Environment/Configuration help section.
+	Summary string `json:"summary,omitempty"`
+}
+
+type ExitStatusEntry struct {
+	// The process exit code this entry documents.
+	Code int `json:"code"`
+	// What this exit code means.
 	Summary string `json:"summary,omitempty"`
 }
 

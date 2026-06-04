@@ -167,6 +167,20 @@
         "remote_discovery": {
           "$ref": "#/definitions/RemoteDiscovery",
           "description": "Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery."
+        },
+        "exit_status": {
+          "type": "array",
+          "description": "Exit codes this command documents, rendered as an EXIT STATUS section in the man page. Data only: rotini sets no exit code itself (handlers own exits via rtx.Exit), so this section is whatever you declare. Ignored when 'man' (verbatim) is set.",
+          "items": {
+            "$ref": "#/definitions/ExitStatusEntry"
+          }
+        },
+        "see_also": {
+          "type": "array",
+          "description": "Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -703,6 +717,23 @@
         "schema": {
           "$ref": "#/definitions/Schema",
           "description": "When set, generates a typed config struct and validates required fields at load time."
+        }
+      }
+    },
+    "ExitStatusEntry": {
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "integer",
+          "description": "The process exit code this entry documents."
+        },
+        "summary": {
+          "type": "string",
+          "description": "What this exit code means."
         }
       }
     }

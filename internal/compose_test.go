@@ -234,6 +234,8 @@ command:
         schema: { type: int, minimum: 1, maximum: 65535 }
       - name: region
         schema: { type: string, minLength: 2, pattern: "^[a-z]+$" }
+      - name: tags
+        schema: { type: array, minItems: 1, maxItems: 3 }
     config:
       - name: name
         schema: { type: string, key: app.name, maxLength: 5 }
@@ -250,6 +252,7 @@ command:
 	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),
 		`min:"1"`, `max:"65535"`,
 		`minlen:"2"`, `pattern:"^[a-z]+$"`,
+		`minitems:"1"`, `maxitems:"3"`,
 		`maxlen:"5"`,
 	)
 }

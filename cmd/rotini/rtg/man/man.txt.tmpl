@@ -7,7 +7,7 @@
 
        DATA (see helpData): .Header .Summary .Description .Footer .Invocation
          .Usage/.UsageDerived .CommandGroups[] .Arguments[] .Flags[] .Environment[]
-         .Configuration[] .Cascading[] .Examples[]
+         .Configuration[] .Cascading[] .Examples[] .ExitStatus[] .SeeAlso[]
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
 {{- with .Header}}{{.}}
@@ -52,6 +52,14 @@ NAME
 {{- with .Examples}}EXAMPLES
 {{range .}}    {{.}}
 {{end}}
+{{end -}}
+{{- with .ExitStatus}}EXIT STATUS
+{{range .}}    {{.Code}}	{{.Summary}}
+{{end}}
+{{end -}}
+{{- with .SeeAlso}}SEE ALSO
+{{indent 4 (join . ", ")}}
+
 {{end -}}
 {{- with .Footer}}{{.}}
 {{end -}}

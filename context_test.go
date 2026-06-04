@@ -3,6 +3,8 @@ package rotini
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -63,4 +65,38 @@ func TestMustGet_panicsOnWrongType(t *testing.T) {
 	}()
 
 	_ = MustGet[*int](rtx, "buf") // bound, but not an *int → panics
+}
+
+// The registry is the DI seam shared by every hook, and concurrent tooling (tickers,
+// completers, a handler's own goroutines) may read and write it at once. This hammers
+// Bind/Has/Value/Get from many goroutines so the race detector proves the RWMutex
+// guards every path, and confirms all bindings survive the storm.
+func TestContext_concurrentRegistry(t *testing.T) {
+	rtx := NewContext()
+	const (
+		workers = 64
+		keys    = 8
+		iters   = 250
+	)
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for w := 0; w < workers; w++ {
+		go func(w int) {
+			defer wg.Done()
+			key := fmt.Sprintf("svc-%d", w%keys)
+			for i := 0; i < iters; i++ {
+				rtx.Bind(key, w)
+				_ = rtx.Has(key)
+				_ = rtx.Value(key)
+				_, _ = Get[int](rtx, key)
+			}
+		}(w)
+	}
+	wg.Wait()
+
+	for k := 0; k < keys; k++ {
+		if !rtx.Has(fmt.Sprintf("svc-%d", k)) {
+			t.Errorf("key svc-%d unbound after concurrent access", k)
+		}
+	}
 }

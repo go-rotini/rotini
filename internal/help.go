@@ -101,6 +101,15 @@ type helpData struct {
 	Configuration []helpConfigRow // visible config-value inputs
 	Cascading     []helpFlagRow   // visible cascading flags inherited from ancestor commands
 	Examples      []string
+	ExitStatus    []helpExitRow // documented exit codes (man EXIT STATUS section)
+	SeeAlso       []string      // cross-references (man SEE ALSO section)
+}
+
+// helpExitRow is one documented exit code in the man EXIT STATUS section. rotini
+// renders this data verbatim — it sets no exit code itself (handlers own exits).
+type helpExitRow struct {
+	Code    int
+	Summary string
 }
 
 // helpCmdGroup is one bucket of sub-commands in the Commands section. Title is the
@@ -192,9 +201,11 @@ type cmdHelp struct {
 	Footer      string
 	Headings    *HelpHeadings
 	Examples    []string
-	Help        string // verbatim help page (command.help)
-	Man         string // verbatim man page (command.man)
-	Markdown    string // verbatim markdown page (command.markdown)
+	ExitStatus  []ExitStatusEntry // command.exit_status (man EXIT STATUS section)
+	SeeAlso     []string          // command.see_also (man SEE ALSO section)
+	Help        string            // verbatim help page (command.help)
+	Man         string            // verbatim man page (command.man)
+	Markdown    string            // verbatim markdown page (command.markdown)
 }
 
 // commandHelp gathers the flattened doc-fields off a command (root or sub).
@@ -202,7 +213,8 @@ func commandHelp(c Command) cmdHelp {
 	return cmdHelp{
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
-		Examples: c.Examples, Help: c.Help, Man: c.Man, Markdown: c.Markdown,
+		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso,
+		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 	}
 }
 
@@ -337,6 +349,10 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		Footer:      h.Footer,
 		Cascading:   ancestorCascading,
 		Examples:    h.Examples,
+		SeeAlso:     h.SeeAlso,
+	}
+	for _, e := range h.ExitStatus {
+		d.ExitStatus = append(d.ExitStatus, helpExitRow{Code: e.Code, Summary: e.Summary})
 	}
 	var cmds []helpCmdRow
 	for _, c := range children {
@@ -786,6 +802,14 @@ func sanitizeHelpData(d helpData) helpData {
 	for i := range d.Configuration {
 		d.Configuration[i].Summary = clean(d.Configuration[i].Summary)
 		d.Configuration[i].Deprecated = clean(d.Configuration[i].Deprecated)
+	}
+	d.ExitStatus = append([]helpExitRow(nil), d.ExitStatus...)
+	for i := range d.ExitStatus {
+		d.ExitStatus[i].Summary = clean(d.ExitStatus[i].Summary)
+	}
+	d.SeeAlso = append([]string(nil), d.SeeAlso...)
+	for i := range d.SeeAlso {
+		d.SeeAlso[i] = clean(d.SeeAlso[i])
 	}
 	return d
 }

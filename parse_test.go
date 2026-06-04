@@ -1,6 +1,9 @@
 package rotini
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func chainNames(chain []ResolvedCommand) []string {
 	names := make([]string, len(chain))
@@ -19,6 +22,63 @@ func TestResolveChain_descendsAndSkipsFlagValues(t *testing.T) {
 	}
 	if got := chainNames(chain); len(got) != 2 || got[0] != "app" || got[1] != "run" {
 		t.Errorf("chain = %v, want [app run]", got)
+	}
+}
+
+// A command tree deeper than two levels resolves all the way to the leaf, with
+// flags (and their separate values) interleaved at every level and a trailing
+// positional stopping descent — the recursive descent isn't special-cased to one or
+// two levels.
+func TestResolveChain_deepThreeLevels(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "v", Identifiers: []string{"--v"}, Type: "bool"}},
+		Commands: []CommandDef{{
+			Name: "a", Handler: "A",
+			Flags: []FlagDef{{Name: "o", Identifiers: []string{"--o"}, Type: "string"}},
+			Commands: []CommandDef{{
+				Name: "b", Handler: "AB",
+				Commands: []CommandDef{{
+					Name:    "c",
+					Handler: "ABC",
+					Flags:   []FlagDef{{Name: "n", Identifiers: []string{"--n"}, Type: "int"}},
+				}},
+			}},
+		}},
+	}
+	// --v (bool, root) · a · --o x (string value at level a, x is not command b) ·
+	// b · c · --n 5 (int value at leaf c) · pos (first positional → stop).
+	chain, remote := resolveChain(def, []string{"--v", "a", "--o", "x", "b", "c", "--n", "5", "pos"})
+	if remote != nil {
+		t.Fatalf("unexpected remote dispatch: %+v", remote)
+	}
+	if got := chainNames(chain); !reflect.DeepEqual(got, []string{"app", "a", "b", "c"}) {
+		t.Errorf("chain = %v, want [app a b c]", got)
+	}
+}
+
+// "--" terminates command descent: every following token is positional, so neither a
+// declared sub-command, a remote command, nor plugin discovery fires after it.
+func TestResolveChain_doubleDashTerminator(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands:       []CommandDef{{Name: "run", Handler: "AppRun"}},
+		RemoteCommands: []RemoteDef{{Name: "ext", Binary: "app-ext"}},
+		Discovery:      &RemoteDiscoveryDef{Prefix: "app-"},
+	}
+	for _, name := range []string{"run", "ext", "anything"} {
+		chain, remote := resolveChain(def, []string{"--", name})
+		if remote != nil {
+			t.Errorf("%q after -- triggered a dispatch: %+v", name, remote)
+		}
+		if got := chainNames(chain); len(got) != 1 || got[0] != "app" {
+			t.Errorf("chain after [-- %s] = %v, want [app]", name, got)
+		}
+	}
+	// A "--" after a descended command stops further descent at that command.
+	chain, _ := resolveChain(def, []string{"run", "--", "sub"})
+	if got := chainNames(chain); !reflect.DeepEqual(got, []string{"app", "run"}) {
+		t.Errorf("chain = %v, want [app run] (sub after -- is positional)", got)
 	}
 }
 

@@ -699,6 +699,42 @@ func TestGenerateManMarkdownVerbatim(t *testing.T) {
 	}
 }
 
+// TestGenerateManExitStatusAndSeeAlso verifies the man EXIT STATUS / SEE ALSO
+// sections: a command's declared exit_status codes render as an aligned section and
+// its see_also entries as a comma-joined cross-reference. These are man-page
+// conventions, so they render in the man page but NOT in the markdown page (the
+// shared doc-data is available to every template; only man's default renders it).
+func TestGenerateManExitStatusAndSeeAlso(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manMarkdownConf)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"command:\n"+
+			"  name: mycli\n"+
+			"  summary: a tool\n"+
+			"  exit_status:\n"+
+			"    - { code: 0, summary: success }\n"+
+			"    - { code: 2, summary: a usage error }\n"+
+			"  see_also:\n"+
+			"    - mycli-build(1)\n"+
+			"    - https://example.com/docs\n")
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	manPath := filepath.Join(tmp, "rtg", "man", "mycli.txt")
+	mustContain(t, manPath,
+		"EXIT STATUS", "0", "success", "2", "a usage error",
+		"SEE ALSO", "mycli-build(1), https://example.com/docs",
+	)
+	// Man-page conventions: the markdown page does not render these sections.
+	mustNotContain(t, filepath.Join(tmp, "rtg", "markdown", "mycli.md"), "EXIT STATUS")
+	mustNotContain(t, filepath.Join(tmp, "rtg", "markdown", "mycli.md"), "SEE ALSO")
+}
+
 // TestGenerateHelpVerbatim verifies that a populated `help` string is written
 // EXACTLY as supplied — byte-for-byte, with no trailing-newline normalization (a
 // YAML `|-` strip block yields no trailing newline, and rotini keeps it that way) —

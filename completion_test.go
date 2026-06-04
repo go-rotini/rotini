@@ -99,6 +99,49 @@ func TestComplete(t *testing.T) {
 	}
 }
 
+// TestComplete_nestedSubcommands exercises completion below the first level: the
+// children (and aliases) of a depth-1 command, and flag-name aggregation across the
+// full root→…→leaf chain.
+func TestComplete_nestedSubcommands(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"--verbose"}, Type: "bool"}},
+		Commands: []CommandDef{{
+			Name: "remote", Handler: "AppRemote",
+			Flags: []FlagDef{{Name: "name", Identifiers: []string{"--name"}, Type: "string"}},
+			Commands: []CommandDef{
+				{
+					Name: "add", Handler: "AppRemoteAdd",
+					Flags: []FlagDef{{Name: "url", Identifiers: []string{"--url"}, Type: "string"}},
+				},
+				{Name: "remove", Handler: "AppRemoteRemove", Aliases: []string{"rm"}},
+			},
+		}},
+	}
+	cases := []struct {
+		name  string
+		words []string
+		want  []string
+	}{
+		{"children of a nested command", []string{"remote", ""}, []string{"add", "remove", "rm"}},
+		{"nested children prefix", []string{"remote", "re"}, []string{"remove"}},
+		// Flag completion aggregates the leaf's flags with every ancestor's.
+		{"flags across the deep chain", []string{"remote", "add", "-"}, []string{"--name", "--url", "--verbose"}},
+		{"a leaf has no sub-commands", []string{"remote", "add", "x"}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := complete(def, c.words, nil, nil)
+			if len(got) == 0 && len(c.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("complete(%v) = %v, want %v", c.words, got, c.want)
+			}
+		})
+	}
+}
+
 // TestComplete_noAutoHelpFlag pins the ethos: completion never auto-adds -h/--help.
 // They appear only when the CLI declares a help flag (Pillar 1 — no framework-injected
 // flags).
