@@ -84,32 +84,66 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 		return filterPrefix(ids, partial)
 	}
 
-	// Completing a sub-command or remote-command name.
+	// Completing a sub-command or remote-command name: the declared children +
+	// remotes, plus the runtime-discovered plugins (minus declared collisions).
 	var names []string
-	declared := map[string]bool{}
-	mark := func(n string) { declared[n] = true; names = append(names, n) }
 	for _, c := range cur.Commands {
-		mark(c.Name)
-		for _, a := range c.Aliases {
-			mark(a)
-		}
+		names = append(names, c.Name)
+		names = append(names, c.Aliases...)
 	}
 	for _, r := range cur.Remotes {
-		mark(r.Name)
-		for _, a := range r.Aliases {
-			mark(a)
-		}
+		names = append(names, r.Name)
+		names = append(names, r.Aliases...)
 	}
-	// Plugin discovery: offer `<prefix>*` executables (minus declared collisions),
-	// unless this command's discovery is hidden.
-	if d := cur.Discovery; d != nil && !d.Hidden {
-		for _, plugin := range discoverPlugins(d) {
-			if !declared[plugin] {
-				names = append(names, plugin)
-			}
-		}
-	}
+	names = append(names, DiscoveredPlugins(cur)...)
 	return filterPrefix(names, partial)
+}
+
+// DiscoveredPlugins returns the names of the plugins discovered for cmd's
+// remote-discovery config — the token each plugin is invoked by (e.g. "foo" for an
+// executable "<prefix>foo" found next to the binary, in the discovery path, or on
+// PATH) — with any name that collides with a declared sub-command, remote command, or
+// alias removed (the declared one wins, exactly as dispatch resolves it). It returns
+// nil when cmd has no discovery or discovery is hidden. Results are deduped and sorted.
+//
+// This is the data feed for surfacing runtime plugins in help. A program's help is
+// generated at codegen time and cannot know which plugins exist at runtime, so a help
+// handler that wants to list them reads the relevant command's discovery from
+// [Context.Chain] and calls this, then formats the result however it likes — rotini
+// renders nothing itself (Pillar 1). For example, in a `--help` handler:
+//
+//	chain := rtx.Chain()
+//	for _, name := range rotini.DiscoveredPlugins(chain[len(chain)-1]) {
+//		fmt.Fprintf(out, "  %s\n", name)
+//	}
+//
+// It touches the filesystem (reading the candidate directories) on every call and is
+// best-effort: an unreadable directory contributes nothing rather than erroring.
+func DiscoveredPlugins(cmd ResolvedCommand) []string {
+	d := cmd.Discovery
+	if d == nil || d.Hidden {
+		return nil
+	}
+	declared := map[string]bool{}
+	for _, c := range cmd.Commands {
+		declared[c.Name] = true
+		for _, a := range c.Aliases {
+			declared[a] = true
+		}
+	}
+	for _, r := range cmd.Remotes {
+		declared[r.Name] = true
+		for _, a := range r.Aliases {
+			declared[a] = true
+		}
+	}
+	var out []string
+	for _, plugin := range discoverPlugins(d) {
+		if !declared[plugin] {
+			out = append(out, plugin)
+		}
+	}
+	return out
 }
 
 // dynamicFlagValues asks the handler of the command that declares the flag (owner) for

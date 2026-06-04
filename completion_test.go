@@ -44,6 +44,67 @@ func TestComplete_discoversPlugins(t *testing.T) {
 	}
 }
 
+// TestDiscoveredPlugins covers the public data feed a help renderer uses to list
+// runtime plugins: discovered names minus declared collisions, nil for no/hidden
+// discovery, sorted + deduped.
+func TestDiscoveredPlugins(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"acme-foo", "acme-bar", "acme-zip", "unrelated"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := ResolvedCommand{
+		Name: "acme",
+		// "bar" collides with discovered acme-bar (declared wins → excluded);
+		// "ext"/"x" remote shadows nothing discovered here.
+		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}},
+		Remotes:   []RemoteDef{{Name: "ext", Aliases: []string{"x"}, Binary: "acme-ext"}},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+	}
+
+	got := DiscoveredPlugins(cmd)
+	if !reflect.DeepEqual(got, []string{"foo", "zip"}) {
+		t.Errorf("DiscoveredPlugins = %v, want [foo zip] (bar shadowed by declared command; unrelated unprefixed)", got)
+	}
+
+	// Hidden discovery → nil (the section is suppressed).
+	hidden := cmd
+	hd := *cmd.Discovery
+	hd.Hidden = true
+	hidden.Discovery = &hd
+	if got := DiscoveredPlugins(hidden); got != nil {
+		t.Errorf("hidden discovery should yield nil, got %v", got)
+	}
+
+	// No discovery configured → nil.
+	if got := DiscoveredPlugins(ResolvedCommand{Name: "acme"}); got != nil {
+		t.Errorf("no discovery should yield nil, got %v", got)
+	}
+}
+
+// TestDiscoveredPlugins_viaChain proves the documented help-handler seam: a handler
+// reads its command's discovery off rtx.Chain() and gets the runtime plugin list —
+// the path that closes static help's plugin blind spot (D-REMOTE-HELP).
+func TestDiscoveredPlugins_viaChain(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{"acme-foo", "acme-bar"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	def := Definition{
+		Name: "acme", Handler: "App",
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+	}
+	rtx := NewContextFor(def, nil) // what the runtime hands a handler
+	chain := rtx.Chain()
+	got := DiscoveredPlugins(chain[len(chain)-1])
+	if !reflect.DeepEqual(got, []string{"bar", "foo"}) {
+		t.Errorf("DiscoveredPlugins via rtx.Chain() = %v, want [bar foo]", got)
+	}
+}
+
 func countString(ss []string, want string) int {
 	n := 0
 	for _, s := range ss {

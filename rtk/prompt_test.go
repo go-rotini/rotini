@@ -2,7 +2,9 @@ package rtk
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 )
@@ -133,5 +135,116 @@ func TestPrompter_secretNonTerminalReadsLine(t *testing.T) {
 	p, _ := testPrompter("s3cret\n")
 	if got, err := p.Secret("Password"); err != nil || got != "s3cret" {
 		t.Errorf("Secret = %q, %v; want s3cret, nil", got, err)
+	}
+}
+
+// keyReader delivers one pre-split keystroke per Read, mimicking a raw terminal (where
+// each keypress arrives as its own read), then EOF.
+type keyReader struct {
+	chunks [][]byte
+	i      int
+}
+
+func (k *keyReader) Read(p []byte) (int, error) {
+	if k.i >= len(k.chunks) {
+		return 0, io.EOF
+	}
+	n := copy(p, k.chunks[k.i])
+	k.i++
+	return n, nil
+}
+
+func keys(cs ...[]byte) *keyReader { return &keyReader{chunks: cs} }
+
+var (
+	kUp    = []byte{0x1b, '[', 'A'}
+	kDown  = []byte{0x1b, '[', 'B'}
+	kEnter = []byte{'\r'}
+	kEsc   = []byte{0x1b}
+)
+
+func TestDecodeSelectKey(t *testing.T) {
+	cases := []struct {
+		in   []byte
+		want selectKey
+	}{
+		{kUp, keyUp}, {kDown, keyDown},
+		{[]byte("k"), keyUp}, {[]byte("j"), keyDown},
+		{[]byte("\r"), keyEnter}, {[]byte("\n"), keyEnter},
+		{[]byte{0x03}, keyCancel}, {[]byte("q"), keyCancel}, {kEsc, keyCancel},
+		{[]byte("x"), keyNone}, {nil, keyNone},
+		{[]byte{0x1b, '[', 'C'}, keyNone}, // right arrow → ignored
+	}
+	for _, c := range cases {
+		if got := decodeSelectKey(c.in); got != c.want {
+			t.Errorf("decodeSelectKey(%v) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestPrompter_selectLoop(t *testing.T) {
+	opts := []string{"yaml", "jsonc", "json"}
+	cases := []struct {
+		name string
+		in   *keyReader
+		want int
+		err  error
+	}{
+		{"enter at first", keys(kEnter), 0, nil},
+		{"down then enter", keys(kDown, kEnter), 1, nil},
+		{"down twice", keys(kDown, kDown, kEnter), 2, nil},
+		{"down wraps to first", keys(kDown, kDown, kDown, kEnter), 0, nil},
+		{"up wraps to last", keys(kUp, kEnter), 2, nil},
+		{"vim j/k", keys([]byte("j"), []byte("j"), []byte("k"), kEnter), 1, nil},
+		{"esc cancels", keys(kEsc), 0, ErrCanceled},
+		{"ctrl-c cancels", keys([]byte{0x03}), 0, ErrCanceled},
+		{"eof cancels", keys(), 0, ErrCanceled},
+		{"unknown key ignored then enter", keys([]byte("x"), kEnter), 0, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, _ := testPrompter("")
+			got, err := p.selectLoop(c.in, "Format", opts)
+			if got != c.want || !errors.Is(err, c.err) {
+				t.Errorf("selectLoop = %d, %v; want %d, %v", got, err, c.want, c.err)
+			}
+		})
+	}
+}
+
+func TestPrompter_selectLoop_rendersAndRestoresCursor(t *testing.T) {
+	p, out := testPrompter("")
+	if _, err := p.selectLoop(keys(kDown, kEnter), "Pick", []string{"a", "b"}); err != nil {
+		t.Fatalf("selectLoop: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, HideCursor) || !strings.Contains(s, ShowCursor) {
+		t.Errorf("cursor should be hidden then restored: %q", s)
+	}
+	if !strings.Contains(s, "Pick") {
+		t.Errorf("question not rendered: %q", s)
+	}
+	if !strings.Contains(s, "> b") { // after one Down, row "b" is marked
+		t.Errorf("selection marker not on the highlighted row: %q", s)
+	}
+}
+
+// SelectArrow degrades to the line-based Select when input is not a terminal (a
+// strings.Reader here), so scripted/piped runs behave exactly like Select.
+func TestPrompter_SelectArrow_fallback(t *testing.T) {
+	p, out := testPrompter("2\n")
+	got, err := p.SelectArrow("Format", []string{"yaml", "jsonc", "json"})
+	if err != nil || got != 1 {
+		t.Fatalf("SelectArrow fallback = %d, %v; want 1, nil", got, err)
+	}
+	if !strings.Contains(out.String(), "1) yaml") {
+		t.Errorf("fallback did not render the numbered list: %q", out.String())
+	}
+}
+
+func TestPrompter_SelectArrow_emptyErrors(t *testing.T) {
+	p, _ := testPrompter("")
+	if _, err := p.SelectArrow("x", nil); err == nil {
+		t.Error("SelectArrow with no options should error")
 	}
 }

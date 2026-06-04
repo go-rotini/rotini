@@ -2,6 +2,7 @@ package rtk
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,17 @@ import (
 
 	xterm "golang.org/x/term"
 )
+
+// ErrCanceled is returned by an interactive prompt the user deliberately aborted (Esc,
+// q, or Ctrl-C in [Prompter.SelectArrow]). Classify it with errors.Is to tell a
+// deliberate cancel apart from a read error or a real answer:
+//
+//	i, err := pr.SelectArrow("Pick one", opts)
+//	switch {
+//	case errors.Is(err, rtk.ErrCanceled): // user backed out
+//	case err != nil:                       // read failure
+//	}
+var ErrCanceled = errors.New("rotini: prompt canceled")
 
 // Prompter is rtk's interactive-prompting service: it asks the user questions on the
 // output stream and reads answers from the input stream. The everyday prompts are
@@ -156,6 +168,132 @@ func (p *Prompter) Select(question string, options []string) (int, error) {
 		}
 		fmt.Fprintf(p.out, "Please enter a number between 1 and %d.\n", len(options))
 	}
+}
+
+// SelectArrow is the arrow-key counterpart to [Prompter.Select]: on a real terminal it
+// draws the options as an in-place list and lets the user move the highlight with the
+// Up/Down arrows (or k/j), confirming with Enter to return the highlighted index. Esc, q,
+// or Ctrl-C aborts with [ErrCanceled]. When input is NOT a terminal — a pipe, a test
+// reader, or a terminal that cannot enter raw mode — it transparently falls back to the
+// line-based [Prompter.Select], so scripted runs keep working unchanged. It errors when
+// options is empty.
+func (p *Prompter) SelectArrow(question string, options []string) (int, error) {
+	if len(options) == 0 {
+		return 0, fmt.Errorf("rotini: SelectArrow requires at least one option")
+	}
+	// Char-at-a-time, no-echo navigation needs a real terminal; otherwise degrade to the
+	// line-based prompt (same gate as Secret).
+	if p.stdin == nil || !isTTY(p.stdin) {
+		return p.Select(question, options)
+	}
+	st, err := xterm.MakeRaw(int(p.stdin.Fd()))
+	if err != nil {
+		return p.Select(question, options)
+	}
+	defer func() { _ = xterm.Restore(int(p.stdin.Fd()), st) }()
+	return p.selectLoop(p.stdin, question, options)
+}
+
+// selectLoop runs the arrow-key picker over in (the raw terminal, delivering one
+// keystroke per Read) and p.out. It is split from [Prompter.SelectArrow]'s terminal
+// setup so it can be driven over plain readers/writers in tests. The terminal is assumed
+// already raw, so lines are CRLF-terminated (raw mode does no \n→\r\n translation) and
+// the cursor is hidden for the duration.
+func (p *Prompter) selectLoop(in io.Reader, question string, options []string) (int, error) {
+	fmt.Fprint(p.out, HideCursor)
+	defer fmt.Fprint(p.out, ShowCursor)
+	fmt.Fprintf(p.out, "%s\r\n", question)
+
+	cursor := 0
+	fmt.Fprint(p.out, renderSelectOptions(options, cursor))
+
+	buf := make([]byte, 8)
+	for {
+		n, err := in.Read(buf)
+		if n > 0 {
+			switch decodeSelectKey(buf[:n]) {
+			case keyUp:
+				cursor = (cursor - 1 + len(options)) % len(options)
+				p.redrawSelect(options, cursor)
+			case keyDown:
+				cursor = (cursor + 1) % len(options)
+				p.redrawSelect(options, cursor)
+			case keyEnter:
+				return cursor, nil
+			case keyCancel:
+				return 0, ErrCanceled
+			case keyNone:
+				// ignored key — no redraw
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return 0, ErrCanceled // input ended before a choice was made
+			}
+			return 0, err
+		}
+	}
+}
+
+// redrawSelect moves the cursor back to the top of the options block and rewrites it in
+// place over the previous frame.
+func (p *Prompter) redrawSelect(options []string, cursor int) {
+	fmt.Fprint(p.out, CursorUp(len(options))+renderSelectOptions(options, cursor))
+}
+
+// renderSelectOptions renders the options block: one CRLF-terminated line per option,
+// the current row marked "> " (others "  "), every line cleared first so a redraw leaves
+// no residue from a longer previous label.
+func renderSelectOptions(options []string, cursor int) string {
+	var b strings.Builder
+	for i, o := range options {
+		marker := "  "
+		if i == cursor {
+			marker = "> "
+		}
+		b.WriteString("\r" + ClearLine + marker + o + "\r\n")
+	}
+	return b.String()
+}
+
+// selectKey is a decoded navigation action from a raw input chunk.
+type selectKey int
+
+const (
+	keyNone selectKey = iota
+	keyUp
+	keyDown
+	keyEnter
+	keyCancel
+)
+
+// decodeSelectKey maps one raw keystroke to a navigation action: the Up/Down arrow
+// escape sequences (ESC [ A / ESC [ B) and their vim equivalents (k/j), Enter (CR or
+// LF), and cancel (Ctrl-C, q, or a lone Esc). Anything else is keyNone. It assumes b is
+// a single keystroke (a raw terminal delivers one per Read).
+func decodeSelectKey(b []byte) selectKey {
+	if len(b) >= 3 && b[0] == 0x1b && b[1] == '[' {
+		switch b[2] {
+		case 'A':
+			return keyUp
+		case 'B':
+			return keyDown
+		}
+		return keyNone
+	}
+	if len(b) == 1 {
+		switch b[0] {
+		case '\r', '\n':
+			return keyEnter
+		case 'k':
+			return keyUp
+		case 'j':
+			return keyDown
+		case 0x03, 'q', 0x1b: // Ctrl-C, q, lone Esc
+			return keyCancel
+		}
+	}
+	return keyNone
 }
 
 // Secret asks question and reads the answer without echoing it, when the input is a
