@@ -8,7 +8,7 @@ import (
 // CompletionScript returns a shell completion script for prog (the installed
 // binary name) and shell. The script delegates to the binary's hidden completion
 // entrypoint (the core runtime's __complete intercept), so completions always
-// reflect the live command tree. Supported shells: bash, zsh, fish.
+// reflect the live command tree. Supported shells: bash, zsh, fish, powershell.
 //
 // A completion handler typically reads the requested shell from its inputs and
 // prints the result:
@@ -23,10 +23,12 @@ func CompletionScript(prog, shell string) (string, error) {
 		tmpl = zshCompletionTemplate
 	case "fish":
 		tmpl = fishCompletionTemplate
+	case "powershell":
+		tmpl = powershellCompletionTemplate
 	case "":
-		return "", fmt.Errorf("a shell is required (bash, zsh, or fish)")
+		return "", fmt.Errorf("a shell is required (bash, zsh, fish, or powershell)")
 	default:
-		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish)", shell)
+		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell)", shell)
 	}
 	return strings.ReplaceAll(tmpl, "PROG", prog), nil
 }
@@ -55,4 +57,15 @@ function __PROG_complete
     PROG __complete $tokens[2..-1] 2>/dev/null
 end
 complete -c PROG -f -a '(__PROG_complete)'
+`
+
+const powershellCompletionTemplate = `# PowerShell completion for PROG
+Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })
+    if ($wordToComplete -eq '') { $tokens += '' }
+    PROG __complete @tokens 2>$null | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+    }
+}
 `

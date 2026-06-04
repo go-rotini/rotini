@@ -375,6 +375,9 @@ var CompletionZsh string
 //go:embed completion/fish.txt
 var CompletionFish string
 
+//go:embed completion/powershell.txt
+var CompletionPowershell string
+
 // Completion returns the embedded completion script for shell, or an error when
 // shell is not one rotini generated a script for.
 func Completion(shell string) (string, error) {
@@ -385,6 +388,8 @@ func Completion(shell string) (string, error) {
 		return CompletionZsh, nil
 	case "fish":
 		return CompletionFish, nil
+	case "powershell":
+		return CompletionPowershell, nil
 	default:
 		return "", fmt.Errorf("no completion for shell %q", shell)
 	}

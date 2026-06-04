@@ -60,7 +60,7 @@ var (
 
 // completionShells are the shells rotini generates completion scripts for, in a
 // deterministic order (matches rtk.CompletionScript's supported set).
-var completionShells = []string{"bash", "zsh", "fish"}
+var completionShells = []string{"bash", "zsh", "fish", "powershell"}
 
 // helpNode is one command's help wiring: the embed var/resolver identity plus
 // everything needed to produce its .txt. One is produced per command (root +

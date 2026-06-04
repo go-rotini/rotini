@@ -213,13 +213,14 @@ func TestGenerateCompletionEnabled(t *testing.T) {
 		`_ "embed"`,
 		"//go:embed completion/bash.txt", "var CompletionBash string",
 		"var CompletionZsh string", "var CompletionFish string",
+		"var CompletionPowershell string",
 		"func Completion(shell string) (string, error)",
 		`case "bash":`,
 	)
 	// Scripts written per shell, program name substituted.
 	mustContain(t, filepath.Join(tmp, "rtg", "completion", "bash.txt"),
 		"mycli __complete", "complete -o default -F _mycli_complete mycli")
-	for _, sh := range []string{"bash.txt", "zsh.txt", "fish.txt"} {
+	for _, sh := range []string{"bash.txt", "zsh.txt", "fish.txt", "powershell.txt"} {
 		if _, err := os.Stat(filepath.Join(tmp, "rtg", "completion", sh)); err != nil {
 			t.Errorf("missing completion script %s: %v", sh, err)
 		}
