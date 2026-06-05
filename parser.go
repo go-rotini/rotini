@@ -1,19 +1,4 @@
-// Package rtk is rotini's opt-in toolkit: the rotini-flavored functionality a CLI
-// can choose to use on top of the core runtime, but does not have to. Core rotini
-// (the github.com/go-rotini/rotini package) guarantees only two things — codegen
-// of the handler files, and command resolution + lifecycle dispatch. Everything
-// else is opt-in and lives here, each piece a service a CLI binds to the context
-// and a handler retrieves with rtx.Get:
-//
-//   - [Parser] — parse the resolved command's arguments into a typed inputs
-//     struct ([Parser.Parse]).
-//   - [Binder] — reconcile argv with environment variables and config files.
-//   - [CompletionScript] — generate bash/zsh/fish shell completion scripts.
-//
-// A handler reaches for rtk when it wants rotini's conventions; a handler that
-// disagrees ignores rtk entirely — reading the raw argument vector via
-// rotini.Context.Args and writing to rtx.Stdout however it likes.
-package rtk
+package rotini
 
 import (
 	"encoding"
@@ -25,8 +10,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/go-rotini/rotini"
 )
 
 // parsedInputs is one invocation's parsed argv, indexed by position in the
@@ -48,25 +31,25 @@ type scopeInputs struct {
 
 // usageError is a parse-time failure caused by bad input; handlers conventionally
 // map it to exit code 2 (the usual CLI usage-error code). It unwraps to
-// [rotini.ErrUsage], so rotini.CategoryOf classifies it as rotini.CategoryUsage.
+// [ErrUsage], so CategoryOf classifies it as CategoryUsage.
 type usageError struct{ msg string }
 
 func (e *usageError) Error() string { return e.msg }
 
-func (e *usageError) Unwrap() error { return rotini.ErrUsage }
+func (e *usageError) Unwrap() error { return ErrUsage }
 
 // Parser is rotini's argument parser, and it is a *service*: a CLI binds it to the
 // context registry under the key "parser" so that (1) parsing is opt-in — a CLI
-// that wants raw argv binds nothing and reads rotini.Context.Args itself — and
+// that wants raw argv binds nothing and reads Context.Args itself — and
 // (2) the registry is a dependency-injection seam (the same handler code runs
 // whether you bound the production parser or a double). A handler retrieves it and
 // calls [Parser.Parse]:
 //
 //	// main.go
-//	rth.Program.Bind("parser", rtk.NewParser()).Execute()
+//	rth.Program.Bind("parser", rotini.NewParser()).Execute()
 //
 //	// a handler
-//	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
+//	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
 //	var in rtg.MycliInputs
 //	err := parser.Parse(rtx, &in)
 type Parser struct{}
@@ -91,8 +74,8 @@ func NewParser() *Parser {
 // positionals). Parse returns an error when out is not a non-nil pointer, an
 // unknown flag is given, a flag's value is missing, a required input is absent, or
 // a value is outside a declared enum — print it (see [Usage]), rtx.Exit, or fall
-// back to rotini.Context.Args.
-func (p *Parser) Parse(rtx *rotini.Context, out any) error {
+// back to Context.Args.
+func (p *Parser) Parse(rtx *Context, out any) error {
 	store, chain, err := p.parseBind(rtx, out)
 	if err != nil {
 		return err
@@ -127,7 +110,7 @@ func (d Deprecation) Error() string {
 // unaffected). It is a data feed only: the framework prints nothing; the handler decides
 // what to do with each (warn, telemetry, exit, ignore). It does not parse and holds no
 // parser state — call it any time the context's chain is resolved (typically after Parse).
-func (p *Parser) Deprecations(rtx *rotini.Context) []Deprecation {
+func (p *Parser) Deprecations(rtx *Context) []Deprecation {
 	if rtx == nil {
 		return nil
 	}
@@ -160,7 +143,7 @@ func (p *Parser) Deprecations(rtx *rotini.Context) []Deprecation {
 // [Binder] (which first reconciles env/config fallbacks into the store, then
 // validates last — so a required input is satisfiable from any source, not just
 // argv). It returns the store and the resolved chain for that deferred validation.
-func (p *Parser) parseBind(rtx *rotini.Context, out any) (*parsedInputs, []rotini.ResolvedCommand, error) {
+func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedCommand, error) {
 	if p == nil {
 		return nil, nil, &usageError{msg: "rotini: nil parser"}
 	}
@@ -191,7 +174,7 @@ func (p *Parser) parseBind(rtx *rotini.Context, out any) (*parsedInputs, []rotin
 // positional argument of the leaf. Declared defaults are applied. parseInto does
 // not check required inputs or enums — that is [validate]'s job — so a handler can
 // inspect what was supplied before deciding how strict to be.
-func parseInto(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, error) {
+func parseInto(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
@@ -217,7 +200,7 @@ func parseInto(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, er
 
 		if isFlag(tok) {
 			name, inline, hasInline := splitFlag(tok)
-			fdef, idx, ok := findFlag(chain, name)
+			fdef, idx, ok := findFlagIndex(chain, name)
 			if !ok {
 				// No exact identifier — try POSIX clustered short flags: -vh → -v
 				// -h, -n5 → -n 5. Long flags ("--" prefix) never cluster.
@@ -273,7 +256,7 @@ func parseInto(chain []rotini.ResolvedCommand, argv []string) (*parsedInputs, er
 // value for a flag or argument that declares an Enum must be one of its members.
 // It is the strict half of [Parse]; a handler that wants laxer behavior can bind
 // inputs without it.
-func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
+func validate(chain []ResolvedCommand, store *parsedInputs) error {
 	leaf := chain[len(chain)-1]
 	si := store.scopes[len(chain)-1]
 
@@ -341,7 +324,7 @@ func validate(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 
 // hasVariadicArg reports whether any of a command's arguments is variadic — when one
 // is, it slurps every trailing positional, so no "too many arguments" can occur.
-func hasVariadicArg(args []rotini.ArgDef) bool {
+func hasVariadicArg(args []ArgDef) bool {
 	for _, a := range args {
 		if a.Variadic {
 			return true
@@ -357,7 +340,7 @@ func hasVariadicArg(args []rotini.ArgDef) bool {
 // bounds apply to int/float types, length/pattern to strings, and item counts to
 // arrays — a constraint declared on an incompatible type is silently ignored. When
 // secret is true the offending value (and its length) is redacted in the error.
-func checkConstraints(label, typ string, c rotini.Constraints, values []string, secret bool) error {
+func checkConstraints(label, typ string, c Constraints, values []string, secret bool) error {
 	if isArrayType(typ) || isMapType(typ) {
 		switch n := len(values); {
 		case c.MinItems > 0 && n < c.MinItems:
@@ -413,7 +396,7 @@ func redactValue(v string, secret bool) string {
 // exclusive / required together / one-of / at-least-one). "Set" means explicitly
 // provided on argv — a default or env/config fallback does not count (matching the
 // command-line-presence convention of cobra/clap). Each violation is a usage error.
-func validateFlagGroups(chain []rotini.ResolvedCommand, argv []string) error {
+func validateFlagGroups(chain []ResolvedCommand, argv []string) error {
 	for _, f := range chain {
 		for _, g := range f.FlagGroups {
 			all := make([]string, 0, len(g.Flags))
@@ -442,7 +425,7 @@ func validateFlagGroups(chain []rotini.ResolvedCommand, argv []string) error {
 // when a dependency's When flag is explicitly set on argv, every flag it Requires must
 // also be set. "Set" follows the same explicit-argv convention as flag groups; a missing
 // requirement is a usage error naming the absent flag(s) and the trigger.
-func validateFlagDependencies(chain []rotini.ResolvedCommand, argv []string) error {
+func validateFlagDependencies(chain []ResolvedCommand, argv []string) error {
 	for _, f := range chain {
 		for _, dep := range f.FlagDependencies {
 			whenLabel := "--" + dep.When
@@ -478,24 +461,24 @@ func validateFlagDependencies(chain []rotini.ResolvedCommand, argv []string) err
 }
 
 // checkFlagGroup applies one group's rule given the labels set and the full membership.
-func checkFlagGroup(kind rotini.FlagGroupKind, set, all []string) error {
+func checkFlagGroup(kind FlagGroupKind, set, all []string) error {
 	switch kind {
-	case rotini.FlagGroupMutuallyExclusive:
+	case FlagGroupMutuallyExclusive:
 		if len(set) > 1 {
 			return &usageError{msg: "flags " + joinAnd(set) + " are mutually exclusive"}
 		}
-	case rotini.FlagGroupRequiredTogether:
+	case FlagGroupRequiredTogether:
 		if n := len(set); n > 0 && n < len(all) {
 			return &usageError{msg: "flags " + strings.Join(all, ", ") + " must be used together"}
 		}
-	case rotini.FlagGroupOneOf:
+	case FlagGroupOneOf:
 		switch {
 		case len(set) == 0:
 			return &usageError{msg: "exactly one of " + strings.Join(all, ", ") + " is required"}
 		case len(set) > 1:
 			return &usageError{msg: "flags " + joinAnd(set) + " are mutually exclusive"}
 		}
-	case rotini.FlagGroupAtLeastOne:
+	case FlagGroupAtLeastOne:
 		if len(set) == 0 {
 			return &usageError{msg: "at least one of " + strings.Join(all, ", ") + " is required"}
 		}
@@ -530,7 +513,7 @@ func formatNum(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
 
 // applyDefaults fills in declared flag and trailing-argument defaults for inputs
 // the user did not provide, so handlers and required-checks see them.
-func applyDefaults(chain []rotini.ResolvedCommand, store *parsedInputs) {
+func applyDefaults(chain []ResolvedCommand, store *parsedInputs) {
 	for i, f := range chain {
 		for _, fd := range f.Flags {
 			if fd.Default == "" {
@@ -557,7 +540,7 @@ func applyDefaults(chain []rotini.ResolvedCommand, store *parsedInputs) {
 
 // requiredErrors reports any required flags or arguments (across the resolved
 // chain / on the leaf) that were neither provided nor defaulted.
-func requiredErrors(chain []rotini.ResolvedCommand, store *parsedInputs) error {
+func requiredErrors(chain []ResolvedCommand, store *parsedInputs) error {
 	var missing []string
 	for i, f := range chain {
 		si := store.scopes[i]
@@ -582,7 +565,7 @@ func requiredErrors(chain []rotini.ResolvedCommand, store *parsedInputs) error {
 	return nil
 }
 
-func flagLabel(f rotini.FlagDef) string {
+func flagLabel(f FlagDef) string {
 	if len(f.Identifiers) > 0 {
 		return f.Identifiers[0]
 	}
@@ -594,28 +577,6 @@ func plural(word string, n int) string {
 		return word
 	}
 	return word + "s"
-}
-
-// isFlag reports whether tok is a flag token (e.g. "-h", "--watch", "--config=x").
-// Bare "-" and "--" are not flags, and a token that parses as a number (e.g. "-5",
-// "-0.5") is a negative-number argument rather than a flag. It mirrors the core
-// runtime's resolver so binding agrees with the command the runtime dispatched.
-func isFlag(tok string) bool {
-	if len(tok) <= 1 || tok[0] != '-' || tok == "--" {
-		return false
-	}
-	if _, err := strconv.ParseFloat(tok, 64); err == nil {
-		return false
-	}
-	return true
-}
-
-// splitFlag splits a flag token into its identifier and an inline "=value".
-func splitFlag(tok string) (name, value string, hasValue bool) {
-	if eq := strings.IndexByte(tok, '='); eq >= 0 {
-		return tok[:eq], tok[eq+1:], true
-	}
-	return tok, "", false
 }
 
 // isShortCluster reports whether name is a candidate POSIX short-flag cluster: a
@@ -632,10 +593,10 @@ func isShortCluster(name string) bool {
 // and the first value-taking flag consumes the rest of the cluster, then the
 // inline "=value", then the next argv token — whichever is present. It returns how
 // many extra argv tokens it consumed (0 or 1).
-func parseCluster(chain []rotini.ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, name, value string)) (int, error) {
+func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, name, value string)) (int, error) {
 	for k := 0; k < len(body); k++ {
 		short := "-" + body[k:k+1]
-		fdef, idx, ok := findFlag(chain, short)
+		fdef, idx, ok := findFlagIndex(chain, short)
 		if !ok {
 			return 0, &usageError{msg: fmt.Sprintf("unknown flag %q", short)}
 		}
@@ -666,10 +627,10 @@ func parseCluster(chain []rotini.ResolvedCommand, body, inline string, hasInline
 	return 0, nil
 }
 
-// findFlag searches the resolved chain leaf→root for a flag whose identifiers
+// findFlagIndex searches the resolved chain leaf→root for a flag whose identifiers
 // include name, returning its definition and the chain index of the command that
 // owns it.
-func findFlag(chain []rotini.ResolvedCommand, name string) (rotini.FlagDef, int, bool) {
+func findFlagIndex(chain []ResolvedCommand, name string) (FlagDef, int, bool) {
 	for i := len(chain) - 1; i >= 0; i-- {
 		for _, f := range chain[i].Flags {
 			for _, id := range f.Identifiers {
@@ -679,27 +640,12 @@ func findFlag(chain []rotini.ResolvedCommand, name string) (rotini.FlagDef, int,
 			}
 		}
 	}
-	return rotini.FlagDef{}, -1, false
-}
-
-// findChild returns the sub-command of f matching tok by name or alias.
-func findChild(f rotini.ResolvedCommand, tok string) (rotini.CommandDef, bool) {
-	for _, c := range f.Commands {
-		if c.Name == tok {
-			return c, true
-		}
-		for _, a := range c.Aliases {
-			if a == tok {
-				return c, true
-			}
-		}
-	}
-	return rotini.CommandDef{}, false
+	return FlagDef{}, -1, false
 }
 
 // unknownCommandMsg builds the error for a mistyped sub-command, appending a
 // "did you mean" suggestion when a close match exists.
-func unknownCommandMsg(cur rotini.ResolvedCommand, tok string) string {
+func unknownCommandMsg(cur ResolvedCommand, tok string) string {
 	msg := fmt.Sprintf("unknown command %q for %q", tok, cur.Name)
 	if s := suggest(cur.Commands, tok); s != "" {
 		msg += fmt.Sprintf("\n\nDid you mean %q?", s)
@@ -708,7 +654,7 @@ func unknownCommandMsg(cur rotini.ResolvedCommand, tok string) string {
 }
 
 // suggest returns the closest command name to tok within edit distance 2.
-func suggest(candidates []rotini.CommandDef, tok string) string {
+func suggest(candidates []CommandDef, tok string) string {
 	best, bestDist := "", 3
 	for _, c := range candidates {
 		if d := levenshtein(tok, c.Name); d < bestDist {
@@ -743,7 +689,7 @@ func levenshtein(a, b string) int {
 // the leaf, so each command's inputs come from the right frame no matter how deep
 // it was reached — including a statically-composed subtree reached under extra
 // parent frames, which simply go unbound.
-func bindInputs(v reflect.Value, p *parsedInputs, chain []rotini.ResolvedCommand) error {
+func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -760,7 +706,7 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []rotini.ResolvedCommand
 }
 
 // bindCommandInputs fills a <Cmd>CommandInputs struct's Flags and Arguments.
-func bindCommandInputs(v reflect.Value, si scopeInputs, frame rotini.ResolvedCommand) error {
+func bindCommandInputs(v reflect.Value, si scopeInputs, frame ResolvedCommand) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -783,7 +729,7 @@ func bindCommandInputs(v reflect.Value, si scopeInputs, frame rotini.ResolvedCom
 // bindFlags fills a <Cmd>Flags struct by matching each field's `rotini:"<name>"`
 // tag against the parsed flag values, surfacing a coercion failure as a usage error
 // naming the flag (by its CLI identifiers).
-func bindFlags(v reflect.Value, flags map[string][]string, defs []rotini.FlagDef) error {
+func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -806,7 +752,7 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []rotini.FlagDef
 
 // labelForFlag is a flag's CLI label (its identifiers) for error messages, falling back
 // to the logical name when the definition isn't found.
-func labelForFlag(defs []rotini.FlagDef, name string) string {
+func labelForFlag(defs []FlagDef, name string) string {
 	for _, d := range defs {
 		if d.Name == name {
 			return flagLabel(d)

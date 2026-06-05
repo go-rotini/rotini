@@ -488,7 +488,7 @@ func renderBindMeta(gp *genProgram) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("// BindMeta is the generated descriptor the default binder (rtk.Binder) consumes.\n")
+	b.WriteString("// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.\n")
 	b.WriteString("var BindMeta = " + rotiniPkgName + ".BindMeta{\n")
 	if len(files) > 0 {
 		b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")

@@ -55,8 +55,8 @@ func TestInitialize_scaffoldsStandalone(t *testing.T) {
 	mustContain(t, filepath.Join(dir, "main.go"),
 		"//go:generate rotini generate",
 		`"example.com/myclis/cmd/mycli/rth"`,
-		`"github.com/go-rotini/rotini/rtk"`,
-		`Bind("parser", rtk.NewParser())`, "Execute()")
+		`"github.com/go-rotini/rotini"`,
+		`Bind("parser", rotini.NewParser())`, "Execute()")
 	mustContain(t, filepath.Join(dir, "rtg", "rotini.go"),
 		"package rtg", "type ProgramHandlers interface", "var definition")
 	mustContain(t, filepath.Join(dir, "rth", "handlers.go"),
@@ -135,5 +135,5 @@ func TestInitialize_into(t *testing.T) {
 		"ParentChild() rotini.CommandHandlers", `Handler: "ParentChild"`)
 	mustContain(t, filepath.Join(tmp, "cmd/parent/rth/handlers.go"), "childrth.Handlers().Child()")
 	// The child is still its own standalone binary.
-	mustContain(t, filepath.Join(tmp, "cmd/child/main.go"), `Bind("parser", rtk.NewParser())`, "Execute()")
+	mustContain(t, filepath.Join(tmp, "cmd/child/main.go"), `Bind("parser", rotini.NewParser())`, "Execute()")
 }

@@ -8,7 +8,7 @@ import (
 // ResolvedCommand is one node on the invoked command path (root → leaf): the
 // flattened command-tree data the runtime resolved for this invocation. The
 // runtime computes the chain in order to dispatch the correct handler, and
-// exposes it via [Rtx.Chain] so opt-in tooling (the rtk parser) binds inputs
+// exposes it via [Rtx.Chain] so opt-in tooling (the [Parser]) binds inputs
 // against the exact command whose handler ran — including for a statically
 // composed child, whose chain is relative to its own root.
 type ResolvedCommand struct {
@@ -52,7 +52,7 @@ func cmdFrame(c CommandDef) ResolvedCommand {
 //
 // Resolution is intentionally lenient — unknown flags, missing values, and bad
 // input are not errors here. Parsing and validation are opt-in, performed by the
-// handler via the rtk package's Parse.
+// handler via [Parser.Parse].
 func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *remoteDispatch) {
 	chain := []ResolvedCommand{rootFrame(def)}
 	for i := 0; i < len(argv); i++ {

@@ -7,7 +7,6 @@ import (
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 	"github.com/go-rotini/rotini/internal"
-	"github.com/go-rotini/rotini/rtk"
 )
 
 type rotiniGenerateHandlers struct {
@@ -20,7 +19,7 @@ type rotiniGenerateHandlers struct {
 var _ rotini.CommandHandlers = (*rotiniGenerateHandlers)(nil)
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
+	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
 
 	var inputs rtg.RotiniGenerateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {

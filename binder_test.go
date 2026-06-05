@@ -1,12 +1,10 @@
-package rtk
+package rotini
 
 import (
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/go-rotini/rotini"
 )
 
 // Generated-shape inputs for the binder tests: one command "app" with an argv flag,
@@ -31,10 +29,10 @@ type tbInputs struct {
 	App tbCmdInputs
 }
 
-func tbDef() rotini.Definition {
-	return rotini.Definition{
+func tbDef() Definition {
+	return Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "verbose", Identifiers: []string{"--verbose"}, Type: "bool"}},
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"--verbose"}, Type: "bool"}},
 	}
 }
 
@@ -51,8 +49,8 @@ func TestBinder_fillsEnvAndConfig(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: https://api.example\n  token: secret123\n")
 	t.Setenv("REGION", "us-west")
 
-	rtx := rotini.NewContextFor(tbDef(), []string{"--verbose"})
-	binder := NewBinder(rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	rtx := NewContextFor(tbDef(), []string{"--verbose"})
+	binder := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	var in tbInputs
 	if err := binder.Bind(rtx, &in); err != nil {
@@ -74,8 +72,8 @@ func TestBinder_fillsEnvAndConfig(t *testing.T) {
 
 func TestBinder_requiredConfigMissing(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: https://api.example\n") // no api.token
-	rtx := rotini.NewContextFor(tbDef(), nil)
-	binder := NewBinder(rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	rtx := NewContextFor(tbDef(), nil)
+	binder := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	var in tbInputs
 	if err := binder.Bind(rtx, &in); err == nil {
@@ -86,8 +84,8 @@ func TestBinder_requiredConfigMissing(t *testing.T) {
 func TestBinder_noConfigFilesLeavesConfigZero(t *testing.T) {
 	// With no config sources, config fields stay zero; a non-required env still binds.
 	t.Setenv("REGION", "eu-central")
-	rtx := rotini.NewContextFor(tbDef(), nil)
-	binder := NewBinder(rotini.BindMeta{}) // no config files
+	rtx := NewContextFor(tbDef(), nil)
+	binder := NewBinder(BindMeta{}) // no config files
 
 	var s tbNoReqInputs
 	if err := binder.Bind(rtx, &s); err != nil {
@@ -117,9 +115,9 @@ func TestBinder_explicitEnvVar(t *testing.T) {
 	t.Setenv("WIDGET_TOKEN", "s3cret")
 	t.Setenv("TOKEN", "wrong-default") // the SNAKE_UPPER default — must be ignored
 
-	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	var in tbEnvVarInputs
-	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Env.Token != "s3cret" {
@@ -155,10 +153,10 @@ func withPipedStdin(t *testing.T, body string) {
 
 func TestBinder_decodesStdin(t *testing.T) {
 	withPipedStdin(t, "kind: Widget\nname: foo\n")
-	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 
 	var in tbStdinInputs
-	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Stdin == nil {
@@ -171,10 +169,10 @@ func TestBinder_decodesStdin(t *testing.T) {
 
 func TestBinder_noStdinLeavesNil(t *testing.T) {
 	withPipedStdin(t, "") // nothing piped → EOF, no data
-	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 
 	var in tbStdinInputs
-	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Stdin != nil {
@@ -192,16 +190,16 @@ type tbFbCmd struct {
 }
 type tbFbInputs struct{ App tbFbCmd }
 
-func tbFbDef() rotini.Definition {
-	return rotini.Definition{
+func tbFbDef() Definition {
+	return Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "color", Identifiers: []string{"--color"}, Type: "string", Default: "blue"}},
+		Flags: []FlagDef{{Name: "color", Identifiers: []string{"--color"}, Type: "string", Default: "blue"}},
 	}
 }
 
 func TestBinder_flagFallbackPrecedence(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  color: red\n")
-	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	cases := []struct {
 		name string
@@ -218,7 +216,7 @@ func TestBinder_flagFallbackPrecedence(t *testing.T) {
 			if c.env != "" {
 				t.Setenv("CREATE_COLOR", c.env)
 			}
-			rtx := rotini.NewContextFor(tbFbDef(), c.argv)
+			rtx := NewContextFor(tbFbDef(), c.argv)
 			var in tbFbInputs
 			if err := NewBinder(meta).Bind(rtx, &in); err != nil {
 				t.Fatalf("Bind: %v", err)
@@ -231,9 +229,9 @@ func TestBinder_flagFallbackPrecedence(t *testing.T) {
 
 	// No source provides the flag → the Parser-applied default is kept.
 	t.Run("default kept when no source", func(t *testing.T) {
-		rtx := rotini.NewContextFor(tbFbDef(), nil)
+		rtx := NewContextFor(tbFbDef(), nil)
 		var in tbFbInputs
-		if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+		if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
 			t.Fatalf("Bind: %v", err)
 		}
 		if in.App.Flags.Color != "blue" {
@@ -254,18 +252,18 @@ type tbReqCmd struct {
 }
 type tbReqInputs struct{ App tbReqCmd }
 
-func tbReqDef() rotini.Definition {
-	return rotini.Definition{
+func tbReqDef() Definition {
+	return Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true}},
+		Flags: []FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true}},
 	}
 }
 
 func TestBinder_requiredFlagSatisfiedByConfig(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  token: from-config\n")
-	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
-	rtx := rotini.NewContextFor(tbReqDef(), nil) // not on argv
+	rtx := NewContextFor(tbReqDef(), nil) // not on argv
 	var in tbReqInputs
 	if err := NewBinder(meta).Bind(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v (a required flag should be satisfiable via config)", err)
@@ -279,9 +277,9 @@ func TestBinder_requiredFlagSatisfiedByEnv(t *testing.T) {
 	t.Setenv("API_TOKEN", "from-env") // SNAKE_UPPER of recon key "api.token"
 
 	// No config files: also exercises the path where env is the only fallback source.
-	rtx := rotini.NewContextFor(tbReqDef(), nil)
+	rtx := NewContextFor(tbReqDef(), nil)
 	var in tbReqInputs
-	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v (a required flag should be satisfiable via env)", err)
 	}
 	if in.App.Flags.Token != "from-env" {
@@ -290,9 +288,9 @@ func TestBinder_requiredFlagSatisfiedByEnv(t *testing.T) {
 }
 
 func TestBinder_requiredFlagMissingEverywhere(t *testing.T) {
-	rtx := rotini.NewContextFor(tbReqDef(), nil) // no argv, no env, no config
+	rtx := NewContextFor(tbReqDef(), nil) // no argv, no env, no config
 	var in tbReqInputs
-	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err == nil {
+	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err == nil {
 		t.Fatal("expected a missing-required error when a required fallback flag is in no source")
 	}
 }
@@ -308,18 +306,18 @@ type tbEnumCmd struct {
 }
 type tbEnumInputs struct{ App tbEnumCmd }
 
-func tbEnumDef() rotini.Definition {
-	return rotini.Definition{
+func tbEnumDef() Definition {
+	return Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "color", Identifiers: []string{"--color"}, Type: "string", Enum: []string{"red", "green", "blue"}}},
+		Flags: []FlagDef{{Name: "color", Identifiers: []string{"--color"}, Type: "string", Enum: []string{"red", "green", "blue"}}},
 	}
 }
 
 func TestBinder_enumCheckedOnReconciledValue(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  color: teal\n") // teal is not in the enum
-	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
-	rtx := rotini.NewContextFor(tbEnumDef(), nil)
+	rtx := NewContextFor(tbEnumDef(), nil)
 	var in tbEnumInputs
 	if err := NewBinder(meta).Bind(rtx, &in); err == nil {
 		t.Fatal("expected an enum error for a config-supplied value outside the declared enum")
@@ -338,21 +336,21 @@ type tbPortCmd struct {
 }
 type tbPortInputs struct{ App tbPortCmd }
 
-func tbPortDef() rotini.Definition {
-	return rotini.Definition{
+func tbPortDef() Definition {
+	return Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{
+		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Constraints: rotini.Constraints{Minimum: 1, Maximum: 65535},
+			Constraints: Constraints{Minimum: 1, Maximum: 65535},
 		}},
 	}
 }
 
 func TestBinder_constraintCheckedOnReconciledValue(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  port: 70000\n") // above the declared maximum
-	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
-	rtx := rotini.NewContextFor(tbPortDef(), nil)
+	rtx := NewContextFor(tbPortDef(), nil)
 	var in tbPortInputs
 	if err := NewBinder(meta).Bind(rtx, &in); err == nil || !strings.Contains(err.Error(), "must be <= 65535") {
 		t.Fatalf("Bind error = %v, want a max-bound violation for the config-supplied port", err)
@@ -381,12 +379,12 @@ type tbCfgName struct {
 	}
 }
 
-func tbAppDef() rotini.Definition { return rotini.Definition{Name: "app", Handler: "App"} }
+func tbAppDef() Definition { return Definition{Name: "app", Handler: "App"} }
 
 func TestBinder_envConstraintEnforced(t *testing.T) {
 	t.Setenv("PORT", "70000") // above max
 	var in tbEnvPort
-	err := NewBinder(rotini.BindMeta{}).Bind(rotini.NewContextFor(tbAppDef(), nil), &in)
+	err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in)
 	if err == nil || !strings.Contains(err.Error(), "<= 65535") {
 		t.Fatalf("Bind err = %v, want a max-bound violation for env PORT", err)
 	}
@@ -395,7 +393,7 @@ func TestBinder_envConstraintEnforced(t *testing.T) {
 func TestBinder_envConstraintValid(t *testing.T) {
 	t.Setenv("PORT", "8080")
 	var in tbEnvPort
-	if err := NewBinder(rotini.BindMeta{}).Bind(rotini.NewContextFor(tbAppDef(), nil), &in); err != nil {
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Env.Port != 8080 {
@@ -411,7 +409,7 @@ func TestBinder_channelConstraintAbsentSkipped(t *testing.T) {
 		t.Cleanup(func() { os.Setenv("PORT", prev) })
 	}
 	var in tbEnvPort
-	if err := NewBinder(rotini.BindMeta{}).Bind(rotini.NewContextFor(tbAppDef(), nil), &in); err != nil {
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("absent env value should skip its constraint check: %v", err)
 	}
 	if in.App.Env.Port != 0 {
@@ -421,18 +419,18 @@ func TestBinder_channelConstraintAbsentSkipped(t *testing.T) {
 
 func TestBinder_configConstraintEnforced(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  name: TOOLONG\n") // length 7 > maxlen 5 (and not lowercase)
-	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbCfgName
-	if err := NewBinder(meta).Bind(rotini.NewContextFor(tbAppDef(), nil), &in); err == nil {
+	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in); err == nil {
 		t.Fatal("expected a constraint violation for the config value app.name")
 	}
 }
 
 func TestBinder_configConstraintValid(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  name: abc\n")
-	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbCfgName
-	if err := NewBinder(meta).Bind(rotini.NewContextFor(tbAppDef(), nil), &in); err != nil {
+	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Config.Name != "abc" {
@@ -454,13 +452,13 @@ type tbStdinValInputs struct{ App tbStdinValCmd }
 
 const tbStdinSchema = `{"type":"object","properties":{"port":{"type":"integer","minimum":1,"maximum":65535}}}`
 
-func tbStdinMeta() rotini.BindMeta {
-	return rotini.BindMeta{StdinSchemas: map[string]string{"tbStdinValPayload": tbStdinSchema}}
+func tbStdinMeta() BindMeta {
+	return BindMeta{StdinSchemas: map[string]string{"tbStdinValPayload": tbStdinSchema}}
 }
 
 func TestBinder_stdinPayloadRejectedBySchema(t *testing.T) {
 	withPipedStdin(t, "port: 70000\n") // above the schema maximum
-	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	var in tbStdinValInputs
 	if err := NewBinder(tbStdinMeta()).Bind(rtx, &in); err == nil {
 		t.Fatal("expected the stdin payload to be rejected (port above maximum)")
@@ -469,7 +467,7 @@ func TestBinder_stdinPayloadRejectedBySchema(t *testing.T) {
 
 func TestBinder_stdinPayloadValid(t *testing.T) {
 	withPipedStdin(t, "port: 8080\n")
-	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	var in tbStdinValInputs
 	if err := NewBinder(tbStdinMeta()).Bind(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
@@ -493,9 +491,9 @@ type tbSecretCfg struct {
 
 func TestBinder_secretChannelValueRedacted(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  token: short\n") // length 5 < minlen 8
-	meta := rotini.BindMeta{ConfigFiles: []rotini.ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbSecretCfg
-	err := NewBinder(meta).Bind(rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil), &in)
+	err := NewBinder(meta).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err == nil {
 		t.Fatal("expected a length-constraint violation")
 	}

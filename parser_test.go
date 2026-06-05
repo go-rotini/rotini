@@ -1,28 +1,26 @@
-package rtk
+package rotini
 
 import (
 	"reflect"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/go-rotini/rotini"
 )
 
-// testDef mirrors a root "app" with a sub-command "run", matching the runInputs
+// parserTestDef mirrors a root "app" with a sub-command "run", matching the runInputs
 // scopes used by the binder tests.
-func testDef() rotini.Definition {
-	return rotini.Definition{
+func parserTestDef() Definition {
+	return Definition{
 		Name:    "app",
 		Handler: "App",
-		Flags:   []rotini.FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool"}},
-		Commands: []rotini.CommandDef{
+		Flags:   []FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool"}},
+		Commands: []CommandDef{
 			{
 				Name:    "run",
 				Handler: "AppRun",
 				Aliases: []string{"r"},
-				Flags:   []rotini.FlagDef{{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"}},
-				Arguments: []rotini.ArgDef{
+				Flags:   []FlagDef{{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"}},
+				Arguments: []ArgDef{
 					{Name: "name", Type: "string"},
 					{Name: "rest", Type: "[]string", Variadic: true},
 				},
@@ -32,7 +30,7 @@ func testDef() rotini.Definition {
 }
 
 func TestParse_bindsInputs(t *testing.T) {
-	rtx := rotini.NewContextFor(testDef(), []string{"--verbose", "run", "alice", "x", "y", "--count", "3"})
+	rtx := NewContextFor(parserTestDef(), []string{"--verbose", "run", "alice", "x", "y", "--count", "3"})
 	var in runInputs
 	if err := NewParser().Parse(rtx, &in); err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -48,7 +46,7 @@ func TestParse_bindsInputs(t *testing.T) {
 // TestParse_viaRegistryGet exercises the full handler flow: the parser is bound to
 // the registry, retrieved via rtx.Get (ctx.Value style), then used to parse.
 func TestParse_viaRegistryGet(t *testing.T) {
-	rtx := rotini.NewContextFor(testDef(), []string{"run", "alice"})
+	rtx := NewContextFor(parserTestDef(), []string{"run", "alice"})
 	rtx.Bind("parser", NewParser())
 
 	parser, ok := rtx.Value("parser").(*Parser)
@@ -67,13 +65,13 @@ func TestParse_viaRegistryGet(t *testing.T) {
 func TestParse_nilParser(t *testing.T) {
 	var p *Parser
 	var in runInputs
-	if err := p.Parse(rotini.NewContextFor(testDef(), []string{"run"}), &in); err == nil || !strings.Contains(err.Error(), "nil parser") {
+	if err := p.Parse(NewContextFor(parserTestDef(), []string{"run"}), &in); err == nil || !strings.Contains(err.Error(), "nil parser") {
 		t.Errorf("Parse on nil parser = %v, want nil-parser error", err)
 	}
 }
 
 func TestParse_outMustBePointer(t *testing.T) {
-	rtx := rotini.NewContextFor(testDef(), []string{"run"})
+	rtx := NewContextFor(parserTestDef(), []string{"run"})
 	var in runInputs
 	if err := NewParser().Parse(rtx, in); err == nil || !strings.Contains(err.Error(), "pointer") {
 		t.Errorf("Parse with non-pointer out = %v, want pointer error", err)
@@ -82,7 +80,7 @@ func TestParse_outMustBePointer(t *testing.T) {
 
 func TestParse_unresolvedContext(t *testing.T) {
 	var in runInputs
-	if err := NewParser().Parse(rotini.NewContext(), &in); err == nil {
+	if err := NewParser().Parse(NewContext(), &in); err == nil {
 		t.Error("Parse on an unresolved context should error")
 	}
 	if in.Run.Flags.Count != 0 || in.App.Flags.Verbose {
@@ -91,7 +89,7 @@ func TestParse_unresolvedContext(t *testing.T) {
 }
 
 func TestParse_unknownFlag(t *testing.T) {
-	rtx := rotini.NewContextFor(testDef(), []string{"run", "--nope"})
+	rtx := NewContextFor(parserTestDef(), []string{"run", "--nope"})
 	var in runInputs
 	if err := NewParser().Parse(rtx, &in); err == nil || !strings.Contains(err.Error(), `unknown flag "--nope"`) {
 		t.Errorf("Parse error = %v, want unknown-flag", err)
@@ -99,7 +97,7 @@ func TestParse_unknownFlag(t *testing.T) {
 }
 
 func TestParse_flagNeedsValue(t *testing.T) {
-	rtx := rotini.NewContextFor(testDef(), []string{"run", "--count"})
+	rtx := NewContextFor(parserTestDef(), []string{"run", "--count"})
 	var in runInputs
 	if err := NewParser().Parse(rtx, &in); err == nil || !strings.Contains(err.Error(), "needs a value") {
 		t.Errorf("Parse error = %v, want needs-a-value", err)
@@ -108,7 +106,7 @@ func TestParse_flagNeedsValue(t *testing.T) {
 
 func TestParse_unknownCommand(t *testing.T) {
 	// "ru" is a stray positional on a branch-only root: a mistyped sub-command.
-	rtx := rotini.NewContextFor(testDef(), []string{"ru"})
+	rtx := NewContextFor(parserTestDef(), []string{"ru"})
 	var in runInputs
 	err := NewParser().Parse(rtx, &in)
 	if err == nil || !strings.Contains(err.Error(), `unknown command "ru"`) {
@@ -120,11 +118,11 @@ func TestParse_unknownCommand(t *testing.T) {
 }
 
 func TestParse_missingRequired(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true}},
+		Flags: []FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true}},
 	}
-	rtx := rotini.NewContextFor(def, []string{})
+	rtx := NewContextFor(def, []string{})
 	var in struct{}
 	err := NewParser().Parse(rtx, &in)
 	if err == nil || !strings.Contains(err.Error(), "missing required") || !strings.Contains(err.Error(), "--token") {
@@ -133,11 +131,11 @@ func TestParse_missingRequired(t *testing.T) {
 }
 
 func TestParse_badEnumValue(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "level", Identifiers: []string{"--level"}, Type: "string", Enum: []string{"low", "high"}}},
+		Flags: []FlagDef{{Name: "level", Identifiers: []string{"--level"}, Type: "string", Enum: []string{"low", "high"}}},
 	}
-	rtx := rotini.NewContextFor(def, []string{"--level", "medium"})
+	rtx := NewContextFor(def, []string{"--level", "medium"})
 	var in struct{}
 	err := NewParser().Parse(rtx, &in)
 	if err == nil || !strings.Contains(err.Error(), "invalid value") || !strings.Contains(err.Error(), "one of: low, high") {
@@ -146,9 +144,9 @@ func TestParse_badEnumValue(t *testing.T) {
 }
 
 func TestParse_defaultsApplied(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "count", Identifiers: []string{"--count"}, Type: "int", Default: "9"}},
+		Flags: []FlagDef{{Name: "count", Identifiers: []string{"--count"}, Type: "int", Default: "9"}},
 	}
 	type inputs struct {
 		App struct {
@@ -158,7 +156,7 @@ func TestParse_defaultsApplied(t *testing.T) {
 			Arguments struct{}
 		}
 	}
-	rtx := rotini.NewContextFor(def, []string{})
+	rtx := NewContextFor(def, []string{})
 	var in inputs
 	if err := NewParser().Parse(rtx, &in); err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -181,11 +179,11 @@ func assertConstraint(t *testing.T, val string, err error, wantErr string) {
 }
 
 func TestParse_numericConstraints(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{
+		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Constraints: rotini.Constraints{Minimum: 1, Maximum: 65535},
+			Constraints: Constraints{Minimum: 1, Maximum: 65535},
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -194,17 +192,17 @@ func TestParse_numericConstraints(t *testing.T) {
 		{"70000", "must be <= 65535"},
 	} {
 		var in struct{}
-		err := NewParser().Parse(rotini.NewContextFor(def, []string{"--port", c.val}), &in)
+		err := NewParser().Parse(NewContextFor(def, []string{"--port", c.val}), &in)
 		assertConstraint(t, c.val, err, c.wantErr)
 	}
 }
 
 func TestParse_stringLengthConstraints(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{
+		Flags: []FlagDef{{
 			Name: "name", Identifiers: []string{"--name"}, Type: "string",
-			Constraints: rotini.Constraints{MinLength: 2, MaxLength: 5},
+			Constraints: Constraints{MinLength: 2, MaxLength: 5},
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -213,17 +211,17 @@ func TestParse_stringLengthConstraints(t *testing.T) {
 		{"toolong", "at most 5"},
 	} {
 		var in struct{}
-		err := NewParser().Parse(rotini.NewContextFor(def, []string{"--name", c.val}), &in)
+		err := NewParser().Parse(NewContextFor(def, []string{"--name", c.val}), &in)
 		assertConstraint(t, c.val, err, c.wantErr)
 	}
 }
 
 func TestParse_patternConstraint(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{
+		Flags: []FlagDef{{
 			Name: "id", Identifiers: []string{"--id"}, Type: "string",
-			Constraints: rotini.Constraints{Pattern: "^[a-z]+$"},
+			Constraints: Constraints{Pattern: "^[a-z]+$"},
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -231,17 +229,17 @@ func TestParse_patternConstraint(t *testing.T) {
 		{"ABC", "must match"},
 	} {
 		var in struct{}
-		err := NewParser().Parse(rotini.NewContextFor(def, []string{"--id", c.val}), &in)
+		err := NewParser().Parse(NewContextFor(def, []string{"--id", c.val}), &in)
 		assertConstraint(t, c.val, err, c.wantErr)
 	}
 }
 
 func TestParse_itemCountConstraints(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{
+		Flags: []FlagDef{{
 			Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
-			Constraints: rotini.Constraints{MinItems: 1, MaxItems: 2},
+			Constraints: Constraints{MinItems: 1, MaxItems: 2},
 		}},
 	}
 	for _, c := range []struct {
@@ -254,7 +252,7 @@ func TestParse_itemCountConstraints(t *testing.T) {
 		{[]string{"--tag", "a", "--tag", "b", "--tag", "c"}, "at most 2"},
 	} {
 		var in struct{}
-		err := NewParser().Parse(rotini.NewContextFor(def, c.argv), &in)
+		err := NewParser().Parse(NewContextFor(def, c.argv), &in)
 		assertConstraint(t, strings.Join(c.argv, " "), err, c.wantErr)
 	}
 }
@@ -262,26 +260,26 @@ func TestParse_itemCountConstraints(t *testing.T) {
 // A MinItems bound applies to a variadic argument even when it receives no values
 // (a distinct code path from a repeatable flag).
 func TestParse_variadicArgItemCount(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Arguments: []rotini.ArgDef{{
+		Arguments: []ArgDef{{
 			Name: "files", Type: "[]string", Variadic: true,
-			Constraints: rotini.Constraints{MinItems: 2},
+			Constraints: Constraints{MinItems: 2},
 		}},
 	}
 	var in struct{}
-	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"only-one"}), &in); err == nil || !strings.Contains(err.Error(), "at least 2") {
+	if err := NewParser().Parse(NewContextFor(def, []string{"only-one"}), &in); err == nil || !strings.Contains(err.Error(), "at least 2") {
 		t.Errorf("error = %v, want at-least-2 for variadic <files>", err)
 	}
-	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"a", "b"}), &in); err != nil {
+	if err := NewParser().Parse(NewContextFor(def, []string{"a", "b"}), &in); err != nil {
 		t.Errorf("unexpected error for two files: %v", err)
 	}
 }
 
 func TestParse_negativeNumberArguments(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Arguments: []rotini.ArgDef{{Name: "delta", Type: "float64"}},
+		Arguments: []ArgDef{{Name: "delta", Type: "float64"}},
 	}
 	type inputs struct {
 		App struct {
@@ -300,7 +298,7 @@ func TestParse_negativeNumberArguments(t *testing.T) {
 		{[]string{"-1.5e2"}, -150},
 	} {
 		var in inputs
-		if err := NewParser().Parse(rotini.NewContextFor(def, c.argv), &in); err != nil {
+		if err := NewParser().Parse(NewContextFor(def, c.argv), &in); err != nil {
 			t.Fatalf("Parse(%v): %v", c.argv, err)
 		}
 		if in.App.Arguments.Delta != c.want {
@@ -310,9 +308,9 @@ func TestParse_negativeNumberArguments(t *testing.T) {
 }
 
 func TestParse_negativeNumberFlagValue(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "offset", Identifiers: []string{"--offset"}, Type: "int"}},
+		Flags: []FlagDef{{Name: "offset", Identifiers: []string{"--offset"}, Type: "int"}},
 	}
 	type inputs struct {
 		App struct {
@@ -323,7 +321,7 @@ func TestParse_negativeNumberFlagValue(t *testing.T) {
 		}
 	}
 	var in inputs
-	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"--offset", "-5"}), &in); err != nil {
+	if err := NewParser().Parse(NewContextFor(def, []string{"--offset", "-5"}), &in); err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	if in.App.Flags.Offset != -5 {
@@ -332,14 +330,14 @@ func TestParse_negativeNumberFlagValue(t *testing.T) {
 }
 
 func TestParse_secretValueRedactedInErrors(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{
+		Flags: []FlagDef{
 			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Secret: true, Enum: []string{"a", "b"}},
 		},
 	}
 	var in struct{}
-	err := NewParser().Parse(rotini.NewContextFor(def, []string{"--token", "topsecret"}), &in)
+	err := NewParser().Parse(NewContextFor(def, []string{"--token", "topsecret"}), &in)
 	if err == nil {
 		t.Fatal("expected an enum error")
 	}
@@ -352,66 +350,66 @@ func TestParse_secretValueRedactedInErrors(t *testing.T) {
 }
 
 func TestParse_secretConstraintValueRedacted(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{
+		Flags: []FlagDef{
 			{Name: "pin", Identifiers: []string{"--pin"}, Type: "string", Secret: true,
-				Constraints: rotini.Constraints{Pattern: "^[0-9]{4}$"}},
+				Constraints: Constraints{Pattern: "^[0-9]{4}$"}},
 		},
 	}
 	var in struct{}
-	err := NewParser().Parse(rotini.NewContextFor(def, []string{"--pin", "supersecretpin"}), &in)
+	err := NewParser().Parse(NewContextFor(def, []string{"--pin", "supersecretpin"}), &in)
 	if err == nil || strings.Contains(err.Error(), "supersecretpin") {
 		t.Errorf("secret value should be redacted in the pattern error: %v", err)
 	}
 }
 
 func TestParse_nonSecretValueStillShown(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "color", Identifiers: []string{"--color"}, Type: "string", Enum: []string{"red", "blue"}}},
+		Flags: []FlagDef{{Name: "color", Identifiers: []string{"--color"}, Type: "string", Enum: []string{"red", "blue"}}},
 	}
 	var in struct{}
-	err := NewParser().Parse(rotini.NewContextFor(def, []string{"--color", "green"}), &in)
+	err := NewParser().Parse(NewContextFor(def, []string{"--color", "green"}), &in)
 	if err == nil || !strings.Contains(err.Error(), "green") {
 		t.Errorf("a non-secret value should appear in the error: %v", err)
 	}
 }
 
 func TestParse_flagGroups(t *testing.T) {
-	def := func(kind rotini.FlagGroupKind) rotini.Definition {
-		return rotini.Definition{
+	def := func(kind FlagGroupKind) Definition {
+		return Definition{
 			Name: "app", Handler: "App",
-			Flags: []rotini.FlagDef{
+			Flags: []FlagDef{
 				{Name: "json", Identifiers: []string{"--json"}, Type: "bool"},
 				{Name: "yaml", Identifiers: []string{"--yaml"}, Type: "bool"},
 			},
-			FlagGroups: []rotini.FlagGroup{{Kind: kind, Flags: []string{"json", "yaml"}}},
+			FlagGroups: []FlagGroup{{Kind: kind, Flags: []string{"json", "yaml"}}},
 		}
 	}
 	cases := []struct {
 		name    string
-		kind    rotini.FlagGroupKind
+		kind    FlagGroupKind
 		argv    []string
 		wantErr string // "" = should pass
 	}{
-		{"exclusive: both → err", rotini.FlagGroupMutuallyExclusive, []string{"--json", "--yaml"}, "mutually exclusive"},
-		{"exclusive: one → ok", rotini.FlagGroupMutuallyExclusive, []string{"--json"}, ""},
-		{"exclusive: none → ok", rotini.FlagGroupMutuallyExclusive, nil, ""},
-		{"together: one → err", rotini.FlagGroupRequiredTogether, []string{"--json"}, "must be used together"},
-		{"together: both → ok", rotini.FlagGroupRequiredTogether, []string{"--json", "--yaml"}, ""},
-		{"together: none → ok", rotini.FlagGroupRequiredTogether, nil, ""},
-		{"one_of: none → err", rotini.FlagGroupOneOf, nil, "exactly one"},
-		{"one_of: one → ok", rotini.FlagGroupOneOf, []string{"--yaml"}, ""},
-		{"one_of: both → err", rotini.FlagGroupOneOf, []string{"--json", "--yaml"}, "mutually exclusive"},
-		{"at_least_one: none → err", rotini.FlagGroupAtLeastOne, nil, "at least one"},
-		{"at_least_one: one → ok", rotini.FlagGroupAtLeastOne, []string{"--json"}, ""},
-		{"at_least_one: both → ok", rotini.FlagGroupAtLeastOne, []string{"--json", "--yaml"}, ""},
+		{"exclusive: both → err", FlagGroupMutuallyExclusive, []string{"--json", "--yaml"}, "mutually exclusive"},
+		{"exclusive: one → ok", FlagGroupMutuallyExclusive, []string{"--json"}, ""},
+		{"exclusive: none → ok", FlagGroupMutuallyExclusive, nil, ""},
+		{"together: one → err", FlagGroupRequiredTogether, []string{"--json"}, "must be used together"},
+		{"together: both → ok", FlagGroupRequiredTogether, []string{"--json", "--yaml"}, ""},
+		{"together: none → ok", FlagGroupRequiredTogether, nil, ""},
+		{"one_of: none → err", FlagGroupOneOf, nil, "exactly one"},
+		{"one_of: one → ok", FlagGroupOneOf, []string{"--yaml"}, ""},
+		{"one_of: both → err", FlagGroupOneOf, []string{"--json", "--yaml"}, "mutually exclusive"},
+		{"at_least_one: none → err", FlagGroupAtLeastOne, nil, "at least one"},
+		{"at_least_one: one → ok", FlagGroupAtLeastOne, []string{"--json"}, ""},
+		{"at_least_one: both → ok", FlagGroupAtLeastOne, []string{"--json", "--yaml"}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var in struct{}
-			err := NewParser().Parse(rotini.NewContextFor(def(c.kind), c.argv), &in)
+			err := NewParser().Parse(NewContextFor(def(c.kind), c.argv), &in)
 			switch {
 			case c.wantErr == "" && err != nil:
 				t.Errorf("Parse(%v) = %v, want ok", c.argv, err)
@@ -425,13 +423,13 @@ func TestParse_flagGroups(t *testing.T) {
 func TestParser_deprecations(t *testing.T) {
 	// A migration: command 'build' renamed to 'compile' (old name kept as a deprecated
 	// alias); flag --conf renamed to --config (old identifier kept but deprecated).
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Commands: []rotini.CommandDef{{
+		Commands: []CommandDef{{
 			Name: "compile", Handler: "AppCompile",
 			Aliases:               []string{"build"},
 			DeprecatedIdentifiers: []string{"build"},
-			Flags: []rotini.FlagDef{
+			Flags: []FlagDef{
 				{Name: "config", Identifiers: []string{"--config", "--conf"}, Type: "string", DeprecatedIdentifiers: []string{"--conf"}},
 			},
 		}},
@@ -446,7 +444,7 @@ func TestParser_deprecations(t *testing.T) {
 		}
 	}
 	depsFor := func(argv ...string) []Deprecation {
-		rtx := rotini.NewContextFor(def, argv)
+		rtx := NewContextFor(def, argv)
 		var in inputs
 		p := NewParser()
 		if err := p.Parse(rtx, &in); err != nil {
@@ -486,14 +484,14 @@ func TestParser_deprecations(t *testing.T) {
 }
 
 func TestParse_coercionErrors(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{
+		Flags: []FlagDef{
 			{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"},
 			{Name: "ttl", Identifiers: []string{"--ttl"}, Type: "time.Duration"},
 			{Name: "when", Identifiers: []string{"--when"}, Type: "time.Time"}, // custom: TextUnmarshaler
 		},
-		Arguments: []rotini.ArgDef{{Name: "n", Type: "int"}},
+		Arguments: []ArgDef{{Name: "n", Type: "int"}},
 	}
 	type inputs struct {
 		App struct {
@@ -509,7 +507,7 @@ func TestParse_coercionErrors(t *testing.T) {
 	}
 	parse := func(argv ...string) error {
 		var in inputs
-		return NewParser().Parse(rotini.NewContextFor(def, argv), &in)
+		return NewParser().Parse(NewContextFor(def, argv), &in)
 	}
 
 	cases := []struct {
@@ -534,9 +532,9 @@ func TestParse_coercionErrors(t *testing.T) {
 }
 
 func TestParse_mapFlag(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{
+		Flags: []FlagDef{
 			{Name: "label", Identifiers: []string{"--label", "-l"}, Type: "map[string]string"},
 			{Name: "port", Identifiers: []string{"--port"}, Type: "map[string]int"},
 		},
@@ -552,7 +550,7 @@ func TestParse_mapFlag(t *testing.T) {
 	}
 	parse := func(argv ...string) (inputs, error) {
 		var in inputs
-		err := NewParser().Parse(rotini.NewContextFor(def, argv), &in)
+		err := NewParser().Parse(NewContextFor(def, argv), &in)
 		return in, err
 	}
 
@@ -582,14 +580,14 @@ func TestParse_mapFlag(t *testing.T) {
 }
 
 func TestParse_flagDependencies(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{
+		Flags: []FlagDef{
 			{Name: "tls", Identifiers: []string{"--tls"}, Type: "bool"},
 			{Name: "cert", Identifiers: []string{"--cert"}, Type: "string"},
 			{Name: "key", Identifiers: []string{"--key"}, Type: "string"},
 		},
-		FlagDependencies: []rotini.FlagDependency{{When: "tls", Requires: []string{"cert", "key"}}},
+		FlagDependencies: []FlagDependency{{When: "tls", Requires: []string{"cert", "key"}}},
 	}
 	cases := []struct {
 		name    string
@@ -605,7 +603,7 @@ func TestParse_flagDependencies(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var in struct{}
-			err := NewParser().Parse(rotini.NewContextFor(def, c.argv), &in)
+			err := NewParser().Parse(NewContextFor(def, c.argv), &in)
 			switch {
 			case c.wantErr == "" && err != nil:
 				t.Errorf("Parse(%v) = %v, want ok", c.argv, err)
@@ -620,9 +618,9 @@ func TestParse_flagDependencies(t *testing.T) {
 // joined booleans, separate flags, an attached value, a next-token value, and
 // mixes — they should all "just work".
 func TestParse_clusteredShortFlags(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{
+		Flags: []FlagDef{
 			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
 			{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
 			{Name: "num", Identifiers: []string{"-n"}, Type: "int"},
@@ -656,7 +654,7 @@ func TestParse_clusteredShortFlags(t *testing.T) {
 	}
 	for _, c := range cases {
 		var got inputs
-		if err := NewParser().Parse(rotini.NewContextFor(def, c.argv), &got); err != nil {
+		if err := NewParser().Parse(NewContextFor(def, c.argv), &got); err != nil {
 			t.Errorf("%v: Parse: %v", c.argv, err)
 			continue
 		}
@@ -669,9 +667,9 @@ func TestParse_clusteredShortFlags(t *testing.T) {
 
 // An exact multi-char identifier wins over cluster decomposition.
 func TestParse_exactIdentifierBeatsCluster(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{
+		Flags: []FlagDef{
 			{Name: "vh", Identifiers: []string{"-vh"}, Type: "bool"},
 			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
 			{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
@@ -688,7 +686,7 @@ func TestParse_exactIdentifierBeatsCluster(t *testing.T) {
 		}
 	}
 	var got inputs
-	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"-vh"}), &got); err != nil {
+	if err := NewParser().Parse(NewContextFor(def, []string{"-vh"}), &got); err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	if !got.App.Flags.VH {
@@ -701,12 +699,12 @@ func TestParse_exactIdentifierBeatsCluster(t *testing.T) {
 
 // An unrecognized character in a cluster is an unknown-flag error naming it.
 func TestParse_clusterUnknownFlag(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"}},
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"}},
 	}
 	var got struct{}
-	err := NewParser().Parse(rotini.NewContextFor(def, []string{"-vx"}), &got)
+	err := NewParser().Parse(NewContextFor(def, []string{"-vx"}), &got)
 	if err == nil || !strings.Contains(err.Error(), `unknown flag "-x"`) {
 		t.Errorf("err = %v, want unknown flag -x", err)
 	}
@@ -716,9 +714,9 @@ func TestParse_clusterUnknownFlag(t *testing.T) {
 // none bool, with different types. The exact multi-char identifier wins for the
 // literal token; clustering is single-char and only on an exact miss.
 func TestParse_multiCharShortVsCluster(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Flags: []rotini.FlagDef{
+		Flags: []FlagDef{
 			{Name: "ex", Identifiers: []string{"-x"}, Type: "string"},
 			{Name: "why", Identifiers: []string{"-y"}, Type: "int"},
 			{Name: "exy", Identifiers: []string{"-xy"}, Type: "string"},
@@ -736,7 +734,7 @@ func TestParse_multiCharShortVsCluster(t *testing.T) {
 	}
 	parse := func(argv ...string) (inputs, error) {
 		var in inputs
-		err := NewParser().Parse(rotini.NewContextFor(def, argv), &in)
+		err := NewParser().Parse(NewContextFor(def, argv), &in)
 		return in, err
 	}
 
@@ -764,14 +762,14 @@ func TestParse_multiCharShortVsCluster(t *testing.T) {
 // flag; positional (not name-based) scoping must keep them in separate frames so
 // the middle command's flag and the leaf's never merge.
 func TestParse_repeatedNameOnPath(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Commands: []rotini.CommandDef{{
+		Commands: []CommandDef{{
 			Name: "cmd1", Handler: "AppCmd1",
-			Flags: []rotini.FlagDef{{Name: "mid", Identifiers: []string{"--mid"}, Type: "string"}},
-			Commands: []rotini.CommandDef{{
+			Flags: []FlagDef{{Name: "mid", Identifiers: []string{"--mid"}, Type: "string"}},
+			Commands: []CommandDef{{
 				Name: "cmd1", Handler: "AppCmd1Cmd1",
-				Flags: []rotini.FlagDef{{Name: "leaf", Identifiers: []string{"--leaf"}, Type: "string"}},
+				Flags: []FlagDef{{Name: "leaf", Identifiers: []string{"--leaf"}, Type: "string"}},
 			}},
 		}},
 	}
@@ -794,7 +792,7 @@ func TestParse_repeatedNameOnPath(t *testing.T) {
 		AppCmd1Cmd1 leafInputs
 	}
 
-	rtx := rotini.NewContextFor(def, []string{"cmd1", "cmd1", "--mid", "M", "--leaf", "L"})
+	rtx := NewContextFor(def, []string{"cmd1", "cmd1", "--mid", "M", "--leaf", "L"})
 	var in inputs
 	if err := NewParser().Parse(rtx, &in); err != nil {
 		t.Fatalf("Parse: %v", err)
@@ -813,23 +811,23 @@ func TestParse_repeatedNameOnPath(t *testing.T) {
 // down its own branch and bind that branch's flags only; the other branch's leaf
 // flag must not be accepted.
 func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Commands: []rotini.CommandDef{
+		Commands: []CommandDef{
 			{
 				Name: "cmd1", Handler: "AppCmd1",
-				Flags: []rotini.FlagDef{{Name: "m1", Identifiers: []string{"--m1"}, Type: "string"}},
-				Commands: []rotini.CommandDef{{
+				Flags: []FlagDef{{Name: "m1", Identifiers: []string{"--m1"}, Type: "string"}},
+				Commands: []CommandDef{{
 					Name: "cmd1", Handler: "AppCmd1Cmd1",
-					Flags: []rotini.FlagDef{{Name: "leaf1", Identifiers: []string{"--leaf1"}, Type: "string"}},
+					Flags: []FlagDef{{Name: "leaf1", Identifiers: []string{"--leaf1"}, Type: "string"}},
 				}},
 			},
 			{
 				Name: "cmd2", Handler: "AppCmd2",
-				Flags: []rotini.FlagDef{{Name: "m2", Identifiers: []string{"--m2"}, Type: "string"}},
-				Commands: []rotini.CommandDef{{
+				Flags: []FlagDef{{Name: "m2", Identifiers: []string{"--m2"}, Type: "string"}},
+				Commands: []CommandDef{{
 					Name: "cmd1", Handler: "AppCmd2Cmd1",
-					Flags: []rotini.FlagDef{{Name: "leaf2", Identifiers: []string{"--leaf2"}, Type: "string"}},
+					Flags: []FlagDef{{Name: "leaf2", Identifiers: []string{"--leaf2"}, Type: "string"}},
 				}},
 			},
 		},
@@ -867,7 +865,7 @@ func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 
 	// app cmd1 cmd1 — descends the cmd1 branch; binds --m1 and --leaf1.
 	var in1 cmd1Inputs
-	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"cmd1", "cmd1", "--m1", "M1", "--leaf1", "L1"}), &in1); err != nil {
+	if err := NewParser().Parse(NewContextFor(def, []string{"cmd1", "cmd1", "--m1", "M1", "--leaf1", "L1"}), &in1); err != nil {
 		t.Fatalf("cmd1 cmd1: Parse: %v", err)
 	}
 	if in1.AppCmd1.Flags.M1 != "M1" || in1.AppCmd1Cmd1.Flags.Leaf1 != "L1" {
@@ -877,7 +875,7 @@ func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 	// app cmd2 cmd1 — descends the cmd2 branch; binds --m2 and --leaf2, with no
 	// bleed from the identically-named cmd1-branch leaf.
 	var in2 cmd2Inputs
-	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"cmd2", "cmd1", "--m2", "M2", "--leaf2", "L2"}), &in2); err != nil {
+	if err := NewParser().Parse(NewContextFor(def, []string{"cmd2", "cmd1", "--m2", "M2", "--leaf2", "L2"}), &in2); err != nil {
 		t.Fatalf("cmd2 cmd1: Parse: %v", err)
 	}
 	if in2.AppCmd2.Flags.M2 != "M2" || in2.AppCmd2Cmd1.Flags.Leaf2 != "L2" {
@@ -886,7 +884,7 @@ func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 
 	// Isolation: the cmd1-branch leaf flag is not a flag of the cmd2-branch leaf.
 	var in3 cmd2Inputs
-	if err := NewParser().Parse(rotini.NewContextFor(def, []string{"cmd2", "cmd1", "--leaf1", "X"}), &in3); err == nil || !strings.Contains(err.Error(), `unknown flag "--leaf1"`) {
+	if err := NewParser().Parse(NewContextFor(def, []string{"cmd2", "cmd1", "--leaf1", "X"}), &in3); err == nil || !strings.Contains(err.Error(), `unknown flag "--leaf1"`) {
 		t.Errorf("cross-branch flag should be unknown under cmd2 cmd1, got: %v", err)
 	}
 }
@@ -903,10 +901,10 @@ type appFlags struct {
 // than silently dropped — both for a command that declares fewer args and for one that
 // declares none.
 func TestParse_rejectsTooManyPositionals(t *testing.T) {
-	def := rotini.Definition{
+	def := Definition{
 		Name: "app", Handler: "App",
-		Commands: []rotini.CommandDef{
-			{Name: "greet", Handler: "AppGreet", Arguments: []rotini.ArgDef{{Name: "name", Type: "string"}}},
+		Commands: []CommandDef{
+			{Name: "greet", Handler: "AppGreet", Arguments: []ArgDef{{Name: "name", Type: "string"}}},
 			{Name: "ping", Handler: "AppPing"},
 		},
 	}
@@ -922,7 +920,7 @@ func TestParse_rejectsTooManyPositionals(t *testing.T) {
 	}
 	parse := func(argv ...string) error {
 		var in tmpInputs
-		return NewParser().Parse(rotini.NewContextFor(def, argv), &in)
+		return NewParser().Parse(NewContextFor(def, argv), &in)
 	}
 
 	if err := parse("greet", "alice"); err != nil {
@@ -973,7 +971,7 @@ type runInputs struct {
 // parsing.
 func bindStore[T any](store *parsedInputs) T {
 	var out T
-	chain := make([]rotini.ResolvedCommand, len(store.scopes))
+	chain := make([]ResolvedCommand, len(store.scopes))
 	_ = bindInputs(reflect.ValueOf(&out).Elem(), store, chain)
 	return out
 }

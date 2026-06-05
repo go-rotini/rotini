@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
-	"github.com/go-rotini/rotini/rtk"
 )
 
 // TestGenerateHelp_viaProgram exercises a generated handler end-to-end through the real
@@ -25,7 +25,7 @@ func TestGenerateHelp_viaProgram(t *testing.T) {
 		WithStdout(out).
 		WithStderr(errb).
 		WithExit(func(c int) { code = c }).
-		Bind("parser", rtk.NewParser()).
+		Bind("parser", rotini.NewParser()).
 		Execute()
 
 	if code != 0 {

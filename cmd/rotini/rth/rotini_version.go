@@ -6,7 +6,6 @@ import (
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
-	"github.com/go-rotini/rotini/rtk"
 )
 
 type rotiniVersionHandlers struct {
@@ -19,7 +18,7 @@ type rotiniVersionHandlers struct {
 var _ rotini.CommandHandlers = (*rotiniVersionHandlers)(nil)
 
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
+	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
 
 	var inputs rtg.RotiniVersionInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {

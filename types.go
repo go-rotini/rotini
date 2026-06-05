@@ -7,7 +7,7 @@ import (
 
 // CommandHandlers is the lifecycle interface every command's handler set
 // implements. The runtime invokes the hooks in order, sharing one [Context]
-// across the chain; handlers read their typed inputs with the rtk package's Parse.
+// across the chain; handlers read their typed inputs with [Parser.Parse].
 type CommandHandlers interface {
 	CascadingPreRun(ctx context.Context, rtx *Context)
 	PreRun(ctx context.Context, rtx *Context)
@@ -50,7 +50,7 @@ const (
 // FlagGroup is a constraint on which of a command's flags may (or must) appear
 // together on the command line. Flags are referenced by their logical Name; "set"
 // means explicitly provided on argv (a default or env/config fallback does not count,
-// matching the convention of cobra/clap). Enforced by the rtk parser; a violation is
+// matching the convention of cobra/clap). Enforced by the [Parser]; a violation is
 // a usage error.
 type FlagGroup struct {
 	Kind  FlagGroupKind
@@ -60,7 +60,7 @@ type FlagGroup struct {
 // FlagDependency is a conditional cross-flag requirement: when the When flag is
 // explicitly set on argv, every flag in Requires must also be set. Flags are referenced
 // by their logical Name and "set" follows the same explicit-argv convention as
-// [FlagGroup]. Enforced by the rtk parser; a violation is a usage error.
+// [FlagGroup]. Enforced by the [Parser]; a violation is a usage error.
 type FlagDependency struct {
 	When     string   // the flag whose presence triggers the requirement
 	Requires []string // flags that must also be set when When is set
@@ -76,10 +76,10 @@ type RemoteDef struct {
 	Timeout time.Duration // 0 means no timeout
 }
 
-// BindMeta is the generated, data-only descriptor the default binder (rtk.Binder)
+// BindMeta is the generated, data-only descriptor the default binder ([Binder])
 // consumes to fill the non-argv input channels. It carries document-level concerns
 // that the dispatch-time Definition deliberately omits. The rtg package emits it as
-// `var BindMeta = rotini.BindMeta{…}`; main.go hands it to rtk.NewProgram's binder.
+// `var BindMeta = rotini.BindMeta{…}`; main.go passes it to [NewBinder].
 type BindMeta struct {
 	ConfigFiles []ConfigFile // document-level configuration_files sources, in declared order
 	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
@@ -111,7 +111,7 @@ type CommandDef struct {
 	Name                  string
 	Aliases               []string
 	Handler               string   // ProgramHandlers method, e.g. "RotiniGenerate"
-	DeprecatedIdentifiers []string // aliases (subset of Aliases) that rtk's Deprecations reports when used to invoke
+	DeprecatedIdentifiers []string // aliases (subset of Aliases) that [Parser.Deprecations] reports when used to invoke
 	Flags                 []FlagDef
 	Arguments             []ArgDef
 	FlagGroups            []FlagGroup      // cross-flag presence rules validated at parse time
@@ -148,7 +148,7 @@ type FlagDef struct {
 	Default               string
 	Enum                  []string
 	Secret                bool     // when true, the value is redacted in usage/validation error output
-	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that rtk's Deprecations reports when used
+	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Parser.Deprecations] reports when used
 	Constraints
 }
 

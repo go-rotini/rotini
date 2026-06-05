@@ -10,14 +10,14 @@ import (
 )
 
 // ErrServiceNotFound is the sentinel reported when a registry key is unbound — the
-// rtk package's MustGet panics a [*ServiceError] wrapping it, which the runtime
+// [MustGet] panics a [*ServiceError] wrapping it, which the runtime
 // recovers and routes to OnError. A funnel classifies it with errors.Is:
 //
 //	case errors.Is(err, rotini.ErrServiceNotFound):
 var ErrServiceNotFound = errors.New("rotini: service not found")
 
 // ServiceError reports a registry key that was requested but unbound (or bound to
-// the wrong type) — the rtk package's MustGet panics it. It unwraps to
+// the wrong type) — the [MustGet] panics it. It unwraps to
 // [ErrServiceNotFound]; recover the key with errors.As.
 type ServiceError struct {
 	Key string // the registry key that was requested
@@ -40,9 +40,9 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 //
 // The registry is the dependency-injection seam: bind any service with
 // [Context.Bind] (a real implementation in production, a double in tests) and
-// retrieve it with [Context.Value] (or the rtk package's typed Get/MustGet).
-// Bindings persist for the lifetime of the Context. Opt-in input parsing (the rtk
-// package's Parser) reads [Context.Args]/[Context.Chain]; the runtime itself never
+// retrieve it with [Context.Value] (or the typed [Get]/[MustGet]).
+// Bindings persist for the lifetime of the Context. Opt-in input parsing (the
+// [Parser]) reads [Context.Args]/[Context.Chain]; the runtime itself never
 // parses flags.
 //
 // A Context is safe for concurrent registry access; reads and writes are guarded
@@ -82,13 +82,13 @@ func NewContext() *Context {
 
 // NewContextFor builds a [Context] with argv resolved against an explicit def — the
 // same context the runtime hands a handler at dispatch (raw [Context.Args] + the
-// resolved [Context.Chain]). It is for exercising the rtk Parser/Usage helpers, or a
+// resolved [Context.Chain]). It is for exercising the [Parser]/[Usage] helpers, or a
 // single hook, against a Definition you construct:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
-//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"}).Bind("parser", rtk.NewParser())
+//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"}).Bind("parser", rotini.NewParser())
 //	var in appInputs
-//	err := rotini.MustGet[*rtk.Parser](rtx, "parser").Parse(rtx, &in)
+//	err := rotini.MustGet[*rotini.Parser](rtx, "parser").Parse(rtx, &in)
 //
 // To drive a whole *generated* program end-to-end (the usual handler test), construct it
 // with the generated NewProgram and run it under a recording exit + capture streams —
@@ -131,7 +131,7 @@ func (rtx *Context) Has(key string) bool {
 
 // Args returns the raw argument vector for this invocation: everything after the
 // resolved command path is still present, so a handler can run its own parser
-// instead of the rtk package's Parse. The slice is the runtime's; treat it as
+// instead of [Parser.Parse]. The slice is the runtime's; treat it as
 // read-only.
 func (rtx *Context) Args() []string {
 	if rtx == nil {
@@ -142,7 +142,7 @@ func (rtx *Context) Args() []string {
 
 // Chain returns the resolved command path for this invocation, root → leaf — the
 // command tree the runtime descended to choose this handler. Opt-in tooling (the
-// rtk package's Parse and Usage) reads it to bind inputs and render help against
+// [Parser] and [Usage]) reads it to bind inputs and render help against
 // the exact command whose handler ran. The slice is the runtime's; treat it as
 // read-only.
 func (rtx *Context) Chain() []ResolvedCommand {
@@ -156,7 +156,7 @@ func (rtx *Context) Chain() []ResolvedCommand {
 // accessor, mirroring [context.Context.Value]. Callers type-assert to the expected
 // type, using the comma-ok form to handle an unbound (or wrong-type) service:
 //
-//	parser, ok := rtx.Value("parser").(*rtk.Parser)
+//	parser, ok := rtx.Value("parser").(*rotini.Parser)
 //	if !ok {
 //		// not bound — fail the command, or fall back
 //	}
@@ -218,7 +218,7 @@ func (rtx *Context) ExitNow(code int) {
 // raw [Context.Value] (which returns any). ok is false when no service is bound
 // under key or the bound value is not a T:
 //
-//	parser, ok := rotini.Get[*rtk.Parser](rtx, "parser")
+//	parser, ok := rotini.Get[*rotini.Parser](rtx, "parser")
 //	if !ok {
 //		// not bound — fail the command, or fall back
 //	}
@@ -237,7 +237,7 @@ func Get[T any](rtx *Context, key string) (T, bool) {
 // cannot run without a service reaches for MustGet instead of handling a miss
 // inline:
 //
-//	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
+//	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
 //	var in rtg.MycliInputs
 //	err := parser.Parse(rtx, &in)
 func MustGet[T any](rtx *Context, key string) T {

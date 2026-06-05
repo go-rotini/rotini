@@ -5,7 +5,7 @@ import "errors"
 // Category classifies an error by whose fault it is, so one OnError funnel (or an
 // [Observer] reading [Event.Err]) can decide the exit code and message style from a single
 // call to [CategoryOf] — rather than every CLI re-deriving the taxonomy. rotini tags its
-// OWN errors (a missing service is [CategoryInternal]; an rtk parse/bind failure is
+// OWN errors (a missing service is [CategoryInternal]; a parse/bind failure is
 // [CategoryUsage]); user code tags its domain errors with [UsageError] / [InternalError].
 //
 // rotini only labels and reports — it maps NO category to an exit code or message itself

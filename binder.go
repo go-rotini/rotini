@@ -1,4 +1,4 @@
-package rtk
+package rotini
 
 import (
 	"fmt"
@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/go-rotini/recon"
-	"github.com/go-rotini/rotini"
 )
 
 // Binder is the default multi-source input binder: it fills a command's typed
@@ -19,30 +18,30 @@ import (
 //
 //	// main.go
 //	rth.Program.
-//	    Bind("binder", rtk.NewBinder(rtg.BindMeta)).
+//	    Bind("binder", rotini.NewBinder(rtg.BindMeta)).
 //	    Execute()
 //
 //	// a handler
-//	binder := rotini.MustGet[*rtk.Binder](rtx, "binder")
+//	binder := rotini.MustGet[*rotini.Binder](rtx, "binder")
 //	var in rtg.WidgetCreateInputs
 //	if err := binder.Bind(rtx, &in); err != nil { /* handler owns it */ }
 //
 // Env values fill the generated <Prefix>Env struct (recon's env source maps a
 // field's recon key to its SNAKE_UPPER form); config-file values fill <Prefix>Config
-// from the document's configuration_files (carried in [rotini.BindMeta]). The two
+// from the document's configuration_files (carried in [BindMeta]). The two
 // channels use independent registries, so an env var never leaks into a config field
 // or vice versa. Flags may also fall back to env/config, and a leaf command may decode
 // a typed stdin payload.
 type Binder struct {
 	parser       *Parser
-	configFiles  []rotini.ConfigFile
+	configFiles  []ConfigFile
 	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
 }
 
 // NewBinder returns the default binder, configured from the generated descriptor
 // (the rtg package's BindMeta var) — its configuration_files sources and per-command
 // stdin payload schemas.
-func NewBinder(meta rotini.BindMeta) *Binder {
+func NewBinder(meta BindMeta) *Binder {
 	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas}
 }
 
@@ -54,7 +53,7 @@ func NewBinder(meta rotini.BindMeta) *Binder {
 // satisfiable from env or config, not only from argv, and an env/config-supplied value
 // is enum-checked. It returns the first error (a usage error from parsing/validation,
 // or a recon bind/validation error for env/config/stdin).
-func (b *Binder) Bind(rtx *rotini.Context, out any) error {
+func (b *Binder) Bind(rtx *Context, out any) error {
 	if b == nil {
 		return &usageError{msg: "rotini: nil binder"}
 	}
@@ -216,7 +215,7 @@ func readPipedStdin() ([]byte, error) {
 // recon tag) are untouched. Each reconciled value is also written back into store, so
 // the deferred [validate] pass sees an env/config-supplied flag as present (satisfying
 // a required check) and range-checks it against any enum.
-func (b *Binder) reconcileFlags(v reflect.Value, chain []rotini.ResolvedCommand, argv []string, store *parsedInputs) error {
+func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv []string, store *parsedInputs) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
@@ -297,7 +296,7 @@ func hasReconFlags(v reflect.Value) bool {
 
 // flagOverrides maps the canonical key of every fallback flag explicitly set on
 // argv to its (Parser-bound) value — the highest-precedence layer for reconciliation.
-func flagOverrides(v reflect.Value, chain []rotini.ResolvedCommand, argv []string) map[string]any {
+func flagOverrides(v reflect.Value, chain []ResolvedCommand, argv []string) map[string]any {
 	m := map[string]any{}
 	offset := len(chain) - v.NumField()
 	if offset < 0 {
@@ -377,13 +376,13 @@ func reconHasSecret(tag string) bool {
 }
 
 // findFlagDef finds a flag definition by its logical name.
-func findFlagDef(defs []rotini.FlagDef, name string) (rotini.FlagDef, bool) {
+func findFlagDef(defs []FlagDef, name string) (FlagDef, bool) {
 	for _, d := range defs {
 		if d.Name == name {
 			return d, true
 		}
 	}
-	return rotini.FlagDef{}, false
+	return FlagDef{}, false
 }
 
 // flagWasSet reports whether any of a flag's identifiers appears as a flag token in
@@ -576,9 +575,9 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry) error {
 }
 
 // channelConstraints reads the validation struct-tags codegen emits on a channel field
-// (min/max/minlen/maxlen/minitems/maxitems/pattern) into a [rotini.Constraints].
-func channelConstraints(tag reflect.StructTag) (rotini.Constraints, bool) {
-	var c rotini.Constraints
+// (min/max/minlen/maxlen/minitems/maxitems/pattern) into a [Constraints].
+func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
+	var c Constraints
 	has := false
 	if v := tag.Get("min"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {

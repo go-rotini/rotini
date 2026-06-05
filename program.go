@@ -115,15 +115,15 @@ func (p *Program) WithSignals(sigs ...os.Signal) *Program {
 // prior binding, and returns the receiver so it chains with [program.OnError] and
 // [program.WithArguments] before [program.Execute]. It is the dependency-injection
 // seam: bind a real implementation in production or a double in tests, with the
-// same handler code retrieving it via [Rtx.Get] (or the rtk package's typed
-// Get/MustGet). Binding "parser" overrides the default parser the rtk package uses.
+// same handler code retrieving it via the typed [Get] / [MustGet]. Binding
+// "parser" overrides the default [Parser].
 func (p *Program) Bind(key string, value any) *Program {
 	p.rtx.Bind(key, value)
 	return p
 }
 
 // OnError sets the funnel that handles any panic raised inside a hook (e.g. the
-// rtk package's MustGet on a missing service): the runtime recovers it during
+// [MustGet] on a missing service): the runtime recovers it during
 // dispatch and calls fn(ctx, rtx, err), where fn decides the exit code by calling
 // rtx.Exit. It is the single place to classify (errors.Is/errors.As), log (file,
 // error-tracking service), and print errors in the CLI's own style. With no funnel
@@ -235,7 +235,7 @@ func (p *Program) defaultOnError(_ context.Context, rtx *Context, err error) {
 //     rtx.Exit inside a teardown hook neither aborts the rest nor displaces the
 //     first failure or exit code.
 //
-// rtx.Exit is a clean stop. A panic anywhere (e.g. the rtk package's MustGet on a
+// rtx.Exit is a clean stop. A panic anywhere (e.g. the [MustGet] on a
 // missing service) is recovered, does not abort the remaining teardown, and is
 // routed once — after all teardown — to the OnError funnel, last. See
 // .docs/ROTINI_RTX_EXIT.md.
