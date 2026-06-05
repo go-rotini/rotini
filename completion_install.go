@@ -1,4 +1,4 @@
-package rtk
+package rotini
 
 import (
 	"fmt"
@@ -36,7 +36,7 @@ type CompletionTarget struct {
 // learn where it goes with the other, and let the handler decide whether to print the
 // command or perform the write — rotini never touches the user's machine on its own:
 //
-//	t, err := rtk.CompletionInstallTarget(prog, shell)
+//	t, err := rotini.CompletionInstallTarget(prog, shell)
 //	if err != nil { /* handler owns it */ }
 //	fmt.Printf("Install with:\n  %s\n", t.Command)
 //	if t.Note != "" { fmt.Printf("\nNote: %s\n", t.Note) }
@@ -111,7 +111,7 @@ func CompletionInstallTarget(prog, shell string) (CompletionTarget, error) {
 // write — so it returns an error pointing at the manual command from CompletionInstallTarget.
 //
 //	script, _ := rtg.Completion(shell)            // the embedded script
-//	path, err := rtk.InstallCompletion(prog, shell, script)
+//	path, err := rotini.InstallCompletion(prog, shell, script)
 //	if err != nil { /* handler owns it */ }
 //	pr.Success("installed %s completion to %s", shell, path)
 func InstallCompletion(prog, shell, script string) (string, error) {

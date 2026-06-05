@@ -10,7 +10,7 @@ import (
 func main() {
 	// Services are opt-in: bind the ones this CLI uses here, then retrieve them in a
 	// handler with rotini.MustGet[*rotini.Parser](rtx, "parser"). Add rotini.NewBinder(
-	// rtg.BindMeta) (env/config/stdin), or rtk.NewSignals() / rtk.NewTickers() from the
+	// rtg.BindMeta) (env/config/stdin), or rtk.NewSignals() from the
 	// github.com/go-rotini/rotini/rtk toolkit, as you need them.
 	{{.Pkg}}.Program.
 		Bind("parser", rotini.NewParser()).

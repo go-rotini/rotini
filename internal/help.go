@@ -12,7 +12,7 @@ import (
 	"unicode"
 
 	"github.com/go-rotini/fs"
-	"github.com/go-rotini/rotini/rtk"
+	"github.com/go-rotini/rotini"
 )
 
 // helpTemplateName is the editable, seed-once help template file living in the
@@ -52,7 +52,7 @@ var (
 		verbatim: func(h cmdHelp) string { return h.Markdown },
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
-	// no template, no verbatim. Scripts come from rtk.CompletionScript at codegen.
+	// no template, no verbatim. Scripts come from rotini.CompletionScript at codegen.
 	completionFeatureDesc = docFeature{
 		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "Completion",
 		ext: ".txt", perShell: true,
@@ -60,7 +60,7 @@ var (
 )
 
 // completionShells are the shells rotini generates completion scripts for, in a
-// deterministic order (matches rtk.CompletionScript's supported set).
+// deterministic order (matches rotini.CompletionScript's supported set).
 var completionShells = []string{"bash", "zsh", "fish", "powershell"}
 
 // helpNode is one command's help wiring: the embed var/resolver identity plus
@@ -278,7 +278,7 @@ func completionNodes() []helpNode {
 
 // writeCompletionFiles writes one rotini-managed completion script per supported
 // shell under the completion dir, generated from the program name via
-// rtk.CompletionScript (the shared source of the bash/zsh/fish templates). Each
+// rotini.CompletionScript (the shared source of the bash/zsh/fish templates). Each
 // file is (re)written every pass, skipped when already identical.
 func writeCompletionFiles(lay layout, dir, prog string, nodes []helpNode) error {
 	if dir == "" {
@@ -289,7 +289,7 @@ func writeCompletionFiles(lay layout, dir, prog string, nodes []helpNode) error 
 		return fmt.Errorf("create completion dir %s: %w", cdir, err)
 	}
 	for _, n := range nodes {
-		script, err := rtk.CompletionScript(prog, n.name)
+		script, err := rotini.CompletionScript(prog, n.name)
 		if err != nil {
 			return fmt.Errorf("generate %s completion: %w", n.name, err)
 		}

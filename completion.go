@@ -23,7 +23,7 @@ const completeCommand = "__complete"
 // Program, so a completer can reach a bound API client, the filesystem, etc.
 //
 // It is entirely opt-in — rotini generates no stub for it and adds nothing if it is
-// absent — and, like any user callback (see Tickers), a panic in it is the caller's
+// absent — and, like any user callback, a panic in it is the caller's
 // bug, not recovered. It may be called on every keystroke, so it must be read-only and
 // fast.
 type FlagValueCompleter interface {

@@ -1,4 +1,4 @@
-package rtk
+package rotini
 
 import (
 	"strings"

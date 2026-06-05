@@ -1,4 +1,4 @@
-package rtk
+package rotini
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 // A completion handler typically reads the requested shell from its inputs and
 // prints the result:
 //
-//	script, err := rtk.CompletionScript(filepath.Base(os.Args[0]), shell)
+//	script, err := rotini.CompletionScript(filepath.Base(os.Args[0]), shell)
 func CompletionScript(prog, shell string) (string, error) {
 	var tmpl string
 	switch shell {
