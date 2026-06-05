@@ -1,9 +1,48 @@
 package internal
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+// writeFileBytes writes atomically and creates the parent directory: a non-Go output goes
+// to a nested missing dir with the exact content, and the atomic temp file is renamed away
+// (the target dir holds only the final file, never a torn or leftover temp).
+func TestWriteFileBytes_atomicAndMkdir(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rtg", "help", "app.txt") // none of these dirs exist yet
+
+	if err := writeFileBytes(path, "the help page\n"); err != nil {
+		t.Fatalf("writeFileBytes: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "the help page\n" {
+		t.Fatalf("content = %q, err = %v; want the help page", got, err)
+	}
+	// Atomic temp-then-rename leaves no residue: only the final file in the target dir.
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatalf("read target dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "app.txt" {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("target dir = %v, want only [app.txt] (no leftover temp file)", names)
+	}
+
+	// Overwriting (re-generate) replaces the content atomically, still no residue.
+	if err := writeFileBytes(path, "updated\n"); err != nil {
+		t.Fatalf("rewrite: %v", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "updated\n" {
+		t.Errorf("rewrite content = %q, want updated", got)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
+		t.Errorf("after rewrite, target dir has %d entries, want 1", len(entries))
+	}
+}
 
 // TestHelpFuncMap asserts the template helper set is exactly the documented,
 // deterministic allowlist — no clock/entropy functions (which would break

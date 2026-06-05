@@ -11,6 +11,7 @@ import (
 	"text/template"
 	"unicode"
 
+	"github.com/go-rotini/fs"
 	"github.com/go-rotini/rotini/rtk"
 )
 
@@ -717,9 +718,13 @@ func writeIfChanged(path, content string) error {
 	return writeFileBytes(path, content)
 }
 
+// writeFileBytes writes content to path atomically (temp file then rename, so an
+// interrupted generate never leaves a torn, half-written file) and creates the parent
+// directory if needed — matching how the generated Go file is written (see format.go). It
+// backs every non-Go output: help/man/markdown pages, completion scripts, and handler stubs.
 func writeFileBytes(path, content string) error {
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write help %s: %w", filepath.Base(path), err)
+	if err := fs.WriteFile(path, []byte(content), fs.WithMkdirAll(true), fs.WithAtomic(true)); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
 	return nil
 }
