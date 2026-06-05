@@ -3,7 +3,6 @@ package rth
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -25,7 +24,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniGenerateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(os.Stderr, "rotini:", err)
+		fmt.Fprintln(rtx.Stderr, "rotini:", err)
 		rtx.Exit(1)
 		return
 	}
@@ -34,11 +33,11 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.RotiniGenerate.Flags
 
 	if flags.Help {
-		fmt.Fprintln(os.Stdout, rtg.HelpRotiniGenerate)
+		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniGenerate)
 		return
 	}
 
-	fmt.Fprintf(os.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
+	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
 	err := internal.Generate(
 		args.SpecFilePath,
@@ -46,15 +45,15 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		flags.Watch,
 		func(result string, err error) {
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "Error:", err)
+				fmt.Fprintln(rtx.Stderr, "Error:", err)
 				return
 			}
-			fmt.Fprintln(os.Stdout, result)
+			fmt.Fprintln(rtx.Stdout, result)
 		},
 	)
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
 	}
 }

@@ -3,7 +3,6 @@ package rth
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -24,15 +23,15 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniVersionInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(os.Stderr, "rotini:", err)
+		fmt.Fprintln(rtx.Stderr, "rotini:", err)
 		rtx.Exit(1)
 		return
 	}
 
 	if inputs.RotiniVersion.Flags.Help {
-		fmt.Fprintln(os.Stdout, rtg.HelpRotiniVersion)
+		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniVersion)
 		return
 	}
 
-	fmt.Fprintln(os.Stdout, rtg.Version)
+	fmt.Fprintln(rtx.Stdout, rtg.Version)
 }

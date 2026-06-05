@@ -6,13 +6,13 @@
 // and a handler retrieves with rtx.Get:
 //
 //   - [Parser] — parse the resolved command's arguments into a typed inputs
-//     struct ([Parser.Parse]); render standard help with [Usage].
-//   - [IO] — injectable, testable stdin/stdout/stderr.
+//     struct ([Parser.Parse]).
+//   - [Binder] — reconcile argv with environment variables and config files.
 //   - [CompletionScript] — generate bash/zsh/fish shell completion scripts.
 //
 // A handler reaches for rtk when it wants rotini's conventions; a handler that
 // disagrees ignores rtk entirely — reading the raw argument vector via
-// rotini.Context.Args and writing to os.Stdout however it likes.
+// rotini.Context.Args and writing to rtx.Stdout however it likes.
 package rtk
 
 import (

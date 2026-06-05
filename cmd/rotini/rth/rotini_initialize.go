@@ -3,7 +3,6 @@ package rth
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -25,26 +24,26 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniInitializeInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(os.Stderr, "rotini:", err)
+		fmt.Fprintln(rtx.Stderr, "rotini:", err)
 		rtx.Exit(1)
 		return
 	}
 	in := inputs.RotiniInitialize
 
 	if in.Flags.Help {
-		fmt.Fprintln(os.Stdout, rtg.HelpRotiniInitialize)
+		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniInitialize)
 		return
 	}
 
 	name := in.Arguments.Name
 	if name == "" {
-		fmt.Fprintln(os.Stderr, "Error: a name argument is required")
+		fmt.Fprintln(rtx.Stderr, "Error: a name argument is required")
 		rtx.Exit(1)
 		return
 	}
 
 	if err := internal.Initialize(name, in.Flags.Format, in.Flags.Force, in.Flags.Into); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
 		return
 	}

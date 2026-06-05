@@ -171,6 +171,7 @@ func (p *Program) Execute() {
 // the generated shell scripts invoke.
 func (p *Program) run(argv []string) int {
 	if len(argv) > 0 && argv[0] == completeCommand {
+		p.rtx.Stdout, p.rtx.Stderr = p.stdout, p.stderr
 		for _, c := range complete(p.def, argv[1:], p.handlers, p.rtx) {
 			fmt.Fprintln(p.stdout, c)
 		}
@@ -203,6 +204,8 @@ func (p *Program) run(argv []string) int {
 	}
 	rtx.args = argv
 	rtx.chain = chain
+	rtx.Stdout = p.stdout
+	rtx.Stderr = p.stderr
 	rtx.onError = p.onError
 	if rtx.onError == nil {
 		rtx.onError = p.defaultOnError

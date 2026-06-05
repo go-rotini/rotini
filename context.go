@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"sync"
 )
 
@@ -46,7 +48,18 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 // A Context is safe for concurrent registry access; reads and writes are guarded
 // by an internal sync.RWMutex. Always pass it as a pointer — it must not be copied.
 type Context struct {
-	mu       sync.RWMutex
+	mu sync.RWMutex
+
+	// Stdout and Stderr are the program's output streams, mirroring the writers set via
+	// [Program.WithStdout] / [Program.WithStderr] (default os.Stdout / os.Stderr). A
+	// handler writes its user-facing output and diagnostics to these rather than to
+	// os.Stdout / os.Stderr directly, so the same handler code is captured in a test by
+	// configuring the Program's streams. They are set before dispatch and not mutated
+	// thereafter; never nil (a standalone [NewContext] defaults them to os.Stdout /
+	// os.Stderr).
+	Stdout io.Writer
+	Stderr io.Writer
+
 	services map[string]any
 	args     []string                                           // raw argument vector for this invocation
 	chain    []ResolvedCommand                                  // resolved command path, root → leaf
@@ -60,7 +73,11 @@ type Context struct {
 // resolved chain before dispatch; tests and standalone tooling can use it
 // directly, or [NewContextFor] to also resolve a command.
 func NewContext() *Context {
-	return &Context{services: make(map[string]any)}
+	return &Context{
+		services: make(map[string]any),
+		Stdout:   os.Stdout,
+		Stderr:   os.Stderr,
+	}
 }
 
 // NewContextFor builds a [Context] with argv resolved against an explicit def — the
