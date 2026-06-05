@@ -6,12 +6,10 @@ package main
 import (
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rth"
-	"github.com/go-rotini/rotini/rtk"
 )
 
 func main() {
 	rth.Program.
 		Bind("parser", rotini.NewParser()).
-		Bind("signals", rtk.NewSignals()).
 		Execute()
 }

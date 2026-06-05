@@ -42,17 +42,15 @@ func TestProgram_WithContext_threadsToHooks(t *testing.T) {
 	}
 }
 
+// A fresh program has no base context (the sentinel for "rotini owns the lifecycle and
+// installs the default signal trap"); WithContext(nil) must be a no-op that preserves it.
 func TestProgram_WithContext_nilIgnored(t *testing.T) {
-	var nilCtx context.Context // a caller may pass a nil context; it must be ignored
-	p := newCtxProgram(ctxRec{}).WithContext(nilCtx)
-	if p.ctx == nil {
-		t.Error("WithContext(nil) should keep the base context, not clear it")
+	p := newCtxProgram(ctxRec{})
+	if p.ctx != nil {
+		t.Fatal("a fresh program should have no base context (default signal handling)")
 	}
-}
-
-func TestProgram_WithSignals_defaultPair(t *testing.T) {
-	p := newCtxProgram(ctxRec{}).WithSignals()
-	if len(p.signals) != 2 {
-		t.Fatalf("WithSignals() default = %v, want two signals (SIGINT, SIGTERM)", p.signals)
+	p.WithContext(nil)
+	if p.ctx != nil {
+		t.Error("WithContext(nil) should be a no-op, leaving the default (nil) context")
 	}
 }

@@ -7,13 +7,32 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
+	"sync/atomic"
 	"syscall"
 	"time"
 )
 
+// trapSignals are the OS signals rotini's default handler traps when the caller does
+// not supply its own context (see [Program.WithContext]). It is a package var, not a
+// constant, so a white-box test can swap in a benign signal. The default action on the
+// first signal is a graceful shutdown (cancel the run context + halt the lifecycle so
+// teardown runs); a second signal forces exit with forceExitCode.
+var trapSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
+
+// forceExitCode is the status a second signal exits with (128 + SIGINT), the
+// conventional "interrupted" code.
+const forceExitCode = 130
+
+// signalExitCode maps a trapped signal to its conventional exit status (128 + signum).
+func signalExitCode(s os.Signal) int {
+	if s == syscall.SIGTERM {
+		return 143 // 128 + 15
+	}
+	return forceExitCode // 128 + 2 (SIGINT); also the default for any other trapped signal
+}
+
 type Program struct {
 	ctx      context.Context
-	signals  []os.Signal // when set, the run's context cancels on one of these (graceful shutdown)
 	args     []string
 	def      Definition
 	handlers any
@@ -22,7 +41,8 @@ type Program struct {
 	observer Observer                                           // opt-in control-flow observation seam; nil → emit nothing
 	stdout   io.Writer
 	stderr   io.Writer
-	exit     func(int) // terminal action for Execute; defaults to os.Exit
+	exit     func(int)    // terminal action for Execute; defaults to os.Exit
+	sigExit  atomic.Int32 // exit code a trapped signal requests; read by dispatch when the run context is canceled
 }
 
 // NewProgram wires a generated program's command tree (the rtg [Definition]) and
@@ -32,7 +52,6 @@ type Program struct {
 // execution time, via the Handler names recorded in def.
 func NewProgram(def Definition, handlers any) *Program {
 	return &Program{
-		ctx:      context.Background(),
 		args:     os.Args[1:],
 		def:      def,
 		handlers: handlers,
@@ -85,29 +104,18 @@ func (p *Program) WithArguments(args []string) *Program {
 
 // WithContext sets the base [context.Context] threaded to every lifecycle hook (and to
 // the OnError funnel and any remote sub-command exec), so a caller — a server, a test,
-// a parent process — can cancel or time-bound the whole run. Defaults to
-// [context.Background]. A nil context is ignored. A handler observes cancellation by
-// selecting on its hook's ctx.Done(); cancellation is cooperative (it cannot preempt a
-// hook that ignores it), and teardown still runs.
+// a parent process — can cancel or time-bound the whole run. A nil context is ignored. A
+// handler observes cancellation by selecting on its hook's ctx.Done(); cancellation is
+// cooperative (it cannot preempt a hook that ignores it), and teardown still runs.
+//
+// Supplying a context also opts OUT of rotini's default signal handling: the caller is
+// declaring that it owns the run's lifecycle (including any Interrupt/SIGTERM trapping it
+// wants, e.g. via [signal.NotifyContext] on the context it passes). With no WithContext,
+// rotini installs its default trap — see [Program.Execute].
 func (p *Program) WithContext(ctx context.Context) *Program {
 	if ctx != nil {
 		p.ctx = ctx
 	}
-	return p
-}
-
-// WithSignals makes the run's context cancel when one of the given OS signals arrives —
-// the standard graceful-shutdown wiring. With no arguments it traps SIGINT and SIGTERM.
-// On the first signal the context is canceled (so cooperative handlers stop and
-// teardown still runs); a second signal restores the default OS behavior (force-quit),
-// via [signal.NotifyContext]. It composes with [Program.WithContext] (the signal
-// context derives from the base). It is independent of the rtk Signals service — use
-// one or the other for a given signal unless you deliberately want both.
-func (p *Program) WithSignals(sigs ...os.Signal) *Program {
-	if len(sigs) == 0 {
-		sigs = []os.Signal{os.Interrupt, syscall.SIGTERM}
-	}
-	p.signals = sigs
 	return p
 }
 
@@ -159,6 +167,14 @@ func (p *Program) emit(e Event) {
 // Execute resolves the command, runs its lifecycle, and ends with the resulting status
 // code via the program's exit action ([os.Exit] by default; override with
 // [Program.WithExit] to capture the code or embed without terminating).
+//
+// Unless the caller supplied its own context ([Program.WithContext]), Execute installs
+// rotini's default signal handling: the first os.Interrupt or syscall.SIGTERM cancels the
+// run context AND halts the lifecycle like [Context.Exit] — forward progress stops and
+// every begun teardown hook still runs — exiting 130 (SIGINT) or 143 (SIGTERM). A second
+// signal forces exit immediately (code 130), skipping any remaining teardown, so a handler
+// stuck ignoring the context can always be interrupted. A caller that wants different
+// behavior supplies its own context and traps signals there.
 func (p *Program) Execute() {
 	p.exit(p.run(p.args))
 }
@@ -178,13 +194,37 @@ func (p *Program) run(argv []string) int {
 		return 0
 	}
 
-	// The effective run context: the base context (WithContext, else Background),
-	// made cancelable on the configured signals (WithSignals) for graceful shutdown.
+	// The effective run context. When the caller supplied none (no WithContext), rotini
+	// owns it: a cancelable context whose cancellation, plus a default signal trap,
+	// drives graceful shutdown. When the caller supplied a context, it is used as-is and
+	// rotini installs no trap — the caller owns signal handling.
 	ctx := p.ctx
-	if len(p.signals) > 0 {
-		var stop context.CancelFunc
-		ctx, stop = signal.NotifyContext(p.ctx, p.signals...)
-		defer stop()
+	trapped := ctx == nil
+	if trapped {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(context.Background())
+		defer cancel()
+
+		sigCh := make(chan os.Signal, 2)
+		signal.Notify(sigCh, trapSignals...)
+		defer signal.Stop(sigCh)
+
+		done := make(chan struct{})
+		defer close(done)
+		go func() {
+			select {
+			case s := <-sigCh: // first signal → graceful: cancel ctx; dispatch then halts the lifecycle
+				p.sigExit.Store(int32(signalExitCode(s)))
+				cancel()
+			case <-done:
+				return
+			}
+			select {
+			case <-sigCh: // second signal → force exit, skipping any remaining teardown
+				p.exit(forceExitCode)
+			case <-done:
+			}
+		}()
 	}
 
 	chain, remote := resolveChain(p.def, argv)
@@ -210,7 +250,7 @@ func (p *Program) run(argv []string) int {
 	if rtx.onError == nil {
 		rtx.onError = p.defaultOnError
 	}
-	code := p.dispatch(ctx, chain, rtx)
+	code := p.dispatch(ctx, chain, rtx, trapped)
 	p.emit(Event{Phase: PhaseExit, Command: chain[len(chain)-1].Name, Code: code})
 	return code
 }
@@ -239,7 +279,12 @@ func (p *Program) defaultOnError(_ context.Context, rtx *Context, err error) {
 // missing service) is recovered, does not abort the remaining teardown, and is
 // routed once — after all teardown — to the OnError funnel, last. See
 // .docs/ROTINI_RTX_EXIT.md.
-func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (code int) {
+// When trapped is set (the caller supplied no context, so rotini installed the default
+// signal trap), a canceled run context is converted into a lifecycle [Context.Exit]
+// between forward hooks: forward progress stops, teardown still runs, and the exit code
+// is the conventional signal status. This conversion happens only on the dispatch
+// goroutine, so rtx state stays single-writer; the signal goroutine only cancels ctx.
+func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context, trapped bool) (code int) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
@@ -312,21 +357,35 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		hook(ctx, rtx)
 	}
 
-	// Setup + work, forward — halting on rtx.Exit (rtx.stopped) or a panic. began
-	// and preRan record how far setup got, so teardown unwinds only what began.
+	// halt reports whether forward progress should stop — after a hook called rtx.Exit
+	// or panicked, OR (when trapped) after a default-trapped signal canceled the run
+	// context. In the signal case it records the conventional exit code via rtx.Exit, so
+	// the cancellation becomes a clean lifecycle stop that still runs teardown.
+	halt := func() bool {
+		if trapped && !rtx.stopped && ctx.Err() != nil {
+			rtx.Exit(int(p.sigExit.Load()))
+		}
+		return rtx.stopped || failure != nil
+	}
+
+	// Setup + work, forward — halting on rtx.Exit (rtx.stopped), a panic, or a signal.
+	// began and preRan record how far setup got, so teardown unwinds only what began.
 	began, preRan := 0, false
 	func() {
 		for i, h := range handlers {
 			began = i + 1
-			if run(chain[i].Name, "CascadingPreRun", h.CascadingPreRun); rtx.stopped || failure != nil {
+			run(chain[i].Name, "CascadingPreRun", h.CascadingPreRun)
+			if halt() {
 				return
 			}
 		}
 		preRan = true
-		if run(leafName, "PreRun", leaf.PreRun); rtx.stopped || failure != nil {
+		run(leafName, "PreRun", leaf.PreRun)
+		if halt() {
 			return
 		}
 		run(leafName, "Run", leaf.Run)
+		halt() // record the signal exit code if Run returned because the context was canceled
 	}()
 
 	// Teardown, reverse — every begun hook's pair, always to completion.
