@@ -18,7 +18,6 @@ require (
 	github.com/go-rotini/jsonschema v1.1.0
 	github.com/go-rotini/recon v1.0.0
 	github.com/go-rotini/yaml v1.2.0
-	golang.org/x/term v0.42.0
 )
 
 require (

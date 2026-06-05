@@ -169,24 +169,6 @@ func TestBinder_decodesStdin(t *testing.T) {
 	}
 }
 
-func TestBinder_decodesStdinViaIOService(t *testing.T) {
-	// With an IO service bound, the binder reads stdin through it (the registry seam)
-	// rather than os.Stdin — so a test supplies the payload without patching os.Stdin.
-	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)
-	rtx.Bind("io", NewIO().WithStdin(strings.NewReader("kind: Widget\nname: foo\n")))
-
-	var in tbStdinInputs
-	if err := NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
-		t.Fatalf("Bind: %v", err)
-	}
-	if in.App.Stdin == nil {
-		t.Fatal("Stdin payload was not decoded from the bound IO service")
-	}
-	if in.App.Stdin.Kind != "Widget" || in.App.Stdin.Name != "foo" {
-		t.Errorf("Stdin = %+v, want {Widget foo}", in.App.Stdin)
-	}
-}
-
 func TestBinder_noStdinLeavesNil(t *testing.T) {
 	withPipedStdin(t, "") // nothing piped → EOF, no data
 	rtx := rotini.NewContextFor(rotini.Definition{Name: "app", Handler: "App"}, nil)

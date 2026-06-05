@@ -101,8 +101,8 @@ func CompletionInstallTarget(prog, shell string) (CompletionTarget, error) {
 //
 // Unlike [CompletionInstallTarget] (which only returns data), this DOES touch the user's
 // machine — so it is something a handler calls deliberately, never something rotini runs on
-// its own (Pillar 1). Confirmation is the handler's: prompt with [Prompter.Confirm] first if
-// you want one; rotini neither prompts nor logs here. The write is atomic (temp file then
+// its own (Pillar 1). Confirmation is the handler's: ask for one first if you want it;
+// rotini neither prompts nor logs here. The write is atomic (temp file then
 // rename, so an interruption never leaves a torn file) and the completion file is
 // rotini-managed, so re-installing simply overwrites it.
 //

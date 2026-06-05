@@ -69,13 +69,6 @@ command:
               - --into
             schema:
               type: string
-          - name: interactive
-            summary: interactively prompt for the name, format, and parent (the init wizard)
-            identifiers:
-              - -i
-              - --interactive
-            schema:
-              type: bool
           - name: help
             summary: print help
             identifiers:

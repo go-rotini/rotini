@@ -2,6 +2,8 @@ package rth
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -19,12 +21,11 @@ var _ rotini.CommandHandlers = (*rotiniHandlers)(nil)
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
-	io := rotini.MustGet[*rtk.IO](rtx, "io")
 
 	var inputs rtg.RotiniInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		io.Stderr.Printf("Error: %v\n\n", err)
-		io.Stdout.Println(rtg.HelpRotini)
+		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
+		fmt.Fprintln(os.Stdout, rtg.HelpRotini)
 		rtx.Exit(1)
 		return
 	}
@@ -32,13 +33,13 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.Rotini.Flags
 	switch {
 	case flags.Help:
-		io.Stdout.Println(rtg.HelpRotini)
+		fmt.Fprintln(os.Stdout, rtg.HelpRotini)
 		rtx.ExitNow(0)
 	case flags.Version:
-		io.Stdout.Println(rtg.Version)
+		fmt.Fprintln(os.Stdout, rtg.Version)
 		rtx.ExitNow(0)
 	default:
-		io.Stdout.Println(rtg.HelpRotini)
+		fmt.Fprintln(os.Stdout, rtg.HelpRotini)
 		rtx.ExitNow(1)
 	}
 }

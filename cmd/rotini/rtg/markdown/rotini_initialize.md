@@ -19,7 +19,6 @@ rotini initialize [name] [flags]
 - `--format string` — the created rotini spec file format (defaults to the module conf's initialize.format, else yaml) [json|yaml]
 - `--force` — force re-initialization if files exist that init would overwrite
 - `--into string` — also compose the new cli into this parent cli
-- `-i, --interactive` — interactively prompt for the name, format, and parent (the init wizard)
 - `-h, --help` — print help
 
 ## Examples

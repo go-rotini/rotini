@@ -19,7 +19,6 @@ import (
 //
 //	// main.go
 //	rth.Program.
-//	    Bind("io", rtk.NewIO()).
 //	    Bind("binder", rtk.NewBinder(rtg.BindMeta)).
 //	    Execute()
 //
@@ -122,17 +121,16 @@ func (b *Binder) Bind(rtx *rotini.Context, out any) error {
 	}
 
 	// 5. stdin → the leaf command's typed payload (decoded by its declared format).
-	return b.fillStdin(rtx, v)
+	return b.fillStdin(v)
 }
 
 // fillStdin decodes piped stdin into the leaf command's Stdin payload field, when it
 // declares one, using the format on its `stdin:"<format>"` tag. Stdin is a single
 // stream, so only the leaf (the running command) consumes it; when nothing is piped
-// the Stdin field is left nil. The bytes are read through the bound IO service (so a
-// test can supply them at the registry seam), falling back to os.Stdin — see readStdin.
+// the Stdin field is left nil. The bytes are read from os.Stdin — see readStdin.
 // The decoded payload is validated against the command's stdin JSON Schema (from
 // BindMeta) before binding, so a malformed document is rejected with a clear error.
-func (b *Binder) fillStdin(rtx *rotini.Context, v reflect.Value) error {
+func (b *Binder) fillStdin(v reflect.Value) error {
 	if v.Kind() != reflect.Struct || v.NumField() == 0 {
 		return nil
 	}
@@ -150,7 +148,7 @@ func (b *Binder) fillStdin(rtx *rotini.Context, v reflect.Value) error {
 		return nil
 	}
 
-	data, err := readStdin(rtx)
+	data, err := readStdin()
 	if err != nil {
 		return fmt.Errorf("rotini: read stdin: %w", err)
 	}
@@ -192,14 +190,9 @@ func (b *Binder) fillStdin(rtx *rotini.Context, v reflect.Value) error {
 	return nil
 }
 
-// readStdin returns piped stdin read through the bound IO service when one is present
-// (registry key "io"), so a test can swap the input at the seam instead of patching
-// os.Stdin; with no IO bound it falls back to reading os.Stdin directly. Either path
-// returns nil bytes for an interactive terminal rather than blocking.
-func readStdin(rtx *rotini.Context) ([]byte, error) {
-	if svc, ok := rotini.Get[*IO](rtx, "io"); ok && svc != nil && svc.Stdin != nil {
-		return svc.Stdin.ReadRawBytes()
-	}
+// readStdin returns the bytes piped or redirected to stdin, or nil when stdin is an
+// interactive terminal (so binding a stdin channel never blocks waiting for input).
+func readStdin() ([]byte, error) {
 	return readPipedStdin()
 }
 

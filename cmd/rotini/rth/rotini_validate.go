@@ -2,6 +2,8 @@ package rth
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/rtg"
@@ -20,23 +22,22 @@ var _ rotini.CommandHandlers = (*rotiniValidateHandlers)(nil)
 
 func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rtk.Parser](rtx, "parser")
-	io := rotini.MustGet[*rtk.IO](rtx, "io")
 
 	var inputs rtg.RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		io.Stderr.Println("rotini:", err)
+		fmt.Fprintln(os.Stderr, "rotini:", err)
 		rtx.Exit(1)
 		return
 	}
 	in := inputs.RotiniValidate
 
 	if in.Flags.Help {
-		io.Stdout.Println(rtg.HelpRotiniValidate)
+		fmt.Fprintln(os.Stdout, rtg.HelpRotiniValidate)
 		return
 	}
 
 	if err := internal.Validate(in.Arguments.File, "", in.Flags.Fail); err != nil {
-		io.Stderr.Println("Error:", err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		rtx.Exit(1)
 		return
 	}

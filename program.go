@@ -45,8 +45,7 @@ func NewProgram(def Definition, handlers any) *Program {
 
 // WithStdout overrides the program's standard-output stream (defaults to os.Stdout) —
 // the destination for the runtime's own writes (help/completion output, usage). A nil
-// writer is ignored. Pair it with binding an IO/Printer service wired to the same writer
-// to capture everything a run emits (e.g. in a test). It returns the receiver to chain.
+// writer is ignored. It returns the receiver to chain.
 func (p *Program) WithStdout(w io.Writer) *Program {
 	if w != nil {
 		p.stdout = w

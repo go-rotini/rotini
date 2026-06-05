@@ -13,6 +13,5 @@ func main() {
 	// rtk.NewTickers(), or rtk.NewBinder(rtg.BindMeta) (env/config/stdin) as you need them.
 	{{.Pkg}}.Program.
 		Bind("parser", rtk.NewParser()).
-		Bind("io", rtk.NewIO()).
 		Execute()
 }

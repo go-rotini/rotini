@@ -91,7 +91,7 @@ func NewContextFor(def Definition, argv []string) *Context {
 // Bind associates value with key, overwriting any prior binding. It returns the
 // receiver so calls can be chained:
 //
-//	cmd.Program.Bind("io", customIO).Bind("os", customOS).Execute()
+//	cmd.Program.Bind("parser", customParser).Bind("binder", customBinder).Execute()
 //
 // Bind is safe for concurrent use.
 func (rtx *Context) Bind(key string, value any) *Context {
