@@ -167,6 +167,22 @@ func TestBinder_decodesStdin(t *testing.T) {
 	}
 }
 
+// The Binder reads its stdin channel from [Context.Stdin] (which the Program sets from
+// Program.WithStdin), so a test can supply input via an ordinary reader without touching
+// the process's os.Stdin.
+func TestBinder_decodesStdinFromContextStdin(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	rtx.Stdin = strings.NewReader("kind: Widget\nname: foo\n")
+
+	var in tbStdinInputs
+	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Stdin == nil || in.App.Stdin.Kind != "Widget" || in.App.Stdin.Name != "foo" {
+		t.Errorf("Stdin = %+v, want {Widget foo} decoded from rtx.Stdin", in.App.Stdin)
+	}
+}
+
 func TestBinder_noStdinLeavesNil(t *testing.T) {
 	withPipedStdin(t, "") // nothing piped → EOF, no data
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)

@@ -50,13 +50,14 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 type Context struct {
 	mu sync.RWMutex
 
-	// Stdout and Stderr are the program's output streams, mirroring the writers set via
-	// [Program.WithStdout] / [Program.WithStderr] (default os.Stdout / os.Stderr). A
-	// handler writes its user-facing output and diagnostics to these rather than to
-	// os.Stdout / os.Stderr directly, so the same handler code is captured in a test by
-	// configuring the Program's streams. They are set before dispatch and not mutated
-	// thereafter; never nil (a standalone [NewContext] defaults them to os.Stdout /
-	// os.Stderr).
+	// Stdin, Stdout, and Stderr are the program's streams, mirroring those set via
+	// [Program.WithStdin] / [Program.WithStdout] / [Program.WithStderr] (default os.Stdin /
+	// os.Stdout / os.Stderr). A handler reads input and writes its output/diagnostics
+	// through these rather than os.Std* directly, so the same handler code is exercised in
+	// a test by configuring the Program's streams (the Binder reads its stdin channel from
+	// [Context.Stdin] too). They are set before dispatch and not mutated thereafter; never
+	// nil (a standalone [NewContext] defaults them to os.Std*).
+	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 
@@ -75,6 +76,7 @@ type Context struct {
 func NewContext() *Context {
 	return &Context{
 		services: make(map[string]any),
+		Stdin:    os.Stdin,
 		Stdout:   os.Stdout,
 		Stderr:   os.Stderr,
 	}

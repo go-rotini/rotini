@@ -37,6 +37,7 @@ type Program struct {
 	handlers any
 	rtx      *Context                                           // pre-seeded registry; user Bind calls land here
 	onError  func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures; nil → defaultOnError
+	stdin    io.Reader
 	stdout   io.Writer
 	stderr   io.Writer
 	exit     func(int)    // terminal action for Execute; defaults to os.Exit
@@ -54,10 +55,23 @@ func NewProgram(def Definition, handlers any) *Program {
 		def:      def,
 		handlers: handlers,
 		rtx:      NewContext(),
+		stdin:    os.Stdin,
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
 		exit:     os.Exit,
 	}
+}
+
+// WithStdin overrides the program's standard-input stream (defaults to os.Stdin) — the
+// source a handler reads from via [Context.Stdin], and the source the Binder decodes a
+// stdin channel from. Supply a reader (e.g. strings.NewReader) to drive an end-to-end test
+// without piping real os.Stdin, or to embed rotini reading from somewhere else. A nil
+// reader is ignored. It returns the receiver to chain.
+func (p *Program) WithStdin(r io.Reader) *Program {
+	if r != nil {
+		p.stdin = r
+	}
+	return p
 }
 
 // WithStdout overrides the program's standard-output stream (defaults to os.Stdout) —
@@ -164,7 +178,7 @@ func (p *Program) Execute() {
 // the generated shell scripts invoke.
 func (p *Program) run(argv []string) int {
 	if len(argv) > 0 && argv[0] == completeCommand {
-		p.rtx.Stdout, p.rtx.Stderr = p.stdout, p.stderr
+		p.rtx.Stdin, p.rtx.Stdout, p.rtx.Stderr = p.stdin, p.stdout, p.stderr
 		for _, c := range complete(p.def, argv[1:], p.handlers, p.rtx) {
 			fmt.Fprintln(p.stdout, c)
 		}
@@ -215,6 +229,7 @@ func (p *Program) run(argv []string) int {
 	}
 	rtx.args = argv
 	rtx.chain = chain
+	rtx.Stdin = p.stdin
 	rtx.Stdout = p.stdout
 	rtx.Stderr = p.stderr
 	rtx.onError = p.onError

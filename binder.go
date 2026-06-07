@@ -120,7 +120,7 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 	}
 
 	// 5. stdin → the leaf command's typed payload (decoded by its declared format).
-	return b.fillStdin(v)
+	return b.fillStdin(rtx, v)
 }
 
 // fillStdin decodes piped stdin into the leaf command's Stdin payload field, when it
@@ -129,7 +129,7 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 // the Stdin field is left nil. The bytes are read from os.Stdin — see readStdin.
 // The decoded payload is validated against the command's stdin JSON Schema (from
 // BindMeta) before binding, so a malformed document is rejected with a clear error.
-func (b *Binder) fillStdin(v reflect.Value) error {
+func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 	if v.Kind() != reflect.Struct || v.NumField() == 0 {
 		return nil
 	}
@@ -147,7 +147,7 @@ func (b *Binder) fillStdin(v reflect.Value) error {
 		return nil
 	}
 
-	data, err := readStdin()
+	data, err := readStdin(rtx.Stdin)
 	if err != nil {
 		return fmt.Errorf("rotini: read stdin: %w", err)
 	}
@@ -189,23 +189,25 @@ func (b *Binder) fillStdin(v reflect.Value) error {
 	return nil
 }
 
-// readStdin returns the bytes piped or redirected to stdin, or nil when stdin is an
-// interactive terminal (so binding a stdin channel never blocks waiting for input).
-func readStdin() ([]byte, error) {
-	return readPipedStdin()
-}
-
-// readPipedStdin returns the bytes piped or redirected to stdin, or nil when stdin
-// is an interactive terminal (so it never blocks waiting for input).
-func readPipedStdin() ([]byte, error) {
-	info, err := os.Stdin.Stat()
-	if err != nil {
-		return nil, err
+// readStdin returns the bytes available on r — the run's stdin ([Context.Stdin], which
+// the Program sets from [Program.WithStdin], default os.Stdin). When r is the real
+// os.Stdin attached to an interactive terminal it returns nil rather than blocking — a
+// stdin channel is for piped/redirected input, not interactive typing. Any other reader
+// (e.g. a test's strings.Reader) is read to EOF. A nil reader yields no data.
+func readStdin(r io.Reader) ([]byte, error) {
+	if r == nil {
+		return nil, nil
 	}
-	if info.Mode()&os.ModeCharDevice != 0 {
-		return nil, nil // a terminal, not a pipe/redirect
+	if f, ok := r.(*os.File); ok {
+		info, err := f.Stat()
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeCharDevice != 0 {
+			return nil, nil // an interactive terminal, not a pipe/redirect
+		}
 	}
-	return io.ReadAll(os.Stdin)
+	return io.ReadAll(r)
 }
 
 // reconcileFlags overrides each fallback flag (a Flags field carrying a recon tag)
