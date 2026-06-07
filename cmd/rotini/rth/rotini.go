@@ -32,12 +32,12 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	switch {
 	case flags.Help:
 		fmt.Fprintln(rtx.Stdout, rtg.HelpRotini)
-		rtx.ExitNow(0)
+		rtx.Exit(0)
 	case flags.Version:
 		fmt.Fprintln(rtx.Stdout, rtg.Version)
-		rtx.ExitNow(0)
+		rtx.Exit(0)
 	default:
 		fmt.Fprintln(rtx.Stdout, rtg.HelpRotini)
-		rtx.ExitNow(1)
+		rtx.Exit(1)
 	}
 }

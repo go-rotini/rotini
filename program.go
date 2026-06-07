@@ -259,16 +259,16 @@ func (p *Program) defaultOnError(_ context.Context, rtx *Context, err error) {
 //     rtx.Exit inside a teardown hook neither aborts the rest nor displaces the
 //     first failure or exit code.
 //
-// rtx.Exit is a clean stop. A panic anywhere (e.g. the [MustGet] on a
-// missing service) is recovered, does not abort the remaining teardown, and is
-// routed once — after all teardown — to the OnError funnel, last. See
-// .docs/ROTINI_RTX_EXIT.md.
+// rtx.Exit is a clean stop. A panic anywhere (e.g. the [MustGet] on a missing service) is
+// recovered, does not abort the remaining teardown, and is routed once — after all
+// teardown — to the OnError funnel, last.
+//
 // When trapped is set (the caller supplied no context, so rotini installed the default
 // signal trap), a canceled run context is converted into a lifecycle [Context.Exit]
 // between forward hooks: forward progress stops, teardown still runs, and the exit code
 // is the conventional signal status. This conversion happens only on the dispatch
 // goroutine, so rtx state stays single-writer; the signal goroutine only cancels ctx.
-func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context, trapped bool) (code int) {
+func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context, trapped bool) int {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
@@ -287,31 +287,15 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 	leaf := handlers[len(handlers)-1]
 
-	// rtx.ExitNow aborts the whole chain at once: it panics a sentinel that run
-	// re-throws (bypassing teardown) so it lands here, returning its code as-is.
-	defer func() {
-		if r := recover(); r != nil {
-			if _, ok := r.(exitNow); ok {
-				code = rtx.exitCode
-				return
-			}
-			panic(r)
-		}
-	}()
-
 	// failure is the first panic seen anywhere in the lifecycle. run wraps every
 	// hook so a panic is recovered (keeping only the first) rather than unwinding —
-	// this is what lets teardown still run and OnError fire exactly once, last. The
-	// ExitNow sentinel is the exception: run re-throws it to abort everything.
+	// this is what lets teardown still run and OnError fire exactly once, last.
 	var failure error
 	run := func(hook func(context.Context, *Context)) {
 		defer func() {
 			r := recover()
 			if r == nil {
 				return
-			}
-			if _, ok := r.(exitNow); ok {
-				panic(r) // ExitNow: skip teardown and OnError
 			}
 			err, ok := r.(error)
 			if !ok {
