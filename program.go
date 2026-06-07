@@ -9,7 +9,6 @@ import (
 	"reflect"
 	"sync/atomic"
 	"syscall"
-	"time"
 )
 
 // trapSignals are the OS signals rotini's default handler traps when the caller does
@@ -38,7 +37,6 @@ type Program struct {
 	handlers any
 	rtx      *Context                                           // pre-seeded registry; user Bind calls land here
 	onError  func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures; nil → defaultOnError
-	observer Observer                                           // opt-in control-flow observation seam; nil → emit nothing
 	stdout   io.Writer
 	stderr   io.Writer
 	exit     func(int)    // terminal action for Execute; defaults to os.Exit
@@ -143,27 +141,6 @@ func (p *Program) OnError(fn func(ctx context.Context, rtx *Context, err error))
 	return p
 }
 
-// WithObserver sets the opt-in observability seam: fn receives an [Event] at each of the
-// runtime's control-flow transitions — the command resolving, each lifecycle hook starting
-// and finishing (with its wall-clock and any panic), a remote/plugin exec, and the run's
-// exit code settling. It is the single place to trace or meter the framework-internal flow a
-// handler cannot see from its own hooks. rotini emits DATA only and never logs, formats, or
-// adds a flag itself (Pillar 1); with no observer set the runtime emits nothing and pays no
-// cost. A nil fn clears any prior observer. It returns the receiver so it chains with
-// [Program.OnError] and [Program.Bind]. See [Observer].
-func (p *Program) WithObserver(fn Observer) *Program {
-	p.observer = fn
-	return p
-}
-
-// emit delivers an Event to the observer when one is set; a no-op otherwise (the common
-// case), so observation costs nothing unless opted into.
-func (p *Program) emit(e Event) {
-	if p.observer != nil {
-		p.observer(e)
-	}
-}
-
 // Execute resolves the command, runs its lifecycle, and ends with the resulting status
 // code via the program's exit action ([os.Exit] by default; override with
 // [Program.WithExit] to capture the code or embed without terminating).
@@ -228,14 +205,8 @@ func (p *Program) run(argv []string) int {
 	}
 
 	chain, remote := resolveChain(p.def, argv)
-	if p.observer != nil {
-		p.observer(Event{Phase: PhaseResolved, Command: chain[len(chain)-1].Name, Path: chainPath(chain)})
-	}
 	if remote != nil {
-		p.emit(Event{Phase: PhaseRemoteExec, Command: remote.def.Name})
-		code := p.execRemote(ctx, remote)
-		p.emit(Event{Phase: PhaseExit, Command: remote.def.Name, Code: code})
-		return code
+		return p.execRemote(ctx, remote)
 	}
 
 	rtx := p.rtx
@@ -250,9 +221,7 @@ func (p *Program) run(argv []string) int {
 	if rtx.onError == nil {
 		rtx.onError = p.defaultOnError
 	}
-	code := p.dispatch(ctx, chain, rtx, trapped)
-	p.emit(Event{Phase: PhaseExit, Command: chain[len(chain)-1].Name, Code: code})
-	return code
+	return p.dispatch(ctx, chain, rtx, trapped)
 }
 
 // defaultOnError is the OnError funnel used when the program supplies none: it
@@ -319,39 +288,22 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	// hook so a panic is recovered (keeping only the first) rather than unwinding —
 	// this is what lets teardown still run and OnError fire exactly once, last. The
 	// ExitNow sentinel is the exception: run re-throws it to abort everything.
-	//
-	// run also brackets each hook with PhaseHookStart/PhaseHookEnd observation (when an
-	// observer is set), reporting the per-hook wall-clock and any panic — independent of
-	// the first-failure bookkeeping the funnel uses.
-	leafName := chain[len(chain)-1].Name
 	var failure error
-	run := func(cmd, name string, hook func(context.Context, *Context)) {
-		var start time.Time
-		if p.observer != nil {
-			p.observer(Event{Phase: PhaseHookStart, Command: cmd, Hook: name})
-			start = time.Now()
-		}
-		var hookErr error
-		defer func() {
-			if p.observer != nil {
-				p.observer(Event{Phase: PhaseHookEnd, Command: cmd, Hook: name, Duration: time.Since(start), Err: hookErr})
-			}
-		}()
+	run := func(hook func(context.Context, *Context)) {
 		defer func() {
 			r := recover()
 			if r == nil {
 				return
 			}
 			if _, ok := r.(exitNow); ok {
-				panic(r) // ExitNow: skip teardown and OnError (the HookEnd defer still runs)
+				panic(r) // ExitNow: skip teardown and OnError
 			}
-			if err, ok := r.(error); ok {
-				hookErr = err
-			} else {
-				hookErr = fmt.Errorf("%v", r)
+			err, ok := r.(error)
+			if !ok {
+				err = fmt.Errorf("%v", r)
 			}
 			if failure == nil {
-				failure = hookErr
+				failure = err
 			}
 		}()
 		hook(ctx, rtx)
@@ -374,26 +326,26 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	func() {
 		for i, h := range handlers {
 			began = i + 1
-			run(chain[i].Name, "CascadingPreRun", h.CascadingPreRun)
+			run(h.CascadingPreRun)
 			if halt() {
 				return
 			}
 		}
 		preRan = true
-		run(leafName, "PreRun", leaf.PreRun)
+		run(leaf.PreRun)
 		if halt() {
 			return
 		}
-		run(leafName, "Run", leaf.Run)
+		run(leaf.Run)
 		halt() // record the signal exit code if Run returned because the context was canceled
 	}()
 
 	// Teardown, reverse — every begun hook's pair, always to completion.
 	if preRan {
-		run(leafName, "PostRun", leaf.PostRun)
+		run(leaf.PostRun)
 	}
 	for i := began - 1; i >= 0; i-- {
-		run(chain[i].Name, "CascadingPostRun", handlers[i].CascadingPostRun)
+		run(handlers[i].CascadingPostRun)
 	}
 
 	// A panic is funneled to OnError last, after teardown. The panic path is always
