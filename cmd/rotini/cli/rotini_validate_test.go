@@ -31,7 +31,7 @@ func TestRotiniValidate(t *testing.T) {
 		{
 			name: "success: header and the pass summary print",
 			argv: []string{"validate"},
-			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
+			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, _ string, cb func(string, error)) error {
 				cb("[12:00:00] 1ms", nil)
 				return nil
 			})}},
@@ -40,7 +40,7 @@ func TestRotiniValidate(t *testing.T) {
 		{
 			name: "per-pass callback error and a final error both surface",
 			argv: []string{"validate"},
-			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
+			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, _ string, cb func(string, error)) error {
 				cb("[12:00:00] 1ms", nil)              // a clean pass → stdout
 				cb("", errors.New("schema violation")) // a failing pass → stderr
 				return errors.New("validation failed")

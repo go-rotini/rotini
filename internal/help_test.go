@@ -109,7 +109,7 @@ func TestGenerateHelpHiddenDeprecated(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -155,10 +155,10 @@ func TestGenerateHelpComposition(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"), parentSpec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.conf.yaml"), helpConf("parent"))
 
-	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate child: %v", err)
 	}
-	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate parent: %v", err)
 	}
 

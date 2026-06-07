@@ -58,10 +58,10 @@ func TestGenerate_staticComposition(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.conf.yaml"), parentConfYAML)
 
 	// Children must be generated before parents (the parent imports the child rth).
-	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate child: %v", err)
 	}
-	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate parent: %v", err)
 	}
 
@@ -111,10 +111,10 @@ command:
 	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"), parentSpec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.conf.yaml"), parentConfYAML)
 
-	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate child: %v", err)
 	}
-	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate parent: %v", err)
 	}
 
@@ -171,7 +171,7 @@ command:
 
 	// Dependency order: grandchild, then child, then parent.
 	for _, dir := range []string{"gc", "child", "parent"} {
-		if err := Generate("cmd/"+dir+"/.rotini.spec.yaml", "cmd/"+dir+"/.rotini.conf.yaml", false, nil); err != nil {
+		if err := Generate("cmd/"+dir+"/.rotini.spec.yaml", "cmd/"+dir+"/.rotini.conf.yaml", false, "", nil); err != nil {
 			t.Fatalf("generate %s: %v", dir, err)
 		}
 	}
@@ -219,7 +219,7 @@ command:
 	writeTestFile(t, filepath.Join(tmp, "cmd/a/.rotini.spec.yaml"), selfRef)
 	writeTestFile(t, filepath.Join(tmp, "cmd/a/.rotini.conf.yaml"), conf)
 
-	err := Generate("cmd/a/.rotini.spec.yaml", "cmd/a/.rotini.conf.yaml", false, nil)
+	err := Generate("cmd/a/.rotini.spec.yaml", "cmd/a/.rotini.conf.yaml", false, "", nil)
 	if err == nil || !strings.Contains(err.Error(), "cyclic") {
 		t.Fatalf("expected cyclic $ref error, got %v", err)
 	}
@@ -247,7 +247,7 @@ command:
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
-	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	// The env/config struct fields carry the validation tags the binder reads.
@@ -277,7 +277,7 @@ command:
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
-	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	// BindMeta carries the stdin payload schema keyed by the <Prefix>Stdin type name.
@@ -311,7 +311,7 @@ command:
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
-	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	rtg := filepath.Join(tmp, "cmd/app/rtg/rotini.go")
@@ -339,7 +339,7 @@ command:
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
-	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	// The FlagDef carries Secret so the parser redacts the value in errors.
@@ -368,7 +368,7 @@ command:
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
-	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),
@@ -400,7 +400,7 @@ command:
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
-	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),

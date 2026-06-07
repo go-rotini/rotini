@@ -59,7 +59,7 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 	writeTestFile(t, confPath, companionConf)
 
 	t.Chdir(tmp)
-	if err := Generate(specPath, confPath, false, nil); err != nil {
+	if err := Generate(specPath, confPath, false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestGenerateDefaultLayout(t *testing.T) {
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: rotini\n  commands:\n    - name: generate\n")
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -139,7 +139,7 @@ func TestGenerateTwoFilesOnePackage(t *testing.T) {
 		confSchemaHeader+"generate:\n  packages:\n    cli:\n      package: cmd/mycli/app\n      file: handlers.gen.go\n    cligen:\n      package: cmd/mycli/app\n      file: framework.gen.go\n")
 	t.Chdir(tmp)
 
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -183,7 +183,7 @@ func TestGenerateRejectsInvalidSpec(t *testing.T) {
 			"command:\n  name: mycli\n  inputs:\n    flags:\n      - name: a\n        identifiers: [\"-x\"]\n      - name: b\n        identifiers: [\"-x\"]\n")
 	t.Chdir(tmp)
 
-	err := Generate(".rotini.spec.yaml", "", false, nil)
+	err := Generate(".rotini.spec.yaml", "", false, "", nil)
 	if err == nil {
 		t.Fatal("Generate on an invalid spec = nil, want a validation error")
 	}
@@ -205,7 +205,7 @@ func TestGenerateRejectsInvalidConf(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), "generate:\n  packages:\n    cligen:\n      file: rotini.go\n") // no $schema
 	t.Chdir(tmp)
 
-	err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil)
+	err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil)
 	if err == nil {
 		t.Fatal("Generate with an invalid conf = nil, want a validation error")
 	}
@@ -217,6 +217,35 @@ func TestGenerateRejectsInvalidConf(t *testing.T) {
 	}
 }
 
+// TestGenerateGuardsSchemaVersion confirms generate inherits the Item-3 $schema↔binary
+// version guard (it validates first): a non-empty release ref that differs from the spec's
+// $schema version rejects the run before any files are written; a matching ref proceeds; and
+// an empty ref (dev/pseudo build) skips the guard.
+func TestGenerateGuardsSchemaVersion(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+	t.Chdir(tmp)
+	gen := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
+
+	err := Generate(".rotini.spec.yaml", "", false, "1.0.0", nil)
+	if err == nil {
+		t.Fatal("Generate(ref 1.0.0 vs $schema 0.0.0) = nil, want a $schema mismatch error")
+	}
+	if !strings.Contains(err.Error(), "$schema") {
+		t.Errorf("error = %v, want a $schema version error", err)
+	}
+	if _, statErr := os.Stat(gen); statErr == nil {
+		t.Error("codegen wrote files despite the $schema version mismatch")
+	}
+
+	if err := Generate(".rotini.spec.yaml", "", false, "0.0.0", nil); err != nil {
+		t.Fatalf("Generate(matching ref 0.0.0) = %v, want nil", err)
+	}
+	mustContain(t, gen, "package cli")
+}
+
 // TestGenerateMissingConfPathUsesDefaults confirms the conf is optional: a -c path that doesn't
 // exist is not a validation error — generation proceeds with the built-in defaults.
 func TestGenerateMissingConfPathUsesDefaults(t *testing.T) {
@@ -226,7 +255,7 @@ func TestGenerateMissingConfPathUsesDefaults(t *testing.T) {
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
 	t.Chdir(tmp)
 
-	if err := Generate(".rotini.spec.yaml", "does-not-exist.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", "does-not-exist.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate with a missing conf path = %v, want nil (defaults used)", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go"), "package cli")
@@ -252,7 +281,7 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	writeTestFile(t, confPath, conf)
 
 	t.Chdir(tmp)
-	if err := Generate(specPath, confPath, false, nil); err != nil {
+	if err := Generate(specPath, confPath, false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -280,7 +309,7 @@ func TestGeneratePrunesOrphanHelp(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpKeepConf)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("first Generate: %v", err)
 	}
 
@@ -290,7 +319,7 @@ func TestGeneratePrunesOrphanHelp(t *testing.T) {
 	writeTestFile(t, orphan, "stale\n")
 	writeTestFile(t, legacy, "kept\n")
 
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("second Generate: %v", err)
 	}
 
@@ -322,7 +351,7 @@ func TestGenerateCompletionEnabled(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), completionConf)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -383,7 +412,7 @@ func TestGenerateOutputTypes(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -420,7 +449,7 @@ func TestGenerateDeprecated(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd", "app", "cli", "rotini.gen.go"),
@@ -446,7 +475,7 @@ func TestGenerateMapFlag(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd", "widget", "cli", "rotini.gen.go"),
@@ -479,7 +508,7 @@ func TestGenerateInputImports(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -516,7 +545,7 @@ func TestGenerateRemoteDiscovery(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -572,7 +601,7 @@ func TestGenerateInputChannels(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", "", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -651,7 +680,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -704,7 +733,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	buildBefore := readFileString(t, build)
 	fwBefore := readAndFormat(t, filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go"))
 
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate (second pass): %v", err)
 	}
 	mustFileEqual(t, root, rootBefore)
@@ -727,14 +756,14 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
 	// A hand edit to a generate-mode file is overwritten on the next pass.
 	build := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli_build.txt")
 	writeTestFile(t, build, "hand-written help for build\n")
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate (regenerate): %v", err)
 	}
 	mustContain(t, build, "mycli build <target> [flags]")
@@ -755,7 +784,7 @@ func TestGenerateManMarkdownEnabled(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manMarkdownConf)
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -803,7 +832,7 @@ func TestGenerateManMarkdownVerbatim(t *testing.T) {
 			"    exact markdown page\n")
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -840,7 +869,7 @@ func TestGenerateManExitStatusAndSeeAlso(t *testing.T) {
 			"    - https://example.com/docs\n")
 
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -871,7 +900,7 @@ func TestGenerateHelpVerbatim(t *testing.T) {
 			"    my exact help page\n"+
 			"    line two\n")
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	// Exactly the supplied bytes — no trailing newline added.
@@ -885,7 +914,7 @@ func TestGenerateHelpVerbatim(t *testing.T) {
 	// The verbatim string wins; a hand edit is overwritten back to the spec value.
 	root := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli.txt")
 	writeTestFile(t, root, "tampered\n")
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate (regenerate): %v", err)
 	}
 	mustFileEqual(t, root, "my exact help page\nline two")
@@ -1019,7 +1048,7 @@ func TestGenerateWatchInitialAndStop(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- watchLoop(ctx, specPath, "", func() (string, error) { return generateTimed(specPath, "") }, onGen)
+		done <- watchLoop(ctx, specPath, "", func() (string, error) { return generateTimed(specPath, "", "") }, onGen)
 	}()
 
 	rtg := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
@@ -1057,7 +1086,7 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- watchLoop(ctx, specPath, "", func() (string, error) { return generateTimed(specPath, "") }, onGen)
+		done <- watchLoop(ctx, specPath, "", func() (string, error) { return generateTimed(specPath, "", "") }, onGen)
 	}()
 
 	rtg := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")

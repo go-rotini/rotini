@@ -23,7 +23,7 @@ func writeTemp(t *testing.T, name, content string) string {
 
 func TestValidate_validSpec(t *testing.T) {
 	path := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
-	if err := validateOnce(path, "", ""); err != nil {
+	if err := validateOnce(path, "", "", ""); err != nil {
 		t.Errorf("Validate(valid spec) = %v, want nil", err)
 	}
 }
@@ -31,8 +31,69 @@ func TestValidate_validSpec(t *testing.T) {
 func TestValidate_validSpecAndConf(t *testing.T) {
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
 	conf := writeTemp(t, "conf.yaml", validConfHeader)
-	if err := validateOnce(spec, conf, ""); err != nil {
+	if err := validateOnce(spec, conf, "", ""); err != nil {
 		t.Errorf("Validate(valid spec+conf) = %v, want nil", err)
+	}
+}
+
+// TestCheckSchemaVersion covers the Item-3 guard logic directly (all branches),
+// since the $schema field is pattern-constrained to the rotini refs/tags form so
+// the non-rotini/absent cases can't be reached through a schema-valid document.
+func TestCheckSchemaVersion(t *testing.T) {
+	const rotiniSpecURL = "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json"
+	cases := []struct {
+		name      string
+		docSchema string
+		ref       string
+		wantErr   bool
+	}{
+		{"matching version passes", rotiniSpecURL, "1.2.3", false},
+		{"mismatched version errors", rotiniSpecURL, "2.0.0", true},
+		{"empty ref skips (dev/pseudo build)", rotiniSpecURL, "", false},
+		{"non-rotini $schema is left alone", "https://example.com/schema.json", "1.2.3", false},
+		{"absent $schema is left alone", "", "1.2.3", false},
+		{"branch ref is not the recognized form", "https://raw.githubusercontent.com/go-rotini/rotini/refs/heads/main/schema-spec.json", "1.2.3", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkSchemaVersion("spec", tc.docSchema, tc.ref)
+			if tc.wantErr && err == nil {
+				t.Fatalf("checkSchemaVersion(%q, ref=%q) = nil, want an error", tc.docSchema, tc.ref)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("checkSchemaVersion(%q, ref=%q) = %v, want nil", tc.docSchema, tc.ref, err)
+			}
+			if tc.wantErr && !strings.Contains(err.Error(), "$schema") {
+				t.Errorf("error %v does not mention $schema", err)
+			}
+		})
+	}
+}
+
+// TestValidate_schemaVersionGuard confirms the guard is wired through the real
+// validateOnce path: a non-empty ref enforces the spec/conf $schema version, an
+// empty ref (dev/pseudo build) skips it.
+func TestValidate_schemaVersionGuard(t *testing.T) {
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n") // tag 1.2.3
+
+	if err := validateOnce(spec, "", "", "1.2.3"); err != nil {
+		t.Errorf("validateOnce(matching ref 1.2.3) = %v, want nil", err)
+	}
+	if err := validateOnce(spec, "", "", ""); err != nil {
+		t.Errorf("validateOnce(empty ref) = %v, want nil (guard skipped)", err)
+	}
+	err := validateOnce(spec, "", "", "2.0.0")
+	if err == nil {
+		t.Fatal("validateOnce(mismatched ref 2.0.0) = nil, want a $schema error")
+	}
+	if !strings.Contains(err.Error(), "1.2.3") || !strings.Contains(err.Error(), "2.0.0") {
+		t.Errorf("error %v should name both the doc version (1.2.3) and the binary version (2.0.0)", err)
+	}
+
+	// The conf's $schema is guarded too.
+	conf := writeTemp(t, "conf.yaml", validConfHeader) // tag 1.2.3
+	if cerr := validateOnce(spec, conf, "", "9.9.9"); cerr == nil || !strings.Contains(cerr.Error(), "conf") {
+		t.Errorf("validateOnce(conf mismatch) = %v, want an error flagging the conf $schema", cerr)
 	}
 }
 
@@ -44,7 +105,7 @@ func TestValidate_singlePassRouting(t *testing.T) {
 	var result string
 	var cbErr error
 	called := 0
-	if err := Validate(spec, "", false, "", func(r string, e error) { called++; result, cbErr = r, e }); err != nil {
+	if err := Validate(spec, "", false, "", "", func(r string, e error) { called++; result, cbErr = r, e }); err != nil {
 		t.Fatalf("Validate(valid) = %v, want nil", err)
 	}
 	if called != 1 || cbErr != nil || result == "" {
@@ -53,7 +114,7 @@ func TestValidate_singlePassRouting(t *testing.T) {
 
 	called = 0
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
-	if err := Validate(missing, "", false, "", func(string, error) { called++ }); err == nil {
+	if err := Validate(missing, "", false, "", "", func(string, error) { called++ }); err == nil {
 		t.Error("Validate(missing spec) = nil, want an error")
 	}
 	if called != 0 {
@@ -64,7 +125,7 @@ func TestValidate_singlePassRouting(t *testing.T) {
 func TestValidate_missingRequiredField(t *testing.T) {
 	// Required "command" is absent at the document level.
 	path := writeTemp(t, "spec.yaml", validSpecHeader)
-	err := validateOnce(path, "", "")
+	err := validateOnce(path, "", "", "")
 	if err == nil {
 		t.Fatal("expected error for spec missing required command")
 	}
@@ -79,7 +140,7 @@ func TestValidate_unknownField(t *testing.T) {
 	// struct (which would silently drop "bogus").
 	doc := `{"$schema":"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json","command":{"name":"demo","bogus":true}}`
 	path := writeTemp(t, "spec.json", doc)
-	if err := validateOnce(path, "", ""); err == nil {
+	if err := validateOnce(path, "", "", ""); err == nil {
 		t.Fatal("expected error for unknown field")
 	}
 }
@@ -108,7 +169,7 @@ func TestValidate_helpKeys(t *testing.T) {
 		"            hidden: true\n" +
 		"            deprecated: no longer needed\n"
 	path := writeTemp(t, "spec.yaml", spec)
-	if err := validateOnce(path, "", ""); err != nil {
+	if err := validateOnce(path, "", "", ""); err != nil {
 		t.Errorf("Validate(spec with help keys) = %v, want nil", err)
 	}
 }
@@ -123,7 +184,7 @@ func TestValidate_localTimeoutRejected(t *testing.T) {
 		"    - name: run\n" +
 		"      timeout: 5s\n"
 	path := writeTemp(t, "spec.yaml", spec)
-	err := validateOnce(path, "", "")
+	err := validateOnce(path, "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "timeout") || !strings.Contains(err.Error(), "remote") {
 		t.Errorf("Validate(local timeout) = %v, want a timeout/remote rejection", err)
 	}
@@ -138,7 +199,7 @@ func TestValidate_remoteTimeoutAccepted(t *testing.T) {
 		"    - name: plugin\n" +
 		"      timeout: 10s\n"
 	path := writeTemp(t, "spec.yaml", spec)
-	if err := validateOnce(path, "", ""); err != nil {
+	if err := validateOnce(path, "", "", ""); err != nil {
 		t.Errorf("Validate(remote_commands timeout) = %v, want nil", err)
 	}
 }
@@ -156,7 +217,7 @@ func TestValidate_flagGroupUnknownFlag(t *testing.T) {
 		"      - kind: mutually_exclusive\n" +
 		"        flags: [json, nope]\n"
 	path := writeTemp(t, "spec.yaml", spec)
-	err := validateOnce(path, "", "")
+	err := validateOnce(path, "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "unknown flag") || !strings.Contains(err.Error(), "nope") {
 		t.Errorf("Validate(flag group with unknown flag) = %v, want an unknown-flag error", err)
 	}
@@ -177,7 +238,7 @@ func TestValidate_danglingSchemaRef(t *testing.T) {
 		"    type: object\n" +
 		"    properties:\n" +
 		"      host: { type: string }\n"
-	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "")
+	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "undeclared schema") || !strings.Contains(err.Error(), `did you mean "Endpoint"`) {
 		t.Errorf("Validate(dangling $ref) = %v, want an undeclared-schema error suggesting Endpoint", err)
 	}
@@ -193,7 +254,7 @@ func TestValidate_danglingSchemaRef(t *testing.T) {
 		"schemas:\n" +
 		"  Endpoint:\n" +
 		"    type: object\n"
-	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", ""); err != nil {
+	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
 		t.Errorf("Validate(valid $ref) = %v, want nil", err)
 	}
 }
@@ -210,7 +271,7 @@ func TestValidate_flagGroupSuggestion(t *testing.T) {
 		"    flag_groups:\n" +
 		"      - kind: mutually_exclusive\n" +
 		"        flags: [json, jsno]\n"
-	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "")
+	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), `did you mean "json"`) {
 		t.Errorf("Validate(flag group typo) = %v, want a did-you-mean suggestion", err)
 	}
@@ -229,7 +290,7 @@ func TestValidate_flagDependencyUnknownFlag(t *testing.T) {
 		"    flag_dependencies:\n" +
 		"      - when: tls\n" +
 		"        requires: [cert]\n"
-	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "")
+	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "unknown flag") || !strings.Contains(err.Error(), "cert") {
 		t.Errorf("Validate(flag dependency requiring unknown flag) = %v, want an unknown-flag error", err)
 	}
@@ -248,7 +309,7 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 		"      - name: organization\n" +
 		"        identifiers: [-o, --org]\n" +
 		"        schema: { type: string }\n"
-	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "")
+	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), `"-o"`) || !strings.Contains(err.Error(), "output") {
 		t.Errorf("Validate(duplicate -o) = %v, want a duplicate-identifier error naming -o and output", err)
 	}
@@ -263,7 +324,7 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 		"        schema: { type: string }\n" +
 		"      - name: out\n" +
 		"        schema: { type: bool }\n"
-	if err := validateOnce(writeTemp(t, "spec2.yaml", spec2), "", ""); err == nil || !strings.Contains(err.Error(), "--out") {
+	if err := validateOnce(writeTemp(t, "spec2.yaml", spec2), "", "", ""); err == nil || !strings.Contains(err.Error(), "--out") {
 		t.Errorf("Validate(derived --out collision) = %v, want a duplicate-identifier error", err)
 	}
 
@@ -279,7 +340,7 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 		"      - name: verbose\n" +
 		"        identifiers: [-v, --verbose]\n" +
 		"        schema: { type: bool }\n"
-	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", ""); err != nil {
+	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
 		t.Errorf("Validate(distinct identifiers) = %v, want nil", err)
 	}
 }
@@ -288,14 +349,14 @@ func TestValidate_verbatimHelpString(t *testing.T) {
 	// command.help / spec.help is a plain string (the verbatim page).
 	spec := validSpecHeader + "command:\n  name: demo\n  help: |\n    my exact help page\n"
 	path := writeTemp(t, "spec.yaml", spec)
-	if err := validateOnce(path, "", ""); err != nil {
+	if err := validateOnce(path, "", "", ""); err != nil {
 		t.Errorf("Validate(verbatim help string) = %v, want nil", err)
 	}
 
 	// help as an object is rejected (it must be a string now).
 	doc := `{"$schema":"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json","command":{"name":"demo","help":{"summary":"x"}}}`
 	objPath := writeTemp(t, "obj.json", doc)
-	if err := validateOnce(objPath, "", ""); err == nil {
+	if err := validateOnce(objPath, "", "", ""); err == nil {
 		t.Fatal("expected error for help given as an object")
 	}
 }
@@ -303,14 +364,14 @@ func TestValidate_verbatimHelpString(t *testing.T) {
 func TestValidate_manMarkdownFields(t *testing.T) {
 	// Spec: verbatim man/markdown strings on a command validate (mirror of help).
 	spec := validSpecHeader + "command:\n  name: demo\n  man: |\n    DEMO(1)\n  markdown: |\n    # demo\n"
-	if err := validateOnce(writeTemp(t, "spec.yaml", spec), "", ""); err != nil {
+	if err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", ""); err != nil {
 		t.Errorf("Validate(spec with man/markdown) = %v, want nil", err)
 	}
 
 	// Conf: features.man / features.markdown validate.
 	plainSpec := writeTemp(t, "spec2.yaml", validSpecHeader+"command:\n  name: demo\n")
 	conf := validConfHeader + "generate:\n  features:\n    man: { enabled: true }\n    markdown: { enabled: true, dir: docs }\n"
-	if err := validateOnce(plainSpec, writeTemp(t, "conf.yaml", conf), ""); err != nil {
+	if err := validateOnce(plainSpec, writeTemp(t, "conf.yaml", conf), "", ""); err != nil {
 		t.Errorf("Validate(conf with man/markdown features) = %v, want nil", err)
 	}
 }
@@ -322,8 +383,8 @@ const multiViolationDoc = `{"$schema":"https://raw.githubusercontent.com/go-roti
 func TestValidate_failMode(t *testing.T) {
 	path := writeTemp(t, "spec.json", multiViolationDoc)
 
-	collect := validateOnce(path, "", "collect")
-	fast := validateOnce(path, "", "fast")
+	collect := validateOnce(path, "", "collect", "")
+	fast := validateOnce(path, "", "fast", "")
 	if collect == nil || fast == nil {
 		t.Fatal("expected validation errors in both modes")
 	}
@@ -348,7 +409,7 @@ func TestValidate_failModeFromConf(t *testing.T) {
 	t.Chdir(tmp)
 
 	// Empty failMode resolves from the module-root conf (fast → single problem).
-	err := validateOnce(specPath, "", "")
+	err := validateOnce(specPath, "", "", "")
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -370,7 +431,7 @@ func TestValidate_importConsistency(t *testing.T) {
 		"      - name: b\n" +
 		"        identifiers: [--b]\n" +
 		"        schema: { type: foo.Bar, import: github.com/y/foo }\n"
-	err := validateOnce(writeTemp(t, "bad.yaml", bad), "", "collect")
+	err := validateOnce(writeTemp(t, "bad.yaml", bad), "", "collect", "")
 	if err == nil {
 		t.Fatal("expected an import-consistency error for one type with two imports")
 	}
@@ -390,34 +451,34 @@ func TestValidate_importConsistency(t *testing.T) {
 		"      - name: b\n" +
 		"        identifiers: [--b]\n" +
 		"        schema: { type: foo.Bar, import: github.com/x/foo }\n"
-	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "collect"); err != nil {
+	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "collect", ""); err != nil {
 		t.Errorf("consistent imports should validate, got: %v", err)
 	}
 }
 
 func TestValidate_badSchemaURL(t *testing.T) {
 	path := writeTemp(t, "spec.yaml", "$schema: https://example.com/wrong\ncommand:\n  name: demo\n")
-	if err := validateOnce(path, "", ""); err == nil {
+	if err := validateOnce(path, "", "", ""); err == nil {
 		t.Fatal("expected error for $schema not matching the version pattern")
 	}
 }
 
 func TestValidate_missingFile(t *testing.T) {
-	if err := validateOnce(filepath.Join(t.TempDir(), "nope.yaml"), "", ""); err == nil {
+	if err := validateOnce(filepath.Join(t.TempDir(), "nope.yaml"), "", "", ""); err == nil {
 		t.Fatal("expected error for missing spec file")
 	}
 }
 
 func TestValidate_missingConfFile(t *testing.T) {
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
-	err := validateOnce(spec, filepath.Join(t.TempDir(), "nope.yaml"), "")
+	err := validateOnce(spec, filepath.Join(t.TempDir(), "nope.yaml"), "", "")
 	if err == nil {
 		t.Fatal("expected error for specified-but-missing conf file")
 	}
 }
 
 func TestValidate_emptySpecPath(t *testing.T) {
-	err := validateOnce("", "", "")
+	err := validateOnce("", "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "required") {
 		t.Errorf("Validate(\"\", \"\") = %v, want a 'required' error", err)
 	}
@@ -426,7 +487,7 @@ func TestValidate_emptySpecPath(t *testing.T) {
 func TestValidate_invalidConf(t *testing.T) {
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
 	conf := writeTemp(t, "conf.yaml", validConfHeader+"bogus: true\n")
-	err := validateOnce(spec, conf, "")
+	err := validateOnce(spec, conf, "", "")
 	if err == nil {
 		t.Fatal("expected error for invalid conf")
 	}

@@ -7,23 +7,36 @@ import (
 	"path/filepath"
 )
 
-// schemaVersion is the version segment of the published schema URLs scaffolded
-// into new spec/conf files. It must satisfy the `$schema` pattern in the
-// embedded schemas. TODO: source this from the real released rotini version.
-const schemaVersion = "0.0.0"
+// baselineSchemaVersion is the version segment scaffolded into new spec/conf
+// `$schema` URLs when the running rotini binary is not a clean tagged release (a
+// dev build or an untagged `go install` → pseudo-version, where schemaRef is "").
+// It must satisfy the `$schema` pattern in the embedded schemas. A real release
+// stamps its own tag instead; the validate guard is skipped for non-release
+// binaries, so this baseline never triggers a spurious version mismatch.
+const baselineSchemaVersion = "0.0.0"
 
-func specSchemaURL() string {
-	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaVersion + "/schema-spec.json"
+// schemaURLVersion resolves the version segment for a scaffolded `$schema` URL:
+// the binary's release tag (ref, e.g. "1.2.3") when set, else the baseline. The
+// URL is always the refs/tags/<VER> form.
+func schemaURLVersion(ref string) string {
+	if ref == "" {
+		return baselineSchemaVersion
+	}
+	return ref
 }
 
-func confSchemaURL() string {
-	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaVersion + "/schema-conf.json"
+func specSchemaURL(ref string) string {
+	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaURLVersion(ref) + "/schema-spec.json"
+}
+
+func confSchemaURL(ref string) string {
+	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaURLVersion(ref) + "/schema-conf.json"
 }
 
 // InitializeFn is the signature of [Initialize]. A command handler can bind it under a
 // registry key and fetch it as an injectable service, so tests substitute a double (see
 // [GenerateFn]).
-type InitializeFn = func(name, format string, force bool, into string) error
+type InitializeFn = func(name, format string, force bool, into, schemaRef string) error
 
 // Initialize scaffolds a new standalone rotini CLI named name under cmd/<name>/
 // of the current module, then generates its framework and handler packages:
@@ -41,7 +54,7 @@ type InitializeFn = func(name, format string, force bool, into string) error
 // statically composed ($ref) sub-command of that parent (the parent's spec
 // gains a $ref and is re-generated). The new CLI still gets its own main.go and
 // stays independently buildable.
-func Initialize(name, format string, force bool, into string) error {
+func Initialize(name, format string, force bool, into, schemaRef string) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
@@ -78,20 +91,20 @@ func Initialize(name, format string, force bool, into string) error {
 		}
 	}
 
-	if err := WriteSpec(specPath, scaffoldSpec(name)); err != nil {
+	if err := WriteSpec(specPath, scaffoldSpec(name, schemaRef)); err != nil {
 		return err
 	}
-	if err := WriteConf(confPath, scaffoldConf(name, pkgDir)); err != nil {
+	if err := WriteConf(confPath, scaffoldConf(name, pkgDir, schemaRef)); err != nil {
 		return err
 	}
 	if err := writeMainGo(mainPath, moduleName, name, pkgDir); err != nil {
 		return err
 	}
-	if err := Generate(specPath, confPath, false, nil); err != nil {
+	if err := Generate(specPath, confPath, false, schemaRef, nil); err != nil {
 		return err
 	}
 	if into != "" {
-		return composeInto(moduleRoot, pkgDir, into, name, ext)
+		return composeInto(moduleRoot, pkgDir, into, name, ext, schemaRef)
 	}
 	return nil
 }
@@ -125,7 +138,7 @@ func moduleInitDefaults(moduleRoot string) initDefaults {
 
 // composeInto registers child as a $ref sub-command of the parent CLI and
 // re-generates the parent so the composition takes effect.
-func composeInto(moduleRoot, pkgDir, parent, child, childExt string) error {
+func composeInto(moduleRoot, pkgDir, parent, child, childExt, schemaRef string) error {
 	parentDir := filepath.Join(moduleRoot, filepath.FromSlash(pkgDir), parent)
 	parentSpec, err := discoverFile(parentDir, ".rotini.spec.")
 	if err != nil {
@@ -140,14 +153,14 @@ func composeInto(moduleRoot, pkgDir, parent, child, childExt string) error {
 	ref := "../" + child + "/.rotini.spec." + childExt
 	for _, c := range spec.Command.Commands {
 		if c.Ref == ref {
-			return Generate(parentSpec, parentConf, false, nil) // already referenced
+			return Generate(parentSpec, parentConf, false, schemaRef, nil) // already referenced
 		}
 	}
 	spec.Command.Commands = append(spec.Command.Commands, Command{Ref: ref})
 	if err := WriteSpec(parentSpec, spec); err != nil {
 		return err
 	}
-	return Generate(parentSpec, parentConf, false, nil)
+	return Generate(parentSpec, parentConf, false, schemaRef, nil)
 }
 
 // discoverFile returns the first dir/<prefix><ext> file that exists, trying the
@@ -180,9 +193,9 @@ func normalizeFormat(format string) (string, error) {
 // scaffoldSpec builds a minimal valid spec: the schema URL, root name, and example
 // help content so spec-driven help works out of the box. The user adds commands
 // (and binds their own build vars like version) from there.
-func scaffoldSpec(name string) *Spec {
+func scaffoldSpec(name, schemaRef string) *Spec {
 	return &Spec{
-		Schema: specSchemaURL(),
+		Schema: specSchemaURL(schemaRef),
 		Command: Command{
 			Name:        name,
 			Summary:     name + " command-line program",
@@ -195,10 +208,10 @@ func scaffoldSpec(name string) *Spec {
 // under <pkgDir>/<name>/cli: cli and cligen point at the same package and file,
 // so the framework and the handler rollup are generated into one rotini.gen.go.
 // Help generation is enabled so a freshly scaffolded CLI has working help.
-func scaffoldConf(name, pkgDir string) *Conf {
+func scaffoldConf(name, pkgDir, schemaRef string) *Conf {
 	cliPkg := pkgDir + "/" + name + "/cli"
 	return &Conf{
-		Schema: confSchemaURL(),
+		Schema: confSchemaURL(schemaRef),
 		Generate: &GenerateConfig{
 			Packages: &PackagesConfig{
 				Cli:    &PackageConfig{Package: cliPkg, File: "rotini.gen.go"},

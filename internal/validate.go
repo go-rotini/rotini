@@ -3,6 +3,7 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -71,7 +72,7 @@ func loadConfSchema() (*jsonschema.Schema, error) {
 
 // ValidateFn is the signature of [Validate]. A command handler can bind it under a registry
 // key and fetch it as an injectable service, so tests substitute a double (see [GenerateFn]).
-type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error)) error
+type ValidateFn = func(specPath, confPath string, watch bool, failMode, schemaRef string, onValidate func(result string, err error)) error
 
 // Validate checks a rotini spec file, and the conf resolved beside it, against the embedded
 // rotini JSON Schemas plus the spec lints. It mirrors [Generate].
@@ -89,19 +90,23 @@ type ValidateFn = func(specPath, confPath string, watch bool, failMode string, o
 // re-validates whenever the spec or conf changes, until interrupted with ctrl-c (SIGINT); there
 // every pass — valid or not — goes to onValidate and watching continues, and only a failure to
 // start watching is returned.
-func Validate(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error)) error {
+// schemaRef is the running rotini binary's release tag (e.g. "1.2.3"), or "" for a non-release
+// build (a dev build or an untagged install → pseudo-version). When non-empty, each document's
+// `$schema` version must match it (a mismatch is a validation error); when "" the match is
+// skipped — an untagged build has no authoritative version to enforce.
+func Validate(specPath, confPath string, watch bool, failMode, schemaRef string, onValidate func(result string, err error)) error {
 	if onValidate == nil {
 		onValidate = func(string, error) {}
 	}
 	confPath = resolveConfPath(specPath, confPath)
-	return runOrWatch(specPath, confPath, watch, func() (string, error) { return validateTimed(specPath, confPath, failMode) }, onValidate)
+	return runOrWatch(specPath, confPath, watch, func() (string, error) { return validateTimed(specPath, confPath, failMode, schemaRef) }, onValidate)
 }
 
 // validateTimed runs one validation pass and returns a "[HH:MM:SS] <took>" summary alongside
 // the pass's error, mirroring generateTimed so watch mode can report both.
-func validateTimed(specPath, confPath, failMode string) (string, error) {
+func validateTimed(specPath, confPath, failMode, schemaRef string) (string, error) {
 	start := time.Now()
-	err := validateOnce(specPath, confPath, failMode)
+	err := validateOnce(specPath, confPath, failMode, schemaRef)
 	result := fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start)))
 	return result, err
 }
@@ -111,7 +116,7 @@ func validateTimed(specPath, confPath, failMode string) (string, error) {
 // missing/unreadable file, a format-conversion failure, a schema violation, a lint — into one
 // error via [errors.Join], or returns the first when failMode resolves to "fast". It returns nil
 // when everything is valid.
-func validateOnce(specPath, confPath, failMode string) error {
+func validateOnce(specPath, confPath, failMode, schemaRef string) error {
 	fast := resolveFailMode(failMode) == "fast"
 
 	var problems []error
@@ -120,8 +125,9 @@ func validateOnce(specPath, confPath, failMode string) error {
 	} else {
 		specProblems := validateDocument(specPath, "spec", loadSpecSchema)
 		problems = append(problems, specProblems...)
-		// The import-consistency lint runs on the decoded spec, so only attempt it
-		// once the document is schema-valid (otherwise the decode is meaningless).
+		// The lints and the $schema-version guard run on the decoded spec, so only
+		// attempt them once the document is schema-valid (otherwise the decode is
+		// meaningless and we'd pile errors on an already-broken file).
 		if len(specProblems) == 0 {
 			if spec, err := ReadSpec(specPath); err == nil {
 				problems = append(problems, lintImportConsistency(spec)...)
@@ -130,6 +136,9 @@ func validateOnce(specPath, confPath, failMode string) error {
 				problems = append(problems, lintFlagDependencies(spec)...)
 				problems = append(problems, lintDuplicateFlagIdentifiers(spec)...)
 				problems = append(problems, lintSchemaRefs(spec)...)
+				if err := checkSchemaVersion("spec", spec.Schema, schemaRef); err != nil {
+					problems = append(problems, err)
+				}
 			}
 		}
 	}
@@ -137,13 +146,52 @@ func validateOnce(specPath, confPath, failMode string) error {
 		return problems[0]
 	}
 	if confPath != "" {
-		problems = append(problems, validateDocument(confPath, "conf", loadConfSchema)...)
+		confProblems := validateDocument(confPath, "conf", loadConfSchema)
+		problems = append(problems, confProblems...)
+		if len(confProblems) == 0 {
+			if conf, err := ReadConf(confPath); err == nil {
+				if err := checkSchemaVersion("conf", conf.Schema, schemaRef); err != nil {
+					problems = append(problems, err)
+				}
+			}
+		}
 	}
 	if fast && len(problems) > 0 {
 		return problems[0]
 	}
 
 	return errors.Join(problems...)
+}
+
+// rotiniSchemaURLRe matches the recognized rotini `$schema` URL form and captures
+// the X.Y.Z version segment. A URL that doesn't match (absent, a branch ref, a
+// different host — i.e. the user deliberately pointed it elsewhere) yields no
+// capture, and checkSchemaVersion skips it.
+var rotiniSchemaURLRe = regexp.MustCompile(`^https://raw\.githubusercontent\.com/go-rotini/rotini/refs/tags/([0-9]+\.[0-9]+\.[0-9]+)/schema-(?:spec|conf)\.json$`)
+
+// checkSchemaVersion enforces that a document's `$schema` targets the same rotini
+// release as the running binary. schemaRef is the binary's release tag ("X.Y.Z"),
+// or "" for a non-release build (dev/pseudo-version) — in which case the check is
+// skipped (an untagged build has no authoritative version). The check is also
+// skipped when the document's `$schema` is absent or not the recognized rotini
+// refs/tags/<VER> form. A present, recognized, mismatched `$schema` against a
+// release-tagged binary is a validation error.
+func checkSchemaVersion(kind, docSchema, schemaRef string) error {
+	if schemaRef == "" {
+		return nil
+	}
+	m := rotiniSchemaURLRe.FindStringSubmatch(docSchema)
+	if m == nil {
+		return nil
+	}
+	if docVer := m[1]; docVer != schemaRef {
+		return &violationError{
+			kind: kind,
+			loc:  "$schema",
+			msg:  fmt.Sprintf("targets schema version %s but this rotini is %s — update the $schema version (or your rotini install) so they match", docVer, schemaRef),
+		}
+	}
+	return nil
 }
 
 // resolveFailMode resolves the validate failure-reporting mode: an explicit value

@@ -62,7 +62,7 @@ func genHelp(t *testing.T, spec, preTmpl string) string {
 		writeTestFile(t, filepath.Join(tmp, "cmd", "app", "cli", "embed", "help", "help.txt.tmpl"), preTmpl)
 	}
 	t.Chdir(tmp)
-	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	return filepath.Join(tmp, "cmd", "app", "cli", "embed", "help")
