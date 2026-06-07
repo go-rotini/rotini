@@ -40,7 +40,14 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
-	if err := internal.Validate(args.SpecFilePath, flags.ConfFilePath, flags.Fail); err != nil {
+	// Bind the real implementation only if a caller (e.g. a test) hasn't injected one,
+	// so the work is dependency-injectable at the registry seam without main.go wiring it.
+	if !rtx.Has("validate") {
+		rtx.Bind("validate", internal.Validate)
+	}
+	validate := rotini.MustGet[internal.ValidateFn](rtx, "validate")
+
+	if err := validate(args.SpecFilePath, flags.ConfFilePath, flags.Fail); err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
 		return

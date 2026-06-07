@@ -11,6 +11,8 @@ import (
 	"github.com/go-rotini/fs"
 )
 
+type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error)) error
+
 // Generate emits the generated program files from the rotini spec at specPath and
 // the conf at confPath (empty or missing → sane defaults; a .rotini.conf.* beside
 // the spec is auto-discovered).

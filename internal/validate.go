@@ -76,6 +76,10 @@ func loadConfSchema() (*jsonschema.Schema, error) {
 // The rotini handler parses those flags and passes their values here.
 //
 // Every problem found — a missing or unreadable file, a format-conversion
+// ValidateFn is the signature of [Validate]. A command handler can bind it under a registry
+// key and fetch it as an injectable service, so tests substitute a double (see [GenerateFn]).
+type ValidateFn = func(specPath, confPath, failMode string) error
+
 // failure, or an individual schema violation — is aggregated and returned
 // as a single error via [errors.Join]; the calling handler unwraps it for
 // display. Validate returns nil when the spec (and conf, if given) are

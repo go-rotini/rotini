@@ -20,6 +20,11 @@ func confSchemaURL() string {
 	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaVersion + "/schema-conf.json"
 }
 
+// InitializeFn is the signature of [Initialize]. A command handler can bind it under a
+// registry key and fetch it as an injectable service, so tests substitute a double (see
+// [GenerateFn]).
+type InitializeFn = func(name, format string, force bool, into string) error
+
 // Initialize scaffolds a new standalone rotini CLI named name under cmd/<name>/
 // of the current module, then generates its framework and handler packages:
 //
