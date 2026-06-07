@@ -16,7 +16,7 @@ rotini generate [spec_file_path] [flags]
 
 ## Flags
 
-- `-c, --config string` — path to the rotini conf file
+- `-c, --config string` — path to the rotini conf file (default `.rotini.conf.yaml`)
 - `--watch, -w` — watch a rotini spec file for changes and re-generate
 - `-h, --help` — print help
 

@@ -7,16 +7,18 @@ Validate a rotini spec file for correctness.
 ## Usage
 
 ```
-rotini validate [file] [flags]
+rotini validate [spec_file_path] [flags]
 ```
 
 ## Arguments
 
-- `[file]` — path to the spec file (default `.rotini.spec.yaml`)
+- `[spec_file_path]` — path to the spec file (default `.rotini.spec.yaml`)
 
 ## Flags
 
+- `-c, --config string` — path to the rotini conf file (default `.rotini.conf.yaml`)
 - `--fail string` — failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]
+- `--watch, -w` — watch a rotini spec file for changes and re-generate
 - `-h, --help` — print help
 
 ## Examples

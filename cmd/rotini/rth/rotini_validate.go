@@ -23,18 +23,24 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(rtx.Stderr, "rotini:", err)
+		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
+		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniValidate)
 		rtx.Exit(1)
 		return
 	}
-	in := inputs.RotiniValidate
 
-	if in.Flags.Help {
+	args := inputs.RotiniValidate.Arguments
+	flags := inputs.RotiniValidate.Flags
+
+	if flags.Help {
 		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniValidate)
+		rtx.Exit(0)
 		return
 	}
 
-	if err := internal.Validate(in.Arguments.File, "", in.Flags.Fail); err != nil {
+	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
+
+	if err := internal.Validate(args.SpecFilePath, flags.ConfFilePath, flags.Fail); err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
 		return

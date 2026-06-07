@@ -46,7 +46,7 @@ var definition = rotini.Definition{
 			Handler: "RotiniGenerate",
 			Aliases: []string{"gen"},
 			Flags: []rotini.FlagDef{
-				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Type: "string"},
+				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Type: "string", Default: ".rotini.conf.yaml"},
 				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool"},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
@@ -58,11 +58,13 @@ var definition = rotini.Definition{
 			Handler: "RotiniValidate",
 			Aliases: []string{"val"},
 			Flags: []rotini.FlagDef{
+				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Type: "string", Default: ".rotini.conf.yaml"},
 				{Name: "fail", Identifiers: []string{"--fail"}, Type: "string", Enum: []string{"fast", "collect"}},
+				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool"},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
-				{Name: "file", Type: "string", Default: ".rotini.spec.yaml"},
+				{Name: "spec_file_path", Type: "string", Default: ".rotini.spec.yaml"},
 			},
 		},
 		{Name: "completion",
@@ -186,12 +188,14 @@ type RotiniInitializeInputs struct {
 }
 
 type RotiniValidateFlags struct {
-	Fail string `rotini:"fail"`
-	Help bool   `rotini:"help"`
+	ConfFilePath string `rotini:"conf_file_path"`
+	Fail         string `rotini:"fail"`
+	Watch        bool   `rotini:"watch"`
+	Help         bool   `rotini:"help"`
 }
 
 type RotiniValidateArguments struct {
-	File string `rotini:"file"`
+	SpecFilePath string `rotini:"spec_file_path"`
 }
 
 type RotiniValidateCommandInputs struct {

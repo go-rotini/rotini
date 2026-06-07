@@ -100,6 +100,7 @@ command:
               - --config
             schema:
               type: string
+              default: .rotini.conf.yaml
           - name: watch
             summary: watch a rotini spec file for changes and re-generate
             identifiers:
@@ -125,12 +126,20 @@ command:
       footer: Use "rotini help <command>" for more information about a command.
       inputs:
         arguments:
-          - name: file
+          - name: spec_file_path
             summary: path to the spec file
             schema:
               type: string
               default: .rotini.spec.yaml
         flags:
+          - name: conf_file_path
+            summary: path to the rotini conf file
+            identifiers:
+              - -c
+              - --config
+            schema:
+              type: string
+              default: .rotini.conf.yaml
           - name: fail
             summary: failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect
             identifiers:
@@ -140,6 +149,13 @@ command:
               enum:
                 - fast
                 - collect
+          - name: watch
+            summary: watch a rotini spec file for changes and re-generate
+            identifiers:
+              - --watch
+              - -w
+            schema:
+              type: bool
           - name: help
             summary: print help
             identifiers:
