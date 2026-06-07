@@ -124,6 +124,55 @@ func TestGenerateDefaultLayout(t *testing.T) {
 	mustContain(t, filepath.Join(tmp, "cmd", "rotini", "cli", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
 }
 
+// TestGenerateTwoFilesOnePackage covers the middle layout: cli and cligen name
+// the SAME package but DIFFERENT files. The framework and the rollup are written
+// as two files in one package, and — because they share a package — the rollup
+// refers to the framework unqualified (no "cligen." prefix, no second import) and
+// no combined rotini.gen.go is produced.
+func TestGenerateTwoFilesOnePackage(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n  commands:\n    - name: build\n")
+	// Same package ("app"), distinct files → two files, one package.
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
+		confSchemaHeader+"generate:\n  packages:\n    cli:\n      package: cmd/mycli/app\n      file: handlers.gen.go\n    cligen:\n      package: cmd/mycli/app\n      file: framework.gen.go\n")
+	t.Chdir(tmp)
+
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	dir := filepath.Join(tmp, "cmd", "mycli", "app")
+	framework := filepath.Join(dir, "framework.gen.go")
+	rollup := filepath.Join(dir, "handlers.gen.go")
+
+	// The framework file holds the typed surface; the rollup holds the handlers.
+	// Both declare package "app".
+	mustContain(t, framework, "package app", "type ProgramHandlers interface", "func NewProgram(handlers ProgramHandlers)")
+	mustContain(t, rollup, "package app", "type handlers struct{}", "var Program = NewProgram(&handlers{})")
+
+	// Same-package refs are unqualified: the rollup must not qualify the framework
+	// with a "cligen." selector or import a separate framework package.
+	rollupSrc, err := os.ReadFile(rollup)
+	if err != nil {
+		t.Fatalf("read rollup: %v", err)
+	}
+	if bytes.Contains(rollupSrc, []byte("cligen.")) {
+		t.Errorf("rollup qualifies framework refs with a package selector; want unqualified same-package refs:\n%s", rollupSrc)
+	}
+
+	// No combined file in this layout.
+	if _, statErr := os.Stat(filepath.Join(dir, "rotini.gen.go")); statErr == nil {
+		t.Error("two-file layout unexpectedly produced a combined rotini.gen.go")
+	}
+
+	// Both files are syntactically valid Go (readAndFormat gofmt-parses, failing the
+	// test otherwise), confirming the split surface forms a well-formed package.
+	readAndFormat(t, framework)
+	readAndFormat(t, rollup)
+}
+
 // TestGenerateRejectsInvalidSpec confirms codegen is gated on validation: an invalid spec
 // (here a duplicate flag identifier the lints catch) is rejected before any files are written.
 func TestGenerateRejectsInvalidSpec(t *testing.T) {

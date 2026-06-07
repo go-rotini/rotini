@@ -995,13 +995,16 @@ func splitGoFile(src []byte) (imports []string, body []byte, err error) {
 }
 
 // pruneStubs removes handler .go files that no longer correspond to an own
-// command, preserving the rollup file, the keep list, and any test files.
-// keepList entries are package-relative paths; rth is a flat package, so for
-// its top-level stubs a path is just the file name.
+// command, preserving the rollup file, the keep list, and any test files. The
+// cli package is flat, so keepList entries (package-relative) are just file names
+// for its top-level stubs. When cli and cligen share a package (two-files-one-
+// package layout), the framework file also lives here, so it is protected too —
+// otherwise it would be pruned as an orphan.
 func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	protected := map[string]bool{
-		gp.root.filename: true,
-		lay.rollupFile:   true,
+		gp.root.filename:  true,
+		lay.rollupFile:    true,
+		lay.frameworkFile: true,
 	}
 	for _, c := range gp.own {
 		protected[c.filename] = true
