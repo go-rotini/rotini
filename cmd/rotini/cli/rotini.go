@@ -32,12 +32,15 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	case flags.Help:
 		fmt.Fprintln(rtx.Stdout, HelpRotini)
 		rtx.Exit(0)
+		return
 	case flags.Version:
 		version := rotini.MustGet[string](rtx, "version")
 		fmt.Fprintln(rtx.Stdout, version)
 		rtx.Exit(0)
+		return
 	default:
 		fmt.Fprintln(rtx.Stdout, HelpRotini)
 		rtx.Exit(1)
+		return
 	}
 }
