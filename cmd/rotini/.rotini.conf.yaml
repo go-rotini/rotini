@@ -1,4 +1,7 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
+initialize:
+  package: cmd
+  format: yaml
 generate:
   packages:
     cli:
@@ -20,3 +23,5 @@ generate:
     completion:
       enabled: false
       dir: cmd/rotini/cli/embed/completion
+validate:
+  fail: collect
