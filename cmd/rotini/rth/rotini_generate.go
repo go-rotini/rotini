@@ -58,4 +58,6 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
 	}
+
+	rtx.Exit(0)
 }

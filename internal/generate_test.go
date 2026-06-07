@@ -898,7 +898,9 @@ func TestGenerateWatchInitialAndStop(t *testing.T) {
 		}
 	}
 	done := make(chan error, 1)
-	go func() { done <- watchLoop(ctx, specPath, "", onGen) }()
+	go func() {
+		done <- watchLoop(ctx, specPath, "", func() (string, error) { return generateTimed(specPath, "") }, onGen)
+	}()
 
 	rtg := filepath.Join(tmp, "rtg", "rotini.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
@@ -934,7 +936,9 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 		}
 	}
 	done := make(chan error, 1)
-	go func() { done <- watchLoop(ctx, specPath, "", onGen) }()
+	go func() {
+		done <- watchLoop(ctx, specPath, "", func() (string, error) { return generateTimed(specPath, "") }, onGen)
+	}()
 
 	rtg := filepath.Join(tmp, "rtg", "rotini.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {

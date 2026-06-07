@@ -8,10 +8,11 @@ import (
 	"github.com/go-rotini/rotini/internal"
 )
 
-// TestRotiniValidate covers the validate command handler (rotini_validate.go). The work is
-// injected at the "validate" registry seam so the success and failure branches are exercised
-// with doubles (the "spec:/conf:" header always prints first). One case leaves "validate"
-// unbound so the real internal.Validate runs (integration).
+// TestRotiniValidate covers the validate command handler (rotini_validate.go). Validate now
+// mirrors Generate (watch + a per-pass callback), injected at the "validate" registry seam, so
+// the handler's branches — the per-pass callback's result vs. error paths and the final error —
+// are exercised with doubles (the "spec:/conf:" header always prints first). One case leaves
+// "validate" unbound so the real internal.Validate runs (integration).
 func TestRotiniValidate(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -29,16 +30,23 @@ func TestRotiniValidate(t *testing.T) {
 			argv: []string{"validate", "--nope"}, wantOut: rtg.HelpRotiniValidate, wantErr: "Error:", wantCode: 1,
 		},
 		{
-			name:    "success prints only the header",
-			argv:    []string{"validate"},
-			binds:   []svc{{"validate", internal.ValidateFn(func(_, _, _ string) error { return nil })}},
-			wantOut: "spec: .rotini.spec.yaml", wantCode: 0,
+			name: "success: header and the pass summary print",
+			argv: []string{"validate"},
+			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
+				cb("[12:00:00] 1ms", nil)
+				return nil
+			})}},
+			wantOut: "[12:00:00] 1ms", wantCode: 0,
 		},
 		{
-			name:    "validation error surfaces",
-			argv:    []string{"validate"},
-			binds:   []svc{{"validate", internal.ValidateFn(func(_, _, _ string) error { return errors.New("schema violation") })}},
-			wantOut: "spec: .rotini.spec.yaml", wantErr: "schema violation", wantCode: 1,
+			name: "per-pass callback error and a final error both surface",
+			argv: []string{"validate"},
+			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
+				cb("[12:00:00] 1ms", nil)              // a clean pass → stdout
+				cb("", errors.New("schema violation")) // a failing pass → stderr
+				return errors.New("validation failed")
+			})}},
+			wantOut: "[12:00:00] 1ms", wantErr: "schema violation", wantCode: 1,
 		},
 		{
 			name: "real validate on a missing spec errors (integration)",

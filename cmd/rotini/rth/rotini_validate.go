@@ -43,9 +43,24 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.BindIfAbsent("validate", internal.Validate)
 	validate := rotini.MustGet[internal.ValidateFn](rtx, "validate")
 
-	if err := validate(args.SpecFilePath, flags.ConfFilePath, flags.Fail); err != nil {
+	err := validate(
+		args.SpecFilePath,
+		flags.ConfFilePath,
+		flags.Watch,
+		flags.Fail,
+		func(result string, err error) {
+			if err != nil {
+				fmt.Fprintln(rtx.Stderr, "Error:", err)
+				return
+			}
+			fmt.Fprintln(rtx.Stdout, result)
+		},
+	)
+
+	if err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
-		return
 	}
+
+	rtx.Exit(0)
 }

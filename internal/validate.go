@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-rotini/jsonschema"
 	"github.com/go-rotini/rotini"
@@ -68,23 +69,49 @@ func loadConfSchema() (*jsonschema.Schema, error) {
 	return confSchema, errConfSchema
 }
 
-// Validate checks a rotini spec file, and optionally a conf file, against
-// the embedded rotini JSON Schemas.
-//
-// specPath is the spec-file command argument and is required. confPath is
-// the value of the -c/--config flag; pass "" when no conf file was given.
-// The rotini handler parses those flags and passes their values here.
-//
-// Every problem found — a missing or unreadable file, a format-conversion
 // ValidateFn is the signature of [Validate]. A command handler can bind it under a registry
 // key and fetch it as an injectable service, so tests substitute a double (see [GenerateFn]).
-type ValidateFn = func(specPath, confPath, failMode string) error
+type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error)) error
 
-// failure, or an individual schema violation — is aggregated and returned
-// as a single error via [errors.Join]; the calling handler unwraps it for
-// display. Validate returns nil when the spec (and conf, if given) are
-// valid.
-func Validate(specPath, confPath, failMode string) error {
+// Validate checks a rotini spec file, and the conf resolved beside it, against the embedded
+// rotini JSON Schemas plus the spec lints. It mirrors [Generate].
+//
+// specPath is the spec-file command argument and is required. confPath is the -c/--config flag
+// value (empty → the .rotini.conf.* discovered next to the spec). failMode is the --fail flag
+// value ("fast" stops at the first problem, anything else collects); when empty it falls back to
+// the module conf's validate.fail, so the flag overrides the conf.
+//
+// onValidate, which may be nil, is called after each pass with a "[HH:MM:SS] <took>" summary and
+// that pass's error (nil when the spec and conf are valid); Validate prints nothing itself, so
+// the caller reports results through it. When watch is false it runs a single pass and returns
+// that pass's error — every problem aggregated via [errors.Join] (or the first in "fast" mode) —
+// so the caller can treat the run as failed. When watch is true it validates once and then
+// re-validates whenever the spec or conf changes, until interrupted with ctrl-c (SIGINT); there
+// every pass — valid or not — goes to onValidate and watching continues, and only a failure to
+// start watching is returned.
+func Validate(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error)) error {
+	if onValidate == nil {
+		onValidate = func(string, error) {}
+	}
+	confPath = resolveConfPath(specPath, confPath)
+	return runOrWatch(specPath, confPath, watch, func() (string, error) { return validateTimed(specPath, confPath, failMode) }, onValidate)
+}
+
+// validateTimed runs one validation pass and returns a "[HH:MM:SS] <took>" summary alongside
+// the pass's error, mirroring generateTimed so watch mode can report both.
+func validateTimed(specPath, confPath, failMode string) (string, error) {
+	start := time.Now()
+	err := validateOnce(specPath, confPath, failMode)
+	result := fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start)))
+	return result, err
+}
+
+// validateOnce runs a single validation pass: it checks the spec (and the conf, when one is
+// resolved) against the embedded schemas and runs the spec lints, aggregating every problem — a
+// missing/unreadable file, a format-conversion failure, a schema violation, a lint — into one
+// error via [errors.Join], or returns the first when failMode resolves to "fast". It returns nil
+// when everything is valid.
+func validateOnce(specPath, confPath, failMode string) error {
 	fast := resolveFailMode(failMode) == "fast"
 
 	var problems []error

@@ -44,16 +44,25 @@ func Generate(specPath, confPath string, watch bool, onGenerate func(result stri
 		onGenerate = func(string, error) {}
 	}
 	confPath = resolveConfPath(specPath, confPath)
+	return runOrWatch(specPath, confPath, watch, func() (string, error) { return generateTimed(specPath, confPath) }, onGenerate)
+}
+
+// runOrWatch performs a single timed pass — returning the pass's error when it fails — or,
+// when watch is set, watches the spec and conf and re-runs the pass on each change until
+// interrupted with ctrl-c (SIGINT), routing every pass (success or failure) to onResult. It is
+// the shared engine behind [Generate] and [Validate]; pass supplies the command-specific work
+// and confPath must already be resolved (see resolveConfPath).
+func runOrWatch(specPath, confPath string, watch bool, pass func() (string, error), onResult func(result string, err error)) error {
 	if watch {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		return watchLoop(ctx, specPath, confPath, onGenerate)
+		return watchLoop(ctx, specPath, confPath, pass, onResult)
 	}
-	result, err := generateTimed(specPath, confPath)
+	result, err := pass()
 	if err != nil {
 		return err
 	}
-	onGenerate(result, nil)
+	onResult(result, nil)
 	return nil
 }
 
@@ -106,12 +115,11 @@ func loadConfOrDefaults(confPath string) (*Conf, error) {
 // saving a file (write + chmod + the rename of an atomic save).
 const watchDebounce = 200 * time.Millisecond
 
-// watchLoop is the cancelable core of watch mode: it generates once, then
-// re-generates on each change, handing every pass to onGenerate, until ctx is
-// done (a clean interrupt → nil). It is split out so tests can drive it with a
-// context rather than a real signal. Only a failure to set up the watchers is
-// returned.
-func watchLoop(ctx context.Context, specPath, confPath string, onGenerate func(result string, err error)) error {
+// watchLoop is the cancelable core of watch mode: it runs pass once, then re-runs it on each
+// change to the spec or conf, handing every pass to onResult, until ctx is done (a clean
+// interrupt → nil). It is split out so tests can drive it with a context rather than a real
+// signal. Only a failure to set up the watchers is returned.
+func watchLoop(ctx context.Context, specPath, confPath string, pass func() (string, error), onResult func(result string, err error)) error {
 	// Watch the spec always, and the conf only when it exists (conf is optional).
 	paths := []string{specPath}
 	if confPath != "" {
@@ -140,14 +148,14 @@ func watchLoop(ctx context.Context, specPath, confPath string, onGenerate func(r
 		go forwardChanges(ctx, events, changed)
 	}
 
-	onGenerate(generateTimed(specPath, confPath)) // initial pass
+	onResult(pass()) // initial pass
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case <-changed:
-			onGenerate(generateTimed(specPath, confPath))
+			onResult(pass())
 		}
 	}
 }
