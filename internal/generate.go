@@ -105,7 +105,7 @@ func generateOnce(specPath, confPath string) error {
 	if err != nil {
 		return err
 	}
-	applyConfDefaults(conf)
+	applyConfDefaults(conf, spec.Command.Name)
 	return generateAll(spec, conf, specPath)
 }
 

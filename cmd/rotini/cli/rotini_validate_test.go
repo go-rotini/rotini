@@ -1,10 +1,9 @@
-package rth
+package cli
 
 import (
 	"errors"
 	"testing"
 
-	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 	"github.com/go-rotini/rotini/internal"
 )
 
@@ -23,11 +22,11 @@ func TestRotiniValidate(t *testing.T) {
 	}{
 		{
 			name: "help flag",
-			argv: []string{"validate", "--help"}, wantOut: rtg.HelpRotiniValidate, wantCode: 0,
+			argv: []string{"validate", "--help"}, wantOut: HelpRotiniValidate, wantCode: 0,
 		},
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"validate", "--nope"}, wantOut: rtg.HelpRotiniValidate, wantErr: "Error:", wantCode: 1,
+			argv: []string{"validate", "--nope"}, wantOut: HelpRotiniValidate, wantErr: "Error:", wantCode: 1,
 		},
 		{
 			name: "success: header and the pass summary print",

@@ -3,7 +3,9 @@ package {{.Package}}
 
 import (
 	"{{.RotiniImport}}"
+{{- if .FrameworkImport}}
 	"{{.FrameworkImport}}"
+{{- end}}
 {{- range .ChildImports}}
 	{{.Alias}} "{{.Path}}"
 {{- end}}
@@ -11,11 +13,11 @@ import (
 
 type handlers struct{}
 
-var _ {{.FrameworkPkg}}.ProgramHandlers = (*handlers)(nil)
+var _ {{.FrameworkQual}}ProgramHandlers = (*handlers)(nil)
 
-var Program = {{.FrameworkPkg}}.NewProgram(&handlers{})
+var Program = {{.FrameworkQual}}NewProgram(&handlers{})
 
-func Handlers() {{.FrameworkPkg}}.ProgramHandlers {
+func Handlers() {{.FrameworkQual}}ProgramHandlers {
 	return &handlers{}
 }
 {{- range .Methods}}

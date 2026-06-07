@@ -44,7 +44,9 @@ func TestConfRoundTrip(t *testing.T) {
 	want := &Conf{
 		Schema: "https://example.com/conf.json",
 		Generate: &GenerateConfig{
-			Rth: &GenerateRthConfig{Package: "internal/handlers", File: "handlers.gen.go"},
+			Packages: &PackagesConfig{
+				Cli: &PackageConfig{Package: "internal/handlers", File: "handlers.gen.go"},
+			},
 		},
 	}
 	for _, ext := range supportedExts {

@@ -309,7 +309,7 @@ func TestValidate_manMarkdownFields(t *testing.T) {
 
 	// Conf: features.man / features.markdown validate.
 	plainSpec := writeTemp(t, "spec2.yaml", validSpecHeader+"command:\n  name: demo\n")
-	conf := validConfHeader + "generate:\n  rtg:\n    features:\n      man: { enabled: true }\n      markdown: { enabled: true, dir: docs }\n"
+	conf := validConfHeader + "generate:\n  features:\n    man: { enabled: true }\n    markdown: { enabled: true, dir: docs }\n"
 	if err := validateOnce(plainSpec, writeTemp(t, "conf.yaml", conf), ""); err != nil {
 		t.Errorf("Validate(conf with man/markdown features) = %v, want nil", err)
 	}

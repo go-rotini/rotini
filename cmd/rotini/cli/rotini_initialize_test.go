@@ -1,10 +1,9 @@
-package rth
+package cli
 
 import (
 	"errors"
 	"testing"
 
-	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 	"github.com/go-rotini/rotini/internal"
 )
 
@@ -24,11 +23,11 @@ func TestRotiniInitialize(t *testing.T) {
 	}{
 		{
 			name: "help flag",
-			argv: []string{"init", "--help"}, wantOut: rtg.HelpRotiniInitialize, wantCode: 0,
+			argv: []string{"init", "--help"}, wantOut: HelpRotiniInitialize, wantCode: 0,
 		},
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"init", "--nope"}, wantOut: rtg.HelpRotiniInitialize, wantErr: "Error:", wantCode: 1,
+			argv: []string{"init", "--nope"}, wantOut: HelpRotiniInitialize, wantErr: "Error:", wantCode: 1,
 		},
 		{
 			name: "missing name argument (guarded before any work)",

@@ -59,13 +59,13 @@ func genHelp(t *testing.T, spec, preTmpl string) string {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 	if preTmpl != "" {
-		writeTestFile(t, filepath.Join(tmp, "rtg", "help", "help.txt.tmpl"), preTmpl)
+		writeTestFile(t, filepath.Join(tmp, "cmd", "app", "cli", "embed", "help", "help.txt.tmpl"), preTmpl)
 	}
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	return filepath.Join(tmp, "rtg", "help")
+	return filepath.Join(tmp, "cmd", "app", "cli", "embed", "help")
 }
 
 // helpGoldenGeneratedSpec exercises the full generated-help surface: root header/

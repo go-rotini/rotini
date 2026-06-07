@@ -280,11 +280,10 @@ func completionNodes() []helpNode {
 // shell under the completion dir, generated from the program name via
 // rotini.CompletionScript (the shared source of the bash/zsh/fish templates). Each
 // file is (re)written every pass, skipped when already identical.
-func writeCompletionFiles(lay layout, dir, prog string, nodes []helpNode) error {
-	if dir == "" {
-		return fmt.Errorf("generate.rtg.features.completion.dir must not be empty")
+func writeCompletionFiles(cdir, prog string, nodes []helpNode) error {
+	if cdir == "" {
+		return fmt.Errorf("generate.features.completion.dir must not be empty")
 	}
-	cdir := filepath.Join(lay.frameworkDir, filepath.FromSlash(dir))
 	if err := os.MkdirAll(cdir, 0o755); err != nil {
 		return fmt.Errorf("create completion dir %s: %w", cdir, err)
 	}
@@ -662,11 +661,10 @@ func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) *helpF
 // file is rotini-managed — (re)written every pass, skipped when already identical —
 // like rotini.go and handlers.go. The template is loaded (seeding the editable
 // default when missing) only when at least one command renders.
-func writeFeatureFiles(lay layout, dir string, nodes []helpNode, feat docFeature) error {
-	if dir == "" {
-		return fmt.Errorf("generate.rtg.features.%s.dir must not be empty", feat.name)
+func writeFeatureFiles(featDir string, nodes []helpNode, feat docFeature) error {
+	if featDir == "" {
+		return fmt.Errorf("generate.features.%s.dir must not be empty", feat.name)
 	}
-	featDir := filepath.Join(lay.frameworkDir, filepath.FromSlash(dir))
 	if err := os.MkdirAll(featDir, 0o755); err != nil {
 		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
 	}

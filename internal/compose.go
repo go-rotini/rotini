@@ -229,7 +229,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
 	}
 
-	imp, err := childRthImport(childSpecPath, moduleRoot, moduleName)
+	imp, err := childCliImport(childSpecPath, moduleRoot, moduleName)
 	if err != nil {
 		return rnode{}, err
 	}
@@ -312,10 +312,10 @@ func (gp *genProgram) addImport(alias, path string) {
 	gp.childImports = append(gp.childImports, childImport{Alias: alias, Path: path})
 }
 
-// childRthImport resolves the import path of a composed child's rth package,
-// reading the child's conf when present and falling back to the cmd/<dir>/rth
-// convention.
-func childRthImport(childSpecPath, moduleRoot, moduleName string) (string, error) {
+// childCliImport resolves the import path of a composed child's cli package —
+// the handler package that exposes Handlers() — reading the child's conf when
+// present and falling back to the cmd/<dir>/cli convention.
+func childCliImport(childSpecPath, moduleRoot, moduleName string) (string, error) {
 	childDir := filepath.Dir(childSpecPath)
 	for _, ext := range []string{"yaml", "yml", "jsonc", "json"} {
 		confPath := filepath.Join(childDir, ".rotini.conf."+ext)
@@ -323,21 +323,22 @@ func childRthImport(childSpecPath, moduleRoot, moduleName string) (string, error
 			continue
 		}
 		cc, err := ReadConf(confPath)
-		if err == nil && cc.Generate != nil && cc.Generate.Rth != nil && cc.Generate.Rth.Package != "" {
-			return moduleName + "/" + filepath.ToSlash(cc.Generate.Rth.Package), nil
+		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
+			cc.Generate.Packages.Cli != nil && cc.Generate.Packages.Cli.Package != "" {
+			return moduleName + "/" + filepath.ToSlash(cc.Generate.Packages.Cli.Package), nil
 		}
 	}
-	rel, err := filepath.Rel(moduleRoot, filepath.Join(childDir, "rth"))
+	rel, err := filepath.Rel(moduleRoot, filepath.Join(childDir, "cli"))
 	if err != nil {
-		return "", fmt.Errorf("locate composed child rth package: %w", err)
+		return "", fmt.Errorf("locate composed child cli package: %w", err)
 	}
 	return moduleName + "/" + filepath.ToSlash(rel), nil
 }
 
 // identAlias derives a valid, reasonably unique Go import alias from a command
-// name (every child rth package is named "rth", so aliases are required).
+// name (every child cli package is named "cli", so aliases are required).
 func identAlias(name string) string {
-	return lowerFirst(toPascalCase(name)) + "rth"
+	return lowerFirst(toPascalCase(name)) + "cli"
 }
 
 // checkCollisions errors when sibling commands share a name or alias.

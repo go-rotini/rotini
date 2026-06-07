@@ -24,12 +24,13 @@ command:
 `
 	childConfYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
-  rth:
-    package: cmd/child/rth
-    file: handlers.go
-  rtg:
-    package: cmd/child/rtg
-    file: rotini.go
+  packages:
+    cli:
+      package: cmd/child/rth
+      file: handlers.go
+    cligen:
+      package: cmd/child/rtg
+      file: rotini.go
 `
 	parentSpecYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
 command:
@@ -39,12 +40,13 @@ command:
 `
 	parentConfYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
-  rth:
-    package: cmd/parent/rth
-    file: handlers.go
-  rtg:
-    package: cmd/parent/rtg
-    file: rotini.go
+  packages:
+    cli:
+      package: cmd/parent/rth
+      file: handlers.go
+    cligen:
+      package: cmd/parent/rtg
+      file: rotini.go
 `
 )
 
@@ -79,9 +81,9 @@ func TestGenerate_staticComposition(t *testing.T) {
 	// commands to it; own root returns a local stub.
 	rollup := filepath.Join(tmp, "cmd/parent/rth/handlers.go")
 	mustContain(t, rollup,
-		`childrth "example.com/myclis/cmd/child/rth"`,
-		"return childrth.Handlers().Child()",
-		"return childrth.Handlers().ChildGreet()",
+		`childcli "example.com/myclis/cmd/child/rth"`,
+		"return childcli.Handlers().Child()",
+		"return childcli.Handlers().ChildGreet()",
 		"return &parentHandlers{}",
 	)
 
@@ -126,8 +128,8 @@ command:
 	)
 	// …but delegation still targets the child's real handler methods (Child/ChildGreet).
 	mustContain(t, filepath.Join(tmp, "cmd/parent/rth/handlers.go"),
-		"return childrth.Handlers().Child()",
-		"return childrth.Handlers().ChildGreet()",
+		"return childcli.Handlers().Child()",
+		"return childcli.Handlers().ChildGreet()",
 	)
 }
 
@@ -135,8 +137,8 @@ func TestGenerate_transitiveRef(t *testing.T) {
 	tmp := initTestModule(t)
 	conf := func(dir string) string {
 		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-			"generate:\n  rth:\n    package: cmd/" + dir + "/rth\n    file: handlers.go\n" +
-			"  rtg:\n    package: cmd/" + dir + "/rtg\n    file: rotini.go\n"
+			"generate:\n  packages:\n    cli:\n      package: cmd/" + dir + "/rth\n      file: handlers.go\n" +
+			"    cligen:\n      package: cmd/" + dir + "/rtg\n      file: rotini.go\n"
 	}
 	// grandchild (gc) has its own sub-command "ping"; child composes gc; parent
 	// composes child — so the parent reaches gc transitively, through child.
@@ -176,9 +178,9 @@ command:
 
 	// The child composed gc directly (one level).
 	mustContain(t, filepath.Join(tmp, "cmd/child/rth/handlers.go"),
-		`gcrth "example.com/myclis/cmd/gc/rth"`,
-		"return gcrth.Handlers().Gc()",
-		"return gcrth.Handlers().GcPing()",
+		`gccli "example.com/myclis/cmd/gc/rth"`,
+		"return gccli.Handlers().Gc()",
+		"return gccli.Handlers().GcPing()",
 	)
 
 	// The parent reaches gc transitively: its Definition + interface include the
@@ -195,12 +197,12 @@ command:
 	// importing only the child's rth — never the grandchild's.
 	parentRollup := filepath.Join(tmp, "cmd/parent/rth/handlers.go")
 	mustContain(t, parentRollup,
-		`childrth "example.com/myclis/cmd/child/rth"`,
-		"return childrth.Handlers().Child()",
-		"return childrth.Handlers().ChildGc()",
-		"return childrth.Handlers().ChildGcPing()",
+		`childcli "example.com/myclis/cmd/child/rth"`,
+		"return childcli.Handlers().Child()",
+		"return childcli.Handlers().ChildGc()",
+		"return childcli.Handlers().ChildGcPing()",
 	)
-	mustNotContain(t, parentRollup, "example.com/myclis/cmd/gc/rth", "gcrth")
+	mustNotContain(t, parentRollup, "example.com/myclis/cmd/gc/rth", "gccli")
 }
 
 func TestGenerate_cyclicRefErrors(t *testing.T) {
@@ -213,7 +215,7 @@ command:
     - $ref: ../a/.rotini.spec.yaml
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-		"generate:\n  rth:\n    package: cmd/a/rth\n  rtg:\n    package: cmd/a/rtg\n"
+		"generate:\n  packages:\n    cli:\n      package: cmd/a/rth\n    cligen:\n      package: cmd/a/rtg\n"
 	writeTestFile(t, filepath.Join(tmp, "cmd/a/.rotini.spec.yaml"), selfRef)
 	writeTestFile(t, filepath.Join(tmp, "cmd/a/.rotini.conf.yaml"), conf)
 
@@ -241,7 +243,7 @@ command:
         schema: { type: string, key: app.name, maxLength: 5 }
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+		"generate:\n  packages:\n    cli:\n      package: cmd/app/rth\n    cligen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
@@ -271,7 +273,7 @@ command:
           port: { type: integer, minimum: 1, maximum: 65535 }
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+		"generate:\n  packages:\n    cli:\n      package: cmd/app/rth\n    cligen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
@@ -305,7 +307,7 @@ command:
           key: server
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+		"generate:\n  packages:\n    cli:\n      package: cmd/app/rth\n    cligen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
@@ -333,7 +335,7 @@ command:
         schema: { type: string, secret: true }
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+		"generate:\n  packages:\n    cli:\n      package: cmd/app/rth\n    cligen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
@@ -362,7 +364,7 @@ command:
         flags: [json, yaml]
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+		"generate:\n  packages:\n    cli:\n      package: cmd/app/rth\n    cligen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 
@@ -394,7 +396,7 @@ command:
         requires: [cert, key]
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-		"generate:\n  rth:\n    package: cmd/app/rth\n  rtg:\n    package: cmd/app/rtg\n"
+		"generate:\n  packages:\n    cli:\n      package: cmd/app/rth\n    cligen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
 

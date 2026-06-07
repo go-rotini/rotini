@@ -5,11 +5,11 @@ package main
 
 import (
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/cmd/rotini/rth"
+	"github.com/go-rotini/rotini/cmd/rotini/cli"
 )
 
 func main() {
-	rth.Program.
+	cli.Program.
 		Bind("parser", rotini.NewParser()).
 		Execute()
 }

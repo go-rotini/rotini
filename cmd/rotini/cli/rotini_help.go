@@ -1,11 +1,10 @@
-package rth
+package cli
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 )
 
 type rotiniHelpHandlers struct {
@@ -20,10 +19,10 @@ var _ rotini.CommandHandlers = (*rotiniHelpHandlers)(nil)
 func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
 
-	var inputs rtg.RotiniHelpInputs
+	var inputs RotiniHelpInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniHelp)
+		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
 		rtx.Exit(1)
 		return
 	}
@@ -32,15 +31,15 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.RotiniHelp.Flags
 
 	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniHelp)
+		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
 		rtx.Exit(0)
 		return
 	}
 
-	text, err := rtg.Help(args.Command...)
+	text, err := Help(args.Command...)
 	if err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniHelp)
+		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
 		rtx.Exit(1)
 		return
 	}

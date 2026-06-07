@@ -1,4 +1,4 @@
-package rth
+package cli
 
 import (
 	"bytes"
@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 )
 
 // svc is a registry binding a test injects in addition to the always-present parser — used
@@ -26,7 +25,7 @@ type svc struct {
 func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string, code int) {
 	t.Helper()
 	var out, errb bytes.Buffer
-	p := rtg.NewProgram(Handlers()).
+	p := NewProgram(Handlers()).
 		WithContext(context.Background()).
 		WithArgs(argv).
 		WithStdout(&out).
@@ -71,10 +70,10 @@ func TestRotini(t *testing.T) {
 		wantOut, wantErr string
 		wantCode         int
 	}{
-		{"help flag", []string{"--help"}, rtg.HelpRotini, "", 0},
-		{"version flag", []string{"--version"}, rtg.Version, "", 0},
-		{"no args prints help and fails", []string{}, rtg.HelpRotini, "", 1},
-		{"parse error on unknown flag", []string{"--nope"}, rtg.HelpRotini, "Error:", 1},
+		{"help flag", []string{"--help"}, HelpRotini, "", 0},
+		{"version flag", []string{"--version"}, Version, "", 0},
+		{"no args prints help and fails", []string{}, HelpRotini, "", 1},
+		{"parse error on unknown flag", []string{"--nope"}, HelpRotini, "Error:", 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

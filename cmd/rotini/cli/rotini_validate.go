@@ -1,11 +1,10 @@
-package rth
+package cli
 
 import (
 	"context"
 	"fmt"
 
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 	"github.com/go-rotini/rotini/internal"
 )
 
@@ -21,10 +20,10 @@ var _ rotini.CommandHandlers = (*rotiniValidateHandlers)(nil)
 func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
 
-	var inputs rtg.RotiniValidateInputs
+	var inputs RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniValidate)
+		fmt.Fprintln(rtx.Stdout, HelpRotiniValidate)
 		rtx.Exit(1)
 		return
 	}
@@ -33,7 +32,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.RotiniValidate.Flags
 
 	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniValidate)
+		fmt.Fprintln(rtx.Stdout, HelpRotiniValidate)
 		rtx.Exit(0)
 		return
 	}

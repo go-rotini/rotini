@@ -1,10 +1,9 @@
-package rth
+package cli
 
 import (
 	"errors"
 	"testing"
 
-	"github.com/go-rotini/rotini/cmd/rotini/rtg"
 	"github.com/go-rotini/rotini/internal"
 )
 
@@ -27,7 +26,7 @@ func TestRotiniGenerate(t *testing.T) {
 		},
 		{
 			name: "help flag",
-			argv: []string{"generate", "--help"}, wantOut: rtg.HelpRotiniGenerate, wantCode: 0,
+			argv: []string{"generate", "--help"}, wantOut: HelpRotiniGenerate, wantCode: 0,
 		},
 		{
 			name: "success: header and the per-file result print",

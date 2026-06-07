@@ -192,23 +192,21 @@ func scaffoldSpec(name string) *Spec {
 	}
 }
 
-// scaffoldConf builds the conf for the standard per-CLI layout under
-// <pkgDir>/<name>. Help generation is enabled so a freshly scaffolded CLI has
-// working help.
+// scaffoldConf builds the conf for the default single-contained-package layout
+// under <pkgDir>/<name>/cli: cli and cligen point at the same package and file,
+// so the framework and the handler rollup are generated into one rotini.gen.go.
+// Help generation is enabled so a freshly scaffolded CLI has working help.
 func scaffoldConf(name, pkgDir string) *Conf {
+	cliPkg := pkgDir + "/" + name + "/cli"
 	return &Conf{
 		Schema: confSchemaURL(),
 		Generate: &GenerateConfig{
-			Rth: &GenerateRthConfig{
-				Package: pkgDir + "/" + name + "/rth",
-				File:    "handlers.go",
+			Packages: &PackagesConfig{
+				Cli:    &PackageConfig{Package: cliPkg, File: "rotini.gen.go"},
+				Cligen: &PackageConfig{Package: cliPkg, File: "rotini.gen.go"},
 			},
-			Rtg: &GenerateRtgConfig{
-				Package: pkgDir + "/" + name + "/rtg",
-				File:    "rotini.go",
-				Features: &FeaturesConfig{
-					Help: &Feature{Enabled: true},
-				},
+			Features: &FeaturesConfig{
+				Help: &Feature{Enabled: true, Dir: cliPkg + "/embed/help"},
 			},
 		},
 	}
@@ -217,8 +215,8 @@ func scaffoldConf(name, pkgDir string) *Conf {
 // writeMainGo renders the binary entrypoint that runs the generated program.
 func writeMainGo(path, moduleName, name, pkgDir string) error {
 	content, err := renderGo("main", "templates/main.go.tmpl", map[string]any{
-		"Import": moduleName + "/" + pkgDir + "/" + name + "/rth",
-		"Pkg":    "rth",
+		"Import": moduleName + "/" + pkgDir + "/" + name + "/cli",
+		"Pkg":    "cli",
 	})
 	if err != nil {
 		return err

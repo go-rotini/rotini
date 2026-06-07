@@ -113,11 +113,11 @@ func TestGenerateHelpHiddenDeprecated(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	root := filepath.Join(tmp, "rtg", "help", "mycli.txt")
+	root := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli.txt")
 	mustContain(t, root, "legacy", "(deprecated: use modern instead)", "an old command")
 	mustNotContain(t, root, "secret", "a hidden command")
 
-	run := filepath.Join(tmp, "rtg", "help", "mycli_run.txt")
+	run := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli_run.txt")
 	mustContain(t, run, "<target>", "(deprecated: positional is going away)", "-v", "chatty output")
 	mustNotContain(t, run, "--secret", "a hidden flag")
 }
@@ -139,8 +139,10 @@ func TestGenerateHelpComposition(t *testing.T) {
 	helpConf := func(dir string) string {
 		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 			"generate:\n" +
-			"  rth: { package: cmd/" + dir + "/rth, file: handlers.go }\n" +
-			"  rtg: { package: cmd/" + dir + "/rtg, file: rotini.go, features: { help: { enabled: true } } }\n"
+			"  packages:\n" +
+			"    cli: { package: cmd/" + dir + "/rth, file: handlers.go }\n" +
+			"    cligen: { package: cmd/" + dir + "/rtg, file: rotini.go }\n" +
+			"  features: { help: { enabled: true } }\n"
 	}
 	parentSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
 		"command:\n" +
@@ -161,13 +163,13 @@ func TestGenerateHelpComposition(t *testing.T) {
 	}
 
 	// The parent's command list shows the composed child via the child's summary.
-	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/help/parent.txt"),
+	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/help/parent.txt"),
 		"child", "the child program")
 	// The composed child's own page (rendered by the parent) carries the child's
 	// content, including its sub-command.
-	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/help/parent_child.txt"),
+	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/help/parent_child.txt"),
 		"A composed child.", "greet", "say hello")
 	// And the grandchild command page exists with its content.
-	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/help/parent_child_greet.txt"),
+	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/help/parent_child_greet.txt"),
 		"parent child greet")
 }
