@@ -83,6 +83,20 @@ func resolveConfPath(specPath, confPath string) string {
 // generateOnce runs a single generation pass against an already-resolved conf
 // path (which may be empty or point at a missing file, meaning "use defaults").
 func generateOnce(specPath, confPath string) error {
+	// Validate the spec and the conf against the embedded schemas (plus the spec lints) before
+	// generating — invalid input must never reach codegen. The conf is optional: an absent conf
+	// means "use defaults", so a conf path that doesn't exist is skipped here (not a validation
+	// failure), but a conf that IS present must be valid.
+	confToValidate := confPath
+	if confToValidate != "" {
+		if _, statErr := os.Stat(confToValidate); statErr != nil {
+			confToValidate = ""
+		}
+	}
+	if err := validateOnce(specPath, confToValidate, ""); err != nil {
+		return err
+	}
+
 	spec, err := ReadSpec(specPath)
 	if err != nil {
 		return err

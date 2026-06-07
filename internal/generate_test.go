@@ -37,6 +37,10 @@ generate:
 // so the generated framework import path matches the golden file byte-for-byte.
 const minimalGoMod = "module github.com/go-rotini/rotini\n\ngo 1.26\n"
 
+// confSchemaHeader is the conf $schema line every test conf must carry — generate now
+// validates the conf (when present) before codegen, and schema-conf.json requires $schema.
+const confSchemaHeader = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n"
+
 // TestGenerateMatchesCompanionExample generates from the committed companion
 // spec into a throwaway module and asserts the output matches the hand-written
 // example files that define the target shape.
@@ -115,6 +119,65 @@ func TestGenerateDefaultLayout(t *testing.T) {
 	mustContain(t, filepath.Join(tmp, "rth", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
 }
 
+// TestGenerateRejectsInvalidSpec confirms codegen is gated on validation: an invalid spec
+// (here a duplicate flag identifier the lints catch) is rejected before any files are written.
+func TestGenerateRejectsInvalidSpec(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"command:\n  name: mycli\n  inputs:\n    flags:\n      - name: a\n        identifiers: [\"-x\"]\n      - name: b\n        identifiers: [\"-x\"]\n")
+	t.Chdir(tmp)
+
+	err := Generate(".rotini.spec.yaml", "", false, nil)
+	if err == nil {
+		t.Fatal("Generate on an invalid spec = nil, want a validation error")
+	}
+	if !strings.Contains(err.Error(), "identifier") {
+		t.Errorf("error = %v, want a duplicate-identifier validation error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, "rtg", "rotini.go")); statErr == nil {
+		t.Error("codegen wrote rtg/rotini.go despite the invalid spec — validation did not gate generation")
+	}
+}
+
+// TestGenerateRejectsInvalidConf confirms a present-but-invalid conf is rejected before codegen
+// (here a conf missing the required $schema); no files are written.
+func TestGenerateRejectsInvalidConf(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), "generate:\n  rtg:\n    file: rotini.go\n") // no $schema
+	t.Chdir(tmp)
+
+	err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, nil)
+	if err == nil {
+		t.Fatal("Generate with an invalid conf = nil, want a validation error")
+	}
+	if !strings.Contains(err.Error(), "conf") {
+		t.Errorf("error = %v, want a conf validation error", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, "rtg", "rotini.go")); statErr == nil {
+		t.Error("codegen wrote files despite the invalid conf")
+	}
+}
+
+// TestGenerateMissingConfPathUsesDefaults confirms the conf is optional: a -c path that doesn't
+// exist is not a validation error — generation proceeds with the built-in defaults.
+func TestGenerateMissingConfPathUsesDefaults(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+	t.Chdir(tmp)
+
+	if err := Generate(".rotini.spec.yaml", "does-not-exist.conf.yaml", false, nil); err != nil {
+		t.Fatalf("Generate with a missing conf path = %v, want nil (defaults used)", err)
+	}
+	mustContain(t, filepath.Join(tmp, "rtg", "rotini.go"), "package rtg")
+}
+
 // TestGeneratePrunesOrphanStubs verifies that pruning (implicit/always-on) drops
 // a stub that no longer maps to a command, while rth.keep files survive and
 // existing command stubs are left untouched.
@@ -130,7 +193,7 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 	writeTestFile(t, orphan, "package rth\n")
 	writeTestFile(t, keep, "package rth\n")
 
-	conf := "generate:\n  rth:\n    keep:\n      - help.go\n"
+	conf := confSchemaHeader + "generate:\n  rth:\n    keep:\n      - help.go\n"
 	confPath := filepath.Join(tmp, ".rotini.conf.yaml")
 	writeTestFile(t, confPath, conf)
 
@@ -151,7 +214,7 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 }
 
 // helpKeepConf enables help and keeps one rtg feature-dir file by package-relative path.
-const helpKeepConf = "generate:\n  rtg:\n    keep:\n      - help/legacy.txt\n    features:\n      help:\n        enabled: true\n"
+const helpKeepConf = confSchemaHeader + "generate:\n  rtg:\n    keep:\n      - help/legacy.txt\n    features:\n      help:\n        enabled: true\n"
 
 // TestGeneratePrunesOrphanHelp verifies rtg pruning (implicit/always-on): a help
 // .txt for a command no longer in the spec is removed on regenerate, while the
@@ -192,7 +255,7 @@ func TestGeneratePrunesOrphanHelp(t *testing.T) {
 }
 
 // completionConf enables only the completion feature.
-const completionConf = "generate:\n  rtg:\n    features:\n      completion:\n        enabled: true\n"
+const completionConf = confSchemaHeader + "generate:\n  rtg:\n    features:\n      completion:\n        enabled: true\n"
 
 // TestGenerateCompletionEnabled verifies the features group's exception: completion
 // emits per-shell embed vars + a shell-keyed resolver (not a command-path one),
@@ -520,7 +583,7 @@ const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotin
 	"            schema:\n" +
 	"              type: bool\n"
 
-const helpEnabledConf = "generate:\n  rtg:\n    features:\n      help:\n        enabled: true\n"
+const helpEnabledConf = confSchemaHeader + "generate:\n  rtg:\n    features:\n      help:\n        enabled: true\n"
 
 // TestGenerateHelpEnabled verifies that, with generate.help enabled, the
 // framework file gains the embedded Help<Prefix> vars + an alias-aware Help
@@ -624,7 +687,7 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 }
 
 // manMarkdownConf enables man + markdown (but not help).
-const manMarkdownConf = "generate:\n  rtg:\n    features:\n      man:\n        enabled: true\n      markdown:\n        enabled: true\n"
+const manMarkdownConf = confSchemaHeader + "generate:\n  rtg:\n    features:\n      man:\n        enabled: true\n      markdown:\n        enabled: true\n"
 
 // TestGenerateManMarkdownEnabled verifies the help pipeline generalizes: with man
 // and markdown enabled, the framework gains per-feature embed vars + alias-aware
