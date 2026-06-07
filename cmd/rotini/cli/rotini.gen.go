@@ -51,9 +51,6 @@ type ProgramHandlers interface {
 	RotiniVersion() rotini.CommandHandlers
 }
 
-// Version is set at build time via -ldflags "-X <pkg>.Version=<value>".
-var Version = "0.0.0"
-
 var definition = rotini.Definition{
 	Name:    "rotini",
 	Handler: "Rotini",

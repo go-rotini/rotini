@@ -16,12 +16,18 @@ type svc struct {
 	val any
 }
 
+// testVersion is the value the harness binds under "version" — the DI seam main.go fills
+// with version() — so the version paths print a known, stable value (and a sentinel, not a
+// real version, to prove the bound value is what flows through).
+const testVersion = "vTEST"
+
 // runRotini drives the companion through the real program lifecycle exactly as main.go
 // would — capturing stdout/stderr and recording the exit code — so a handler's every path
-// is exercised end-to-end. "parser" is the one service every handler fetches with MustGet;
-// it is always bound (we are testing handler logic, not the parser). Extra binds inject
-// doubles for a handler's work dependency. WithContext opts out of the default signal trap,
-// which these tests don't exercise.
+// is exercised end-to-end. "parser" and "version" are the services main.go binds, so both are
+// always bound here too (we are testing handler logic, not those deps); a handler's own work
+// dependency (generate/validate/initialize) is self-bound via BindIfAbsent, so leaving it
+// unbound here exercises that real production wiring. Extra binds inject doubles for that work
+// dependency. WithContext opts out of the default signal trap, which these tests don't exercise.
 func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string, code int) {
 	t.Helper()
 	var out, errb bytes.Buffer
@@ -31,7 +37,8 @@ func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string
 		WithStdout(&out).
 		WithStderr(&errb).
 		WithExit(func(c int) { code = c }).
-		Bind("parser", rotini.NewParser())
+		Bind("parser", rotini.NewParser()).
+		Bind("version", testVersion)
 	for _, b := range binds {
 		p.Bind(b.key, b.val)
 	}
@@ -71,7 +78,7 @@ func TestRotini(t *testing.T) {
 		wantCode         int
 	}{
 		{"help flag", []string{"--help"}, HelpRotini, "", 0},
-		{"version flag", []string{"--version"}, Version, "", 0},
+		{"version flag", []string{"--version"}, testVersion, "", 0},
 		{"no args prints help and fails", []string{}, HelpRotini, "", 1},
 		{"parse error on unknown flag", []string{"--nope"}, HelpRotini, "Error:", 1},
 	}

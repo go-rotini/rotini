@@ -4,12 +4,26 @@
 package main
 
 import (
+	"runtime/debug"
+
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/cmd/rotini/cli"
 )
 
+func version() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "v0.0.0"
+	}
+	if ver := bi.Main.Version; ver != "" && ver != "(devel)" {
+		return ver
+	}
+	return "v0.0.0"
+}
+
 func main() {
 	cli.Program.
 		Bind("parser", rotini.NewParser()).
+		Bind("version", version()).
 		Execute()
 }

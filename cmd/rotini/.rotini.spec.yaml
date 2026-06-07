@@ -200,6 +200,3 @@ command:
               - --help
             schema:
               type: bool
-metadata:
-  - var: Version
-    default: 0.0.0

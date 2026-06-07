@@ -13,7 +13,7 @@ func TestRotiniVersion(t *testing.T) {
 		wantOut, wantErr string
 		wantCode         int
 	}{
-		{"prints version", []string{"version"}, Version, "", 0},
+		{"prints version", []string{"version"}, testVersion, "", 0},
 		{"help flag", []string{"version", "--help"}, HelpRotiniVersion, "", 0},
 		{"parse error on unknown flag", []string{"version", "--nope"}, HelpRotiniVersion, "Error:", 1},
 	}

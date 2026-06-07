@@ -28,12 +28,12 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	flags := inputs.RotiniVersion.Flags
-
 	if flags.Help {
 		fmt.Fprintln(rtx.Stdout, HelpRotiniVersion)
 		rtx.Exit(0)
 		return
 	}
 
-	fmt.Fprintln(rtx.Stdout, Version)
+	version := rotini.MustGet[string](rtx, "version")
+	fmt.Fprintln(rtx.Stdout, version)
 }
