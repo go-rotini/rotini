@@ -44,11 +44,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	// Bind the real implementation only if a caller (e.g. a test) hasn't injected one,
-	// so the work is dependency-injectable at the registry seam without main.go wiring it.
-	if !rtx.Has("initialize") {
-		rtx.Bind("initialize", internal.Initialize)
-	}
+	rtx.BindIfAbsent("initialize", internal.Initialize)
 	initialize := rotini.MustGet[internal.InitializeFn](rtx, "initialize")
 
 	if err := initialize(args.Name, flags.Format, flags.Force, flags.Into); err != nil {

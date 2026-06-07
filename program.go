@@ -142,6 +142,14 @@ func (p *Program) Bind(key string, value any) *Program {
 	return p
 }
 
+// BindIfAbsent registers value under key only if nothing is bound there yet — the
+// registered-default form of [Program.Bind] (see [Context.BindIfAbsent]). It returns the
+// receiver to chain.
+func (p *Program) BindIfAbsent(key string, value any) *Program {
+	p.rtx.BindIfAbsent(key, value)
+	return p
+}
+
 // OnError sets the funnel that handles any panic raised inside a hook (e.g. the
 // [MustGet] on a missing service): the runtime recovers it during
 // dispatch and calls fn(ctx, rtx, err), where fn decides the exit code by calling

@@ -24,6 +24,24 @@ func TestGet_typed(t *testing.T) {
 	}
 }
 
+func TestBindIfAbsent_keepsExistingElseRegistersDefault(t *testing.T) {
+	rtx := NewContext()
+	injected, def := &bytes.Buffer{}, &bytes.Buffer{}
+
+	// A prior binding (e.g. a test's double) is kept — BindIfAbsent no-ops.
+	rtx.Bind("buf", injected)
+	rtx.BindIfAbsent("buf", def)
+	if MustGet[*bytes.Buffer](rtx, "buf") != injected {
+		t.Error("BindIfAbsent must not overwrite an existing binding")
+	}
+
+	// An absent key gets the default registered into the registry.
+	rtx.BindIfAbsent("other", def)
+	if MustGet[*bytes.Buffer](rtx, "other") != def {
+		t.Error("BindIfAbsent should register the default when the key is absent")
+	}
+}
+
 func TestMustGet_returnsBoundService(t *testing.T) {
 	rtx := NewContext()
 	buf := &bytes.Buffer{}

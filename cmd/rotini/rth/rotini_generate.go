@@ -38,11 +38,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
-	// Bind the real implementation only if a caller (e.g. a test) hasn't injected one,
-	// so the work is dependency-injectable at the registry seam without main.go wiring it.
-	if !rtx.Has("generate") {
-		rtx.Bind("generate", internal.Generate)
-	}
+	rtx.BindIfAbsent("generate", internal.Generate)
 	generate := rotini.MustGet[internal.GenerateFn](rtx, "generate")
 
 	err := generate(

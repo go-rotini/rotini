@@ -123,6 +123,28 @@ func (rtx *Context) Bind(key string, value any) *Context {
 	return rtx
 }
 
+// BindIfAbsent binds value under key only if key is not already bound, and returns the
+// receiver to chain. It is the registered-default form of [Bind]: a handler binds its work
+// dependency's real implementation with BindIfAbsent so production materializes the real one
+// in the registry, while a caller (e.g. a test) that bound a double under the same key
+// earlier keeps it — and either way the dependency is resolvable from the registry (with the
+// standard [MustGet]), not a value hidden inline. The check-and-set is atomic. Use [Bind] to
+// overwrite unconditionally.
+//
+//	rtx.BindIfAbsent("generate", internal.Generate)
+//	gen := rotini.MustGet[internal.GenerateFn](rtx, "generate")
+func (rtx *Context) BindIfAbsent(key string, value any) *Context {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	if rtx.services == nil {
+		rtx.services = make(map[string]any)
+	}
+	if _, ok := rtx.services[key]; !ok {
+		rtx.services[key] = value
+	}
+	return rtx
+}
+
 // Has reports whether a binding exists under key.
 func (rtx *Context) Has(key string) bool {
 	rtx.mu.RLock()
