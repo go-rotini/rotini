@@ -23,25 +23,28 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniInitializeInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(rtx.Stderr, "rotini:", err)
+		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
+		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniInitialize)
 		rtx.Exit(1)
 		return
 	}
-	in := inputs.RotiniInitialize
 
-	if in.Flags.Help {
+	args := inputs.RotiniInitialize.Arguments
+	flags := inputs.RotiniInitialize.Flags
+
+	if flags.Help {
 		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniInitialize)
+		rtx.Exit(0)
 		return
 	}
 
-	name := in.Arguments.Name
-	if name == "" {
+	if args.Name == "" {
 		fmt.Fprintln(rtx.Stderr, "Error: a name argument is required")
 		rtx.Exit(1)
 		return
 	}
 
-	if err := internal.Initialize(name, in.Flags.Format, in.Flags.Force, in.Flags.Into); err != nil {
+	if err := internal.Initialize(args.Name, flags.Format, flags.Force, flags.Into); err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
 		return

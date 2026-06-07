@@ -22,22 +22,27 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniCompletionInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(rtx.Stderr, "rotini:", err)
-		rtx.Exit(2)
-		return
-	}
-	in := inputs.RotiniCompletion
-
-	if in.Flags.Help {
+		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
 		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniCompletion)
+		rtx.Exit(1)
 		return
 	}
 
-	script, err := rtg.Completion(in.Arguments.Shell)
+	args := inputs.RotiniCompletion.Arguments
+	flags := inputs.RotiniCompletion.Flags
+
+	if flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniCompletion)
+		rtx.Exit(0)
+		return
+	}
+
+	script, err := rtg.Completion(args.Shell)
 	if err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
 		return
 	}
+
 	fmt.Fprint(rtx.Stdout, script)
 }

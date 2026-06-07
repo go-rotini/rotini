@@ -22,21 +22,28 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs rtg.RotiniHelpInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(rtx.Stderr, "rotini:", err)
-		rtx.Exit(1)
-		return
-	}
-	in := inputs.RotiniHelp
-	if in.Flags.Help {
+		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
 		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniHelp)
+		rtx.Exit(1)
 		return
 	}
 
-	text, err := rtg.Help(in.Arguments.Command...)
+	args := inputs.RotiniHelp.Arguments
+	flags := inputs.RotiniHelp.Flags
+
+	if flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniHelp)
+		rtx.Exit(0)
+		return
+	}
+
+	text, err := rtg.Help(args.Command...)
 	if err != nil {
-		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n%s", err, rtg.HelpRotini)
+		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
+		fmt.Fprintln(rtx.Stdout, rtg.HelpRotiniHelp)
 		rtx.Exit(1)
 		return
 	}
+
 	fmt.Fprintln(rtx.Stdout, text)
 }
