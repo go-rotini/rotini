@@ -10,8 +10,8 @@ generate:
       help:
         enabled: true
       man:
-        enabled: true
+        enabled: false
       markdown:
-        enabled: true
+        enabled: false
       completion:
-        enabled: true
+        enabled: false
