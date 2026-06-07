@@ -14,7 +14,7 @@ func TestProgram_WithExit_capturesCode(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.Exit(2) }}
 
 	NewProgram(testDef(), h).
-		WithArguments([]string{"run", "x"}).
+		WithArgs([]string{"run", "x"}).
 		WithExit(func(c int) { code = c }).
 		Execute()
 
@@ -32,7 +32,7 @@ func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { panic("boom") }}
 
 	NewProgram(testDef(), h).
-		WithArguments([]string{"run", "x"}).
+		WithArgs([]string{"run", "x"}).
 		WithStderr(errb).
 		WithExit(func(c int) { code = c }).
 		Execute()
@@ -52,7 +52,7 @@ func TestProgram_WithStdout_capturesRuntimeOutput(t *testing.T) {
 	code := -1
 
 	NewProgram(testDef(), &testHandlers{log: new([]string)}).
-		WithArguments([]string{"__complete", "ru"}).
+		WithArgs([]string{"__complete", "ru"}).
 		WithStdout(out).
 		WithExit(func(c int) { code = c }).
 		Execute()

@@ -92,8 +92,8 @@ func (p *Program) WithExit(fn func(int)) *Program {
 	return p
 }
 
-// WithArguments overrides the argument vector (defaults to os.Args[1:]).
-func (p *Program) WithArguments(args []string) *Program {
+// WithArgs overrides the argument vector (defaults to os.Args[1:]).
+func (p *Program) WithArgs(args []string) *Program {
 	if args != nil {
 		p.args = args
 	}
@@ -119,7 +119,7 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 
 // Bind registers a service on the program's registry under key, overwriting any
 // prior binding, and returns the receiver so it chains with [program.OnError] and
-// [program.WithArguments] before [program.Execute]. It is the dependency-injection
+// [program.WithArgs] before [program.Execute]. It is the dependency-injection
 // seam: bind a real implementation in production or a double in tests, with the
 // same handler code retrieving it via the typed [Get] / [MustGet]. Binding
 // "parser" overrides the default [Parser].

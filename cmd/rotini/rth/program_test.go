@@ -21,7 +21,7 @@ func TestGenerateHelp_viaProgram(t *testing.T) {
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
 
 	rtg.NewProgram(Handlers()).
-		WithArguments([]string{"generate", "--help"}).
+		WithArgs([]string{"generate", "--help"}).
 		WithStdout(out).
 		WithStderr(errb).
 		WithExit(func(c int) { code = c }).

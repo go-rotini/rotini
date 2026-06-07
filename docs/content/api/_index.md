@@ -6,6 +6,6 @@ title: "api"
 
 ## Init
 
-## WithArguments
+## WithArgs
 
 ## Execute

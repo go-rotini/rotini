@@ -372,7 +372,7 @@ func (h dynCtxBuild) CompleteFlagValue(rtx *Context, flag, partial string) []str
 
 func TestComplete_runIntercept(t *testing.T) {
 	out := &bytes.Buffer{}
-	p := NewProgram(completionDef(), &testHandlers{log: new([]string)}).WithArguments([]string{"__complete", "te"})
+	p := NewProgram(completionDef(), &testHandlers{log: new([]string)}).WithArgs([]string{"__complete", "te"})
 	p.stdout, p.stderr = out, &bytes.Buffer{}
 	if code := p.run(p.args); code != 0 {
 		t.Fatalf("__complete run = %d, want 0", code)
@@ -387,7 +387,7 @@ func TestComplete_runIntercept(t *testing.T) {
 // FlagValueCompleter drives the candidates printed to stdout.
 func TestComplete_dynamicViaProgram(t *testing.T) {
 	out := &bytes.Buffer{}
-	p := NewProgram(dynCompletionDef(), dynCompletionHandlers{}).WithArguments([]string{"__complete", "build", "--mode", "s"})
+	p := NewProgram(dynCompletionDef(), dynCompletionHandlers{}).WithArgs([]string{"__complete", "build", "--mode", "s"})
 	p.stdout, p.stderr = out, &bytes.Buffer{}
 	if code := p.run(p.args); code != 0 {
 		t.Fatalf("__complete run = %d, want 0", code)

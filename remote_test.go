@@ -23,7 +23,7 @@ func writeFakeBinary(t *testing.T, name, body string) {
 
 func remoteProgram(def Definition, args []string) (*Program, *bytes.Buffer, *bytes.Buffer) {
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
-	p := NewProgram(def, &testHandlers{log: new([]string)}).WithArguments(args)
+	p := NewProgram(def, &testHandlers{log: new([]string)}).WithArgs(args)
 	p.stdout, p.stderr = out, errb
 	return p, out, errb
 }

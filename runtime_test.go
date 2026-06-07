@@ -62,7 +62,7 @@ func testDef() Definition {
 
 func newTestProgram(h any, args []string) (*Program, *bytes.Buffer, *bytes.Buffer) {
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
-	p := NewProgram(testDef(), h).WithArguments(args)
+	p := NewProgram(testDef(), h).WithArgs(args)
 	p.stdout, p.stderr = out, errb
 	return p, out, errb
 }
