@@ -177,9 +177,9 @@ func normalizeFormat(format string) (string, error) {
 	}
 }
 
-// scaffoldSpec builds a minimal valid spec: the schema URL, root name, a version
-// metadata var, and example help content so spec-driven help works out of the box.
-// The user adds commands from there.
+// scaffoldSpec builds a minimal valid spec: the schema URL, root name, and example
+// help content so spec-driven help works out of the box. The user adds commands
+// (and binds their own build vars like version) from there.
 func scaffoldSpec(name string) *Spec {
 	return &Spec{
 		Schema: specSchemaURL(),
@@ -188,7 +188,6 @@ func scaffoldSpec(name string) *Spec {
 			Summary:     name + " command-line program",
 			Description: "Describe " + name + " here. This text appears at the top of `" + name + " --help`.",
 		},
-		Metadata: []MetadataEntry{{Var: "Version", Default: "dev"}},
 	}
 }
 

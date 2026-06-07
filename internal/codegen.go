@@ -838,7 +838,6 @@ func renderFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) 
 		"Methods":      gp.methods(),
 		"Blocks":       blocks,
 		"Definition":   renderDefinition(gp),
-		"Metadata":     gp.metadata,
 		"Features":     features,
 		"OutputTypes":  outputTypes,
 		"BindMeta":     renderBindMeta(gp),

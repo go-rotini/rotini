@@ -18,7 +18,6 @@ type genProgram struct {
 	rootPascal    string
 	rootInputs    *Inputs
 	rootAliases   []string
-	metadata      []MetadataEntry     // ldflag-settable vars emitted in rtg
 	rootRemotes   []RemoteCommandSpec // root-level remote/co-located sub-commands
 	rootHelp      cmdHelp             // root command's flattened help fields
 	rootOutput    *Schema             // root command's output type (nil when unset)
@@ -85,7 +84,6 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootPascal:    toPascalCase(root.Name),
 		rootInputs:    root.Inputs,
 		rootAliases:   root.Aliases,
-		metadata:      spec.Metadata,
 		rootRemotes:   root.RemoteCommands,
 		rootHelp:      commandHelp(root),
 		rootOutput:    root.Output,

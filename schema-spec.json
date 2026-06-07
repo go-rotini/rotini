@@ -16,20 +16,13 @@
     },
     "command": {
       "$ref": "#/definitions/Command",
-      "description": "The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, metadata, schemas) live at the document level beside it."
+      "description": "The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, schemas) live at the document level beside it."
     },
     "configuration_files": {
       "type": "array",
       "description": "Config-file sources the program loads at startup (document-level). Per-command 'config' inputs bind typed values from these by name + key.",
       "items": {
         "$ref": "#/definitions/ConfigurationFile"
-      }
-    },
-    "metadata": {
-      "type": "array",
-      "description": "Build-time metadata vars injected via go ldflags (document-level).",
-      "items": {
-        "$ref": "#/definitions/MetadataEntry"
       }
     },
     "schemas": {
@@ -233,24 +226,6 @@
         },
         "examples": {
           "type": "string"
-        }
-      }
-    },
-    "MetadataEntry": {
-      "type": "object",
-      "required": [
-        "var"
-      ],
-      "additionalProperties": false,
-      "properties": {
-        "var": {
-          "type": "string",
-          "pattern": "^[A-Z][a-zA-Z0-9_]*$",
-          "description": "Exported Go identifier for the ldflag var. Rotini declares this as a package-level var in the framework package. Inject at build time: -ldflags \"-X <module>/<framework-pkg>.<var>=<value>\""
-        },
-        "default": {
-          "type": "string",
-          "description": "Fallback value used when the ldflag has not been applied at build time. Becomes the var's initial value in the generated file."
         }
       }
     },

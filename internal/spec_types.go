@@ -6,12 +6,10 @@ package internal
 type Spec struct {
 	// URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.
 	Schema string `json:"$schema"`
-	// The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, metadata, schemas) live at the document level beside it.
+	// The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, schemas) live at the document level beside it.
 	Command Command `json:"command"`
 	// Config-file sources the program loads at startup (document-level). Per-command 'config' inputs bind typed values from these by name + key.
 	ConfigurationFiles []ConfigurationFile `json:"configuration_files,omitempty"`
-	// Build-time metadata vars injected via go ldflags (document-level).
-	Metadata []MetadataEntry `json:"metadata,omitempty"`
 	// Reusable named schema definitions (document-level). Referenced elsewhere via "$ref": "#/schemas/<Name>".
 	Schemas map[string]Schema `json:"schemas,omitempty"`
 }
@@ -233,13 +231,6 @@ type Inputs struct {
 	Flags []FlagInput `json:"flags,omitempty"`
 	// Declares expected stdin format and schema for this command
 	Stdin *StdinSpec `json:"stdin,omitempty"`
-}
-
-type MetadataEntry struct {
-	// Fallback value used when the ldflag has not been applied at build time. Becomes the var's initial value in the generated file.
-	Default string `json:"default,omitempty"`
-	// Exported Go identifier for the ldflag var. Rotini declares this as a package-level var in the framework package. Inject at build time: -ldflags "-X <module>/<framework-pkg>.<var>=<value>"
-	Var string `json:"var"`
 }
 
 type RemoteCommandSpec struct {
