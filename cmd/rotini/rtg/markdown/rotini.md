@@ -17,7 +17,6 @@ rotini <command> <arguments> [flags]
 - `initialize` (init) — scaffold a cli program
 - `generate` (gen) — generate a cli program
 - `validate` (val) — validate a spec file
-- `completion` — print shell completion
 - `help` — print help
 - `version` — print version
 

@@ -10,7 +10,6 @@ import (
 
 type ProgramHandlers interface {
 	Rotini() rotini.CommandHandlers
-	RotiniCompletion() rotini.CommandHandlers
 	RotiniGenerate() rotini.CommandHandlers
 	RotiniHelp() rotini.CommandHandlers
 	RotiniInitialize() rotini.CommandHandlers
@@ -67,15 +66,6 @@ var definition = rotini.Definition{
 				{Name: "spec_file_path", Type: "string", Default: ".rotini.spec.yaml"},
 			},
 		},
-		{Name: "completion",
-			Handler: "RotiniCompletion",
-			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
-			},
-			Arguments: []rotini.ArgDef{
-				{Name: "shell", Type: "string", Enum: []string{"zsh", "bash", "fish", "powershell", "nushell", "elvish"}},
-			},
-		},
 		{Name: "help",
 			Handler: "RotiniHelp",
 			Flags: []rotini.FlagDef{
@@ -108,24 +98,6 @@ type RotiniCommandInputs struct {
 
 type RotiniInputs struct {
 	Rotini RotiniCommandInputs
-}
-
-type RotiniCompletionFlags struct {
-	Help bool `rotini:"help"`
-}
-
-type RotiniCompletionArguments struct {
-	Shell string `rotini:"shell"`
-}
-
-type RotiniCompletionCommandInputs struct {
-	Flags     RotiniCompletionFlags
-	Arguments RotiniCompletionArguments
-}
-
-type RotiniCompletionInputs struct {
-	Rotini           RotiniCommandInputs
-	RotiniCompletion RotiniCompletionCommandInputs
 }
 
 type RotiniGenerateFlags struct {
@@ -245,9 +217,6 @@ var HelpRotiniGenerate string
 //go:embed help/rotini_validate.txt
 var HelpRotiniValidate string
 
-//go:embed help/rotini_completion.txt
-var HelpRotiniCompletion string
-
 //go:embed help/rotini_help.txt
 var HelpRotiniHelp string
 
@@ -267,8 +236,6 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniGenerate, nil
 	case "validate", "val":
 		return HelpRotiniValidate, nil
-	case "completion":
-		return HelpRotiniCompletion, nil
 	case "help":
 		return HelpRotiniHelp, nil
 	case "version":
@@ -290,9 +257,6 @@ var ManRotiniGenerate string
 //go:embed man/rotini_validate.txt
 var ManRotiniValidate string
 
-//go:embed man/rotini_completion.txt
-var ManRotiniCompletion string
-
 //go:embed man/rotini_help.txt
 var ManRotiniHelp string
 
@@ -312,8 +276,6 @@ func Man(path ...string) (string, error) {
 		return ManRotiniGenerate, nil
 	case "validate", "val":
 		return ManRotiniValidate, nil
-	case "completion":
-		return ManRotiniCompletion, nil
 	case "help":
 		return ManRotiniHelp, nil
 	case "version":
@@ -335,9 +297,6 @@ var MarkdownRotiniGenerate string
 //go:embed markdown/rotini_validate.md
 var MarkdownRotiniValidate string
 
-//go:embed markdown/rotini_completion.md
-var MarkdownRotiniCompletion string
-
 //go:embed markdown/rotini_help.md
 var MarkdownRotiniHelp string
 
@@ -357,8 +316,6 @@ func Markdown(path ...string) (string, error) {
 		return MarkdownRotiniGenerate, nil
 	case "validate", "val":
 		return MarkdownRotiniValidate, nil
-	case "completion":
-		return MarkdownRotiniCompletion, nil
 	case "help":
 		return MarkdownRotiniHelp, nil
 	case "version":

@@ -20,10 +20,6 @@ func (*handlers) Rotini() rotini.CommandHandlers {
 	return &rotiniHandlers{}
 }
 
-func (*handlers) RotiniCompletion() rotini.CommandHandlers {
-	return &rotiniCompletionHandlers{}
-}
-
 func (*handlers) RotiniGenerate() rotini.CommandHandlers {
 	return &rotiniGenerateHandlers{}
 }
