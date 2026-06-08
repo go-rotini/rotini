@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,9 +23,9 @@ const (
 	formatJSONC
 )
 
-// ErrUnsupportedFormat is returned for a spec or conf path whose extension
+// errUnsupportedFormat is returned for a spec or conf path whose extension
 // is not one of the supported serializations (.yaml, .yml, .json, .jsonc).
-var ErrUnsupportedFormat = errors.New("unsupported file format")
+var errUnsupportedFormat = errors.New("unsupported file format")
 
 // detectFormat maps a file path's extension to its serialization format,
 // returning formatUnknown for unrecognized extensions.
@@ -49,7 +48,7 @@ func detectFormat(path string) fileFormat {
 func readFile[T any](path string) (*T, error) {
 	format := detectFormat(path)
 	if format == formatUnknown {
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, path)
+		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
 	data, err := fs.ReadFile(path)
 	if err != nil {
@@ -65,7 +64,7 @@ func readFile[T any](path string) (*T, error) {
 	case formatJSONC:
 		err = jsonc.Unmarshal(data, out)
 	default:
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, path)
+		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("decode %s: %w", path, err)
@@ -88,7 +87,7 @@ func writeFile[T any](path string, v *T) error {
 		data, err = json.MarshalIndent(v, "", "  ")
 		data = append(data, '\n')
 	default:
-		return fmt.Errorf("%w: %s", ErrUnsupportedFormat, path)
+		return fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", path, err)
@@ -108,7 +107,7 @@ func writeFile[T any](path string, v *T) error {
 func toJSON(path string) ([]byte, error) {
 	format := detectFormat(path)
 	if format == formatUnknown {
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, path)
+		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
 	data, err := fs.ReadFile(path)
 	if err != nil {
@@ -130,44 +129,32 @@ func toJSON(path string) ([]byte, error) {
 		}
 		return out, nil
 	default:
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, path)
+		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
 }
 
-// watchFile watches the file at path and invokes onChange with a freshly
-// decoded *T after each content change, until ctx is canceled. Decode
-// errors are delivered to onChange rather than stopping the watch, so a
-// transient bad write does not end the stream.
-func watchFile[T any](ctx context.Context, path string, onChange func(*T, error)) error {
-	if detectFormat(path) == formatUnknown {
-		return fmt.Errorf("%w: %s", ErrUnsupportedFormat, path)
-	}
-	w, err := fs.NewWatcher(path)
-	if err != nil {
-		return fmt.Errorf("watch %s: %w", path, err)
-	}
-	events, err := w.Subscribe(ctx)
-	if err != nil {
-		_ = w.Close()
-		return fmt.Errorf("subscribe %s: %w", path, err)
-	}
+// readSpec reads and decodes the rotini spec file at path. The serialization
+// (YAML, JSON, or JSONC) is selected from the file extension. It does not
+// validate the document against the spec schema; use [Validate] for that.
+func readSpec(path string) (*Spec, error) {
+	return readFile[Spec](path)
+}
 
-	go func() {
-		defer w.Close()
-		const relevant = fs.WatchWrite | fs.WatchCreate | fs.WatchRename
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ev, ok := <-events:
-				if !ok {
-					return
-				}
-				if ev.Op&relevant != 0 {
-					onChange(readFile[T](path))
-				}
-			}
-		}
-	}()
-	return nil
+// writeSpec encodes s and writes it to path, selecting the serialization from
+// the file extension.
+func writeSpec(path string, s *Spec) error {
+	return writeFile(path, s)
+}
+
+// readConf reads and decodes the rotini conf file at path. The serialization
+// (YAML, JSON, or JSONC) is selected from the file extension. It does not
+// validate the document against the conf schema; use [Validate] for that.
+func readConf(path string) (*Conf, error) {
+	return readFile[Conf](path)
+}
+
+// writeConf encodes c and writes it to path, selecting the serialization from
+// the file extension.
+func writeConf(path string, c *Conf) error {
+	return writeFile(path, c)
 }

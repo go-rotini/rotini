@@ -1,16 +1,14 @@
 package internal
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
-	"time"
 )
 
-// supportedExts is the set of extensions ReadSpec/WriteSpec round-trip.
+// supportedExts is the set of extensions readSpec/writeSpec round-trip.
 var supportedExts = []string{".yaml", ".yml", ".json", ".jsonc"}
 
 func TestSpecRoundTrip(t *testing.T) {
@@ -26,12 +24,12 @@ func TestSpecRoundTrip(t *testing.T) {
 	for _, ext := range supportedExts {
 		t.Run(ext, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "spec"+ext)
-			if err := WriteSpec(path, want); err != nil {
-				t.Fatalf("WriteSpec: %v", err)
+			if err := writeSpec(path, want); err != nil {
+				t.Fatalf("writeSpec: %v", err)
 			}
-			got, err := ReadSpec(path)
+			got, err := readSpec(path)
 			if err != nil {
-				t.Fatalf("ReadSpec: %v", err)
+				t.Fatalf("readSpec: %v", err)
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("round-trip mismatch:\n got=%+v\nwant=%+v", got, want)
@@ -52,12 +50,12 @@ func TestConfRoundTrip(t *testing.T) {
 	for _, ext := range supportedExts {
 		t.Run(ext, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "conf"+ext)
-			if err := WriteConf(path, want); err != nil {
-				t.Fatalf("WriteConf: %v", err)
+			if err := writeConf(path, want); err != nil {
+				t.Fatalf("writeConf: %v", err)
 			}
-			got, err := ReadConf(path)
+			got, err := readConf(path)
 			if err != nil {
-				t.Fatalf("ReadConf: %v", err)
+				t.Fatalf("readConf: %v", err)
 			}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("round-trip mismatch:\n got=%+v\nwant=%+v", got, want)
@@ -82,9 +80,9 @@ func TestReadSpec_formatsAndTags(t *testing.T) {
 			if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 				t.Fatalf("seed file: %v", err)
 			}
-			got, err := ReadSpec(path)
+			got, err := readSpec(path)
 			if err != nil {
-				t.Fatalf("ReadSpec: %v", err)
+				t.Fatalf("readSpec: %v", err)
 			}
 			if got.Schema != "https://x/spec.json" || got.Command.Name != "demo" {
 				t.Errorf("tag mapping wrong: %+v", got)
@@ -98,49 +96,10 @@ func TestReadSpec_formatsAndTags(t *testing.T) {
 
 func TestUnsupportedFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "spec.toml")
-	if _, err := ReadSpec(path); !errors.Is(err, ErrUnsupportedFormat) {
-		t.Errorf("ReadSpec err = %v, want ErrUnsupportedFormat", err)
+	if _, err := readSpec(path); !errors.Is(err, errUnsupportedFormat) {
+		t.Errorf("readSpec err = %v, want errUnsupportedFormat", err)
 	}
-	if err := WriteSpec(path, &Spec{}); !errors.Is(err, ErrUnsupportedFormat) {
-		t.Errorf("WriteSpec err = %v, want ErrUnsupportedFormat", err)
-	}
-}
-
-func TestWatchSpec(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "spec.yaml")
-	if err := WriteSpec(path, &Spec{Command: Command{Name: "v1"}}); err != nil {
-		t.Fatalf("seed WriteSpec: %v", err)
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	updates := make(chan *Spec, 8)
-	err := WatchSpec(ctx, path, func(s *Spec, err error) {
-		if err == nil {
-			updates <- s
-		}
-	})
-	if err != nil {
-		t.Fatalf("WatchSpec: %v", err)
-	}
-
-	// Give the watcher a moment to establish its baseline, then change the
-	// file in place.
-	time.Sleep(200 * time.Millisecond)
-	if err := os.WriteFile(path, []byte("command:\n  name: v2\n"), 0o600); err != nil {
-		t.Fatalf("modify: %v", err)
-	}
-
-	deadline := time.After(10 * time.Second)
-	for {
-		select {
-		case s := <-updates:
-			if s.Command.Name == "v2" {
-				return
-			}
-		case <-deadline:
-			t.Fatal("timed out waiting for watch event with updated content")
-		}
+	if err := writeSpec(path, &Spec{}); !errors.Is(err, errUnsupportedFormat) {
+		t.Errorf("writeSpec err = %v, want errUnsupportedFormat", err)
 	}
 }

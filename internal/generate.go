@@ -27,18 +27,19 @@ type GenerateFn = func(specPath, confPath string, watch bool, version string, on
 // to onGenerate and watching continues, so a malformed save can be fixed in place,
 // and only a failure to start watching is returned.
 //
-// A pass produces three things, mirroring the "commands all the way down" model
-// where a root command owns sub-commands that own their own sub-commands:
+// A pass produces these, mirroring the "commands all the way down" model where a
+// root command owns sub-commands that own their own sub-commands:
 //
-//  1. The framework file (default rtg/rotini.go): the ProgramHandlers aggregate
-//     interface plus the typed Flags/Arguments/CommandInputs/Inputs structs for
-//     the root command and every sub-command. Always (over)written.
-//  2. A handler stub per command in the handler package, named after the
-//     command path to avoid collisions (rotini.go, rotini_generate.go, …).
-//     Created only when missing, since stubs hold user code.
-//  3. The handler rollup file (default handlers.go): the handlers struct, the
-//     Program var, and one method per command. Always (over)written; orphaned
-//     stubs are pruned when generate.cmd.prune is enabled.
+//  1. The framework (the cligen package): the ProgramHandlers aggregate interface
+//     plus the typed Flags/Arguments/CommandInputs/Inputs structs for the root
+//     command and every sub-command. Always (over)written.
+//  2. The handler rollup (the cli package): the handlers struct, the Program var,
+//     and one method per command. Always (over)written. When cli and cligen
+//     resolve to the same package and file (the default), the framework and the
+//     rollup are merged into one rotini.gen.go.
+//  3. A handler stub per command in the cli package, named after the command path
+//     to avoid collisions (rotini.go, rotini_generate.go, …). Created only when
+//     missing, since stubs hold user code; orphaned stubs are pruned each pass.
 //
 // version is the running rotini binary's bound "version" string ("vX.Y.Z" for a
 // release, "v0.0.0" otherwise); it is threaded into the pre-codegen validation so
@@ -102,7 +103,7 @@ func generateOnce(specPath, confPath, version string) error {
 		return err
 	}
 
-	spec, err := ReadSpec(specPath)
+	spec, err := readSpec(specPath)
 	if err != nil {
 		return err
 	}
@@ -127,7 +128,7 @@ func loadConfOrDefaults(confPath string) (*Conf, error) {
 		}
 		return nil, fmt.Errorf("stat conf %s: %w", confPath, err)
 	}
-	return ReadConf(confPath)
+	return readConf(confPath)
 }
 
 // watchDebounce coalesces the burst of filesystem events most editors emit when

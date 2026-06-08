@@ -196,7 +196,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	if err := pruneStubs(gp, lay, conf.Generate.Packages.Cli.Keep); err != nil {
 		return err
 	}
-	if err := pruneRtg(lay, conf.Generate.Packages.Cligen.Keep, outputs); err != nil {
+	if err := pruneCligen(lay, conf.Generate.Packages.Cligen.Keep, outputs); err != nil {
 		return err
 	}
 	return nil
@@ -600,14 +600,27 @@ func discoveryLiteral(host string, d *RemoteDiscovery) string {
 
 // remoteDefsLiteral renders the []rotini.RemoteDef literal for a command's
 // remote/co-located sub-commands. The expected binary is "<host>-<name>".
-func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
-	if len(rcs) == 0 {
+// sliceLiteral renders a "[]rotini.<typeName>{ ... }" Go literal (one element per
+// item), or "" when items is empty. renderItem writes one element's body — the
+// text between the element's surrounding "{" and "}," which sliceLiteral supplies.
+func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.Builder, item T)) string {
+	if len(items) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("[]" + rotiniPkgName + ".RemoteDef{\n")
-	for _, rc := range rcs {
-		b.WriteString("{Name: " + strconv.Quote(rc.Name))
+	b.WriteString("[]" + rotiniPkgName + "." + typeName + "{\n")
+	for _, it := range items {
+		b.WriteString("{")
+		renderItem(&b, it)
+		b.WriteString("},\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
+	return sliceLiteral("RemoteDef", rcs, func(b *strings.Builder, rc RemoteCommandSpec) {
+		b.WriteString("Name: " + strconv.Quote(rc.Name))
 		b.WriteString(", Binary: " + strconv.Quote(host+"-"+rc.Name))
 		if len(rc.Aliases) > 0 {
 			b.WriteString(", Aliases: " + goStringSlice(rc.Aliases))
@@ -617,82 +630,95 @@ func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 				b.WriteString(fmt.Sprintf(", Timeout: %d", int64(d)))
 			}
 		}
-		b.WriteString("},\n")
-	}
-	b.WriteString("}")
-	return b.String()
+	})
 }
 
 func flagDefsLiteral(in *Inputs) string {
-	if in == nil || len(in.Flags) == 0 {
+	if in == nil {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("[]" + rotiniPkgName + ".FlagDef{\n")
-	for _, f := range in.Flags {
+	return sliceLiteral("FlagDef", in.Flags, func(b *strings.Builder, f FlagInput) {
 		ids := f.Identifiers
 		if len(ids) == 0 {
 			ids = []string{"--" + strings.ReplaceAll(f.Name, "_", "-")}
 		}
-		b.WriteString("{Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(ids))
+		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(ids))
 		b.WriteString(", Type: " + strconv.Quote(schemaType(f.Schema)))
-		writeSchemaCommon(&b, f.Schema)
+		writeSchemaCommon(b, f.Schema)
 		if len(f.DeprecatedIdentifiers) > 0 {
 			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
 		}
-		b.WriteString("},\n")
-	}
-	b.WriteString("}")
-	return b.String()
+	})
 }
 
 func argDefsLiteral(in *Inputs) string {
-	if in == nil || len(in.Arguments) == 0 {
+	if in == nil {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("[]" + rotiniPkgName + ".ArgDef{\n")
-	for _, a := range in.Arguments {
+	return sliceLiteral("ArgDef", in.Arguments, func(b *strings.Builder, a ArgumentInput) {
 		typ := schemaType(a.Schema)
-		b.WriteString("{Name: " + strconv.Quote(a.Name) + ", Type: " + strconv.Quote(typ))
+		b.WriteString("Name: " + strconv.Quote(a.Name) + ", Type: " + strconv.Quote(typ))
 		if strings.HasPrefix(typ, "[]") {
 			b.WriteString(", Variadic: true")
 		}
-		writeSchemaCommon(&b, a.Schema)
-		b.WriteString("},\n")
-	}
-	b.WriteString("}")
-	return b.String()
+		writeSchemaCommon(b, a.Schema)
+	})
 }
 
 // flagGroupsLiteral renders the []rotini.FlagGroup literal for a command's flag
 // groups, or "" when none are declared.
 func flagGroupsLiteral(in *Inputs) string {
-	if in == nil || len(in.FlagGroups) == 0 {
+	if in == nil {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("[]" + rotiniPkgName + ".FlagGroup{\n")
-	for _, g := range in.FlagGroups {
-		b.WriteString("{Kind: " + strconv.Quote(g.Kind) + ", Flags: " + goStringSlice(g.Flags) + "},\n")
-	}
-	b.WriteString("}")
-	return b.String()
+	return sliceLiteral("FlagGroup", in.FlagGroups, func(b *strings.Builder, g FlagGroup) {
+		b.WriteString("Kind: " + strconv.Quote(g.Kind) + ", Flags: " + goStringSlice(g.Flags))
+	})
 }
 
 // flagDependenciesLiteral renders the []rotini.FlagDependency literal for a command's
 // conditional cross-flag requirements, or "" when none are declared.
 func flagDependenciesLiteral(in *Inputs) string {
-	if in == nil || len(in.FlagDependencies) == 0 {
+	if in == nil {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("[]" + rotiniPkgName + ".FlagDependency{\n")
-	for _, d := range in.FlagDependencies {
-		b.WriteString("{When: " + strconv.Quote(d.When) + ", Requires: " + goStringSlice(d.Requires) + "},\n")
-	}
-	b.WriteString("}")
-	return b.String()
+	return sliceLiteral("FlagDependency", in.FlagDependencies, func(b *strings.Builder, d FlagDependency) {
+		b.WriteString("When: " + strconv.Quote(d.When) + ", Requires: " + goStringSlice(d.Requires))
+	})
+}
+
+// rnodesLiteral renders the []rotini.CommandDef literal for a resolved command
+// tree (recursing into children), or "" when nodes is empty. host prefixes the
+// remote binary names for any discovery nodes.
+func rnodesLiteral(host string, nodes []rnode) string {
+	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
+		b.WriteString("Name: " + strconv.Quote(n.name) + ",\n")
+		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
+		if len(n.aliases) > 0 {
+			b.WriteString("Aliases: " + goStringSlice(n.aliases) + ",\n")
+		}
+		if len(n.deprecatedIdentifiers) > 0 {
+			b.WriteString("DeprecatedIdentifiers: " + goStringSlice(n.deprecatedIdentifiers) + ",\n")
+		}
+		if fl := flagDefsLiteral(n.inputs); fl != "" {
+			b.WriteString("Flags: " + fl + ",\n")
+		}
+		if al := argDefsLiteral(n.inputs); al != "" {
+			b.WriteString("Arguments: " + al + ",\n")
+		}
+		if fg := flagGroupsLiteral(n.inputs); fg != "" {
+			b.WriteString("FlagGroups: " + fg + ",\n")
+		}
+		if fd := flagDependenciesLiteral(n.inputs); fd != "" {
+			b.WriteString("FlagDependencies: " + fd + ",\n")
+		}
+		if cl := rnodesLiteral(host, n.children); cl != "" {
+			b.WriteString("Commands: " + cl + ",\n")
+		}
+		if dl := discoveryLiteral(host, n.discovery); dl != "" {
+			b.WriteString("Discovery: " + dl + ",\n")
+		}
+	})
 }
 
 // writeSchemaCommon appends the Required/Default/Enum fields shared by FlagDef
@@ -1031,12 +1057,13 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	return nil
 }
 
-// pruneRtg removes orphaned rotini-managed outputs in each enabled feature's rtg
-// dir — the per-command pages (matching the feature's extension) for commands no
-// longer in the spec. The editable per-feature template, test files, and any
-// keep-listed (package-relative) path are preserved. Top-level rtg files (the gen
-// file) are never auto-removed. keepList entries are package-relative to rtg.
-func pruneRtg(lay layout, keepList []string, outputs []featureOutput) error {
+// pruneCligen removes orphaned rotini-managed outputs in each enabled feature's
+// dir (under the cligen package) — the per-command pages (matching the feature's
+// extension) for commands no longer in the spec. The editable per-feature
+// template, test files, and any keep-listed (package-relative) path are
+// preserved. Top-level cligen files (the gen file) are never auto-removed.
+// keepList entries are package-relative to the cligen package.
+func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 	keep := make(map[string]bool, len(keepList))
 	for _, k := range keepList {
 		keep[filepath.ToSlash(k)] = true

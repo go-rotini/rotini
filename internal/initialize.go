@@ -38,15 +38,16 @@ func confSchemaURL(version string) string {
 type InitializeFn = func(name, format string, force bool, into, version string) error
 
 // Initialize scaffolds a new standalone rotini CLI named name under cmd/<name>/
-// of the current module, then generates its framework and handler packages:
+// of the current module, then generates its code (the default single-package
+// layout — framework + rollup merged into one cli/rotini.gen.go):
 //
-//	cmd/<name>/.rotini.spec.<fmt>   cmd/<name>/rtg/rotini.go
-//	cmd/<name>/.rotini.conf.<fmt>   cmd/<name>/rth/handlers.go + stubs
+//	cmd/<name>/.rotini.spec.<fmt>   cmd/<name>/cli/rotini.gen.go
+//	cmd/<name>/.rotini.conf.<fmt>   cmd/<name>/cli/<name>.go + per-command stubs
 //	cmd/<name>/main.go
 //
 // format selects the spec/conf serialization (yaml, jsonc, or json). The
 // create-once files (spec, conf, main.go) are left untouched unless force is
-// set; the generated framework/rollup files are always (re)written, and handler
+// set; the generated framework/rollup file is always (re)written, and handler
 // stubs are never overwritten.
 //
 // When into names an existing CLI, the new CLI is additionally registered as a
@@ -90,10 +91,10 @@ func Initialize(name, format string, force bool, into, version string) error {
 		}
 	}
 
-	if err := WriteSpec(specPath, scaffoldSpec(name, version)); err != nil {
+	if err := writeSpec(specPath, scaffoldSpec(name, version)); err != nil {
 		return err
 	}
-	if err := WriteConf(confPath, scaffoldConf(name, pkgDir, version)); err != nil {
+	if err := writeConf(confPath, scaffoldConf(name, pkgDir, version)); err != nil {
 		return err
 	}
 	if err := writeMainGo(mainPath, moduleName, name, pkgDir); err != nil {
@@ -122,7 +123,7 @@ func moduleInitDefaults(moduleRoot string) initDefaults {
 	if err != nil {
 		return d
 	}
-	conf, err := ReadConf(confPath)
+	conf, err := readConf(confPath)
 	if err != nil || conf.Initialize == nil {
 		return d
 	}
@@ -145,7 +146,7 @@ func composeInto(moduleRoot, pkgDir, parent, child, childExt, version string) er
 	}
 	parentConf, _ := discoverFile(parentDir, ".rotini.conf.")
 
-	spec, err := ReadSpec(parentSpec)
+	spec, err := readSpec(parentSpec)
 	if err != nil {
 		return err
 	}
@@ -156,7 +157,7 @@ func composeInto(moduleRoot, pkgDir, parent, child, childExt, version string) er
 		}
 	}
 	spec.Command.Commands = append(spec.Command.Commands, Command{Ref: ref})
-	if err := WriteSpec(parentSpec, spec); err != nil {
+	if err := writeSpec(parentSpec, spec); err != nil {
 		return err
 	}
 	return Generate(parentSpec, parentConf, false, version, nil)

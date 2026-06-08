@@ -73,7 +73,7 @@ func collectOutputDefs(gp *genProgram) map[string]any {
 	walk = func(nodes []rnode) {
 		for _, n := range nodes {
 			if n.composed {
-				continue // a composed command's output/stdin types live in the child's rtg
+				continue // a composed command's output/stdin types live in the child's cligen
 			}
 			add(n.prefix, n.output)
 			addStdin(n.prefix, n.inputs)
@@ -104,7 +104,7 @@ func collectStdinSchemas(gp *genProgram) map[string]string {
 	walk = func(nodes []rnode) {
 		for _, n := range nodes {
 			if n.composed {
-				continue // composed commands' stdin schemas live in the child's rtg
+				continue // composed commands' stdin schemas live in the child's cligen
 			}
 			add(n.prefix, n.inputs)
 			walk(n.children)

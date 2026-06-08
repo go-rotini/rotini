@@ -7,7 +7,7 @@ import (
 
 func TestCompletionScript(t *testing.T) {
 	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
-		script, err := CompletionScript("myprog", shell)
+		script, err := completionScript("myprog", shell)
 		if err != nil {
 			t.Errorf("%s: %v", shell, err)
 			continue
@@ -16,10 +16,10 @@ func TestCompletionScript(t *testing.T) {
 			t.Errorf("%s script missing prog/__complete:\n%s", shell, script)
 		}
 	}
-	if _, err := CompletionScript("p", "nushell"); err == nil {
+	if _, err := completionScript("p", "nushell"); err == nil {
 		t.Error("nushell should be unsupported")
 	}
-	if _, err := CompletionScript("p", ""); err == nil {
+	if _, err := completionScript("p", ""); err == nil {
 		t.Error("empty shell should error")
 	}
 }

@@ -5,14 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
 // genProgram is a parent spec resolved for code generation: its own command
 // tree (inline commands — emit types, stubs, and a rollup method that returns a
 // local stub) plus any statically composed commands pulled in via `$ref` (emit
-// a rollup method that delegates to the child's rth package; no types or stubs).
+// a rollup method that delegates to the child's cli package; no types or stubs).
 type genProgram struct {
 	rootName      string
 	rootPascal    string
@@ -29,7 +28,7 @@ type genProgram struct {
 	own          []genCommand  // inline sub-commands, sorted by prefix
 	composed     []composedCmd // composed sub-commands, sorted by prefix
 	tree         []rnode       // full resolved tree (own + grafted), for the Definition
-	childImports []childImport // unique child rth imports for the rollup
+	childImports []childImport // unique child cli imports for the rollup
 }
 
 // rnode is one node of the resolved command tree used to render the Definition.
@@ -45,7 +44,7 @@ type rnode struct {
 	group                 string           // group label that buckets this command in the parent's Commands list
 	deprecated            string           // deprecation note for the parent's Commands list (help annotation)
 	deprecatedIdentifiers []string         // deprecated aliases of this command (runtime Deprecations)
-	composed              bool             // grafted from a $ref'd child (its types live in the child's rtg)
+	composed              bool             // grafted from a $ref'd child (its types live in the child's cligen)
 	children              []rnode
 }
 
@@ -57,7 +56,7 @@ type composedCmd struct {
 	delegateMethod string
 }
 
-// childImport is a composed child's rth import for the rollup. Fields are
+// childImport is a composed child's cli import for the rollup. Fields are
 // exported because the rollup template ranges over them.
 type childImport struct {
 	Alias string
@@ -69,7 +68,7 @@ type composeCtx struct {
 	composed    bool
 	rootPath    string // underscore path of the composed subtree's root in the parent
 	childPascal string // PascalCase of the composed child's own root name
-	alias       string // import alias of the composed child's rth package
+	alias       string // import alias of the composed child's cli package
 }
 
 // resolveTree resolves spec into a genProgram, loading any `$ref`'d child specs
@@ -218,7 +217,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	seen[abs] = true
 	defer delete(seen, abs)
 
-	childSpec, err := ReadSpec(childSpecPath)
+	childSpec, err := readSpec(childSpecPath)
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
@@ -262,7 +261,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 // composeNestedRef handles a `$ref` encountered *inside* an already-composed subtree
 // (a transitive ref: parent → child → grandchild). The direct child already composed
 // the grandchild and exposes handler methods for it, so the parent does not import the
-// grandchild's rth — it grafts the grandchild's command tree here and lets the normal
+// grandchild's cli — it grafts the grandchild's command tree here and lets the normal
 // composed-walk delegate each node to the direct child (delegateMethod =
 // ctx.childPascal + the node's relative path, which matches the child's method names).
 // Ref-side overrides (name/aliases/hidden/deprecated) win, mirroring composeRef.
@@ -278,7 +277,7 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, specDir, moduleRoo
 	seen[abs] = true
 	defer delete(seen, abs)
 
-	gcSpec, err := ReadSpec(childSpecPath)
+	gcSpec, err := readSpec(childSpecPath)
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
@@ -320,7 +319,7 @@ func childCliImport(childSpecPath, moduleRoot, moduleName string) (string, error
 		if _, err := os.Stat(confPath); err != nil {
 			continue
 		}
-		cc, err := ReadConf(confPath)
+		cc, err := readConf(confPath)
 		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
 			cc.Generate.Packages.Cli != nil && cc.Generate.Packages.Cli.Package != "" {
 			return moduleName + "/" + filepath.ToSlash(cc.Generate.Packages.Cli.Package), nil
@@ -355,41 +354,3 @@ func checkCollisions(nodes []rnode) error {
 
 // rnodesLiteral renders the []rotini.CommandDef literal for a resolved tree. host
 // is the root binary name, used for the default plugin-discovery prefix.
-func rnodesLiteral(host string, nodes []rnode) string {
-	if len(nodes) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("[]" + rotiniPkgName + ".CommandDef{\n")
-	for _, n := range nodes {
-		b.WriteString("{Name: " + strconv.Quote(n.name) + ",\n")
-		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
-		if len(n.aliases) > 0 {
-			b.WriteString("Aliases: " + goStringSlice(n.aliases) + ",\n")
-		}
-		if len(n.deprecatedIdentifiers) > 0 {
-			b.WriteString("DeprecatedIdentifiers: " + goStringSlice(n.deprecatedIdentifiers) + ",\n")
-		}
-		if fl := flagDefsLiteral(n.inputs); fl != "" {
-			b.WriteString("Flags: " + fl + ",\n")
-		}
-		if al := argDefsLiteral(n.inputs); al != "" {
-			b.WriteString("Arguments: " + al + ",\n")
-		}
-		if fg := flagGroupsLiteral(n.inputs); fg != "" {
-			b.WriteString("FlagGroups: " + fg + ",\n")
-		}
-		if fd := flagDependenciesLiteral(n.inputs); fd != "" {
-			b.WriteString("FlagDependencies: " + fd + ",\n")
-		}
-		if cl := rnodesLiteral(host, n.children); cl != "" {
-			b.WriteString("Commands: " + cl + ",\n")
-		}
-		if dl := discoveryLiteral(host, n.discovery); dl != "" {
-			b.WriteString("Discovery: " + dl + ",\n")
-		}
-		b.WriteString("},\n")
-	}
-	b.WriteString("}")
-	return b.String()
-}

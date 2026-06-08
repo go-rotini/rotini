@@ -129,7 +129,7 @@ func validateOnce(specPath, confPath, failMode, version string) error {
 		// attempt them once the document is schema-valid (otherwise the decode is
 		// meaningless and we'd pile errors on an already-broken file).
 		if len(specProblems) == 0 {
-			if spec, err := ReadSpec(specPath); err == nil {
+			if spec, err := readSpec(specPath); err == nil {
 				problems = append(problems, lintImportConsistency(spec)...)
 				problems = append(problems, lintLocalTimeout(spec)...)
 				problems = append(problems, lintFlagGroups(spec)...)
@@ -149,7 +149,7 @@ func validateOnce(specPath, confPath, failMode, version string) error {
 		confProblems := validateDocument(confPath, "conf", loadConfSchema)
 		problems = append(problems, confProblems...)
 		if len(confProblems) == 0 {
-			if conf, err := ReadConf(confPath); err == nil {
+			if conf, err := readConf(confPath); err == nil {
 				if err := checkSchemaVersion("conf", conf.Schema, version); err != nil {
 					problems = append(problems, err)
 				}
@@ -210,7 +210,7 @@ func resolveFailMode(failMode string) string {
 	if err != nil {
 		return "collect"
 	}
-	conf, err := ReadConf(confPath)
+	conf, err := readConf(confPath)
 	if err != nil || conf.Validate == nil {
 		return "collect"
 	}

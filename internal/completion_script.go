@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// CompletionScript returns a shell completion script for prog (the installed
+// completionScript returns a shell completion script for prog (the installed
 // binary name) and shell. The script delegates to the binary's hidden completion
 // entrypoint (the runtime's __complete intercept), so completions always reflect
 // the live command tree. Supported shells: bash, zsh, fish, powershell.
@@ -13,7 +13,7 @@ import (
 // It is used at codegen time: when the completion feature is enabled, the
 // generator renders one script per supported shell and embeds it in the cligen
 // package (the runtime then serves the embedded script, never calling this).
-func CompletionScript(prog, shell string) (string, error) {
+func completionScript(prog, shell string) (string, error) {
 	var tmpl string
 	switch shell {
 	case "bash":
