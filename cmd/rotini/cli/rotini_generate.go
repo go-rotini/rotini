@@ -39,13 +39,13 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	rtx.BindIfAbsent("generate", internal.Generate)
 	generate := rotini.MustGet[internal.GenerateFn](rtx, "generate")
-	schemaRef := rotini.MustGet[string](rtx, "schema_ref")
+	version := rotini.MustGet[string](rtx, "version")
 
 	err := generate(
 		args.SpecFilePath,
 		flags.ConfFilePath,
 		flags.Watch,
-		schemaRef,
+		version,
 		func(result string, err error) {
 			if err != nil {
 				fmt.Fprintln(rtx.Stderr, "Error:", err)

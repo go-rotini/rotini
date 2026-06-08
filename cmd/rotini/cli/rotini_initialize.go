@@ -45,9 +45,9 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	rtx.BindIfAbsent("initialize", internal.Initialize)
 	initialize := rotini.MustGet[internal.InitializeFn](rtx, "initialize")
-	schemaRef := rotini.MustGet[string](rtx, "schema_ref")
+	version := rotini.MustGet[string](rtx, "version")
 
-	if err := initialize(args.Name, flags.Format, flags.Force, flags.Into, schemaRef); err != nil {
+	if err := initialize(args.Name, flags.Format, flags.Force, flags.Into, version); err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.Exit(1)
 		return

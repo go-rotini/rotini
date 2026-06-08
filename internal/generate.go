@@ -11,7 +11,7 @@ import (
 	"github.com/go-rotini/fs"
 )
 
-type GenerateFn = func(specPath, confPath string, watch bool, schemaRef string, onGenerate func(result string, err error)) error
+type GenerateFn = func(specPath, confPath string, watch bool, version string, onGenerate func(result string, err error)) error
 
 // Generate emits the generated program files from the rotini spec at specPath and
 // the conf at confPath (empty or missing → sane defaults; a .rotini.conf.* beside
@@ -40,15 +40,15 @@ type GenerateFn = func(specPath, confPath string, watch bool, schemaRef string, 
 //     Program var, and one method per command. Always (over)written; orphaned
 //     stubs are pruned when generate.cmd.prune is enabled.
 //
-// schemaRef is the running rotini binary's release tag (e.g. "1.2.3"), or "" for a
-// non-release build; it is threaded into the pre-codegen validation so generate
-// inherits the $schema↔binary version guard (skipped when "" — see [Validate]).
-func Generate(specPath, confPath string, watch bool, schemaRef string, onGenerate func(result string, err error)) error {
+// version is the running rotini binary's bound "version" string ("vX.Y.Z" for a
+// release, "v0.0.0" otherwise); it is threaded into the pre-codegen validation so
+// generate inherits the $schema↔binary version guard (see [Validate]).
+func Generate(specPath, confPath string, watch bool, version string, onGenerate func(result string, err error)) error {
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
 	}
 	confPath = resolveConfPath(specPath, confPath)
-	return runOrWatch(specPath, confPath, watch, func() (string, error) { return generateTimed(specPath, confPath, schemaRef) }, onGenerate)
+	return runOrWatch(specPath, confPath, watch, func() (string, error) { return generateTimed(specPath, confPath, version) }, onGenerate)
 }
 
 // runOrWatch performs a single timed pass — returning the pass's error when it fails — or,
@@ -86,11 +86,11 @@ func resolveConfPath(specPath, confPath string) string {
 
 // generateOnce runs a single generation pass against an already-resolved conf
 // path (which may be empty or point at a missing file, meaning "use defaults").
-func generateOnce(specPath, confPath, schemaRef string) error {
+func generateOnce(specPath, confPath, version string) error {
 	// Validate the spec and the conf against the embedded schemas (plus the spec lints) before
 	// generating — invalid input must never reach codegen. The conf is optional: an absent conf
 	// means "use defaults", so a conf path that doesn't exist is skipped here (not a validation
-	// failure), but a conf that IS present must be valid. schemaRef carries the binary's release
+	// failure), but a conf that IS present must be valid. version carries the binary's release
 	// tag so the $schema↔version guard runs here too (skipped when "").
 	confToValidate := confPath
 	if confToValidate != "" {
@@ -98,7 +98,7 @@ func generateOnce(specPath, confPath, schemaRef string) error {
 			confToValidate = ""
 		}
 	}
-	if err := validateOnce(specPath, confToValidate, "", schemaRef); err != nil {
+	if err := validateOnce(specPath, confToValidate, "", version); err != nil {
 		return err
 	}
 
@@ -183,9 +183,9 @@ func watchLoop(ctx context.Context, specPath, confPath string, pass func() (stri
 // summary alongside the pass's error, so a watcher can report both when a
 // generation ran and how long it took. The elapsed time renders in whatever unit
 // fits best (ns/µs/ms/s).
-func generateTimed(specPath, confPath, schemaRef string) (string, error) {
+func generateTimed(specPath, confPath, version string) (string, error) {
 	start := time.Now()
-	err := generateOnce(specPath, confPath, schemaRef)
+	err := generateOnce(specPath, confPath, version)
 	result := fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start)))
 	return result, err
 }

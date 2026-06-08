@@ -41,14 +41,14 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	rtx.BindIfAbsent("validate", internal.Validate)
 	validate := rotini.MustGet[internal.ValidateFn](rtx, "validate")
-	schemaRef := rotini.MustGet[string](rtx, "schema_ref")
+	version := rotini.MustGet[string](rtx, "version")
 
 	err := validate(
 		args.SpecFilePath,
 		flags.ConfFilePath,
 		flags.Watch,
 		flags.Fail,
-		schemaRef,
+		version,
 		func(result string, err error) {
 			if err != nil {
 				fmt.Fprintln(rtx.Stderr, "Error:", err)

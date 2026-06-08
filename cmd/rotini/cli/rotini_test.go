@@ -23,13 +23,14 @@ const testVersion = "vTEST"
 
 // runRotini drives the companion through the real program lifecycle exactly as main.go
 // would — capturing stdout/stderr and recording the exit code — so a handler's every path
-// is exercised end-to-end. "parser", "version", and "schema_ref" are the services main.go
-// binds, so all three are always bound here too (we are testing handler logic, not those
-// deps); "schema_ref" defaults to "" (a non-release build, so the $schema-version guard is
-// skipped — like a dev binary), which a guard test overrides via the binds vararg. A handler's
-// own work dependency (generate/validate/initialize) is self-bound via BindIfAbsent, so leaving
-// it unbound here exercises that real production wiring. Extra binds inject doubles for that
-// work dependency. WithContext opts out of the default signal trap, which these tests don't exercise.
+// is exercised end-to-end. "parser" and "version" are the services main.go binds, so both
+// are always bound here too (we are testing handler logic, not those deps). The handlers pass
+// "version" straight to internal.{Generate,Validate,Initialize}, which strip the leading "v"
+// for the $schema segment; the validate/generate paths only reach the $schema-version check
+// for a schema-valid spec, which these handler tests don't exercise. A handler's own work
+// dependency (generate/validate/initialize) is self-bound via BindIfAbsent, so leaving it
+// unbound here exercises that real production wiring. Extra binds inject doubles for that work
+// dependency. WithContext opts out of the default signal trap, which these tests don't exercise.
 func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string, code int) {
 	t.Helper()
 	var out, errb bytes.Buffer
@@ -40,8 +41,7 @@ func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string
 		WithStderr(&errb).
 		WithExit(func(c int) { code = c }).
 		Bind("parser", rotini.NewParser()).
-		Bind("version", testVersion).
-		Bind("schema_ref", "")
+		Bind("version", testVersion)
 	for _, b := range binds {
 		p.Bind(b.key, b.val)
 	}
