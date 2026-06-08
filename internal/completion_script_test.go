@@ -1,4 +1,4 @@
-package rotini
+package internal
 
 import (
 	"strings"

@@ -1,4 +1,4 @@
-package rotini
+package internal
 
 import (
 	"fmt"
@@ -7,13 +7,12 @@ import (
 
 // CompletionScript returns a shell completion script for prog (the installed
 // binary name) and shell. The script delegates to the binary's hidden completion
-// entrypoint (the core runtime's __complete intercept), so completions always
-// reflect the live command tree. Supported shells: bash, zsh, fish, powershell.
+// entrypoint (the runtime's __complete intercept), so completions always reflect
+// the live command tree. Supported shells: bash, zsh, fish, powershell.
 //
-// A completion handler typically reads the requested shell from its inputs and
-// prints the result:
-//
-//	script, err := rotini.CompletionScript(filepath.Base(os.Args[0]), shell)
+// It is used at codegen time: when the completion feature is enabled, the
+// generator renders one script per supported shell and embeds it in the cligen
+// package (the runtime then serves the embedded script, never calling this).
 func CompletionScript(prog, shell string) (string, error) {
 	var tmpl string
 	switch shell {
