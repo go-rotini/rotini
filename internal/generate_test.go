@@ -1048,7 +1048,7 @@ func TestGenerateWatchInitialAndStop(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- watchLoop(ctx, specPath, "", func() (string, error) { return generateTimed(specPath, "", "") }, onGen)
+		done <- watchLoop(ctx, specPath, "", generatePassClosure(specPath), onGen)
 	}()
 
 	rtg := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
@@ -1086,7 +1086,7 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- watchLoop(ctx, specPath, "", func() (string, error) { return generateTimed(specPath, "", "") }, onGen)
+		done <- watchLoop(ctx, specPath, "", generatePassClosure(specPath), onGen)
 	}()
 
 	rtg := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")

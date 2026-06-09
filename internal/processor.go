@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/go-rotini/fs"
 	"github.com/go-rotini/jsonc"
@@ -190,6 +191,7 @@ type processor struct {
 	version  string // running binary's version string, for the $schema guard
 	specPath string // explicit spec path ("" → resolved from the fallback locations)
 	confPath string // explicit conf path ("" → resolved beside the spec, else defaults)
+	failMode string // --fail override; "" → the conf's validate.fail (then "collect")
 
 	schemaSpec *jsonschema.Schema
 	spec       *Spec
@@ -206,8 +208,8 @@ var schemaConfBytes []byte
 
 // The embedded rotini JSON Schemas are immutable, so each is compiled at most once
 // per process and the result cached. NewProcessor fills a processor's schema fields
-// from these; the standalone Validator (validate.go) shares the same caches until it
-// folds into the processor's validator phase.
+// from these — the cache spares the recompile when a fresh processor is built per
+// pass (e.g. watch mode rebuilds one on every change).
 var (
 	specSchemaOnce sync.Once
 	specSchema     *jsonschema.Schema
@@ -285,6 +287,30 @@ func firstExisting(paths []string) string {
 	return ""
 }
 
+// resolveSpecPath resolves the spec file path: the explicit specPath when given,
+// otherwise the first .rotini.spec.* in the working directory, or "" when none is
+// found (callers treat that as the required-spec error).
+func resolveSpecPath(specPath string) (string, error) {
+	if specPath != "" {
+		return specPath, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return firstExisting(getFallbackPaths(cwd, "spec")), nil
+}
+
+// resolveConfBesideSpec resolves the conf file path: the explicit confPath when
+// given, otherwise the first .rotini.conf.* beside the spec, or "" when none is found
+// (callers fall back to a default Conf).
+func resolveConfBesideSpec(specPath, confPath string) string {
+	if confPath != "" {
+		return confPath
+	}
+	return firstExisting(getFallbackPaths(filepath.Dir(specPath), "conf"))
+}
+
 // load resolves and reads the end-user spec and conf, decoding them onto the
 // processor. The spec is loaded first because conf resolution looks beside it.
 func (p *processor) load() error {
@@ -299,13 +325,9 @@ func (p *processor) load() error {
 // the processor. The spec is required: no explicit path and no fallback match is an
 // error.
 func (p *processor) loadSpec() error {
-	path := p.specPath
-	if path == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		path = firstExisting(getFallbackPaths(cwd, "spec"))
+	path, err := resolveSpecPath(p.specPath)
+	if err != nil {
+		return err
 	}
 	if path == "" {
 		return errSpecPathRequired
@@ -325,13 +347,23 @@ func (p *processor) loadSpec() error {
 // the processor. The conf is optional: no explicit path and no fallback match yields
 // a default Conf. An explicit path that does not exist is a read error.
 func (p *processor) loadConf() error {
-	path := p.confPath
+	path := resolveConfBesideSpec(p.specPath, p.confPath)
+
+	// The conf is optional: no resolved path — or a resolved (explicit) path that
+	// doesn't exist — falls back to a default Conf, with confPath cleared so the
+	// validator skips it.
 	if path == "" {
-		path = firstExisting(getFallbackPaths(filepath.Dir(p.specPath), "conf"))
-	}
-	if path == "" {
-		p.conf = &Conf{} // optional → default shape
+		p.confPath = ""
+		p.conf = &Conf{}
 		return nil
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		if os.IsNotExist(statErr) {
+			p.confPath = ""
+			p.conf = &Conf{}
+			return nil
+		}
+		return fmt.Errorf("stat conf %s: %w", path, statErr)
 	}
 
 	conf, err := readConf(path)
@@ -400,10 +432,15 @@ func (p *processor) validateConf() []error {
 	return nil
 }
 
-// failFast reports whether the loaded conf selects fast failure reporting
-// (validate.fail = "fast"); otherwise problems are collected (the default).
+// failFast reports whether validation should stop at the first problem. The --fail
+// override (p.failMode) wins; otherwise the loaded conf's validate.fail is used. Only
+// "fast" enables it — anything else collects every problem (the default).
 func (p *processor) failFast() bool {
-	return p.conf != nil && p.conf.Validate != nil && p.conf.Validate.Fail == "fast"
+	mode := p.failMode
+	if mode == "" && p.conf != nil && p.conf.Validate != nil {
+		mode = p.conf.Validate.Fail
+	}
+	return mode == "fast"
 }
 
 // generate runs the generator phase over the loaded spec and conf. Call load — and,
@@ -445,12 +482,69 @@ const (
 func (p *processor) initialize(name, format string, force bool, into string, rcp recipe) error {
 	switch rcp {
 	case recipeCmd, "":
-		return Initialize(name, format, force, into, p.version)
+		return p.initializeCmd(name, format, force, into)
 	case recipeFlat:
 		return fmt.Errorf("the %q init recipe is not yet supported", recipeFlat)
 	default:
 		return fmt.Errorf("unknown init recipe %q (want %q or %q)", rcp, recipeCmd, recipeFlat)
 	}
+}
+
+// validatePass runs one pass of the validate workflow: load, then validate. It is
+// the unit the run/watch engine repeats — each pass builds a fresh processor, so a
+// re-read picks up edits in watch mode.
+func (p *processor) validatePass() error {
+	if err := p.load(); err != nil {
+		return err
+	}
+	return p.validate()
+}
+
+// generatePass runs one pass of the generate workflow: load, validate, then
+// generate. Validation is the gate — when the spec or conf is invalid it returns
+// that error and generation never runs, so invalid input never reaches codegen.
+func (p *processor) generatePass() error {
+	if err := p.load(); err != nil {
+		return err
+	}
+	if err := p.validate(); err != nil {
+		return err
+	}
+	return p.generate()
+}
+
+// runProcessorWorkflow runs a processor workflow once, or — when watch is set —
+// re-runs it whenever the spec or conf changes, until interrupted (ctrl-c). It
+// resolves the spec and conf paths up-front so watch mode watches exactly the files
+// the processor reads, then drives the shared run/watch engine: each pass builds a
+// fresh processor (re-reading the files, so edits are picked up) and runs pass over
+// it, stamped with a "[HH:MM:SS] <took>" summary handed to onResult.
+//
+// Without watch it returns the single pass's error (not routed through onResult), so
+// the caller can treat the run as failed; with watch every pass — success or failure
+// — goes to onResult and only a failure to start watching is returned. pass is a
+// method expression: (*processor).validatePass or (*processor).generatePass. failMode
+// is the --fail override carried onto each pass's processor (generate passes "").
+func runProcessorWorkflow(specPath, confPath, version, failMode string, watch bool, pass func(*processor) error, onResult func(result string, err error)) error {
+	resolvedSpec, err := resolveSpecPath(specPath)
+	if err != nil {
+		return err
+	}
+	if resolvedSpec == "" {
+		return errSpecPathRequired
+	}
+	resolvedConf := resolveConfBesideSpec(resolvedSpec, confPath)
+
+	timed := func() (string, error) {
+		start := time.Now()
+		p, err := NewProcessor(resolvedSpec, resolvedConf, version)
+		if err == nil {
+			p.failMode = failMode
+			err = pass(p)
+		}
+		return fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start))), err
+	}
+	return runOrWatch(resolvedSpec, resolvedConf, watch, timed, onResult)
 }
 
 /*

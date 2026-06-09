@@ -470,10 +470,11 @@ func TestValidate_missingFile(t *testing.T) {
 }
 
 func TestValidate_missingConfFile(t *testing.T) {
+	// A specified-but-missing conf is tolerated: the conf is optional, so validation
+	// falls back to defaults rather than erroring.
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
-	err := validateOnce(spec, filepath.Join(t.TempDir(), "nope.yaml"), "", "")
-	if err == nil {
-		t.Fatal("expected error for specified-but-missing conf file")
+	if err := validateOnce(spec, filepath.Join(t.TempDir(), "nope.yaml"), "", ""); err != nil {
+		t.Errorf("Validate(missing conf) = %v, want nil (defaults used)", err)
 	}
 }
 

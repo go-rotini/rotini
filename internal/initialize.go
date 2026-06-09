@@ -55,6 +55,16 @@ type InitializeFn = func(name, format string, force bool, into, version string) 
 // gains a $ref and is re-generated). The new CLI still gets its own main.go and
 // stays independently buildable.
 func Initialize(name, format string, force bool, into, version string) error {
+	p, err := NewProcessor("", "", version)
+	if err != nil {
+		return err
+	}
+	return p.initialize(name, format, force, into, recipeCmd)
+}
+
+// initializeCmd scaffolds the cmd/<name>/ layout (the cmd recipe) and generates it —
+// the body the processor's initialize routes recipeCmd (and the empty default) to.
+func (p *processor) initializeCmd(name, format string, force bool, into string) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
@@ -83,28 +93,28 @@ func Initialize(name, format string, force bool, into, version string) error {
 	mainPath := filepath.Join(cliDir, "main.go")
 
 	if !force {
-		for _, p := range []string{specPath, confPath, mainPath} {
-			if _, statErr := os.Stat(p); statErr == nil {
-				rel, _ := filepath.Rel(moduleRoot, p)
+		for _, pth := range []string{specPath, confPath, mainPath} {
+			if _, statErr := os.Stat(pth); statErr == nil {
+				rel, _ := filepath.Rel(moduleRoot, pth)
 				return fmt.Errorf("%s already exists (use --force to overwrite)", filepath.ToSlash(rel))
 			}
 		}
 	}
 
-	if err := writeSpec(specPath, scaffoldSpec(name, version)); err != nil {
+	if err := writeSpec(specPath, scaffoldSpec(name, p.version)); err != nil {
 		return err
 	}
-	if err := writeConf(confPath, scaffoldConf(name, pkgDir, version)); err != nil {
+	if err := writeConf(confPath, scaffoldConf(name, pkgDir, p.version)); err != nil {
 		return err
 	}
 	if err := writeMainGo(mainPath, moduleName, name, pkgDir); err != nil {
 		return err
 	}
-	if err := Generate(specPath, confPath, false, version, nil); err != nil {
+	if err := Generate(specPath, confPath, false, p.version, nil); err != nil {
 		return err
 	}
 	if into != "" {
-		return composeInto(moduleRoot, pkgDir, into, name, ext, version)
+		return composeInto(moduleRoot, pkgDir, into, name, ext, p.version)
 	}
 	return nil
 }

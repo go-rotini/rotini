@@ -1,11 +1,13 @@
 package internal
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mustWriteSpec/mustWriteConf seed a fixture document at path, failing the test on
@@ -133,17 +135,40 @@ func TestLoadSpec_requiredErr(t *testing.T) {
 	}
 }
 
-// TestLoadConf_explicitMissingIsError confirms an explicit conf path that does not
-// exist is a hard read error (not a silent fallback to defaults).
-func TestLoadConf_explicitMissingIsError(t *testing.T) {
+// TestLoadConf_explicitMissingDefaults confirms an explicit conf path that does not
+// exist falls back to a default Conf (the conf is optional), rather than erroring —
+// matching the established Generate contract.
+func TestLoadConf_explicitMissingDefaults(t *testing.T) {
 	dir := t.TempDir()
 	specPath := filepath.Join(dir, "spec.yaml")
 	mustWriteSpec(t, specPath, &Spec{Command: Command{Name: "demo"}})
 
 	p := newProcessor(t, specPath, filepath.Join(dir, "does-not-exist.yaml"))
-	if err := p.load(); err == nil {
-		t.Error("load err = nil, want a read error for the missing explicit conf")
+	if err := p.load(); err != nil {
+		t.Fatalf("load with missing explicit conf = %v, want nil (defaults used)", err)
 	}
+	if p.conf == nil {
+		t.Error("conf = nil, want a default &Conf{}")
+	}
+	if p.confPath != "" {
+		t.Errorf("confPath = %q, want empty (no usable conf)", p.confPath)
+	}
+}
+
+// validateOnce runs the validator phase over the spec and conf through the processor,
+// returning the aggregated result. It is the test seam that replaced the production
+// validateOnce retired in the processor migration, so the existing call sites are
+// unchanged.
+func validateOnce(specPath, confPath, failMode, version string) error {
+	p, err := NewProcessor(specPath, confPath, version)
+	if err != nil {
+		return err
+	}
+	p.failMode = failMode
+	if err := p.load(); err != nil {
+		return err
+	}
+	return p.validate()
 }
 
 // loadAndValidate builds a processor, runs the loader, then the validator phase,
@@ -324,5 +349,152 @@ func TestProcessorInitialize_recipeErrors(t *testing.T) {
 	}
 	if err := p.initialize("mycli", "yaml", false, "", recipe("bogus")); err == nil || !strings.Contains(err.Error(), "unknown init recipe") {
 		t.Errorf("initialize(bogus) = %v, want an 'unknown recipe' error", err)
+	}
+}
+
+// TestProcessorValidatePass confirms the validate workflow composes load + validate,
+// propagating a load failure.
+func TestProcessorValidatePass(t *testing.T) {
+	good := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+	if err := newProcessor(t, good, "").validatePass(); err != nil {
+		t.Errorf("validatePass(valid) = %v, want nil", err)
+	}
+
+	missing := filepath.Join(t.TempDir(), "nope.yaml")
+	if err := newProcessor(t, missing, "").validatePass(); err == nil {
+		t.Error("validatePass(missing spec) = nil, want a load error")
+	}
+}
+
+// TestProcessorGeneratePass_gatesOnValidation confirms the generate workflow does
+// not reach codegen when validation fails: the error is returned and nothing is
+// written.
+func TestProcessorGeneratePass_gatesOnValidation(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	specPath := filepath.Join(tmp, ".rotini.spec.yaml")
+	writeTestFile(t, specPath, validSpecHeader) // no command → schema-invalid
+	t.Chdir(tmp)
+
+	p := newProcessor(t, specPath, "")
+	if err := p.generatePass(); err == nil {
+		t.Fatal("generatePass(invalid spec) = nil, want a validation error")
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, "cmd")); statErr == nil {
+		t.Error("codegen ran despite invalid input — the validate gate did not hold")
+	}
+}
+
+// TestProcessorGeneratePass_valid confirms a valid spec flows load → validate →
+// generate and emits the program.
+func TestProcessorGeneratePass_valid(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		validSpecHeader+"command:\n  name: rotini\n  commands:\n    - name: generate\n")
+	t.Chdir(tmp)
+
+	p := newProcessor(t, ".rotini.spec.yaml", "")
+	if err := p.generatePass(); err != nil {
+		t.Fatalf("generatePass(valid) = %v, want nil", err)
+	}
+	mustContain(t, filepath.Join(tmp, "cmd", "rotini", "cli", "rotini.gen.go"),
+		"package cli", "var Program = NewProgram(&handlers{})")
+}
+
+// TestRunProcessorWorkflow_validateRouting confirms the non-watch path: a valid pass
+// routes a "[HH:MM:SS] <took>" summary to onResult and returns nil; a failing pass
+// returns the error and is NOT routed through onResult.
+func TestRunProcessorWorkflow_validateRouting(t *testing.T) {
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+	var summary string
+	var cbErr error
+	calls := 0
+	if err := runProcessorWorkflow(spec, "", "", "", false, (*processor).validatePass, func(s string, e error) { calls++; summary, cbErr = s, e }); err != nil {
+		t.Fatalf("runProcessorWorkflow(valid) = %v, want nil", err)
+	}
+	if calls != 1 || cbErr != nil || summary == "" {
+		t.Errorf("valid pass: calls=%d summary=%q err=%v, want one call with a summary and nil err", calls, summary, cbErr)
+	}
+
+	calls = 0
+	bad := writeTemp(t, "bad.yaml", validSpecHeader) // no command
+	if err := runProcessorWorkflow(bad, "", "", "", false, (*processor).validatePass, func(string, error) { calls++ }); err == nil {
+		t.Error("runProcessorWorkflow(invalid) = nil, want an error")
+	}
+	if calls != 0 {
+		t.Errorf("onResult called %d times on a non-watch failure, want 0", calls)
+	}
+}
+
+// TestRunProcessorWorkflow_generate confirms the generate workflow emits the program
+// through the wrapper, including resolving an empty spec path from the working
+// directory.
+func TestRunProcessorWorkflow_generate(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		validSpecHeader+"command:\n  name: rotini\n  commands:\n    - name: generate\n")
+	t.Chdir(tmp)
+
+	noop := func(string, error) {}
+	gen := filepath.Join(tmp, "cmd", "rotini", "cli", "rotini.gen.go")
+
+	if err := runProcessorWorkflow(".rotini.spec.yaml", "", "", "", false, (*processor).generatePass, noop); err != nil {
+		t.Fatalf("runProcessorWorkflow generate = %v, want nil", err)
+	}
+	mustContain(t, gen, "package cli", "var Program = NewProgram(&handlers{})")
+
+	// An empty spec path resolves from the working directory.
+	if err := runProcessorWorkflow("", "", "", "", false, (*processor).generatePass, noop); err != nil {
+		t.Fatalf("runProcessorWorkflow(empty spec, cwd fallback) = %v, want nil", err)
+	}
+}
+
+// generatePassClosure returns a watchLoop-compatible pass that builds a fresh
+// processor and runs generatePass — the test seam that replaced generateTimed.
+func generatePassClosure(specPath string) func() (string, error) {
+	return func() (string, error) {
+		p, err := NewProcessor(specPath, "", "")
+		if err != nil {
+			return "", err
+		}
+		return "", p.generatePass()
+	}
+}
+
+// TestProcessorWatch_regenerates drives the run/watch engine with the fresh-processor
+// generate pass (the shape runProcessorWorkflow builds) to confirm the processor
+// re-reads and regenerates when the spec changes.
+func TestProcessorWatch_regenerates(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	specPath := filepath.Join(tmp, ".rotini.spec.yaml")
+	writeTestFile(t, specPath, specWith("alpha"))
+	t.Chdir(tmp)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- watchLoop(ctx, specPath, "", generatePassClosure(specPath), func(string, error) {}) }()
+
+	rtg := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
+	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
+		t.Fatal("initial generate did not produce MycliAlpha")
+	}
+
+	writeTestFile(t, specPath, specWith("alpha", "beta"))
+	if !waitForCond(5*time.Second, func() bool { return fileContains(rtg, "MycliBeta") }) {
+		t.Fatal("watch did not regenerate after the spec change (no MycliBeta)")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("watchLoop returned error after cancel: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("watchLoop did not return after cancel")
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"time"
 
 	"github.com/go-rotini/fs"
@@ -48,15 +47,14 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
 	}
-	confPath = resolveConfPath(specPath, confPath)
-	return runOrWatch(specPath, confPath, watch, func() (string, error) { return generateTimed(specPath, confPath, version) }, onGenerate)
+	return runProcessorWorkflow(specPath, confPath, version, "", watch, (*processor).generatePass, onGenerate)
 }
 
 // runOrWatch performs a single timed pass — returning the pass's error when it fails — or,
 // when watch is set, watches the spec and conf and re-runs the pass on each change until
 // interrupted with ctrl-c (SIGINT), routing every pass (success or failure) to onResult. It is
 // the shared engine behind [Generate] and [Validate]; pass supplies the command-specific work
-// and confPath must already be resolved (see resolveConfPath).
+// and confPath must already be resolved (see resolveConfBesideSpec).
 func runOrWatch(specPath, confPath string, watch bool, pass func() (string, error), onResult func(result string, err error)) error {
 	if watch {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -69,66 +67,6 @@ func runOrWatch(specPath, confPath string, watch bool, pass func() (string, erro
 	}
 	onResult(result, nil)
 	return nil
-}
-
-// resolveConfPath returns confPath when set, otherwise the .rotini.conf.* file
-// discovered next to the spec (e.g. for the scaffolded `//go:generate rotini
-// generate`), or "" when none is found. Watch mode also uses this to learn which
-// conf file, if any, to watch.
-func resolveConfPath(specPath, confPath string) string {
-	if confPath != "" {
-		return confPath
-	}
-	if p, err := discoverFile(filepath.Dir(specPath), ".rotini.conf."); err == nil {
-		return p
-	}
-	return ""
-}
-
-// generateOnce runs a single generation pass against an already-resolved conf
-// path (which may be empty or point at a missing file, meaning "use defaults").
-func generateOnce(specPath, confPath, version string) error {
-	// Validate the spec and the conf against the embedded schemas (plus the spec lints) before
-	// generating — invalid input must never reach codegen. The conf is optional: an absent conf
-	// means "use defaults", so a conf path that doesn't exist is skipped here (not a validation
-	// failure), but a conf that IS present must be valid. version carries the binary's release
-	// tag so the $schema↔version guard runs here too (skipped when "").
-	confToValidate := confPath
-	if confToValidate != "" {
-		if _, statErr := os.Stat(confToValidate); statErr != nil {
-			confToValidate = ""
-		}
-	}
-	if err := validateOnce(specPath, confToValidate, "", version); err != nil {
-		return err
-	}
-
-	spec, err := readSpec(specPath)
-	if err != nil {
-		return err
-	}
-	conf, err := loadConfOrDefaults(confPath)
-	if err != nil {
-		return err
-	}
-	applyConfDefaults(conf, spec.Command.Name)
-	return generateAll(spec, conf, specPath)
-}
-
-// loadConfOrDefaults reads the conf at confPath, treating an empty path or a
-// missing file as "no conf supplied" and returning an empty *Conf so that
-// applyConfDefaults can fill in the defaults.
-func loadConfOrDefaults(confPath string) (*Conf, error) {
-	if confPath == "" {
-		return &Conf{}, nil
-	}
-	if _, err := os.Stat(confPath); err != nil {
-		if os.IsNotExist(err) {
-			return &Conf{}, nil
-		}
-		return nil, fmt.Errorf("stat conf %s: %w", confPath, err)
-	}
-	return readConf(confPath)
 }
 
 // watchDebounce coalesces the burst of filesystem events most editors emit when
@@ -178,17 +116,6 @@ func watchLoop(ctx context.Context, specPath, confPath string, pass func() (stri
 			onResult(pass())
 		}
 	}
-}
-
-// generateTimed runs one generation pass and returns a "[HH:MM:SS] <took>"
-// summary alongside the pass's error, so a watcher can report both when a
-// generation ran and how long it took. The elapsed time renders in whatever unit
-// fits best (ns/µs/ms/s).
-func generateTimed(specPath, confPath, version string) (string, error) {
-	start := time.Now()
-	err := generateOnce(specPath, confPath, version)
-	result := fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start)))
-	return result, err
 }
 
 // roundDuration trims d to roughly three significant figures so its String()
