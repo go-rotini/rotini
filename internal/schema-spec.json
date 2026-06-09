@@ -1,0 +1,716 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Rotini Spec Schema",
+  "description": "Schema for a Rotini CLI definition spec file.",
+  "type": "object",
+  "required": [
+    "$schema",
+    "command"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.",
+      "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-spec\\.json$"
+    },
+    "command": {
+      "$ref": "#/definitions/Command",
+      "description": "The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, schemas) live at the document level beside it."
+    },
+    "configuration_files": {
+      "type": "array",
+      "description": "Config-file sources the program loads at startup (document-level). Per-command 'config' inputs bind typed values from these by name + key.",
+      "items": {
+        "$ref": "#/definitions/ConfigurationFile"
+      }
+    },
+    "schemas": {
+      "type": "object",
+      "description": "Reusable named schema definitions (document-level). Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\".",
+      "additionalProperties": {
+        "$ref": "#/definitions/Schema"
+      }
+    }
+  },
+  "definitions": {
+    "Command": {
+      "description": "A command node in the CLI command tree — the root command and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). When used as the root (the top-level 'command'), it must use 'name'.",
+      "type": "object",
+      "anyOf": [
+        {
+          "required": [
+            "name"
+          ]
+        },
+        {
+          "required": [
+            "$ref"
+          ]
+        }
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Command name used in routing. As the root command (the top-level 'command') this is the binary name and must be set — the root cannot use '$ref'."
+        },
+        "$ref": {
+          "type": "string",
+          "description": "Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name. Not valid on the root command."
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        },
+        "deprecated_identifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)"
+        },
+        "inputs": {
+          "$ref": "#/definitions/Inputs",
+          "description": "Typed inputs for this command: flags, arguments, config values, env variables, and stdin."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page."
+        },
+        "description": {
+          "type": "string",
+          "description": "Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set."
+        },
+        "usage": {
+          "type": "string",
+          "description": "Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set."
+        },
+        "header": {
+          "type": "string",
+          "description": "Text rendered above the description block. Ignored when 'help' is set."
+        },
+        "footer": {
+          "type": "string",
+          "description": "Text rendered at the bottom of the page. Ignored when 'help' is set."
+        },
+        "headings": {
+          "$ref": "#/definitions/HelpHeadings",
+          "description": "Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set."
+        },
+        "examples": {
+          "type": "array",
+          "description": "Example command-line invocations, rendered one per line. Ignored when 'help' is set.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "help": {
+          "type": "string",
+          "description": "Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields."
+        },
+        "man": {
+          "type": "string",
+          "description": "Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template."
+        },
+        "markdown": {
+          "type": "string",
+          "description": "Exact, verbatim markdown page for this command (the markdown feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the markdown page; when unset, the markdown page is rendered from those fields through the markdown template."
+        },
+        "output": {
+          "$ref": "#/definitions/Schema",
+          "description": "This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handlers have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line)."
+        },
+        "group": {
+          "type": "string",
+          "description": "Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the command is annotated as deprecated in its parent's generated Commands list."
+        },
+        "commands": {
+          "type": "array",
+          "description": "Sub-commands of this command (inline or composed via $ref).",
+          "items": {
+            "$ref": "#/definitions/Command"
+          }
+        },
+        "remote_commands": {
+          "type": "array",
+          "description": "Co-located remote binaries dispatched as first-class sub-commands of this command.",
+          "items": {
+            "$ref": "#/definitions/RemoteCommandSpec"
+          }
+        },
+        "remote_discovery": {
+          "$ref": "#/definitions/RemoteDiscovery",
+          "description": "Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery."
+        },
+        "exit_status": {
+          "type": "array",
+          "description": "Exit codes this command documents, rendered as an EXIT STATUS section in the man page. Data only: rotini sets no exit code itself (handlers own exits via rtx.Exit), so this section is whatever you declare. Ignored when 'man' (verbatim) is set.",
+          "items": {
+            "$ref": "#/definitions/ExitStatusEntry"
+          }
+        },
+        "see_also": {
+          "type": "array",
+          "description": "Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "RemoteDiscovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Auto-expose external '<prefix>*' executables as remote sub-commands (kubectl/git/gh plugin style), alongside any declared remote_commands. Presence enables discovery; a discovered name that collides with a declared command or remote is skipped.",
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "description": "Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-')."
+        },
+        "path": {
+          "type": "string",
+          "description": "Extra directory to scan for plugins, in addition to the host binary's directory and PATH."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, discovered plugins still dispatch but are omitted from completion listings."
+        }
+      }
+    },
+    "HelpHeadings": {
+      "type": "object",
+      "description": "Section heading overrides for generated help pages.",
+      "additionalProperties": false,
+      "properties": {
+        "usage": {
+          "type": "string"
+        },
+        "commands": {
+          "type": "string"
+        },
+        "arguments": {
+          "type": "string"
+        },
+        "flags": {
+          "type": "string"
+        },
+        "environment": {
+          "type": "string"
+        },
+        "configuration": {
+          "type": "string"
+        },
+        "cascading": {
+          "type": "string",
+          "description": "Heading for the cascading-flags section on descendant pages. Defaults to 'Global Flags:'. The value is rendered verbatim, so include a trailing ':' if you want one."
+        },
+        "examples": {
+          "type": "string"
+        }
+      }
+    },
+    "BaseSchema": {
+      "type": "object",
+      "description": "Shared fields for Schema and InputSchema. JSON Schema Draft 7 does not support additionalProperties: false on schemas that use allOf for inheritance — strictness is enforced by Go's DisallowUnknownFields at parse time.",
+      "properties": {
+        "$ref": {
+          "type": "string",
+          "pattern": "^#/schemas/",
+          "description": "Reference to a named schema in the top-level schemas map (e.g. '#/schemas/MySchema'). Resolved at codegen time."
+        },
+        "type": {
+          "type": "string",
+          "description": "The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. A '[]…' flag is repeatable (--tag a --tag b → slice). A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path."
+        },
+        "import": {
+          "type": "string",
+          "description": "Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec."
+        },
+        "nullable": {
+          "type": "boolean",
+          "default": false
+        },
+        "enum": {
+          "type": "array",
+          "description": "Allowed values; parsed values are validated against this list",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Regular expression the value must match (string type only)"
+        },
+        "minimum": {
+          "type": "number",
+          "description": "Minimum allowed value (numeric types only)"
+        },
+        "maximum": {
+          "type": "number",
+          "description": "Maximum allowed value (numeric types only)"
+        },
+        "minLength": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Minimum string length (string type only)"
+        },
+        "maxLength": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum string length (string type only)"
+        },
+        "minItems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxItems": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Schema"
+          }
+        },
+        "items": {
+          "$ref": "#/definitions/Schema"
+        }
+      }
+    },
+    "Schema": {
+      "description": "JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/BaseSchema"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "required": {
+              "type": "array",
+              "description": "Required property names for object schemas (standard JSON Schema semantics).",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "InputSchema": {
+      "description": "Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/BaseSchema"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean — unlike the string-array 'required' on Schema."
+            },
+            "default": {
+              "description": "Default value applied when the input is not provided"
+            },
+            "variable": {
+              "type": "string",
+              "description": "Environment variable name (env inputs only)",
+              "pattern": "^[A-Z_][A-Z0-9_]*$"
+            },
+            "file": {
+              "type": "string",
+              "description": "Config file logical name to read from (config inputs only)"
+            },
+            "key": {
+              "type": "string",
+              "description": "Key path within the config file (config inputs only, e.g., 'server.port')"
+            },
+            "secret": {
+              "type": "boolean",
+              "default": false,
+              "description": "When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag."
+            }
+          }
+        }
+      ]
+    },
+    "FlagInput": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name for the flag"
+        },
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition and input-level metadata (type, required, default, enum, nullable, constraints)"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this flag in the Flags section of generated help."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the flag is omitted from generated help (it still parses on the command line)."
+        },
+        "cascading": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: all flags already resolve up the command chain at runtime regardless of this setting; cascading controls whether descendants document it."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the flag is annotated as deprecated in generated help."
+        },
+        "identifiers": {
+          "type": "array",
+          "description": "CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is auto-derived.",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        },
+        "deprecated_identifiers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rtk's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input."
+        }
+      }
+    },
+    "ArgumentInput": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name for the argument"
+        },
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition and input-level metadata (type, required, default, enum, nullable, constraints)"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this argument in the Arguments section of generated help."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the argument is omitted from generated help (it still parses on the command line)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the argument is annotated as deprecated in generated help."
+        }
+      }
+    },
+    "ConfigInput": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name for this config value"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this input in the generated Environment/Configuration help section."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the input is omitted from generated help (it is still bound)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the input is annotated as deprecated in generated help."
+        },
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition and input-level metadata (required, default, file, key)"
+        }
+      }
+    },
+    "EnvInput": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Logical name for this env var input"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this input in the generated Environment/Configuration help section."
+        },
+        "hidden": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, the input is omitted from generated help (it is still bound)."
+        },
+        "deprecated": {
+          "type": "string",
+          "description": "Deprecation message; the input is annotated as deprecated in generated help."
+        },
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition and input-level metadata (required, default, variable)"
+        }
+      }
+    },
+    "StdinSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema": {
+          "$ref": "#/definitions/InputSchema",
+          "description": "Type definition for stdin content. Set required: true in schema to error when stdin is empty."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "json",
+            "yaml",
+            "jsonc",
+            "toml"
+          ],
+          "default": "json",
+          "description": "Serialization the piped stdin payload is decoded from (into the generated <Prefix>Stdin type). Defaults to json."
+        }
+      }
+    },
+    "Inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "flags": {
+          "type": "array",
+          "description": "Flag inputs for this command",
+          "items": {
+            "$ref": "#/definitions/FlagInput"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "description": "Positional argument inputs for this command",
+          "items": {
+            "$ref": "#/definitions/ArgumentInput"
+          }
+        },
+        "config": {
+          "type": "array",
+          "description": "Config-value inputs for this command, bound from a document-level configuration_files source by key.",
+          "items": {
+            "$ref": "#/definitions/ConfigInput"
+          }
+        },
+        "env": {
+          "type": "array",
+          "description": "Environment-variable inputs for this command",
+          "items": {
+            "$ref": "#/definitions/EnvInput"
+          }
+        },
+        "stdin": {
+          "$ref": "#/definitions/StdinSpec",
+          "description": "Declares expected stdin format and schema for this command"
+        },
+        "flag_groups": {
+          "type": "array",
+          "description": "Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).",
+          "items": {
+            "$ref": "#/definitions/FlagGroup"
+          }
+        },
+        "flag_dependencies": {
+          "type": "array",
+          "description": "Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).",
+          "items": {
+            "$ref": "#/definitions/FlagDependency"
+          }
+        }
+      }
+    },
+    "FlagDependency": {
+      "type": "object",
+      "required": [
+        "when",
+        "requires"
+      ],
+      "additionalProperties": false,
+      "description": "A conditional requirement: when the 'when' flag is explicitly set on the command line, every flag in 'requires' must also be set. Both reference flag logical names; 'set' means explicitly provided (a default or env/config fallback does not count).",
+      "properties": {
+        "when": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "The flag whose presence triggers the requirement."
+        },
+        "requires": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          },
+          "description": "Flags that must also be set when 'when' is set."
+        }
+      }
+    },
+    "FlagGroup": {
+      "type": "object",
+      "required": [
+        "kind",
+        "flags"
+      ],
+      "additionalProperties": false,
+      "description": "A constraint on which of this command's flags may (or must) be set together. 'flags' references flag logical names; 'set' means explicitly provided on the command line (a default or env/config fallback does not count).",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "mutually_exclusive",
+            "required_together",
+            "one_of",
+            "at_least_one"
+          ],
+          "description": "mutually_exclusive: at most one set. required_together: all or none. one_of: exactly one. at_least_one: one or more."
+        },
+        "flags": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        }
+      }
+    },
+    "RemoteCommandSpec": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "description": "Name of the remote command. The dispatched binary must be named <program>-<name> and located in the same directory as the host binary."
+        },
+        "aliases": {
+          "type": "array",
+          "description": "Additional names that invoke this remote command.",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
+          }
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-liner shown next to this remote command in its parent's generated Commands list."
+        },
+        "description": {
+          "type": "string",
+          "description": "Long description block for this remote command's generated help page."
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Host-side timeout for the remote binary execution. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
+        }
+      }
+    },
+    "ConfigurationFile": {
+      "type": "object",
+      "required": [
+        "name",
+        "path"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Logical name for the config file (e.g., 'app-config')"
+        },
+        "path": {
+          "type": "string",
+          "description": "File path (supports ~ for home dir)"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "json",
+            "yaml",
+            "toml"
+          ],
+          "default": "json",
+          "description": "File format"
+        },
+        "schema": {
+          "$ref": "#/definitions/Schema",
+          "description": "When set, generates a typed config struct and validates required fields at load time."
+        }
+      }
+    },
+    "ExitStatusEntry": {
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "integer",
+          "description": "The process exit code this entry documents."
+        },
+        "summary": {
+          "type": "string",
+          "description": "What this exit code means."
+        }
+      }
+    }
+  }
+}

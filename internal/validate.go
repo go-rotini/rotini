@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -29,16 +28,16 @@ var (
 	errConfSchema  error
 )
 
-// violationError is a single schema-validation failure: the location of the
+// problem is a single schema-validation failure: the location of the
 // offending value within the document and a human-readable message, tagged
 // by document kind ("spec" or "conf").
-type violationError struct {
+type problem struct {
 	kind string
 	loc  string
 	msg  string
 }
 
-func (e *violationError) Error() string {
+func (e *problem) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
 }
 
@@ -74,93 +73,182 @@ func loadConfSchema() (*jsonschema.Schema, error) {
 // key and fetch it as an injectable service, so tests substitute a double (see [GenerateFn]).
 type ValidateFn = func(specPath, confPath string, watch bool, failMode, version string, onValidate func(result string, err error)) error
 
-// Validate checks a rotini spec file, and the conf resolved beside it, against the embedded
-// rotini JSON Schemas plus the spec lints. It mirrors [Generate].
+// Validate is the convenience entry over [Validator] (the DI-bound [ValidateFn]): it builds a
+// Validator and runs it. It mirrors [Generate].
 //
 // specPath is the spec-file command argument and is required. confPath is the -c/--config flag
 // value (empty → the .rotini.conf.* discovered next to the spec). failMode is the --fail flag
 // value ("fast" stops at the first problem, anything else collects); when empty it falls back to
-// the module conf's validate.fail, so the flag overrides the conf.
+// the module conf's validate.fail, so the flag overrides the conf. version is the running rotini
+// binary's version string ("vX.Y.Z" / "v0.0.0") for the $schema guard ("" → skipped).
 //
 // onValidate, which may be nil, is called after each pass with a "[HH:MM:SS] <took>" summary and
-// that pass's error (nil when the spec and conf are valid); Validate prints nothing itself, so
-// the caller reports results through it. When watch is false it runs a single pass and returns
-// that pass's error — every problem aggregated via [errors.Join] (or the first in "fast" mode) —
-// so the caller can treat the run as failed. When watch is true it validates once and then
-// re-validates whenever the spec or conf changes, until interrupted with ctrl-c (SIGINT); there
-// every pass — valid or not — goes to onValidate and watching continues, and only a failure to
-// start watching is returned.
-// version is the running rotini binary's release tag (e.g. "1.2.3"), or "" for a non-release
-// build (a dev build or an untagged install → pseudo-version). When non-empty, each document's
-// `$schema` version must match it (a mismatch is a validation error); when "" the match is
-// skipped — an untagged build has no authoritative version to enforce.
+// that pass's error (nil when the spec and conf are valid); Validate prints nothing itself, so the
+// caller reports results through it. When watch is false it runs a single pass and returns that
+// pass's error — every problem aggregated via [errors.Join] (or the first in "fast" mode). When
+// watch is true it validates once and then re-validates whenever the spec or conf changes, until
+// interrupted with ctrl-c (SIGINT); there every pass goes to onValidate and watching continues,
+// and only a failure to start watching is returned.
 func Validate(specPath, confPath string, watch bool, failMode, version string, onValidate func(result string, err error)) error {
-	if onValidate == nil {
-		onValidate = func(string, error) {}
-	}
-	confPath = resolveConfPath(specPath, confPath)
-	return runOrWatch(specPath, confPath, watch, func() (string, error) { return validateTimed(specPath, confPath, failMode, version) }, onValidate)
+	return NewValidator(specPath, confPath, version).
+		WithFailMode(failMode).
+		WithOnValidate(onValidate).
+		Run(watch)
 }
 
-// validateTimed runs one validation pass and returns a "[HH:MM:SS] <took>" summary alongside
-// the pass's error, mirroring generateTimed so watch mode can report both.
-func validateTimed(specPath, confPath, failMode, version string) (string, error) {
+// Validator validates a rotini spec and its optional conf. Build one with [NewValidator], tune it
+// with the With* options, then [Validator.Run] it. Fail mode defaults to "collect" and the
+// onValidate callback to a no-op. A Validator runs one pass at a time and is not safe for
+// concurrent Run calls.
+type Validator struct {
+	specPath   string
+	confPath   string
+	version    string // binary version for the $schema guard; "" → guard skipped
+	failMode   string // "" → resolved from the conf's validate.fail, then "collect"
+	onValidate func(result string, err error)
+
+	// per-pass scratch, reset at the start of each pass:
+	fast     bool
+	problems []error
+}
+
+// NewValidator constructs a Validator for the spec at specPath, the conf at confPath (empty → the
+// .rotini.conf.* discovered beside the spec), and version — the running binary's version string for
+// the $schema guard ("" → guard skipped). Fail mode defaults to "collect"; onValidate defaults to a
+// no-op satisfying the callback signature.
+func NewValidator(specPath, confPath, version string) *Validator {
+	return &Validator{
+		specPath:   specPath,
+		confPath:   confPath,
+		version:    version,
+		onValidate: func(string, error) {},
+	}
+}
+
+// WithFailMode sets how problems are reported: "fast" returns the first; anything else collects
+// them all (the default). An empty mode falls back to the module conf's validate.fail, then
+// "collect" — so the --fail flag overrides the conf.
+func (v *Validator) WithFailMode(mode string) *Validator {
+	v.failMode = mode
+	return v
+}
+
+// WithOnValidate sets the per-pass callback (a "[HH:MM:SS] <took>" summary + the pass error). A nil
+// fn is ignored, leaving the no-op default.
+func (v *Validator) WithOnValidate(fn func(result string, err error)) *Validator {
+	if fn != nil {
+		v.onValidate = fn
+	}
+	return v
+}
+
+// Run executes the validation: a single pass when watch is false (returning that pass's aggregated
+// error — or the first problem in fast mode, or nil when valid), or a watch loop when true
+// (re-validating on spec/conf change, routing every pass to the onValidate callback until
+// interrupted). Only a failure to start watching is returned in watch mode.
+func (v *Validator) Run(watch bool) error {
+	v.confPath = resolveConfPath(v.specPath, v.confPath)
+	return runOrWatch(v.specPath, v.confPath, watch, v.timedPass, v.onValidate)
+}
+
+// timedPass runs one pass and stamps it with the "[HH:MM:SS] <took>" summary, mirroring
+// generateTimed so watch mode can report both when a pass ran and how long it took.
+func (v *Validator) timedPass() (string, error) {
 	start := time.Now()
-	err := validateOnce(specPath, confPath, failMode, version)
-	result := fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start)))
-	return result, err
+	err := v.pass()
+	return fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start))), err
 }
 
-// validateOnce runs a single validation pass: it checks the spec (and the conf, when one is
-// resolved) against the embedded schemas and runs the spec lints, aggregating every problem — a
-// missing/unreadable file, a format-conversion failure, a schema violation, a lint — into one
-// error via [errors.Join], or returns the first when failMode resolves to "fast". It returns nil
-// when everything is valid.
+// pass runs one validation pass against a fresh accumulator: the spec first, then the conf (reached
+// only when the spec produced no problem in fast mode). It returns every problem aggregated via
+// [errors.Join], or the first when fail mode resolves to "fast", or nil when valid.
+func (v *Validator) pass() error {
+	v.problems = nil
+	v.fast = resolveFailMode(v.failMode) == "fast"
+	v.checkSpec()
+	if v.stop() {
+		return v.result()
+	}
+	v.checkConf()
+	return v.result()
+}
+
+// checkSpec schema-validates the spec, then — only when it is schema-valid — runs the lints and the
+// $schema-version guard. Linting a malformed doc is meaningless and would pile errors on an
+// already-broken file, so a schema violation short-circuits.
+func (v *Validator) checkSpec() {
+	if v.specPath == "" {
+		v.add(errSpecPathRequired)
+		return
+	}
+	if problems := validateDocument(v.specPath, "spec", loadSpecSchema); len(problems) > 0 {
+		v.add(problems...)
+		return
+	}
+	spec, err := readSpec(v.specPath)
+	if err != nil {
+		return
+	}
+	v.lintSpec(spec)
+	v.addErr(checkSchemaVersion("spec", spec.Schema, v.version))
+}
+
+// checkConf schema-validates the conf when one is resolved, then guards its $schema version. The
+// conf is optional — an empty path is skipped.
+func (v *Validator) checkConf() {
+	if v.confPath == "" {
+		return
+	}
+	if problems := validateDocument(v.confPath, "conf", loadConfSchema); len(problems) > 0 {
+		v.add(problems...)
+		return
+	}
+	if conf, err := readConf(v.confPath); err == nil {
+		v.addErr(checkSchemaVersion("conf", conf.Schema, v.version))
+	}
+}
+
+// lintSpec runs every registered spec lint, in order, accumulating their problems.
+func (v *Validator) lintSpec(spec *Spec) {
+	for _, lint := range specLints {
+		v.add(lint(spec)...)
+	}
+}
+
+func (v *Validator) add(errs ...error) { v.problems = append(v.problems, errs...) }
+
+func (v *Validator) addErr(err error) {
+	if err != nil {
+		v.problems = append(v.problems, err)
+	}
+}
+
+func (v *Validator) stop() bool { return v.fast && len(v.problems) > 0 }
+
+func (v *Validator) result() error {
+	if v.fast && len(v.problems) > 0 {
+		return v.problems[0]
+	}
+	return errors.Join(v.problems...)
+}
+
+// specLints is the ordered set of spec lints run after the spec is schema-valid. Adding a lint is a
+// one-line append here; each stays a pure func(*Spec) []error for isolated testing. The order is
+// observable (collect mode joins problems in order), so keep it stable.
+var specLints = []func(*Spec) []error{
+	lintImportConsistency,
+	lintLocalTimeout,
+	lintFlagGroups,
+	lintFlagDependencies,
+	lintDuplicateFlagIdentifiers,
+	lintSchemaRefs,
+}
+
+// validateOnce runs a single validation pass against an already-resolved conf path (it does NOT
+// re-discover a conf beside the spec — the caller, generate, has already resolved and existence-
+// checked it). It is the internal single-pass seam the codegen path and the tests use.
 func validateOnce(specPath, confPath, failMode, version string) error {
-	fast := resolveFailMode(failMode) == "fast"
-
-	var problems []error
-	if specPath == "" {
-		problems = append(problems, errSpecPathRequired)
-	} else {
-		specProblems := validateDocument(specPath, "spec", loadSpecSchema)
-		problems = append(problems, specProblems...)
-		// The lints and the $schema-version guard run on the decoded spec, so only
-		// attempt them once the document is schema-valid (otherwise the decode is
-		// meaningless and we'd pile errors on an already-broken file).
-		if len(specProblems) == 0 {
-			if spec, err := readSpec(specPath); err == nil {
-				problems = append(problems, lintImportConsistency(spec)...)
-				problems = append(problems, lintLocalTimeout(spec)...)
-				problems = append(problems, lintFlagGroups(spec)...)
-				problems = append(problems, lintFlagDependencies(spec)...)
-				problems = append(problems, lintDuplicateFlagIdentifiers(spec)...)
-				problems = append(problems, lintSchemaRefs(spec)...)
-				if err := checkSchemaVersion("spec", spec.Schema, version); err != nil {
-					problems = append(problems, err)
-				}
-			}
-		}
-	}
-	if fast && len(problems) > 0 {
-		return problems[0]
-	}
-	if confPath != "" {
-		confProblems := validateDocument(confPath, "conf", loadConfSchema)
-		problems = append(problems, confProblems...)
-		if len(confProblems) == 0 {
-			if conf, err := readConf(confPath); err == nil {
-				if err := checkSchemaVersion("conf", conf.Schema, version); err != nil {
-					problems = append(problems, err)
-				}
-			}
-		}
-	}
-	if fast && len(problems) > 0 {
-		return problems[0]
-	}
-
-	return errors.Join(problems...)
+	return NewValidator(specPath, confPath, version).WithFailMode(failMode).pass()
 }
 
 // rotiniSchemaURLRe matches the recognized rotini `$schema` URL form and captures
@@ -186,7 +274,7 @@ func checkSchemaVersion(kind, docSchema, version string) error {
 		return nil
 	}
 	if docVer := m[1]; docVer != want {
-		return &violationError{
+		return &problem{
 			kind: kind,
 			loc:  "$schema",
 			msg:  fmt.Sprintf("targets schema version %s but this rotini is %s — update the $schema version (or your rotini install) so they match", docVer, want),
@@ -217,391 +305,9 @@ func resolveFailMode(failMode string) string {
 	return conf.Validate.Fail
 }
 
-// lintImportConsistency reports any `type:` declared with two or more different
-// `import:` values across the spec — the same type with two backing packages is
-// always a bug. (A wrong-but-consistent import is left to `go build`; this catches
-// the contradictory case at validate time.) One problem per offending type, sorted.
-func lintImportConsistency(spec *Spec) []error {
-	byType := map[string]map[string]bool{}
-	record := func(typ, imp string) {
-		typ, imp = strings.TrimSpace(typ), strings.TrimSpace(imp)
-		if typ == "" || imp == "" {
-			return
-		}
-		if byType[typ] == nil {
-			byType[typ] = map[string]bool{}
-		}
-		byType[typ][imp] = true
-	}
-	feedInput := func(s *InputSchema) {
-		if s != nil {
-			walkSchemaImports(s.BaseSchema, record)
-		}
-	}
-	var walkCmd func(c *Command)
-	walkCmd = func(c *Command) {
-		if c.Inputs != nil {
-			for i := range c.Inputs.Flags {
-				feedInput(c.Inputs.Flags[i].Schema)
-			}
-			for i := range c.Inputs.Arguments {
-				feedInput(c.Inputs.Arguments[i].Schema)
-			}
-			for i := range c.Inputs.Env {
-				feedInput(c.Inputs.Env[i].Schema)
-			}
-			for i := range c.Inputs.Config {
-				feedInput(c.Inputs.Config[i].Schema)
-			}
-			if c.Inputs.Stdin != nil {
-				feedInput(c.Inputs.Stdin.Schema)
-			}
-		}
-		if c.Output != nil {
-			walkSchemaImports(c.Output.BaseSchema, record)
-		}
-		for i := range c.Commands {
-			walkCmd(&c.Commands[i])
-		}
-	}
-	walkCmd(&spec.Command)
-	for name := range spec.Schemas {
-		s := spec.Schemas[name]
-		walkSchemaImports(s.BaseSchema, record)
-	}
-
-	var problems []error
-	for typ, imps := range byType {
-		if len(imps) < 2 {
-			continue
-		}
-		list := make([]string, 0, len(imps))
-		for imp := range imps {
-			list = append(list, imp)
-		}
-		sort.Strings(list)
-		problems = append(problems, &violationError{
-			kind: "spec",
-			loc:  "type " + typ,
-			msg:  "declared with conflicting imports (" + strings.Join(list, ", ") + "); a type must have one backing package",
-		})
-	}
-	sort.Slice(problems, func(i, j int) bool { return problems[i].Error() < problems[j].Error() })
-	return problems
-}
-
-// lintLocalTimeout rejects a `timeout` declared on any command. A timeout is a
-// remote-only, host-side bound on a dispatched binary (set per remote_commands entry,
-// honored by the remote runtime); on a local command it is never honored, so accepting
-// it would be a silent lie. One problem per offending command, in tree order. The
-// remote_commands[].timeout is a separate field and is left untouched.
-func lintLocalTimeout(spec *Spec) []error {
-	var problems []error
-	var walk func(c *Command, path string)
-	walk = func(c *Command, path string) {
-		if strings.TrimSpace(c.Timeout) != "" {
-			problems = append(problems, &violationError{
-				kind: "spec",
-				loc:  "command " + path,
-				msg:  "timeout is not supported on a local command — it is a remote-only, host-side bound with no effect here; set it on a remote_commands entry's timeout instead",
-			})
-		}
-		for i := range c.Commands {
-			child := &c.Commands[i]
-			seg := child.Name
-			if seg == "" {
-				seg = child.Ref
-			}
-			walk(child, path+"/"+seg)
-		}
-	}
-	name := spec.Command.Name
-	if name == "" {
-		name = "(root)"
-	}
-	walk(&spec.Command, name)
-	return problems
-}
-
-// lintFlagGroups checks that every flag_groups entry references flags that actually
-// exist on the same command (a typo'd flag name would otherwise silently never match
-// at runtime). One problem per bad reference, in tree order.
-func lintFlagGroups(spec *Spec) []error {
-	var problems []error
-	var walk func(c *Command, path string)
-	walk = func(c *Command, path string) {
-		if c.Inputs != nil && len(c.Inputs.FlagGroups) > 0 {
-			known := map[string]bool{}
-			flagNames := make([]string, 0, len(c.Inputs.Flags))
-			for _, f := range c.Inputs.Flags {
-				known[f.Name] = true
-				flagNames = append(flagNames, f.Name)
-			}
-			for _, g := range c.Inputs.FlagGroups {
-				for _, name := range g.Flags {
-					if !known[name] {
-						msg := fmt.Sprintf("flag_groups (%s) references unknown flag %q — it has no matching entry in this command's flags", g.Kind, name)
-						if s := closestName(name, flagNames); s != "" {
-							msg += fmt.Sprintf("; did you mean %q?", s)
-						}
-						problems = append(problems, &violationError{kind: "spec", loc: "command " + path, msg: msg})
-					}
-				}
-			}
-		}
-		for i := range c.Commands {
-			child := &c.Commands[i]
-			seg := child.Name
-			if seg == "" {
-				seg = child.Ref
-			}
-			walk(child, path+"/"+seg)
-		}
-	}
-	name := spec.Command.Name
-	if name == "" {
-		name = "(root)"
-	}
-	walk(&spec.Command, name)
-	return problems
-}
-
-// lintFlagDependencies rejects a flag_dependencies entry whose When or Requires
-// references a flag the command doesn't declare — the conditional could never fire (or
-// could never be satisfied), masking a typo.
-func lintFlagDependencies(spec *Spec) []error {
-	var problems []error
-	var walk func(c *Command, path string)
-	walk = func(c *Command, path string) {
-		if c.Inputs != nil && len(c.Inputs.FlagDependencies) > 0 {
-			known := map[string]bool{}
-			flagNames := make([]string, 0, len(c.Inputs.Flags))
-			for _, f := range c.Inputs.Flags {
-				known[f.Name] = true
-				flagNames = append(flagNames, f.Name)
-			}
-			report := func(name string) {
-				msg := fmt.Sprintf("flag_dependencies references unknown flag %q — it has no matching entry in this command's flags", name)
-				if s := closestName(name, flagNames); s != "" {
-					msg += fmt.Sprintf("; did you mean %q?", s)
-				}
-				problems = append(problems, &violationError{kind: "spec", loc: "command " + path, msg: msg})
-			}
-			for _, dep := range c.Inputs.FlagDependencies {
-				if !known[dep.When] {
-					report(dep.When)
-				}
-				for _, name := range dep.Requires {
-					if !known[name] {
-						report(name)
-					}
-				}
-			}
-		}
-		for i := range c.Commands {
-			child := &c.Commands[i]
-			seg := child.Name
-			if seg == "" {
-				seg = child.Ref
-			}
-			walk(child, path+"/"+seg)
-		}
-	}
-	name := spec.Command.Name
-	if name == "" {
-		name = "(root)"
-	}
-	walk(&spec.Command, name)
-	return problems
-}
-
-// lintDuplicateFlagIdentifiers rejects a command that declares the same flag identifier
-// twice — a collision the parser would resolve silently (last/first wins), masking the
-// author's intent. Each flag's effective identifiers are its declared ones, or the
-// auto-derived "--<name>" when it declares none, so both explicit ("-o" on two flags)
-// and derived (two flags whose names both yield "--out") collisions are caught.
-func lintDuplicateFlagIdentifiers(spec *Spec) []error {
-	var problems []error
-	var walk func(c *Command, path string)
-	walk = func(c *Command, path string) {
-		if c.Inputs != nil {
-			claimedBy := map[string]string{} // identifier -> the flag name that first claimed it
-			for _, f := range c.Inputs.Flags {
-				ids := f.Identifiers
-				if len(ids) == 0 {
-					ids = []string{"--" + f.Name}
-				}
-				for _, id := range ids {
-					if prev, dup := claimedBy[id]; dup {
-						problems = append(problems, &violationError{
-							kind: "spec",
-							loc:  "command " + path,
-							msg:  fmt.Sprintf("flag identifier %q is declared by both %q and %q", id, prev, f.Name),
-						})
-						continue
-					}
-					claimedBy[id] = f.Name
-				}
-			}
-		}
-		for i := range c.Commands {
-			child := &c.Commands[i]
-			seg := child.Name
-			if seg == "" {
-				seg = child.Ref
-			}
-			walk(child, path+"/"+seg)
-		}
-	}
-	name := spec.Command.Name
-	if name == "" {
-		name = "(root)"
-	}
-	walk(&spec.Command, name)
-	return problems
-}
-
-// lintSchemaRefs rejects an intra-document "$ref": "#/schemas/X" that points to a schema
-// the document doesn't declare — which would otherwise become an "undefined type X"
-// compile error in the generated code instead of a clear spec error. It walks every
-// place a ref can appear (each command's flag/argument/env/config/stdin input schemas and
-// output schema, plus the document-level schemas themselves, recursing into object
-// properties and array items) and offers the closest declared schema name as a suggestion.
-func lintSchemaRefs(spec *Spec) []error {
-	declared := map[string]bool{}
-	names := make([]string, 0, len(spec.Schemas))
-	for name := range spec.Schemas {
-		declared[name] = true
-		names = append(names, name)
-	}
-	var problems []error
-	reported := map[string]bool{}
-	checkAt := func(loc string) func(BaseSchema) {
-		return func(b BaseSchema) {
-			name := refTypeName(b.Ref)
-			if name == "" || declared[name] {
-				return
-			}
-			if key := name + "\x00" + loc; reported[key] {
-				return
-			} else {
-				reported[key] = true
-			}
-			msg := fmt.Sprintf("$ref %q points to an undeclared schema (no %q under the document-level \"schemas\")", b.Ref, name)
-			if s := closestName(name, names); s != "" {
-				msg += fmt.Sprintf("; did you mean %q?", s)
-			}
-			problems = append(problems, &violationError{kind: "spec", loc: loc, msg: msg})
-		}
-	}
-	feed := func(s *InputSchema, loc string) {
-		if s != nil {
-			walkSchemaRefs(s.BaseSchema, checkAt(loc))
-		}
-	}
-	var walkCmd func(c *Command, path string)
-	walkCmd = func(c *Command, path string) {
-		if c.Inputs != nil {
-			for i := range c.Inputs.Flags {
-				feed(c.Inputs.Flags[i].Schema, "command "+path+" flag "+c.Inputs.Flags[i].Name)
-			}
-			for i := range c.Inputs.Arguments {
-				feed(c.Inputs.Arguments[i].Schema, "command "+path+" argument "+c.Inputs.Arguments[i].Name)
-			}
-			for i := range c.Inputs.Env {
-				feed(c.Inputs.Env[i].Schema, "command "+path+" env "+c.Inputs.Env[i].Name)
-			}
-			for i := range c.Inputs.Config {
-				feed(c.Inputs.Config[i].Schema, "command "+path+" config "+c.Inputs.Config[i].Name)
-			}
-			if c.Inputs.Stdin != nil {
-				feed(c.Inputs.Stdin.Schema, "command "+path+" stdin")
-			}
-		}
-		if c.Output != nil {
-			walkSchemaRefs(c.Output.BaseSchema, checkAt("command "+path+" output"))
-		}
-		for i := range c.Commands {
-			child := &c.Commands[i]
-			seg := child.Name
-			if seg == "" {
-				seg = child.Ref
-			}
-			walkCmd(child, path+"/"+seg)
-		}
-	}
-	rootName := spec.Command.Name
-	if rootName == "" {
-		rootName = "(root)"
-	}
-	walkCmd(&spec.Command, rootName)
-	for name := range spec.Schemas {
-		s := spec.Schemas[name]
-		walkSchemaRefs(s.BaseSchema, checkAt("schema "+name))
-	}
-	return problems
-}
-
-// walkSchemaRefs invokes visit for a schema and recurses into its object properties and
-// array items, so a "$ref" at any nesting depth is seen.
-func walkSchemaRefs(b BaseSchema, visit func(BaseSchema)) {
-	visit(b)
-	for _, p := range b.Properties {
-		walkSchemaRefs(p.BaseSchema, visit)
-	}
-	if b.Items != nil {
-		walkSchemaRefs(b.Items.BaseSchema, visit)
-	}
-}
-
-// levenshtein is the edit distance between a and b (Wagner–Fischer).
-func levenshtein(a, b string) int {
-	prev := make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		cur := make([]int, len(b)+1)
-		cur[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
-		}
-		prev = cur
-	}
-	return prev[len(b)]
-}
-
-// closestName returns the candidate within edit distance 2 of target (the nearest typo
-// fix), or "" when none is close enough.
-func closestName(target string, candidates []string) string {
-	best, bestDist := "", 3
-	for _, c := range candidates {
-		if d := levenshtein(target, c); d < bestDist {
-			best, bestDist = c, d
-		}
-	}
-	return best
-}
-
-// walkSchemaImports records (type, import) for a schema and recurses into its
-// object properties and array items.
-func walkSchemaImports(b BaseSchema, record func(typ, imp string)) {
-	record(b.Type, b.Import)
-	for _, p := range b.Properties {
-		walkSchemaImports(p.BaseSchema, record)
-	}
-	if b.Items != nil {
-		walkSchemaImports(b.Items.BaseSchema, record)
-	}
-}
-
 // validateDocument reads the document at path, compiles its schema, and
 // returns one error per problem: a read/convert failure, a schema-compile
-// failure, or one [*violationError] per schema violation. It returns nil
+// failure, or one [*problem] per schema violation. It returns nil
 // when the document is valid.
 func validateDocument(path, kind string, loadSchema func() (*jsonschema.Schema, error)) []error {
 	instance, err := toJSON(path)
@@ -627,7 +333,7 @@ func validateDocument(path, kind string, loadSchema func() (*jsonschema.Schema, 
 		if loc == "" {
 			loc = "/"
 		}
-		problems = append(problems, &violationError{kind: kind, loc: loc, msg: ve.Message})
+		problems = append(problems, &problem{kind: kind, loc: loc, msg: ve.Message})
 	}
 	return problems
 }

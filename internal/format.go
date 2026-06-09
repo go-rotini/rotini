@@ -140,6 +140,14 @@ func readSpec(path string) (*Spec, error) {
 	return readFile[Spec](path)
 }
 
+// ReadSpec is the exported read seam the codegen package's Loader uses to decode a
+// spec across the package boundary; internal's own code uses the unexported
+// readSpec. (Migration bridge: when the read path moves fully into codegen this
+// goes away.)
+func ReadSpec(path string) (*Spec, error) {
+	return readSpec(path)
+}
+
 // writeSpec encodes s and writes it to path, selecting the serialization from
 // the file extension.
 func writeSpec(path string, s *Spec) error {
@@ -151,6 +159,14 @@ func writeSpec(path string, s *Spec) error {
 // validate the document against the conf schema; use [Validate] for that.
 func readConf(path string) (*Conf, error) {
 	return readFile[Conf](path)
+}
+
+// ReadConf is the exported read seam the codegen package's Loader uses to decode a
+// conf across the package boundary; internal's own code uses the unexported
+// readConf. (Migration bridge: when the read path moves fully into codegen this
+// goes away.)
+func ReadConf(path string) (*Conf, error) {
+	return readConf(path)
 }
 
 // writeConf encodes c and writes it to path, selecting the serialization from
