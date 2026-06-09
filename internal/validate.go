@@ -5,27 +5,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-rotini/jsonschema"
-	"github.com/go-rotini/rotini"
-)
-
-// errSpecPathRequired is reported by [Validate] when no spec-file path is
-// supplied.
-var errSpecPathRequired = errors.New("spec file path is required")
-
-// The embedded rotini JSON Schemas are immutable, so each is compiled at
-// most once per process and the result cached.
-var (
-	specSchemaOnce sync.Once
-	specSchema     *jsonschema.Schema
-	errSpecSchema  error
-
-	confSchemaOnce sync.Once
-	confSchema     *jsonschema.Schema
-	errConfSchema  error
 )
 
 // problem is a single schema-validation failure: the location of the
@@ -39,34 +21,6 @@ type problem struct {
 
 func (e *problem) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
-}
-
-// loadSpecSchema compiles the embedded spec JSON Schema once and returns
-// the cached result.
-func loadSpecSchema() (*jsonschema.Schema, error) {
-	specSchemaOnce.Do(func() {
-		s, err := jsonschema.Compile(rotini.SchemaSpec)
-		if err != nil {
-			errSpecSchema = fmt.Errorf("compile spec schema: %w", err)
-			return
-		}
-		specSchema = s
-	})
-	return specSchema, errSpecSchema
-}
-
-// loadConfSchema compiles the embedded conf JSON Schema once and returns
-// the cached result.
-func loadConfSchema() (*jsonschema.Schema, error) {
-	confSchemaOnce.Do(func() {
-		s, err := jsonschema.Compile(rotini.SchemaConf)
-		if err != nil {
-			errConfSchema = fmt.Errorf("compile conf schema: %w", err)
-			return
-		}
-		confSchema = s
-	})
-	return confSchema, errConfSchema
 }
 
 // ValidateFn is the signature of [Validate]. A command handler can bind it under a registry
