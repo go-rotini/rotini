@@ -17,31 +17,8 @@ var specSchemaBytes []byte
 //go:embed schema-conf.json
 var confSchemaBytes []byte
 
-// The embedded rotini JSON Schemas are immutable, so each is compiled at most once
-// per process and the result cached.
-var (
-	specSchemaOnce sync.Once
-	specSchema     *jsonschema.Schema
-	errSpecSchema  error
-
-	confSchemaOnce sync.Once
-	confSchema     *jsonschema.Schema
-	errConfSchema  error
-)
-
 // loadSpecSchema compiles the embedded spec JSON Schema once and returns the cached
 // result.
-func loadSpecSchema() (*jsonschema.Schema, error) {
-	specSchemaOnce.Do(func() {
-		s, err := jsonschema.Compile(specSchemaBytes)
-		if err != nil {
-			errSpecSchema = fmt.Errorf("compile spec schema: %w", err)
-			return
-		}
-		specSchema = s
-	})
-	return specSchema, errSpecSchema
-}
 
 // loadConfSchema compiles the embedded conf JSON Schema once and returns the cached
 // result.
@@ -155,9 +132,41 @@ func (l *Loader) LoadConf(spec Input[Spec], confPath string, overrides Overrides
 // guard, and drives the pipeline stages over them — Validate, Lint, Generate —
 // plus Initialize, which scaffolds a new rotini-powered CLI.
 type Engine struct {
-	spec    Input[Spec] // the loaded spec
-	conf    Input[Conf] // the loaded conf; zero value when no conf was found
-	version string      // the running binary's version string, for the $schema guard
+	specSchemaOnce sync.Once
+	specSchema     *jsonschema.Schema
+	errSpecSchema  error
+	spec           *Spec
+
+	confSchemaOnce sync.Once
+	confSchema     *jsonschema.Schema
+	errConfSchema  error
+	conf           *Conf
+
+	version string // the running binary's version string, for the $schema guard
+}
+
+func (e *Engine) loadSpecSchema() (*jsonschema.Schema, error) {
+	e.specSchemaOnce.Do(func() {
+		schema, err := jsonschema.Compile(specSchemaBytes)
+		if err != nil {
+			e.errSpecSchema = fmt.Errorf("compile spec schema: %w", err)
+			return
+		}
+		e.specSchema = schema
+	})
+	return e.specSchema, e.errSpecSchema
+}
+
+func (e *Engine) loadConfSchema() (*jsonschema.Schema, error) {
+	e.confSchemaOnce.Do(func() {
+		schema, err := jsonschema.Compile(specSchemaBytes)
+		if err != nil {
+			e.errConfSchema = fmt.Errorf("compile conf schema: %w", err)
+			return
+		}
+		e.confSchema = schema
+	})
+	return e.confSchema, e.errConfSchema
 }
 
 // Validate schema-validates the loaded spec and conf against the embedded rotini
