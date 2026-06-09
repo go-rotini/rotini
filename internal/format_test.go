@@ -95,7 +95,7 @@ func TestReadSpec_formatsAndTags(t *testing.T) {
 }
 
 func TestUnsupportedFormat(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "spec.toml")
+	path := filepath.Join(t.TempDir(), "spec.xml")
 	if _, err := readSpec(path); !errors.Is(err, errUnsupportedFormat) {
 		t.Errorf("readSpec err = %v, want errUnsupportedFormat", err)
 	}

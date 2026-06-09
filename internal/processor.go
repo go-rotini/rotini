@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/go-rotini/fs"
 	"github.com/go-rotini/jsonc"
@@ -178,8 +179,17 @@ func writeConf(path string, c *Conf) error {
 	return writeFile(path, c)
 }
 
+// errSpecPathRequired is reported when no spec-file path is supplied and none of
+// the fallback locations resolve to a spec.
+var errSpecPathRequired = errors.New("spec file path is required")
+
+// processor owns every rotini process end-to-end — schema-file loading, end-user
+// spec/conf resolution + reading, validation, generation, and initialization. One
+// value carries the compiled schemas and the decoded documents through a run.
 type processor struct {
-	version string
+	version  string // running binary's version string, for the $schema guard
+	specPath string // explicit spec path ("" → resolved from the fallback locations)
+	confPath string // explicit conf path ("" → resolved beside the spec, else defaults)
 
 	schemaSpec *jsonschema.Schema
 	spec       *Spec
@@ -194,44 +204,206 @@ var schemaSpecBytes []byte
 //go:embed schema-conf.json
 var schemaConfBytes []byte
 
-func NewProcessor(specFilePath string, confFilePath string, version string) (*processor, error) {
-	schemaSpec, err := jsonschema.Compile(schemaSpecBytes)
-	if err != nil {
-		return nil, fmt.Errorf("compile spec schema: %w", err)
-	}
+// The embedded rotini JSON Schemas are immutable, so each is compiled at most once
+// per process and the result cached. NewProcessor fills a processor's schema fields
+// from these; the standalone Validator (validate.go) shares the same caches until it
+// folds into the processor's validator phase.
+var (
+	specSchemaOnce sync.Once
+	specSchema     *jsonschema.Schema
+	specSchemaErr  error
 
-	schemaConf, err := jsonschema.Compile(schemaConfBytes)
-	if err != nil {
-		return nil, fmt.Errorf("compile conf schema: %w", err)
-	}
+	confSchemaOnce sync.Once
+	confSchema     *jsonschema.Schema
+	confSchemaErr  error
+)
 
+// compileSchema compiles a rotini JSON Schema, tagging a failure with the schema's
+// name ("spec" or "conf").
+func compileSchema(name string, schemaBytes []byte) (*jsonschema.Schema, error) {
+	schema, err := jsonschema.Compile(schemaBytes)
+	if err != nil {
+		return nil, fmt.Errorf("compile %s schema: %w", name, err)
+	}
+	return schema, nil
+}
+
+// loadSpecSchema compiles the embedded spec schema once and returns the cached result.
+func loadSpecSchema() (*jsonschema.Schema, error) {
+	specSchemaOnce.Do(func() { specSchema, specSchemaErr = compileSchema("spec", schemaSpecBytes) })
+	return specSchema, specSchemaErr
+}
+
+// loadConfSchema compiles the embedded conf schema once and returns the cached result.
+func loadConfSchema() (*jsonschema.Schema, error) {
+	confSchemaOnce.Do(func() { confSchema, confSchemaErr = compileSchema("conf", schemaConfBytes) })
+	return confSchema, confSchemaErr
+}
+
+// NewProcessor builds a processor for the spec at specFilePath and the conf at
+// confFilePath (either may be empty — the loader phase resolves them against the
+// .rotini.{spec,conf}.* fallback locations beside the spec), tagged with version
+// (the running binary's version string for the $schema guard; "" → guard skipped).
+// It compiles both embedded rotini JSON Schemas up front.
+func NewProcessor(specFilePath, confFilePath, version string) (*processor, error) {
+	schemaSpec, err := loadSpecSchema()
+	if err != nil {
+		return nil, err
+	}
+	schemaConf, err := loadConfSchema()
+	if err != nil {
+		return nil, err
+	}
 	return &processor{
+		version:    version,
+		specPath:   specFilePath,
+		confPath:   confFilePath,
 		schemaSpec: schemaSpec,
 		schemaConf: schemaConf,
 	}, nil
 }
 
-func (*processor) compileSchema(schemaType string, schemaBytes []byte) (*jsonschema.Schema, error) {
-	schema, err := jsonschema.Compile(schemaBytes)
-	if err != nil {
-		return nil, fmt.Errorf("compile %s schema: %w", schemaType, err)
+// getFallbackPaths returns the default discovery locations for a spec or conf file
+// (fileType is "spec" or "conf") within dir, in extension-precedence order. The
+// loader passes dir = the spec's directory, so the conf is discovered beside the spec.
+func getFallbackPaths(dir, fileType string) []string {
+	exts := []string{"yaml", "toml", "json", "jsonc"}
+	paths := make([]string, len(exts))
+	for i, ext := range exts {
+		paths[i] = filepath.Join(dir, fmt.Sprintf(".rotini.%s.%s", fileType, ext))
 	}
-	return schema, nil
+	return paths
 }
 
-func getFallbackPaths(fileType string) ([]string, error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return nil, err
+// firstExisting returns the first path in paths that exists on disk, or "" if none do.
+func firstExisting(paths []string) string {
+	for _, p := range paths {
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+	return ""
+}
+
+// load resolves and reads the end-user spec and conf, decoding them onto the
+// processor. The spec is loaded first because conf resolution looks beside it.
+func (p *processor) load() error {
+	if err := p.loadSpec(); err != nil {
+		return err
+	}
+	return p.loadConf()
+}
+
+// loadSpec resolves the spec path — the explicit path passed to NewProcessor, else
+// the first .rotini.spec.* in the working directory — then reads and decodes it onto
+// the processor. The spec is required: no explicit path and no fallback match is an
+// error.
+func (p *processor) loadSpec() error {
+	path := p.specPath
+	if path == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		path = firstExisting(getFallbackPaths(cwd, "spec"))
+	}
+	if path == "" {
+		return errSpecPathRequired
 	}
 
-	// fileType = spec or conf
-	return []string{
-		fmt.Sprintf("%s/.rotini.%s.yaml", dir, fileType),
-		fmt.Sprintf("%s/.rotini.%s.toml", dir, fileType),
-		fmt.Sprintf("%s/.rotini.%s.json", dir, fileType),
-		fmt.Sprintf("%s/.rotini.%s.jsonc", dir, fileType),
-	}, nil
+	spec, err := readSpec(path)
+	if err != nil {
+		return err
+	}
+	p.specPath = path
+	p.spec = spec
+	return nil
+}
+
+// loadConf resolves the conf path — the explicit path passed to NewProcessor, else
+// the first .rotini.conf.* beside the resolved spec — then reads and decodes it onto
+// the processor. The conf is optional: no explicit path and no fallback match yields
+// a default Conf. An explicit path that does not exist is a read error.
+func (p *processor) loadConf() error {
+	path := p.confPath
+	if path == "" {
+		path = firstExisting(getFallbackPaths(filepath.Dir(p.specPath), "conf"))
+	}
+	if path == "" {
+		p.conf = &Conf{} // optional → default shape
+		return nil
+	}
+
+	conf, err := readConf(path)
+	if err != nil {
+		return err
+	}
+	p.confPath = path
+	p.conf = conf
+	return nil
+}
+
+// validate runs the validator phase over the loaded spec and conf (call load
+// first): it schema-validates each document on its raw JSON instance, enforces the
+// $schema↔version guard, and runs the rotini-specific rules the JSON Schema can't
+// express. Problems are aggregated via errors.Join, or — when the loaded conf
+// selects fast mode (validate.fail = "fast") — the first problem is returned. It
+// returns nil when the spec and conf are valid.
+func (p *processor) validate() error {
+	fast := p.failFast()
+
+	problems := p.validateSpec()
+	if fast && len(problems) > 0 {
+		return problems[0]
+	}
+
+	problems = append(problems, p.validateConf()...)
+	if fast && len(problems) > 0 {
+		return problems[0]
+	}
+	return errors.Join(problems...)
+}
+
+// validateSpec schema-validates the spec on its raw JSON instance, then — only when
+// it is schema-valid — runs the rotini-specific spec rules and the $schema version
+// guard. A schema violation short-circuits the rules: linting a malformed document
+// is meaningless and would pile errors onto an already-broken file.
+func (p *processor) validateSpec() []error {
+	if problems := validateDocument(p.specPath, "spec", p.schemaSpec); len(problems) > 0 {
+		return problems
+	}
+
+	var problems []error
+	for _, rule := range specLints {
+		problems = append(problems, rule(p.spec)...)
+	}
+	if err := checkSchemaVersion("spec", p.spec.Schema, p.version); err != nil {
+		problems = append(problems, err)
+	}
+	return problems
+}
+
+// validateConf schema-validates the conf on its raw JSON instance when one was
+// resolved, then guards its $schema version. The conf is optional: when none was
+// found (a default Conf, empty confPath) there is nothing to validate. The conf-side
+// rotini-specific rules are a seam — none exist yet.
+func (p *processor) validateConf() []error {
+	if p.confPath == "" {
+		return nil
+	}
+	if problems := validateDocument(p.confPath, "conf", p.schemaConf); len(problems) > 0 {
+		return problems
+	}
+	if err := checkSchemaVersion("conf", p.conf.Schema, p.version); err != nil {
+		return []error{err}
+	}
+	return nil
+}
+
+// failFast reports whether the loaded conf selects fast failure reporting
+// (validate.fail = "fast"); otherwise problems are collected (the default).
+func (p *processor) failFast() bool {
+	return p.conf != nil && p.conf.Validate != nil && p.conf.Validate.Fail == "fast"
 }
 
 /*
@@ -260,5 +432,5 @@ func getFallbackPaths(fileType string) ([]string, error) {
  * Initializer
  * 1. scaffolds based on a "recipe" type
  *   a. "flat" = go.mod, go.sum, main.go, commands handler files, codegen files all in main package
- *   b. "cmd"
+ *   b. "cmd" = ./cmd/<root command name>/main.go, ./internal/<root command name>/clipkg (see conf file)
  */

@@ -135,7 +135,12 @@ func (v *Validator) checkSpec() {
 		v.add(errSpecPathRequired)
 		return
 	}
-	if problems := validateDocument(v.specPath, "spec", loadSpecSchema); len(problems) > 0 {
+	schema, err := loadSpecSchema()
+	if err != nil {
+		v.add(err)
+		return
+	}
+	if problems := validateDocument(v.specPath, "spec", schema); len(problems) > 0 {
 		v.add(problems...)
 		return
 	}
@@ -153,7 +158,12 @@ func (v *Validator) checkConf() {
 	if v.confPath == "" {
 		return
 	}
-	if problems := validateDocument(v.confPath, "conf", loadConfSchema); len(problems) > 0 {
+	schema, err := loadConfSchema()
+	if err != nil {
+		v.add(err)
+		return
+	}
+	if problems := validateDocument(v.confPath, "conf", schema); len(problems) > 0 {
 		v.add(problems...)
 		return
 	}
@@ -259,18 +269,14 @@ func resolveFailMode(failMode string) string {
 	return conf.Validate.Fail
 }
 
-// validateDocument reads the document at path, compiles its schema, and
-// returns one error per problem: a read/convert failure, a schema-compile
-// failure, or one [*problem] per schema violation. It returns nil
-// when the document is valid.
-func validateDocument(path, kind string, loadSchema func() (*jsonschema.Schema, error)) []error {
+// validateDocument reads the document at path and validates its raw JSON instance
+// (so schema rules like additionalProperties:false see unknown fields) against the
+// given compiled schema, returning one error per problem: a read/convert failure,
+// or one [*problem] per schema violation. It returns nil when the document is valid.
+func validateDocument(path, kind string, schema *jsonschema.Schema) []error {
 	instance, err := toJSON(path)
 	if err != nil {
 		return []error{fmt.Errorf("%s file: %w", kind, err)}
-	}
-	schema, err := loadSchema()
-	if err != nil {
-		return []error{err}
 	}
 	result, err := schema.Validate(instance)
 	if err != nil {

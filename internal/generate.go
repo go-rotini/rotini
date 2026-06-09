@@ -85,14 +85,6 @@ func resolveConfPath(specPath, confPath string) string {
 	return ""
 }
 
-// ResolveConfPath is the exported resolution seam the codegen package's Loader uses
-// to locate the conf across the package boundary — returning confPath when given,
-// otherwise the conf discovered beside the spec, or "" when none is found.
-// (Migration bridge: when resolution moves fully into codegen this goes away.)
-func ResolveConfPath(specPath, confPath string) string {
-	return resolveConfPath(specPath, confPath)
-}
-
 // generateOnce runs a single generation pass against an already-resolved conf
 // path (which may be empty or point at a missing file, meaning "use defaults").
 func generateOnce(specPath, confPath, version string) error {
