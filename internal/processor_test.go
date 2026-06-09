@@ -2,6 +2,7 @@ package internal
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -230,5 +231,98 @@ func TestProcessorValidate_failMode(t *testing.T) {
 	}
 	if n := strings.Count(fast.Error(), "\n") + 1; n != 1 {
 		t.Errorf("fast should report a single problem, got %d:\n%v", n, fast)
+	}
+}
+
+// TestProcessorGenerate_matchesCompanion is the byte-stability guard for step 4: the
+// processor's generate phase, driven from the committed companion spec, must
+// reproduce the committed companion files byte-for-byte — proving the wrap around
+// generateAll changed no output.
+func TestProcessorGenerate_matchesCompanion(t *testing.T) {
+	repoRoot := repoRoot(t)
+	specPath := filepath.Join(repoRoot, "cmd", "rotini", ".rotini.spec.yaml")
+
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	confPath := filepath.Join(tmp, ".rotini.conf.yaml")
+	writeTestFile(t, confPath, companionConf)
+
+	t.Chdir(tmp)
+	p, err := NewProcessor(specPath, confPath, "")
+	if err != nil {
+		t.Fatalf("NewProcessor: %v", err)
+	}
+	if err := p.load(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := p.generate(); err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	// The always-(re)generated combined framework + rollup file is reproduced
+	// byte-for-byte.
+	assertGoEqual(t,
+		filepath.Join(tmp, "cmd/rotini/cli/rotini.gen.go"),
+		filepath.Join(repoRoot, "cmd/rotini/cli/rotini.gen.go"))
+
+	// The companion's generated help feature files are reproduced byte-for-byte
+	// (only help is enabled in the committed companion conf).
+	featRel := "cmd/rotini/cli/embed/help"
+	entries, err := os.ReadDir(filepath.Join(repoRoot, featRel))
+	if err != nil {
+		t.Fatalf("read companion help dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		got := readFileString(t, filepath.Join(tmp, featRel, e.Name()))
+		want := readFileString(t, filepath.Join(repoRoot, featRel, e.Name()))
+		if got != want {
+			t.Errorf("companion help/%s not reproduced via processor:\n--- generated ---\n%s\n--- committed ---\n%s", e.Name(), got, want)
+		}
+	}
+}
+
+// TestProcessorInitialize_cmdRecipe confirms the cmd recipe (and the empty default)
+// scaffold the established cmd/<name>/ layout — delegating to the proven path.
+func TestProcessorInitialize_cmdRecipe(t *testing.T) {
+	tmp := initTestModule(t)
+	p, err := NewProcessor("", "", "")
+	if err != nil {
+		t.Fatalf("NewProcessor: %v", err)
+	}
+
+	// Explicit cmd recipe.
+	if err := p.initialize("mycli", "yaml", false, "", recipeCmd); err != nil {
+		t.Fatalf("initialize(cmd): %v", err)
+	}
+	dir := filepath.Join(tmp, "cmd", "mycli")
+	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli")
+	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: cmd/mycli/cli")
+	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate rotini generate")
+	mustContain(t, filepath.Join(dir, "cli", "rotini.gen.go"), "package cli", "var Program = NewProgram(&handlers{})")
+
+	// The empty recipe defaults to cmd.
+	if err := p.initialize("other", "yaml", false, "", ""); err != nil {
+		t.Fatalf("initialize(default): %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(tmp, "cmd", "other", "main.go")); statErr != nil {
+		t.Errorf("empty recipe did not scaffold the cmd layout: %v", statErr)
+	}
+}
+
+// TestProcessorInitialize_recipeErrors confirms the flat recipe is a flagged seam
+// and an unknown recipe is rejected — both before touching the filesystem.
+func TestProcessorInitialize_recipeErrors(t *testing.T) {
+	p, err := NewProcessor("", "", "")
+	if err != nil {
+		t.Fatalf("NewProcessor: %v", err)
+	}
+	if err := p.initialize("mycli", "yaml", false, "", recipeFlat); err == nil || !strings.Contains(err.Error(), "not yet supported") {
+		t.Errorf("initialize(flat) = %v, want a 'not yet supported' error", err)
+	}
+	if err := p.initialize("mycli", "yaml", false, "", recipe("bogus")); err == nil || !strings.Contains(err.Error(), "unknown init recipe") {
+		t.Errorf("initialize(bogus) = %v, want an 'unknown recipe' error", err)
 	}
 }

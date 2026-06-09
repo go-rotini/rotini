@@ -406,6 +406,53 @@ func (p *processor) failFast() bool {
 	return p.conf != nil && p.conf.Validate != nil && p.conf.Validate.Fail == "fast"
 }
 
+// generate runs the generator phase over the loaded spec and conf. Call load — and,
+// through the workflow, validate — first: invalid input must never reach codegen. It
+// applies the built-in conf defaults (the cmd/<root>/cli package paths, gen file
+// names, and feature dirs, keyed off the spec's root command name), then emits the
+// program: the cli and cligen packages plus the enabled doc features
+// (help/man/markdown/completion).
+func (p *processor) generate() error {
+	applyConfDefaults(p.conf, p.spec.Command.Name)
+	return generateAll(p.spec, p.conf, p.specPath)
+}
+
+// recipe selects the project layout the initializer scaffolds.
+type recipe string
+
+const (
+	// recipeCmd scaffolds the CLI under cmd/<name>/ with its generated package
+	// beside it: cmd/<name>/{.rotini.spec,.rotini.conf,main.go} plus
+	// cmd/<name>/cli/{rotini.gen.go, per-command stubs}. The established layout and
+	// the default.
+	recipeCmd recipe = "cmd"
+	// recipeFlat scaffolds everything into the current module's main (root) package
+	// — main.go, the handler files, and the codegen together (an existing module; it
+	// does not bootstrap go.mod/go.sum). Not yet implemented.
+	recipeFlat recipe = "flat"
+)
+
+// initialize scaffolds a new rotini CLI named name using the given recipe, then
+// generates it. format selects the spec/conf serialization (yaml/jsonc/json; empty →
+// the module conf's initialize.format, then yaml); force overwrites the create-once
+// files (spec/conf/main.go); into, when set, registers the new CLI as a $ref
+// sub-command of an existing one. The running binary's version (p.version) is stamped
+// into the scaffolded $schema URLs.
+//
+// For now the cmd recipe (and the empty default) delegate to the established
+// scaffolding path so the output is unchanged; the flat recipe is a seam to be built
+// once its layout is settled.
+func (p *processor) initialize(name, format string, force bool, into string, rcp recipe) error {
+	switch rcp {
+	case recipeCmd, "":
+		return Initialize(name, format, force, into, p.version)
+	case recipeFlat:
+		return fmt.Errorf("the %q init recipe is not yet supported", recipeFlat)
+	default:
+		return fmt.Errorf("unknown init recipe %q (want %q or %q)", rcp, recipeCmd, recipeFlat)
+	}
+}
+
 /*
  * Processor functionality:
  * Loader
