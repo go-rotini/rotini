@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-rotini/fs"
 	"github.com/go-rotini/jsonc"
+	"github.com/go-rotini/toml"
 	"github.com/go-rotini/yaml"
 )
 
@@ -21,6 +22,7 @@ const (
 	formatYAML
 	formatJSON
 	formatJSONC
+	formatTOML
 )
 
 // errUnsupportedFormat is returned for a spec or conf path whose extension
@@ -37,6 +39,8 @@ func detectFormat(path string) fileFormat {
 		return formatJSON
 	case ".jsonc":
 		return formatJSONC
+	case ".toml":
+		return formatTOML
 	default:
 		return formatUnknown
 	}
@@ -63,6 +67,8 @@ func readFile[T any](path string) (*T, error) {
 		err = json.Unmarshal(data, out)
 	case formatJSONC:
 		err = jsonc.Unmarshal(data, out)
+	case formatTOML:
+		err = toml.Unmarshal(data, out)
 	default:
 		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
@@ -86,6 +92,8 @@ func writeFile[T any](path string, v *T) error {
 	case formatJSON, formatJSONC:
 		data, err = json.MarshalIndent(v, "", "  ")
 		data = append(data, '\n')
+	case formatTOML:
+		data, err = toml.Marshal(v)
 	default:
 		return fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
@@ -128,6 +136,12 @@ func toJSON(path string) ([]byte, error) {
 			return nil, fmt.Errorf("convert %s to json: %w", path, err)
 		}
 		return out, nil
+	case formatTOML:
+		out, err := toml.ToJSON(data)
+		if err != nil {
+			return nil, fmt.Errorf("convert %s to json: %w", path, err)
+		}
+		return out, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
@@ -136,16 +150,12 @@ func toJSON(path string) ([]byte, error) {
 // readSpec reads and decodes the rotini spec file at path. The serialization
 // (YAML, JSON, or JSONC) is selected from the file extension. It does not
 // validate the document against the spec schema; use [Validate] for that.
-func readSpec(path string) (*Spec, error) {
-	return readFile[Spec](path)
-}
-
 // ReadSpec is the exported read seam the codegen package's Loader uses to decode a
 // spec across the package boundary; internal's own code uses the unexported
 // readSpec. (Migration bridge: when the read path moves fully into codegen this
 // goes away.)
-func ReadSpec(path string) (*Spec, error) {
-	return readSpec(path)
+func readSpec(path string) (*Spec, error) {
+	return readFile[Spec](path)
 }
 
 // writeSpec encodes s and writes it to path, selecting the serialization from
@@ -157,16 +167,12 @@ func writeSpec(path string, s *Spec) error {
 // readConf reads and decodes the rotini conf file at path. The serialization
 // (YAML, JSON, or JSONC) is selected from the file extension. It does not
 // validate the document against the conf schema; use [Validate] for that.
-func readConf(path string) (*Conf, error) {
-	return readFile[Conf](path)
-}
-
 // ReadConf is the exported read seam the codegen package's Loader uses to decode a
 // conf across the package boundary; internal's own code uses the unexported
 // readConf. (Migration bridge: when the read path moves fully into codegen this
 // goes away.)
-func ReadConf(path string) (*Conf, error) {
-	return readConf(path)
+func readConf(path string) (*Conf, error) {
+	return readFile[Conf](path)
 }
 
 // writeConf encodes c and writes it to path, selecting the serialization from

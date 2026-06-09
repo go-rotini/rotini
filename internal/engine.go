@@ -1,38 +1,14 @@
 package internal
 
 import (
+	_ "embed"
 	"errors"
 	"fmt"
 	"os"
 	"sync"
 
 	"github.com/go-rotini/jsonschema"
-
-	_ "embed"
 )
-
-//go:embed schema-spec.json
-var specSchemaBytes []byte
-
-//go:embed schema-conf.json
-var confSchemaBytes []byte
-
-// loadSpecSchema compiles the embedded spec JSON Schema once and returns the cached
-// result.
-
-// loadConfSchema compiles the embedded conf JSON Schema once and returns the cached
-// result.
-func loadConfSchema() (*jsonschema.Schema, error) {
-	confSchemaOnce.Do(func() {
-		s, err := jsonschema.Compile(confSchemaBytes)
-		if err != nil {
-			errConfSchema = fmt.Errorf("compile conf schema: %w", err)
-			return
-		}
-		confSchema = s
-	})
-	return confSchema, errConfSchema
-}
 
 // errSpecPathRequired is reported when no spec-file path is supplied.
 var errSpecPathRequired = errors.New("spec file path is required")
@@ -83,7 +59,7 @@ func (l *Loader) LoadSpec(path string) (Input[Spec], error) {
 	if path == "" {
 		return Input[Spec]{}, errSpecPathRequired
 	}
-	spec, err := ReadSpec(path)
+	spec, err := readSpec(path)
 	if err != nil {
 		return Input[Spec]{}, err
 	}
@@ -104,7 +80,7 @@ func (l *Loader) LoadConf(spec Input[Spec], confPath string, overrides Overrides
 	conf := &Conf{} // default when no conf is present
 	if confPath != "" {
 		if _, statErr := os.Stat(confPath); statErr == nil {
-			c, err := ReadConf(confPath)
+			c, err := readConf(confPath)
 			if err != nil {
 				return Input[Conf]{}, err
 			}
@@ -145,28 +121,89 @@ type Engine struct {
 	version string // the running binary's version string, for the $schema guard
 }
 
-func (e *Engine) loadSpecSchema() (*jsonschema.Schema, error) {
-	e.specSchemaOnce.Do(func() {
-		schema, err := jsonschema.Compile(specSchemaBytes)
-		if err != nil {
-			e.errSpecSchema = fmt.Errorf("compile spec schema: %w", err)
-			return
-		}
-		e.specSchema = schema
-	})
-	return e.specSchema, e.errSpecSchema
+type schemaLoader struct {
+	version string // the running binary's version string, for the $schema guard
+
+	specSchemaOnce sync.Once
+	specSchema     *jsonschema.Schema
+	errSpecSchema  error
+
+	confSchemaOnce sync.Once
+	confSchema     *jsonschema.Schema
+	errConfSchema  error
 }
 
-func (e *Engine) loadConfSchema() (*jsonschema.Schema, error) {
-	e.confSchemaOnce.Do(func() {
+//go:embed schema-spec.json
+var specSchemaBytes []byte
+
+//go:embed schema-conf.json
+var confSchemaBytes []byte
+
+func (l *schemaLoader) loadSpecSchema() (*jsonschema.Schema, error) {
+	l.specSchemaOnce.Do(func() {
 		schema, err := jsonschema.Compile(specSchemaBytes)
+
 		if err != nil {
-			e.errConfSchema = fmt.Errorf("compile conf schema: %w", err)
+			l.errSpecSchema = fmt.Errorf("compile spec schema: %w", err)
 			return
 		}
-		e.confSchema = schema
+
+		l.specSchema = schema
 	})
-	return e.confSchema, e.errConfSchema
+
+	specSchemaBytes = nil
+
+	return l.specSchema, l.errSpecSchema
+}
+
+func (l *schemaLoader) loadConfSchema() (*jsonschema.Schema, error) {
+	l.confSchemaOnce.Do(func() {
+		schema, err := jsonschema.Compile(confSchemaBytes)
+
+		if err != nil {
+			l.errConfSchema = fmt.Errorf("compile conf schema: %w", err)
+			return
+		}
+
+		l.confSchema = schema
+	})
+
+	confSchemaBytes = nil
+
+	return l.confSchema, l.errConfSchema
+}
+
+func (l *schemaLoader) loadSchemas() error {
+	if _, err := l.loadSpecSchema(); err != nil {
+		return err
+	}
+
+	if _, err := l.loadConfSchema(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+type specFile struct {
+	version       string
+	path          string
+	fallbackPaths []string
+}
+
+func (f *specFile) loadFile() ([]byte, error) {
+	var bytes []byte
+	var err error
+
+	if f.path != "" {
+		bytes, err = os.ReadFile(f.path)
+	}
+
+	if err != nil {
+		// try each fallback path until either a fallback path resolves to a spec file or until all fallback paths have been attempted but have not resolved to a spec file
+	}
+
+	return bytes, err
 }
 
 // Validate schema-validates the loaded spec and conf against the embedded rotini
