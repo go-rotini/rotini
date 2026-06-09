@@ -1,20 +1,21 @@
 package internal
 
 import (
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/go-rotini/fs"
 	"github.com/go-rotini/jsonc"
+	"github.com/go-rotini/jsonschema"
 	"github.com/go-rotini/toml"
 	"github.com/go-rotini/yaml"
 )
 
-// fileFormat identifies the on-disk serialization of a rotini spec or
-// conf file.
 type fileFormat int
 
 const (
@@ -25,13 +26,9 @@ const (
 	formatTOML
 )
 
-// errUnsupportedFormat is returned for a spec or conf path whose extension
-// is not one of the supported serializations (.yaml, .yml, .json, .jsonc).
 var errUnsupportedFormat = errors.New("unsupported file format")
 
-// detectFormat maps a file path's extension to its serialization format,
-// returning formatUnknown for unrecognized extensions.
-func detectFormat(path string) fileFormat {
+func detectFileFormat(path string) fileFormat {
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".yaml", ".yml":
 		return formatYAML
@@ -50,7 +47,7 @@ func detectFormat(path string) fileFormat {
 // choosing the decoder from the file extension. YAML, JSON, and JSONC all
 // honor the json struct tags carried by the generated Spec and Conf types.
 func readFile[T any](path string) (*T, error) {
-	format := detectFormat(path)
+	format := detectFileFormat(path)
 	if format == formatUnknown {
 		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
@@ -86,7 +83,7 @@ func writeFile[T any](path string, v *T) error {
 		data []byte
 		err  error
 	)
-	switch detectFormat(path) {
+	switch detectFileFormat(path) {
 	case formatYAML:
 		data, err = yaml.Marshal(v)
 	case formatJSON, formatJSONC:
@@ -113,7 +110,7 @@ func writeFile[T any](path string, v *T) error {
 // is returned (not a decoded struct) so schema rules like
 // additionalProperties:false still see unknown fields.
 func toJSON(path string) ([]byte, error) {
-	format := detectFormat(path)
+	format := detectFileFormat(path)
 	if format == formatUnknown {
 		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
@@ -180,3 +177,88 @@ func readConf(path string) (*Conf, error) {
 func writeConf(path string, c *Conf) error {
 	return writeFile(path, c)
 }
+
+type processor struct {
+	version string
+
+	schemaSpec *jsonschema.Schema
+	spec       *Spec
+
+	schemaConf *jsonschema.Schema
+	conf       *Conf
+}
+
+//go:embed schema-spec.json
+var schemaSpecBytes []byte
+
+//go:embed schema-conf.json
+var schemaConfBytes []byte
+
+func NewProcessor(specFilePath string, confFilePath string, version string) (*processor, error) {
+	schemaSpec, err := jsonschema.Compile(schemaSpecBytes)
+	if err != nil {
+		return nil, fmt.Errorf("compile spec schema: %w", err)
+	}
+
+	schemaConf, err := jsonschema.Compile(schemaConfBytes)
+	if err != nil {
+		return nil, fmt.Errorf("compile conf schema: %w", err)
+	}
+
+	return &processor{
+		schemaSpec: schemaSpec,
+		schemaConf: schemaConf,
+	}, nil
+}
+
+func (*processor) compileSchema(schemaType string, schemaBytes []byte) (*jsonschema.Schema, error) {
+	schema, err := jsonschema.Compile(schemaBytes)
+	if err != nil {
+		return nil, fmt.Errorf("compile %s schema: %w", schemaType, err)
+	}
+	return schema, nil
+}
+
+func getFallbackPaths(fileType string) ([]string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+
+	// fileType = spec or conf
+	return []string{
+		fmt.Sprintf("%s/.rotini.%s.yaml", dir, fileType),
+		fmt.Sprintf("%s/.rotini.%s.toml", dir, fileType),
+		fmt.Sprintf("%s/.rotini.%s.json", dir, fileType),
+		fmt.Sprintf("%s/.rotini.%s.jsonc", dir, fileType),
+	}, nil
+}
+
+/*
+ * Processor functionality:
+ * Loader
+ * 1. compile schema spec
+ * 2. compile schema conf
+ * 3. get the end-users spec file bytes
+ *   a. first by path passed in param
+ *   b. next by looking at the fallback paths (if any of the fallback paths resolve to a spec, use it -- if none do, err)
+ * 4. get the end-users conf file bytes -- first by path passed in param, then by looking at the fallback paths (if any of the fallback paths resolve to a conf, use it -- if none do, err)
+ *   a. first by path passed in param
+ *   b. next by looking at the fallback paths (if any of the fallback paths resolve to a conf, use it -- if none do, do not err, go to next)
+ *   c. finally, fallback to a "default conf" shape
+ * Validator
+ * 1. ensures end-user spec file satisfies schema spec
+ * 2. ensures end-user conf file satisfies schema conf
+ * 3. ensures "rotini-specific rules" for end-user spec file all okay -- no dupe command names/aliases, etc -- whatever won't be "caught" by the jsonschema check
+ * 4. ensures "rotini-specific rules" for end-user conf file all okay -- whatever won't be "caught" by the jsonschema check
+ * Generator
+ * 1. generator for help
+ * 2. generator for man
+ * 3. generator for markdown
+ * 4. generator for completion
+ * 5. generator for rotini codegen
+ * Initializer
+ * 1. scaffolds based on a "recipe" type
+ *   a. "flat" = go.mod, go.sum, main.go, commands handler files, codegen files all in main package
+ *   b. "cmd"
+ */
