@@ -200,12 +200,6 @@ type processor struct {
 	conf       *Conf
 }
 
-//go:embed schema-spec.json
-var schemaSpecBytes []byte
-
-//go:embed schema-conf.json
-var schemaConfBytes []byte
-
 // The embedded rotini JSON Schemas are immutable, so each is compiled at most once
 // per process and the result cached. NewProcessor fills a processor's schema fields
 // from these — the cache spares the recompile when a fresh processor is built per
@@ -220,25 +214,15 @@ var (
 	confSchemaErr  error
 )
 
-// compileSchema compiles a rotini JSON Schema, tagging a failure with the schema's
-// name ("spec" or "conf").
-func compileSchema(name string, schemaBytes []byte) (*jsonschema.Schema, error) {
-	schema, err := jsonschema.Compile(schemaBytes)
-	if err != nil {
-		return nil, fmt.Errorf("compile %s schema: %w", name, err)
-	}
-	return schema, nil
-}
-
 // loadSpecSchema compiles the embedded spec schema once and returns the cached result.
 func loadSpecSchema() (*jsonschema.Schema, error) {
-	specSchemaOnce.Do(func() { specSchema, specSchemaErr = compileSchema("spec", schemaSpecBytes) })
+	specSchemaOnce.Do(func() { specSchema, specSchemaErr = jsonschema.Compile(schemaSpecFileBytes) })
 	return specSchema, specSchemaErr
 }
 
 // loadConfSchema compiles the embedded conf schema once and returns the cached result.
 func loadConfSchema() (*jsonschema.Schema, error) {
-	confSchemaOnce.Do(func() { confSchema, confSchemaErr = compileSchema("conf", schemaConfBytes) })
+	confSchemaOnce.Do(func() { confSchema, confSchemaErr = jsonschema.Compile(schemaConfFileBytes) })
 	return confSchema, confSchemaErr
 }
 
@@ -263,28 +247,6 @@ func NewProcessor(specFilePath, confFilePath, version string) (*processor, error
 		schemaSpec: schemaSpec,
 		schemaConf: schemaConf,
 	}, nil
-}
-
-// getFallbackPaths returns the default discovery locations for a spec or conf file
-// (fileType is "spec" or "conf") within dir, in extension-precedence order. The
-// loader passes dir = the spec's directory, so the conf is discovered beside the spec.
-func getFallbackPaths(dir, fileType string) []string {
-	exts := []string{"yaml", "toml", "json", "jsonc"}
-	paths := make([]string, len(exts))
-	for i, ext := range exts {
-		paths[i] = filepath.Join(dir, fmt.Sprintf(".rotini.%s.%s", fileType, ext))
-	}
-	return paths
-}
-
-// firstExisting returns the first path in paths that exists on disk, or "" if none do.
-func firstExisting(paths []string) string {
-	for _, p := range paths {
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-	}
-	return ""
 }
 
 // resolveSpecPath resolves the spec file path: the explicit specPath when given,

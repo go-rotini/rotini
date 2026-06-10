@@ -643,7 +643,7 @@ func flagDefsLiteral(in *Inputs) string {
 			ids = []string{"--" + strings.ReplaceAll(f.Name, "_", "-")}
 		}
 		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(ids))
-		b.WriteString(", Type: " + strconv.Quote(schemaType(f.Schema)))
+		b.WriteString(", Type: " + strconv.Quote(getSchemaType(f.Schema)))
 		writeSchemaCommon(b, f.Schema)
 		if len(f.DeprecatedIdentifiers) > 0 {
 			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
@@ -656,7 +656,7 @@ func argDefsLiteral(in *Inputs) string {
 		return ""
 	}
 	return sliceLiteral("ArgDef", in.Arguments, func(b *strings.Builder, a ArgumentInput) {
-		typ := schemaType(a.Schema)
+		typ := getSchemaType(a.Schema)
 		b.WriteString("Name: " + strconv.Quote(a.Name) + ", Type: " + strconv.Quote(typ))
 		if strings.HasPrefix(typ, "[]") {
 			b.WriteString(", Variadic: true")
@@ -776,9 +776,9 @@ func constraintsLiteral(schema *InputSchema) string {
 	return rotiniPkgName + ".Constraints{" + strings.Join(parts, ", ") + "}"
 }
 
-// schemaType resolves an input schema to the Definition's type string,
+// getSchemaType resolves an input schema to the Definition's type string,
 // defaulting to "string".
-func schemaType(schema *InputSchema) string {
+func getSchemaType(schema *InputSchema) string {
 	if schema != nil {
 		if name := refTypeName(schema.Ref); name != "" {
 			return name

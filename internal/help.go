@@ -559,13 +559,13 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 }
 
 func isVariadicSchema(schema *InputSchema) bool {
-	return strings.HasPrefix(schemaType(schema), "[]")
+	return strings.HasPrefix(getSchemaType(schema), "[]")
 }
 
 // flagDisplayType returns the type token shown after a flag's identifiers, or ""
 // for bool flags (which don't take a value).
 func flagDisplayType(schema *InputSchema) string {
-	t := schemaType(schema)
+	t := getSchemaType(schema)
 	if t == "bool" {
 		return ""
 	}
