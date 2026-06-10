@@ -1519,6 +1519,44 @@ func lowerFirst(s string) string {
 	return string(r)
 }
 
+// goReservedFilenames are the trailing "_"-separated tokens the go tool reads
+// specially from a file's name alone: "test" (a "_test.go" test file, excluded from
+// the normal build) and the GOOS/GOARCH names (an implicit build constraint, e.g.
+// "app_windows.go" builds only on Windows). Kept as one set since stubFilename only
+// needs membership, not which rule matched.
+var goReservedFilenames = func() map[string]bool {
+	m := map[string]bool{}
+	for _, s := range []string{
+		"test",
+		// GOOS
+		"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos",
+		"ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris",
+		"wasip1", "windows", "zos",
+		// GOARCH
+		"386", "amd64", "amd64p32", "arm", "arm64", "arm64be", "armbe", "loong64",
+		"mips", "mips64", "mips64le", "mips64p32", "mips64p32le", "mipsle", "ppc",
+		"ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64",
+		"wasm",
+	} {
+		m[s] = true
+	}
+	return m
+}()
+
+// stubFilename builds a handler-stub file name from base (a command's root name or
+// "<root>_<path>"), escaping the names the go tool would read specially from the
+// filename alone — a "_test.go" test file, or a "_<GOOS>.go"/"_<GOARCH>.go" build
+// constraint — by appending a trailing underscore. That makes the trailing
+// "_"-separated token empty, which matches none of those rules, so a command named
+// "test"/"windows"/"wasm"/… still compiles into the ordinary build.
+func stubFilename(base string) string {
+	parts := strings.Split(base, "_")
+	if goReservedFilenames[parts[len(parts)-1]] {
+		base += "_"
+	}
+	return base + ".go"
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // The resolved command tree — spec (+ $ref composition) → genProgram.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1608,7 +1646,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 	gp.root = genCommand{
 		prefix:      gp.rootPascal,
 		handler:     lowerFirst(gp.rootPascal) + "Handlers",
-		filename:    root.Name + ".go",
+		filename:    stubFilename(root.Name),
 		flags:       flagFields(root.Inputs),
 		args:        argFields(root.Inputs),
 		env:         envFields(root.Inputs),
@@ -1678,7 +1716,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			gp.own = append(gp.own, genCommand{
 				prefix:      prefix,
 				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
-				filename:    gp.rootName + "_" + path + ".go",
+				filename:    stubFilename(gp.rootName + "_" + path),
 				flags:       flagFields(c.Inputs),
 				args:        argFields(c.Inputs),
 				env:         envFields(c.Inputs),

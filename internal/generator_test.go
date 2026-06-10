@@ -122,6 +122,43 @@ func TestGenerateDefaultLayout(t *testing.T) {
 	mustContain(t, filepath.Join(tmp, "internal", "cmd", "rotini", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
 }
 
+// TestGenerateEscapesReservedFilenames verifies that a command whose name would make
+// the go tool read its handler stub specially — a "_test.go" test file, or a
+// "_<GOOS>.go"/"_<GOARCH>.go" build-constrained file — gets a trailing-underscore
+// escape, so the stub compiles into the ordinary build like any other handler.
+func TestGenerateEscapesReservedFilenames(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"command:\n  name: app\n  commands:\n    - name: test\n    - name: windows\n    - name: build\n")
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	dir := filepath.Join(tmp, "internal", "cmd", "app")
+	// Reserved-name commands (_test / a GOOS) are escaped with a trailing underscore;
+	// the un-escaped names the go tool would treat specially are never produced.
+	for _, f := range []string{"app_test_.go", "app_windows_.go"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Errorf("expected escaped stub %s: %v", f, err)
+		}
+	}
+	for _, f := range []string{"app_test.go", "app_windows.go"} {
+		if _, err := os.Stat(filepath.Join(dir, f)); !os.IsNotExist(err) {
+			t.Errorf("reserved stub %s should not be produced (err=%v)", f, err)
+		}
+	}
+	// A normal command name is untouched, and the rollup wires every handler.
+	if _, err := os.Stat(filepath.Join(dir, "app_build.go")); err != nil {
+		t.Errorf("expected normal stub app_build.go: %v", err)
+	}
+	mustContain(t, filepath.Join(dir, "rotini.gen.go"),
+		"return &appTestHandlers{}", "return &appWindowsHandlers{}", "return &appBuildHandlers{}")
+}
+
 // TestGenerateTwoFilesOnePackage covers the middle layout: cli and cligen name
 // the SAME package but DIFFERENT files. The framework and the rollup are written
 // as two files in one package, and — because they share a package — the rollup
