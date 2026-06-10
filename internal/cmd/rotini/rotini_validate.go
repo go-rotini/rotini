@@ -1,4 +1,4 @@
-package cli
+package rotini
 
 import (
 	"context"
@@ -8,43 +8,46 @@ import (
 	"github.com/go-rotini/rotini/internal"
 )
 
-type rotiniGenerateHandlers struct {
+type rotiniValidateHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
 }
 
-var _ rotini.CommandHandlers = (*rotiniGenerateHandlers)(nil)
+var _ rotini.CommandHandlers = (*rotiniValidateHandlers)(nil)
 
-func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
 
-	var inputs RotiniGenerateInputs
+	var inputs RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintln(rtx.Stderr, "rotini:", err)
+		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
+		fmt.Fprintln(rtx.Stdout, HelpRotiniValidate)
 		rtx.Exit(1)
 		return
 	}
 
-	args := inputs.RotiniGenerate.Arguments
-	flags := inputs.RotiniGenerate.Flags
+	args := inputs.RotiniValidate.Arguments
+	flags := inputs.RotiniValidate.Flags
 
 	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, HelpRotiniGenerate)
+		fmt.Fprintln(rtx.Stdout, HelpRotiniValidate)
+		rtx.Exit(0)
 		return
 	}
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
 	version := rotini.MustGet[string](rtx, "version")
-	rtx.BindIfAbsent("generate", internal.NewProcessor(version).Generate)
-	generate := rotini.MustGet[internal.GenerateFn](rtx, "generate")
+	rtx.BindIfAbsent("validate", internal.NewProcessor(version).Validate)
+	validate := rotini.MustGet[internal.ValidateFn](rtx, "validate")
 
-	err := generate(
+	err := validate(
 		args.SpecFilePath,
 		flags.ConfFilePath,
 		flags.Watch,
+		flags.Fail,
 		func(result string, err error) {
 			if err != nil {
 				fmt.Fprintln(rtx.Stderr, "Error:", err)

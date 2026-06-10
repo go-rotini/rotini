@@ -5,23 +5,20 @@ initialize:
 generate:
   packages:
     cli:
-      package: cmd/rotini/cli
+      package: internal/cmd/rotini
       file: rotini.gen.go
     cligen:
-      package: cmd/rotini/cli
+      package: internal/cmd/rotini
       file: rotini.gen.go
   features:
     help:
       enabled: true
-      dir: cmd/rotini/cli/embed/help
+      dir: internal/cmd/rotini/embed/help
     man:
       enabled: false
-      dir: cmd/rotini/cli/embed/man
-    markdown:
-      enabled: false
-      dir: cmd/rotini/cli/embed/markdown
+      dir: internal/cmd/rotini/embed/man
     completion:
       enabled: false
-      dir: cmd/rotini/cli/embed/completion
+      dir: internal/cmd/rotini/embed/completion
 validate:
   fail: collect

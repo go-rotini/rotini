@@ -8,7 +8,8 @@ import (
 	"runtime/debug"
 
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/cmd/rotini/cli"
+	cli "github.com/go-rotini/rotini/internal/cmd"
+	"github.com/go-rotini/rotini/internal/cmd/rotini"
 )
 
 func version() string {
