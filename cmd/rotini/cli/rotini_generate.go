@@ -37,15 +37,14 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
-	rtx.BindIfAbsent("generate", internal.Generate)
-	generate := rotini.MustGet[internal.GenerateFn](rtx, "generate")
 	version := rotini.MustGet[string](rtx, "version")
+	rtx.BindIfAbsent("generate", internal.NewProcessor(version).Generate)
+	generate := rotini.MustGet[internal.GenerateFn](rtx, "generate")
 
 	err := generate(
 		args.SpecFilePath,
 		flags.ConfFilePath,
 		flags.Watch,
-		version,
 		func(result string, err error) {
 			if err != nil {
 				fmt.Fprintln(rtx.Stderr, "Error:", err)

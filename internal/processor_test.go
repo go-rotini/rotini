@@ -27,14 +27,10 @@ func mustWriteConf(t *testing.T, path string, c *Conf) {
 	}
 }
 
-// newProcessor builds a processor and fails the test if schema compilation fails.
-func newProcessor(t *testing.T, specPath, confPath string) *processor {
+// newProcessor builds a session (the per-pass loaded unit) for tests.
+func newProcessor(t *testing.T, specPath, confPath string) *session {
 	t.Helper()
-	p, err := NewProcessor(specPath, confPath, "")
-	if err != nil {
-		t.Fatalf("NewProcessor: %v", err)
-	}
-	return p
+	return newSession(specPath, confPath, "")
 }
 
 // TestLoad_explicitSpec_confBesideSpec covers the common path: an explicit spec
@@ -51,17 +47,17 @@ func TestLoad_explicitSpec_confBesideSpec(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	if p.spec == nil || p.spec.Command.Name != "demo" {
+	if p.spec == nil || p.spec.spec.Command.Name != "demo" {
 		t.Errorf("spec not loaded: %+v", p.spec)
 	}
-	if p.specPath != specPath {
-		t.Errorf("specPath = %q, want %q", p.specPath, specPath)
+	if p.spec.path != specPath {
+		t.Errorf("spec path = %q, want %q", p.spec.path, specPath)
 	}
-	if p.conf == nil || p.conf.Schema != "https://x/conf.json" {
+	if p.conf == nil || p.conf.conf.Schema != "https://x/conf.json" {
 		t.Errorf("conf not loaded from beside spec: %+v", p.conf)
 	}
-	if p.confPath != confPath {
-		t.Errorf("confPath = %q, want %q", p.confPath, confPath)
+	if p.conf.path != confPath {
+		t.Errorf("conf path = %q, want %q", p.conf.path, confPath)
 	}
 }
 
@@ -76,11 +72,11 @@ func TestLoad_confDefaultsWhenAbsent(t *testing.T) {
 	if err := p.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if p.conf == nil {
+	if p.conf == nil || p.conf.conf == nil {
 		t.Fatal("conf = nil, want default &Conf{}")
 	}
-	if p.confPath != "" {
-		t.Errorf("confPath = %q, want empty", p.confPath)
+	if p.conf.path != "" {
+		t.Errorf("conf path = %q, want empty", p.conf.path)
 	}
 }
 
@@ -97,10 +93,10 @@ func TestLoad_confTOMLFallback(t *testing.T) {
 	if err := p.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if p.confPath != confPath {
-		t.Errorf("confPath = %q, want %q", p.confPath, confPath)
+	if p.conf.path != confPath {
+		t.Errorf("conf path = %q, want %q", p.conf.path, confPath)
 	}
-	if p.conf == nil || p.conf.Schema != "https://x/conf.json" {
+	if p.conf == nil || p.conf.conf.Schema != "https://x/conf.json" {
 		t.Errorf("toml conf not decoded: %+v", p.conf)
 	}
 }
@@ -116,11 +112,11 @@ func TestLoadSpec_cwdFallback(t *testing.T) {
 	if err := p.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if p.spec == nil || p.spec.Command.Name != "demo" {
+	if p.spec == nil || p.spec.spec.Command.Name != "demo" {
 		t.Errorf("spec not resolved from cwd: %+v", p.spec)
 	}
-	if want := filepath.Join(dir, ".rotini.spec.yaml"); p.specPath != want {
-		t.Errorf("specPath = %q, want %q", p.specPath, want)
+	if want := filepath.Join(dir, ".rotini.spec.yaml"); p.spec.path != want {
+		t.Errorf("spec path = %q, want %q", p.spec.path, want)
 	}
 }
 
@@ -147,11 +143,11 @@ func TestLoadConf_explicitMissingDefaults(t *testing.T) {
 	if err := p.load(); err != nil {
 		t.Fatalf("load with missing explicit conf = %v, want nil (defaults used)", err)
 	}
-	if p.conf == nil {
+	if p.conf == nil || p.conf.conf == nil {
 		t.Error("conf = nil, want a default &Conf{}")
 	}
-	if p.confPath != "" {
-		t.Errorf("confPath = %q, want empty (no usable conf)", p.confPath)
+	if p.conf.path != "" {
+		t.Errorf("conf path = %q, want empty (no usable conf)", p.conf.path)
 	}
 }
 
@@ -160,29 +156,23 @@ func TestLoadConf_explicitMissingDefaults(t *testing.T) {
 // validateOnce retired in the processor migration, so the existing call sites are
 // unchanged.
 func validateOnce(specPath, confPath, failMode, version string) error {
-	p, err := NewProcessor(specPath, confPath, version)
-	if err != nil {
+	s := newSession(specPath, confPath, version)
+	s.failMode = failMode
+	if err := s.load(); err != nil {
 		return err
 	}
-	p.failMode = failMode
-	if err := p.load(); err != nil {
-		return err
-	}
-	return p.validate()
+	return s.validate()
 }
 
 // loadAndValidate builds a processor, runs the loader, then the validator phase,
 // returning that phase's aggregated result.
 func loadAndValidate(t *testing.T, specPath, confPath, version string) error {
 	t.Helper()
-	p, err := NewProcessor(specPath, confPath, version)
-	if err != nil {
-		t.Fatalf("NewProcessor: %v", err)
-	}
-	if err := p.load(); err != nil {
+	s := newSession(specPath, confPath, version)
+	if err := s.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	return p.validate()
+	return s.validate()
 }
 
 // TestProcessorValidate_validSpecAndConf: a schema-valid spec and conf pass with no
@@ -273,14 +263,11 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 	writeTestFile(t, confPath, companionConf)
 
 	t.Chdir(tmp)
-	p, err := NewProcessor(specPath, confPath, "")
-	if err != nil {
-		t.Fatalf("NewProcessor: %v", err)
-	}
-	if err := p.load(); err != nil {
+	s := newSession(specPath, confPath, "")
+	if err := s.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if err := p.generate(); err != nil {
+	if err := s.generate(); err != nil {
 		t.Fatalf("generate: %v", err)
 	}
 
@@ -313,10 +300,7 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 // scaffold the established cmd/<name>/ layout — delegating to the proven path.
 func TestProcessorInitialize_cmdRecipe(t *testing.T) {
 	tmp := initTestModule(t)
-	p, err := NewProcessor("", "", "")
-	if err != nil {
-		t.Fatalf("NewProcessor: %v", err)
-	}
+	p := NewProcessor("")
 
 	// Explicit cmd recipe.
 	if err := p.initialize("mycli", "yaml", false, "", recipeCmd); err != nil {
@@ -340,10 +324,7 @@ func TestProcessorInitialize_cmdRecipe(t *testing.T) {
 // TestProcessorInitialize_recipeErrors confirms the flat recipe is a flagged seam
 // and an unknown recipe is rejected — both before touching the filesystem.
 func TestProcessorInitialize_recipeErrors(t *testing.T) {
-	p, err := NewProcessor("", "", "")
-	if err != nil {
-		t.Fatalf("NewProcessor: %v", err)
-	}
+	p := NewProcessor("")
 	if err := p.initialize("mycli", "yaml", false, "", recipeFlat); err == nil || !strings.Contains(err.Error(), "not yet supported") {
 		t.Errorf("initialize(flat) = %v, want a 'not yet supported' error", err)
 	}
@@ -402,16 +383,16 @@ func TestProcessorGeneratePass_valid(t *testing.T) {
 		"package cli", "var Program = NewProgram(&handlers{})")
 }
 
-// TestRunProcessorWorkflow_validateRouting confirms the non-watch path: a valid pass
-// routes a "[HH:MM:SS] <took>" summary to onResult and returns nil; a failing pass
-// returns the error and is NOT routed through onResult.
-func TestRunProcessorWorkflow_validateRouting(t *testing.T) {
+// TestProcessorValidate_routing confirms the non-watch path: a valid pass routes a
+// "[HH:MM:SS] <took>" summary to onResult and returns nil; a failing pass returns the
+// error and is NOT routed through onResult.
+func TestProcessorValidate_routing(t *testing.T) {
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
 	var summary string
 	var cbErr error
 	calls := 0
-	if err := runProcessorWorkflow(spec, "", "", "", false, (*processor).validatePass, func(s string, e error) { calls++; summary, cbErr = s, e }); err != nil {
-		t.Fatalf("runProcessorWorkflow(valid) = %v, want nil", err)
+	if err := NewProcessor("").Validate(spec, "", false, "", func(s string, e error) { calls++; summary, cbErr = s, e }); err != nil {
+		t.Fatalf("Validate(valid) = %v, want nil", err)
 	}
 	if calls != 1 || cbErr != nil || summary == "" {
 		t.Errorf("valid pass: calls=%d summary=%q err=%v, want one call with a summary and nil err", calls, summary, cbErr)
@@ -419,18 +400,18 @@ func TestRunProcessorWorkflow_validateRouting(t *testing.T) {
 
 	calls = 0
 	bad := writeTemp(t, "bad.yaml", validSpecHeader) // no command
-	if err := runProcessorWorkflow(bad, "", "", "", false, (*processor).validatePass, func(string, error) { calls++ }); err == nil {
-		t.Error("runProcessorWorkflow(invalid) = nil, want an error")
+	if err := NewProcessor("").Validate(bad, "", false, "", func(string, error) { calls++ }); err == nil {
+		t.Error("Validate(invalid) = nil, want an error")
 	}
 	if calls != 0 {
 		t.Errorf("onResult called %d times on a non-watch failure, want 0", calls)
 	}
 }
 
-// TestRunProcessorWorkflow_generate confirms the generate workflow emits the program
-// through the wrapper, including resolving an empty spec path from the working
+// TestProcessorGenerate_workflow confirms the generate workflow emits the program
+// through Processor.Generate, including resolving an empty spec path from the working
 // directory.
-func TestRunProcessorWorkflow_generate(t *testing.T) {
+func TestProcessorGenerate_workflow(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
@@ -440,26 +421,22 @@ func TestRunProcessorWorkflow_generate(t *testing.T) {
 	noop := func(string, error) {}
 	gen := filepath.Join(tmp, "cmd", "rotini", "cli", "rotini.gen.go")
 
-	if err := runProcessorWorkflow(".rotini.spec.yaml", "", "", "", false, (*processor).generatePass, noop); err != nil {
-		t.Fatalf("runProcessorWorkflow generate = %v, want nil", err)
+	if err := NewProcessor("").Generate(".rotini.spec.yaml", "", false, noop); err != nil {
+		t.Fatalf("Generate = %v, want nil", err)
 	}
 	mustContain(t, gen, "package cli", "var Program = NewProgram(&handlers{})")
 
 	// An empty spec path resolves from the working directory.
-	if err := runProcessorWorkflow("", "", "", "", false, (*processor).generatePass, noop); err != nil {
-		t.Fatalf("runProcessorWorkflow(empty spec, cwd fallback) = %v, want nil", err)
+	if err := NewProcessor("").Generate("", "", false, noop); err != nil {
+		t.Fatalf("Generate(empty spec, cwd fallback) = %v, want nil", err)
 	}
 }
 
-// generatePassClosure returns a watchLoop-compatible pass that builds a fresh
-// processor and runs generatePass — the test seam that replaced generateTimed.
+// generatePassClosure returns a watchLoop-compatible pass that builds a fresh session
+// and runs generatePass — the test seam that replaced generateTimed.
 func generatePassClosure(specPath string) func() (string, error) {
 	return func() (string, error) {
-		p, err := NewProcessor(specPath, "", "")
-		if err != nil {
-			return "", err
-		}
-		return "", p.generatePass()
+		return "", newSession(specPath, "", "").generatePass()
 	}
 }
 

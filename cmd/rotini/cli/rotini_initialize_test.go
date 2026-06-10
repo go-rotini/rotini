@@ -36,13 +36,13 @@ func TestRotiniInitialize(t *testing.T) {
 		{
 			name:     "success is silent",
 			argv:     []string{"init", "mycli"},
-			binds:    []svc{{"initialize", internal.InitializeFn(func(_, _ string, _ bool, _ string, _ string) error { return nil })}},
+			binds:    []svc{{"initialize", internal.InitializeFn(func(_, _ string, _ bool, _ string) error { return nil })}},
 			wantCode: 0,
 		},
 		{
 			name:    "initialize error surfaces",
 			argv:    []string{"init", "mycli"},
-			binds:   []svc{{"initialize", internal.InitializeFn(func(_, _ string, _ bool, _ string, _ string) error { return errors.New("already exists") })}},
+			binds:   []svc{{"initialize", internal.InitializeFn(func(_, _ string, _ bool, _ string) error { return errors.New("already exists") })}},
 			wantErr: "already exists", wantCode: 1,
 		},
 		{

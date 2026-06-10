@@ -21,34 +21,16 @@ func (e *problem) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
 }
 
-// ValidateFn is the signature of [Validate]. A command handler can bind it under a registry
-// key and fetch it as an injectable service, so tests substitute a double (see [GenerateFn]).
-type ValidateFn = func(specPath, confPath string, watch bool, failMode, version string, onValidate func(result string, err error)) error
+// ValidateFn is the signature of [Processor.Validate]. A command handler binds it
+// under a registry key and fetches it as an injectable service, so tests substitute a
+// double (see [GenerateFn]).
+type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error)) error
 
-// Validate is the DI-bound [ValidateFn]: the convenience entry that runs the
-// processor's validate workflow (load → validate). It mirrors [Generate].
-//
-// specPath is the spec-file command argument (empty → the .rotini.spec.* discovered
-// in the working directory). confPath is the -c/--config flag value (empty → the
-// .rotini.conf.* discovered next to the spec). failMode is the --fail flag value
-// ("fast" stops at the first problem, anything else collects); when empty it falls
-// back to the conf's validate.fail, so the flag overrides the conf. version is the
-// running rotini binary's version string ("vX.Y.Z" / "v0.0.0") for the $schema guard
-// ("" → skipped).
-//
-// onValidate, which may be nil, is called after each pass with a "[HH:MM:SS] <took>"
-// summary and that pass's error (nil when the spec and conf are valid); Validate
-// prints nothing itself, so the caller reports results through it. When watch is
-// false it runs a single pass and returns that pass's error — every problem
-// aggregated via [errors.Join] (or the first in "fast" mode). When watch is true it
-// validates once and then re-validates whenever the spec or conf changes, until
-// interrupted with ctrl-c (SIGINT); there every pass goes to onValidate and watching
-// continues, and only a failure to start watching is returned.
+// Validate is a convenience over [Processor.Validate]: it builds a Processor for
+// version and runs the validate workflow. The companion handlers drive the Processor
+// directly; this serves internal callers (tests).
 func Validate(specPath, confPath string, watch bool, failMode, version string, onValidate func(result string, err error)) error {
-	if onValidate == nil {
-		onValidate = func(string, error) {}
-	}
-	return runProcessorWorkflow(specPath, confPath, version, failMode, watch, (*processor).validatePass, onValidate)
+	return NewProcessor(version).Validate(specPath, confPath, watch, failMode, onValidate)
 }
 
 // specLints is the ordered set of spec lints run after the spec is schema-valid. Adding a lint is a

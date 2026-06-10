@@ -31,7 +31,7 @@ func TestRotiniGenerate(t *testing.T) {
 		{
 			name: "success: header and the per-file result print",
 			argv: []string{"generate", ".rotini.spec.yaml"},
-			binds: []svc{{"generate", internal.GenerateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
+			binds: []svc{{"generate", internal.GenerateFn(func(_, _ string, _ bool, cb func(string, error)) error {
 				cb("cmd/mycli/rtg/rotini.go", nil)
 				return nil
 			})}},
@@ -40,7 +40,7 @@ func TestRotiniGenerate(t *testing.T) {
 		{
 			name: "per-file callback error and a final error both surface",
 			argv: []string{"generate", ".rotini.spec.yaml"},
-			binds: []svc{{"generate", internal.GenerateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
+			binds: []svc{{"generate", internal.GenerateFn(func(_, _ string, _ bool, cb func(string, error)) error {
 				cb("cmd/mycli/rtg/rotini.go", nil) // a good file → stdout
 				cb("", errors.New("bad template")) // a per-file error → stderr
 				return errors.New("generation failed")

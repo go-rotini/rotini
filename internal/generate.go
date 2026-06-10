@@ -10,44 +10,16 @@ import (
 	"github.com/go-rotini/fs"
 )
 
-type GenerateFn = func(specPath, confPath string, watch bool, version string, onGenerate func(result string, err error)) error
+// GenerateFn is the signature of [Processor.Generate]. A command handler binds it
+// under a registry key and fetches it as an injectable service, so tests substitute a
+// double.
+type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error)) error
 
-// Generate emits the generated program files from the rotini spec at specPath and
-// the conf at confPath (empty or missing → sane defaults; a .rotini.conf.* beside
-// the spec is auto-discovered).
-//
-// onGenerate, which may be nil, is called after each generation pass with a
-// "[HH:MM:SS] <took>" summary and that pass's error (nil on success); Generate
-// prints nothing itself, so the caller reports results through it. When watch is
-// false it runs a single pass and returns that pass's error (not routed through
-// onGenerate) so the caller can treat the run as failed. When watch is true it
-// generates once and then re-generates whenever the spec or conf changes, until
-// interrupted with ctrl-c (SIGINT); there every pass — success or failure — goes
-// to onGenerate and watching continues, so a malformed save can be fixed in place,
-// and only a failure to start watching is returned.
-//
-// A pass produces these, mirroring the "commands all the way down" model where a
-// root command owns sub-commands that own their own sub-commands:
-//
-//  1. The framework (the cligen package): the ProgramHandlers aggregate interface
-//     plus the typed Flags/Arguments/CommandInputs/Inputs structs for the root
-//     command and every sub-command. Always (over)written.
-//  2. The handler rollup (the cli package): the handlers struct, the Program var,
-//     and one method per command. Always (over)written. When cli and cligen
-//     resolve to the same package and file (the default), the framework and the
-//     rollup are merged into one rotini.gen.go.
-//  3. A handler stub per command in the cli package, named after the command path
-//     to avoid collisions (rotini.go, rotini_generate.go, …). Created only when
-//     missing, since stubs hold user code; orphaned stubs are pruned each pass.
-//
-// version is the running rotini binary's bound "version" string ("vX.Y.Z" for a
-// release, "v0.0.0" otherwise); it is threaded into the pre-codegen validation so
-// generate inherits the $schema↔binary version guard (see [Validate]).
+// Generate is a convenience over [Processor.Generate]: it builds a Processor for
+// version and runs the generate workflow. The companion handlers drive the Processor
+// directly; this serves internal callers (init and tests).
 func Generate(specPath, confPath string, watch bool, version string, onGenerate func(result string, err error)) error {
-	if onGenerate == nil {
-		onGenerate = func(string, error) {}
-	}
-	return runProcessorWorkflow(specPath, confPath, version, "", watch, (*processor).generatePass, onGenerate)
+	return NewProcessor(version).Generate(specPath, confPath, watch, onGenerate)
 }
 
 // runOrWatch performs a single timed pass — returning the pass's error when it fails — or,

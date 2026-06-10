@@ -32,10 +32,10 @@ func confSchemaURL(version string) string {
 	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaURLVersion(version) + "/schema-conf.json"
 }
 
-// InitializeFn is the signature of [Initialize]. A command handler can bind it under a
-// registry key and fetch it as an injectable service, so tests substitute a double (see
-// [GenerateFn]).
-type InitializeFn = func(name, format string, force bool, into, version string) error
+// InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
+// under a registry key and fetches it as an injectable service, so tests substitute a
+// double (see [GenerateFn]).
+type InitializeFn = func(name, format string, force bool, into string) error
 
 // Initialize scaffolds a new standalone rotini CLI named name under cmd/<name>/
 // of the current module, then generates its code (the default single-package
@@ -55,16 +55,12 @@ type InitializeFn = func(name, format string, force bool, into, version string) 
 // gains a $ref and is re-generated). The new CLI still gets its own main.go and
 // stays independently buildable.
 func Initialize(name, format string, force bool, into, version string) error {
-	p, err := NewProcessor("", "", version)
-	if err != nil {
-		return err
-	}
-	return p.initialize(name, format, force, into, recipeCmd)
+	return NewProcessor(version).Initialize(name, format, force, into)
 }
 
 // initializeCmd scaffolds the cmd/<name>/ layout (the cmd recipe) and generates it —
-// the body the processor's initialize routes recipeCmd (and the empty default) to.
-func (p *processor) initializeCmd(name, format string, force bool, into string) error {
+// the body the Processor's initialize routes recipeCmd (and the empty default) to.
+func (p *Processor) initializeCmd(name, format string, force bool, into string) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
@@ -129,7 +125,7 @@ type initDefaults struct {
 // present), falling back to rotini's built-ins (yaml format, "cmd" package dir).
 func moduleInitDefaults(moduleRoot string) initDefaults {
 	d := initDefaults{format: "yaml", pkg: "cmd"}
-	confPath, err := discoverFile(moduleRoot, ".rotini.conf.")
+	confPath, err := discoverFile(moduleRoot, fileTypeConf)
 	if err != nil {
 		return d
 	}
@@ -150,11 +146,11 @@ func moduleInitDefaults(moduleRoot string) initDefaults {
 // re-generates the parent so the composition takes effect.
 func composeInto(moduleRoot, pkgDir, parent, child, childExt, version string) error {
 	parentDir := filepath.Join(moduleRoot, filepath.FromSlash(pkgDir), parent)
-	parentSpec, err := discoverFile(parentDir, ".rotini.spec.")
+	parentSpec, err := discoverFile(parentDir, fileTypeSpec)
 	if err != nil {
 		return fmt.Errorf("compose into %q: %w", parent, err)
 	}
-	parentConf, _ := discoverFile(parentDir, ".rotini.conf.")
+	parentConf, _ := discoverFile(parentDir, fileTypeConf)
 
 	spec, err := readSpec(parentSpec)
 	if err != nil {
@@ -171,18 +167,6 @@ func composeInto(moduleRoot, pkgDir, parent, child, childExt, version string) er
 		return err
 	}
 	return Generate(parentSpec, parentConf, false, version, nil)
-}
-
-// discoverFile returns the first dir/<prefix><ext> file that exists, trying the
-// supported serializations in order.
-func discoverFile(dir, prefix string) (string, error) {
-	for _, ext := range []string{"yaml", "yml", "jsonc", "json"} {
-		p := filepath.Join(dir, prefix+ext)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("no %s* file found in %s", prefix, dir)
 }
 
 // normalizeFormat resolves the requested format to a file extension, defaulting
