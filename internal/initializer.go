@@ -44,7 +44,7 @@ func schemaURLVersion(version string) string {
 // InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double (see [GenerateFn]).
-type InitializeFn = func(name, format string, force bool, into string) error
+type InitializeFn = func(name, format string, force bool) error
 
 // Initialize scaffolds a new standalone rotini CLI named name under cmd/<name>/
 // of the current module, then generates its code into the module-internal
@@ -58,13 +58,8 @@ type InitializeFn = func(name, format string, force bool, into string) error
 // create-once files (spec, conf, main.go) are left untouched unless force is
 // set; the generated framework/rollup file is always (re)written, and handler
 // stubs are never overwritten.
-//
-// When into names an existing CLI, the new CLI is additionally registered as a
-// statically composed ($ref) sub-command of that parent (the parent's spec
-// gains a $ref and is re-generated). The new CLI still gets its own main.go and
-// stays independently buildable.
-func Initialize(name, format string, force bool, into, version string) error {
-	return NewProcessor(version).Initialize(name, format, force, into)
+func Initialize(name, format string, force bool, version string) error {
+	return NewProcessor(version).Initialize(name, format, force)
 }
 
 // recipe selects the project layout the initializer scaffolds.
@@ -85,10 +80,10 @@ const (
 // initialize dispatches on the recipe. For now the cmd recipe (and the empty default)
 // scaffold the established cmd/<name>/ layout; the flat recipe is a seam to be built
 // once its layout is settled.
-func (p *Processor) initialize(name, format string, force bool, into string, rcp recipe) error {
+func (p *Processor) initialize(name, format string, force bool, rcp recipe) error {
 	switch rcp {
 	case recipeCmd, "":
-		return p.initializeCmd(name, format, force, into)
+		return p.initializeCmd(name, format, force)
 	case recipeFlat:
 		return fmt.Errorf("the %q init recipe is not yet supported", recipeFlat)
 	default:
@@ -98,7 +93,7 @@ func (p *Processor) initialize(name, format string, force bool, into string, rcp
 
 // initializeCmd scaffolds the cmd/<name>/ layout (the cmd recipe) and generates it —
 // the body the Processor's initialize routes recipeCmd (and the empty default) to.
-func (p *Processor) initializeCmd(name, format string, force bool, into string) error {
+func (p *Processor) initializeCmd(name, format string, force bool) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
@@ -153,13 +148,7 @@ func (p *Processor) initializeCmd(name, format string, force bool, into string) 
 	if err := writeMainGo(mainPath, moduleName, name); err != nil {
 		return err
 	}
-	if err := Generate(specPath, confPath, false, p.version, nil); err != nil {
-		return err
-	}
-	if into != "" {
-		return composeInto(moduleRoot, pkgDir, into, name, ext, p.version)
-	}
-	return nil
+	return Generate(specPath, confPath, false, p.version, nil)
 }
 
 // initDefaults holds the resolved `rotini init` defaults.
@@ -187,33 +176,6 @@ func moduleInitDefaults(moduleRoot string) initDefaults {
 		d.pkg = conf.Initialize.Package
 	}
 	return d
-}
-
-// composeInto registers child as a $ref sub-command of the parent CLI and
-// re-generates the parent so the composition takes effect.
-func composeInto(moduleRoot, pkgDir, parent, child, childExt, version string) error {
-	parentDir := filepath.Join(moduleRoot, filepath.FromSlash(pkgDir), parent)
-	parentSpec, err := discoverFile(parentDir, fileTypeSpec)
-	if err != nil {
-		return fmt.Errorf("compose into %q: %w", parent, err)
-	}
-	parentConf, _ := discoverFile(parentDir, fileTypeConf)
-
-	spec, err := readSpec(parentSpec)
-	if err != nil {
-		return err
-	}
-	ref := "../" + child + "/.rotini.spec." + childExt
-	for _, c := range spec.Command.Commands {
-		if c.Ref == ref {
-			return Generate(parentSpec, parentConf, false, version, nil) // already referenced
-		}
-	}
-	spec.Command.Commands = append(spec.Command.Commands, Command{Ref: ref})
-	if err := writeSpec(parentSpec, spec); err != nil {
-		return err
-	}
-	return Generate(parentSpec, parentConf, false, version, nil)
 }
 
 // normalizeFormat resolves the requested format to a file extension, defaulting

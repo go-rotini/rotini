@@ -303,17 +303,17 @@ func TestProcessorInitialize_cmdRecipe(t *testing.T) {
 	p := NewProcessor("")
 
 	// Explicit cmd recipe.
-	if err := p.initialize("mycli", "yaml", false, "", recipeCmd); err != nil {
+	if err := p.initialize("mycli", "yaml", false, recipeCmd); err != nil {
 		t.Fatalf("initialize(cmd): %v", err)
 	}
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: internal/cmd/mycli")
-	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate rotini generate")
+	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate go tool rotini generate")
 	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go"), "package mycli", "var Program = NewProgram(&handlers{})")
 
 	// The empty recipe defaults to cmd.
-	if err := p.initialize("other", "yaml", false, "", ""); err != nil {
+	if err := p.initialize("other", "yaml", false, ""); err != nil {
 		t.Fatalf("initialize(default): %v", err)
 	}
 	if _, statErr := os.Stat(filepath.Join(tmp, "cmd", "other", "main.go")); statErr != nil {
@@ -325,10 +325,10 @@ func TestProcessorInitialize_cmdRecipe(t *testing.T) {
 // and an unknown recipe is rejected — both before touching the filesystem.
 func TestProcessorInitialize_recipeErrors(t *testing.T) {
 	p := NewProcessor("")
-	if err := p.initialize("mycli", "yaml", false, "", recipeFlat); err == nil || !strings.Contains(err.Error(), "not yet supported") {
+	if err := p.initialize("mycli", "yaml", false, recipeFlat); err == nil || !strings.Contains(err.Error(), "not yet supported") {
 		t.Errorf("initialize(flat) = %v, want a 'not yet supported' error", err)
 	}
-	if err := p.initialize("mycli", "yaml", false, "", recipe("bogus")); err == nil || !strings.Contains(err.Error(), "unknown init recipe") {
+	if err := p.initialize("mycli", "yaml", false, recipe("bogus")); err == nil || !strings.Contains(err.Error(), "unknown init recipe") {
 		t.Errorf("initialize(bogus) = %v, want an 'unknown recipe' error", err)
 	}
 }

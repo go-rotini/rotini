@@ -65,12 +65,6 @@ command:
               - --force
             schema:
               type: bool
-          - name: into
-            summary: also compose the new cli into this parent cli
-            identifiers:
-              - --into
-            schema:
-              type: string
           - name: help
             summary: print help
             identifiers:

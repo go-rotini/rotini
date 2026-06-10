@@ -43,10 +43,9 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode str
 }
 
 // Initialize scaffolds a new rotini CLI named name and generates it (the cmd recipe).
-// format selects the spec/conf serialization; force overwrites the create-once files;
-// into, when set, registers the new CLI as a $ref sub-command of an existing one.
-func (p *Processor) Initialize(name, format string, force bool, into string) error {
-	return p.initialize(name, format, force, into, recipeCmd)
+// format selects the spec/conf serialization; force overwrites the create-once files.
+func (p *Processor) Initialize(name, format string, force bool) error {
+	return p.initialize(name, format, force, recipeCmd)
 }
 
 // run resolves the spec/conf paths up-front (so watch watches exactly the files read),

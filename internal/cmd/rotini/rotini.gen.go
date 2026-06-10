@@ -66,7 +66,6 @@ var definition = rotini.Definition{
 			Flags: []rotini.FlagDef{
 				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Enum: []string{"yaml", "json", "jsonc", "toml"}},
 				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
-				{Name: "into", Identifiers: []string{"--into"}, Type: "string"},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
@@ -173,7 +172,6 @@ type RotiniHelpInputs struct {
 type RotiniInitializeFlags struct {
 	Format string `rotini:"format"`
 	Force  bool   `rotini:"force"`
-	Into   string `rotini:"into"`
 	Help   bool   `rotini:"help"`
 }
 
