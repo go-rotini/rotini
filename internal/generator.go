@@ -1,14 +1,33 @@
 package internal
 
 import (
+	"bytes"
 	"context"
+	"embed"
+	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"text/template"
 	"time"
+	"unicode"
 
 	"github.com/go-rotini/fs"
+	"github.com/go-rotini/jsonschema"
 )
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The `rotini generate` workflow + the run/watch engine.
+// ─────────────────────────────────────────────────────────────────────────────
 
 // GenerateFn is the signature of [Processor.Generate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
@@ -136,3 +155,2811 @@ func forwardChanges(ctx context.Context, events <-chan fs.WatchEvent, changed ch
 		}
 	}
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Code generation — the cli/cligen program (framework, rollup, stubs, literals).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Generated programs import the rotini runtime under this path. The framework
+// file references rotini.CommandHandlers; the handler rollup references
+// rotini.NewProgram and rotini.CommandHandlers.
+const (
+	rotiniImportPath = "github.com/go-rotini/rotini"
+	rotiniPkgName    = "rotini"
+)
+
+//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.txt.tmpl templates/man.txt.tmpl templates/markdown.md.tmpl
+var templateFS embed.FS
+
+// fieldDef is one generated struct field: a Go identifier, its type, and its
+// `rotini` struct-tag content — a flag/argument logical name (empty for the
+// per-command fields of an <Cmd>Inputs struct, which the binder maps by position).
+type fieldDef struct {
+	Field  string
+	GoType string
+	Tag    string
+	Import string // Go import path backing GoType ("" for builtins); aliased form "alias path"
+	Recon  string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
+	EnvVar string // explicit environment variable name for an env field (schema.variable); "" = snake-upper default
+	// Constraint is the space-separated validation struct-tags for an env/config field
+	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), which the binder enforces over the
+	// reconciled value; "" when the input declares no numeric/string/array constraints.
+	Constraint string
+}
+
+// inputBlock is the set of generated input types for a single command. The
+// framework file emits four types per block: <Prefix>Flags, <Prefix>Arguments,
+// <Prefix>CommandInputs and <Prefix>Inputs.
+type inputBlock struct {
+	Prefix       string     // PascalCase type prefix, e.g. "RotiniGenerate"
+	Flags        []fieldDef // fields of <Prefix>Flags (argv flags)
+	Arguments    []fieldDef // fields of <Prefix>Arguments
+	Env          []fieldDef // fields of <Prefix>Env (pure environment inputs)
+	Config       []fieldDef // fields of <Prefix>Config (pure config-file inputs)
+	StdinType    string     // Stdin field type (e.g. "*RotiniGenerateStdin"); "" when none
+	StdinFormat  string     // stdin decode format for the Stdin field's tag (e.g. "yaml")
+	InputsFields []fieldDef // root + ancestor + self CommandInputs fields of <Prefix>Inputs
+}
+
+// genCommand is the fully resolved description of one command node (root or
+// sub-command) that the renderers consume.
+type genCommand struct {
+	prefix      string // PascalCase type prefix, e.g. "RotiniGenerate"
+	handler     string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
+	filename    string // handler stub file name, e.g. "rotini_generate.go"
+	flags       []fieldDef
+	args        []fieldDef
+	env         []fieldDef // <Prefix>Env fields (pure environment inputs)
+	config      []fieldDef // <Prefix>Config fields (pure config-file inputs)
+	stdinType   string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
+	stdinFormat string     // stdin decode format, e.g. "yaml"; "" when no stdin
+	inputs      []fieldDef // InputsFields for this command's <Prefix>Inputs
+}
+
+// layout holds the resolved package locations and import paths for a single
+// generation pass. The cli (handler) package and the cligen (framework) package
+// may be the same package — even the same file — or two distinct packages:
+//
+//   - distinct packages (split): the rollup in the cli package imports the
+//     cligen package and refers to it qualified (cligen.ProgramHandlers);
+//   - same package, distinct files: framework and rollup are two files in one
+//     package, with unqualified references;
+//   - same package and file (combined): framework and rollup are merged into a
+//     single file, with unqualified references.
+type layout struct {
+	moduleRoot string // module root dir (feature dirs are module-relative to it)
+
+	frameworkDir     string // absolute output dir for the framework (cligen) file
+	frameworkPkgName string // cligen package name, e.g. "cli" or "cligen"
+	frameworkFile    string // framework file name, e.g. "rotini.gen.go"
+	frameworkImport  string // cligen import path; "" when cli and cligen share a package
+	frameworkQual    string // qualifier for the rollup's framework refs, e.g. "cligen."; "" when same package
+
+	handlerDir     string // absolute output dir for stubs + rollup (cli package)
+	handlerPkgName string // cli package name, e.g. "cli"
+	rollupFile     string // rollup file name, e.g. "rotini.gen.go"
+
+	samePackage bool // cli and cligen resolve to the same package (refs are unqualified)
+	combined    bool // same package AND same file → framework+rollup merged into one file
+}
+
+// generateAll runs a single generation pass: it resolves the spec (expanding
+// any composed $ref children), writes the framework file, creates missing
+// handler stubs, (re)writes the handler rollup, and prunes orphaned stubs when
+// configured. specPath is needed to resolve $ref paths relative to the spec.
+func generateAll(spec *Spec, conf *Conf, specPath string) error {
+	moduleRoot, moduleName, err := findModule()
+	if err != nil {
+		return err
+	}
+	lay, err := resolveLayout(conf, moduleRoot, moduleName)
+	if err != nil {
+		return err
+	}
+	gp, err := resolveTree(spec, specPath, moduleRoot, moduleName)
+	if err != nil {
+		return err
+	}
+
+	// For each enabled doc feature (help/man/markdown), the cligen file gains
+	// embedded "<Prefix>" vars + a resolver, and each command's page is (re)written
+	// under that feature's dir — rendered from the command's doc-fields, or written
+	// verbatim when the command sets the feature's spec string. The conf's feature
+	// dir is module-relative; the absolute dir is where files are written/pruned and
+	// the cligen-package-relative path is what //go:embed references.
+	feats := enabledFeatures(conf)
+	frameworks := make([]*helpFramework, 0, len(feats))
+	outputs := make([]featureOutput, 0, len(feats))
+	for _, f := range feats {
+		var nodes []helpNode
+		if f.desc.perShell {
+			nodes = completionNodes() // completion: per shell, not per command
+		} else {
+			nodes = flattenFeature(gp, f.desc)
+		}
+		absDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.Dir))
+		embedRel, err := filepath.Rel(lay.frameworkDir, absDir)
+		if err != nil {
+			return fmt.Errorf("feature %s dir %q is not under the cligen package: %w", f.desc.name, f.cfg.Dir, err)
+		}
+		if strings.HasPrefix(embedRel, "..") {
+			return fmt.Errorf("generate.features.%s.dir %q must resolve under the cligen package %q so //go:embed can reach it", f.desc.name, f.cfg.Dir, filepath.ToSlash(conf.Generate.Packages.Cligen.Package))
+		}
+		frameworks = append(frameworks, buildFeatureFramework(nodes, filepath.ToSlash(embedRel), f.desc))
+		outputs = append(outputs, featureOutput{desc: f.desc, absDir: absDir, nodes: nodes})
+	}
+
+	// Render the framework (cligen) and the handler rollup (cli). When cli and
+	// cligen resolve to the same package AND file, the two are merged into a single
+	// file (rollup body first, then framework body); otherwise they are written to
+	// their own files (two files in one package, or two packages).
+	fwContent, err := renderFrameworkFile(gp, lay, frameworks)
+	if err != nil {
+		return err
+	}
+	rollupContent, err := renderHandlerRollup(gp, lay)
+	if err != nil {
+		return err
+	}
+	if lay.combined {
+		merged, err := mergeGenFile(lay.handlerPkgName, rollupContent, fwContent)
+		if err != nil {
+			return err
+		}
+		if err := writeGeneratedFile(filepath.Join(lay.handlerDir, lay.rollupFile), merged); err != nil {
+			return err
+		}
+	} else {
+		if err := writeGeneratedFile(filepath.Join(lay.frameworkDir, lay.frameworkFile), fwContent); err != nil {
+			return err
+		}
+		if err := writeGeneratedFile(filepath.Join(lay.handlerDir, lay.rollupFile), rollupContent); err != nil {
+			return err
+		}
+	}
+
+	for _, o := range outputs {
+		if o.desc.perShell {
+			if err := writeCompletionFiles(o.absDir, gp.rootName, o.nodes); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := writeFeatureFiles(o.absDir, o.nodes, o.desc); err != nil {
+			return err
+		}
+	}
+	if err := writeHandlerStubs(gp, lay); err != nil {
+		return err
+	}
+	// Pruning is implicit (always-on): drop orphaned cli stubs and orphaned cligen
+	// feature outputs, sparing only the per-package `keep` paths (and test files
+	// and the editable feature templates).
+	if err := pruneStubs(gp, lay, conf.Generate.Packages.Cli.Keep); err != nil {
+		return err
+	}
+	if err := pruneCligen(lay, conf.Generate.Packages.Cligen.Keep, outputs); err != nil {
+		return err
+	}
+	return nil
+}
+
+// confFeature pairs a doc-feature descriptor with its conf entry.
+type confFeature struct {
+	desc docFeature
+	cfg  *Feature
+}
+
+// featureOutput is one enabled feature's resolved absolute output dir +
+// per-command nodes, used for writing and pruning its output dir.
+type featureOutput struct {
+	desc   docFeature
+	absDir string
+	nodes  []helpNode
+}
+
+// featureConfigs pairs every doc feature with its conf entry (nil when unset).
+// Requires conf.Generate to be non-nil (guaranteed after applyConfDefaults).
+func featureConfigs(conf *Conf) []confFeature {
+	feats := conf.Generate.Features
+	if feats == nil {
+		return nil
+	}
+	return []confFeature{
+		{helpFeatureDesc, feats.Help},
+		{manFeatureDesc, feats.Man},
+		{markdownFeatureDesc, feats.Markdown},
+		{completionFeatureDesc, feats.Completion},
+	}
+}
+
+// enabledFeatures returns the doc features toggled on, in help→man→markdown order.
+func enabledFeatures(conf *Conf) []confFeature {
+	var out []confFeature
+	for _, f := range featureConfigs(conf) {
+		if f.cfg != nil && f.cfg.Enabled {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// methods returns the ProgramHandlers method names: the root, then every own
+// and composed sub-command, sorted.
+func (gp *genProgram) methods() []string {
+	out := []string{gp.root.prefix}
+	for _, c := range gp.own {
+		out = append(out, c.prefix)
+	}
+	for _, c := range gp.composed {
+		out = append(out, c.prefix)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// inputsFields returns the fields of a command's <Prefix>Inputs struct: one per
+// ancestor command (root first, then each intermediate) plus the command itself,
+// in root→leaf order. Each field is named after the command's PascalCase prefix
+// and typed as that prefix's CommandInputs. There is deliberately no struct tag:
+// the binder maps fields to resolved-chain frames by position (aligned at the
+// leaf), so command names can never collide along a path.
+func inputsFields(rootPascal, path string) []fieldDef {
+	fields := []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs"}}
+	segments := strings.Split(path, "_")
+	for i := 1; i <= len(segments); i++ {
+		prefix := rootPascal + toPascalCase(strings.Join(segments[:i], "_"))
+		fields = append(fields, fieldDef{Field: prefix, GoType: prefix + "CommandInputs"})
+	}
+	return fields
+}
+
+// flagFields returns the <Prefix>Flags struct fields for a command's inputs: the
+// argv flags. The env/config channels are their own structs (envFields/configFields);
+// a flag with an env/config *fallback* still lives here and is reconciled by the binder.
+func flagFields(in *Inputs) []fieldDef {
+	if in == nil {
+		return nil
+	}
+	fields := make([]fieldDef, 0, len(in.Flags))
+	for _, f := range in.Flags {
+		fields = append(fields, fieldDef{
+			Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name,
+			Import: fieldImport(f.Schema), Recon: flagReconKey(f.Schema),
+		})
+	}
+	return fields
+}
+
+// flagReconKey is a flag's reconciliation key — its config key (schema.key) — when
+// the flag declares a config fallback, else "" (an argv-only flag, no recon tag).
+// The binder reconciles such a flag argv > env (SNAKE_UPPER of the key) > config > default.
+func flagReconKey(schema *InputSchema) string {
+	if schema != nil && schema.Key != "" {
+		return schema.Key
+	}
+	return ""
+}
+
+// envFields returns the <Prefix>Env struct fields: one per pure environment input.
+// The recon key is the input name (recon's env source maps it to SNAKE_UPPER).
+func envFields(in *Inputs) []fieldDef {
+	if in == nil {
+		return nil
+	}
+	fields := make([]fieldDef, 0, len(in.Env))
+	for _, e := range in.Env {
+		fields = append(fields, fieldDef{
+			Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name,
+			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema), EnvVar: envVarOf(e.Schema),
+			Constraint: constraintTags(e.Schema),
+		})
+	}
+	return fields
+}
+
+// constraintTags renders an input's numeric/string/array constraints as space-separated
+// validation struct-tags (e.g. `min:"1" max:"65535" pattern:"^x$"`) for the binder to
+// enforce, or "" when none are set. Mirrors the FlagDef/ArgDef constraints A1 enforces
+// for argv, but carried on the env/config field itself since channels have no Definition.
+func constraintTags(schema *InputSchema) string {
+	if schema == nil {
+		return ""
+	}
+	var parts []string
+	if schema.Minimum != 0 {
+		parts = append(parts, `min:"`+strconv.FormatFloat(schema.Minimum, 'g', -1, 64)+`"`)
+	}
+	if schema.Maximum != 0 {
+		parts = append(parts, `max:"`+strconv.FormatFloat(schema.Maximum, 'g', -1, 64)+`"`)
+	}
+	if schema.MinLength != 0 {
+		parts = append(parts, `minlen:"`+strconv.Itoa(schema.MinLength)+`"`)
+	}
+	if schema.MaxLength != 0 {
+		parts = append(parts, `maxlen:"`+strconv.Itoa(schema.MaxLength)+`"`)
+	}
+	if schema.MinItems != 0 {
+		parts = append(parts, `minitems:"`+strconv.Itoa(schema.MinItems)+`"`)
+	}
+	if schema.MaxItems != 0 {
+		parts = append(parts, `maxitems:"`+strconv.Itoa(schema.MaxItems)+`"`)
+	}
+	if schema.Pattern != "" {
+		parts = append(parts, `pattern:"`+schema.Pattern+`"`)
+	}
+	return strings.Join(parts, " ")
+}
+
+// envVarOf returns an env input's explicit environment variable (schema.variable),
+// or "" to let the binder use recon's snake-upper default for the key.
+func envVarOf(schema *InputSchema) string {
+	if schema != nil {
+		return schema.Variable
+	}
+	return ""
+}
+
+// configFields returns the <Prefix>Config struct fields: one per pure config-file
+// input. The recon key is the declared key path (schema.key), else the input name.
+func configFields(in *Inputs) []fieldDef {
+	if in == nil {
+		return nil
+	}
+	fields := make([]fieldDef, 0, len(in.Config))
+	for _, c := range in.Config {
+		fields = append(fields, fieldDef{
+			Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name,
+			Import: fieldImport(c.Schema), Recon: reconTag(configKey(c), c.Schema),
+			Constraint: constraintTags(c.Schema),
+		})
+	}
+	return fields
+}
+
+// configKey is a config input's recon key: its declared schema.key, else its name.
+func configKey(c ConfigInput) string {
+	if c.Schema != nil && c.Schema.Key != "" {
+		return c.Schema.Key
+	}
+	return c.Name
+}
+
+// reconTag builds an env/config field's recon struct-tag body: the canonical key,
+// then default=/required/secret from the input schema.
+func reconTag(key string, schema *InputSchema) string {
+	parts := []string{key}
+	if schema != nil {
+		if d := defaultString(schema.Default); d != "" {
+			parts = append(parts, "default="+d)
+		}
+		if schema.Required {
+			parts = append(parts, "required")
+		}
+		if schema.Secret {
+			parts = append(parts, "secret")
+		}
+	}
+	return strings.Join(parts, ",")
+}
+
+// stdinTypeExpr returns the Go type for a command's Stdin field — "*<Prefix>Stdin"
+// when the command declares a typed stdin payload, else "" (no Stdin field).
+func stdinTypeExpr(prefix string, in *Inputs) string {
+	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
+		return ""
+	}
+	return "*" + prefix + "Stdin"
+}
+
+// stdinFormatExpr returns a command's stdin decode format (the binder reads it from
+// the Stdin field's `stdin:"<format>"` tag), defaulting to json. "" when no stdin.
+func stdinFormatExpr(in *Inputs) string {
+	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
+		return ""
+	}
+	if in.Stdin.Format != "" {
+		return in.Stdin.Format
+	}
+	return "json"
+}
+
+// argFields returns the <Prefix>Arguments struct fields for a command's inputs.
+func argFields(in *Inputs) []fieldDef {
+	if in == nil {
+		return nil
+	}
+	fields := make([]fieldDef, 0, len(in.Arguments))
+	for _, a := range in.Arguments {
+		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema)})
+	}
+	return fields
+}
+
+// goFieldType resolves an input schema to a Go type expression, defaulting to
+// string and applying a pointer for nullable inputs.
+func goFieldType(schema *InputSchema) string {
+	t := "string"
+	nullable := false
+	if schema != nil {
+		if name := refTypeName(schema.Ref); name != "" {
+			t = name // a "#/schemas/X" ref → the generated named type X
+		} else if schema.Type != "" {
+			t = jsonSchemaTypeToGo(schema.Type)
+		}
+		nullable = schema.Nullable
+	}
+	if nullable {
+		return "*" + t
+	}
+	return t
+}
+
+// refTypeName returns the named-schema type for an intra-document "$ref"
+// ("#/schemas/X" → "X"), or "" when ref is empty or external. The named type is
+// generated from the document-level `schemas` map (see buildOutputTypes).
+func refTypeName(ref string) string {
+	const prefix = "#/schemas/"
+	if strings.HasPrefix(ref, prefix) {
+		return strings.TrimPrefix(ref, prefix)
+	}
+	return ""
+}
+
+// jsonSchemaTypeToGo maps a schema type name to a Go type expression. It
+// accepts both JSON Schema standard names and Go names (the schema permits
+// both); unknown values pass through unchanged so custom types are usable.
+func jsonSchemaTypeToGo(t string) string {
+	switch t {
+	case "boolean", "bool":
+		return "bool"
+	case "integer", "int":
+		return "int"
+	case "number", "float64":
+		return "float64"
+	case "array", "[]string":
+		return "[]string"
+	case "object", "map":
+		return "map[string]any"
+	case "duration":
+		return "time.Duration"
+	case "time", "datetime", "date":
+		return "time.Time"
+	default:
+		return t
+	}
+}
+
+// renderDefinition renders the `var definition = rotini.Definition{…}` literal —
+// the compiled command tree the runtime parses against. It is unexported: end-users
+// hold the *Program (from the generated NewProgram), never the Definition. Emitted into
+// the framework file and gofmt-formatted with the rest of it, so the produced text only
+// needs to be valid Go, not pretty.
+func renderDefinition(gp *genProgram) string {
+	var b strings.Builder
+	b.WriteString("var definition = " + rotiniPkgName + ".Definition{\n")
+	b.WriteString("Name: " + strconv.Quote(gp.rootName) + ",\n")
+	b.WriteString("Handler: " + strconv.Quote(gp.rootPascal) + ",\n")
+	if len(gp.rootAliases) > 0 {
+		b.WriteString("Aliases: " + goStringSlice(gp.rootAliases) + ",\n")
+	}
+	if fl := flagDefsLiteral(gp.rootInputs); fl != "" {
+		b.WriteString("Flags: " + fl + ",\n")
+	}
+	if al := argDefsLiteral(gp.rootInputs); al != "" {
+		b.WriteString("Arguments: " + al + ",\n")
+	}
+	if fg := flagGroupsLiteral(gp.rootInputs); fg != "" {
+		b.WriteString("FlagGroups: " + fg + ",\n")
+	}
+	if fd := flagDependenciesLiteral(gp.rootInputs); fd != "" {
+		b.WriteString("FlagDependencies: " + fd + ",\n")
+	}
+	if cl := rnodesLiteral(gp.rootName, gp.tree); cl != "" {
+		b.WriteString("Commands: " + cl + ",\n")
+	}
+	if rl := remoteDefsLiteral(gp.rootName, gp.rootRemotes); rl != "" {
+		b.WriteString("RemoteCommands: " + rl + ",\n")
+	}
+	if dl := discoveryLiteral(gp.rootName, gp.rootDiscovery); dl != "" {
+		b.WriteString("Discovery: " + dl + ",\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
+}
+
+// renderBindMeta renders the `var BindMeta = rotini.BindMeta{…}` descriptor the
+// default binder consumes — the document-level config-file sources. Returns "" when
+// there are none (so a CLI with no configuration_files stays unchanged).
+func renderBindMeta(gp *genProgram) string {
+	files := gp.configFiles
+	stdinSchemas := collectStdinSchemas(gp)
+	if len(files) == 0 && len(stdinSchemas) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.\n")
+	b.WriteString("var BindMeta = " + rotiniPkgName + ".BindMeta{\n")
+	if len(files) > 0 {
+		b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
+		for _, f := range files {
+			b.WriteString("{Name: " + strconv.Quote(f.Name) + ", Path: " + strconv.Quote(f.Path))
+			if f.Format != "" {
+				b.WriteString(", Format: " + strconv.Quote(f.Format))
+			}
+			b.WriteString("},\n")
+		}
+		b.WriteString("},\n")
+	}
+	if len(stdinSchemas) > 0 {
+		b.WriteString("StdinSchemas: map[string]string{\n")
+		keys := make([]string, 0, len(stdinSchemas))
+		for k := range stdinSchemas {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			b.WriteString(strconv.Quote(k) + ": " + goRawString(stdinSchemas[k]) + ",\n")
+		}
+		b.WriteString("},\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// goRawString renders s as a Go string literal, preferring a backtick raw string
+// (clean for embedded JSON) and falling back to a quoted literal if s contains a
+// backtick.
+func goRawString(s string) string {
+	if !strings.Contains(s, "`") {
+		return "`" + s + "`"
+	}
+	return strconv.Quote(s)
+}
+
+// discoveryLiteral renders the *rotini.RemoteDiscoveryDef literal for a command's
+// plugin discovery, or "" when discovery is off. The prefix defaults to "<host>-"
+// (the root binary name) when the spec leaves it unset.
+func discoveryLiteral(host string, d *RemoteDiscovery) string {
+	if d == nil {
+		return ""
+	}
+	prefix := d.Prefix
+	if prefix == "" {
+		prefix = host + "-"
+	}
+	var b strings.Builder
+	b.WriteString("&" + rotiniPkgName + ".RemoteDiscoveryDef{Prefix: " + strconv.Quote(prefix))
+	if d.Path != "" {
+		b.WriteString(", Path: " + strconv.Quote(d.Path))
+	}
+	if d.Hidden {
+		b.WriteString(", Hidden: true")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+// remoteDefsLiteral renders the []rotini.RemoteDef literal for a command's
+// remote/co-located sub-commands. The expected binary is "<host>-<name>".
+// sliceLiteral renders a "[]rotini.<typeName>{ ... }" Go literal (one element per
+// item), or "" when items is empty. renderItem writes one element's body — the
+// text between the element's surrounding "{" and "}," which sliceLiteral supplies.
+func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.Builder, item T)) string {
+	if len(items) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("[]" + rotiniPkgName + "." + typeName + "{\n")
+	for _, it := range items {
+		b.WriteString("{")
+		renderItem(&b, it)
+		b.WriteString("},\n")
+	}
+	b.WriteString("}")
+	return b.String()
+}
+
+func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
+	return sliceLiteral("RemoteDef", rcs, func(b *strings.Builder, rc RemoteCommandSpec) {
+		b.WriteString("Name: " + strconv.Quote(rc.Name))
+		b.WriteString(", Binary: " + strconv.Quote(host+"-"+rc.Name))
+		if len(rc.Aliases) > 0 {
+			b.WriteString(", Aliases: " + goStringSlice(rc.Aliases))
+		}
+		if rc.Timeout != "" {
+			if d, err := time.ParseDuration(rc.Timeout); err == nil && d > 0 {
+				b.WriteString(fmt.Sprintf(", Timeout: %d", int64(d)))
+			}
+		}
+	})
+}
+
+func flagDefsLiteral(in *Inputs) string {
+	if in == nil {
+		return ""
+	}
+	return sliceLiteral("FlagDef", in.Flags, func(b *strings.Builder, f FlagInput) {
+		ids := f.Identifiers
+		if len(ids) == 0 {
+			ids = []string{"--" + strings.ReplaceAll(f.Name, "_", "-")}
+		}
+		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(ids))
+		b.WriteString(", Type: " + strconv.Quote(getSchemaType(f.Schema)))
+		writeSchemaCommon(b, f.Schema)
+		if len(f.DeprecatedIdentifiers) > 0 {
+			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
+		}
+	})
+}
+
+func argDefsLiteral(in *Inputs) string {
+	if in == nil {
+		return ""
+	}
+	return sliceLiteral("ArgDef", in.Arguments, func(b *strings.Builder, a ArgumentInput) {
+		typ := getSchemaType(a.Schema)
+		b.WriteString("Name: " + strconv.Quote(a.Name) + ", Type: " + strconv.Quote(typ))
+		if strings.HasPrefix(typ, "[]") {
+			b.WriteString(", Variadic: true")
+		}
+		writeSchemaCommon(b, a.Schema)
+	})
+}
+
+// flagGroupsLiteral renders the []rotini.FlagGroup literal for a command's flag
+// groups, or "" when none are declared.
+func flagGroupsLiteral(in *Inputs) string {
+	if in == nil {
+		return ""
+	}
+	return sliceLiteral("FlagGroup", in.FlagGroups, func(b *strings.Builder, g FlagGroup) {
+		b.WriteString("Kind: " + strconv.Quote(g.Kind) + ", Flags: " + goStringSlice(g.Flags))
+	})
+}
+
+// flagDependenciesLiteral renders the []rotini.FlagDependency literal for a command's
+// conditional cross-flag requirements, or "" when none are declared.
+func flagDependenciesLiteral(in *Inputs) string {
+	if in == nil {
+		return ""
+	}
+	return sliceLiteral("FlagDependency", in.FlagDependencies, func(b *strings.Builder, d FlagDependency) {
+		b.WriteString("When: " + strconv.Quote(d.When) + ", Requires: " + goStringSlice(d.Requires))
+	})
+}
+
+// rnodesLiteral renders the []rotini.CommandDef literal for a resolved command
+// tree (recursing into children), or "" when nodes is empty. host prefixes the
+// remote binary names for any discovery nodes.
+func rnodesLiteral(host string, nodes []rnode) string {
+	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
+		b.WriteString("Name: " + strconv.Quote(n.name) + ",\n")
+		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
+		if len(n.aliases) > 0 {
+			b.WriteString("Aliases: " + goStringSlice(n.aliases) + ",\n")
+		}
+		if len(n.deprecatedIdentifiers) > 0 {
+			b.WriteString("DeprecatedIdentifiers: " + goStringSlice(n.deprecatedIdentifiers) + ",\n")
+		}
+		if fl := flagDefsLiteral(n.inputs); fl != "" {
+			b.WriteString("Flags: " + fl + ",\n")
+		}
+		if al := argDefsLiteral(n.inputs); al != "" {
+			b.WriteString("Arguments: " + al + ",\n")
+		}
+		if fg := flagGroupsLiteral(n.inputs); fg != "" {
+			b.WriteString("FlagGroups: " + fg + ",\n")
+		}
+		if fd := flagDependenciesLiteral(n.inputs); fd != "" {
+			b.WriteString("FlagDependencies: " + fd + ",\n")
+		}
+		if cl := rnodesLiteral(host, n.children); cl != "" {
+			b.WriteString("Commands: " + cl + ",\n")
+		}
+		if dl := discoveryLiteral(host, n.discovery); dl != "" {
+			b.WriteString("Discovery: " + dl + ",\n")
+		}
+	})
+}
+
+// writeSchemaCommon appends the Required/Default/Enum fields shared by FlagDef
+// and ArgDef literals, omitting zero values.
+func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
+	if schema == nil {
+		return
+	}
+	if schema.Required {
+		b.WriteString(", Required: true")
+	}
+	if d := defaultString(schema.Default); d != "" {
+		b.WriteString(", Default: " + strconv.Quote(d))
+	}
+	if len(schema.Enum) > 0 {
+		b.WriteString(", Enum: " + goStringSlice(schema.Enum))
+	}
+	if schema.Secret {
+		b.WriteString(", Secret: true")
+	}
+	if c := constraintsLiteral(schema); c != "" {
+		b.WriteString(", Constraints: " + c)
+	}
+}
+
+// constraintsLiteral renders a rotini.Constraints{…} literal from a schema's declared
+// numeric/string/array bounds, or "" when none are set (a zero bound or empty pattern
+// is "unset", matching the Definition's zero-sentinel convention).
+func constraintsLiteral(schema *InputSchema) string {
+	var parts []string
+	if schema.Minimum != 0 {
+		parts = append(parts, "Minimum: "+strconv.FormatFloat(schema.Minimum, 'g', -1, 64))
+	}
+	if schema.Maximum != 0 {
+		parts = append(parts, "Maximum: "+strconv.FormatFloat(schema.Maximum, 'g', -1, 64))
+	}
+	if schema.MinLength != 0 {
+		parts = append(parts, "MinLength: "+strconv.Itoa(schema.MinLength))
+	}
+	if schema.MaxLength != 0 {
+		parts = append(parts, "MaxLength: "+strconv.Itoa(schema.MaxLength))
+	}
+	if schema.MinItems != 0 {
+		parts = append(parts, "MinItems: "+strconv.Itoa(schema.MinItems))
+	}
+	if schema.MaxItems != 0 {
+		parts = append(parts, "MaxItems: "+strconv.Itoa(schema.MaxItems))
+	}
+	if schema.Pattern != "" {
+		parts = append(parts, "Pattern: "+strconv.Quote(schema.Pattern))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return rotiniPkgName + ".Constraints{" + strings.Join(parts, ", ") + "}"
+}
+
+// getSchemaType resolves an input schema to the Definition's type string,
+// defaulting to "string".
+func getSchemaType(schema *InputSchema) string {
+	if schema != nil {
+		if name := refTypeName(schema.Ref); name != "" {
+			return name
+		}
+		if schema.Type != "" {
+			return jsonSchemaTypeToGo(schema.Type)
+		}
+	}
+	return "string"
+}
+
+// goStringSlice renders a []string{…} literal.
+func goStringSlice(ss []string) string {
+	quoted := make([]string, len(ss))
+	for i, s := range ss {
+		quoted[i] = strconv.Quote(s)
+	}
+	return "[]string{" + strings.Join(quoted, ", ") + "}"
+}
+
+// defaultString renders an input's decoded default value as a string.
+func defaultString(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case bool:
+		return strconv.FormatBool(x)
+	case float64:
+		return strconv.FormatFloat(x, 'g', -1, 64)
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	default:
+		return fmt.Sprintf("%v", x)
+	}
+}
+
+// renderFrameworkFile renders the framework file: the ProgramHandlers aggregate
+// interface plus the typed input structs for every command. The caller writes it
+// (to its own file, or merged with the rollup when cli and cligen are combined).
+// It is fully generated and carries a DO NOT EDIT banner.
+func renderFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) ([]byte, error) {
+	own := append([]genCommand{gp.root}, gp.own...)
+
+	blocks := make([]inputBlock, 0, len(own))
+	imports := map[string]bool{}
+	noteImport := func(imp string) {
+		if imp != "" {
+			imports[imp] = true
+		}
+	}
+	for _, c := range own {
+		blocks = append(blocks, inputBlock{
+			Prefix:       c.prefix,
+			Flags:        c.flags,
+			Arguments:    c.args,
+			Env:          c.env,
+			Config:       c.config,
+			StdinType:    c.stdinType,
+			StdinFormat:  c.stdinFormat,
+			InputsFields: c.inputs,
+		})
+		for _, fs := range [][]fieldDef{c.flags, c.args, c.env, c.config} {
+			for _, f := range fs {
+				noteImport(f.Import)
+			}
+		}
+	}
+
+	outputTypes, err := buildOutputTypes(gp, lay.frameworkPkgName)
+	if err != nil {
+		return nil, err
+	}
+
+	data := map[string]any{
+		"Package":      lay.frameworkPkgName,
+		"RotiniImport": rotiniImportPath,
+		"RotiniPkg":    rotiniPkgName,
+		"Imports":      renderImports(imports),
+		"Methods":      gp.methods(),
+		"Blocks":       blocks,
+		"Definition":   renderDefinition(gp),
+		"Features":     features,
+		"OutputTypes":  outputTypes,
+		"BindMeta":     renderBindMeta(gp),
+	}
+	return renderGo("framework", "templates/rotini.go.tmpl", data)
+}
+
+// writeHandlerStubs creates a per-command handler stub for the root command and
+// every OWN sub-command, but only when the file does not already exist — stubs
+// are user-editable, so an existing stub is never overwritten. Composed
+// commands have no stub here; their handlers live in the child's package.
+func writeHandlerStubs(gp *genProgram, lay layout) error {
+	for _, c := range append([]genCommand{gp.root}, gp.own...) {
+		path := filepath.Join(lay.handlerDir, c.filename)
+		if _, err := os.Stat(path); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("stat %s: %w", path, err)
+		}
+		data := map[string]any{
+			"Package":      lay.handlerPkgName,
+			"RotiniImport": rotiniImportPath,
+			"RotiniPkg":    rotiniPkgName,
+			"HandlerType":  c.handler,
+		}
+		content, err := renderGo("handler-"+c.handler, "templates/handler.go.tmpl", data)
+		if err != nil {
+			return err
+		}
+		if err := writeGeneratedFile(path, content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// renderHandlerRollup renders the handler rollup: the unexported handlers
+// struct, the ProgramHandlers assertion, the Program var, the Handlers accessor,
+// and one method per command — own commands return a local stub, composed
+// commands delegate to the child's cli package. References to the framework
+// (ProgramHandlers, NewProgram) are unqualified when cli and cligen share a
+// package, else qualified with the cligen package name. The caller writes it (to
+// its own file, or merged with the framework when combined).
+func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
+	type rollupMethod struct {
+		Method         string
+		Composed       bool
+		HandlerType    string
+		DelegateAlias  string
+		DelegateMethod string
+	}
+	var methods []rollupMethod
+	for _, c := range append([]genCommand{gp.root}, gp.own...) {
+		methods = append(methods, rollupMethod{Method: c.prefix, HandlerType: c.handler})
+	}
+	for _, c := range gp.composed {
+		methods = append(methods, rollupMethod{
+			Method:         c.prefix,
+			Composed:       true,
+			DelegateAlias:  c.delegateAlias,
+			DelegateMethod: c.delegateMethod,
+		})
+	}
+	sort.Slice(methods, func(i, j int) bool { return methods[i].Method < methods[j].Method })
+
+	data := map[string]any{
+		"Package":         lay.handlerPkgName,
+		"RotiniImport":    rotiniImportPath,
+		"RotiniPkg":       rotiniPkgName,
+		"FrameworkImport": lay.frameworkImport, // "" when cli and cligen share a package
+		"FrameworkQual":   lay.frameworkQual,   // e.g. "cligen."; "" when same package
+		"ChildImports":    gp.childImports,
+		"Methods":         methods,
+	}
+	return renderGo("rollup", "templates/handlers.go.tmpl", data)
+}
+
+// mergeGenFile combines the rollup and framework files into a single source file
+// for the combined layout (cli and cligen are the same package and file). The
+// rollup body comes first, then the framework body, under one package clause with
+// the two files' imports unioned. Both inputs are already gofmt'd; the merged
+// result is re-formatted so the unioned import block is sorted and grouped.
+func mergeGenFile(pkgName string, rollup, framework []byte) ([]byte, error) {
+	rImports, rBody, err := splitGoFile(rollup)
+	if err != nil {
+		return nil, fmt.Errorf("merge: parse rollup: %w", err)
+	}
+	fImports, fBody, err := splitGoFile(framework)
+	if err != nil {
+		return nil, fmt.Errorf("merge: parse framework: %w", err)
+	}
+
+	seen := map[string]bool{}
+	var imports []string
+	for _, imp := range append(rImports, fImports...) {
+		if !seen[imp] {
+			seen[imp] = true
+			imports = append(imports, imp)
+		}
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("// Code generated by rotini; DO NOT EDIT.\n")
+	buf.WriteString("package " + pkgName + "\n\n")
+	if len(imports) > 0 {
+		buf.WriteString("import (\n")
+		for _, imp := range imports {
+			buf.WriteString("\t" + imp + "\n")
+		}
+		buf.WriteString(")\n\n")
+	}
+	buf.Write(rBody)
+	buf.WriteString("\n\n")
+	buf.Write(fBody)
+
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("merge: gofmt: %w\n--- merged source ---\n%s", err, buf.String())
+	}
+	return formatted, nil
+}
+
+// splitGoFile parses a gofmt'd Go source file and returns its import specs (each
+// reconstructed as it appears in source, e.g. `_ "embed"` or `"fmt"`) and the
+// file body verbatim — everything after the import block (or after the package
+// clause when there are no imports). Returning the body as raw source preserves
+// directive comments like //go:embed exactly.
+func splitGoFile(src []byte) (imports []string, body []byte, err error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
+	if err != nil {
+		return nil, nil, err
+	}
+	bodyStart := fset.Position(f.Name.End()).Offset
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.IMPORT {
+			continue
+		}
+		for _, s := range gd.Specs {
+			is := s.(*ast.ImportSpec)
+			if is.Name != nil {
+				imports = append(imports, is.Name.Name+" "+is.Path.Value)
+			} else {
+				imports = append(imports, is.Path.Value)
+			}
+		}
+		if e := fset.Position(gd.End()).Offset; e > bodyStart {
+			bodyStart = e
+		}
+	}
+	body = bytes.TrimLeft(src[bodyStart:], "\n\r\t ")
+	return imports, body, nil
+}
+
+// pruneStubs removes handler .go files that no longer correspond to an own
+// command, preserving the rollup file, the keep list, and any test files. The
+// cli package is flat, so keepList entries (package-relative) are just file names
+// for its top-level stubs. When cli and cligen share a package (two-files-one-
+// package layout), the framework file also lives here, so it is protected too —
+// otherwise it would be pruned as an orphan.
+func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
+	protected := map[string]bool{
+		gp.root.filename:  true,
+		lay.rollupFile:    true,
+		lay.frameworkFile: true,
+	}
+	for _, c := range gp.own {
+		protected[c.filename] = true
+	}
+	for _, k := range keepList {
+		protected[filepath.ToSlash(k)] = true
+	}
+
+	entries, err := os.ReadDir(lay.handlerDir)
+	if err != nil {
+		return fmt.Errorf("read handler dir %s: %w", lay.handlerDir, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		if protected[name] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(lay.handlerDir, name)); err != nil {
+			return fmt.Errorf("prune %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// pruneCligen removes orphaned rotini-managed outputs in each enabled feature's
+// dir (under the cligen package) — the per-command pages (matching the feature's
+// extension) for commands no longer in the spec. The editable per-feature
+// template, test files, and any keep-listed (package-relative) path are
+// preserved. Top-level cligen files (the gen file) are never auto-removed.
+// keepList entries are package-relative to the cligen package.
+func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
+	keep := make(map[string]bool, len(keepList))
+	for _, k := range keepList {
+		keep[filepath.ToSlash(k)] = true
+	}
+	for _, o := range outputs {
+		// The current command set's pages and the editable template are protected.
+		protected := map[string]bool{o.desc.tmplFile: true}
+		for _, n := range o.nodes {
+			protected[n.file] = true
+		}
+
+		entries, err := os.ReadDir(o.absDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("read %s dir %s: %w", o.desc.name, o.absDir, err)
+		}
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
+				continue
+			}
+			if protected[name] {
+				continue
+			}
+			// keep entries are package-relative (to the cligen package).
+			rel := name
+			if r, err := filepath.Rel(lay.frameworkDir, filepath.Join(o.absDir, name)); err == nil {
+				rel = filepath.ToSlash(r)
+			}
+			if keep[rel] {
+				continue
+			}
+			if err := os.Remove(filepath.Join(o.absDir, name)); err != nil {
+				return fmt.Errorf("prune %s: %w", rel, err)
+			}
+		}
+	}
+	return nil
+}
+
+// resolveLayout turns the (defaulted) conf package settings into absolute
+// output directories, package names, the framework import path, and the
+// same-package/combined flags. cli and cligen may name the same package (refs
+// become unqualified) and even the same file (framework + rollup are merged).
+func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
+	cli := conf.Generate.Packages.Cli
+	cligen := conf.Generate.Packages.Cligen
+
+	cliPkgDir := filepath.ToSlash(cli.Package)
+	cligenPkgDir := filepath.ToSlash(cligen.Package)
+	samePackage := cliPkgDir == cligenPkgDir
+	combined := samePackage && cli.File == cligen.File
+
+	frameworkImport := ""
+	frameworkQual := ""
+	if !samePackage {
+		frameworkImport = moduleName + "/" + cligenPkgDir
+		frameworkQual = filepath.Base(cligenPkgDir) + "."
+	}
+
+	return layout{
+		moduleRoot: moduleRoot,
+
+		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(cligenPkgDir)),
+		frameworkPkgName: filepath.Base(cligenPkgDir),
+		frameworkFile:    cligen.File,
+		frameworkImport:  frameworkImport,
+		frameworkQual:    frameworkQual,
+
+		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(cliPkgDir)),
+		handlerPkgName: filepath.Base(cliPkgDir),
+		rollupFile:     cli.File,
+
+		samePackage: samePackage,
+		combined:    combined,
+	}, nil
+}
+
+// applyConfDefaults fills in the sane rotini conf defaults for any unset
+// generation settings, so a missing or partial conf still generates. The
+// default is one self-contained package: both cli and cligen point at
+// "cmd/<root>/cli" / "rotini.gen.go" (so framework + rollup merge into a single
+// file). rootName is the spec's root command name (e.g. "rotini"), used to build
+// that default package path.
+func applyConfDefaults(conf *Conf, rootName string) {
+	if conf.Generate == nil {
+		conf.Generate = &GenerateConfig{}
+	}
+	if conf.Generate.Packages == nil {
+		conf.Generate.Packages = &PackagesConfig{}
+	}
+	pkgs := conf.Generate.Packages
+	if pkgs.Cli == nil {
+		pkgs.Cli = &PackageConfig{}
+	}
+	if pkgs.Cligen == nil {
+		pkgs.Cligen = &PackageConfig{}
+	}
+	defaultPkg := "cmd/" + rootName + "/cli"
+	const defaultFile = "rotini.gen.go"
+	for _, p := range []*PackageConfig{pkgs.Cli, pkgs.Cligen} {
+		if p.Package == "" {
+			p.Package = defaultPkg
+		}
+		if p.File == "" {
+			p.File = defaultFile
+		}
+	}
+	// Each present feature defaults its output dir to "<cligen-package>/embed/<feature>"
+	// (module-relative), which always resolves under the cligen package so //go:embed
+	// can reach it.
+	cligenDir := filepath.ToSlash(pkgs.Cligen.Package)
+	for _, f := range featureConfigs(conf) {
+		if f.cfg != nil && f.cfg.Dir == "" {
+			f.cfg.Dir = cligenDir + "/embed/" + f.desc.name
+		}
+	}
+}
+
+// renderGo parses the named embedded template, executes it against data, and
+// gofmt-formats the result. A formatting failure includes the unformatted
+// source to make template bugs diagnosable.
+func renderGo(name, templatePath string, data any) ([]byte, error) {
+	src, err := templateFS.ReadFile(templatePath)
+	if err != nil {
+		return nil, fmt.Errorf("read template %s: %w", templatePath, err)
+	}
+	tmpl, err := template.New(name).Parse(string(src))
+	if err != nil {
+		return nil, fmt.Errorf("parse template %s: %w", templatePath, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, data); err != nil {
+		return nil, fmt.Errorf("execute template %s: %w", templatePath, err)
+	}
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("gofmt %s: %w\n--- generated source ---\n%s", name, err, buf.String())
+	}
+	return formatted, nil
+}
+
+// writeGeneratedFile creates dir as needed and writes the generated file.
+func writeGeneratedFile(path string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("create dir for %s: %w", path, err)
+	}
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// findModule walks up from the working directory to the nearest go.mod and
+// returns the module root directory and the module path declared in it.
+func findModule() (root, name string, err error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", "", fmt.Errorf("get working directory: %w", err)
+	}
+	for {
+		goMod := filepath.Join(dir, "go.mod")
+		if data, statErr := os.ReadFile(goMod); statErr == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if after, ok := strings.CutPrefix(line, "module "); ok {
+					return dir, strings.TrimSpace(after), nil
+				}
+			}
+			return "", "", fmt.Errorf("no module path in %s", goMod)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", "", fmt.Errorf("go.mod not found in any parent of working directory")
+		}
+		dir = parent
+	}
+}
+
+// noteStdImport records the standard-library import a Go type expression needs
+// (currently only the time package, for time.Duration / time.Time fields).
+// fieldImport returns the Go import path backing a field's schema: the explicit
+// spec `import:` when set, otherwise the import rotini knows is needed for its own
+// built-in type aliases (duration/time/datetime/date → "time"). "" means no import.
+func fieldImport(schema *InputSchema) string {
+	if schema == nil {
+		return ""
+	}
+	if imp := strings.TrimSpace(schema.Import); imp != "" {
+		return imp
+	}
+	return builtinImport(schema.Type)
+}
+
+// builtinImport returns the import path rotini's own type vocabulary requires, or
+// "" when the type needs none. Only the time-family aliases (which jsonSchemaTypeToGo
+// maps to time.Time/time.Duration) carry an implicit import.
+func builtinImport(rotiniType string) string {
+	switch rotiniType {
+	case "duration", "time", "datetime", "date":
+		return "time"
+	}
+	return ""
+}
+
+// renderImports turns a set of spec `import:` values into sorted Go import specs:
+// a plain path becomes "path"; the aliased form "alias path" becomes alias "path".
+func renderImports(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for imp := range set {
+		if i := strings.IndexByte(imp, ' '); i >= 0 {
+			out = append(out, imp[:i]+" "+strconv.Quote(strings.TrimSpace(imp[i+1:])))
+		} else {
+			out = append(out, strconv.Quote(imp))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// toPascalCase converts a name to PascalCase, treating '-', '_' and ' ' as word
+// boundaries (e.g. "foo_bar" -> "FooBar", "generate" -> "Generate").
+func toPascalCase(s string) string {
+	var b strings.Builder
+	capitalize := true
+	for _, r := range s {
+		if r == '-' || r == '_' || r == ' ' {
+			capitalize = true
+			continue
+		}
+		if capitalize {
+			b.WriteRune(unicode.ToUpper(r))
+			capitalize = false
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// lowerFirst returns s with its first rune lower-cased.
+func lowerFirst(s string) string {
+	if s == "" {
+		return ""
+	}
+	r := []rune(s)
+	r[0] = unicode.ToLower(r[0])
+	return string(r)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The resolved command tree — spec (+ $ref composition) → genProgram.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// genProgram is a parent spec resolved for code generation: its own command
+// tree (inline commands — emit types, stubs, and a rollup method that returns a
+// local stub) plus any statically composed commands pulled in via `$ref` (emit
+// a rollup method that delegates to the child's cli package; no types or stubs).
+type genProgram struct {
+	rootName      string
+	rootPascal    string
+	rootInputs    *Inputs
+	rootAliases   []string
+	rootRemotes   []RemoteCommandSpec // root-level remote/co-located sub-commands
+	rootHelp      cmdHelp             // root command's flattened help fields
+	rootOutput    *Schema             // root command's output type (nil when unset)
+	rootDiscovery *RemoteDiscovery    // root command's plugin discovery (nil = off)
+	schemas       map[string]Schema   // document-level named schemas (for output codegen)
+	configFiles   []ConfigurationFile // document-level config-file sources (for the binder)
+
+	root         genCommand    // the root command (own)
+	own          []genCommand  // inline sub-commands, sorted by prefix
+	composed     []composedCmd // composed sub-commands, sorted by prefix
+	tree         []rnode       // full resolved tree (own + grafted), for the Definition
+	childImports []childImport // unique child cli imports for the rollup
+}
+
+// rnode is one node of the resolved command tree used to render the Definition.
+type rnode struct {
+	name                  string
+	prefix                string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
+	aliases               []string
+	inputs                *Inputs
+	help                  cmdHelp          // flattened help fields; for a composed root, from the child spec
+	output                *Schema          // command's output type (own commands only; nil for composed)
+	discovery             *RemoteDiscovery // command's plugin discovery (nil = off)
+	hidden                bool             // omit from the parent's generated Commands list
+	group                 string           // group label that buckets this command in the parent's Commands list
+	deprecated            string           // deprecation note for the parent's Commands list (help annotation)
+	deprecatedIdentifiers []string         // deprecated aliases of this command (runtime Deprecations)
+	composed              bool             // grafted from a $ref'd child (its types live in the child's cligen)
+	children              []rnode
+}
+
+// composedCmd is a command supplied by a composed child: the parent's rollup
+// method (prefix) delegates to delegateAlias.delegateMethod().
+type composedCmd struct {
+	prefix         string
+	delegateAlias  string
+	delegateMethod string
+}
+
+// childImport is a composed child's cli import for the rollup. Fields are
+// exported because the rollup template ranges over them.
+type childImport struct {
+	Alias string
+	Path  string
+}
+
+// composeCtx threads composition state down a composed subtree.
+type composeCtx struct {
+	composed    bool
+	rootPath    string // underscore path of the composed subtree's root in the parent
+	childPascal string // PascalCase of the composed child's own root name
+	alias       string // import alias of the composed child's cli package
+}
+
+// resolveTree resolves spec into a genProgram, loading any `$ref`'d child specs
+// (relative to specPath) and grafting them as composed subtrees.
+func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgram, error) {
+	root := spec.Command
+	if root.Ref != "" || root.Name == "" {
+		return nil, fmt.Errorf("root command must have a name (the top-level \"command\" cannot use $ref)")
+	}
+	gp := &genProgram{
+		rootName:      root.Name,
+		rootPascal:    toPascalCase(root.Name),
+		rootInputs:    root.Inputs,
+		rootAliases:   root.Aliases,
+		rootRemotes:   root.RemoteCommands,
+		rootHelp:      commandHelp(root),
+		rootOutput:    root.Output,
+		rootDiscovery: root.RemoteDiscovery,
+		schemas:       spec.Schemas,
+		configFiles:   spec.ConfigurationFiles,
+	}
+	gp.root = genCommand{
+		prefix:      gp.rootPascal,
+		handler:     lowerFirst(gp.rootPascal) + "Handlers",
+		filename:    root.Name + ".go",
+		flags:       flagFields(root.Inputs),
+		args:        argFields(root.Inputs),
+		env:         envFields(root.Inputs),
+		config:      configFields(root.Inputs),
+		stdinType:   stdinTypeExpr(gp.rootPascal, root.Inputs),
+		stdinFormat: stdinFormatExpr(root.Inputs),
+		inputs:      []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
+	}
+
+	specDir := filepath.Dir(specPath)
+	seen := map[string]bool{}
+	if abs, err := filepath.Abs(specPath); err == nil {
+		seen[filepath.Clean(abs)] = true
+	}
+
+	tree, err := gp.walk(root.Commands, "", specDir, moduleRoot, moduleName, seen, composeCtx{})
+	if err != nil {
+		return nil, err
+	}
+	gp.tree = tree
+
+	sort.Slice(gp.own, func(i, j int) bool { return gp.own[i].prefix < gp.own[j].prefix })
+	sort.Slice(gp.composed, func(i, j int) bool { return gp.composed[i].prefix < gp.composed[j].prefix })
+	return gp, nil
+}
+
+func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+	out := make([]rnode, 0, len(cmds))
+	for _, c := range cmds {
+		if c.Ref != "" {
+			if ctx.composed {
+				// Transitive $ref: the direct child already composed this grandchild
+				// and exposes handler methods for it, so graft its tree here and
+				// delegate to the child (no new import) — see composeNestedRef.
+				nodes, err := gp.composeNestedRef(c, parentPath, specDir, moduleRoot, moduleName, seen, ctx)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, nodes...)
+				continue
+			}
+			node, err := gp.composeRef(c, parentPath, specDir, moduleRoot, moduleName, seen)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, node)
+			continue
+		}
+		if c.Name == "" {
+			return nil, fmt.Errorf("command entry has neither a name nor a $ref")
+		}
+
+		path := c.Name
+		if parentPath != "" {
+			path = parentPath + "_" + c.Name
+		}
+		prefix := gp.rootPascal + toPascalCase(path)
+
+		if ctx.composed {
+			rel := strings.TrimPrefix(strings.TrimPrefix(path, ctx.rootPath), "_")
+			gp.composed = append(gp.composed, composedCmd{
+				prefix:         prefix,
+				delegateAlias:  ctx.alias,
+				delegateMethod: ctx.childPascal + toPascalCase(rel),
+			})
+		} else {
+			gp.own = append(gp.own, genCommand{
+				prefix:      prefix,
+				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
+				filename:    gp.rootName + "_" + path + ".go",
+				flags:       flagFields(c.Inputs),
+				args:        argFields(c.Inputs),
+				env:         envFields(c.Inputs),
+				config:      configFields(c.Inputs),
+				stdinType:   stdinTypeExpr(prefix, c.Inputs),
+				stdinFormat: stdinFormatExpr(c.Inputs),
+				inputs:      inputsFields(gp.rootPascal, path),
+			})
+		}
+
+		children, err := gp.walk(c.Commands, path, specDir, moduleRoot, moduleName, seen, ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rnode{
+			name:                  c.Name,
+			prefix:                prefix,
+			aliases:               c.Aliases,
+			inputs:                c.Inputs,
+			help:                  commandHelp(c),
+			output:                c.Output,
+			discovery:             c.RemoteDiscovery,
+			hidden:                c.Hidden,
+			group:                 c.Group,
+			deprecated:            c.Deprecated,
+			deprecatedIdentifiers: c.DeprecatedIdentifiers,
+			composed:              ctx.composed,
+			children:              children,
+		})
+	}
+	if err := checkCollisions(out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// composeRef loads a `$ref`'d child spec and grafts its command tree as a composed
+// subtree. The grafted command is named after the child's own root unless the ref
+// entry sets `name` to override it; the delegation still targets the child's real
+// handler methods either way. Transitive $refs (a composed child that itself $refs)
+// are handled by composeNestedRef during the walk.
+func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool) (rnode, error) {
+	childSpecPath := filepath.Clean(filepath.Join(specDir, filepath.FromSlash(c.Ref)))
+	abs := childSpecPath
+	if a, err := filepath.Abs(childSpecPath); err == nil {
+		abs = filepath.Clean(a)
+	}
+	if seen[abs] {
+		return rnode{}, fmt.Errorf("cyclic $ref: %q", c.Ref)
+	}
+	seen[abs] = true
+	defer delete(seen, abs)
+
+	childSpec, err := readSpec(childSpecPath)
+	if err != nil {
+		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
+	}
+	childRoot := childSpec.Command
+	if childRoot.Name == "" {
+		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
+	}
+
+	imp, err := childCliImport(childSpecPath, moduleRoot, moduleName)
+	if err != nil {
+		return rnode{}, err
+	}
+	childPascal := toPascalCase(childRoot.Name)
+	alias := identAlias(childRoot.Name)
+	gp.addImport(alias, imp)
+
+	// The grafted command is named after the child's root unless the ref overrides it;
+	// the override changes only the parent-side name/path/method, never the delegation
+	// target (which is always the child's real handler).
+	graftName := childRoot.Name
+	if c.Name != "" {
+		graftName = c.Name
+	}
+	composeRootPath := graftName
+	if parentPath != "" {
+		composeRootPath = parentPath + "_" + graftName
+	}
+	prefix := gp.rootPascal + toPascalCase(composeRootPath)
+
+	// The composed subtree root delegates to the child's own root handler.
+	gp.composed = append(gp.composed, composedCmd{prefix: prefix, delegateAlias: alias, delegateMethod: childPascal})
+
+	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: childPascal, alias: alias}
+	children, err := gp.walk(childRoot.Commands, composeRootPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
+	if err != nil {
+		return rnode{}, err
+	}
+	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, group: c.Group, deprecated: c.Deprecated, deprecatedIdentifiers: c.DeprecatedIdentifiers, composed: true, children: children}, nil
+}
+
+// composeNestedRef handles a `$ref` encountered *inside* an already-composed subtree
+// (a transitive ref: parent → child → grandchild). The direct child already composed
+// the grandchild and exposes handler methods for it, so the parent does not import the
+// grandchild's cli — it grafts the grandchild's command tree here and lets the normal
+// composed-walk delegate each node to the direct child (delegateMethod =
+// ctx.childPascal + the node's relative path, which matches the child's method names).
+// Ref-side overrides (name/aliases/hidden/deprecated) win, mirroring composeRef.
+func (gp *genProgram) composeNestedRef(c Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+	childSpecPath := filepath.Clean(filepath.Join(specDir, filepath.FromSlash(c.Ref)))
+	abs := childSpecPath
+	if a, err := filepath.Abs(childSpecPath); err == nil {
+		abs = filepath.Clean(a)
+	}
+	if seen[abs] {
+		return nil, fmt.Errorf("cyclic $ref: %q", c.Ref)
+	}
+	seen[abs] = true
+	defer delete(seen, abs)
+
+	gcSpec, err := readSpec(childSpecPath)
+	if err != nil {
+		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
+	}
+	gc := gcSpec.Command
+	if gc.Name == "" {
+		return nil, fmt.Errorf("composed spec %q has no name", c.Ref)
+	}
+
+	// Graft the grandchild as a named command in the current composed subtree: run it
+	// (and its descendants) through the normal walk so the standard composed
+	// delegation applies and the rnodes are marked composed (no types emitted here).
+	synth := gc
+	synth.Ref = ""
+	if c.Name != "" {
+		synth.Name = c.Name
+	}
+	synth.Aliases = c.Aliases
+	synth.Hidden = c.Hidden
+	synth.Deprecated = c.Deprecated
+	return gp.walk([]Command{synth}, parentPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
+}
+
+func (gp *genProgram) addImport(alias, path string) {
+	for _, ci := range gp.childImports {
+		if ci.Path == path {
+			return
+		}
+	}
+	gp.childImports = append(gp.childImports, childImport{Alias: alias, Path: path})
+}
+
+// childCliImport resolves the import path of a composed child's cli package —
+// the handler package that exposes Handlers() — reading the child's conf when
+// present and falling back to the cmd/<dir>/cli convention.
+func childCliImport(childSpecPath, moduleRoot, moduleName string) (string, error) {
+	childDir := filepath.Dir(childSpecPath)
+	for _, ext := range []string{"yaml", "yml", "jsonc", "json"} {
+		confPath := filepath.Join(childDir, ".rotini.conf."+ext)
+		if _, err := os.Stat(confPath); err != nil {
+			continue
+		}
+		cc, err := readConf(confPath)
+		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
+			cc.Generate.Packages.Cli != nil && cc.Generate.Packages.Cli.Package != "" {
+			return moduleName + "/" + filepath.ToSlash(cc.Generate.Packages.Cli.Package), nil
+		}
+	}
+	rel, err := filepath.Rel(moduleRoot, filepath.Join(childDir, "cli"))
+	if err != nil {
+		return "", fmt.Errorf("locate composed child cli package: %w", err)
+	}
+	return moduleName + "/" + filepath.ToSlash(rel), nil
+}
+
+// identAlias derives a valid, reasonably unique Go import alias from a command
+// name (every child cli package is named "cli", so aliases are required).
+func identAlias(name string) string {
+	return lowerFirst(toPascalCase(name)) + "cli"
+}
+
+// checkCollisions errors when sibling commands share a name or alias.
+func checkCollisions(nodes []rnode) error {
+	seen := map[string]bool{}
+	for _, n := range nodes {
+		for _, id := range append([]string{n.name}, n.aliases...) {
+			if seen[id] {
+				return fmt.Errorf("duplicate command name or alias %q among siblings", id)
+			}
+			seen[id] = true
+		}
+	}
+	return nil
+}
+
+// rnodesLiteral renders the []rotini.CommandDef literal for a resolved tree. host
+// is the root binary name, used for the default plugin-discovery prefix.
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Doc features — help / man / markdown / completion page generation.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// helpTemplateName is the editable, seed-once help template file living in the
+// help feature's dir (the only user-owned file there). Pruning always keeps it.
+const helpTemplateName = "help.txt.tmpl"
+
+// docFeature describes one doc-rendered codegen feature (help, man, markdown).
+// All three share the doc-data pipeline (buildHelpData → renderHelpText) and
+// differ only in their file extension, embed-var/resolver names, the editable
+// template, and which per-command verbatim spec string escapes the render.
+type docFeature struct {
+	name      string               // feature key + default dir, e.g. "help"
+	noun      string               // word used in the resolver doc comment / error, e.g. "help"
+	varPrefix string               // embed-var prefix, e.g. "Help" → HelpRotiniGenerate
+	resolver  string               // resolver func name, e.g. "Help"
+	ext       string               // output file extension, e.g. ".txt" / ".md"
+	tmplFile  string               // editable template file name in the feature dir ("" = none)
+	embedTmpl string               // embedded default template path under templates/ ("" = none)
+	verbatim  func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
+	perShell  bool                 // completion: keyed by shell name, not command path
+}
+
+var (
+	helpFeatureDesc = docFeature{
+		name: "help", noun: "help", varPrefix: "Help", resolver: "Help",
+		ext: ".txt", tmplFile: helpTemplateName, embedTmpl: "templates/help.txt.tmpl",
+		verbatim: func(h cmdHelp) string { return h.Help },
+	}
+	manFeatureDesc = docFeature{
+		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
+		ext: ".txt", tmplFile: "man.txt.tmpl", embedTmpl: "templates/man.txt.tmpl",
+		verbatim: func(h cmdHelp) string { return h.Man },
+	}
+	markdownFeatureDesc = docFeature{
+		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
+		ext: ".md", tmplFile: "markdown.md.tmpl", embedTmpl: "templates/markdown.md.tmpl",
+		verbatim: func(h cmdHelp) string { return h.Markdown },
+	}
+	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
+	// no template, no verbatim. Scripts come from completionScript at codegen.
+	completionFeatureDesc = docFeature{
+		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "Completion",
+		ext: ".txt", perShell: true,
+	}
+)
+
+// completionShells are the shells rotini generates completion scripts for, in a
+// deterministic order (matches completionScript's supported set).
+var completionShells = []string{"bash", "zsh", "fish", "powershell"}
+
+// helpNode is one command's help wiring: the embed var/resolver identity plus
+// everything needed to produce its .txt. One is produced per command (root +
+// every own and composed sub-command). The .txt is produced one of two ways,
+// selected by whether the command's verbatim `help` string is set: non-empty →
+// write it verbatim; empty → render `data` through the template.
+type helpNode struct {
+	prefix   string   // PascalCase command prefix; the embed var is "Help"+prefix
+	file     string   // .txt file name within the help dir
+	paths    []string // resolver case values (name/alias permutations); root = [""]
+	name     string   // the command's invocation name, e.g. "rotini generate"
+	verbatim string   // command.help — the exact page; "" means render from data
+	data     helpData // rendering inputs (used when verbatim == "")
+}
+
+// helpHeadings holds the resolved section headings (defaults applied). Each value
+// is rendered verbatim by the template — the trailing ":" lives in the value (the
+// defaults carry it), so an override can drop or restyle it.
+type helpHeadings struct {
+	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples string
+}
+
+// helpData is the per-command template context. Fields are exported because
+// text/template can only read exported fields.
+type helpData struct {
+	Header        string
+	Invocation    string // full command path, e.g. "rotini generate"
+	Summary       string // command.summary (this command's own one-liner)
+	Description   string // command.description (long block)
+	Usage         string // command.usage override ("" when unset)
+	UsageDerived  string // always-computed usage line
+	Footer        string
+	Headings      helpHeadings
+	CommandGroups []helpCmdGroup  // visible direct children, bucketed by group (one default-titled bucket when ungrouped)
+	Arguments     []helpArgRow    // visible own arguments
+	Flags         []helpFlagRow   // visible own flags
+	Environment   []helpEnvRow    // visible env-var inputs
+	Configuration []helpConfigRow // visible config-value inputs
+	Cascading     []helpFlagRow   // visible cascading flags inherited from ancestor commands
+	Examples      []string
+	ExitStatus    []helpExitRow // documented exit codes (man EXIT STATUS section)
+	SeeAlso       []string      // cross-references (man SEE ALSO section)
+}
+
+// helpExitRow is one documented exit code in the man EXIT STATUS section. rotini
+// renders this data verbatim — it sets no exit code itself (handlers own exits).
+type helpExitRow struct {
+	Code    int
+	Summary string
+}
+
+// helpCmdGroup is one bucket of sub-commands in the Commands section. Title is the
+// command's `group` value; "" is the ungrouped bucket, which each template heads with
+// its own default ("Commands:" / "COMMANDS" / "## Commands"). Titled buckets the
+// template formats from Title (its format's convention).
+type helpCmdGroup struct {
+	Title    string // group label, verbatim; "" = ungrouped (default heading)
+	Commands []helpCmdRow
+}
+
+type helpCmdRow struct {
+	Name       string
+	Summary    string // ← the child command's help.summary
+	Aliases    []string
+	Group      string // ← the child command's `group` (buckets it in the Commands section)
+	Deprecated string
+}
+
+type helpEnvRow struct {
+	Var        string // the environment variable (schema.variable, else snake-upper of the name)
+	Summary    string
+	Type       string
+	Required   bool
+	Default    string
+	Enum       []string
+	Deprecated string
+}
+
+type helpConfigRow struct {
+	Name       string
+	Location   string // "<file>.<key>" / "<key>" — where the value is read from
+	Summary    string
+	Type       string
+	Required   bool
+	Default    string
+	Enum       []string
+	Deprecated string
+}
+
+type helpArgRow struct {
+	Name       string
+	Summary    string // ← the argument's summary
+	Required   bool
+	Variadic   bool
+	Default    string
+	Enum       []string
+	Deprecated string
+}
+
+type helpFlagRow struct {
+	Identifiers []string
+	Summary     string // ← the flag's summary
+	Type        string // "" for bool flags
+	Required    bool
+	Default     string
+	Enum        []string
+	Deprecated  string
+}
+
+// helpVar / helpCase / helpFramework are the data the framework template
+// (rotini.go.tmpl) ranges over to emit the embed vars and the Help resolver.
+type helpVar struct {
+	Name  string // Go var name, e.g. "HelpRotiniGenerate"
+	Embed string // //go:embed path, e.g. "help/rotini_generate.txt"
+}
+
+type helpCase struct {
+	PathsLiteral string // case values, e.g. `"generate", "gen"` (root: `""`)
+	Var          string // the var returned for these paths
+}
+
+type helpFramework struct {
+	Resolver string // resolver func name, e.g. "Help"/"Man"/"Markdown"/"Completion"
+	Noun     string // word used in the doc comment + error, e.g. "help"
+	PerShell bool   // completion: resolver takes a shell string, not a command path
+	Vars     []helpVar
+	Cases    []helpCase
+}
+
+// cmdHelp bundles a command's resolved help-presentation fields, which live
+// directly on the spec's command (and root). Help, when non-empty, is the exact
+// verbatim page; otherwise the page is rendered from the structured fields.
+type cmdHelp struct {
+	Summary     string
+	Description string
+	Usage       string
+	Header      string
+	Footer      string
+	Headings    *HelpHeadings
+	Examples    []string
+	ExitStatus  []ExitStatusEntry // command.exit_status (man EXIT STATUS section)
+	SeeAlso     []string          // command.see_also (man SEE ALSO section)
+	Help        string            // verbatim help page (command.help)
+	Man         string            // verbatim man page (command.man)
+	Markdown    string            // verbatim markdown page (command.markdown)
+}
+
+// commandHelp gathers the flattened doc-fields off a command (root or sub).
+func commandHelp(c Command) cmdHelp {
+	return cmdHelp{
+		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
+		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
+		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso,
+		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
+	}
+}
+
+// flattenFeature produces a node per command for one doc feature across the whole
+// resolved tree: the root first, then every sub-command in tree order. Each node
+// carries its verbatim page (the feature's spec escape, when set) and its built
+// helpData (the shared doc-data, used when no verbatim page is given). The file
+// extension is the feature's; the doc-data is identical across features.
+func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
+	out := []helpNode{{
+		prefix:   gp.rootPascal,
+		file:     gp.rootName + feat.ext,
+		paths:    []string{""},
+		name:     gp.rootName,
+		verbatim: feat.verbatim(gp.rootHelp),
+		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree, nil),
+	}}
+
+	// cascading carries the cascading flags accumulated from a node's ancestors
+	// (the root's own cascading flags seed the root's children, and so on down).
+	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []helpFlagRow)
+	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []helpFlagRow) {
+		for _, n := range nodes {
+			seg := append([]string{n.name}, n.aliases...)
+			childChain := append(append([][]string{}, identChain...), seg)
+			childNames := append(append([]string{}, names...), n.name)
+			invocation := gp.rootName + " " + strings.Join(childNames, " ")
+			out = append(out, helpNode{
+				prefix:   n.prefix,
+				file:     gp.rootName + "_" + strings.Join(childNames, "_") + feat.ext,
+				paths:    permute(childChain),
+				name:     invocation,
+				verbatim: feat.verbatim(n.help),
+				data:     buildHelpData(invocation, n.help, n.inputs, n.children, cascading),
+			})
+			childCascading := append(append([]helpFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
+			walk(n.children, childChain, childNames, childCascading)
+		}
+	}
+	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs))
+	return out
+}
+
+// completionNodes produces one node per supported shell for the completion
+// feature: keyed by shell name (the resolver case), file <shell>.txt, embed var
+// Completion<Shell>. No doc-data or verbatim — the script comes from
+// writeCompletionFiles.
+func completionNodes() []helpNode {
+	out := make([]helpNode, 0, len(completionShells))
+	for _, sh := range completionShells {
+		out = append(out, helpNode{
+			prefix: toPascalCase(sh),
+			file:   sh + completionFeatureDesc.ext,
+			paths:  []string{sh},
+			name:   sh,
+		})
+	}
+	return out
+}
+
+// writeCompletionFiles writes one rotini-managed completion script per supported
+// shell under the completion dir, generated from the program name via
+// completionScript (the shared source of the bash/zsh/fish templates). Each
+// file is (re)written every pass, skipped when already identical.
+func writeCompletionFiles(cdir, prog string, nodes []helpNode) error {
+	if cdir == "" {
+		return fmt.Errorf("generate.features.completion.dir must not be empty")
+	}
+	if err := os.MkdirAll(cdir, 0o755); err != nil {
+		return fmt.Errorf("create completion dir %s: %w", cdir, err)
+	}
+	for _, n := range nodes {
+		script, err := completionScript(prog, n.name)
+		if err != nil {
+			return fmt.Errorf("generate %s completion: %w", n.name, err)
+		}
+		if err := writeIfChanged(filepath.Join(cdir, n.file), script); err != nil {
+			return fmt.Errorf("write completion %s: %w", n.file, err)
+		}
+	}
+	return nil
+}
+
+// resolveHeadings applies the section-heading defaults, overriding with any set
+// in the spec.
+func resolveHeadings(h cmdHelp) helpHeadings {
+	// Defaults carry the trailing ":" so an override is rendered verbatim — a spec
+	// author can drop or restyle the colon (the template adds nothing).
+	hd := helpHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:"}
+	if h.Headings == nil {
+		return hd
+	}
+	o := h.Headings
+	if o.Usage != "" {
+		hd.Usage = o.Usage
+	}
+	if o.Commands != "" {
+		hd.Commands = o.Commands
+	}
+	if o.Arguments != "" {
+		hd.Arguments = o.Arguments
+	}
+	if o.Flags != "" {
+		hd.Flags = o.Flags
+	}
+	if o.Environment != "" {
+		hd.Environment = o.Environment
+	}
+	if o.Configuration != "" {
+		hd.Configuration = o.Configuration
+	}
+	if o.Cascading != "" {
+		hd.Cascading = o.Cascading
+	}
+	if o.Examples != "" {
+		hd.Examples = o.Examples
+	}
+	return hd
+}
+
+// buildHelpData assembles the template context for one command from its help
+// fields, inputs, and direct children. Hidden children/inputs are excluded.
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, ancestorCascading []helpFlagRow) helpData {
+	d := helpData{
+		Invocation:  invocation,
+		Headings:    resolveHeadings(h),
+		Header:      h.Header,
+		Summary:     h.Summary,
+		Description: h.Description,
+		Usage:       h.Usage,
+		Footer:      h.Footer,
+		Cascading:   ancestorCascading,
+		Examples:    h.Examples,
+		SeeAlso:     h.SeeAlso,
+	}
+	for _, e := range h.ExitStatus {
+		d.ExitStatus = append(d.ExitStatus, helpExitRow{Code: e.Code, Summary: e.Summary})
+	}
+	var cmds []helpCmdRow
+	for _, c := range children {
+		if c.hidden {
+			continue
+		}
+		cmds = append(cmds, helpCmdRow{
+			Name:       c.name,
+			Summary:    c.help.Summary,
+			Aliases:    c.aliases,
+			Group:      c.group,
+			Deprecated: c.deprecated,
+		})
+	}
+	d.CommandGroups = groupCommands(cmds)
+	if inputs != nil {
+		for _, a := range inputs.Arguments {
+			if a.Hidden {
+				continue
+			}
+			d.Arguments = append(d.Arguments, helpArgRow{
+				Name:       a.Name,
+				Summary:    a.Summary,
+				Required:   a.Schema != nil && a.Schema.Required,
+				Variadic:   isVariadicSchema(a.Schema),
+				Default:    schemaDefaultString(a.Schema),
+				Enum:       enumOf(a.Schema),
+				Deprecated: a.Deprecated,
+			})
+		}
+		for _, f := range inputs.Flags {
+			if f.Hidden {
+				continue
+			}
+			d.Flags = append(d.Flags, flagRow(f))
+		}
+		for _, e := range inputs.Env {
+			if e.Hidden {
+				continue
+			}
+			d.Environment = append(d.Environment, helpEnvRow{
+				Var:        envVarLabel(e),
+				Summary:    e.Summary,
+				Type:       flagDisplayType(e.Schema),
+				Required:   e.Schema != nil && e.Schema.Required,
+				Default:    schemaDefaultString(e.Schema),
+				Enum:       enumOf(e.Schema),
+				Deprecated: e.Deprecated,
+			})
+		}
+		for _, c := range inputs.Config {
+			if c.Hidden {
+				continue
+			}
+			d.Configuration = append(d.Configuration, helpConfigRow{
+				Name:       c.Name,
+				Location:   configLocation(c),
+				Summary:    c.Summary,
+				Type:       flagDisplayType(c.Schema),
+				Required:   c.Schema != nil && c.Schema.Required,
+				Default:    schemaDefaultString(c.Schema),
+				Enum:       enumOf(c.Schema),
+				Deprecated: c.Deprecated,
+			})
+		}
+	}
+	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children))
+	return d
+}
+
+// envVarLabel is the environment variable an env input reads: its explicit
+// schema.variable, else the snake-upper form of its logical name (mirroring the
+// binder's default key→env-var derivation, e.g. "apiKey" → "API_KEY").
+func envVarLabel(e EnvInput) string {
+	if e.Schema != nil && e.Schema.Variable != "" {
+		return e.Schema.Variable
+	}
+	return snakeUpper(e.Name)
+}
+
+// configLocation is where a config input is read from, for display: "<file>.<key>"
+// when a source file is named, the bare key when an explicit key differs from the
+// logical name, or "" when the input reads from its own name (nothing to add).
+func configLocation(c ConfigInput) string {
+	if c.Schema == nil {
+		return ""
+	}
+	key := c.Schema.Key
+	switch {
+	case c.Schema.File != "":
+		if key == "" {
+			key = c.Name
+		}
+		return c.Schema.File + "." + key
+	case key != "":
+		return key
+	default:
+		return ""
+	}
+}
+
+// groupCommands buckets command rows by their Group, preserving the order in which each
+// group first appears in the declared command list. Ungrouped rows (Group == "") form a
+// bucket with Title "" — each template heads it with its own default. When no row
+// declares a group, the result is a single Title-"" bucket holding every command in
+// order, so a non-grouped command list renders byte-identically to before.
+func groupCommands(rows []helpCmdRow) []helpCmdGroup {
+	if len(rows) == 0 {
+		return nil
+	}
+	idx := map[string]int{}
+	var groups []helpCmdGroup
+	for _, r := range rows {
+		i, ok := idx[r.Group]
+		if !ok {
+			i = len(groups)
+			idx[r.Group] = i
+			groups = append(groups, helpCmdGroup{Title: r.Group})
+		}
+		groups[i].Commands = append(groups[i].Commands, r)
+	}
+	return groups
+}
+
+// snakeUpper converts a logical name to the conventional SCREAMING_SNAKE_CASE env-var
+// form: word boundaries are '-'/'_'/' ' and lower→upper case transitions.
+func snakeUpper(name string) string {
+	var b strings.Builder
+	var prev rune
+	for i, r := range name {
+		switch {
+		case r == '-' || r == '_' || r == ' ':
+			b.WriteByte('_')
+		case i > 0 && unicode.IsUpper(r) && (unicode.IsLower(prev) || unicode.IsDigit(prev)):
+			b.WriteByte('_')
+			b.WriteRune(unicode.ToUpper(r))
+		default:
+			b.WriteRune(unicode.ToUpper(r))
+		}
+		prev = r
+	}
+	return b.String()
+}
+
+// flagRow builds the help-row for a single flag (shared by a command's own Flags
+// section and the Cascading section it contributes to its descendants).
+func flagRow(f FlagInput) helpFlagRow {
+	return helpFlagRow{
+		Identifiers: flagIdentifiers(f),
+		Summary:     f.Summary,
+		Type:        flagDisplayType(f.Schema),
+		Required:    f.Schema != nil && f.Schema.Required,
+		Default:     schemaDefaultString(f.Schema),
+		Enum:        enumOf(f.Schema),
+		Deprecated:  f.Deprecated,
+	}
+}
+
+// cascadingFlagsOf returns the help-rows for a command's own flags marked
+// cascading: true (and not hidden) — the flags it advertises on its descendants'
+// pages. Order follows declaration order, matching the Flags section.
+func cascadingFlagsOf(inputs *Inputs) []helpFlagRow {
+	if inputs == nil {
+		return nil
+	}
+	var rows []helpFlagRow
+	for _, f := range inputs.Flags {
+		if f.Hidden || !f.Cascading {
+			continue
+		}
+		rows = append(rows, flagRow(f))
+	}
+	return rows
+}
+
+// deriveUsage builds the default usage line: invocation, a <command> slot when
+// the node has visible children, each visible argument decorated, then [flags]
+// when the node has visible flags.
+func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
+	var b strings.Builder
+	b.WriteString(invocation)
+	if hasChildren {
+		b.WriteString(" <command>")
+	}
+	if inputs != nil {
+		for _, a := range inputs.Arguments {
+			if a.Hidden {
+				continue
+			}
+			name := a.Name
+			if isVariadicSchema(a.Schema) {
+				name += "..."
+			}
+			if a.Schema != nil && a.Schema.Required {
+				b.WriteString(" <" + name + ">")
+			} else {
+				b.WriteString(" [" + name + "]")
+			}
+		}
+	}
+	if hasVisibleFlags(inputs) {
+		b.WriteString(" [flags]")
+	}
+	return b.String()
+}
+
+func isVariadicSchema(schema *InputSchema) bool {
+	return strings.HasPrefix(getSchemaType(schema), "[]")
+}
+
+// flagDisplayType returns the type token shown after a flag's identifiers, or ""
+// for bool flags (which don't take a value).
+func flagDisplayType(schema *InputSchema) string {
+	t := getSchemaType(schema)
+	if t == "bool" {
+		return ""
+	}
+	return t
+}
+
+func schemaDefaultString(schema *InputSchema) string {
+	if schema == nil {
+		return ""
+	}
+	return defaultString(schema.Default)
+}
+
+func enumOf(schema *InputSchema) []string {
+	if schema == nil {
+		return nil
+	}
+	return schema.Enum
+}
+
+// flagIdentifiers returns a flag's CLI identifiers, deriving "--<name>" when none
+// are declared (mirrors flagDefsLiteral).
+func flagIdentifiers(f FlagInput) []string {
+	if len(f.Identifiers) > 0 {
+		return f.Identifiers
+	}
+	return []string{"--" + strings.ReplaceAll(f.Name, "_", "-")}
+}
+
+func hasVisibleChildren(children []rnode) bool {
+	for _, c := range children {
+		if !c.hidden {
+			return true
+		}
+	}
+	return false
+}
+
+func hasVisibleFlags(inputs *Inputs) bool {
+	if inputs == nil {
+		return false
+	}
+	for _, f := range inputs.Flags {
+		if !f.Hidden {
+			return true
+		}
+	}
+	return false
+}
+
+// permute returns every space-joined path through the chain of per-segment
+// identifier sets (name + aliases), so the resolver matches an aliased path. An
+// empty chain (the root) yields the single empty path.
+func permute(chain [][]string) []string {
+	out := []string{""}
+	for _, seg := range chain {
+		var next []string
+		for _, prefix := range out {
+			for _, id := range seg {
+				if prefix == "" {
+					next = append(next, id)
+				} else {
+					next = append(next, prefix+" "+id)
+				}
+			}
+		}
+		out = next
+	}
+	return out
+}
+
+// buildFeatureFramework turns a feature's nodes into the embed vars + resolver
+// cases the framework template emits (one resolver per feature).
+func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) *helpFramework {
+	h := &helpFramework{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
+	for _, hn := range nodes {
+		name := feat.varPrefix + hn.prefix
+		h.Vars = append(h.Vars, helpVar{Name: name, Embed: dir + "/" + hn.file})
+		quoted := make([]string, len(hn.paths))
+		for i, p := range hn.paths {
+			quoted[i] = strconv.Quote(p)
+		}
+		h.Cases = append(h.Cases, helpCase{PathsLiteral: strings.Join(quoted, ", "), Var: name})
+	}
+	return h
+}
+
+// writeFeatureFiles produces each command's rendered page for one feature under
+// its dir in the framework package. When the command's verbatim spec string for
+// the feature is set, that string is written byte-exact; otherwise the page is
+// rendered from the shared doc-data via the feature's template. Either way the
+// file is rotini-managed — (re)written every pass, skipped when already identical —
+// like rotini.go and handlers.go. The template is loaded (seeding the editable
+// default when missing) only when at least one command renders.
+func writeFeatureFiles(featDir string, nodes []helpNode, feat docFeature) error {
+	if featDir == "" {
+		return fmt.Errorf("generate.features.%s.dir must not be empty", feat.name)
+	}
+	if err := os.MkdirAll(featDir, 0o755); err != nil {
+		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
+	}
+
+	renders := false
+	for _, hn := range nodes {
+		if hn.verbatim == "" {
+			renders = true
+			break
+		}
+	}
+
+	var tmpl *template.Template
+	if renders {
+		t, err := loadFeatureTemplate(featDir, feat)
+		if err != nil {
+			return err
+		}
+		tmpl = t
+	}
+
+	for _, hn := range nodes {
+		path := filepath.Join(featDir, hn.file)
+		if hn.verbatim != "" {
+			// Verbatim: write exactly what the spec supplied — byte-for-byte, no
+			// trailing-newline normalization (the author controls it via YAML).
+			if err := writeIfChanged(path, hn.verbatim); err != nil {
+				return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
+			}
+			continue
+		}
+		rendered, err := renderHelpText(tmpl, hn.data)
+		if err != nil {
+			return fmt.Errorf("render %s for %q: %w", feat.name, hn.name, err)
+		}
+		if err := writeIfChanged(path, rendered); err != nil {
+			return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
+		}
+	}
+	return nil
+}
+
+// writeIfChanged writes content only when it differs from the file on disk,
+// keeping mtimes (and watch loops) stable.
+func writeIfChanged(path, content string) error {
+	if existing, err := os.ReadFile(path); err == nil && string(existing) == content {
+		return nil
+	}
+	return writeFileBytes(path, content)
+}
+
+// writeFileBytes writes content to path atomically (temp file then rename, so an
+// interrupted generate never leaves a torn, half-written file) and creates the parent
+// directory if needed — matching how the generated Go file is written (see format.go). It
+// backs every non-Go output: help/man/markdown pages, completion scripts, and handler stubs.
+func writeFileBytes(path, content string) error {
+	if err := fs.WriteFile(path, []byte(content), fs.WithMkdirAll(true), fs.WithAtomic(true)); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
+	}
+	return nil
+}
+
+// loadFeatureTemplate reads the feature dir's editable template, seeding it from
+// the embedded default when missing, and parses it with the shared FuncMap.
+func loadFeatureTemplate(featDir string, feat docFeature) (*template.Template, error) {
+	path := filepath.Join(featDir, feat.tmplFile)
+	src, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		def, derr := templateFS.ReadFile(feat.embedTmpl)
+		if derr != nil {
+			return nil, fmt.Errorf("read embedded default %s template: %w", feat.name, derr)
+		}
+		if werr := os.WriteFile(path, def, 0o644); werr != nil {
+			return nil, fmt.Errorf("seed %s template %s: %w", feat.name, path, werr)
+		}
+		src = def
+	} else if err != nil {
+		return nil, fmt.Errorf("read %s template %s: %w", feat.name, path, err)
+	}
+	tmpl, err := template.New(feat.tmplFile).Funcs(helpFuncMap()).Parse(string(src))
+	if err != nil {
+		return nil, fmt.Errorf("parse %s template %s: %w", feat.name, path, err)
+	}
+	return tmpl, nil
+}
+
+// renderHelpText renders data through tmpl, aligns tab-separated columns with
+// tabwriter, and tidies the result. It is a pure function of (tmpl, data) so
+// repeated passes produce byte-identical output.
+func renderHelpText(tmpl *template.Template, data helpData) (string, error) {
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, sanitizeHelpData(data)); err != nil {
+		return "", fmt.Errorf("execute help template: %w", err)
+	}
+	aligned, err := tabAlign(buf.String())
+	if err != nil {
+		return "", err
+	}
+	return tidy(aligned), nil
+}
+
+// sanitizeHelpData replaces tabs/newlines in row text (which would corrupt
+// tabwriter columns) with spaces. Block fields (Header/Description/Footer/Usage)
+// are left intact. Row slices are copied so the source helpData is not mutated.
+func sanitizeHelpData(d helpData) helpData {
+	clean := func(s string) string {
+		return strings.ReplaceAll(strings.ReplaceAll(s, "\t", " "), "\n", " ")
+	}
+	d.CommandGroups = append([]helpCmdGroup(nil), d.CommandGroups...)
+	for i := range d.CommandGroups {
+		d.CommandGroups[i].Commands = append([]helpCmdRow(nil), d.CommandGroups[i].Commands...)
+		for j := range d.CommandGroups[i].Commands {
+			d.CommandGroups[i].Commands[j].Summary = clean(d.CommandGroups[i].Commands[j].Summary)
+			d.CommandGroups[i].Commands[j].Deprecated = clean(d.CommandGroups[i].Commands[j].Deprecated)
+		}
+	}
+	d.Arguments = append([]helpArgRow(nil), d.Arguments...)
+	for i := range d.Arguments {
+		d.Arguments[i].Summary = clean(d.Arguments[i].Summary)
+		d.Arguments[i].Deprecated = clean(d.Arguments[i].Deprecated)
+	}
+	cleanFlags := func(rows []helpFlagRow) []helpFlagRow {
+		rows = append([]helpFlagRow(nil), rows...)
+		for i := range rows {
+			rows[i].Summary = clean(rows[i].Summary)
+			rows[i].Deprecated = clean(rows[i].Deprecated)
+		}
+		return rows
+	}
+	d.Flags = cleanFlags(d.Flags)
+	d.Cascading = cleanFlags(d.Cascading)
+	d.Environment = append([]helpEnvRow(nil), d.Environment...)
+	for i := range d.Environment {
+		d.Environment[i].Summary = clean(d.Environment[i].Summary)
+		d.Environment[i].Deprecated = clean(d.Environment[i].Deprecated)
+	}
+	d.Configuration = append([]helpConfigRow(nil), d.Configuration...)
+	for i := range d.Configuration {
+		d.Configuration[i].Summary = clean(d.Configuration[i].Summary)
+		d.Configuration[i].Deprecated = clean(d.Configuration[i].Deprecated)
+	}
+	d.ExitStatus = append([]helpExitRow(nil), d.ExitStatus...)
+	for i := range d.ExitStatus {
+		d.ExitStatus[i].Summary = clean(d.ExitStatus[i].Summary)
+	}
+	d.SeeAlso = append([]string(nil), d.SeeAlso...)
+	for i := range d.SeeAlso {
+		d.SeeAlso[i] = clean(d.SeeAlso[i])
+	}
+	return d
+}
+
+// tabAlign aligns each contiguous block of tab-separated lines with tabwriter.
+func tabAlign(s string) (string, error) {
+	var buf bytes.Buffer
+	tw := tabwriter.NewWriter(&buf, 0, 0, 4, ' ', 0)
+	if _, err := tw.Write([]byte(s)); err != nil {
+		return "", fmt.Errorf("tabwriter write: %w", err)
+	}
+	if err := tw.Flush(); err != nil {
+		return "", fmt.Errorf("tabwriter flush: %w", err)
+	}
+	return buf.String(), nil
+}
+
+// tidy trims trailing whitespace per line and collapses runs of blank lines to a
+// single blank line, then strips leading and trailing blank lines entirely — the
+// rendered page ends exactly at its last line of content, with no trailing newline.
+func tidy(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	out := strings.Join(lines, "\n")
+	for strings.Contains(out, "\n\n\n") {
+		out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
+	}
+	return strings.Trim(out, "\n")
+}
+
+// helpFuncMap is the deterministic, dependency-free helper set available to the
+// help template (an allowlist — no clock/entropy funcs exist to call).
+func helpFuncMap() template.FuncMap {
+	return template.FuncMap{
+		"join":       strings.Join,
+		"upper":      strings.ToUpper,
+		"lower":      strings.ToLower,
+		"title":      titleASCII,
+		"trim":       strings.TrimSpace,
+		"trimPrefix": func(prefix, s string) string { return strings.TrimPrefix(s, prefix) },
+		"trimSuffix": func(suffix, s string) string { return strings.TrimSuffix(s, suffix) },
+		"replace":    func(old, repl, s string) string { return strings.ReplaceAll(s, old, repl) },
+		"indent":     indentLines,
+		"repeat":     func(n int, s string) string { return strings.Repeat(s, n) },
+		"default": func(def, s string) string {
+			if s == "" {
+				return def
+			}
+			return s
+		},
+		"contains":  func(substr, s string) bool { return strings.Contains(s, substr) },
+		"hasPrefix": func(prefix, s string) bool { return strings.HasPrefix(s, prefix) },
+		"hasSuffix": func(suffix, s string) bool { return strings.HasSuffix(s, suffix) },
+		"first": func(elems []string) string {
+			if len(elems) == 0 {
+				return ""
+			}
+			return elems[0]
+		},
+		"last": func(elems []string) string {
+			if len(elems) == 0 {
+				return ""
+			}
+			return elems[len(elems)-1]
+		},
+	}
+}
+
+// titleASCII upper-cases the first letter of each word (ASCII only). A local
+// implementation: strings.Title is deprecated and golang.org/x/text would add a
+// dependency.
+func titleASCII(s string) string {
+	var b strings.Builder
+	atWordStart := true
+	for _, r := range s {
+		if atWordStart && r >= 'a' && r <= 'z' {
+			b.WriteRune(r - ('a' - 'A'))
+		} else {
+			b.WriteRune(r)
+		}
+		atWordStart = r == ' ' || r == '\t' || r == '-' || r == '_'
+	}
+	return b.String()
+}
+
+// indentLines prefixes every non-empty line of s with n spaces.
+func indentLines(n int, s string) string {
+	pad := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if ln != "" {
+			lines[i] = pad + ln
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Output & stdin schema types.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// outputRootSentinel is the throwaway root type GenerateGo always emits for the
+// assembled output-types document; it carries no data and is stripped, leaving
+// only the document-level named schemas and the per-command <Prefix>Output types.
+const outputRootSentinel = "rotiniGeneratedOutputsRoot"
+
+// buildOutputTypes generates the Go type declarations for a program's output
+// types and named schemas as a formatted source fragment (no package clause, no
+// root type) ready to inject into the framework file. It returns "" when the
+// program declares no schemas and no command outputs.
+//
+// Every document-level schema becomes a named type, and every command (root + own
+// sub-commands) that declares `output` gets a "<Prefix>Output" type — an alias-like
+// named type when the output is a bare `$ref`, or a struct for an inline shape.
+// Generation reuses jsonschema.GenerateGo (the same engine behind the spec/conf
+// types), so refs, nesting, arrays, and allOf embedding all work.
+func buildOutputTypes(gp *genProgram, pkg string) (string, error) {
+	defs := collectOutputDefs(gp)
+	if len(defs) == 0 {
+		return "", nil
+	}
+	doc, err := json.Marshal(map[string]any{
+		"$schema":     "http://json-schema.org/draft-07/schema#",
+		"type":        "object",
+		"definitions": defs,
+	})
+	if err != nil {
+		return "", fmt.Errorf("marshal output schema document: %w", err)
+	}
+	src, err := jsonschema.GenerateGo(doc,
+		jsonschema.WithGoPackage(pkg),
+		jsonschema.WithGoRootType(outputRootSentinel))
+	if err != nil {
+		return "", fmt.Errorf("generate output types: %w", err)
+	}
+	return stripGenerated(string(src), outputRootSentinel), nil
+}
+
+// collectOutputDefs assembles the JSON-schema `definitions` for the output-types
+// document: each document-level named schema, plus one "<Prefix>Output" per
+// command that declares an output. Refs are rewritten from the spec's
+// "#/schemas/" space to the document's "#/definitions/" space.
+func collectOutputDefs(gp *genProgram) map[string]any {
+	defs := map[string]any{}
+	for name, sch := range gp.schemas {
+		defs[name] = schemaToDoc(sch)
+	}
+	add := func(prefix string, out *Schema) {
+		if out != nil {
+			defs[prefix+"Output"] = schemaToDoc(*out)
+		}
+	}
+	// A command's stdin payload type "<Prefix>Stdin" comes from the schema-shape of
+	// its stdin InputSchema (only the BaseSchema part — required/default/etc. are
+	// input metadata, not JSON-schema type structure).
+	addStdin := func(prefix string, in *Inputs) {
+		if in != nil && in.Stdin != nil && in.Stdin.Schema != nil {
+			defs[prefix+"Stdin"] = schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema})
+		}
+	}
+	add(gp.rootPascal, gp.rootOutput)
+	addStdin(gp.rootPascal, gp.rootInputs)
+	var walk func(nodes []rnode)
+	walk = func(nodes []rnode) {
+		for _, n := range nodes {
+			if n.composed {
+				continue // a composed command's output/stdin types live in the child's cligen
+			}
+			add(n.prefix, n.output)
+			addStdin(n.prefix, n.inputs)
+			walk(n.children)
+		}
+	}
+	walk(gp.tree)
+	return defs
+}
+
+// collectStdinSchemas builds the per-command stdin validation schemas for BindMeta:
+// each non-composed command that declares a stdin payload maps its "<Prefix>Stdin"
+// type name to a self-contained JSON Schema (the payload schema, plus the document's
+// named schemas as definitions so any "#/schemas/X" refs resolve). The binder
+// validates the decoded payload against it. Returns nil when no command has stdin.
+func collectStdinSchemas(gp *genProgram) map[string]string {
+	out := map[string]string{}
+	add := func(prefix string, in *Inputs) {
+		if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
+			return
+		}
+		if js := stdinValidationSchema(in.Stdin.Schema, gp.schemas); js != "" {
+			out[prefix+"Stdin"] = js
+		}
+	}
+	add(gp.rootPascal, gp.rootInputs)
+	var walk func(nodes []rnode)
+	walk = func(nodes []rnode) {
+		for _, n := range nodes {
+			if n.composed {
+				continue // composed commands' stdin schemas live in the child's cligen
+			}
+			add(n.prefix, n.inputs)
+			walk(n.children)
+		}
+	}
+	walk(gp.tree)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// stdinValidationSchema renders a self-contained JSON Schema (as a JSON string) for a
+// stdin payload: the payload's type/properties/constraints, plus the document's named
+// schemas as `definitions` (so any "#/schemas/X" refs resolve). It uses only the
+// schema-shape of the InputSchema (the BaseSchema), matching the generated type.
+func stdinValidationSchema(stdin *InputSchema, docSchemas map[string]Schema) string {
+	body, ok := schemaToDoc(Schema{BaseSchema: stdin.BaseSchema}).(map[string]any)
+	if !ok {
+		return ""
+	}
+	body["$schema"] = "http://json-schema.org/draft-07/schema#"
+	if len(docSchemas) > 0 {
+		defs := map[string]any{}
+		for name, s := range docSchemas {
+			defs[name] = schemaToDoc(s)
+		}
+		body["definitions"] = defs
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// schemaToDoc marshals a spec Schema to a generic JSON-schema value and rewrites
+// its "#/schemas/" refs to "#/definitions/".
+func schemaToDoc(s Schema) any {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		return map[string]any{}
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return map[string]any{}
+	}
+	rewriteSchemaRefs(v)
+	return v
+}
+
+// rewriteSchemaRefs deep-walks v, rewriting every {"$ref": "#/schemas/X"} to
+// "#/definitions/X" so the assembled document (which uses `definitions`) resolves.
+func rewriteSchemaRefs(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		for k, val := range t {
+			if k == "$ref" {
+				if s, ok := val.(string); ok {
+					t[k] = strings.Replace(s, "#/schemas/", "#/definitions/", 1)
+				}
+				continue
+			}
+			rewriteSchemaRefs(val)
+		}
+	case []any:
+		for _, e := range t {
+			rewriteSchemaRefs(e)
+		}
+	}
+}
+
+// stripGenerated reduces a generated Go file to its type declarations: it drops
+// the leading "// Code generated …" banner and the "package …" clause, then
+// removes the throwaway sentinel root type. The result is gofmt-clean type decls
+// the framework template injects and the whole file is re-formatted.
+func stripGenerated(src, sentinel string) string {
+	// Header banner, package clause, then the body are blank-line separated.
+	if parts := strings.SplitN(src, "\n\n", 3); len(parts) == 3 {
+		src = parts[2]
+	}
+	src = strings.ReplaceAll(src, "type "+sentinel+" map[string]any\n", "")
+	return strings.TrimSpace(src)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shell completion scripts (bash / zsh / fish / powershell).
+// ─────────────────────────────────────────────────────────────────────────────
+
+// completionScript returns a shell completion script for prog (the installed
+// binary name) and shell. The script delegates to the binary's hidden completion
+// entrypoint (the runtime's __complete intercept), so completions always reflect
+// the live command tree. Supported shells: bash, zsh, fish, powershell.
+//
+// It is used at codegen time: when the completion feature is enabled, the
+// generator renders one script per supported shell and embeds it in the cligen
+// package (the runtime then serves the embedded script, never calling this).
+func completionScript(prog, shell string) (string, error) {
+	var tmpl string
+	switch shell {
+	case "bash":
+		tmpl = bashCompletionTemplate
+	case "zsh":
+		tmpl = zshCompletionTemplate
+	case "fish":
+		tmpl = fishCompletionTemplate
+	case "powershell":
+		tmpl = powershellCompletionTemplate
+	case "":
+		return "", fmt.Errorf("a shell is required (bash, zsh, fish, or powershell)")
+	default:
+		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell)", shell)
+	}
+	return strings.ReplaceAll(tmpl, "PROG", prog), nil
+}
+
+const bashCompletionTemplate = `# bash completion for PROG
+_PROG_complete() {
+    local args IFS=$'\n'
+    args=("${COMP_WORDS[@]:1:$COMP_CWORD}")
+    COMPREPLY=($(PROG __complete "${args[@]}" 2>/dev/null))
+}
+complete -o default -F _PROG_complete PROG
+`
+
+const zshCompletionTemplate = `#compdef PROG
+_PROG() {
+    local -a completions
+    completions=(${(f)"$(PROG __complete ${words[2,$CURRENT]} 2>/dev/null)"})
+    compadd -a completions
+}
+compdef _PROG PROG
+`
+
+const fishCompletionTemplate = `# fish completion for PROG
+function __PROG_complete
+    set -l tokens (commandline -opc) (commandline -ct)
+    PROG __complete $tokens[2..-1] 2>/dev/null
+end
+complete -c PROG -f -a '(__PROG_complete)'
+`
+
+const powershellCompletionTemplate = `# PowerShell completion for PROG
+Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+    $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })
+    if ($wordToComplete -eq '') { $tokens += '' }
+    PROG __complete @tokens 2>$null | ForEach-Object {
+        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+    }
+}
+`
