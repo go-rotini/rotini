@@ -767,18 +767,18 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 	mustNotContain(t, build, "hand-written help for build")
 }
 
-// manMarkdownConf enables man + markdown (but not help).
-const manMarkdownConf = confSchemaHeader + "generate:\n  features:\n    man:\n      enabled: true\n    markdown:\n      enabled: true\n"
+// manConf enables man (but not help).
+const manConf = confSchemaHeader + "generate:\n  features:\n    man:\n      enabled: true\n"
 
-// TestGenerateManMarkdownEnabled verifies the help pipeline generalizes: with man
-// and markdown enabled, the framework gains per-feature embed vars + alias-aware
-// resolvers, each feature renders into its own dir with its own extension and
-// seeded template, and a disabled feature (help) produces nothing.
-func TestGenerateManMarkdownEnabled(t *testing.T) {
+// TestGenerateManEnabled verifies the help pipeline generalizes: with man enabled,
+// the framework gains per-feature embed vars + alias-aware resolvers, the feature
+// renders into its own dir with its own extension and seeded template, and a
+// disabled feature (help) produces nothing.
+func TestGenerateManEnabled(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), helpSpecYAML)
-	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manMarkdownConf)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manConf)
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
@@ -790,8 +790,6 @@ func TestGenerateManMarkdownEnabled(t *testing.T) {
 		`_ "embed"`,
 		"//go:embed embed/man/mycli.txt", "var ManMycli string", "var ManMycliBuild string",
 		"func Man(path ...string) (string, error)",
-		"//go:embed embed/markdown/mycli.md", "var MarkdownMycli string", "var MarkdownMycliBuild string",
-		"func Markdown(path ...string) (string, error)",
 		`case "build", "b":`,
 	)
 	// Help was not enabled — no Help resolver, no help dir.
@@ -802,7 +800,6 @@ func TestGenerateManMarkdownEnabled(t *testing.T) {
 
 	for _, p := range []string{
 		"internal/cmd/mycli/embed/man/man.txt.tmpl", "internal/cmd/mycli/embed/man/mycli.txt", "internal/cmd/mycli/embed/man/mycli_build.txt",
-		"internal/cmd/mycli/embed/markdown/markdown.md.tmpl", "internal/cmd/mycli/embed/markdown/mycli.md", "internal/cmd/mycli/embed/markdown/mycli_build.md",
 	} {
 		if _, err := os.Stat(filepath.Join(tmp, filepath.FromSlash(p))); err != nil {
 			t.Errorf("expected generated %s: %v", p, err)
@@ -810,23 +807,20 @@ func TestGenerateManMarkdownEnabled(t *testing.T) {
 	}
 }
 
-// TestGenerateManMarkdownVerbatim verifies the per-command verbatim escapes: a
-// command's `man` / `markdown` strings are written byte-for-byte (no template
-// seeded when nothing renders), exactly like help's verbatim `help` string.
-func TestGenerateManMarkdownVerbatim(t *testing.T) {
+// TestGenerateManVerbatim verifies the per-command verbatim escape: a command's
+// `man` string is written byte-for-byte (no template seeded when nothing renders),
+// exactly like help's verbatim `help` string.
+func TestGenerateManVerbatim(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
-	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manMarkdownConf)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manConf)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
 			"command:\n"+
 			"  name: mycli\n"+
 			"  man: |-\n"+
 			"    MYCLI(1)\n"+
-			"    exact man page\n"+
-			"  markdown: |-\n"+
-			"    # mycli\n"+
-			"    exact markdown page\n")
+			"    exact man page\n")
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
@@ -834,25 +828,20 @@ func TestGenerateManMarkdownVerbatim(t *testing.T) {
 	}
 
 	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "man", "mycli.txt"), "MYCLI(1)\nexact man page")
-	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "markdown", "mycli.md"), "# mycli\nexact markdown page")
 
-	// Nothing renders (root supplies verbatim, no sub-commands) → no templates seeded.
-	for _, p := range []string{"internal/cmd/mycli/embed/man/man.txt.tmpl", "internal/cmd/mycli/embed/markdown/markdown.md.tmpl"} {
-		if _, err := os.Stat(filepath.Join(tmp, filepath.FromSlash(p))); !os.IsNotExist(err) {
-			t.Errorf("%s should not be seeded when no command renders (err=%v)", p, err)
-		}
+	// Nothing renders (root supplies verbatim, no sub-commands) → no template seeded.
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "man", "man.txt.tmpl")); !os.IsNotExist(err) {
+		t.Errorf("man.txt.tmpl should not be seeded when no command renders (err=%v)", err)
 	}
 }
 
 // TestGenerateManExitStatusAndSeeAlso verifies the man EXIT STATUS / SEE ALSO
 // sections: a command's declared exit_status codes render as an aligned section and
-// its see_also entries as a comma-joined cross-reference. These are man-page
-// conventions, so they render in the man page but NOT in the markdown page (the
-// shared doc-data is available to every template; only man's default renders it).
+// its see_also entries as a comma-joined cross-reference.
 func TestGenerateManExitStatusAndSeeAlso(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
-	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manMarkdownConf)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manConf)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
 			"command:\n"+
@@ -875,10 +864,6 @@ func TestGenerateManExitStatusAndSeeAlso(t *testing.T) {
 		"EXIT STATUS", "0", "success", "2", "a usage error",
 		"SEE ALSO", "mycli-build(1), https://example.com/docs",
 	)
-	// Man-page conventions: the markdown page does not render these sections.
-	mdPath := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "markdown", "mycli.md")
-	mustNotContain(t, mdPath, "EXIT STATUS")
-	mustNotContain(t, mdPath, "SEE ALSO")
 }
 
 // TestGenerateHelpVerbatim verifies that a populated `help` string is written

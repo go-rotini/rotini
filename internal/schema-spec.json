@@ -122,10 +122,6 @@
           "type": "string",
           "description": "Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template."
         },
-        "markdown": {
-          "type": "string",
-          "description": "Exact, verbatim markdown page for this command (the markdown feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the markdown page; when unset, the markdown page is rendered from those fields through the markdown template."
-        },
         "output": {
           "$ref": "#/definitions/Schema",
           "description": "This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handlers have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract."

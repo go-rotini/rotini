@@ -168,7 +168,7 @@ const (
 	rotiniPkgName    = "rotini"
 )
 
-//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.txt.tmpl templates/man.txt.tmpl templates/markdown.md.tmpl
+//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.txt.tmpl templates/man.txt.tmpl
 var templateFS embed.FS
 
 // fieldDef is one generated struct field: a Go identifier, its type, and its
@@ -258,7 +258,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		return err
 	}
 
-	// For each enabled doc feature (help/man/markdown), the cligen file gains
+	// For each enabled doc feature (help/man), the cligen file gains
 	// embedded "<Prefix>" vars + a resolver, and each command's page is (re)written
 	// under that feature's dir — rendered from the command's doc-fields, or written
 	// verbatim when the command sets the feature's spec string. The conf's feature
@@ -365,12 +365,11 @@ func featureConfigs(conf *Conf) []confFeature {
 	return []confFeature{
 		{helpFeatureDesc, feats.Help},
 		{manFeatureDesc, feats.Man},
-		{markdownFeatureDesc, feats.Markdown},
 		{completionFeatureDesc, feats.Completion},
 	}
 }
 
-// enabledFeatures returns the doc features toggled on, in help→man→markdown order.
+// enabledFeatures returns the doc features toggled on, in help→man order.
 func enabledFeatures(conf *Conf) []confFeature {
 	var out []confFeature
 	for _, f := range featureConfigs(conf) {
@@ -1865,17 +1864,17 @@ func checkCollisions(nodes []rnode) error {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Doc features — help / man / markdown / completion page generation.
+// Doc features — help / man / completion page generation.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // helpTemplateName is the editable, seed-once help template file living in the
 // help feature's dir (the only user-owned file there). Pruning always keeps it.
 const helpTemplateName = "help.txt.tmpl"
 
-// docFeature describes one doc-rendered codegen feature (help, man, markdown).
-// All three share the doc-data pipeline (buildHelpData → renderHelpText) and
-// differ only in their file extension, embed-var/resolver names, the editable
-// template, and which per-command verbatim spec string escapes the render.
+// docFeature describes one doc-rendered codegen feature (help, man). Both share
+// the doc-data pipeline (buildHelpData → renderHelpText) and differ only in their
+// file extension, embed-var/resolver names, the editable template, and which
+// per-command verbatim spec string escapes the render.
 type docFeature struct {
 	name      string               // feature key + default dir, e.g. "help"
 	noun      string               // word used in the resolver doc comment / error, e.g. "help"
@@ -1898,11 +1897,6 @@ var (
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
 		ext: ".txt", tmplFile: "man.txt.tmpl", embedTmpl: "templates/man.txt.tmpl",
 		verbatim: func(h cmdHelp) string { return h.Man },
-	}
-	markdownFeatureDesc = docFeature{
-		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
-		ext: ".md", tmplFile: "markdown.md.tmpl", embedTmpl: "templates/markdown.md.tmpl",
-		verbatim: func(h cmdHelp) string { return h.Markdown },
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
 	// no template, no verbatim. Scripts come from completionScript at codegen.
@@ -2037,7 +2031,7 @@ type helpCase struct {
 }
 
 type helpFramework struct {
-	Resolver string // resolver func name, e.g. "Help"/"Man"/"Markdown"/"Completion"
+	Resolver string // resolver func name, e.g. "Help"/"Man"/"Completion"
 	Noun     string // word used in the doc comment + error, e.g. "help"
 	PerShell bool   // completion: resolver takes a shell string, not a command path
 	Vars     []helpVar
@@ -2059,7 +2053,6 @@ type cmdHelp struct {
 	SeeAlso     []string          // command.see_also (man SEE ALSO section)
 	Help        string            // verbatim help page (command.help)
 	Man         string            // verbatim man page (command.man)
-	Markdown    string            // verbatim markdown page (command.markdown)
 }
 
 // commandHelp gathers the flattened doc-fields off a command (root or sub).
@@ -2068,7 +2061,7 @@ func commandHelp(c Command) cmdHelp {
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
 		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso,
-		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
+		Help: c.Help, Man: c.Man,
 	}
 }
 
@@ -2572,7 +2565,7 @@ func writeIfChanged(path, content string) error {
 // writeFileBytes writes content to path atomically (temp file then rename, so an
 // interrupted generate never leaves a torn, half-written file) and creates the parent
 // directory if needed — matching how the generated Go file is written (see format.go). It
-// backs every non-Go output: help/man/markdown pages, completion scripts, and handler stubs.
+// backs every non-Go output: help/man pages, completion scripts, and handler stubs.
 func writeFileBytes(path, content string) error {
 	if err := fs.WriteFile(path, []byte(content), fs.WithMkdirAll(true), fs.WithAtomic(true)); err != nil {
 		return fmt.Errorf("write %s: %w", filepath.Base(path), err)

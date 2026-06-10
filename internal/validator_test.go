@@ -361,18 +361,18 @@ func TestValidate_verbatimHelpString(t *testing.T) {
 	}
 }
 
-func TestValidate_manMarkdownFields(t *testing.T) {
-	// Spec: verbatim man/markdown strings on a command validate (mirror of help).
-	spec := validSpecHeader + "command:\n  name: demo\n  man: |\n    DEMO(1)\n  markdown: |\n    # demo\n"
+func TestValidate_manFields(t *testing.T) {
+	// Spec: a verbatim man string on a command validates (mirror of help).
+	spec := validSpecHeader + "command:\n  name: demo\n  man: |\n    DEMO(1)\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", ""); err != nil {
-		t.Errorf("Validate(spec with man/markdown) = %v, want nil", err)
+		t.Errorf("Validate(spec with man) = %v, want nil", err)
 	}
 
-	// Conf: features.man / features.markdown validate.
+	// Conf: the features.man toggle validates.
 	plainSpec := writeTemp(t, "spec2.yaml", validSpecHeader+"command:\n  name: demo\n")
-	conf := validConfHeader + "generate:\n  features:\n    man: { enabled: true }\n    markdown: { enabled: true, dir: docs }\n"
+	conf := validConfHeader + "generate:\n  features:\n    man: { enabled: true }\n"
 	if err := validateOnce(plainSpec, writeTemp(t, "conf.yaml", conf), "", ""); err != nil {
-		t.Errorf("Validate(conf with man/markdown features) = %v, want nil", err)
+		t.Errorf("Validate(conf with man feature) = %v, want nil", err)
 	}
 }
 

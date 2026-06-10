@@ -27,8 +27,6 @@ type FeaturesConfig struct {
 	Help *Feature `json:"help,omitempty"`
 	// Embedded, per-command man pages. Same render-or-verbatim contract as help: each command's .txt is rendered from its doc-fields through the editable man template in the feature's dir, or written verbatim when the command sets a 'man' string in the spec. Emits 'Man<Prefix>' vars plus a 'Man(path ...string) (string, error)' resolver.
 	Man *Feature `json:"man,omitempty"`
-	// Embedded, per-command markdown pages (e.g. for a docs site). Same render-or-verbatim contract as help, via the editable markdown template in the feature's dir or a command's verbatim 'markdown' string. Emits 'Markdown<Prefix>' vars plus a 'Markdown(path ...string) (string, error)' resolver.
-	Markdown *Feature `json:"markdown,omitempty"`
 }
 
 // Controls `rotini generate`: where the generated code is written ('packages') and which derived doc/completion outputs are emitted ('features').
@@ -55,7 +53,7 @@ type PackageConfig struct {
 	Package string `json:"package,omitempty"`
 }
 
-// The two generated package targets. 'cli' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cligen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/markdown/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cligen's types for passthrough functions without an import cycle).
+// The two generated package targets. 'cli' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cligen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cligen's types for passthrough functions without an import cycle).
 type PackagesConfig struct {
 	Cli    *PackageConfig `json:"cli,omitempty"`
 	Cligen *PackageConfig `json:"cligen,omitempty"`
