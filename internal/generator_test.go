@@ -630,10 +630,9 @@ func TestGenerateInputChannels(t *testing.T) {
 	)
 	// env is NOT folded into the Flags struct (the channel break).
 	flags := readFileString(t, rotiniGo)
-	if i := strings.Index(flags, "type WidgetFlags struct {"); i >= 0 {
-		block := flags[i:]
-		if end := strings.Index(block, "}"); end >= 0 && strings.Contains(block[:end], "Region") {
-			t.Errorf("env field Region must not be folded into WidgetFlags:\n%s", block[:end])
+	if _, block, ok := strings.Cut(flags, "type WidgetFlags struct {"); ok {
+		if before, _, found := strings.Cut(block, "}"); found && strings.Contains(before, "Region") {
+			t.Errorf("env field Region must not be folded into WidgetFlags:\n%s", before)
 		}
 	}
 }

@@ -588,9 +588,8 @@ func goFieldType(schema *InputSchema) string {
 // ("#/schemas/X" → "X"), or "" when ref is empty or external. The named type is
 // generated from the document-level `schemas` map (see buildOutputTypes).
 func refTypeName(ref string) string {
-	const prefix = "#/schemas/"
-	if strings.HasPrefix(ref, prefix) {
-		return strings.TrimPrefix(ref, prefix)
+	if name, ok := strings.CutPrefix(ref, "#/schemas/"); ok {
+		return name
 	}
 	return ""
 }
@@ -766,7 +765,7 @@ func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 		}
 		if rc.Timeout != "" {
 			if d, err := time.ParseDuration(rc.Timeout); err == nil && d > 0 {
-				b.WriteString(fmt.Sprintf(", Timeout: %d", int64(d)))
+				fmt.Fprintf(b, ", Timeout: %d", int64(d))
 			}
 		}
 	})
@@ -1167,47 +1166,55 @@ func groupImports(src []byte) ([]byte, error) {
 			break
 		}
 	}
-	if decl == nil || len(decl.Specs) < 2 {
-		return format.Source(src)
-	}
 
-	var std, third []string
-	for _, s := range decl.Specs {
-		is := s.(*ast.ImportSpec)
-		spec := is.Path.Value
-		if is.Name != nil {
-			spec = is.Name.Name + " " + spec
+	// Rearrange only when there is a parenthesized block holding both a standard-
+	// library and a third-party group; otherwise the block is already conventional
+	// and gofmt-formatted as-is below.
+	out := src
+	if decl != nil && len(decl.Specs) >= 2 {
+		var std, third []string
+		for _, s := range decl.Specs {
+			is := s.(*ast.ImportSpec)
+			spec := is.Path.Value
+			if is.Name != nil {
+				spec = is.Name.Name + " " + spec
+			}
+			if isThirdPartyImport(is.Path.Value) {
+				third = append(third, spec)
+			} else {
+				std = append(std, spec)
+			}
 		}
-		if isThirdPartyImport(is.Path.Value) {
-			third = append(third, spec)
-		} else {
-			std = append(std, spec)
+		if len(std) > 0 && len(third) > 0 {
+			sort.Strings(std)
+			sort.Strings(third)
+
+			var block strings.Builder
+			block.WriteString("import (\n")
+			for _, s := range std {
+				block.WriteString("\t" + s + "\n")
+			}
+			block.WriteString("\n")
+			for _, s := range third {
+				block.WriteString("\t" + s + "\n")
+			}
+			block.WriteString(")")
+
+			start := fset.Position(decl.Pos()).Offset
+			end := fset.Position(decl.End()).Offset
+			var buf bytes.Buffer
+			buf.Write(src[:start])
+			buf.WriteString(block.String())
+			buf.Write(src[end:])
+			out = buf.Bytes()
 		}
 	}
-	if len(std) == 0 || len(third) == 0 {
-		return format.Source(src) // already a single conventional group
-	}
-	sort.Strings(std)
-	sort.Strings(third)
 
-	var block strings.Builder
-	block.WriteString("import (\n")
-	for _, s := range std {
-		block.WriteString("\t" + s + "\n")
+	formatted, err := format.Source(out)
+	if err != nil {
+		return nil, fmt.Errorf("group imports: gofmt: %w", err)
 	}
-	block.WriteString("\n")
-	for _, s := range third {
-		block.WriteString("\t" + s + "\n")
-	}
-	block.WriteString(")")
-
-	start := fset.Position(decl.Pos()).Offset
-	end := fset.Position(decl.End()).Offset
-	var out bytes.Buffer
-	out.Write(src[:start])
-	out.WriteString(block.String())
-	out.Write(src[end:])
-	return format.Source(out.Bytes())
+	return formatted, nil
 }
 
 // isThirdPartyImport reports whether a quoted import path is a third-party package —
@@ -1428,7 +1435,7 @@ func findModule() (root, name string, err error) {
 	for {
 		goMod := filepath.Join(dir, "go.mod")
 		if data, statErr := os.ReadFile(goMod); statErr == nil {
-			for _, line := range strings.Split(string(data), "\n") {
+			for line := range strings.SplitSeq(string(data), "\n") {
 				line = strings.TrimSpace(line)
 				if after, ok := strings.CutPrefix(line, "module "); ok {
 					return dir, strings.TrimSpace(after), nil
@@ -1473,8 +1480,8 @@ func builtinImport(rotiniType string) string {
 func renderImports(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
 	for imp := range set {
-		if i := strings.IndexByte(imp, ' '); i >= 0 {
-			out = append(out, imp[:i]+" "+strconv.Quote(strings.TrimSpace(imp[i+1:])))
+		if alias, path, ok := strings.Cut(imp, " "); ok {
+			out = append(out, alias+" "+strconv.Quote(strings.TrimSpace(path)))
 		} else {
 			out = append(out, strconv.Quote(imp))
 		}
@@ -2198,7 +2205,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		SeeAlso:     h.SeeAlso,
 	}
 	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, helpExitRow{Code: e.Code, Summary: e.Summary})
+		d.ExitStatus = append(d.ExitStatus, helpExitRow(e))
 	}
 	var cmds []helpCmdRow
 	for _, c := range children {
