@@ -8,10 +8,6 @@ import (
 )
 
 func main() {
-	// Services are opt-in: bind the ones this CLI uses here, then retrieve them in a
-	// handler with rotini.MustGet[*rotini.Parser](rtx, "parser"). Add
-	// rotini.NewBinder(rtg.BindMeta) for env/config/stdin binding as you need it.
-	// (Interrupt/SIGTERM are handled by default — see rotini.Program.Execute.)
 	{{.Pkg}}.Program.
 		Bind("parser", rotini.NewParser()).
 		Execute()
