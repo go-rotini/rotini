@@ -139,6 +139,10 @@
           "type": "string",
           "description": "Deprecation message; the command is annotated as deprecated in its parent's generated Commands list."
         },
+        "filename": {
+          "type": "string",
+          "description": "Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go'), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first."
+        },
         "commands": {
           "type": "array",
           "description": "Sub-commands of this command (inline or composed via $ref).",

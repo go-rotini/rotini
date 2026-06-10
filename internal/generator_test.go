@@ -159,6 +159,27 @@ func TestGenerateEscapesReservedFilenames(t *testing.T) {
 		"return &appTestHandlers{}", "return &appWindowsHandlers{}", "return &appBuildHandlers{}")
 }
 
+// TestGenerateFilenameOverride verifies a command's `filename` override names its
+// generated handler stub, replacing the path-derived default.
+func TestGenerateFilenameOverride(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"command:\n  name: app\n  commands:\n    - name: build\n      filename: build_handlers.go\n")
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	dir := filepath.Join(tmp, "internal", "cmd", "app")
+	mustContain(t, filepath.Join(dir, "build_handlers.go"), "type appBuildHandlers struct{}")
+	if _, err := os.Stat(filepath.Join(dir, "app_build.go")); !os.IsNotExist(err) {
+		t.Errorf("derived stub app_build.go should not be produced when overridden (err=%v)", err)
+	}
+}
+
 // TestGenerateTwoFilesOnePackage covers the middle layout: cli and cligen name
 // the SAME package but DIFFERENT files. The framework and the rollup are written
 // as two files in one package, and — because they share a package — the rollup

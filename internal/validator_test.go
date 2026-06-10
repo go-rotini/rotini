@@ -376,6 +376,39 @@ func TestValidate_manFields(t *testing.T) {
 	}
 }
 
+// TestValidate_handlerFilenameCollision rejects two commands that resolve to the same
+// generated stub file — here "test" and "test_", which both escape to "app_test_.go".
+func TestValidate_handlerFilenameCollision(t *testing.T) {
+	spec := validSpecHeader + "command:\n  name: app\n  commands:\n    - name: test\n    - name: test_\n"
+	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "already used by command") {
+		t.Errorf("Validate(colliding stub filenames) = %v, want a collision error", err)
+	}
+}
+
+// TestValidate_handlerFilenameOverride covers the `filename` override rules: it must be
+// a bare "*.go" name that Go does not read specially; a valid, unique one passes.
+func TestValidate_handlerFilenameOverride(t *testing.T) {
+	for _, tc := range []struct{ name, filename, wantErr string }{
+		{"reserved", "app_test.go", "read specially"},
+		{"noGoExt", "handlers", `end in ".go"`},
+		{"hasDir", "sub/x.go", "bare file name"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := validSpecHeader + "command:\n  name: app\n  commands:\n    - name: build\n      filename: " + tc.filename + "\n"
+			err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("Validate(filename=%q) = %v, want error containing %q", tc.filename, err, tc.wantErr)
+			}
+		})
+	}
+
+	spec := validSpecHeader + "command:\n  name: app\n  commands:\n    - name: build\n      filename: my_handlers.go\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", ""); err != nil {
+		t.Errorf("Validate(valid filename override) = %v, want nil", err)
+	}
+}
+
 // multiViolationDoc is a spec with two unknown properties → two schema violations,
 // used to tell fast (one problem) from collect (all problems) apart.
 const multiViolationDoc = `{"$schema":"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json","command":{"name":"demo","bogusA":1,"bogusB":2}}`

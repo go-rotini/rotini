@@ -1543,6 +1543,14 @@ var goReservedFilenames = func() map[string]bool {
 	return m
 }()
 
+// reservedTrailingToken reports whether stem's trailing "_"-separated token is one the
+// go tool reads specially from a file's name — "test" (a "_test.go" test file) or a
+// GOOS/GOARCH (an implicit build constraint).
+func reservedTrailingToken(stem string) bool {
+	parts := strings.Split(stem, "_")
+	return goReservedFilenames[parts[len(parts)-1]]
+}
+
 // stubFilename builds a handler-stub file name from base (a command's root name or
 // "<root>_<path>"), escaping the names the go tool would read specially from the
 // filename alone — a "_test.go" test file, or a "_<GOOS>.go"/"_<GOARCH>.go" build
@@ -1550,11 +1558,26 @@ var goReservedFilenames = func() map[string]bool {
 // "_"-separated token empty, which matches none of those rules, so a command named
 // "test"/"windows"/"wasm"/… still compiles into the ordinary build.
 func stubFilename(base string) string {
-	parts := strings.Split(base, "_")
-	if goReservedFilenames[parts[len(parts)-1]] {
+	if reservedTrailingToken(base) {
 		base += "_"
 	}
 	return base + ".go"
+}
+
+// commandStubFilename returns a command's handler-stub file name: its explicit
+// `filename` override when set, else the derived "<root>[_<path>].go" (reserved-name
+// escaped by stubFilename). path is the underscore-joined command path relative to the
+// root, "" for the root command itself. The same derivation is shared by codegen (to
+// name the stub) and lintHandlerFilenames (to validate uniqueness), so they agree.
+func commandStubFilename(rootName, path, override string) string {
+	if override != "" {
+		return override
+	}
+	base := rootName
+	if path != "" {
+		base += "_" + path
+	}
+	return stubFilename(base)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1646,7 +1669,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 	gp.root = genCommand{
 		prefix:      gp.rootPascal,
 		handler:     lowerFirst(gp.rootPascal) + "Handlers",
-		filename:    stubFilename(root.Name),
+		filename:    commandStubFilename(root.Name, "", root.Filename),
 		flags:       flagFields(root.Inputs),
 		args:        argFields(root.Inputs),
 		env:         envFields(root.Inputs),
@@ -1716,7 +1739,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			gp.own = append(gp.own, genCommand{
 				prefix:      prefix,
 				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
-				filename:    stubFilename(gp.rootName + "_" + path),
+				filename:    commandStubFilename(gp.rootName, path, c.Filename),
 				flags:       flagFields(c.Inputs),
 				args:        argFields(c.Inputs),
 				env:         envFields(c.Inputs),

@@ -72,6 +72,8 @@ type Command struct {
 	Examples []string `json:"examples,omitempty"`
 	// Exit codes this command documents, rendered as an EXIT STATUS section in the man page. Data only: rotini sets no exit code itself (handlers own exits via rtx.Exit), so this section is whatever you declare. Ignored when 'man' (verbatim) is set.
 	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
+	// Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go'), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
+	Filename string `json:"filename,omitempty"`
 	// Text rendered at the bottom of the page. Ignored when 'help' is set.
 	Footer string `json:"footer,omitempty"`
 	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only.

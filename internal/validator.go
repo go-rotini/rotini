@@ -178,6 +178,7 @@ var specLints = []func(*Spec) []error{
 	lintFlagDependencies,
 	lintDuplicateFlagIdentifiers,
 	lintSchemaRefs,
+	lintHandlerFilenames,
 }
 
 // walkCommands visits every command in the spec depth-first (pre-order), passing a
@@ -457,6 +458,56 @@ func lintSchemaRefs(spec *Spec) []error {
 		s := spec.Schemas[name]
 		walkSchemaRefs(s.BaseSchema, checkAt("schema "+name))
 	}
+	return problems
+}
+
+// lintHandlerFilenames rejects collisions and malformed overrides in the per-command
+// handler-stub file names. Codegen writes one stub .go per own (inline) command into
+// the cli package, named by commandStubFilename — a `filename` override when set, else
+// a path-derived, reserved-name-escaped default. Two commands resolving to the same
+// file would have codegen write one over the other; an override that is not a bare
+// "*.go" name, or that is itself a name the go tool reads specially, would silently
+// break the build. Composed ($ref) commands generate no stub here and are skipped — the
+// walk mirrors the generator's own-command derivation so the two agree.
+func lintHandlerFilenames(spec *Spec) []error {
+	rootName := spec.Command.Name
+	var problems []error
+	byFile := map[string]string{} // stub file name -> the command path that first produced it
+	var walk func(c *Command, path, display string)
+	walk = func(c *Command, path, display string) {
+		if ov := c.Filename; ov != "" {
+			switch {
+			case strings.ContainsAny(ov, `/\`):
+				problems = append(problems, &problem{kind: "spec", loc: "command " + display, msg: fmt.Sprintf("filename %q must be a bare file name with no directory", ov)})
+			case !strings.HasSuffix(ov, ".go"):
+				problems = append(problems, &problem{kind: "spec", loc: "command " + display, msg: fmt.Sprintf("filename %q must end in \".go\"", ov)})
+			case reservedTrailingToken(strings.TrimSuffix(ov, ".go")):
+				problems = append(problems, &problem{kind: "spec", loc: "command " + display, msg: fmt.Sprintf("filename %q would be read specially by the go tool (a _test.go test file, or a GOOS/GOARCH build constraint) — choose another name", ov)})
+			}
+		}
+		fn := commandStubFilename(rootName, path, c.Filename)
+		if prev, dup := byFile[fn]; dup {
+			problems = append(problems, &problem{kind: "spec", loc: "command " + display, msg: fmt.Sprintf("generates handler file %q, already used by command %q", fn, prev)})
+		} else {
+			byFile[fn] = display
+		}
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			if child.Ref != "" {
+				continue // composed: its stub lives in the child's package
+			}
+			childPath := child.Name
+			if path != "" {
+				childPath = path + "_" + child.Name
+			}
+			walk(child, childPath, display+"/"+child.Name)
+		}
+	}
+	display := rootName
+	if display == "" {
+		display = "(root)"
+	}
+	walk(&spec.Command, "", display)
 	return problems
 }
 
