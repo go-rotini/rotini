@@ -167,7 +167,7 @@ func toJSON(path string) ([]byte, error) {
 }
 
 // readSpec reads and decodes the rotini spec file at path (serialization chosen from
-// the extension). It does not validate against the schema; build a specFile for that.
+// the extension). It does not validate against the schema; build a specLoader for that.
 func readSpec(path string) (*Spec, error) {
 	return readFile[Spec](path)
 }
@@ -179,7 +179,7 @@ func writeSpec(path string, s *Spec) error {
 }
 
 // readConf reads and decodes the rotini conf file at path (serialization chosen from
-// the extension). It does not validate against the schema; build a confFile for that.
+// the extension). It does not validate against the schema; build a confLoader for that.
 func readConf(path string) (*Conf, error) {
 	return readFile[Conf](path)
 }
@@ -194,7 +194,7 @@ func writeConf(path string, c *Conf) error {
 
 // The embedded rotini JSON Schemas are immutable, so each is compiled at most once
 // per process and the result cached — the cache spares the recompile when a fresh
-// specFile/confFile is built per pass (e.g. watch mode rebuilds one on every change).
+// specLoader/confLoader is built per pass (e.g. watch mode rebuilds one on every change).
 var (
 	specSchemaOnce sync.Once
 	specSchema     *jsonschema.Schema
@@ -279,23 +279,23 @@ func discoverFile(dir string, fileType fileType) (string, error) {
 	return "", fmt.Errorf("no .rotini.%s.* file found in %s", fileType, dir)
 }
 
-// ─── specFile / confFile ─────────────────────────────────────────────────────
+// ─── specLoader / confLoader ─────────────────────────────────────────────────────
 
-// specFile holds the compiled spec schema together with the resolved path and decoded
+// specLoader holds the compiled spec schema together with the resolved path and decoded
 // content of the end-user's spec file — the correct schema and the user's content in
 // one value, able to validate itself.
-type specFile struct {
+type specLoader struct {
 	version string             // running binary version, for the $schema guard
 	schema  *jsonschema.Schema // compiled spec JSON Schema
 	path    string             // resolved spec path
 	spec    *Spec              // decoded spec content
 }
 
-// NewSpecFile resolves the spec path (the given path, else the first .rotini.spec.* in
+// newSpecLoader resolves the spec path (the given path, else the first .rotini.spec.* in
 // the working directory) and reads + decodes the spec, holding it alongside the
 // (cached) compiled spec schema. The spec is required: when no path is given and none
 // is discovered it returns errSpecPathRequired. version is carried for the $schema guard.
-func NewSpecFile(path, version string) (*specFile, error) {
+func newSpecLoader(path, version string) (*specLoader, error) {
 	schema, err := loadSpecSchema()
 	if err != nil {
 		return nil, err
@@ -313,33 +313,33 @@ func NewSpecFile(path, version string) (*specFile, error) {
 		return nil, err
 	}
 
-	return &specFile{version: version, schema: schema, path: resolved, spec: spec}, nil
+	return &specLoader{version: version, schema: schema, path: resolved, spec: spec}, nil
 }
 
-// The specFile/confFile validate() methods live in validator.go (the validate op).
+// The specLoader/confLoader validate() methods live in validator.go (the validate op).
 
-// confFile holds the compiled conf schema together with the resolved path and decoded
+// confLoader holds the compiled conf schema together with the resolved path and decoded
 // content of the end-user's conf file. The conf is optional: when none is found, path
 // is "" and conf is a default &Conf{}.
-type confFile struct {
+type confLoader struct {
 	version string             // running binary version, for the $schema guard
 	schema  *jsonschema.Schema // compiled conf JSON Schema
 	path    string             // resolved conf path ("" when none — defaults used)
 	conf    *Conf              // decoded conf content (or default)
 }
 
-// NewConfFile resolves the conf path (the given path, else the first .rotini.conf.*
+// newConfLoader resolves the conf path (the given path, else the first .rotini.conf.*
 // beside the spec) and reads + decodes the conf, holding it alongside the (cached)
 // compiled conf schema. The conf is optional: no path given and none discovered — or a
 // resolved path that does not exist — yields a default Conf with an empty path.
 // version is carried for the $schema guard.
-func NewConfFile(specPath, confPath, version string) (*confFile, error) {
+func newConfLoader(specPath, confPath, version string) (*confLoader, error) {
 	schema, err := loadConfSchema()
 	if err != nil {
 		return nil, err
 	}
 
-	f := &confFile{version: version, schema: schema, conf: &Conf{}}
+	f := &confLoader{version: version, schema: schema, conf: &Conf{}}
 
 	resolved := resolveConfBesideSpec(specPath, confPath)
 	if resolved == "" {

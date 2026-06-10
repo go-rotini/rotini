@@ -9,7 +9,7 @@ import (
 // cmd/rotini/cli construct and drive. It holds process-wide state (the running binary
 // version, for the $schema guard) and exposes the workflows: Generate, Validate, and
 // Initialize. Each workflow resolves the spec/conf paths, then runs — once, or on every
-// change in watch mode — building a fresh session per pass (see session and file.go,
+// change in watch mode — building a fresh session per pass (see session and loader.go,
 // which owns all spec/conf file handling).
 type Processor struct {
 	version string // running binary version string ("vX.Y.Z" / "v0.0.0"; "" → guard skipped)
@@ -74,7 +74,7 @@ func (p *Processor) run(specPath, confPath, failMode string, watch bool, pass fu
 }
 
 // session is one pass over one spec/conf pair — built fresh per pass (so watch
-// re-reads). It loads the files as a specFile/confFile (file.go), validates them, and
+// re-reads). It loads the files as a specLoader/confLoader (file.go), validates them, and
 // generates the program.
 type session struct {
 	version  string // for the $schema guard, threaded onto the loaded files
@@ -82,8 +82,8 @@ type session struct {
 	confPath string // explicit conf path ("" → resolved beside the spec, else defaults)
 	failMode string // --fail override; "" → the conf's validate.fail (then "collect")
 
-	spec *specFile // loaded by load()
-	conf *confFile // loaded by load()
+	spec *specLoader // loaded by load()
+	conf *confLoader // loaded by load()
 }
 
 // newSession returns a session for the spec/conf at the given paths (either may be
@@ -92,14 +92,14 @@ func newSession(specPath, confPath, version string) *session {
 	return &session{version: version, specPath: specPath, confPath: confPath}
 }
 
-// load reads the end-user spec and conf as a specFile/confFile. The spec is loaded
+// load reads the end-user spec and conf as a specLoader/confLoader. The spec is loaded
 // first because conf resolution looks beside it.
 func (s *session) load() error {
-	spec, err := NewSpecFile(s.specPath, s.version)
+	spec, err := newSpecLoader(s.specPath, s.version)
 	if err != nil {
 		return err
 	}
-	conf, err := NewConfFile(spec.path, s.confPath, s.version)
+	conf, err := newConfLoader(spec.path, s.confPath, s.version)
 	if err != nil {
 		return err
 	}
