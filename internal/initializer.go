@@ -62,38 +62,10 @@ func Initialize(name, format string, force bool, version string) error {
 	return NewProcessor(version).Initialize(name, format, force)
 }
 
-// recipe selects the project layout the initializer scaffolds.
-type recipe string
-
-const (
-	// recipeCmd scaffolds the CLI source under cmd/<name>/
-	// ({.rotini.spec,.rotini.conf,main.go}) and its generated package into the
-	// module-internal internal/cmd/<name>/{rotini.gen.go, per-command stubs}. The
-	// established layout and the default.
-	recipeCmd recipe = "cmd"
-	// recipeFlat scaffolds everything into the current module's main (root) package
-	// — main.go, the handler files, and the codegen together (an existing module; it
-	// does not bootstrap go.mod/go.sum). Not yet implemented.
-	recipeFlat recipe = "flat"
-)
-
-// initialize dispatches on the recipe. For now the cmd recipe (and the empty default)
-// scaffold the established cmd/<name>/ layout; the flat recipe is a seam to be built
-// once its layout is settled.
-func (p *Processor) initialize(name, format string, force bool, rcp recipe) error {
-	switch rcp {
-	case recipeCmd, "":
-		return p.initializeCmd(name, format, force)
-	case recipeFlat:
-		return fmt.Errorf("the %q init recipe is not yet supported", recipeFlat)
-	default:
-		return fmt.Errorf("unknown init recipe %q (want %q or %q)", rcp, recipeCmd, recipeFlat)
-	}
-}
-
-// initializeCmd scaffolds the cmd/<name>/ layout (the cmd recipe) and generates it —
-// the body the Processor's initialize routes recipeCmd (and the empty default) to.
-func (p *Processor) initializeCmd(name, format string, force bool) error {
+// initialize scaffolds the cmd/<name>/ layout — spec/conf/main.go under
+// cmd/<name>/ and the generated package under internal/cmd/<name> — then
+// generates it.
+func (p *Processor) initialize(name, format string, force bool) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}

@@ -42,10 +42,10 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode str
 	return p.run(specPath, confPath, failMode, watch, (*session).validatePass, onValidate)
 }
 
-// Initialize scaffolds a new rotini CLI named name and generates it (the cmd recipe).
+// Initialize scaffolds a new rotini CLI named name and generates it.
 // format selects the spec/conf serialization; force overwrites the create-once files.
 func (p *Processor) Initialize(name, format string, force bool) error {
-	return p.initialize(name, format, force, recipeCmd)
+	return p.initialize(name, format, force)
 }
 
 // run resolves the spec/conf paths up-front (so watch watches exactly the files read),
