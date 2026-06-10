@@ -29,10 +29,6 @@ var (
 	schemaSpecFileBytes []byte
 	//go:embed schema-conf.json
 	schemaConfFileBytes []byte
-	//go:embed templates/.rotini.spec.yaml.tmpl
-	defaultSpecFileBytes []byte
-	//go:embed templates/.rotini.conf.yaml.tmpl
-	defaultConfFileBytes []byte
 )
 
 // ─── serialization ───────────────────────────────────────────────────────────

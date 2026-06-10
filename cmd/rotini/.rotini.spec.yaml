@@ -55,8 +55,10 @@ command:
             schema:
               type: string
               enum:
-                - json
                 - yaml
+                - json
+                - jsonc
+                - toml
           - name: force
             summary: force re-initialization if files exist that init would overwrite
             identifiers:

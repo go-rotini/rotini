@@ -1111,7 +1111,7 @@ func mergeGenFile(pkgName string, rollup, framework []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("merge: gofmt: %w\n--- merged source ---\n%s", err, buf.String())
 	}
-	return formatted, nil
+	return groupImports(formatted)
 }
 
 // splitGoFile parses a gofmt'd Go source file and returns its import specs (each
@@ -1145,6 +1145,80 @@ func splitGoFile(src []byte) (imports []string, body []byte, err error) {
 	}
 	body = bytes.TrimLeft(src[bodyStart:], "\n\r\t ")
 	return imports, body, nil
+}
+
+// groupImports rewrites a Go source file's single gofmt'd import block into the two
+// conventional groups — standard library first, then third-party — separated by a
+// blank line, and re-formats. gofmt sorts imports but never splits std from
+// third-party (that is goimports' job); rotini emits one merged block, so this
+// restores the idiom without taking on the golang.org/x/tools dependency. A file
+// with fewer than two imports, or whose imports already fall in a single group, is
+// returned gofmt'd but otherwise unchanged.
+func groupImports(src []byte) ([]byte, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("group imports: parse: %w", err)
+	}
+	var decl *ast.GenDecl
+	for _, d := range f.Decls {
+		if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.IMPORT && gd.Lparen.IsValid() {
+			decl = gd
+			break
+		}
+	}
+	if decl == nil || len(decl.Specs) < 2 {
+		return format.Source(src)
+	}
+
+	var std, third []string
+	for _, s := range decl.Specs {
+		is := s.(*ast.ImportSpec)
+		spec := is.Path.Value
+		if is.Name != nil {
+			spec = is.Name.Name + " " + spec
+		}
+		if isThirdPartyImport(is.Path.Value) {
+			third = append(third, spec)
+		} else {
+			std = append(std, spec)
+		}
+	}
+	if len(std) == 0 || len(third) == 0 {
+		return format.Source(src) // already a single conventional group
+	}
+	sort.Strings(std)
+	sort.Strings(third)
+
+	var block strings.Builder
+	block.WriteString("import (\n")
+	for _, s := range std {
+		block.WriteString("\t" + s + "\n")
+	}
+	block.WriteString("\n")
+	for _, s := range third {
+		block.WriteString("\t" + s + "\n")
+	}
+	block.WriteString(")")
+
+	start := fset.Position(decl.Pos()).Offset
+	end := fset.Position(decl.End()).Offset
+	var out bytes.Buffer
+	out.Write(src[:start])
+	out.WriteString(block.String())
+	out.Write(src[end:])
+	return format.Source(out.Bytes())
+}
+
+// isThirdPartyImport reports whether a quoted import path is a third-party package —
+// its first path segment contains a "." (e.g. "github.com/..."). Standard-library
+// paths ("fmt", "text/template", "embed") have no dot in the first segment.
+func isThirdPartyImport(quotedPath string) bool {
+	p := strings.Trim(quotedPath, `"`)
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		p = p[:i]
+	}
+	return strings.Contains(p, ".")
 }
 
 // pruneStubs removes handler .go files that no longer correspond to an own
@@ -1271,10 +1345,10 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
 
 // applyConfDefaults fills in the sane rotini conf defaults for any unset
 // generation settings, so a missing or partial conf still generates. The
-// default is one self-contained package: both cli and cligen point at
-// "cmd/<root>/cli" / "rotini.gen.go" (so framework + rollup merge into a single
-// file). rootName is the spec's root command name (e.g. "rotini"), used to build
-// that default package path.
+// default is one self-contained module-internal package: both cli and cligen
+// point at "internal/cmd/<root>" / "rotini.gen.go" (so framework + rollup merge
+// into a single file). rootName is the spec's root command name (e.g. "rotini"),
+// used to build that default package path.
 func applyConfDefaults(conf *Conf, rootName string) {
 	if conf.Generate == nil {
 		conf.Generate = &GenerateConfig{}
@@ -1289,7 +1363,7 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	if pkgs.Cligen == nil {
 		pkgs.Cligen = &PackageConfig{}
 	}
-	defaultPkg := "cmd/" + rootName + "/cli"
+	defaultPkg := "internal/cmd/" + rootName
 	const defaultFile = "rotini.gen.go"
 	for _, p := range []*PackageConfig{pkgs.Cli, pkgs.Cligen} {
 		if p.Package == "" {
@@ -1330,7 +1404,7 @@ func renderGo(name, templatePath string, data any) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("gofmt %s: %w\n--- generated source ---\n%s", name, err, buf.String())
 	}
-	return formatted, nil
+	return groupImports(formatted)
 }
 
 // writeGeneratedFile creates dir as needed and writes the generated file.
@@ -1661,10 +1735,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
 	}
 
-	imp, err := childCliImport(childSpecPath, moduleRoot, moduleName)
-	if err != nil {
-		return rnode{}, err
-	}
+	imp := childCliImport(childSpecPath, moduleName)
 	childPascal := toPascalCase(childRoot.Name)
 	alias := identAlias(childRoot.Name)
 	gp.addImport(alias, imp)
@@ -1746,8 +1817,9 @@ func (gp *genProgram) addImport(alias, path string) {
 
 // childCliImport resolves the import path of a composed child's cli package —
 // the handler package that exposes Handlers() — reading the child's conf when
-// present and falling back to the cmd/<dir>/cli convention.
-func childCliImport(childSpecPath, moduleRoot, moduleName string) (string, error) {
+// present and falling back to the default internal/cmd/<child> convention (named
+// after the child's source directory).
+func childCliImport(childSpecPath, moduleName string) string {
 	childDir := filepath.Dir(childSpecPath)
 	for _, ext := range []string{"yaml", "yml", "jsonc", "json"} {
 		confPath := filepath.Join(childDir, ".rotini.conf."+ext)
@@ -1757,18 +1829,16 @@ func childCliImport(childSpecPath, moduleRoot, moduleName string) (string, error
 		cc, err := readConf(confPath)
 		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
 			cc.Generate.Packages.Cli != nil && cc.Generate.Packages.Cli.Package != "" {
-			return moduleName + "/" + filepath.ToSlash(cc.Generate.Packages.Cli.Package), nil
+			return moduleName + "/" + filepath.ToSlash(cc.Generate.Packages.Cli.Package)
 		}
 	}
-	rel, err := filepath.Rel(moduleRoot, filepath.Join(childDir, "cli"))
-	if err != nil {
-		return "", fmt.Errorf("locate composed child cli package: %w", err)
-	}
-	return moduleName + "/" + filepath.ToSlash(rel), nil
+	return moduleName + "/internal/cmd/" + filepath.Base(childDir)
 }
 
 // identAlias derives a valid, reasonably unique Go import alias from a command
-// name (every child cli package is named "cli", so aliases are required).
+// name. Each composed child's cli package is named after the child (internal/cmd/
+// <child>), so an explicit alias keeps the rollup's references unambiguous and
+// clear of the rotini runtime package (also a bare package name).
 func identAlias(name string) string {
 	return lowerFirst(toPascalCase(name)) + "cli"
 }

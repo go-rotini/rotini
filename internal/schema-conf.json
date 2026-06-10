@@ -29,7 +29,7 @@
       "properties": {
         "format": {
           "type": "string",
-          "enum": ["yaml", "jsonc", "json"],
+          "enum": ["yaml", "jsonc", "json", "toml"],
           "default": "yaml",
           "description": "Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default \"yaml\"."
         },
@@ -86,7 +86,7 @@
       "properties": {
         "package": {
           "type": "string",
-          "description": "Import path (relative to the module root) of the target package; the Go package name is the last path segment. Defaults to 'cmd/<root-command>/cli'."
+          "description": "Import path (relative to the module root) of the target package; the Go package name is the last path segment. Defaults to 'internal/cmd/<root-command>'."
         },
         "file": {
           "type": "string",
@@ -137,7 +137,7 @@
         },
         "dir": {
           "type": "string",
-          "description": "Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cligen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to '<cligen-package>/embed/<feature>' (e.g. 'cmd/app/cli/embed/help')."
+          "description": "Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cligen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to '<cligen-package>/embed/<feature>' (e.g. 'internal/cmd/app/embed/help')."
         }
       }
     }

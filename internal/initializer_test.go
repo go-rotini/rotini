@@ -19,10 +19,12 @@ func TestInitialize_confDefaults(t *testing.T) {
 	if err := Initialize("mycli", "", false, "", ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
+	// Spec/conf/main live under the conf's package dir (tools); the generated code
+	// goes to the module-internal internal/cmd/<name> regardless of that dir.
 	dir := filepath.Join(tmp, "tools", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.jsonc"), `"name": "mycli"`)
-	mustContain(t, filepath.Join(dir, ".rotini.conf.jsonc"), `"tools/mycli/cli"`)
-	mustContain(t, filepath.Join(dir, "main.go"), `"example.com/myclis/tools/mycli/cli"`)
+	mustContain(t, filepath.Join(dir, ".rotini.conf.jsonc"), `"internal/cmd/mycli"`)
+	mustContain(t, filepath.Join(dir, "main.go"), `"example.com/myclis/internal/cmd/mycli"`)
 
 	// An explicit --format overrides the conf default (still under the conf package).
 	if err := Initialize("other", "yaml", false, "", ""); err != nil {
@@ -50,17 +52,17 @@ func TestInitialize_scaffoldsStandalone(t *testing.T) {
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli", "schema-spec.json")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"),
-		"package: cmd/mycli/cli", "file: rotini.gen.go", "schema-conf.json")
+		"package: internal/cmd/mycli", "file: rotini.gen.go", "schema-conf.json")
 	mustContain(t, filepath.Join(dir, "main.go"),
 		"//go:generate rotini generate",
-		`"example.com/myclis/cmd/mycli/cli"`,
+		`"example.com/myclis/internal/cmd/mycli"`,
 		`"github.com/go-rotini/rotini"`,
 		`Bind("parser", rotini.NewParser())`, "Execute()")
-	gen := filepath.Join(dir, "cli", "rotini.gen.go")
-	mustContain(t, gen,
-		"package cli", "type ProgramHandlers interface", "var definition",
+	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
+	mustContain(t, filepath.Join(genDir, "rotini.gen.go"),
+		"package mycli", "type ProgramHandlers interface", "var definition",
 		"var Program = NewProgram(&handlers{})")
-	mustContain(t, filepath.Join(dir, "cli", "mycli.go"), "type mycliHandlers struct{}")
+	mustContain(t, filepath.Join(genDir, "mycli.go"), "type mycliHandlers struct{}")
 }
 
 // TestInitialize_stampsSchemaRef covers Item 3's scaffold side: a release ref is
@@ -103,7 +105,7 @@ func TestInitialize_forcePreservesEditedStub(t *testing.T) {
 	if err := Initialize("mycli", "yaml", false, "", ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	stub := filepath.Join(tmp, "cmd", "mycli", "cli", "mycli.go")
+	stub := filepath.Join(tmp, "internal", "cmd", "mycli", "mycli.go")
 	writeTestFile(t, stub, "package cli\n\n// EDITED BY USER\n")
 
 	if err := Initialize("mycli", "yaml", true, "", ""); err != nil {
@@ -118,7 +120,20 @@ func TestInitialize_formatJSON(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.spec.json"), `"name": "tool"`)
-	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.conf.json"), `"cmd/tool/cli"`)
+	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.conf.json"), `"internal/cmd/tool"`)
+}
+
+// TestInitialize_formatTOML covers the toml seed path: the YAML templates are
+// transcoded to TOML (via yaml→json→toml) and the seeded files validate + generate.
+func TestInitialize_formatTOML(t *testing.T) {
+	tmp := initTestModule(t)
+	if err := Initialize("tool", "toml", false, "", ""); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.spec.toml"), `name = "tool"`)
+	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.conf.toml"), "internal/cmd/tool")
+	// The generated program still lands in the module-internal package.
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "tool", "rotini.gen.go"), "package tool")
 }
 
 func TestInitialize_errors(t *testing.T) {
@@ -126,7 +141,7 @@ func TestInitialize_errors(t *testing.T) {
 	if err := Initialize("", "yaml", false, "", ""); err == nil {
 		t.Error("empty name should error")
 	}
-	if err := Initialize("x", "toml", false, "", ""); err == nil {
+	if err := Initialize("x", "xml", false, "", ""); err == nil {
 		t.Error("unsupported format should error")
 	}
 }
@@ -151,7 +166,7 @@ func TestInitialize_into(t *testing.T) {
 	// YAML encoder).
 	mustContain(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"), "$ref:", "../child/.rotini.spec.yaml")
 	// The parent re-generated to compose the child (combined framework + rollup).
-	gen := filepath.Join(tmp, "cmd/parent/cli/rotini.gen.go")
+	gen := filepath.Join(tmp, "internal/cmd/parent/rotini.gen.go")
 	mustContain(t, gen,
 		"ParentChild() rotini.CommandHandlers", `Handler: "ParentChild"`,
 		"childcli.Handlers().Child()")

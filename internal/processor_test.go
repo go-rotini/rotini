@@ -274,12 +274,12 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 	// The always-(re)generated combined framework + rollup file is reproduced
 	// byte-for-byte.
 	assertGoEqual(t,
-		filepath.Join(tmp, "cmd/rotini/cli/rotini.gen.go"),
-		filepath.Join(repoRoot, "cmd/rotini/cli/rotini.gen.go"))
+		filepath.Join(tmp, "internal/cmd/rotini/rotini.gen.go"),
+		filepath.Join(repoRoot, "internal/cmd/rotini/rotini.gen.go"))
 
 	// The companion's generated help feature files are reproduced byte-for-byte
 	// (only help is enabled in the committed companion conf).
-	featRel := "cmd/rotini/cli/embed/help"
+	featRel := "internal/cmd/rotini/embed/help"
 	entries, err := os.ReadDir(filepath.Join(repoRoot, featRel))
 	if err != nil {
 		t.Fatalf("read companion help dir: %v", err)
@@ -308,9 +308,9 @@ func TestProcessorInitialize_cmdRecipe(t *testing.T) {
 	}
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli")
-	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: cmd/mycli/cli")
+	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: internal/cmd/mycli")
 	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate rotini generate")
-	mustContain(t, filepath.Join(dir, "cli", "rotini.gen.go"), "package cli", "var Program = NewProgram(&handlers{})")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go"), "package mycli", "var Program = NewProgram(&handlers{})")
 
 	// The empty recipe defaults to cmd.
 	if err := p.initialize("other", "yaml", false, "", ""); err != nil {
@@ -379,8 +379,8 @@ func TestProcessorGeneratePass_valid(t *testing.T) {
 	if err := p.generatePass(); err != nil {
 		t.Fatalf("generatePass(valid) = %v, want nil", err)
 	}
-	mustContain(t, filepath.Join(tmp, "cmd", "rotini", "cli", "rotini.gen.go"),
-		"package cli", "var Program = NewProgram(&handlers{})")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "rotini", "rotini.gen.go"),
+		"package rotini", "var Program = NewProgram(&handlers{})")
 }
 
 // TestProcessorValidate_routing confirms the non-watch path: a valid pass routes a
@@ -419,12 +419,12 @@ func TestProcessorGenerate_workflow(t *testing.T) {
 	t.Chdir(tmp)
 
 	noop := func(string, error) {}
-	gen := filepath.Join(tmp, "cmd", "rotini", "cli", "rotini.gen.go")
+	gen := filepath.Join(tmp, "internal", "cmd", "rotini", "rotini.gen.go")
 
 	if err := NewProcessor("").Generate(".rotini.spec.yaml", "", false, noop); err != nil {
 		t.Fatalf("Generate = %v, want nil", err)
 	}
-	mustContain(t, gen, "package cli", "var Program = NewProgram(&handlers{})")
+	mustContain(t, gen, "package rotini", "var Program = NewProgram(&handlers{})")
 
 	// An empty spec path resolves from the working directory.
 	if err := NewProcessor("").Generate("", "", false, noop); err != nil {
@@ -455,7 +455,7 @@ func TestProcessorWatch_regenerates(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- watchLoop(ctx, specPath, "", generatePassClosure(specPath), func(string, error) {}) }()
 
-	rtg := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
+	rtg := filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
 		t.Fatal("initial generate did not produce MycliAlpha")
 	}

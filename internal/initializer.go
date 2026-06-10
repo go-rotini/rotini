@@ -1,11 +1,28 @@
 package internal
 
 import (
+	"bytes"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"text/template"
+
+	"github.com/go-rotini/toml"
+	"github.com/go-rotini/yaml"
+)
+
+// The embedded YAML seed templates rotini init renders to scaffold a new CLI's spec
+// and conf. YAML is the authoring format; renderSeed converts the rendered output to
+// the requested serialization (json/jsonc/toml) when it is not YAML.
+var (
+	//go:embed templates/.rotini.spec.yaml.tmpl
+	specSeedTemplate []byte
+	//go:embed templates/.rotini.conf.yaml.tmpl
+	confSeedTemplate []byte
 )
 
 // baselineSchemaVersion is the version segment scaffolded into new spec/conf
@@ -24,29 +41,20 @@ func schemaURLVersion(version string) string {
 	return baselineSchemaVersion
 }
 
-// schemaURL builds the refs/tags/<VER> URL for the named embedded schema file.
-func schemaURL(version, file string) string {
-	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaURLVersion(version) + "/" + file
-}
-
-func specSchemaURL(version string) string { return schemaURL(version, "schema-spec.json") }
-
-func confSchemaURL(version string) string { return schemaURL(version, "schema-conf.json") }
-
 // InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double (see [GenerateFn]).
 type InitializeFn = func(name, format string, force bool, into string) error
 
 // Initialize scaffolds a new standalone rotini CLI named name under cmd/<name>/
-// of the current module, then generates its code (the default single-package
-// layout — framework + rollup merged into one cli/rotini.gen.go):
+// of the current module, then generates its code into the module-internal
+// package internal/cmd/<name> (framework + rollup merged into one rotini.gen.go):
 //
-//	cmd/<name>/.rotini.spec.<fmt>   cmd/<name>/cli/rotini.gen.go
-//	cmd/<name>/.rotini.conf.<fmt>   cmd/<name>/cli/<name>.go + per-command stubs
+//	cmd/<name>/.rotini.spec.<fmt>   internal/cmd/<name>/rotini.gen.go
+//	cmd/<name>/.rotini.conf.<fmt>   internal/cmd/<name>/<name>.go + per-command stubs
 //	cmd/<name>/main.go
 //
-// format selects the spec/conf serialization (yaml, jsonc, or json). The
+// format selects the spec/conf serialization (yaml, jsonc, json, or toml). The
 // create-once files (spec, conf, main.go) are left untouched unless force is
 // set; the generated framework/rollup file is always (re)written, and handler
 // stubs are never overwritten.
@@ -63,10 +71,10 @@ func Initialize(name, format string, force bool, into, version string) error {
 type recipe string
 
 const (
-	// recipeCmd scaffolds the CLI under cmd/<name>/ with its generated package
-	// beside it: cmd/<name>/{.rotini.spec,.rotini.conf,main.go} plus
-	// cmd/<name>/cli/{rotini.gen.go, per-command stubs}. The established layout and
-	// the default.
+	// recipeCmd scaffolds the CLI source under cmd/<name>/
+	// ({.rotini.spec,.rotini.conf,main.go}) and its generated package into the
+	// module-internal internal/cmd/<name>/{rotini.gen.go, per-command stubs}. The
+	// established layout and the default.
 	recipeCmd recipe = "cmd"
 	// recipeFlat scaffolds everything into the current module's main (root) package
 	// — main.go, the handler files, and the codegen together (an existing module; it
@@ -127,13 +135,22 @@ func (p *Processor) initializeCmd(name, format string, force bool, into string) 
 		}
 	}
 
-	if err := writeSpec(specPath, scaffoldSpec(name, p.version)); err != nil {
+	seed := seedContext{RotiniVersion: schemaURLVersion(p.version), RootCommandName: name}
+	specBytes, err := renderSeed("spec", specSeedTemplate, seed, ext)
+	if err != nil {
 		return err
 	}
-	if err := writeConf(confPath, scaffoldConf(name, pkgDir, p.version)); err != nil {
+	if err := writeGeneratedFile(specPath, specBytes); err != nil {
 		return err
 	}
-	if err := writeMainGo(mainPath, moduleName, name, pkgDir); err != nil {
+	confBytes, err := renderSeed("conf", confSeedTemplate, seed, ext)
+	if err != nil {
+		return err
+	}
+	if err := writeGeneratedFile(confPath, confBytes); err != nil {
+		return err
+	}
+	if err := writeMainGo(mainPath, moduleName, name); err != nil {
 		return err
 	}
 	if err := Generate(specPath, confPath, false, p.version, nil); err != nil {
@@ -209,49 +226,78 @@ func normalizeFormat(format string) (string, error) {
 		return "jsonc", nil
 	case "json":
 		return "json", nil
+	case "toml":
+		return "toml", nil
 	default:
-		return "", fmt.Errorf("unsupported format %q (want yaml, jsonc, or json)", format)
+		return "", fmt.Errorf("unsupported format %q (want yaml, jsonc, json, or toml)", format)
 	}
 }
 
-// scaffoldSpec builds a minimal valid spec: the schema URL, root name, and example
-// help content so spec-driven help works out of the box. The user adds commands
-// (and binds their own build vars like version) from there.
-func scaffoldSpec(name, version string) *Spec {
-	return &Spec{
-		Schema: specSchemaURL(version),
-		Command: Command{
-			Name:        name,
-			Summary:     name + " command-line program",
-			Description: "Describe " + name + " here. This text appears at the top of `" + name + " --help`.",
-		},
+// seedContext is the data the embedded spec/conf seed templates render against.
+// Field names are exported because text/template reads only exported fields.
+type seedContext struct {
+	RotiniVersion   string // $schema URL version segment, e.g. "0.0.0" or "1.4.0"
+	RootCommandName string // the new CLI's root command name
+}
+
+// renderSeed renders an embedded YAML seed template against seed, then converts the
+// rendered output to the requested serialization (see formatSeed). name labels the
+// template for diagnostics ("spec" / "conf"); ext is the normalized format extension.
+func renderSeed(name string, tmplBytes []byte, seed seedContext, ext string) ([]byte, error) {
+	tmpl, err := template.New(name).Parse(string(tmplBytes))
+	if err != nil {
+		return nil, fmt.Errorf("parse %s seed template: %w", name, err)
+	}
+	var buf bytes.Buffer
+	if err := tmpl.Execute(&buf, seed); err != nil {
+		return nil, fmt.Errorf("render %s seed: %w", name, err)
+	}
+	return formatSeed(buf.Bytes(), ext)
+}
+
+// formatSeed converts a rendered YAML seed to the target serialization (the
+// normalized extension from normalizeFormat). YAML — the authoring format — is
+// returned verbatim; json and jsonc become pretty-printed JSON (a valid JSONC
+// document); toml is transcoded through JSON. Conversion goes through an untyped
+// value, so it carries every field the template declares (including documentation
+// such as the disabled feature toggles).
+func formatSeed(yamlBytes []byte, ext string) ([]byte, error) {
+	if ext == "yaml" {
+		return yamlBytes, nil
+	}
+	jsonBytes, err := yaml.ToJSON(yamlBytes)
+	if err != nil {
+		return nil, fmt.Errorf("convert seed to json: %w", err)
+	}
+	switch ext {
+	case "json", "jsonc":
+		var v any
+		if err := json.Unmarshal(jsonBytes, &v); err != nil {
+			return nil, fmt.Errorf("decode seed json: %w", err)
+		}
+		out, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("encode seed json: %w", err)
+		}
+		return append(out, '\n'), nil
+	case "toml":
+		out, err := toml.FromJSON(jsonBytes)
+		if err != nil {
+			return nil, fmt.Errorf("convert seed to toml: %w", err)
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, ext)
 	}
 }
 
-// scaffoldConf builds the conf for the default single-contained-package layout
-// under <pkgDir>/<name>/cli: cli and cligen point at the same package and file,
-// so the framework and the handler rollup are generated into one rotini.gen.go.
-// Help generation is enabled so a freshly scaffolded CLI has working help.
-func scaffoldConf(name, pkgDir, version string) *Conf {
-	cliPkg := pkgDir + "/" + name + "/cli"
-	return &Conf{
-		Schema: confSchemaURL(version),
-		Generate: &GenerateConfig{
-			Packages: &PackagesConfig{
-				Cli:    &PackageConfig{Package: cliPkg, File: "rotini.gen.go"},
-				Cligen: &PackageConfig{Package: cliPkg, File: "rotini.gen.go"},
-			},
-			Features: &FeaturesConfig{
-				Help: &Feature{Enabled: true, Dir: cliPkg + "/embed/help"},
-			},
-		},
-	}
-}
-
-// writeMainGo renders the binary entrypoint that runs the generated program.
-func writeMainGo(path, moduleName, name, pkgDir string) error {
+// writeMainGo renders the binary entrypoint that runs the generated program. The
+// generated package lives at internal/cmd/<name> (package <name>); main.go imports
+// it aliased as "cli" so the reference never collides with the rotini runtime
+// package (also named "rotini").
+func writeMainGo(path, moduleName, name string) error {
 	content, err := renderGo("main", "templates/main.go.tmpl", map[string]any{
-		"Import": moduleName + "/" + pkgDir + "/" + name + "/cli",
+		"Import": moduleName + "/internal/cmd/" + name,
 		"Pkg":    "cli",
 	})
 	if err != nil {

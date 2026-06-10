@@ -19,24 +19,21 @@ const companionConf = `$schema: https://raw.githubusercontent.com/go-rotini/roti
 generate:
   packages:
     cli:
-      package: cmd/rotini/cli
+      package: internal/cmd/rotini
       file: rotini.gen.go
     cligen:
-      package: cmd/rotini/cli
+      package: internal/cmd/rotini
       file: rotini.gen.go
   features:
     help:
       enabled: true
-      dir: cmd/rotini/cli/embed/help
+      dir: internal/cmd/rotini/embed/help
     man:
       enabled: false
-      dir: cmd/rotini/cli/embed/man
-    markdown:
-      enabled: false
-      dir: cmd/rotini/cli/embed/markdown
+      dir: internal/cmd/rotini/embed/man
     completion:
       enabled: false
-      dir: cmd/rotini/cli/embed/completion
+      dir: internal/cmd/rotini/embed/completion
 `
 
 // minimalGoMod uses the same module path the committed handlers rollup imports,
@@ -67,7 +64,7 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 	// The always-(re)generated file (the combined framework + rollup) is reproduced
 	// byte-for-byte.
 	for _, rel := range []string{
-		"cmd/rotini/cli/rotini.gen.go",
+		"internal/cmd/rotini/rotini.gen.go",
 	} {
 		assertGoEqual(t, filepath.Join(tmp, rel), filepath.Join(repoRoot, rel))
 	}
@@ -76,7 +73,7 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 	// golden: the dogfooded output is reproduced byte-for-byte from the committed
 	// spec. Only help is enabled in the committed companion conf.
 	for _, feat := range []string{"help"} {
-		featRel := "cmd/rotini/cli/embed/" + feat
+		featRel := "internal/cmd/rotini/embed/" + feat
 		entries, err := os.ReadDir(filepath.Join(repoRoot, featRel))
 		if err != nil {
 			t.Fatalf("read companion %s dir: %v", feat, err)
@@ -100,14 +97,14 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 		"rotini", "rotini_generate",
 		"rotini_help", "rotini_initialize", "rotini_validate", "rotini_version",
 	} {
-		mustContain(t, filepath.Join(tmp, "cmd/rotini/cli", name+".go"),
-			"package cli", "rotini.CommandHandlers", "*rotini.Context")
+		mustContain(t, filepath.Join(tmp, "internal/cmd/rotini", name+".go"),
+			"package rotini", "rotini.CommandHandlers", "*rotini.Context")
 	}
 }
 
 // TestGenerateDefaultLayout verifies that, with no conf alongside the spec and
 // none supplied, the sane defaults place the combined framework + rollup file at
-// cmd/<root>/cli/rotini.gen.go (relative to the module root).
+// internal/cmd/<root>/rotini.gen.go (relative to the module root).
 func TestGenerateDefaultLayout(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
@@ -120,9 +117,9 @@ func TestGenerateDefaultLayout(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	gen := filepath.Join(tmp, "cmd", "rotini", "cli", "rotini.gen.go")
-	mustContain(t, gen, "package cli", "type ProgramHandlers interface", "var Program = NewProgram(&handlers{})")
-	mustContain(t, filepath.Join(tmp, "cmd", "rotini", "cli", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
+	gen := filepath.Join(tmp, "internal", "cmd", "rotini", "rotini.gen.go")
+	mustContain(t, gen, "package rotini", "type ProgramHandlers interface", "var Program = NewProgram(&handlers{})")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "rotini", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
 }
 
 // TestGenerateTwoFilesOnePackage covers the middle layout: cli and cligen name
@@ -191,7 +188,7 @@ func TestGenerateRejectsInvalidSpec(t *testing.T) {
 	if !strings.Contains(err.Error(), "identifier") {
 		t.Errorf("error = %v, want a duplicate-identifier validation error", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")); statErr == nil {
 		t.Error("codegen wrote the gen file despite the invalid spec — validation did not gate generation")
 	}
 }
@@ -213,7 +210,7 @@ func TestGenerateRejectsInvalidConf(t *testing.T) {
 	if !strings.Contains(err.Error(), "conf") {
 		t.Errorf("error = %v, want a conf validation error", err)
 	}
-	if _, statErr := os.Stat(filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")); statErr == nil {
+	if _, statErr := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")); statErr == nil {
 		t.Error("codegen wrote files despite the invalid conf")
 	}
 }
@@ -228,7 +225,7 @@ func TestGenerateGuardsSchemaVersion(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
 	t.Chdir(tmp)
-	gen := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
+	gen := filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")
 
 	err := Generate(".rotini.spec.yaml", "", false, "1.0.0", nil)
 	if err == nil {
@@ -244,7 +241,7 @@ func TestGenerateGuardsSchemaVersion(t *testing.T) {
 	if err := Generate(".rotini.spec.yaml", "", false, "0.0.0", nil); err != nil {
 		t.Fatalf("Generate(matching ref 0.0.0) = %v, want nil", err)
 	}
-	mustContain(t, gen, "package cli")
+	mustContain(t, gen, "package mycli")
 }
 
 // TestGenerateMissingConfPathUsesDefaults confirms the conf is optional: a -c path that doesn't
@@ -259,7 +256,7 @@ func TestGenerateMissingConfPathUsesDefaults(t *testing.T) {
 	if err := Generate(".rotini.spec.yaml", "does-not-exist.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate with a missing conf path = %v, want nil (defaults used)", err)
 	}
-	mustContain(t, filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go"), "package cli")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go"), "package mycli")
 }
 
 // TestGeneratePrunesOrphanStubs verifies that pruning (implicit/always-on) drops
@@ -271,7 +268,7 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
-	handlersDir := filepath.Join(tmp, "cmd", "rotini", "cli")
+	handlersDir := filepath.Join(tmp, "internal", "cmd", "rotini")
 	orphan := filepath.Join(handlersDir, "rotini_obsolete.go")
 	keep := filepath.Join(handlersDir, "help.go")
 	writeTestFile(t, orphan, "package cli\n")
@@ -314,7 +311,7 @@ func TestGeneratePrunesOrphanHelp(t *testing.T) {
 		t.Fatalf("first Generate: %v", err)
 	}
 
-	helpDir := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help")
+	helpDir := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help")
 	orphan := filepath.Join(helpDir, "mycli_obsolete.txt")
 	legacy := filepath.Join(helpDir, "legacy.txt")
 	writeTestFile(t, orphan, "stale\n")
@@ -356,8 +353,8 @@ func TestGenerateCompletionEnabled(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	compDir := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "completion")
-	mustContain(t, filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go"),
+	compDir := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "completion")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go"),
 		`_ "embed"`,
 		"//go:embed embed/completion/bash.txt", "var CompletionBash string",
 		"var CompletionZsh string", "var CompletionFish string",
@@ -417,7 +414,7 @@ func TestGenerateOutputTypes(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	rotiniGo := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
+	rotiniGo := filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")
 	mustContain(t, rotiniGo,
 		"type Widget struct {", "`json:\"id\"`", // the named schema
 		"type MycliGetOutput Widget", // sub-command bare-$ref output → named alias type
@@ -453,7 +450,7 @@ func TestGenerateDeprecated(t *testing.T) {
 	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	mustContain(t, filepath.Join(tmp, "cmd", "app", "cli", "rotini.gen.go"),
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "app", "rotini.gen.go"),
 		`DeprecatedIdentifiers: []string{"build"}`,  // command-level → CommandDef
 		`DeprecatedIdentifiers: []string{"--conf"}`, // flag-level → FlagDef
 	)
@@ -479,7 +476,7 @@ func TestGenerateMapFlag(t *testing.T) {
 	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	mustContain(t, filepath.Join(tmp, "cmd", "widget", "cli", "rotini.gen.go"),
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "widget", "rotini.gen.go"),
 		"Label map[string]string", `rotini:"label"`, // explicit map type passes through
 		"Meta  map[string]any", `rotini:"meta"`, // the `map` alias → map[string]any
 		`Type: "map[string]string"`, // recorded in the Definition FlagDef
@@ -513,7 +510,7 @@ func TestGenerateInputImports(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	rotiniGo := filepath.Join(tmp, "cmd", "widget", "cli", "rotini.gen.go")
+	rotiniGo := filepath.Join(tmp, "internal", "cmd", "widget", "rotini.gen.go")
 	mustContain(t, rotiniGo,
 		"\"time\"",                   // time.Time + duration alias, deduped to one
 		"\"github.com/google/uuid\"", // third-party
@@ -550,7 +547,7 @@ func TestGenerateRemoteDiscovery(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	rotiniGo := filepath.Join(tmp, "cmd", "acme", "cli", "rotini.gen.go")
+	rotiniGo := filepath.Join(tmp, "internal", "cmd", "acme", "rotini.gen.go")
 	mustContain(t, rotiniGo,
 		"RemoteDiscoveryDef{Prefix: \"acme-\"", // root: default prefix <host>-
 		"Path: \"/opt/acme/plugins\"",
@@ -606,7 +603,7 @@ func TestGenerateInputChannels(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	rotiniGo := filepath.Join(tmp, "cmd", "widget", "cli", "rotini.gen.go")
+	rotiniGo := filepath.Join(tmp, "internal", "cmd", "widget", "rotini.gen.go")
 	mustContain(t, rotiniGo,
 		"type WidgetFlags struct {",  // argv flag stays
 		"Color string",               //
@@ -685,7 +682,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	mustContain(t, filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go"),
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go"),
 		`_ "embed"`,
 		"//go:embed embed/help/mycli.txt",
 		"var HelpMycli string",
@@ -696,13 +693,13 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	)
 
 	// The editable default template was seeded.
-	if _, err := os.Stat(filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "help.txt.tmpl")); err != nil {
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "help.txt.tmpl")); err != nil {
 		t.Errorf("default help template not seeded: %v", err)
 	}
 
 	// The root page renders the description, a derived usage line, the commands
 	// list (with the alias and summary), and the footer.
-	root := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli.txt")
+	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli.txt")
 	mustContain(t, root,
 		"A demo CLI.",
 		"Usage:",
@@ -717,7 +714,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 		t.Errorf("generated help should not end with a trailing newline; got %q", got)
 	}
 	// The leaf page renders derived usage, the decorated required arg, and the flag.
-	build := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli_build.txt")
+	build := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli_build.txt")
 	mustContain(t, build,
 		"mycli build <target> [flags]",
 		"Arguments:",
@@ -732,7 +729,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	// byte-identical no-op (determinism + overwrite-guard "identical => skip").
 	rootBefore := readFileString(t, root)
 	buildBefore := readFileString(t, build)
-	fwBefore := readAndFormat(t, filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go"))
+	fwBefore := readAndFormat(t, filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go"))
 
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate (second pass): %v", err)
@@ -740,7 +737,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	mustFileEqual(t, root, rootBefore)
 	mustFileEqual(t, build, buildBefore)
 
-	after := readAndFormat(t, filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go"))
+	after := readAndFormat(t, filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go"))
 	if !bytes.Equal(fwBefore, after) {
 		t.Errorf("help generation is not idempotent:\n--- before ---\n%s\n--- after ---\n%s", fwBefore, after)
 	}
@@ -762,7 +759,7 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 	}
 
 	// A hand edit to a generate-mode file is overwritten on the next pass.
-	build := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli_build.txt")
+	build := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli_build.txt")
 	writeTestFile(t, build, "hand-written help for build\n")
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate (regenerate): %v", err)
@@ -789,7 +786,7 @@ func TestGenerateManMarkdownEnabled(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	genFile := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
+	genFile := filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")
 	mustContain(t, genFile,
 		`_ "embed"`,
 		"//go:embed embed/man/mycli.txt", "var ManMycli string", "var ManMycliBuild string",
@@ -800,13 +797,13 @@ func TestGenerateManMarkdownEnabled(t *testing.T) {
 	)
 	// Help was not enabled — no Help resolver, no help dir.
 	mustNotContain(t, genFile, "func Help(")
-	if _, err := os.Stat(filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help")); !os.IsNotExist(err) {
 		t.Errorf("help dir should not exist when help is off (err=%v)", err)
 	}
 
 	for _, p := range []string{
-		"cmd/mycli/cli/embed/man/man.txt.tmpl", "cmd/mycli/cli/embed/man/mycli.txt", "cmd/mycli/cli/embed/man/mycli_build.txt",
-		"cmd/mycli/cli/embed/markdown/markdown.md.tmpl", "cmd/mycli/cli/embed/markdown/mycli.md", "cmd/mycli/cli/embed/markdown/mycli_build.md",
+		"internal/cmd/mycli/embed/man/man.txt.tmpl", "internal/cmd/mycli/embed/man/mycli.txt", "internal/cmd/mycli/embed/man/mycli_build.txt",
+		"internal/cmd/mycli/embed/markdown/markdown.md.tmpl", "internal/cmd/mycli/embed/markdown/mycli.md", "internal/cmd/mycli/embed/markdown/mycli_build.md",
 	} {
 		if _, err := os.Stat(filepath.Join(tmp, filepath.FromSlash(p))); err != nil {
 			t.Errorf("expected generated %s: %v", p, err)
@@ -837,11 +834,11 @@ func TestGenerateManMarkdownVerbatim(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	mustFileEqual(t, filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "man", "mycli.txt"), "MYCLI(1)\nexact man page")
-	mustFileEqual(t, filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "markdown", "mycli.md"), "# mycli\nexact markdown page")
+	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "man", "mycli.txt"), "MYCLI(1)\nexact man page")
+	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "markdown", "mycli.md"), "# mycli\nexact markdown page")
 
 	// Nothing renders (root supplies verbatim, no sub-commands) → no templates seeded.
-	for _, p := range []string{"cmd/mycli/cli/embed/man/man.txt.tmpl", "cmd/mycli/cli/embed/markdown/markdown.md.tmpl"} {
+	for _, p := range []string{"internal/cmd/mycli/embed/man/man.txt.tmpl", "internal/cmd/mycli/embed/markdown/markdown.md.tmpl"} {
 		if _, err := os.Stat(filepath.Join(tmp, filepath.FromSlash(p))); !os.IsNotExist(err) {
 			t.Errorf("%s should not be seeded when no command renders (err=%v)", p, err)
 		}
@@ -874,13 +871,13 @@ func TestGenerateManExitStatusAndSeeAlso(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	manPath := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "man", "mycli.txt")
+	manPath := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "man", "mycli.txt")
 	mustContain(t, manPath,
 		"EXIT STATUS", "0", "success", "2", "a usage error",
 		"SEE ALSO", "mycli-build(1), https://example.com/docs",
 	)
 	// Man-page conventions: the markdown page does not render these sections.
-	mdPath := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "markdown", "mycli.md")
+	mdPath := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "markdown", "mycli.md")
 	mustNotContain(t, mdPath, "EXIT STATUS")
 	mustNotContain(t, mdPath, "SEE ALSO")
 }
@@ -905,15 +902,15 @@ func TestGenerateHelpVerbatim(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	// Exactly the supplied bytes — no trailing newline added.
-	mustFileEqual(t, filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli.txt"), "my exact help page\nline two")
+	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli.txt"), "my exact help page\nline two")
 
 	// Nothing renders (root supplies verbatim help, no sub-commands) → no template.
-	if _, err := os.Stat(filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "help.txt.tmpl")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "help.txt.tmpl")); !os.IsNotExist(err) {
 		t.Errorf("help.txt.tmpl should not be seeded when no command renders (err=%v)", err)
 	}
 
 	// The verbatim string wins; a hand edit is overwritten back to the spec value.
-	root := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli.txt")
+	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli.txt")
 	writeTestFile(t, root, "tampered\n")
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate (regenerate): %v", err)
@@ -1052,7 +1049,7 @@ func TestGenerateWatchInitialAndStop(t *testing.T) {
 		done <- watchLoop(ctx, specPath, "", generatePassClosure(specPath), onGen)
 	}()
 
-	rtg := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
+	rtg := filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
 		t.Fatalf("initial generate did not produce %s with MycliAlpha\noutput:\n%s", rtg, buf.String())
 	}
@@ -1090,7 +1087,7 @@ func TestGenerateWatchRegeneratesOnChange(t *testing.T) {
 		done <- watchLoop(ctx, specPath, "", generatePassClosure(specPath), onGen)
 	}()
 
-	rtg := filepath.Join(tmp, "cmd", "mycli", "cli", "rotini.gen.go")
+	rtg := filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
 		t.Fatalf("initial generate missing MycliAlpha\noutput:\n%s", buf.String())
 	}
@@ -1652,11 +1649,11 @@ func TestGenerateHelpHiddenDeprecated(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	root := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli.txt")
+	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli.txt")
 	mustContain(t, root, "legacy", "(deprecated: use modern instead)", "an old command")
 	mustNotContain(t, root, "secret", "a hidden command")
 
-	run := filepath.Join(tmp, "cmd", "mycli", "cli", "embed", "help", "mycli_run.txt")
+	run := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli_run.txt")
 	mustContain(t, run, "<target>", "(deprecated: positional is going away)", "-v", "chatty output")
 	mustNotContain(t, run, "--secret", "a hidden flag")
 }
@@ -1765,13 +1762,13 @@ func genHelp(t *testing.T, spec, preTmpl string) string {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 	if preTmpl != "" {
-		writeTestFile(t, filepath.Join(tmp, "cmd", "app", "cli", "embed", "help", "help.txt.tmpl"), preTmpl)
+		writeTestFile(t, filepath.Join(tmp, "internal", "cmd", "app", "embed", "help", "help.txt.tmpl"), preTmpl)
 	}
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	return filepath.Join(tmp, "cmd", "app", "cli", "embed", "help")
+	return filepath.Join(tmp, "internal", "cmd", "app", "embed", "help")
 }
 
 // helpGoldenGeneratedSpec exercises the full generated-help surface: root header/

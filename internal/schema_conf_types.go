@@ -13,7 +13,7 @@ type Conf struct {
 
 // A rendered/derived codegen feature: a toggle plus the output directory (under the cligen package) where its files live and are embedded.
 type Feature struct {
-	// Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cligen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to '<cligen-package>/embed/<feature>' (e.g. 'cmd/app/cli/embed/help').
+	// Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cligen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to '<cligen-package>/embed/<feature>' (e.g. 'internal/cmd/app/embed/help').
 	Dir string `json:"dir,omitempty"`
 	// When true, rotini generates this feature's outputs into the cligen package and emits the embed vars + resolver. Opt-in only.
 	Enabled bool `json:"enabled,omitempty"`
@@ -51,7 +51,7 @@ type PackageConfig struct {
 	File string `json:"file,omitempty"`
 	// Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. The editable per-feature templates and test files are always kept automatically. Intended to stay empty in steady state.
 	Keep []string `json:"keep,omitempty"`
-	// Import path (relative to the module root) of the target package; the Go package name is the last path segment. Defaults to 'cmd/<root-command>/cli'.
+	// Import path (relative to the module root) of the target package; the Go package name is the last path segment. Defaults to 'internal/cmd/<root-command>'.
 	Package string `json:"package,omitempty"`
 }
 
