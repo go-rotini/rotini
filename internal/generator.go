@@ -22,6 +22,20 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 	return NewProcessor(version).Generate(specPath, confPath, watch, onGenerate)
 }
 
+// generate runs the generator phase over a loaded session (call load — and, through
+// the pass, validate — first: invalid input must never reach codegen). It applies the
+// built-in conf defaults, then emits the cli and cligen packages plus the enabled doc
+// features.
+//
+// NOTE: the codegen implementation still lives in codegen.go / compose.go / help.go /
+// output.go / completion_script.go (reached via generateAll). Those are the next files
+// to be absorbed into the generator op, decomposing into a program generator + a
+// featureGenerator per doc feature (see ROTINI_PROCESSOR_REFACTOR.md §5).
+func (s *session) generate() error {
+	applyConfDefaults(s.conf.conf, s.spec.spec.Command.Name)
+	return generateAll(s.spec.spec, s.conf.conf, s.spec.path)
+}
+
 // runOrWatch performs a single timed pass — returning the pass's error when it fails — or,
 // when watch is set, watches the spec and conf and re-runs the pass on each change until
 // interrupted with ctrl-c (SIGINT), routing every pass (success or failure) to onResult. It is

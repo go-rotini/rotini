@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"errors"
 	"fmt"
 	"time"
 )
@@ -74,35 +73,6 @@ func (p *Processor) run(specPath, confPath, failMode string, watch bool, pass fu
 	return runOrWatch(resolvedSpec, resolvedConf, watch, timed, onResult)
 }
 
-// recipe selects the project layout the initializer scaffolds.
-type recipe string
-
-const (
-	// recipeCmd scaffolds the CLI under cmd/<name>/ with its generated package
-	// beside it: cmd/<name>/{.rotini.spec,.rotini.conf,main.go} plus
-	// cmd/<name>/cli/{rotini.gen.go, per-command stubs}. The established layout and
-	// the default.
-	recipeCmd recipe = "cmd"
-	// recipeFlat scaffolds everything into the current module's main (root) package
-	// — main.go, the handler files, and the codegen together (an existing module; it
-	// does not bootstrap go.mod/go.sum). Not yet implemented.
-	recipeFlat recipe = "flat"
-)
-
-// initialize dispatches on the recipe. For now the cmd recipe (and the empty default)
-// scaffold the established cmd/<name>/ layout; the flat recipe is a seam to be built
-// once its layout is settled.
-func (p *Processor) initialize(name, format string, force bool, into string, rcp recipe) error {
-	switch rcp {
-	case recipeCmd, "":
-		return p.initializeCmd(name, format, force, into)
-	case recipeFlat:
-		return fmt.Errorf("the %q init recipe is not yet supported", recipeFlat)
-	default:
-		return fmt.Errorf("unknown init recipe %q (want %q or %q)", rcp, recipeCmd, recipeFlat)
-	}
-}
-
 // session is one pass over one spec/conf pair — built fresh per pass (so watch
 // re-reads). It loads the files as a specFile/confFile (file.go), validates them, and
 // generates the program.
@@ -137,43 +107,8 @@ func (s *session) load() error {
 	return nil
 }
 
-// validate runs the validator phase (call load first): each file validates itself
-// (schema on the raw JSON instance, the $schema↔version guard, and — for the spec —
-// the rotini-specific rules). Problems are aggregated via errors.Join, or — in fast
-// mode — the first is returned. It returns nil when both are valid.
-func (s *session) validate() error {
-	fast := s.failFast()
-
-	problems := s.spec.validate()
-	if fast && len(problems) > 0 {
-		return problems[0]
-	}
-
-	problems = append(problems, s.conf.validate()...)
-	if fast && len(problems) > 0 {
-		return problems[0]
-	}
-	return errors.Join(problems...)
-}
-
-// failFast reports whether validation should stop at the first problem. The --fail
-// override (s.failMode) wins; otherwise the loaded conf's validate.fail is used. Only
-// "fast" enables it — anything else collects every problem (the default).
-func (s *session) failFast() bool {
-	mode := s.failMode
-	if mode == "" && s.conf != nil && s.conf.conf != nil && s.conf.conf.Validate != nil {
-		mode = s.conf.conf.Validate.Fail
-	}
-	return mode == "fast"
-}
-
-// generate runs the generator phase (call load — and, through the pass, validate —
-// first: invalid input must never reach codegen). It applies the built-in conf
-// defaults, then emits the cli and cligen packages plus the enabled doc features.
-func (s *session) generate() error {
-	applyConfDefaults(s.conf.conf, s.spec.spec.Command.Name)
-	return generateAll(s.spec.spec, s.conf.conf, s.spec.path)
-}
+// The session's per-op methods live with their op: validate + failFast (validator.go),
+// generate (generator.go).
 
 // validatePass runs one pass of the validate workflow: load, then validate.
 func (s *session) validatePass() error {

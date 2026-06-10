@@ -1,14 +1,188 @@
 package internal
 
 import (
+	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/go-rotini/jsonschema"
 )
+
+// This file owns the `rotini validate` operation end-to-end: the session/file-level
+// validation that the Processor drives, plus the machinery (schema validation, the
+// $schema↔version guard, and the rotini-specific rules the JSON Schema can't express).
+
+// ValidateFn is the signature of [Processor.Validate]. A command handler binds it
+// under a registry key and fetches it as an injectable service, so tests substitute a
+// double (see [GenerateFn]).
+type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error)) error
+
+// Validate is a convenience over [Processor.Validate]: it builds a Processor for
+// version and runs the validate workflow. The companion handlers drive the Processor
+// directly; this serves internal callers (tests).
+func Validate(specPath, confPath string, watch bool, failMode, version string, onValidate func(result string, err error)) error {
+	return NewProcessor(version).Validate(specPath, confPath, watch, failMode, onValidate)
+}
+
+// ─── session + file validation ────────────────────────────────────────────────
+
+// validate runs the validator phase over the loaded spec and conf (call load first):
+// each file validates itself. Problems are aggregated via errors.Join, or — in fast
+// mode — the first is returned. It returns nil when both are valid.
+func (s *session) validate() error {
+	fast := s.failFast()
+
+	problems := s.spec.validate()
+	if fast && len(problems) > 0 {
+		return problems[0]
+	}
+
+	problems = append(problems, s.conf.validate()...)
+	if fast && len(problems) > 0 {
+		return problems[0]
+	}
+	return errors.Join(problems...)
+}
+
+// failFast reports whether validation should stop at the first problem. The --fail
+// override (s.failMode) wins; otherwise the loaded conf's validate.fail is used. Only
+// "fast" enables it — anything else collects every problem (the default).
+func (s *session) failFast() bool {
+	mode := s.failMode
+	if mode == "" && s.conf != nil && s.conf.conf != nil && s.conf.conf.Validate != nil {
+		mode = s.conf.conf.Validate.Fail
+	}
+	return mode == "fast"
+}
+
+// validate schema-validates the spec against its compiled schema on the raw JSON
+// instance (so unknown-field rules fire), then — only when it is schema-valid — runs
+// the rotini-specific rules and enforces the $schema↔version guard. It returns every
+// problem found, empty when the spec is valid.
+func (f *specFile) validate() []error {
+	if problems := validateDocument(f.path, "spec", f.schema); len(problems) > 0 {
+		return problems
+	}
+
+	var problems []error
+	for _, rule := range specLints {
+		problems = append(problems, rule(f.spec)...)
+	}
+	if err := checkSchemaVersion("spec", f.spec.Schema, f.version); err != nil {
+		problems = append(problems, err)
+	}
+	return problems
+}
+
+// validate schema-validates the conf against its compiled schema on the raw JSON
+// instance when one was resolved, then enforces the $schema↔version guard. A default
+// conf (no file) has nothing to validate. It returns every problem found.
+func (f *confFile) validate() []error {
+	if f.path == "" {
+		return nil
+	}
+	if problems := validateDocument(f.path, "conf", f.schema); len(problems) > 0 {
+		return problems
+	}
+	if err := checkSchemaVersion("conf", f.conf.Schema, f.version); err != nil {
+		return []error{err}
+	}
+	return nil
+}
+
+// ─── schema validation + the $schema↔version guard ─────────────────────────────
+
+// problem is a single validation failure: the location of the offending value within
+// the document and a human-readable message, tagged by document kind ("spec"/"conf").
+type problem struct {
+	kind string
+	loc  string
+	msg  string
+}
+
+func (e *problem) Error() string {
+	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
+}
+
+// validateDocument reads the document at path and validates its raw JSON instance (so
+// schema rules like additionalProperties:false see unknown fields) against the given
+// compiled schema, returning one error per problem: a read/convert failure, or one
+// [*problem] per schema violation. It returns nil when the document is valid.
+func validateDocument(path, kind string, schema *jsonschema.Schema) []error {
+	instance, err := toJSON(path)
+	if err != nil {
+		return []error{fmt.Errorf("%s file: %w", kind, err)}
+	}
+	result, err := schema.Validate(instance)
+	if err != nil {
+		return []error{fmt.Errorf("validate %s: %w", kind, err)}
+	}
+	if result.Valid {
+		return nil
+	}
+
+	problems := make([]error, 0, len(result.Errors))
+	for i := range result.Errors {
+		ve := &result.Errors[i]
+		loc := ve.InstanceLocation
+		if loc == "" {
+			loc = "/"
+		}
+		problems = append(problems, &problem{kind: kind, loc: loc, msg: ve.Message})
+	}
+	return problems
+}
+
+// rotiniSchemaURLRe matches the recognized rotini `$schema` URL form and captures the
+// X.Y.Z version segment. A URL that doesn't match (absent, a branch ref, a different
+// host) yields no capture, and checkSchemaVersion skips it.
+var rotiniSchemaURLRe = regexp.MustCompile(`^https://raw\.githubusercontent\.com/go-rotini/rotini/refs/tags/([0-9]+\.[0-9]+\.[0-9]+)/schema-(?:spec|conf)\.json$`)
+
+// checkSchemaVersion enforces that a document's `$schema` targets the same rotini
+// release as the running binary. version is the binary's bound version string
+// ("vX.Y.Z" or "v0.0.0"); its leading "v" is stripped to the "X.Y.Z" segment compared
+// against the document's `$schema` version. The check is skipped when the version is
+// empty/unknown, or when the document's `$schema` is absent or not the recognized
+// rotini refs/tags/<VER> form. A present, recognized, mismatched `$schema` is an error.
+func checkSchemaVersion(kind, docSchema, version string) error {
+	want := strings.TrimPrefix(version, "v")
+	if want == "" {
+		return nil
+	}
+	m := rotiniSchemaURLRe.FindStringSubmatch(docSchema)
+	if m == nil {
+		return nil
+	}
+	if docVer := m[1]; docVer != want {
+		return &problem{
+			kind: kind,
+			loc:  "$schema",
+			msg:  fmt.Sprintf("targets schema version %s but this rotini is %s — update the $schema version (or your rotini install) so they match", docVer, want),
+		}
+	}
+	return nil
+}
+
+// ─── the rotini-specific rules (what the JSON Schema can't express) ─────────────
+
+// specLints is the ordered set of spec rules run after the spec is schema-valid.
+// Adding a rule is a one-line append here; each stays a pure func(*Spec) []error for
+// isolated testing. The order is observable (collect mode joins problems in order), so
+// keep it stable.
+var specLints = []func(*Spec) []error{
+	lintImportConsistency,
+	lintLocalTimeout,
+	lintFlagGroups,
+	lintFlagDependencies,
+	lintDuplicateFlagIdentifiers,
+	lintSchemaRefs,
+}
 
 // walkCommands visits every command in the spec depth-first (pre-order), passing a
 // display path — "root/child/grandchild", using a child's $ref segment when it has
-// no name (and "(root)" for an unnamed root). The lints call this instead of each
+// no name (and "(root)" for an unnamed root). The rules call this instead of each
 // re-defining the same recursive walk.
 func walkCommands(spec *Spec, visit func(c *Command, path string)) {
 	var walk func(c *Command, path string)
@@ -32,7 +206,7 @@ func walkCommands(spec *Spec, visit func(c *Command, path string)) {
 
 // flagNames returns the set of a command's declared flag names plus an ordered slice
 // of them (for closestName "did you mean?" suggestions). Shared by the flag_groups
-// and flag_dependencies lints.
+// and flag_dependencies rules.
 func flagNames(c *Command) (known map[string]bool, ordered []string) {
 	known = map[string]bool{}
 	if c.Inputs == nil {
@@ -301,6 +475,18 @@ func walkSchemaRefs(b BaseSchema, visit func(BaseSchema)) {
 	}
 }
 
+// walkSchemaImports records (type, import) for a schema and recurses into its object
+// properties and array items.
+func walkSchemaImports(b BaseSchema, record func(typ, imp string)) {
+	record(b.Type, b.Import)
+	for _, p := range b.Properties {
+		walkSchemaImports(p.BaseSchema, record)
+	}
+	if b.Items != nil {
+		walkSchemaImports(b.Items.BaseSchema, record)
+	}
+}
+
 // levenshtein is the edit distance between a and b (Wagner–Fischer).
 func levenshtein(a, b string) int {
 	prev := make([]int, len(b)+1)
@@ -332,16 +518,4 @@ func closestName(target string, candidates []string) string {
 		}
 	}
 	return best
-}
-
-// walkSchemaImports records (type, import) for a schema and recurses into its
-// object properties and array items.
-func walkSchemaImports(b BaseSchema, record func(typ, imp string)) {
-	record(b.Type, b.Import)
-	for _, p := range b.Properties {
-		walkSchemaImports(p.BaseSchema, record)
-	}
-	if b.Items != nil {
-		walkSchemaImports(b.Items.BaseSchema, record)
-	}
 }

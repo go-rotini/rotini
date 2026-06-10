@@ -316,24 +316,7 @@ func NewSpecFile(path, version string) (*specFile, error) {
 	return &specFile{version: version, schema: schema, path: resolved, spec: spec}, nil
 }
 
-// validate schema-validates the spec against its compiled schema on the raw JSON
-// instance (so unknown-field rules fire), then — only when it is schema-valid — runs
-// the rotini-specific rules and enforces the $schema↔version guard. It returns every
-// problem found, empty when the spec is valid.
-func (f *specFile) validate() []error {
-	if problems := validateDocument(f.path, "spec", f.schema); len(problems) > 0 {
-		return problems
-	}
-
-	var problems []error
-	for _, rule := range specLints {
-		problems = append(problems, rule(f.spec)...)
-	}
-	if err := checkSchemaVersion("spec", f.spec.Schema, f.version); err != nil {
-		problems = append(problems, err)
-	}
-	return problems
-}
+// The specFile/confFile validate() methods live in validator.go (the validate op).
 
 // confFile holds the compiled conf schema together with the resolved path and decoded
 // content of the end-user's conf file. The conf is optional: when none is found, path
@@ -375,20 +358,4 @@ func NewConfFile(specPath, confPath, version string) (*confFile, error) {
 	}
 	f.path, f.conf = resolved, conf
 	return f, nil
-}
-
-// validate schema-validates the conf against its compiled schema on the raw JSON
-// instance when one was resolved, then enforces the $schema↔version guard. A default
-// conf (no file) has nothing to validate. It returns every problem found.
-func (f *confFile) validate() []error {
-	if f.path == "" {
-		return nil
-	}
-	if problems := validateDocument(f.path, "conf", f.schema); len(problems) > 0 {
-		return problems
-	}
-	if err := checkSchemaVersion("conf", f.conf.Schema, f.version); err != nil {
-		return []error{err}
-	}
-	return nil
 }
