@@ -65,17 +65,28 @@ func detectFileFormat(path string) fileFormat {
 	}
 }
 
+// readRaw detects path's serialization format from its extension and reads the
+// file's bytes, erroring on an unknown extension or a read failure. It is the shared
+// preamble of readFile and toJSON.
+func readRaw(path string) (fileFormat, []byte, error) {
+	format := detectFileFormat(path)
+	if format == formatUnknown {
+		return formatUnknown, nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
+	}
+	data, err := fs.ReadFile(path)
+	if err != nil {
+		return format, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	return format, data, nil
+}
+
 // readFile reads the file at path and decodes it into a value of type T, choosing the
 // decoder from the file extension. YAML, JSON, JSONC, and TOML all honor the json
 // struct tags carried by the generated Spec and Conf types.
 func readFile[T any](path string) (*T, error) {
-	format := detectFileFormat(path)
-	if format == formatUnknown {
-		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
-	}
-	data, err := fs.ReadFile(path)
+	format, data, err := readRaw(path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, err
 	}
 
 	out := new(T)
@@ -132,38 +143,27 @@ func writeFile[T any](path string, v *T) error {
 // decoded struct) so schema rules like additionalProperties:false still see unknown
 // fields.
 func toJSON(path string) ([]byte, error) {
-	format := detectFileFormat(path)
-	if format == formatUnknown {
-		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
-	}
-	data, err := fs.ReadFile(path)
+	format, data, err := readRaw(path)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", path, err)
+		return nil, err
 	}
+	var out []byte
 	switch format {
 	case formatJSON:
 		return data, nil
 	case formatJSONC:
-		out, err := jsonc.ToJSON(data)
-		if err != nil {
-			return nil, fmt.Errorf("convert %s to json: %w", path, err)
-		}
-		return out, nil
+		out, err = jsonc.ToJSON(data)
 	case formatYAML:
-		out, err := yaml.ToJSON(data)
-		if err != nil {
-			return nil, fmt.Errorf("convert %s to json: %w", path, err)
-		}
-		return out, nil
+		out, err = yaml.ToJSON(data)
 	case formatTOML:
-		out, err := toml.ToJSON(data)
-		if err != nil {
-			return nil, fmt.Errorf("convert %s to json: %w", path, err)
-		}
-		return out, nil
+		out, err = toml.ToJSON(data)
 	default:
 		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
+	if err != nil {
+		return nil, fmt.Errorf("convert %s to json: %w", path, err)
+	}
+	return out, nil
 }
 
 // readSpec reads and decodes the rotini spec file at path (serialization chosen from

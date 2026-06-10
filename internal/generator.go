@@ -227,8 +227,6 @@ type genCommand struct {
 //   - same package and file (combined): framework and rollup are merged into a
 //     single file, with unqualified references.
 type layout struct {
-	moduleRoot string // module root dir (feature dirs are module-relative to it)
-
 	frameworkDir     string // absolute output dir for the framework (cligen) file
 	frameworkPkgName string // cligen package name, e.g. "cli" or "cligen"
 	frameworkFile    string // framework file name, e.g. "rotini.gen.go"
@@ -239,8 +237,7 @@ type layout struct {
 	handlerPkgName string // cli package name, e.g. "cli"
 	rollupFile     string // rollup file name, e.g. "rotini.gen.go"
 
-	samePackage bool // cli and cligen resolve to the same package (refs are unqualified)
-	combined    bool // same package AND same file → framework+rollup merged into one file
+	combined bool // same package AND same file → framework+rollup merged into one file
 }
 
 // generateAll runs a single generation pass: it resolves the spec (expanding
@@ -577,19 +574,11 @@ func argFields(in *Inputs) []fieldDef {
 }
 
 // goFieldType resolves an input schema to a Go type expression, defaulting to
-// string and applying a pointer for nullable inputs.
+// string and applying a pointer for nullable inputs. The base type matches the
+// Definition type string (getSchemaType); a nullable input wraps it in a pointer.
 func goFieldType(schema *InputSchema) string {
-	t := "string"
-	nullable := false
-	if schema != nil {
-		if name := refTypeName(schema.Ref); name != "" {
-			t = name // a "#/schemas/X" ref → the generated named type X
-		} else if schema.Type != "" {
-			t = jsonSchemaTypeToGo(schema.Type)
-		}
-		nullable = schema.Nullable
-	}
-	if nullable {
+	t := getSchemaType(schema)
+	if schema != nil && schema.Nullable {
 		return "*" + t
 	}
 	return t
@@ -630,6 +619,25 @@ func jsonSchemaTypeToGo(t string) string {
 	}
 }
 
+// writeInputDefsLiteral appends the Flags/Arguments/FlagGroups/FlagDependencies
+// literal fields an Inputs contributes to a Definition or CommandDef literal,
+// omitting any that render empty. Shared by renderDefinition (the root) and
+// rnodesLiteral (each command node) so the field set is enumerated once.
+func writeInputDefsLiteral(b *strings.Builder, in *Inputs) {
+	if fl := flagDefsLiteral(in); fl != "" {
+		b.WriteString("Flags: " + fl + ",\n")
+	}
+	if al := argDefsLiteral(in); al != "" {
+		b.WriteString("Arguments: " + al + ",\n")
+	}
+	if fg := flagGroupsLiteral(in); fg != "" {
+		b.WriteString("FlagGroups: " + fg + ",\n")
+	}
+	if fd := flagDependenciesLiteral(in); fd != "" {
+		b.WriteString("FlagDependencies: " + fd + ",\n")
+	}
+}
+
 // renderDefinition renders the `var definition = rotini.Definition{…}` literal —
 // the compiled command tree the runtime parses against. It is unexported: end-users
 // hold the *Program (from the generated NewProgram), never the Definition. Emitted into
@@ -643,18 +651,7 @@ func renderDefinition(gp *genProgram) string {
 	if len(gp.rootAliases) > 0 {
 		b.WriteString("Aliases: " + goStringSlice(gp.rootAliases) + ",\n")
 	}
-	if fl := flagDefsLiteral(gp.rootInputs); fl != "" {
-		b.WriteString("Flags: " + fl + ",\n")
-	}
-	if al := argDefsLiteral(gp.rootInputs); al != "" {
-		b.WriteString("Arguments: " + al + ",\n")
-	}
-	if fg := flagGroupsLiteral(gp.rootInputs); fg != "" {
-		b.WriteString("FlagGroups: " + fg + ",\n")
-	}
-	if fd := flagDependenciesLiteral(gp.rootInputs); fd != "" {
-		b.WriteString("FlagDependencies: " + fd + ",\n")
-	}
+	writeInputDefsLiteral(&b, gp.rootInputs)
 	if cl := rnodesLiteral(gp.rootName, gp.tree); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
 	}
@@ -842,18 +839,7 @@ func rnodesLiteral(host string, nodes []rnode) string {
 		if len(n.deprecatedIdentifiers) > 0 {
 			b.WriteString("DeprecatedIdentifiers: " + goStringSlice(n.deprecatedIdentifiers) + ",\n")
 		}
-		if fl := flagDefsLiteral(n.inputs); fl != "" {
-			b.WriteString("Flags: " + fl + ",\n")
-		}
-		if al := argDefsLiteral(n.inputs); al != "" {
-			b.WriteString("Arguments: " + al + ",\n")
-		}
-		if fg := flagGroupsLiteral(n.inputs); fg != "" {
-			b.WriteString("FlagGroups: " + fg + ",\n")
-		}
-		if fd := flagDependenciesLiteral(n.inputs); fd != "" {
-			b.WriteString("FlagDependencies: " + fd + ",\n")
-		}
+		writeInputDefsLiteral(b, n.inputs)
 		if cl := rnodesLiteral(host, n.children); cl != "" {
 			b.WriteString("Commands: " + cl + ",\n")
 		}
@@ -1269,8 +1255,6 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
 	}
 
 	return layout{
-		moduleRoot: moduleRoot,
-
 		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(cligenPkgDir)),
 		frameworkPkgName: filepath.Base(cligenPkgDir),
 		frameworkFile:    cligen.File,
@@ -1281,8 +1265,7 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
 		handlerPkgName: filepath.Base(cliPkgDir),
 		rollupFile:     cli.File,
 
-		samePackage: samePackage,
-		combined:    combined,
+		combined: combined,
 	}, nil
 }
 
@@ -1387,8 +1370,6 @@ func findModule() (root, name string, err error) {
 	}
 }
 
-// noteStdImport records the standard-library import a Go type expression needs
-// (currently only the time package, for time.Duration / time.Time fields).
 // fieldImport returns the Go import path backing a field's schema: the explicit
 // spec `import:` when set, otherwise the import rotini knows is needed for its own
 // built-in type aliases (duration/time/datetime/date → "time"). "" means no import.
@@ -1805,9 +1786,6 @@ func checkCollisions(nodes []rnode) error {
 	}
 	return nil
 }
-
-// rnodesLiteral renders the []rotini.CommandDef literal for a resolved tree. host
-// is the root binary name, used for the default plugin-discovery prefix.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doc features — help / man / markdown / completion page generation.
@@ -2751,6 +2729,20 @@ func buildOutputTypes(gp *genProgram, pkg string) (string, error) {
 	return stripGenerated(string(src), outputRootSentinel), nil
 }
 
+// eachOwnNode visits every non-composed command node in the resolved tree
+// depth-first (pre-order), skipping composed subtrees entirely — their output and
+// stdin types live in the child's cligen. Shared by the output- and stdin-type
+// collectors.
+func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
+	for i := range nodes {
+		if nodes[i].composed {
+			continue
+		}
+		visit(&nodes[i])
+		eachOwnNode(nodes[i].children, visit)
+	}
+}
+
 // collectOutputDefs assembles the JSON-schema `definitions` for the output-types
 // document: each document-level named schema, plus one "<Prefix>Output" per
 // command that declares an output. Refs are rewritten from the spec's
@@ -2775,18 +2767,10 @@ func collectOutputDefs(gp *genProgram) map[string]any {
 	}
 	add(gp.rootPascal, gp.rootOutput)
 	addStdin(gp.rootPascal, gp.rootInputs)
-	var walk func(nodes []rnode)
-	walk = func(nodes []rnode) {
-		for _, n := range nodes {
-			if n.composed {
-				continue // a composed command's output/stdin types live in the child's cligen
-			}
-			add(n.prefix, n.output)
-			addStdin(n.prefix, n.inputs)
-			walk(n.children)
-		}
-	}
-	walk(gp.tree)
+	eachOwnNode(gp.tree, func(n *rnode) {
+		add(n.prefix, n.output)
+		addStdin(n.prefix, n.inputs)
+	})
 	return defs
 }
 
@@ -2806,17 +2790,7 @@ func collectStdinSchemas(gp *genProgram) map[string]string {
 		}
 	}
 	add(gp.rootPascal, gp.rootInputs)
-	var walk func(nodes []rnode)
-	walk = func(nodes []rnode) {
-		for _, n := range nodes {
-			if n.composed {
-				continue // composed commands' stdin schemas live in the child's cligen
-			}
-			add(n.prefix, n.inputs)
-			walk(n.children)
-		}
-	}
-	walk(gp.tree)
+	eachOwnNode(gp.tree, func(n *rnode) { add(n.prefix, n.inputs) })
 	if len(out) == 0 {
 		return nil
 	}

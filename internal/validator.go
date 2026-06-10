@@ -220,6 +220,41 @@ func flagNames(c *Command) (known map[string]bool, ordered []string) {
 	return known, ordered
 }
 
+// eachInputSchema visits each declared input schema of a command across all
+// channels (flag, argument, env, config, stdin), passing the channel label and the
+// input's logical name ("" for stdin). It is the single place the schema-walking
+// rules enumerate a command's input channels.
+func eachInputSchema(in *Inputs, visit func(channel, name string, schema *InputSchema)) {
+	if in == nil {
+		return
+	}
+	for i := range in.Flags {
+		visit("flag", in.Flags[i].Name, in.Flags[i].Schema)
+	}
+	for i := range in.Arguments {
+		visit("argument", in.Arguments[i].Name, in.Arguments[i].Schema)
+	}
+	for i := range in.Env {
+		visit("env", in.Env[i].Name, in.Env[i].Schema)
+	}
+	for i := range in.Config {
+		visit("config", in.Config[i].Name, in.Config[i].Schema)
+	}
+	if in.Stdin != nil {
+		visit("stdin", "", in.Stdin.Schema)
+	}
+}
+
+// didYouMean appends a "; did you mean %q?" suffix to msg when one of candidates is
+// a near-match (edit distance < 3) for name, else returns msg unchanged. Shared by
+// the rules that suggest a fix for a typo'd flag or schema name.
+func didYouMean(msg, name string, candidates []string) string {
+	if s := closestName(name, candidates); s != "" {
+		return msg + fmt.Sprintf("; did you mean %q?", s)
+	}
+	return msg
+}
+
 // lintImportConsistency reports any `type:` declared with two or more different
 // `import:` values across the spec — the same type with two backing packages is
 // always a bug. (A wrong-but-consistent import is left to `go build`; this catches
@@ -236,29 +271,12 @@ func lintImportConsistency(spec *Spec) []error {
 		}
 		byType[typ][imp] = true
 	}
-	feedInput := func(s *InputSchema) {
-		if s != nil {
-			walkSchemaImports(s.BaseSchema, record)
-		}
-	}
 	walkCommands(spec, func(c *Command, _ string) {
-		if c.Inputs != nil {
-			for i := range c.Inputs.Flags {
-				feedInput(c.Inputs.Flags[i].Schema)
+		eachInputSchema(c.Inputs, func(_, _ string, s *InputSchema) {
+			if s != nil {
+				walkSchemaImports(s.BaseSchema, record)
 			}
-			for i := range c.Inputs.Arguments {
-				feedInput(c.Inputs.Arguments[i].Schema)
-			}
-			for i := range c.Inputs.Env {
-				feedInput(c.Inputs.Env[i].Schema)
-			}
-			for i := range c.Inputs.Config {
-				feedInput(c.Inputs.Config[i].Schema)
-			}
-			if c.Inputs.Stdin != nil {
-				feedInput(c.Inputs.Stdin.Schema)
-			}
-		}
+		})
 		if c.Output != nil {
 			walkSchemaImports(c.Output.BaseSchema, record)
 		}
@@ -321,10 +339,7 @@ func lintFlagGroups(spec *Spec) []error {
 			for _, name := range g.Flags {
 				if !known[name] {
 					msg := fmt.Sprintf("flag_groups (%s) references unknown flag %q — it has no matching entry in this command's flags", g.Kind, name)
-					if s := closestName(name, ordered); s != "" {
-						msg += fmt.Sprintf("; did you mean %q?", s)
-					}
-					problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: msg})
+					problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 				}
 			}
 		}
@@ -344,10 +359,7 @@ func lintFlagDependencies(spec *Spec) []error {
 		known, ordered := flagNames(c)
 		report := func(name string) {
 			msg := fmt.Sprintf("flag_dependencies references unknown flag %q — it has no matching entry in this command's flags", name)
-			if s := closestName(name, ordered); s != "" {
-				msg += fmt.Sprintf("; did you mean %q?", s)
-			}
-			problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: msg})
+			problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 		}
 		for _, dep := range c.Inputs.FlagDependencies {
 			if !known[dep.When] {
@@ -423,35 +435,20 @@ func lintSchemaRefs(spec *Spec) []error {
 				reported[key] = true
 			}
 			msg := fmt.Sprintf("$ref %q points to an undeclared schema (no %q under the document-level \"schemas\")", b.Ref, name)
-			if s := closestName(name, names); s != "" {
-				msg += fmt.Sprintf("; did you mean %q?", s)
-			}
-			problems = append(problems, &problem{kind: "spec", loc: loc, msg: msg})
-		}
-	}
-	feed := func(s *InputSchema, loc string) {
-		if s != nil {
-			walkSchemaRefs(s.BaseSchema, checkAt(loc))
+			problems = append(problems, &problem{kind: "spec", loc: loc, msg: didYouMean(msg, name, names)})
 		}
 	}
 	walkCommands(spec, func(c *Command, path string) {
-		if c.Inputs != nil {
-			for i := range c.Inputs.Flags {
-				feed(c.Inputs.Flags[i].Schema, "command "+path+" flag "+c.Inputs.Flags[i].Name)
+		eachInputSchema(c.Inputs, func(channel, name string, s *InputSchema) {
+			if s == nil {
+				return
 			}
-			for i := range c.Inputs.Arguments {
-				feed(c.Inputs.Arguments[i].Schema, "command "+path+" argument "+c.Inputs.Arguments[i].Name)
+			loc := "command " + path + " " + channel
+			if name != "" {
+				loc += " " + name
 			}
-			for i := range c.Inputs.Env {
-				feed(c.Inputs.Env[i].Schema, "command "+path+" env "+c.Inputs.Env[i].Name)
-			}
-			for i := range c.Inputs.Config {
-				feed(c.Inputs.Config[i].Schema, "command "+path+" config "+c.Inputs.Config[i].Name)
-			}
-			if c.Inputs.Stdin != nil {
-				feed(c.Inputs.Stdin.Schema, "command "+path+" stdin")
-			}
-		}
+			walkSchemaRefs(s.BaseSchema, checkAt(loc))
+		})
 		if c.Output != nil {
 			walkSchemaRefs(c.Output.BaseSchema, checkAt("command "+path+" output"))
 		}

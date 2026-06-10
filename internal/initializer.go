@@ -24,13 +24,14 @@ func schemaURLVersion(version string) string {
 	return baselineSchemaVersion
 }
 
-func specSchemaURL(version string) string {
-	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaURLVersion(version) + "/schema-spec.json"
+// schemaURL builds the refs/tags/<VER> URL for the named embedded schema file.
+func schemaURL(version, file string) string {
+	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaURLVersion(version) + "/" + file
 }
 
-func confSchemaURL(version string) string {
-	return "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/" + schemaURLVersion(version) + "/schema-conf.json"
-}
+func specSchemaURL(version string) string { return schemaURL(version, "schema-spec.json") }
+
+func confSchemaURL(version string) string { return schemaURL(version, "schema-conf.json") }
 
 // InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
