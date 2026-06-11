@@ -1,24 +1,27 @@
-$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/{{.RotiniVersion}}/schema-conf.json
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/{{.Version}}/schema-conf.json
 initialize:
   package: cmd
   format: yaml
 generate:
   packages:
-    cli:
-      package: internal/cmd/{{.RootCommandName}}
-      file: rotini.gen.go
-    cligen:
-      package: internal/cmd/{{.RootCommandName}}
-      file: rotini.gen.go
+    entrypoint:
+      package: cmd/{{.Package}}
+      file: main.go
+    cmd:
+      package: internal/cmd/{{.Package}}
+      file: zz_rotini.gen.go
+    cmdgen:
+      package: internal/cmd/{{.Package}}
+      file: zz_rotini.gen.go
   features:
     help:
       enabled: true
-      dir: internal/cmd/{{.RootCommandName}}/embed/help
+      dir: internal/cmd/{{.Package}}/embed/help
     man:
       enabled: false
-      dir: internal/cmd/{{.RootCommandName}}/embed/man
+      dir: internal/cmd/{{.Package}}/embed/man
     completion:
       enabled: false
-      dir: internal/cmd/{{.RootCommandName}}/embed/completion
+      dir: internal/cmd/{{.Package}}/embed/completion
 validate:
   fail: collect

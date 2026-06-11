@@ -1,4 +1,4 @@
-package codegen
+package internal
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 )
 
 func TestSmokeRenderSeedFiles(t *testing.T) {
-	for _, format := range []FileFormat{FileFormatYAML, FileFormatJSON, FileFormatJSONC, FileFormatTOML} {
+	for _, format := range []fileFormat{formatYAML, formatJSON, formatJSONC, formatTOML} {
 		if _, err := renderSpecFile("v1.0.0", "app", format); err != nil {
 			t.Errorf("spec %s: %v", format, err)
 		}
@@ -173,7 +173,7 @@ func TestSmokeRenderManFile(t *testing.T) {
 }
 
 func TestSmokeConvertJSONC(t *testing.T) {
-	out, err := convert([]byte("name: app\nversion: 1\n"), FileFormatJSONC)
+	out, err := convert([]byte("name: app\nversion: 1\n"), formatJSONC)
 	if err != nil {
 		t.Fatal(err)
 	}

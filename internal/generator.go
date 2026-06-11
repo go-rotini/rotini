@@ -1,32 +1,22 @@
 package internal
 
 import (
-	"bytes"
-	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/format"
-	"go/parser"
-	"go/token"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"text/tabwriter"
 	"text/template"
 	"time"
 	"unicode"
 
-	"github.com/go-rotini/fs"
 	"github.com/go-rotini/jsonschema"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The `rotini generate` workflow + the run/watch engine.
+// The `rotini generate` workflow.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // GenerateFn is the signature of [Processor.Generate]. A command handler binds it
@@ -45,131 +35,19 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 // the pass, validate — first: invalid input must never reach codegen). It applies the
 // built-in conf defaults, then emits the cli and cligen packages plus the enabled doc
 // features.
-//
-// NOTE: the codegen implementation still lives in codegen.go / compose.go / help.go /
-// output.go / completion_script.go (reached via generateAll). Those are the next files
-// to be absorbed into the generator op, decomposing into a program generator + a
-// featureGenerator per doc feature (see ROTINI_PROCESSOR_REFACTOR.md §5).
 func (s *session) generate() error {
 	applyConfDefaults(s.conf.conf, s.spec.spec.Command.Name)
 	return generateAll(s.spec.spec, s.conf.conf, s.spec.path)
-}
-
-// runOrWatch performs a single timed pass — returning the pass's error when it fails — or,
-// when watch is set, watches the spec and conf and re-runs the pass on each change until
-// interrupted with ctrl-c (SIGINT), routing every pass (success or failure) to onResult. It is
-// the shared engine behind [Generate] and [Validate]; pass supplies the command-specific work
-// and confPath must already be resolved (see resolveConfBesideSpec).
-func runOrWatch(specPath, confPath string, watch bool, pass func() (string, error), onResult func(result string, err error)) error {
-	if watch {
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		defer stop()
-		return watchLoop(ctx, specPath, confPath, pass, onResult)
-	}
-	result, err := pass()
-	if err != nil {
-		return err
-	}
-	onResult(result, nil)
-	return nil
-}
-
-// watchDebounce coalesces the burst of filesystem events most editors emit when
-// saving a file (write + chmod + the rename of an atomic save).
-const watchDebounce = 200 * time.Millisecond
-
-// watchLoop is the cancelable core of watch mode: it runs pass once, then re-runs it on each
-// change to the spec or conf, handing every pass to onResult, until ctx is done (a clean
-// interrupt → nil). It is split out so tests can drive it with a context rather than a real
-// signal. Only a failure to set up the watchers is returned.
-func watchLoop(ctx context.Context, specPath, confPath string, pass func() (string, error), onResult func(result string, err error)) error {
-	// Watch the spec always, and the conf only when it exists (conf is optional).
-	paths := []string{specPath}
-	if confPath != "" {
-		if _, err := os.Stat(confPath); err == nil {
-			paths = append(paths, confPath)
-		}
-	}
-
-	changed := make(chan struct{}, 1)
-	var watchers []*fs.Watcher
-	defer func() {
-		for _, w := range watchers {
-			_ = w.Close()
-		}
-	}()
-	for _, p := range paths {
-		w, err := fs.NewWatcher(p, fs.WithDebounce(watchDebounce))
-		if err != nil {
-			return fmt.Errorf("watch %s: %w", p, err)
-		}
-		watchers = append(watchers, w)
-		events, err := w.Subscribe(ctx)
-		if err != nil {
-			return fmt.Errorf("watch %s: %w", p, err)
-		}
-		go forwardChanges(ctx, events, changed)
-	}
-
-	onResult(pass()) // initial pass
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-changed:
-			onResult(pass())
-		}
-	}
-}
-
-// roundDuration trims d to roughly three significant figures so its String()
-// stays compact while still rendering in the unit that fits best — ns, µs, ms,
-// or s, which Duration.String already selects (e.g. 312ns, 45.7µs, 2.79ms, 1.23s).
-func roundDuration(d time.Duration) time.Duration {
-	if d <= 0 {
-		return d
-	}
-	unit := time.Nanosecond
-	for d/unit >= 1000 {
-		unit *= 10
-	}
-	return d.Round(unit)
-}
-
-// forwardChanges fans one watcher's events into changed, coalescing to at most
-// one pending signal, until events closes or ctx is cancelled.
-func forwardChanges(ctx context.Context, events <-chan fs.WatchEvent, changed chan<- struct{}) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case _, ok := <-events:
-			if !ok {
-				return
-			}
-			select {
-			case changed <- struct{}{}:
-			default: // a regeneration is already pending; fold this change into it
-			}
-		}
-	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Code generation — the cli/cligen program (framework, rollup, stubs, literals).
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Generated programs import the rotini runtime under this path. The framework
-// file references rotini.CommandHandlers; the handler rollup references
-// rotini.NewProgram and rotini.CommandHandlers.
-const (
-	rotiniImportPath = "github.com/go-rotini/rotini"
-	rotiniPkgName    = "rotini"
-)
-
-//go:embed templates/rotini.go.tmpl templates/handler.go.tmpl templates/handlers.go.tmpl templates/main.go.tmpl templates/help.txt.tmpl templates/man.txt.tmpl
-var templateFS embed.FS
+// Generated programs reference the rotini runtime package under this name in
+// rendered literals (the Definition, BindMeta, …); the templates hardcode the
+// matching import.
+const rotiniPkgName = "rotini"
 
 // fieldDef is one generated struct field: a Go identifier, its type, and its
 // `rotini` struct-tag content — a flag/argument logical name (empty for the
@@ -185,20 +63,6 @@ type fieldDef struct {
 	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), which the binder enforces over the
 	// reconciled value; "" when the input declares no numeric/string/array constraints.
 	Constraint string
-}
-
-// inputBlock is the set of generated input types for a single command. The
-// framework file emits four types per block: <Prefix>Flags, <Prefix>Arguments,
-// <Prefix>CommandInputs and <Prefix>Inputs.
-type inputBlock struct {
-	Prefix       string     // PascalCase type prefix, e.g. "RotiniGenerate"
-	Flags        []fieldDef // fields of <Prefix>Flags (argv flags)
-	Arguments    []fieldDef // fields of <Prefix>Arguments
-	Env          []fieldDef // fields of <Prefix>Env (pure environment inputs)
-	Config       []fieldDef // fields of <Prefix>Config (pure config-file inputs)
-	StdinType    string     // Stdin field type (e.g. "*RotiniGenerateStdin"); "" when none
-	StdinFormat  string     // stdin decode format for the Stdin field's tag (e.g. "yaml")
-	InputsFields []fieldDef // root + ancestor + self CommandInputs fields of <Prefix>Inputs
 }
 
 // genCommand is the fully resolved description of one command node (root or
@@ -265,7 +129,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	// dir is module-relative; the absolute dir is where files are written/pruned and
 	// the cligen-package-relative path is what //go:embed references.
 	feats := enabledFeatures(conf)
-	frameworks := make([]*helpFramework, 0, len(feats))
+	frameworks := make([]templateFeature, 0, len(feats))
 	outputs := make([]featureOutput, 0, len(feats))
 	for _, f := range feats {
 		var nodes []helpNode
@@ -945,14 +809,30 @@ func defaultString(v any) string {
 	}
 }
 
+// toTemplateFields converts resolved fieldDefs to renderer input fields,
+// assembling each field's complete struct-tag literal from its parts. A fieldDef
+// with no rotini tag (the <Prefix>Inputs fields, which the binder maps by
+// position) yields a field with no tag at all.
+func toTemplateFields(fs []fieldDef) []templateInputField {
+	out := make([]templateInputField, 0, len(fs))
+	for _, f := range fs {
+		tf := templateInputField{Field: f.Field, GoType: f.GoType}
+		if f.Tag != "" {
+			tf.Tag = inputFieldTag(f.Tag, f.Recon, f.EnvVar, f.Constraint)
+		}
+		out = append(out, tf)
+	}
+	return out
+}
+
 // renderFrameworkFile renders the framework file: the ProgramHandlers aggregate
 // interface plus the typed input structs for every command. The caller writes it
 // (to its own file, or merged with the rollup when cli and cligen are combined).
 // It is fully generated and carries a DO NOT EDIT banner.
-func renderFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) ([]byte, error) {
+func renderFrameworkFile(gp *genProgram, lay layout, features []templateFeature) ([]byte, error) {
 	own := append([]genCommand{gp.root}, gp.own...)
 
-	blocks := make([]inputBlock, 0, len(own))
+	blocks := make([]templateInputBlock, 0, len(own))
 	imports := map[string]bool{}
 	noteImport := func(imp string) {
 		if imp != "" {
@@ -960,15 +840,15 @@ func renderFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) 
 		}
 	}
 	for _, c := range own {
-		blocks = append(blocks, inputBlock{
+		blocks = append(blocks, templateInputBlock{
 			Prefix:       c.prefix,
-			Flags:        c.flags,
-			Arguments:    c.args,
-			Env:          c.env,
-			Config:       c.config,
+			Flags:        toTemplateFields(c.flags),
+			Arguments:    toTemplateFields(c.args),
+			Env:          toTemplateFields(c.env),
+			Config:       toTemplateFields(c.config),
 			StdinType:    c.stdinType,
 			StdinFormat:  c.stdinFormat,
-			InputsFields: c.inputs,
+			InputsFields: toTemplateFields(c.inputs),
 		})
 		for _, fs := range [][]fieldDef{c.flags, c.args, c.env, c.config} {
 			for _, f := range fs {
@@ -982,19 +862,16 @@ func renderFrameworkFile(gp *genProgram, lay layout, features []*helpFramework) 
 		return nil, err
 	}
 
-	data := map[string]any{
-		"Package":      lay.frameworkPkgName,
-		"RotiniImport": rotiniImportPath,
-		"RotiniPkg":    rotiniPkgName,
-		"Imports":      renderImports(imports),
-		"Methods":      gp.methods(),
-		"Blocks":       blocks,
-		"Definition":   renderDefinition(gp),
-		"Features":     features,
-		"OutputTypes":  outputTypes,
-		"BindMeta":     renderBindMeta(gp),
-	}
-	return renderGo("framework", "templates/rotini.go.tmpl", data)
+	return renderRotiniFile(templateRotiniData{
+		Package:     lay.frameworkPkgName,
+		Imports:     renderImports(imports),
+		Methods:     gp.methods(),
+		Definition:  renderDefinition(gp),
+		Blocks:      blocks,
+		OutputTypes: outputTypes,
+		BindMeta:    renderBindMeta(gp),
+		Features:    features,
+	})
 }
 
 // writeHandlerStubs creates a per-command handler stub for the root command and
@@ -1009,13 +886,7 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		data := map[string]any{
-			"Package":      lay.handlerPkgName,
-			"RotiniImport": rotiniImportPath,
-			"RotiniPkg":    rotiniPkgName,
-			"HandlerType":  c.handler,
-		}
-		content, err := renderGo("handler-"+c.handler, "templates/handler.go.tmpl", data)
+		content, err := renderHandlerStubFile(lay.handlerPkgName, c.handler)
 		if err != nil {
 			return err
 		}
@@ -1034,19 +905,12 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 // package, else qualified with the cligen package name. The caller writes it (to
 // its own file, or merged with the framework when combined).
 func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
-	type rollupMethod struct {
-		Method         string
-		Composed       bool
-		HandlerType    string
-		DelegateAlias  string
-		DelegateMethod string
-	}
-	var methods []rollupMethod
+	var methods []templateHandlersMethod
 	for _, c := range append([]genCommand{gp.root}, gp.own...) {
-		methods = append(methods, rollupMethod{Method: c.prefix, HandlerType: c.handler})
+		methods = append(methods, templateHandlersMethod{Method: c.prefix, HandlerType: c.handler})
 	}
 	for _, c := range gp.composed {
-		methods = append(methods, rollupMethod{
+		methods = append(methods, templateHandlersMethod{
 			Method:         c.prefix,
 			Composed:       true,
 			DelegateAlias:  c.delegateAlias,
@@ -1055,176 +919,13 @@ func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
 	}
 	sort.Slice(methods, func(i, j int) bool { return methods[i].Method < methods[j].Method })
 
-	data := map[string]any{
-		"Package":         lay.handlerPkgName,
-		"RotiniImport":    rotiniImportPath,
-		"RotiniPkg":       rotiniPkgName,
-		"FrameworkImport": lay.frameworkImport, // "" when cli and cligen share a package
-		"FrameworkQual":   lay.frameworkQual,   // e.g. "cligen."; "" when same package
-		"ChildImports":    gp.childImports,
-		"Methods":         methods,
-	}
-	return renderGo("rollup", "templates/handlers.go.tmpl", data)
-}
-
-// mergeGenFile combines the rollup and framework files into a single source file
-// for the combined layout (cli and cligen are the same package and file). The
-// rollup body comes first, then the framework body, under one package clause with
-// the two files' imports unioned. Both inputs are already gofmt'd; the merged
-// result is re-formatted so the unioned import block is sorted and grouped.
-func mergeGenFile(pkgName string, rollup, framework []byte) ([]byte, error) {
-	rImports, rBody, err := splitGoFile(rollup)
-	if err != nil {
-		return nil, fmt.Errorf("merge: parse rollup: %w", err)
-	}
-	fImports, fBody, err := splitGoFile(framework)
-	if err != nil {
-		return nil, fmt.Errorf("merge: parse framework: %w", err)
-	}
-
-	seen := map[string]bool{}
-	var imports []string
-	for _, imp := range append(rImports, fImports...) {
-		if !seen[imp] {
-			seen[imp] = true
-			imports = append(imports, imp)
-		}
-	}
-
-	var buf bytes.Buffer
-	buf.WriteString("// Code generated by rotini; DO NOT EDIT.\n")
-	buf.WriteString("package " + pkgName + "\n\n")
-	if len(imports) > 0 {
-		buf.WriteString("import (\n")
-		for _, imp := range imports {
-			buf.WriteString("\t" + imp + "\n")
-		}
-		buf.WriteString(")\n\n")
-	}
-	buf.Write(rBody)
-	buf.WriteString("\n\n")
-	buf.Write(fBody)
-
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("merge: gofmt: %w\n--- merged source ---\n%s", err, buf.String())
-	}
-	return groupImports(formatted)
-}
-
-// splitGoFile parses a gofmt'd Go source file and returns its import specs (each
-// reconstructed as it appears in source, e.g. `_ "embed"` or `"fmt"`) and the
-// file body verbatim — everything after the import block (or after the package
-// clause when there are no imports). Returning the body as raw source preserves
-// directive comments like //go:embed exactly.
-func splitGoFile(src []byte) (imports []string, body []byte, err error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
-	if err != nil {
-		return nil, nil, err
-	}
-	bodyStart := fset.Position(f.Name.End()).Offset
-	for _, d := range f.Decls {
-		gd, ok := d.(*ast.GenDecl)
-		if !ok || gd.Tok != token.IMPORT {
-			continue
-		}
-		for _, s := range gd.Specs {
-			is := s.(*ast.ImportSpec)
-			if is.Name != nil {
-				imports = append(imports, is.Name.Name+" "+is.Path.Value)
-			} else {
-				imports = append(imports, is.Path.Value)
-			}
-		}
-		if e := fset.Position(gd.End()).Offset; e > bodyStart {
-			bodyStart = e
-		}
-	}
-	body = bytes.TrimLeft(src[bodyStart:], "\n\r\t ")
-	return imports, body, nil
-}
-
-// groupImports rewrites a Go source file's single gofmt'd import block into the two
-// conventional groups — standard library first, then third-party — separated by a
-// blank line, and re-formats. gofmt sorts imports but never splits std from
-// third-party (that is goimports' job); rotini emits one merged block, so this
-// restores the idiom without taking on the golang.org/x/tools dependency. A file
-// with fewer than two imports, or whose imports already fall in a single group, is
-// returned gofmt'd but otherwise unchanged.
-func groupImports(src []byte) ([]byte, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
-	if err != nil {
-		return nil, fmt.Errorf("group imports: parse: %w", err)
-	}
-	var decl *ast.GenDecl
-	for _, d := range f.Decls {
-		if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.IMPORT && gd.Lparen.IsValid() {
-			decl = gd
-			break
-		}
-	}
-
-	// Rearrange only when there is a parenthesized block holding both a standard-
-	// library and a third-party group; otherwise the block is already conventional
-	// and gofmt-formatted as-is below.
-	out := src
-	if decl != nil && len(decl.Specs) >= 2 {
-		var std, third []string
-		for _, s := range decl.Specs {
-			is := s.(*ast.ImportSpec)
-			spec := is.Path.Value
-			if is.Name != nil {
-				spec = is.Name.Name + " " + spec
-			}
-			if isThirdPartyImport(is.Path.Value) {
-				third = append(third, spec)
-			} else {
-				std = append(std, spec)
-			}
-		}
-		if len(std) > 0 && len(third) > 0 {
-			sort.Strings(std)
-			sort.Strings(third)
-
-			var block strings.Builder
-			block.WriteString("import (\n")
-			for _, s := range std {
-				block.WriteString("\t" + s + "\n")
-			}
-			block.WriteString("\n")
-			for _, s := range third {
-				block.WriteString("\t" + s + "\n")
-			}
-			block.WriteString(")")
-
-			start := fset.Position(decl.Pos()).Offset
-			end := fset.Position(decl.End()).Offset
-			var buf bytes.Buffer
-			buf.Write(src[:start])
-			buf.WriteString(block.String())
-			buf.Write(src[end:])
-			out = buf.Bytes()
-		}
-	}
-
-	formatted, err := format.Source(out)
-	if err != nil {
-		return nil, fmt.Errorf("group imports: gofmt: %w", err)
-	}
-	return formatted, nil
-}
-
-// isThirdPartyImport reports whether a quoted import path is a third-party package —
-// its first path segment contains a "." (e.g. "github.com/..."). Standard-library
-// paths ("fmt", "text/template", "embed") have no dot in the first segment.
-func isThirdPartyImport(quotedPath string) bool {
-	p := strings.Trim(quotedPath, `"`)
-	if i := strings.IndexByte(p, '/'); i >= 0 {
-		p = p[:i]
-	}
-	return strings.Contains(p, ".")
+	return renderHandlersFile(templateHandlersData{
+		Package:         lay.handlerPkgName,
+		FrameworkImport: lay.frameworkImport, // "" when cli and cligen share a package
+		FrameworkQual:   lay.frameworkQual,   // e.g. "cligen."; "" when same package
+		ChildImports:    gp.childImports,
+		Methods:         methods,
+	})
 }
 
 // pruneStubs removes handler .go files that no longer correspond to an own
@@ -1390,66 +1091,6 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	}
 }
 
-// renderGo parses the named embedded template, executes it against data, and
-// gofmt-formats the result. A formatting failure includes the unformatted
-// source to make template bugs diagnosable.
-func renderGo(name, templatePath string, data any) ([]byte, error) {
-	src, err := templateFS.ReadFile(templatePath)
-	if err != nil {
-		return nil, fmt.Errorf("read template %s: %w", templatePath, err)
-	}
-	tmpl, err := template.New(name).Parse(string(src))
-	if err != nil {
-		return nil, fmt.Errorf("parse template %s: %w", templatePath, err)
-	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return nil, fmt.Errorf("execute template %s: %w", templatePath, err)
-	}
-	formatted, err := format.Source(buf.Bytes())
-	if err != nil {
-		return nil, fmt.Errorf("gofmt %s: %w\n--- generated source ---\n%s", name, err, buf.String())
-	}
-	return groupImports(formatted)
-}
-
-// writeGeneratedFile creates dir as needed and writes the generated file.
-func writeGeneratedFile(path string, content []byte) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create dir for %s: %w", path, err)
-	}
-	if err := os.WriteFile(path, content, 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
-}
-
-// findModule walks up from the working directory to the nearest go.mod and
-// returns the module root directory and the module path declared in it.
-func findModule() (root, name string, err error) {
-	dir, err := os.Getwd()
-	if err != nil {
-		return "", "", fmt.Errorf("get working directory: %w", err)
-	}
-	for {
-		goMod := filepath.Join(dir, "go.mod")
-		if data, statErr := os.ReadFile(goMod); statErr == nil {
-			for line := range strings.SplitSeq(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				if after, ok := strings.CutPrefix(line, "module "); ok {
-					return dir, strings.TrimSpace(after), nil
-				}
-			}
-			return "", "", fmt.Errorf("no module path in %s", goMod)
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", "", fmt.Errorf("go.mod not found in any parent of working directory")
-		}
-		dir = parent
-	}
-}
-
 // fieldImport returns the Go import path backing a field's schema: the explicit
 // spec `import:` when set, otherwise the import rotini knows is needed for its own
 // built-in type aliases (duration/time/datetime/date → "time"). "" means no import.
@@ -1600,11 +1241,11 @@ type genProgram struct {
 	schemas       map[string]Schema   // document-level named schemas (for output codegen)
 	configFiles   []ConfigurationFile // document-level config-file sources (for the binder)
 
-	root         genCommand    // the root command (own)
-	own          []genCommand  // inline sub-commands, sorted by prefix
-	composed     []composedCmd // composed sub-commands, sorted by prefix
-	tree         []rnode       // full resolved tree (own + grafted), for the Definition
-	childImports []childImport // unique child cli imports for the rollup
+	root         genCommand               // the root command (own)
+	own          []genCommand             // inline sub-commands, sorted by prefix
+	composed     []composedCmd            // composed sub-commands, sorted by prefix
+	tree         []rnode                  // full resolved tree (own + grafted), for the Definition
+	childImports []templateHandlersImport // unique child cli imports for the rollup
 }
 
 // rnode is one node of the resolved command tree used to render the Definition.
@@ -1630,13 +1271,6 @@ type composedCmd struct {
 	prefix         string
 	delegateAlias  string
 	delegateMethod string
-}
-
-// childImport is a composed child's cli import for the rollup. Fields are
-// exported because the rollup template ranges over them.
-type childImport struct {
-	Alias string
-	Path  string
 }
 
 // composeCtx threads composition state down a composed subtree.
@@ -1879,7 +1513,7 @@ func (gp *genProgram) addImport(alias, path string) {
 			return
 		}
 	}
-	gp.childImports = append(gp.childImports, childImport{Alias: alias, Path: path})
+	gp.childImports = append(gp.childImports, templateHandlersImport{Alias: alias, Path: path})
 }
 
 // childCliImport resolves the import path of a composed child's cli package —
@@ -1933,7 +1567,7 @@ func checkCollisions(nodes []rnode) error {
 const helpTemplateName = "help.txt.tmpl"
 
 // docFeature describes one doc-rendered codegen feature (help, man). Both share
-// the doc-data pipeline (buildHelpData → renderHelpText) and differ only in their
+// the doc-data pipeline (buildHelpData → renderDocText) and differ only in their
 // file extension, embed-var/resolver names, the editable template, and which
 // per-command verbatim spec string escapes the render.
 type docFeature struct {
@@ -1943,7 +1577,7 @@ type docFeature struct {
 	resolver  string               // resolver func name, e.g. "Help"
 	ext       string               // output file extension, e.g. ".txt" / ".md"
 	tmplFile  string               // editable template file name in the feature dir ("" = none)
-	embedTmpl string               // embedded default template path under templates/ ("" = none)
+	embedded  string               // embedded default template text, from renderer.go ("" = none)
 	verbatim  func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
 	perShell  bool                 // completion: keyed by shell name, not command path
 }
@@ -1951,12 +1585,12 @@ type docFeature struct {
 var (
 	helpFeatureDesc = docFeature{
 		name: "help", noun: "help", varPrefix: "Help", resolver: "Help",
-		ext: ".txt", tmplFile: helpTemplateName, embedTmpl: "templates/help.txt.tmpl",
+		ext: ".txt", tmplFile: helpTemplateName, embedded: templateHelp,
 		verbatim: func(h cmdHelp) string { return h.Help },
 	}
 	manFeatureDesc = docFeature{
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
-		ext: ".txt", tmplFile: "man.txt.tmpl", embedTmpl: "templates/man.txt.tmpl",
+		ext: ".txt", tmplFile: "man.txt.tmpl", embedded: templateMan,
 		verbatim: func(h cmdHelp) string { return h.Man },
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
@@ -1977,126 +1611,12 @@ var completionShells = []string{"bash", "zsh", "fish", "powershell"}
 // selected by whether the command's verbatim `help` string is set: non-empty →
 // write it verbatim; empty → render `data` through the template.
 type helpNode struct {
-	prefix   string   // PascalCase command prefix; the embed var is "Help"+prefix
-	file     string   // .txt file name within the help dir
-	paths    []string // resolver case values (name/alias permutations); root = [""]
-	name     string   // the command's invocation name, e.g. "rotini generate"
-	verbatim string   // command.help — the exact page; "" means render from data
-	data     helpData // rendering inputs (used when verbatim == "")
-}
-
-// helpHeadings holds the resolved section headings (defaults applied). Each value
-// is rendered verbatim by the template — the trailing ":" lives in the value (the
-// defaults carry it), so an override can drop or restyle it.
-type helpHeadings struct {
-	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples string
-}
-
-// helpData is the per-command template context. Fields are exported because
-// text/template can only read exported fields.
-type helpData struct {
-	Header        string
-	Invocation    string // full command path, e.g. "rotini generate"
-	Summary       string // command.summary (this command's own one-liner)
-	Description   string // command.description (long block)
-	Usage         string // command.usage override ("" when unset)
-	UsageDerived  string // always-computed usage line
-	Footer        string
-	Headings      helpHeadings
-	CommandGroups []helpCmdGroup  // visible direct children, bucketed by group (one default-titled bucket when ungrouped)
-	Arguments     []helpArgRow    // visible own arguments
-	Flags         []helpFlagRow   // visible own flags
-	Environment   []helpEnvRow    // visible env-var inputs
-	Configuration []helpConfigRow // visible config-value inputs
-	Cascading     []helpFlagRow   // visible cascading flags inherited from ancestor commands
-	Examples      []string
-	ExitStatus    []helpExitRow // documented exit codes (man EXIT STATUS section)
-	SeeAlso       []string      // cross-references (man SEE ALSO section)
-}
-
-// helpExitRow is one documented exit code in the man EXIT STATUS section. rotini
-// renders this data verbatim — it sets no exit code itself (handlers own exits).
-type helpExitRow struct {
-	Code    int
-	Summary string
-}
-
-// helpCmdGroup is one bucket of sub-commands in the Commands section. Title is the
-// command's `group` value; "" is the ungrouped bucket, which each template heads with
-// its own default ("Commands:" / "COMMANDS" / "## Commands"). Titled buckets the
-// template formats from Title (its format's convention).
-type helpCmdGroup struct {
-	Title    string // group label, verbatim; "" = ungrouped (default heading)
-	Commands []helpCmdRow
-}
-
-type helpCmdRow struct {
-	Name       string
-	Summary    string // ← the child command's help.summary
-	Aliases    []string
-	Group      string // ← the child command's `group` (buckets it in the Commands section)
-	Deprecated string
-}
-
-type helpEnvRow struct {
-	Var        string // the environment variable (schema.variable, else snake-upper of the name)
-	Summary    string
-	Type       string
-	Required   bool
-	Default    string
-	Enum       []string
-	Deprecated string
-}
-
-type helpConfigRow struct {
-	Name       string
-	Location   string // "<file>.<key>" / "<key>" — where the value is read from
-	Summary    string
-	Type       string
-	Required   bool
-	Default    string
-	Enum       []string
-	Deprecated string
-}
-
-type helpArgRow struct {
-	Name       string
-	Summary    string // ← the argument's summary
-	Required   bool
-	Variadic   bool
-	Default    string
-	Enum       []string
-	Deprecated string
-}
-
-type helpFlagRow struct {
-	Identifiers []string
-	Summary     string // ← the flag's summary
-	Type        string // "" for bool flags
-	Required    bool
-	Default     string
-	Enum        []string
-	Deprecated  string
-}
-
-// helpVar / helpCase / helpFramework are the data the framework template
-// (rotini.go.tmpl) ranges over to emit the embed vars and the Help resolver.
-type helpVar struct {
-	Name  string // Go var name, e.g. "HelpRotiniGenerate"
-	Embed string // //go:embed path, e.g. "help/rotini_generate.txt"
-}
-
-type helpCase struct {
-	PathsLiteral string // case values, e.g. `"generate", "gen"` (root: `""`)
-	Var          string // the var returned for these paths
-}
-
-type helpFramework struct {
-	Resolver string // resolver func name, e.g. "Help"/"Man"/"Completion"
-	Noun     string // word used in the doc comment + error, e.g. "help"
-	PerShell bool   // completion: resolver takes a shell string, not a command path
-	Vars     []helpVar
-	Cases    []helpCase
+	prefix   string           // PascalCase command prefix; the embed var is "Help"+prefix
+	file     string           // .txt file name within the help dir
+	paths    []string         // resolver case values (name/alias permutations); root = [""]
+	name     string           // the command's invocation name, e.g. "rotini generate"
+	verbatim string           // command.help — the exact page; "" means render from data
+	data     templateHelpData // rendering inputs (used when verbatim == "")
 }
 
 // cmdHelp bundles a command's resolved help-presentation fields, which live
@@ -2129,7 +1649,7 @@ func commandHelp(c Command) cmdHelp {
 // flattenFeature produces a node per command for one doc feature across the whole
 // resolved tree: the root first, then every sub-command in tree order. Each node
 // carries its verbatim page (the feature's spec escape, when set) and its built
-// helpData (the shared doc-data, used when no verbatim page is given). The file
+// doc-data (templateHelpData, used when no verbatim page is given). The file
 // extension is the feature's; the doc-data is identical across features.
 func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 	out := []helpNode{{
@@ -2143,8 +1663,8 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 
 	// cascading carries the cascading flags accumulated from a node's ancestors
 	// (the root's own cascading flags seed the root's children, and so on down).
-	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []helpFlagRow)
-	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []helpFlagRow) {
+	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow)
+	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow) {
 		for _, n := range nodes {
 			seg := append([]string{n.name}, n.aliases...)
 			childChain := append(append([][]string{}, identChain...), seg)
@@ -2158,7 +1678,7 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 				verbatim: feat.verbatim(n.help),
 				data:     buildHelpData(invocation, n.help, n.inputs, n.children, cascading),
 			})
-			childCascading := append(append([]helpFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
+			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
 			walk(n.children, childChain, childNames, childCascading)
 		}
 	}
@@ -2208,10 +1728,10 @@ func writeCompletionFiles(cdir, prog string, nodes []helpNode) error {
 
 // resolveHeadings applies the section-heading defaults, overriding with any set
 // in the spec.
-func resolveHeadings(h cmdHelp) helpHeadings {
+func resolveHeadings(h cmdHelp) templateDocHeadings {
 	// Defaults carry the trailing ":" so an override is rendered verbatim — a spec
 	// author can drop or restyle the colon (the template adds nothing).
-	hd := helpHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:"}
+	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -2245,8 +1765,8 @@ func resolveHeadings(h cmdHelp) helpHeadings {
 
 // buildHelpData assembles the template context for one command from its help
 // fields, inputs, and direct children. Hidden children/inputs are excluded.
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, ancestorCascading []helpFlagRow) helpData {
-	d := helpData{
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, ancestorCascading []templateDocFlagRow) templateHelpData {
+	d := templateHelpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
 		Header:      h.Header,
@@ -2259,14 +1779,14 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		SeeAlso:     h.SeeAlso,
 	}
 	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, helpExitRow(e))
+		d.ExitStatus = append(d.ExitStatus, templateDocExitRow(e))
 	}
-	var cmds []helpCmdRow
+	var cmds []templateDocCommandRow
 	for _, c := range children {
 		if c.hidden {
 			continue
 		}
-		cmds = append(cmds, helpCmdRow{
+		cmds = append(cmds, templateDocCommandRow{
 			Name:       c.name,
 			Summary:    c.help.Summary,
 			Aliases:    c.aliases,
@@ -2280,7 +1800,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if a.Hidden {
 				continue
 			}
-			d.Arguments = append(d.Arguments, helpArgRow{
+			d.Arguments = append(d.Arguments, templateDocArgumentRow{
 				Name:       a.Name,
 				Summary:    a.Summary,
 				Required:   a.Schema != nil && a.Schema.Required,
@@ -2300,7 +1820,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if e.Hidden {
 				continue
 			}
-			d.Environment = append(d.Environment, helpEnvRow{
+			d.Environment = append(d.Environment, templateDocEnvRow{
 				Var:        envVarLabel(e),
 				Summary:    e.Summary,
 				Type:       flagDisplayType(e.Schema),
@@ -2314,7 +1834,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			if c.Hidden {
 				continue
 			}
-			d.Configuration = append(d.Configuration, helpConfigRow{
+			d.Configuration = append(d.Configuration, templateDocConfigRow{
 				Name:       c.Name,
 				Location:   configLocation(c),
 				Summary:    c.Summary,
@@ -2366,18 +1886,18 @@ func configLocation(c ConfigInput) string {
 // bucket with Title "" — each template heads it with its own default. When no row
 // declares a group, the result is a single Title-"" bucket holding every command in
 // order, so a non-grouped command list renders byte-identically to before.
-func groupCommands(rows []helpCmdRow) []helpCmdGroup {
+func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
 	if len(rows) == 0 {
 		return nil
 	}
 	idx := map[string]int{}
-	var groups []helpCmdGroup
+	var groups []templateDocCommandGroup
 	for _, r := range rows {
 		i, ok := idx[r.Group]
 		if !ok {
 			i = len(groups)
 			idx[r.Group] = i
-			groups = append(groups, helpCmdGroup{Title: r.Group})
+			groups = append(groups, templateDocCommandGroup{Title: r.Group})
 		}
 		groups[i].Commands = append(groups[i].Commands, r)
 	}
@@ -2406,8 +1926,8 @@ func snakeUpper(name string) string {
 
 // flagRow builds the help-row for a single flag (shared by a command's own Flags
 // section and the Cascading section it contributes to its descendants).
-func flagRow(f FlagInput) helpFlagRow {
-	return helpFlagRow{
+func flagRow(f FlagInput) templateDocFlagRow {
+	return templateDocFlagRow{
 		Identifiers: flagIdentifiers(f),
 		Summary:     f.Summary,
 		Type:        flagDisplayType(f.Schema),
@@ -2421,11 +1941,11 @@ func flagRow(f FlagInput) helpFlagRow {
 // cascadingFlagsOf returns the help-rows for a command's own flags marked
 // cascading: true (and not hidden) — the flags it advertises on its descendants'
 // pages. Order follows declaration order, matching the Flags section.
-func cascadingFlagsOf(inputs *Inputs) []helpFlagRow {
+func cascadingFlagsOf(inputs *Inputs) []templateDocFlagRow {
 	if inputs == nil {
 		return nil
 	}
-	var rows []helpFlagRow
+	var rows []templateDocFlagRow
 	for _, f := range inputs.Flags {
 		if f.Hidden || !f.Cascading {
 			continue
@@ -2547,16 +2067,16 @@ func permute(chain [][]string) []string {
 
 // buildFeatureFramework turns a feature's nodes into the embed vars + resolver
 // cases the framework template emits (one resolver per feature).
-func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) *helpFramework {
-	h := &helpFramework{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
+func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) templateFeature {
+	h := templateFeature{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
 	for _, hn := range nodes {
 		name := feat.varPrefix + hn.prefix
-		h.Vars = append(h.Vars, helpVar{Name: name, Embed: dir + "/" + hn.file})
+		h.Vars = append(h.Vars, templateFeatureVar{Name: name, Embed: dir + "/" + hn.file})
 		quoted := make([]string, len(hn.paths))
 		for i, p := range hn.paths {
 			quoted[i] = strconv.Quote(p)
 		}
-		h.Cases = append(h.Cases, helpCase{PathsLiteral: strings.Join(quoted, ", "), Var: name})
+		h.Cases = append(h.Cases, templateFeatureCase{PathsLiteral: strings.Join(quoted, ", "), Var: name})
 	}
 	return h
 }
@@ -2603,7 +2123,7 @@ func writeFeatureFiles(featDir string, nodes []helpNode, feat docFeature) error 
 			}
 			continue
 		}
-		rendered, err := renderHelpText(tmpl, hn.data)
+		rendered, err := renderDocText(tmpl, hn.data)
 		if err != nil {
 			return fmt.Errorf("render %s for %q: %w", feat.name, hn.name, err)
 		}
@@ -2614,209 +2134,24 @@ func writeFeatureFiles(featDir string, nodes []helpNode, feat docFeature) error 
 	return nil
 }
 
-// writeIfChanged writes content only when it differs from the file on disk,
-// keeping mtimes (and watch loops) stable.
-func writeIfChanged(path, content string) error {
-	if existing, err := os.ReadFile(path); err == nil && string(existing) == content {
-		return nil
-	}
-	return writeFileBytes(path, content)
-}
-
-// writeFileBytes writes content to path atomically (temp file then rename, so an
-// interrupted generate never leaves a torn, half-written file) and creates the parent
-// directory if needed — matching how the generated Go file is written (see format.go). It
-// backs every non-Go output: help/man pages, completion scripts, and handler stubs.
-func writeFileBytes(path, content string) error {
-	if err := fs.WriteFile(path, []byte(content), fs.WithMkdirAll(true), fs.WithAtomic(true)); err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
-	}
-	return nil
-}
-
 // loadFeatureTemplate reads the feature dir's editable template, seeding it from
 // the embedded default when missing, and parses it with the shared FuncMap.
 func loadFeatureTemplate(featDir string, feat docFeature) (*template.Template, error) {
 	path := filepath.Join(featDir, feat.tmplFile)
 	src, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		def, derr := templateFS.ReadFile(feat.embedTmpl)
-		if derr != nil {
-			return nil, fmt.Errorf("read embedded default %s template: %w", feat.name, derr)
-		}
-		if werr := os.WriteFile(path, def, 0o644); werr != nil {
+		if werr := os.WriteFile(path, []byte(feat.embedded), 0o644); werr != nil {
 			return nil, fmt.Errorf("seed %s template %s: %w", feat.name, path, werr)
 		}
-		src = def
+		src = []byte(feat.embedded)
 	} else if err != nil {
 		return nil, fmt.Errorf("read %s template %s: %w", feat.name, path, err)
 	}
-	tmpl, err := template.New(feat.tmplFile).Funcs(helpFuncMap()).Parse(string(src))
+	tmpl, err := parseDocTemplate(feat.tmplFile, string(src))
 	if err != nil {
-		return nil, fmt.Errorf("parse %s template %s: %w", feat.name, path, err)
+		return nil, fmt.Errorf("%s template %s: %w", feat.name, path, err)
 	}
 	return tmpl, nil
-}
-
-// renderHelpText renders data through tmpl, aligns tab-separated columns with
-// tabwriter, and tidies the result. It is a pure function of (tmpl, data) so
-// repeated passes produce byte-identical output.
-func renderHelpText(tmpl *template.Template, data helpData) (string, error) {
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, sanitizeHelpData(data)); err != nil {
-		return "", fmt.Errorf("execute help template: %w", err)
-	}
-	aligned, err := tabAlign(buf.String())
-	if err != nil {
-		return "", err
-	}
-	return tidy(aligned), nil
-}
-
-// sanitizeHelpData replaces tabs/newlines in row text (which would corrupt
-// tabwriter columns) with spaces. Block fields (Header/Description/Footer/Usage)
-// are left intact. Row slices are copied so the source helpData is not mutated.
-func sanitizeHelpData(d helpData) helpData {
-	clean := func(s string) string {
-		return strings.ReplaceAll(strings.ReplaceAll(s, "\t", " "), "\n", " ")
-	}
-	d.CommandGroups = append([]helpCmdGroup(nil), d.CommandGroups...)
-	for i := range d.CommandGroups {
-		d.CommandGroups[i].Commands = append([]helpCmdRow(nil), d.CommandGroups[i].Commands...)
-		for j := range d.CommandGroups[i].Commands {
-			d.CommandGroups[i].Commands[j].Summary = clean(d.CommandGroups[i].Commands[j].Summary)
-			d.CommandGroups[i].Commands[j].Deprecated = clean(d.CommandGroups[i].Commands[j].Deprecated)
-		}
-	}
-	d.Arguments = append([]helpArgRow(nil), d.Arguments...)
-	for i := range d.Arguments {
-		d.Arguments[i].Summary = clean(d.Arguments[i].Summary)
-		d.Arguments[i].Deprecated = clean(d.Arguments[i].Deprecated)
-	}
-	cleanFlags := func(rows []helpFlagRow) []helpFlagRow {
-		rows = append([]helpFlagRow(nil), rows...)
-		for i := range rows {
-			rows[i].Summary = clean(rows[i].Summary)
-			rows[i].Deprecated = clean(rows[i].Deprecated)
-		}
-		return rows
-	}
-	d.Flags = cleanFlags(d.Flags)
-	d.Cascading = cleanFlags(d.Cascading)
-	d.Environment = append([]helpEnvRow(nil), d.Environment...)
-	for i := range d.Environment {
-		d.Environment[i].Summary = clean(d.Environment[i].Summary)
-		d.Environment[i].Deprecated = clean(d.Environment[i].Deprecated)
-	}
-	d.Configuration = append([]helpConfigRow(nil), d.Configuration...)
-	for i := range d.Configuration {
-		d.Configuration[i].Summary = clean(d.Configuration[i].Summary)
-		d.Configuration[i].Deprecated = clean(d.Configuration[i].Deprecated)
-	}
-	d.ExitStatus = append([]helpExitRow(nil), d.ExitStatus...)
-	for i := range d.ExitStatus {
-		d.ExitStatus[i].Summary = clean(d.ExitStatus[i].Summary)
-	}
-	d.SeeAlso = append([]string(nil), d.SeeAlso...)
-	for i := range d.SeeAlso {
-		d.SeeAlso[i] = clean(d.SeeAlso[i])
-	}
-	return d
-}
-
-// tabAlign aligns each contiguous block of tab-separated lines with tabwriter.
-func tabAlign(s string) (string, error) {
-	var buf bytes.Buffer
-	tw := tabwriter.NewWriter(&buf, 0, 0, 4, ' ', 0)
-	if _, err := tw.Write([]byte(s)); err != nil {
-		return "", fmt.Errorf("tabwriter write: %w", err)
-	}
-	if err := tw.Flush(); err != nil {
-		return "", fmt.Errorf("tabwriter flush: %w", err)
-	}
-	return buf.String(), nil
-}
-
-// tidy trims trailing whitespace per line and collapses runs of blank lines to a
-// single blank line, then strips leading and trailing blank lines entirely — the
-// rendered page ends exactly at its last line of content, with no trailing newline.
-func tidy(s string) string {
-	lines := strings.Split(s, "\n")
-	for i := range lines {
-		lines[i] = strings.TrimRight(lines[i], " \t")
-	}
-	out := strings.Join(lines, "\n")
-	for strings.Contains(out, "\n\n\n") {
-		out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
-	}
-	return strings.Trim(out, "\n")
-}
-
-// helpFuncMap is the deterministic, dependency-free helper set available to the
-// help template (an allowlist — no clock/entropy funcs exist to call).
-func helpFuncMap() template.FuncMap {
-	return template.FuncMap{
-		"join":       strings.Join,
-		"upper":      strings.ToUpper,
-		"lower":      strings.ToLower,
-		"title":      titleASCII,
-		"trim":       strings.TrimSpace,
-		"trimPrefix": func(prefix, s string) string { return strings.TrimPrefix(s, prefix) },
-		"trimSuffix": func(suffix, s string) string { return strings.TrimSuffix(s, suffix) },
-		"replace":    func(old, repl, s string) string { return strings.ReplaceAll(s, old, repl) },
-		"indent":     indentLines,
-		"repeat":     func(n int, s string) string { return strings.Repeat(s, n) },
-		"default": func(def, s string) string {
-			if s == "" {
-				return def
-			}
-			return s
-		},
-		"contains":  func(substr, s string) bool { return strings.Contains(s, substr) },
-		"hasPrefix": func(prefix, s string) bool { return strings.HasPrefix(s, prefix) },
-		"hasSuffix": func(suffix, s string) bool { return strings.HasSuffix(s, suffix) },
-		"first": func(elems []string) string {
-			if len(elems) == 0 {
-				return ""
-			}
-			return elems[0]
-		},
-		"last": func(elems []string) string {
-			if len(elems) == 0 {
-				return ""
-			}
-			return elems[len(elems)-1]
-		},
-	}
-}
-
-// titleASCII upper-cases the first letter of each word (ASCII only). A local
-// implementation: strings.Title is deprecated and golang.org/x/text would add a
-// dependency.
-func titleASCII(s string) string {
-	var b strings.Builder
-	atWordStart := true
-	for _, r := range s {
-		if atWordStart && r >= 'a' && r <= 'z' {
-			b.WriteRune(r - ('a' - 'A'))
-		} else {
-			b.WriteRune(r)
-		}
-		atWordStart = r == ' ' || r == '\t' || r == '-' || r == '_'
-	}
-	return b.String()
-}
-
-// indentLines prefixes every non-empty line of s with n spaces.
-func indentLines(n int, s string) string {
-	pad := strings.Repeat(" ", n)
-	lines := strings.Split(s, "\n")
-	for i, ln := range lines {
-		if ln != "" {
-			lines[i] = pad + ln
-		}
-	}
-	return strings.Join(lines, "\n")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

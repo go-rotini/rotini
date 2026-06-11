@@ -1,10 +1,15 @@
-package codegen
+package internal
+
+// This file owns template parsing and rendering: every generated artifact —
+// seed spec/conf files, the main.go entrypoint, handler stubs and seeds, the
+// handlers rollup, the framework (rotini) file, and the help/man doc pages —
+// renders through here. Reading inputs lives in reader.go; writing outputs
+// lives in writer.go.
 
 import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -18,15 +23,6 @@ import (
 	"github.com/go-rotini/jsonc"
 	"github.com/go-rotini/toml"
 	"github.com/go-rotini/yaml"
-)
-
-type FileFormat string
-
-const (
-	FileFormatJSON  FileFormat = "json"
-	FileFormatJSONC FileFormat = "jsonc"
-	FileFormatTOML  FileFormat = "toml"
-	FileFormatYAML  FileFormat = "yaml"
 )
 
 var (
@@ -52,12 +48,15 @@ var (
 	templateHelp string
 	//go:embed templates/man.txt.tmpl
 	templateMan string
-
-	ErrUnsupportedFileFormat = errors.New("unsupported file format")
 )
 
-func convert(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
-	if fileFormat == FileFormatYAML {
+// convert transcodes a rendered YAML document to the target serialization.
+// YAML — the authoring format — is returned verbatim; json and jsonc become
+// pretty-printed JSON (a valid JSONC document); toml is transcoded through
+// JSON. Conversion goes through an untyped value, so it carries every field
+// the template declares.
+func convert(yamlBytes []byte, format fileFormat) ([]byte, error) {
+	if format == formatYAML {
 		return yamlBytes, nil
 	}
 
@@ -66,8 +65,8 @@ func convert(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
 		return nil, fmt.Errorf("convert seed to json: %w", err)
 	}
 
-	switch fileFormat {
-	case FileFormatJSON:
+	switch format {
+	case formatJSON:
 		var v any
 		if err := json.Unmarshal(jsonBytes, &v); err != nil {
 			return nil, fmt.Errorf("decode json: %w", err)
@@ -77,7 +76,7 @@ func convert(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
 			return nil, fmt.Errorf("encode json: %w", err)
 		}
 		return append(out, '\n'), nil
-	case FileFormatJSONC:
+	case formatJSONC:
 		var v any
 		if err := jsonc.Unmarshal(jsonBytes, &v); err != nil {
 			return nil, fmt.Errorf("decode jsonc: %w", err)
@@ -87,14 +86,14 @@ func convert(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
 			return nil, fmt.Errorf("encode jsonc: %w", err)
 		}
 		return append(out, '\n'), nil
-	case FileFormatTOML:
+	case formatTOML:
 		out, err := toml.FromJSON(jsonBytes)
 		if err != nil {
 			return nil, fmt.Errorf("convert to toml: %w", err)
 		}
 		return out, nil
 	default:
-		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFileFormat, fileFormat)
+		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, format)
 	}
 }
 
@@ -130,88 +129,6 @@ func renderGoFile(name string, text string, data any) ([]byte, error) {
 	return groupImports(formatted)
 }
 
-// groupImports rewrites a Go source file's single gofmt'd import block into the two
-// conventional groups — standard library first, then third-party — separated by a
-// blank line, and re-formats. gofmt sorts imports but never splits std from
-// third-party (that is goimports' job); the templates emit one merged block, so this
-// restores the idiom without taking on the golang.org/x/tools dependency. A file
-// with fewer than two imports, or whose imports already fall in a single group, is
-// returned gofmt'd but otherwise unchanged.
-func groupImports(src []byte) ([]byte, error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
-	if err != nil {
-		return nil, fmt.Errorf("group imports: parse: %w", err)
-	}
-	var decl *ast.GenDecl
-	for _, d := range f.Decls {
-		if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.IMPORT && gd.Lparen.IsValid() {
-			decl = gd
-			break
-		}
-	}
-
-	// Rearrange only when there is a parenthesized block holding both a standard-
-	// library and a third-party group; otherwise the block is already conventional
-	// and gofmt-formatted as-is below.
-	out := src
-	if decl != nil && len(decl.Specs) >= 2 {
-		var std, third []string
-		for _, s := range decl.Specs {
-			is := s.(*ast.ImportSpec)
-			spec := is.Path.Value
-			if is.Name != nil {
-				spec = is.Name.Name + " " + spec
-			}
-			if isThirdPartyImport(is.Path.Value) {
-				third = append(third, spec)
-			} else {
-				std = append(std, spec)
-			}
-		}
-		if len(std) > 0 && len(third) > 0 {
-			sort.Strings(std)
-			sort.Strings(third)
-
-			var block strings.Builder
-			block.WriteString("import (\n")
-			for _, s := range std {
-				block.WriteString("\t" + s + "\n")
-			}
-			block.WriteString("\n")
-			for _, s := range third {
-				block.WriteString("\t" + s + "\n")
-			}
-			block.WriteString(")")
-
-			start := fset.Position(decl.Pos()).Offset
-			end := fset.Position(decl.End()).Offset
-			var buf bytes.Buffer
-			buf.Write(src[:start])
-			buf.WriteString(block.String())
-			buf.Write(src[end:])
-			out = buf.Bytes()
-		}
-	}
-
-	formatted, err := format.Source(out)
-	if err != nil {
-		return nil, fmt.Errorf("group imports: gofmt: %w", err)
-	}
-	return formatted, nil
-}
-
-// isThirdPartyImport reports whether a quoted import path is outside the
-// standard library: its first path element contains a dot (a domain), the same
-// heuristic goimports uses.
-func isThirdPartyImport(quotedPath string) bool {
-	p := strings.Trim(quotedPath, `"`)
-	if i := strings.IndexByte(p, '/'); i >= 0 {
-		p = p[:i]
-	}
-	return strings.Contains(p, ".")
-}
-
 // templateSeedData is the context for the spec and conf seed templates.
 type templateSeedData struct {
 	Version string
@@ -220,7 +137,7 @@ type templateSeedData struct {
 
 // renderSeedFile renders one YAML seed template and transcodes it to the
 // requested file format.
-func renderSeedFile(name string, text string, version string, pkg string, fileFormat FileFormat) ([]byte, error) {
+func renderSeedFile(name string, text string, version string, pkg string, format fileFormat) ([]byte, error) {
 	rendered, err := renderTemplate(name, text, templateSeedData{
 		Version: version,
 		Package: pkg,
@@ -230,15 +147,15 @@ func renderSeedFile(name string, text string, version string, pkg string, fileFo
 		return nil, err
 	}
 
-	return convert(rendered, fileFormat)
+	return convert(rendered, format)
 }
 
-func renderSpecFile(version string, pkg string, fileFormat FileFormat) ([]byte, error) {
-	return renderSeedFile("spec", templateSpec, version, pkg, fileFormat)
+func renderSpecFile(version string, pkg string, format fileFormat) ([]byte, error) {
+	return renderSeedFile("spec", templateSpec, version, pkg, format)
 }
 
-func renderConfFile(version string, pkg string, fileFormat FileFormat) ([]byte, error) {
-	return renderSeedFile("conf", templateConf, version, pkg, fileFormat)
+func renderConfFile(version string, pkg string, format fileFormat) ([]byte, error) {
+	return renderSeedFile("conf", templateConf, version, pkg, format)
 }
 
 type templateMainData struct {
@@ -422,6 +339,7 @@ type templateDocCommandRow struct {
 	Name       string
 	Summary    string
 	Aliases    []string
+	Group      string // the child command's `group` (buckets it in the Commands section)
 	Deprecated string
 }
 
@@ -504,21 +422,48 @@ func renderManFile(data templateManData) ([]byte, error) {
 	return renderDocFile("man", templateMan, data)
 }
 
-// renderDocFile renders one doc page (help/man): sanitize the row text, execute
-// the template, align tab-separated columns, and tidy the result. It is a pure
-// function of (text, data) so repeated passes produce byte-identical output.
+// renderDocFile renders one doc page through a one-shot template text (the
+// embedded defaults). The doc features render user-editable templates instead —
+// parse those once with parseDocTemplate and render each page with
+// renderDocText.
 func renderDocFile(name string, text string, data templateHelpData) ([]byte, error) {
-	rendered, err := renderTemplate(name, text, sanitizeDocData(data))
+	tmpl, err := parseDocTemplate(name, text)
 	if err != nil {
 		return nil, err
 	}
 
-	aligned, err := tabAlign(string(rendered))
+	rendered, err := renderDocText(tmpl, data)
 	if err != nil {
 		return nil, err
 	}
 
-	return []byte(tidy(aligned)), nil
+	return []byte(rendered), nil
+}
+
+// parseDocTemplate parses doc-template text (help/man) with the shared FuncMap.
+func parseDocTemplate(name string, text string) (*template.Template, error) {
+	tmpl, err := template.New(name).Funcs(templateFuncMap()).Parse(text)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s template: %w", name, err)
+	}
+	return tmpl, nil
+}
+
+// renderDocText renders one doc page (help/man): sanitize the row text, execute
+// the template, align tab-separated columns, and tidy the result. It is a pure
+// function of (tmpl, data) so repeated passes produce byte-identical output.
+func renderDocText(tmpl *template.Template, data templateHelpData) (string, error) {
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, sanitizeDocData(data)); err != nil {
+		return "", fmt.Errorf("execute %s template: %w", tmpl.Name(), err)
+	}
+
+	aligned, err := tabAlign(buffer.String())
+	if err != nil {
+		return "", err
+	}
+
+	return tidy(aligned), nil
 }
 
 // sanitizeDocData replaces tabs/newlines in row text (which would corrupt
@@ -668,4 +613,164 @@ func indentLines(n int, s string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// mergeGenFile combines the rollup and framework files into a single source file
+// for the combined layout (cli and cligen are the same package and file). The
+// rollup body comes first, then the framework body, under one package clause with
+// the two files' imports unioned. Both inputs are already gofmt'd; the merged
+// result is re-formatted so the unioned import block is sorted and grouped.
+func mergeGenFile(pkgName string, rollup, framework []byte) ([]byte, error) {
+	rImports, rBody, err := splitGoFile(rollup)
+	if err != nil {
+		return nil, fmt.Errorf("merge: parse rollup: %w", err)
+	}
+	fImports, fBody, err := splitGoFile(framework)
+	if err != nil {
+		return nil, fmt.Errorf("merge: parse framework: %w", err)
+	}
+
+	seen := map[string]bool{}
+	var imports []string
+	for _, imp := range append(rImports, fImports...) {
+		if !seen[imp] {
+			seen[imp] = true
+			imports = append(imports, imp)
+		}
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("// Code generated by rotini; DO NOT EDIT.\n")
+	buf.WriteString("package " + pkgName + "\n\n")
+	if len(imports) > 0 {
+		buf.WriteString("import (\n")
+		for _, imp := range imports {
+			buf.WriteString("\t" + imp + "\n")
+		}
+		buf.WriteString(")\n\n")
+	}
+	buf.Write(rBody)
+	buf.WriteString("\n")
+	buf.Write(fBody)
+
+	formatted, err := format.Source(buf.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("merge: gofmt: %w\n--- merged source ---\n%s", err, buf.String())
+	}
+	return groupImports(formatted)
+}
+
+// splitGoFile parses a gofmt'd Go source file and returns its import specs (each
+// reconstructed as it appears in source, e.g. `_ "embed"` or `"fmt"`) and the
+// file body verbatim — everything after the import block (or after the package
+// clause when there are no imports). Returning the body as raw source preserves
+// directive comments like //go:embed exactly.
+func splitGoFile(src []byte) (imports []string, body []byte, err error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
+	if err != nil {
+		return nil, nil, err
+	}
+	bodyStart := fset.Position(f.Name.End()).Offset
+	for _, d := range f.Decls {
+		gd, ok := d.(*ast.GenDecl)
+		if !ok || gd.Tok != token.IMPORT {
+			continue
+		}
+		for _, s := range gd.Specs {
+			is := s.(*ast.ImportSpec)
+			if is.Name != nil {
+				imports = append(imports, is.Name.Name+" "+is.Path.Value)
+			} else {
+				imports = append(imports, is.Path.Value)
+			}
+		}
+		if e := fset.Position(gd.End()).Offset; e > bodyStart {
+			bodyStart = e
+		}
+	}
+	body = bytes.TrimLeft(src[bodyStart:], "\n\r\t ")
+	return imports, body, nil
+}
+
+// groupImports rewrites a Go source file's single gofmt'd import block into the two
+// conventional groups — standard library first, then third-party — separated by a
+// blank line, and re-formats. gofmt sorts imports but never splits std from
+// third-party (that is goimports' job); the templates emit one merged block, so this
+// restores the idiom without taking on the golang.org/x/tools dependency. A file
+// with fewer than two imports, or whose imports already fall in a single group, is
+// returned gofmt'd but otherwise unchanged.
+func groupImports(src []byte) ([]byte, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("group imports: parse: %w", err)
+	}
+	var decl *ast.GenDecl
+	for _, d := range f.Decls {
+		if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.IMPORT && gd.Lparen.IsValid() {
+			decl = gd
+			break
+		}
+	}
+
+	// Rearrange only when there is a parenthesized block holding both a standard-
+	// library and a third-party group; otherwise the block is already conventional
+	// and gofmt-formatted as-is below.
+	out := src
+	if decl != nil && len(decl.Specs) >= 2 {
+		var std, third []string
+		for _, s := range decl.Specs {
+			is := s.(*ast.ImportSpec)
+			spec := is.Path.Value
+			if is.Name != nil {
+				spec = is.Name.Name + " " + spec
+			}
+			if isThirdPartyImport(is.Path.Value) {
+				third = append(third, spec)
+			} else {
+				std = append(std, spec)
+			}
+		}
+		if len(std) > 0 && len(third) > 0 {
+			sort.Strings(std)
+			sort.Strings(third)
+
+			var block strings.Builder
+			block.WriteString("import (\n")
+			for _, s := range std {
+				block.WriteString("\t" + s + "\n")
+			}
+			block.WriteString("\n")
+			for _, s := range third {
+				block.WriteString("\t" + s + "\n")
+			}
+			block.WriteString(")")
+
+			start := fset.Position(decl.Pos()).Offset
+			end := fset.Position(decl.End()).Offset
+			var buf bytes.Buffer
+			buf.Write(src[:start])
+			buf.WriteString(block.String())
+			buf.Write(src[end:])
+			out = buf.Bytes()
+		}
+	}
+
+	formatted, err := format.Source(out)
+	if err != nil {
+		return nil, fmt.Errorf("group imports: gofmt: %w", err)
+	}
+	return formatted, nil
+}
+
+// isThirdPartyImport reports whether a quoted import path is a third-party package —
+// its first path segment contains a "." (e.g. "github.com/..."). Standard-library
+// paths ("fmt", "text/template", "embed") have no dot in the first segment.
+func isThirdPartyImport(quotedPath string) bool {
+	p := strings.Trim(quotedPath, `"`)
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		p = p[:i]
+	}
+	return strings.Contains(p, ".")
 }

@@ -19,12 +19,9 @@ func TestInitialize_confDefaults(t *testing.T) {
 	if err := Initialize("mycli", "", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	// Spec/conf/main live under the conf's package dir (tools); the generated code
-	// goes to the module-internal internal/cmd/<name> regardless of that dir.
 	dir := filepath.Join(tmp, "tools", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.jsonc"), `"name": "mycli"`)
 	mustContain(t, filepath.Join(dir, ".rotini.conf.jsonc"), `"internal/cmd/mycli"`)
-	mustContain(t, filepath.Join(dir, "main.go"), `"example.com/myclis/internal/cmd/mycli"`)
 
 	// An explicit --format overrides the conf default (still under the conf package).
 	if err := Initialize("other", "yaml", false, ""); err != nil {
@@ -43,31 +40,39 @@ func initTestModule(t *testing.T) string {
 	return tmp
 }
 
-func TestInitialize_scaffoldsStandalone(t *testing.T) {
+// TestInitialize_scaffoldsSeeds verifies the whole `rotini init` job: the seed
+// spec (root command named after the CLI, with the default version/help flags)
+// and the seed conf (package layout + feature toggles) under cmd/<name>/.
+// Nothing else is written — code generation is a separate `rotini generate` run.
+func TestInitialize_scaffoldsSeeds(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 
 	dir := filepath.Join(tmp, "cmd", "mycli")
-	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli", "schema-spec.json")
+	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"),
+		"name: mycli", "schema-spec.json",
+		"name: version", "--version", "name: help", "--help")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"),
-		"package: internal/cmd/mycli", "file: rotini.gen.go", "schema-conf.json")
-	mustContain(t, filepath.Join(dir, "main.go"),
-		"//go:generate go tool rotini generate",
-		`"example.com/myclis/internal/cmd/mycli"`,
-		`"github.com/go-rotini/rotini"`,
-		`Bind("parser", rotini.NewParser())`, "Execute()")
-	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
-	mustContain(t, filepath.Join(genDir, "rotini.gen.go"),
-		"package mycli", "type ProgramHandlers interface", "var definition",
-		"var Program = NewProgram(&handlers{})")
-	mustContain(t, filepath.Join(genDir, "mycli.go"), "type mycliHandlers struct{}")
+		"schema-conf.json",
+		"package: cmd/mycli", "package: internal/cmd/mycli",
+		"file: main.go", "file: zz_rotini.gen.go",
+		"dir: internal/cmd/mycli/embed/help")
+
+	// Initialize seeds only — no main.go and no generated package.
+	if _, err := os.Stat(filepath.Join(dir, "main.go")); !os.IsNotExist(err) {
+		t.Errorf("initialize should not write main.go (err=%v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli")); !os.IsNotExist(err) {
+		t.Errorf("initialize should not generate code (err=%v)", err)
+	}
 }
 
-// TestInitialize_stampsSchemaRef covers Item 3's scaffold side: a release ref is
-// stamped verbatim into both $schema URLs (always the refs/tags/<VER> form), while
-// a non-release build (empty ref) falls back to the baseline 0.0.0 tag.
+// TestInitialize_stampsSchemaRef covers the scaffold side of the $schema↔version
+// guard: a release ref is stamped verbatim into both $schema URLs (always the
+// refs/tags/<VER> form), while a non-release build (empty ref) falls back to the
+// baseline 0.0.0 tag.
 func TestInitialize_stampsSchemaRef(t *testing.T) {
 	tmp := initTestModule(t)
 
@@ -100,20 +105,6 @@ func TestInitialize_noClobberThenForce(t *testing.T) {
 	}
 }
 
-func TestInitialize_forcePreservesEditedStub(t *testing.T) {
-	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false, ""); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
-	stub := filepath.Join(tmp, "internal", "cmd", "mycli", "mycli.go")
-	writeTestFile(t, stub, "package cli\n\n// EDITED BY USER\n")
-
-	if err := Initialize("mycli", "yaml", true, ""); err != nil {
-		t.Fatalf("re-init with force: %v", err)
-	}
-	mustContain(t, stub, "EDITED BY USER")
-}
-
 func TestInitialize_formatJSON(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("tool", "json", false, ""); err != nil {
@@ -124,7 +115,7 @@ func TestInitialize_formatJSON(t *testing.T) {
 }
 
 // TestInitialize_formatTOML covers the toml seed path: the YAML templates are
-// transcoded to TOML (via yaml→json→toml) and the seeded files validate + generate.
+// transcoded to TOML (via yaml→json→toml).
 func TestInitialize_formatTOML(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("tool", "toml", false, ""); err != nil {
@@ -132,8 +123,6 @@ func TestInitialize_formatTOML(t *testing.T) {
 	}
 	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.spec.toml"), `name = "tool"`)
 	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.conf.toml"), "internal/cmd/tool")
-	// The generated program still lands in the module-internal package.
-	mustContain(t, filepath.Join(tmp, "internal", "cmd", "tool", "rotini.gen.go"), "package tool")
 }
 
 func TestInitialize_errors(t *testing.T) {

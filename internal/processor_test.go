@@ -296,8 +296,9 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 	}
 }
 
-// TestProcessorInitialize confirms the Processor's initialize scaffolds the
-// cmd/<name>/ source layout plus the generated internal/cmd/<name> package.
+// TestProcessorInitialize confirms the Processor's initialize scaffolds the seed
+// spec and conf under cmd/<name>/ — and nothing else (codegen is a separate
+// generate run).
 func TestProcessorInitialize(t *testing.T) {
 	tmp := initTestModule(t)
 	p := NewProcessor("")
@@ -308,8 +309,9 @@ func TestProcessorInitialize(t *testing.T) {
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: internal/cmd/mycli")
-	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate go tool rotini generate")
-	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go"), "package mycli", "var Program = NewProgram(&handlers{})")
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli")); !os.IsNotExist(err) {
+		t.Errorf("initialize should not generate code (err=%v)", err)
+	}
 }
 
 // TestProcessorValidatePass confirms the validate workflow composes load + validate,

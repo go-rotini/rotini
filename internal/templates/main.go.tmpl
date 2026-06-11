@@ -2,13 +2,21 @@
 package main
 
 import (
-	{{.Pkg}} "{{.Import}}"
-
+	{{.PackageAlias}} "{{.Package}}"
 	"github.com/go-rotini/rotini"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
-	{{.Pkg}}.Program.
+	{{.PackageAlias}}.Program.
 		Bind("parser", rotini.NewParser()).
+		Bind("build", rotini.BuildInfo(version)).
+		Bind("commit", commit).
+		Bind("date", date).
 		Execute()
 }

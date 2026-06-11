@@ -2,7 +2,7 @@
 package {{.Package}}
 
 import (
-	"{{.RotiniImport}}"
+	"github.com/go-rotini/rotini"
 {{- if .FrameworkImport}}
 	"{{.FrameworkImport}}"
 {{- end}}
@@ -22,7 +22,7 @@ func Handlers() {{.FrameworkQual}}ProgramHandlers {
 }
 {{- range .Methods}}
 
-func (*handlers) {{.Method}}() {{$.RotiniPkg}}.CommandHandlers {
+func (*handlers) {{.Method}}() rotini.CommandHandlers {
 {{- if .Composed}}
 	return {{.DelegateAlias}}.Handlers().{{.DelegateMethod}}()
 {{- else}}

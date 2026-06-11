@@ -119,7 +119,8 @@ func TestGenerateDefaultLayout(t *testing.T) {
 
 	gen := filepath.Join(tmp, "internal", "cmd", "rotini", "rotini.gen.go")
 	mustContain(t, gen, "package rotini", "type ProgramHandlers interface", "var Program = NewProgram(&handlers{})")
-	mustContain(t, filepath.Join(tmp, "internal", "cmd", "rotini", "rotini_generate.go"), "type rotiniGenerateHandlers struct{}")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "rotini", "rotini_generate.go"),
+		"type rotiniGenerateHandlers struct {", "rotini.DefaultPreRun")
 }
 
 // TestGenerateEscapesReservedFilenames verifies that a command whose name would make
@@ -174,7 +175,7 @@ func TestGenerateFilenameOverride(t *testing.T) {
 	}
 
 	dir := filepath.Join(tmp, "internal", "cmd", "app")
-	mustContain(t, filepath.Join(dir, "build_handlers.go"), "type appBuildHandlers struct{}")
+	mustContain(t, filepath.Join(dir, "build_handlers.go"), "type appBuildHandlers struct {")
 	if _, err := os.Stat(filepath.Join(dir, "app_build.go")); !os.IsNotExist(err) {
 		t.Errorf("derived stub app_build.go should not be produced when overridden (err=%v)", err)
 	}
@@ -1622,27 +1623,27 @@ func TestWriteFileBytes_atomicAndMkdir(t *testing.T) {
 	}
 }
 
-// TestHelpFuncMap asserts the template helper set is exactly the documented,
+// TestTemplateFuncMap asserts the template helper set is exactly the documented,
 // deterministic allowlist — no clock/entropy functions (which would break
 // byte-stable rendering) and no third-party dependency.
-func TestHelpFuncMap(t *testing.T) {
-	fm := helpFuncMap()
+func TestTemplateFuncMap(t *testing.T) {
+	fm := templateFuncMap()
 	want := []string{
 		"join", "upper", "lower", "title", "trim", "trimPrefix", "trimSuffix",
 		"replace", "indent", "repeat", "default", "contains", "hasPrefix",
 		"hasSuffix", "first", "last",
 	}
 	if len(fm) != len(want) {
-		t.Errorf("helpFuncMap has %d funcs, want %d", len(fm), len(want))
+		t.Errorf("templateFuncMap has %d funcs, want %d", len(fm), len(want))
 	}
 	for _, k := range want {
 		if _, ok := fm[k]; !ok {
-			t.Errorf("helpFuncMap missing %q", k)
+			t.Errorf("templateFuncMap missing %q", k)
 		}
 	}
 	for _, bad := range []string{"now", "date", "uuidv4", "randAlpha", "randNumeric", "randBytes"} {
 		if _, ok := fm[bad]; ok {
-			t.Errorf("helpFuncMap unexpectedly exposes non-deterministic %q", bad)
+			t.Errorf("templateFuncMap unexpectedly exposes non-deterministic %q", bad)
 		}
 	}
 	if got := titleASCII("foo-bar baz"); got != "Foo-Bar Baz" {
