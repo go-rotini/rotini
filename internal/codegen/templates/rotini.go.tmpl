@@ -10,12 +10,12 @@ import (
 	"fmt"
 	"strings"
 {{- end}}
-	"{{.RotiniImport}}"
+	"github.com/go-rotini/rotini"
 )
 
 type ProgramHandlers interface {
 {{- range .Methods}}
-	{{.}}() {{$.RotiniPkg}}.CommandHandlers
+	{{.}}() rotini.CommandHandlers
 {{- end}}
 }
 
@@ -25,7 +25,7 @@ type ProgramHandlers interface {
 {{if .Flags}}
 type {{.Prefix}}Flags struct {
 {{- range .Flags}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"{{with .Recon}} recon:"{{.}}"{{end}}`
+	{{.Field}} {{.GoType}} {{.Tag}}
 {{- end}}
 }
 {{- else}}
@@ -34,7 +34,7 @@ type {{.Prefix}}Flags struct{}
 {{if .Arguments}}
 type {{.Prefix}}Arguments struct {
 {{- range .Arguments}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}"`
+	{{.Field}} {{.GoType}} {{.Tag}}
 {{- end}}
 }
 {{- else}}
@@ -44,7 +44,7 @@ type {{.Prefix}}Arguments struct{}
 
 type {{.Prefix}}Env struct {
 {{- range .Env}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"{{with .EnvVar}} env:"{{.}}"{{end}}{{with .Constraint}} {{.}}{{end}}`
+	{{.Field}} {{.GoType}} {{.Tag}}
 {{- end}}
 }
 {{- end}}
@@ -52,7 +52,7 @@ type {{.Prefix}}Env struct {
 
 type {{.Prefix}}Config struct {
 {{- range .Config}}
-	{{.Field}} {{.GoType}} `rotini:"{{.Tag}}" recon:"{{.Recon}}"{{with .Constraint}} {{.}}{{end}}`
+	{{.Field}} {{.GoType}} {{.Tag}}
 {{- end}}
 }
 {{- end}}
@@ -84,12 +84,12 @@ type {{.Prefix}}Inputs struct {
 {{.}}
 {{end}}
 // NewProgram builds the program from the generated command tree and the typed
-// ProgramHandlers, delegating to {{.RotiniPkg}}.NewProgram (which takes the handlers
+// ProgramHandlers, delegating to rotini.NewProgram (which takes the handlers
 // as an untyped value). Construct your program with this so the compiler verifies
 // your handlers satisfy ProgramHandlers. The command tree is an unexported
-// implementation detail — you hold a *{{.RotiniPkg}}.Program, never the Definition.
-func NewProgram(handlers ProgramHandlers) *{{.RotiniPkg}}.Program {
-	return {{.RotiniPkg}}.NewProgram(definition, handlers)
+// implementation detail — you hold a *rotini.Program, never the Definition.
+func NewProgram(handlers ProgramHandlers) *rotini.Program {
+	return rotini.NewProgram(definition, handlers)
 }
 {{range .Features}}
 {{range .Vars}}

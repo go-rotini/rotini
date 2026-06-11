@@ -5,10 +5,38 @@ import (
 	"testing"
 )
 
+func TestSmokeRenderSeedFiles(t *testing.T) {
+	for _, format := range []FileFormat{FileFormatYAML, FileFormatJSON, FileFormatJSONC, FileFormatTOML} {
+		if _, err := renderSpecFile("v1.0.0", "app", format); err != nil {
+			t.Errorf("spec %s: %v", format, err)
+		}
+		if _, err := renderConfFile("v1.0.0", "app", format); err != nil {
+			t.Errorf("conf %s: %v", format, err)
+		}
+	}
+}
+
+func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
+	if _, err := renderMainFile("example.com/app/internal/cmd/app", "cli"); err != nil {
+		t.Errorf("main: %v", err)
+	}
+	if _, err := renderHandlerStubFile("cli", "appSubHandlers"); err != nil {
+		t.Errorf("handler stub: %v", err)
+	}
+	if _, err := renderHandlerRootFile("cli", "appHandlers", "App", "HelpApp"); err != nil {
+		t.Errorf("handler root: %v", err)
+	}
+	if _, err := renderHandlerVersionFile("cli", "appVersionHandlers", "App", "HelpAppVersion"); err != nil {
+		t.Errorf("handler version: %v", err)
+	}
+	if _, err := renderHandlerHelpFile("cli", "appHelpHandlers", "App", "HelpAppHelp"); err != nil {
+		t.Errorf("handler help: %v", err)
+	}
+}
+
 func TestSmokeRenderHandlersFile(t *testing.T) {
 	out, err := renderHandlersFile(templateHandlersData{
 		Package:         "cli",
-		RotiniPkg:       "rotini",
 		FrameworkImport: "example.com/app/internal/cmd/app/cligen",
 		FrameworkQual:   "cligen.",
 		ChildImports:    []templateHandlersImport{{Alias: "childcli", Path: "example.com/child/cli"}},
@@ -25,26 +53,24 @@ func TestSmokeRenderHandlersFile(t *testing.T) {
 
 func TestSmokeRenderRotiniFile(t *testing.T) {
 	out, err := renderRotiniFile(templateRotiniData{
-		Package:      "cligen",
-		RotiniImport: "github.com/go-rotini/rotini",
-		RotiniPkg:    "rotini",
-		Imports:      []string{`"time"`},
-		Methods:      []string{"App", "AppGenerate"},
-		Definition:   "var definition = rotini.Definition{}",
+		Package:    "cligen",
+		Imports:    []string{`"time"`},
+		Methods:    []string{"App", "AppGenerate"},
+		Definition: "var definition = rotini.Definition{}",
 		Blocks: []templateInputBlock{
 			{
 				Prefix: "App",
 				Flags: []templateInputField{
-					{Field: "Verbose", GoType: "bool", Tag: "flag:verbose"},
+					{Field: "Verbose", GoType: "bool", Tag: inputFieldTag("flag:verbose", "", "", "")},
 				},
 				Arguments: []templateInputField{
-					{Field: "Paths", GoType: "[]string", Tag: "argument:paths"},
+					{Field: "Paths", GoType: "[]string", Tag: inputFieldTag("argument:paths", "", "", "")},
 				},
 				Env: []templateInputField{
-					{Field: "Home", GoType: "string", Tag: "env:home", Recon: "key:home", EnvVar: "APP_HOME", Constraint: `min:"1"`},
+					{Field: "Home", GoType: "string", Tag: inputFieldTag("env:home", "key:home", "APP_HOME", `min:"1"`)},
 				},
 				Config: []templateInputField{
-					{Field: "Timeout", GoType: "time.Duration", Tag: "config:timeout", Recon: "key:timeout"},
+					{Field: "Timeout", GoType: "time.Duration", Tag: inputFieldTag("config:timeout", "key:timeout", "", "")},
 				},
 				StdinType:    "*AppStdin",
 				StdinFormat:  "yaml",
@@ -69,6 +95,9 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !strings.Contains(string(out), "\"time\"\n\n\t\"github.com/go-rotini/rotini\"") {
+		t.Error("imports should be grouped std then third-party")
 	}
 	t.Logf("rotini:\n%s", out)
 }

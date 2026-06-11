@@ -6,6 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/format"
+	"go/parser"
+	"go/token"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"text/template"
@@ -48,7 +53,7 @@ var (
 	//go:embed templates/man.txt.tmpl
 	templateMan string
 
-	ErrUnsupportedFileFormat = errors.New("unsupported spec file format")
+	ErrUnsupportedFileFormat = errors.New("unsupported file format")
 )
 
 func convert(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
@@ -93,7 +98,7 @@ func convert(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
 	}
 }
 
-func renderTemplate[T any](name string, text string, data T) ([]byte, error) {
+func renderTemplate(name string, text string, data any) ([]byte, error) {
 	tmpl, err := template.New(name).Funcs(templateFuncMap()).Parse(text)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s template: %w", name, err)
@@ -107,48 +112,133 @@ func renderTemplate[T any](name string, text string, data T) ([]byte, error) {
 	return buffer.Bytes(), nil
 }
 
-type templateSpecData struct {
+// renderGoFile renders a Go source template, gofmt-formats the result, and
+// groups its imports, so templates need no whitespace gymnastics and malformed
+// output fails at render time. A formatting failure includes the unformatted
+// source to make template bugs diagnosable.
+func renderGoFile(name string, text string, data any) ([]byte, error) {
+	rendered, err := renderTemplate(name, text, data)
+	if err != nil {
+		return nil, err
+	}
+
+	formatted, err := format.Source(rendered)
+	if err != nil {
+		return nil, fmt.Errorf("gofmt %s: %w\n--- generated source ---\n%s", name, err, rendered)
+	}
+
+	return groupImports(formatted)
+}
+
+// groupImports rewrites a Go source file's single gofmt'd import block into the two
+// conventional groups — standard library first, then third-party — separated by a
+// blank line, and re-formats. gofmt sorts imports but never splits std from
+// third-party (that is goimports' job); the templates emit one merged block, so this
+// restores the idiom without taking on the golang.org/x/tools dependency. A file
+// with fewer than two imports, or whose imports already fall in a single group, is
+// returned gofmt'd but otherwise unchanged.
+func groupImports(src []byte) ([]byte, error) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
+	if err != nil {
+		return nil, fmt.Errorf("group imports: parse: %w", err)
+	}
+	var decl *ast.GenDecl
+	for _, d := range f.Decls {
+		if gd, ok := d.(*ast.GenDecl); ok && gd.Tok == token.IMPORT && gd.Lparen.IsValid() {
+			decl = gd
+			break
+		}
+	}
+
+	// Rearrange only when there is a parenthesized block holding both a standard-
+	// library and a third-party group; otherwise the block is already conventional
+	// and gofmt-formatted as-is below.
+	out := src
+	if decl != nil && len(decl.Specs) >= 2 {
+		var std, third []string
+		for _, s := range decl.Specs {
+			is := s.(*ast.ImportSpec)
+			spec := is.Path.Value
+			if is.Name != nil {
+				spec = is.Name.Name + " " + spec
+			}
+			if isThirdPartyImport(is.Path.Value) {
+				third = append(third, spec)
+			} else {
+				std = append(std, spec)
+			}
+		}
+		if len(std) > 0 && len(third) > 0 {
+			sort.Strings(std)
+			sort.Strings(third)
+
+			var block strings.Builder
+			block.WriteString("import (\n")
+			for _, s := range std {
+				block.WriteString("\t" + s + "\n")
+			}
+			block.WriteString("\n")
+			for _, s := range third {
+				block.WriteString("\t" + s + "\n")
+			}
+			block.WriteString(")")
+
+			start := fset.Position(decl.Pos()).Offset
+			end := fset.Position(decl.End()).Offset
+			var buf bytes.Buffer
+			buf.Write(src[:start])
+			buf.WriteString(block.String())
+			buf.Write(src[end:])
+			out = buf.Bytes()
+		}
+	}
+
+	formatted, err := format.Source(out)
+	if err != nil {
+		return nil, fmt.Errorf("group imports: gofmt: %w", err)
+	}
+	return formatted, nil
+}
+
+// isThirdPartyImport reports whether a quoted import path is outside the
+// standard library: its first path element contains a dot (a domain), the same
+// heuristic goimports uses.
+func isThirdPartyImport(quotedPath string) bool {
+	p := strings.Trim(quotedPath, `"`)
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		p = p[:i]
+	}
+	return strings.Contains(p, ".")
+}
+
+// templateSeedData is the context for the spec and conf seed templates.
+type templateSeedData struct {
 	Version string
 	Package string
+}
+
+// renderSeedFile renders one YAML seed template and transcodes it to the
+// requested file format.
+func renderSeedFile(name string, text string, version string, pkg string, fileFormat FileFormat) ([]byte, error) {
+	rendered, err := renderTemplate(name, text, templateSeedData{
+		Version: version,
+		Package: pkg,
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return convert(rendered, fileFormat)
 }
 
 func renderSpecFile(version string, pkg string, fileFormat FileFormat) ([]byte, error) {
-	bytes, err := renderTemplate(
-		"spec",
-		templateSpec,
-		templateSpecData{
-			Version: version,
-			Package: pkg,
-		},
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return convert(bytes, fileFormat)
-}
-
-type templateConfData struct {
-	Version string
-	Package string
+	return renderSeedFile("spec", templateSpec, version, pkg, fileFormat)
 }
 
 func renderConfFile(version string, pkg string, fileFormat FileFormat) ([]byte, error) {
-	bytes, err := renderTemplate(
-		"conf",
-		templateConf,
-		templateConfData{
-			Version: version,
-			Package: pkg,
-		},
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return convert(bytes, fileFormat)
+	return renderSeedFile("conf", templateConf, version, pkg, fileFormat)
 }
 
 type templateMainData struct {
@@ -157,120 +247,54 @@ type templateMainData struct {
 }
 
 func renderMainFile(pkg string, pkgAlias string) ([]byte, error) {
-	bytes, err := renderTemplate(
-		"main",
-		templateMain,
-		templateMainData{
-			Package:      pkg,
-			PackageAlias: pkgAlias,
-		},
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
+	return renderGoFile("main", templateMain, templateMainData{
+		Package:      pkg,
+		PackageAlias: pkgAlias,
+	})
 }
 
-type templateHandlerStubData struct {
-	Package      string
-	HandlersType string
+// templateHandlerData is the per-command handler seed context, shared by the
+// stub/root/version/help handler templates (the stub reads only Package and
+// HandlersType).
+type templateHandlerData struct {
+	Package         string
+	HandlersType    string
+	RootCommandName string
+	HelpVar         string
 }
 
 func renderHandlerStubFile(pkg string, handlersType string) ([]byte, error) {
-	bytes, err := renderTemplate(
-		"handler_stub",
-		templateHandlerStub,
-		templateHandlerStubData{
-			Package:      pkg,
-			HandlersType: handlersType,
-		},
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
-}
-
-type templateHandlerRootData struct {
-	Package         string
-	HandlersType    string
-	RootCommandName string
-	HelpVar         string
+	return renderGoFile("handler_stub", templateHandlerStub, templateHandlerData{
+		Package:      pkg,
+		HandlersType: handlersType,
+	})
 }
 
 func renderHandlerRootFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
-	bytes, err := renderTemplate(
-		"handler_root",
-		templateHandlerRoot,
-		templateHandlerRootData{
-			Package:         pkg,
-			HandlersType:    handlersType,
-			RootCommandName: rootCommandName,
-			HelpVar:         helpVar,
-		},
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
-}
-
-type templateHandlerVersionData struct {
-	Package         string
-	HandlersType    string
-	RootCommandName string
-	HelpVar         string
+	return renderGoFile("handler_root", templateHandlerRoot, templateHandlerData{
+		Package:         pkg,
+		HandlersType:    handlersType,
+		RootCommandName: rootCommandName,
+		HelpVar:         helpVar,
+	})
 }
 
 func renderHandlerVersionFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
-	bytes, err := renderTemplate(
-		"handler_version",
-		templateHandlerVersion,
-		templateHandlerVersionData{
-			Package:         pkg,
-			HandlersType:    handlersType,
-			RootCommandName: rootCommandName,
-			HelpVar:         helpVar,
-		},
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
-}
-
-type templateHandlerHelpData struct {
-	Package         string
-	HandlersType    string
-	RootCommandName string
-	HelpVar         string
+	return renderGoFile("handler_version", templateHandlerVersion, templateHandlerData{
+		Package:         pkg,
+		HandlersType:    handlersType,
+		RootCommandName: rootCommandName,
+		HelpVar:         helpVar,
+	})
 }
 
 func renderHandlerHelpFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
-	bytes, err := renderTemplate(
-		"handler_help",
-		templateHandlerHelp,
-		templateHandlerHelpData{
-			Package:         pkg,
-			HandlersType:    handlersType,
-			RootCommandName: rootCommandName,
-			HelpVar:         helpVar,
-		},
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes, nil
+	return renderGoFile("handler_help", templateHandlerHelp, templateHandlerData{
+		Package:         pkg,
+		HandlersType:    handlersType,
+		RootCommandName: rootCommandName,
+		HelpVar:         helpVar,
+	})
 }
 
 // templateHandlersImport is one child cli package import in the handlers
@@ -293,7 +317,6 @@ type templateHandlersMethod struct {
 
 type templateHandlersData struct {
 	Package         string
-	RotiniPkg       string
 	FrameworkImport string // "" when cli and cligen share a package
 	FrameworkQual   string // e.g. "cligen."; "" when same package
 	ChildImports    []templateHandlersImport
@@ -301,18 +324,34 @@ type templateHandlersData struct {
 }
 
 func renderHandlersFile(data templateHandlersData) ([]byte, error) {
-	return renderTemplate("handlers", templateHandlers, data)
+	return renderGoFile("handlers", templateHandlers, data)
 }
 
 // templateInputField is one generated input struct field (flag, argument, env,
-// config, or a <Prefix>Inputs field).
+// config, or a <Prefix>Inputs field). Tag is the complete struct-tag literal,
+// backticks included ("" when the field carries no tag) — see inputFieldTag.
 type templateInputField struct {
-	Field      string
-	GoType     string
-	Tag        string // rotini struct-tag body
-	Recon      string // recon struct-tag body for env/config fields; "" otherwise
-	EnvVar     string // explicit env var name for an env field; "" = snake-upper default
-	Constraint string // space-separated validation struct-tags; "" when none
+	Field  string
+	GoType string
+	Tag    string
+}
+
+// inputFieldTag assembles a complete struct-tag literal for a generated input
+// field: the rotini tag plus the optional recon / env / constraint tags.
+// constraint is pre-rendered space-separated tags (e.g. `min:"1" max:"65535"`);
+// every part but rotiniTag may be empty.
+func inputFieldTag(rotiniTag string, recon string, envVar string, constraint string) string {
+	tag := fmt.Sprintf("rotini:%q", rotiniTag)
+	if recon != "" {
+		tag += fmt.Sprintf(" recon:%q", recon)
+	}
+	if envVar != "" {
+		tag += fmt.Sprintf(" env:%q", envVar)
+	}
+	if constraint != "" {
+		tag += " " + constraint
+	}
+	return "`" + tag + "`"
 }
 
 // templateInputBlock is the set of generated input types for a single command:
@@ -350,20 +389,18 @@ type templateFeature struct {
 }
 
 type templateRotiniData struct {
-	Package      string
-	RotiniImport string
-	RotiniPkg    string
-	Imports      []string // pre-rendered import lines (aliased form "alias \"path\"")
-	Methods      []string // ProgramHandlers method names, e.g. "RotiniGenerate"
-	Definition   string   // pre-rendered definition var declaration
-	Blocks       []templateInputBlock
-	OutputTypes  string // pre-rendered output type declarations; "" when none
-	BindMeta     string // pre-rendered bind metadata; "" when none
-	Features     []templateFeature
+	Package     string
+	Imports     []string // pre-rendered import lines (aliased form "alias \"path\"")
+	Methods     []string // ProgramHandlers method names, e.g. "RotiniGenerate"
+	Definition  string   // pre-rendered definition var declaration
+	Blocks      []templateInputBlock
+	OutputTypes string // pre-rendered output type declarations; "" when none
+	BindMeta    string // pre-rendered bind metadata; "" when none
+	Features    []templateFeature
 }
 
 func renderRotiniFile(data templateRotiniData) ([]byte, error) {
-	return renderTemplate("rotini", templateRotini, data)
+	return renderGoFile("rotini", templateRotini, data)
 }
 
 // templateDocHeadings holds the resolved section headings (defaults applied).

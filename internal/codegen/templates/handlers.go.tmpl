@@ -22,7 +22,7 @@ func Handlers() {{.FrameworkQual}}ProgramHandlers {
 }
 {{- range .Methods}}
 
-func (*handlers) {{.Method}}() {{$.RotiniPkg}}.CommandHandlers {
+func (*handlers) {{.Method}}() rotini.CommandHandlers {
 {{- if .Composed}}
 	return {{.DelegateAlias}}.Handlers().{{.DelegateMethod}}()
 {{- else}}
