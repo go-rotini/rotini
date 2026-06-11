@@ -16,12 +16,12 @@ generate:
   features:
     help:
       enabled: true
-      dir: internal/cmd/rotini/embed/help
+      dir: internal/cmd/rotini/embed
     man:
       enabled: false
-      dir: internal/cmd/rotini/embed/man
+      dir: internal/cmd/rotini/embed
     completion:
       enabled: false
-      dir: internal/cmd/rotini/embed/completion
+      dir: internal/cmd/rotini/embed
 validate:
   fail: collect
