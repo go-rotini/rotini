@@ -111,6 +111,7 @@ type CommandDef struct {
 	Name                  string
 	Aliases               []string
 	Handler               string   // ProgramHandlers method, e.g. "RotiniGenerate"
+	Hidden                bool     // omitted from completion candidates (it still dispatches); help omission happens at codegen
 	DeprecatedIdentifiers []string // aliases (subset of Aliases) that [Parser.Deprecations] reports when used to invoke
 	Flags                 []FlagDef
 	Arguments             []ArgDef
@@ -148,6 +149,7 @@ type FlagDef struct {
 	Default               string
 	Enum                  []string
 	Secret                bool     // when true, the value is redacted in usage/validation error output
+	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen
 	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Parser.Deprecations] reports when used
 	Constraints
 }
@@ -162,5 +164,6 @@ type ArgDef struct {
 	Default  string
 	Enum     []string
 	Secret   bool // when true, the value is redacted in usage/validation error output
+	Hidden   bool // omitted from completion candidates (it still parses); help omission happens at codegen
 	Constraints
 }

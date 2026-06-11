@@ -328,3 +328,50 @@ func TestWriteEntrypoint_createOnce(t *testing.T) {
 		t.Errorf("unexpected files written: %v", entries)
 	}
 }
+
+// TestGenerateHiddenInDefinition confirms hidden commands/flags/arguments are
+// recorded in the generated Definition — the runtime excludes them from shell
+// completion (they still parse and dispatch).
+func TestGenerateHiddenInDefinition(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"command:\n"+
+			"  name: app\n"+
+			"  inputs:\n"+
+			"    flags:\n"+
+			"      - name: secret\n"+
+			"        hidden: true\n"+
+			"        identifiers: [--secret]\n"+
+			"        schema: { type: bool }\n"+
+			"      - name: loud\n"+
+			"        identifiers: [--loud]\n"+
+			"        schema: { type: bool }\n"+
+			"    arguments:\n"+
+			"      - name: ghostarg\n"+
+			"        hidden: true\n"+
+			"        schema: { type: string }\n"+
+			"  commands:\n"+
+			"    - name: ghost\n"+
+			"      hidden: true\n"+
+			"    - name: run\n")
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	gen := filepath.Join(tmp, "internal", "cmd", "app", "zz_rotini.gen.go")
+	mustContain(t, gen,
+		`{Name: "secret", Identifiers: []string{"--secret"}, Type: "bool", Hidden: true}`,
+		`{Name: "ghostarg", Type: "string", Hidden: true}`,
+	)
+	src := readFileString(t, gen)
+	ghost := src[strings.Index(src, `Name: "ghost"`):]
+	if !strings.Contains(ghost[:200], "Hidden:") {
+		t.Errorf("ghost command literal missing Hidden:\n%s", ghost[:200])
+	}
+	if strings.Contains(src, `Name: "loud", Identifiers: []string{"--loud"}, Type: "bool", Hidden`) {
+		t.Error("visible flag must not carry Hidden")
+	}
+}

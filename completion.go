@@ -30,10 +30,39 @@ type FlagValueCompleter interface {
 	CompleteFlagValue(rtx *Context, flag, partial string) []string
 }
 
+// ArgValueCompleter is the positional-argument counterpart of
+// [FlagValueCompleter]: a command's handler may implement it to supply dynamic
+// completion candidates for one of its arguments' values. When the hidden
+// __complete entry is completing a positional, it resolves the handler of the
+// command being invoked and, if it implements this interface, calls
+// CompleteArgValue with the argument's logical Name and the word being typed. A
+// nil return falls back to the argument's static enum; a non-nil (possibly
+// empty) return is authoritative. The same opt-in, read-only, called-on-every-
+// keystroke contract as FlagValueCompleter applies.
+type ArgValueCompleter interface {
+	CompleteArgValue(rtx *Context, arg, partial string) []string
+}
+
+// completionContext is the dispatch-faithful reading of the words preceding the
+// one being completed: the resolved command chain, how many positional
+// arguments the leaf has already consumed, and whether a "--" terminator has
+// ended flag handling. It mirrors resolveChain (value-aware flag skipping,
+// descent stops at the first positional) so completion predicts exactly what
+// dispatch would do with the same words.
+type completionContext struct {
+	chain           []ResolvedCommand
+	positionals     int
+	afterTerminator bool
+	remote          bool // a remote/plugin token was hit: the rest belongs to the dispatched binary
+}
+
 // complete returns the completion candidates for the word currently being typed
 // (the last element of words; the rest are the preceding context). It completes
-// flag values (enum), flag names (when the word starts with "-"), and otherwise
-// sub-command / remote-command names — all filtered by the typed prefix.
+// flag values (dynamic completer, else enum), flag names (when the word starts
+// with "-", including the inline "--flag=val" form), sub-command and
+// remote-command names, and positional-argument values (dynamic completer, else
+// enum) — all filtered by the typed prefix and excluding hidden inputs. An
+// empty result lets the shell apply its own default (typically file names).
 func complete(def Definition, words []string, handlers any, rtx *Context) []string {
 	if len(words) == 0 {
 		words = []string{""}
@@ -41,62 +70,178 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	partial := words[len(words)-1]
 	context := words[:len(words)-1]
 
-	// Resolve the command chain from the context words, leniently skipping
-	// anything that isn't a known sub-command (flags, flag values, arguments).
-	chain := []ResolvedCommand{rootFrame(def)}
-	for _, w := range context {
-		if isFlag(w) {
-			continue
-		}
-		if child, ok := findChild(chain[len(chain)-1], w); ok {
-			chain = append(chain, cmdFrame(child))
-		}
+	cc := walkContext(def, context)
+	if cc.remote {
+		return nil // the remote binary owns its own argument surface
 	}
-	cur := chain[len(chain)-1]
+	cur := cc.chain[len(cc.chain)-1]
 
-	// Completing the value of the preceding flag. The handler of the command that
-	// declares the flag may supply dynamic candidates (FlagValueCompleter); a nil
-	// return (or no completer) falls back to the flag's static enum.
-	if len(context) > 0 {
-		if prev := context[len(context)-1]; isFlag(prev) {
-			name, _, _ := splitFlag(prev)
-			if fd, owner, ok := findFlag(chain, name); ok && fd.Type != "bool" {
-				if cands, dyn := dynamicFlagValues(handlers, rtx, chain, words, owner, fd.Name, partial); dyn {
-					return filterPrefix(cands, partial)
-				}
-				if len(fd.Enum) > 0 {
-					return filterPrefix(fd.Enum, partial)
-				}
+	// Completing the value of the preceding flag (the separate-word form,
+	// including bash's "--flag = val" word splitting). The handler of the command
+	// that declares the flag may supply dynamic candidates (FlagValueCompleter);
+	// a nil return (or no completer) falls back to the flag's static enum, and an
+	// empty result lets the shell fall back to file completion — never to
+	// sub-command names, which dispatch would treat as this flag's value.
+	if !cc.afterTerminator {
+		if name, ok := pendingValueFlag(context); ok {
+			if fd, owner, found := findFlag(cc.chain, name); found && fd.Type != "bool" {
+				return filterPrefix(flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, partial), partial)
 			}
 		}
 	}
 
-	// Completing a flag name. Only declared flags are offered — rotini auto-adds no
-	// flags, so `-h`/`--help` appear here exactly when the CLI declares them (as the
-	// companion does on every command), not by framework injection.
-	if strings.HasPrefix(partial, "-") {
+	// Completing a flag name — or, with an inline "=", a flag's value. Only
+	// declared, non-hidden flags are offered — rotini auto-adds no flags, so
+	// `-h`/`--help` appear here exactly when the CLI declares them, not by
+	// framework injection. The whole chain contributes: ancestor flags resolve on
+	// descendants at runtime.
+	if !cc.afterTerminator && strings.HasPrefix(partial, "-") {
+		if name, val, hasInline := splitFlag(partial); hasInline {
+			if fd, owner, found := findFlag(cc.chain, name); found && fd.Type != "bool" {
+				cands := flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, val)
+				out := make([]string, 0, len(cands))
+				for _, c := range cands {
+					out = append(out, name+"="+c)
+				}
+				return filterPrefix(out, partial)
+			}
+			return nil
+		}
 		var ids []string
-		for i := len(chain) - 1; i >= 0; i-- {
-			for _, f := range chain[i].Flags {
-				ids = append(ids, f.Identifiers...)
+		for i := len(cc.chain) - 1; i >= 0; i-- {
+			for _, f := range cc.chain[i].Flags {
+				if !f.Hidden {
+					ids = append(ids, f.Identifiers...)
+				}
 			}
 		}
 		return filterPrefix(ids, partial)
 	}
 
-	// Completing a sub-command or remote-command name: the declared children +
-	// remotes, plus the runtime-discovered plugins (minus declared collisions).
+	// Completing a positional word. Until the first positional is consumed it may
+	// also be a sub-command / remote-command / discovered plugin; afterwards
+	// dispatch no longer descends, so only argument values remain.
 	var names []string
-	for _, c := range cur.Commands {
-		names = append(names, c.Name)
-		names = append(names, c.Aliases...)
+	if !cc.afterTerminator && cc.positionals == 0 {
+		for _, c := range cur.Commands {
+			if c.Hidden {
+				continue
+			}
+			names = append(names, c.Name)
+			names = append(names, c.Aliases...)
+		}
+		for _, r := range cur.Remotes {
+			names = append(names, r.Name)
+			names = append(names, r.Aliases...)
+		}
+		names = append(names, DiscoveredPlugins(cur)...)
 	}
-	for _, r := range cur.Remotes {
-		names = append(names, r.Name)
-		names = append(names, r.Aliases...)
-	}
-	names = append(names, DiscoveredPlugins(cur)...)
+	names = append(names, argValueCandidates(handlers, rtx, cc, words, partial)...)
 	return filterPrefix(names, partial)
+}
+
+// walkContext resolves the words preceding the completed one with dispatch's
+// semantics (see resolveChain), leniently: unknown tokens are positionals, not
+// errors. bash splits "--flag=value" on "=" into three words; the literal "="
+// token glues such a value back onto its flag.
+func walkContext(def Definition, context []string) completionContext {
+	cc := completionContext{chain: []ResolvedCommand{rootFrame(def)}}
+	for i := 0; i < len(context); i++ {
+		tok := context[i]
+		if cc.afterTerminator {
+			cc.positionals++
+			continue
+		}
+		if tok == "--" {
+			cc.afterTerminator = true
+			continue
+		}
+		if tok == "=" {
+			if i > 0 && isFlag(context[i-1]) {
+				i++ // the glued value (when present) belongs to the preceding flag
+			}
+			continue
+		}
+		if isFlag(tok) {
+			name, _, hasInline := splitFlag(tok)
+			// Skip a separate value token so it is not mistaken for a command —
+			// unless it is the "=" glue, which the next iteration handles.
+			if fd, _, ok := findFlag(cc.chain, name); ok && fd.Type != "bool" && !hasInline {
+				if i+1 < len(context) && context[i+1] != "=" {
+					i++
+				}
+			}
+			continue
+		}
+		cur := cc.chain[len(cc.chain)-1]
+		if cc.positionals == 0 {
+			if child, ok := findChild(cur, tok); ok {
+				cc.chain = append(cc.chain, cmdFrame(child))
+				continue
+			}
+			if _, ok := findRemote(cur, tok); ok || cur.Discovery != nil {
+				cc.remote = true
+				return cc
+			}
+		}
+		cc.positionals++
+	}
+	return cc
+}
+
+// pendingValueFlag reports the flag whose value the next word supplies, when
+// the context ends with a flag awaiting one: a bare flag token, or a flag
+// followed by bash's "=" split token.
+func pendingValueFlag(context []string) (string, bool) {
+	if len(context) == 0 {
+		return "", false
+	}
+	last := context[len(context)-1]
+	if last == "=" && len(context) >= 2 && isFlag(context[len(context)-2]) {
+		name, _, _ := splitFlag(context[len(context)-2])
+		return name, true
+	}
+	if isFlag(last) {
+		if name, _, hasInline := splitFlag(last); !hasInline {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// flagValueCandidates returns the candidates for one flag's value: the owning
+// handler's dynamic completer when it answers, else the flag's static enum,
+// else nothing (so the shell falls back to its default completion).
+func flagValueCandidates(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner string, fd FlagDef, partial string) []string {
+	if cands, dyn := dynamicFlagValues(handlers, rtx, chain, words, owner, fd.Name, partial); dyn {
+		return cands
+	}
+	return fd.Enum
+}
+
+// argValueCandidates returns the candidates for the positional argument the
+// completed word would bind to — the argument at the leaf's next positional
+// index (the trailing variadic argument absorbs everything past the end). The
+// leaf handler's dynamic completer (ArgValueCompleter) wins when it answers,
+// else the argument's static enum; hidden arguments offer nothing.
+func argValueCandidates(handlers any, rtx *Context, cc completionContext, words []string, partial string) []string {
+	cur := cc.chain[len(cc.chain)-1]
+	args := cur.Arguments
+	idx := cc.positionals
+	if idx >= len(args) {
+		if len(args) == 0 || !args[len(args)-1].Variadic {
+			return nil
+		}
+		idx = len(args) - 1
+	}
+	ad := args[idx]
+	if ad.Hidden {
+		return nil
+	}
+	if cands, dyn := dynamicArgValues(handlers, rtx, cc.chain, words, ad.Name, partial); dyn {
+		return cands
+	}
+	return ad.Enum
 }
 
 // DiscoveredPlugins returns the names of the plugins discovered for cmd's
@@ -184,9 +329,6 @@ func discoveredFor(cmd ResolvedCommand) ([]string, []error) {
 // resolved chain and completion words so the completer can inspect them and reach bound
 // services.
 func dynamicFlagValues(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner, flag, partial string) ([]string, bool) {
-	if handlers == nil {
-		return nil, false
-	}
 	var handlerName string
 	for _, fr := range chain {
 		if fr.Name == owner {
@@ -194,26 +336,57 @@ func dynamicFlagValues(handlers any, rtx *Context, chain []ResolvedCommand, word
 			break
 		}
 	}
-	if handlerName == "" {
-		return nil, false
-	}
-	m := reflect.ValueOf(handlers).MethodByName(handlerName)
-	if !m.IsValid() || m.Type().NumIn() != 0 || m.Type().NumOut() != 1 {
-		return nil, false
-	}
-	completer, ok := m.Call(nil)[0].Interface().(FlagValueCompleter)
+	completer, ok := resolveHandler[FlagValueCompleter](handlers, handlerName)
 	if !ok {
 		return nil, false
 	}
-	if rtx != nil {
-		rtx.chain = chain
-		rtx.args = words
-	}
+	seedCompletionContext(rtx, chain, words)
 	cands := completer.CompleteFlagValue(rtx, flag, partial)
 	if cands == nil {
 		return nil, false
 	}
 	return cands, true
+}
+
+// dynamicArgValues is dynamicFlagValues' positional counterpart: it asks the
+// handler of the command being invoked (the chain leaf — positionals always
+// bind to the leaf) for candidates, when it implements ArgValueCompleter.
+func dynamicArgValues(handlers any, rtx *Context, chain []ResolvedCommand, words []string, arg, partial string) ([]string, bool) {
+	completer, ok := resolveHandler[ArgValueCompleter](handlers, chain[len(chain)-1].Handler)
+	if !ok {
+		return nil, false
+	}
+	seedCompletionContext(rtx, chain, words)
+	cands := completer.CompleteArgValue(rtx, arg, partial)
+	if cands == nil {
+		return nil, false
+	}
+	return cands, true
+}
+
+// resolveHandler resolves handlerName on the aggregate handler set — the same
+// reflection dispatch uses — and reports whether the handler implements T.
+func resolveHandler[T any](handlers any, handlerName string) (T, bool) {
+	var zero T
+	if handlers == nil || handlerName == "" {
+		return zero, false
+	}
+	m := reflect.ValueOf(handlers).MethodByName(handlerName)
+	if !m.IsValid() || m.Type().NumIn() != 0 || m.Type().NumOut() != 1 {
+		return zero, false
+	}
+	completer, ok := m.Call(nil)[0].Interface().(T)
+	return completer, ok
+}
+
+// seedCompletionContext hands the resolved chain and completion words to the
+// context a dynamic completer receives, so it can inspect them and reach bound
+// services.
+func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string) {
+	if rtx != nil {
+		rtx.chain = chain
+		rtx.args = words
+	}
 }
 
 // discoverPlugins lists the names (the part after the prefix) of `<prefix>*`

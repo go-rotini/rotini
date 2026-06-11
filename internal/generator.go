@@ -650,6 +650,9 @@ func flagDefsLiteral(in *Inputs) string {
 		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(ids))
 		b.WriteString(", Type: " + strconv.Quote(getSchemaType(f.Schema)))
 		writeSchemaCommon(b, f.Schema)
+		if f.Hidden {
+			b.WriteString(", Hidden: true")
+		}
 		if len(f.DeprecatedIdentifiers) > 0 {
 			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
 		}
@@ -667,6 +670,9 @@ func argDefsLiteral(in *Inputs) string {
 			b.WriteString(", Variadic: true")
 		}
 		writeSchemaCommon(b, a.Schema)
+		if a.Hidden {
+			b.WriteString(", Hidden: true")
+		}
 	})
 }
 
@@ -699,6 +705,9 @@ func rnodesLiteral(host string, nodes []rnode) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		b.WriteString("Name: " + strconv.Quote(n.name) + ",\n")
 		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
+		if n.hidden {
+			b.WriteString("Hidden: true,\n")
+		}
 		if len(n.aliases) > 0 {
 			b.WriteString("Aliases: " + goStringSlice(n.aliases) + ",\n")
 		}
@@ -2494,7 +2503,17 @@ function __PROG_complete
     set -l tokens (commandline -opc) (commandline -ct)
     PROG __complete $tokens[2..-1] 2>/dev/null
 end
-complete -c PROG -f -a '(__PROG_complete)'
+
+function __PROG_has_results
+    set -g __PROG_results (__PROG_complete)
+    test (count $__PROG_results) -gt 0
+end
+
+# Offer the binary's candidates when it has any; otherwise fall back to fish's
+# file completion (the binary returns nothing for path-valued flags and
+# arguments, exactly so the shell takes over).
+complete -c PROG -f -n '__PROG_has_results' -a '$__PROG_results'
+complete -c PROG -F -n 'not __PROG_has_results'
 `
 
 const powershellCompletionTemplate = `# PowerShell completion for PROG

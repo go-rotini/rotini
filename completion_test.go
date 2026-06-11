@@ -396,3 +396,138 @@ func TestComplete_dynamicViaProgram(t *testing.T) {
 		t.Errorf("dynamic __complete output = %q, want %q", got, "slow")
 	}
 }
+
+// completionFixtureDef is a definition exercising the full completion surface:
+// nested commands, enum + plain flags, enum + variadic positionals, and hidden
+// commands/flags/arguments.
+func completionFixtureDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool"},
+			{Name: "config", Identifiers: []string{"--config"}, Type: "string"},
+		},
+		Commands: []CommandDef{
+			{
+				Name: "deploy", Handler: "AppDeploy",
+				Arguments: []ArgDef{
+					{Name: "target", Type: "string", Enum: []string{"api", "web", "worker"}},
+					{Name: "extra", Type: "[]string", Variadic: true, Enum: []string{"fast", "slow"}},
+				},
+				Flags: []FlagDef{
+					{Name: "env", Identifiers: []string{"--env", "-e"}, Type: "string", Enum: []string{"dev", "staging", "prod"}},
+					{Name: "out", Identifiers: []string{"--out"}, Type: "string"},
+					{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
+					{Name: "covert", Identifiers: []string{"--covert"}, Type: "bool", Hidden: true},
+				},
+				Commands: []CommandDef{{Name: "status", Handler: "AppDeployStatus"}},
+			},
+			{Name: "ghost", Handler: "AppGhost", Hidden: true},
+			{
+				Name: "stash", Handler: "AppStash",
+				Arguments: []ArgDef{{Name: "id", Type: "string", Enum: []string{"a1", "b2"}, Hidden: true}},
+			},
+		},
+	}
+}
+
+// TestComplete_dispatchFaithful locks completion to dispatch's reading of the
+// context words: flag values are never treated as commands, descent stops at
+// the first positional, and "--" ends both flag handling and descent.
+func TestComplete_dispatchFaithful(t *testing.T) {
+	def := completionFixtureDef()
+	cases := []struct {
+		name  string
+		words []string
+		want  []string
+	}{
+		{"root commands, hidden excluded", []string{""}, []string{"deploy", "stash"}},
+		{"prefix filter", []string{"dep"}, []string{"deploy"}},
+		{"subcommand plus arg enum", []string{"deploy", ""}, []string{"api", "status", "web", "worker"}},
+		{"flag value: enum", []string{"deploy", "--env", ""}, []string{"dev", "prod", "staging"}},
+		{"flag value: enum prefix", []string{"deploy", "--env", "d"}, []string{"dev"}},
+		{"flag value: short identifier", []string{"deploy", "-e", ""}, []string{"dev", "prod", "staging"}},
+		{"flag value without candidates is empty", []string{"deploy", "--out", ""}, nil},
+		{"flag value consumed, next word completes again", []string{"deploy", "--out", "x.txt", ""}, []string{"api", "status", "web", "worker"}},
+		{"flag value never resolves as a command", []string{"--config", "deploy", ""}, []string{"deploy", "stash"}},
+		{"bool flag consumes no value", []string{"deploy", "--force", ""}, []string{"api", "status", "web", "worker"}},
+		{"descent stops at the first positional", []string{"deploy", "api", ""}, []string{"fast", "slow"}},
+		{"variadic arg absorbs the tail", []string{"deploy", "api", "fast", ""}, []string{"fast", "slow"}},
+		{"flag names, hidden excluded, chain-wide", []string{"deploy", "-"}, []string{"--config", "--env", "--force", "--out", "--verbose", "-e", "-v"}},
+		{"inline = completes the value", []string{"deploy", "--env=d"}, []string{"--env=dev"}},
+		{"inline = on a valueless flag is empty", []string{"deploy", "--force=x"}, nil},
+		{"bash = split: empty value", []string{"deploy", "--env", "=", ""}, []string{"dev", "prod", "staging"}},
+		{"bash = split: glued value then next word", []string{"deploy", "--env", "=", "dev", ""}, []string{"api", "status", "web", "worker"}},
+		{"after -- only positionals complete", []string{"deploy", "--", ""}, []string{"api", "web", "worker"}},
+		{"after -- flags never complete", []string{"deploy", "--", "-"}, nil},
+		{"hidden argument offers nothing", []string{"stash", ""}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := complete(def, tc.words, nil, nil)
+			if len(got) == 0 && len(tc.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("complete(%v) = %v, want %v", tc.words, got, tc.want)
+			}
+		})
+	}
+}
+
+// argCompleterHandlers implements ArgValueCompleter on the deploy handler: the
+// target argument completes dynamically, anything else defers (nil → enum).
+type argCompleterHandlers struct{}
+
+type deployArgCompleter struct{}
+
+func (deployArgCompleter) Run(ctx context.Context, rtx *Context)              {}
+func (deployArgCompleter) CascadingPreRun(ctx context.Context, rtx *Context)  {}
+func (deployArgCompleter) PreRun(ctx context.Context, rtx *Context)           {}
+func (deployArgCompleter) PostRun(ctx context.Context, rtx *Context)          {}
+func (deployArgCompleter) CascadingPostRun(ctx context.Context, rtx *Context) {}
+func (deployArgCompleter) CompleteArgValue(rtx *Context, arg, partial string) []string {
+	if arg == "target" {
+		return []string{"dyn-one", "dyn-two"}
+	}
+	return nil
+}
+
+func (argCompleterHandlers) AppDeploy() CommandHandlers { return deployArgCompleter{} }
+
+// TestComplete_dynamicArgValue confirms a handler implementing ArgValueCompleter
+// supplies positional candidates (authoritative over the enum), and that a nil
+// return defers to the static enum.
+func TestComplete_dynamicArgValue(t *testing.T) {
+	def := completionFixtureDef()
+	got := complete(def, []string{"deploy", "x"}, argCompleterHandlers{}, nil)
+	want := []string{"dyn-one", "dyn-two"}
+	// "x" filters out the subcommand/enum names; the dynamic candidates remain
+	// unfiltered-by-enum but still prefix-filtered — none start with x, so refine:
+	got = complete(def, []string{"deploy", "dyn"}, argCompleterHandlers{}, nil)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("dynamic arg candidates = %v, want %v", got, want)
+	}
+	// The variadic "extra" argument gets nil from the completer → its enum.
+	got = complete(def, []string{"deploy", "api", "f"}, argCompleterHandlers{}, nil)
+	if !reflect.DeepEqual(got, []string{"fast"}) {
+		t.Errorf("enum fallback after dynamic nil = %v, want [fast]", got)
+	}
+}
+
+// TestComplete_remoteOpaque confirms completion goes silent past a remote or
+// discovered-plugin token — the dispatched binary owns that argument surface.
+func TestComplete_remoteOpaque(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands:       []CommandDef{{Name: "local", Handler: "AppLocal"}},
+		RemoteCommands: []RemoteDef{{Name: "plugin", Binary: "app-plugin"}},
+	}
+	if got := complete(def, []string{"plugin", ""}, nil, nil); got != nil {
+		t.Errorf("complete past a remote token = %v, want nil", got)
+	}
+	// The remote NAME itself still completes.
+	if got := complete(def, []string{"plug"}, nil, nil); !reflect.DeepEqual(got, []string{"plugin"}) {
+		t.Errorf("remote name completion = %v, want [plugin]", got)
+	}
+}
