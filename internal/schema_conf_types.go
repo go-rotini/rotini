@@ -11,19 +11,19 @@ type Conf struct {
 	Validate   *ValidateConfig   `json:"validate,omitempty"`
 }
 
-// A rendered/derived codegen feature: a toggle plus the output directory (under the cligen package) where its files live and are embedded.
+// A rendered/derived codegen feature: a toggle plus the output directory (under the cmdgen package) where its files live and are embedded.
 type Feature struct {
-	// Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cligen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to '<cligen-package>/embed/<feature>' (e.g. 'internal/cmd/app/embed/help').
+	// Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cmdgen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to '<cmdgen-package>/embed/<feature>' (e.g. 'internal/cmd/app/embed/help').
 	Dir string `json:"dir,omitempty"`
-	// When true, rotini generates this feature's outputs into the cligen package and emits the embed vars + resolver. Opt-in only.
+	// When true, rotini generates this feature's outputs into the cmdgen package and emits the embed vars + resolver. Opt-in only.
 	Enabled bool `json:"enabled,omitempty"`
 }
 
-// Rendered/derived codegen features generated into the cligen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cligen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cligen package.
+// Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cmdgen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cmdgen package.
 type FeaturesConfig struct {
 	// Embedded shell completion scripts — the features group's exception: generated per supported shell (bash/zsh/fish) from the program name, not per command, with no doc-data, no editable template, and no verbatim escape. Emits 'Completion<Shell>' vars plus a 'Completion(shell string) (string, error)' resolver that a handler reads instead of building the script itself.
 	Completion *Feature `json:"completion,omitempty"`
-	// Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the cligen package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir.
+	// Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the cmdgen package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir.
 	Help *Feature `json:"help,omitempty"`
 	// Embedded, per-command man pages. Same render-or-verbatim contract as help: each command's .txt is rendered from its doc-fields through the editable man template in the feature's dir, or written verbatim when the command sets a 'man' string in the spec. Emits 'Man<Prefix>' vars plus a 'Man(path ...string) (string, error)' resolver.
 	Man *Feature `json:"man,omitempty"`
@@ -43,9 +43,9 @@ type InitializeConfig struct {
 	Package string `json:"package,omitempty"`
 }
 
-// One generated package target: the directory (import path relative to the module root) and the rotini-controlled file written into it. When 'cli' and 'cligen' resolve to the same package AND file, the framework and the handler rollup are merged into that one file; when they differ in package, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.
+// One generated package target: the directory (import path relative to the module root) and the rotini-controlled file written into it. When 'cmd' and 'cmdgen' resolve to the same package AND file, the framework and the handler rollup are merged into that one file; when they differ in package, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.
 type PackageConfig struct {
-	// Name of the rotini-controlled file written into the package (must end in .go). Defaults to 'rotini.gen.go'.
+	// Name of the rotini-controlled file written into the package (must end in .go). Defaults to 'zz_rotini.gen.go'.
 	File string `json:"file,omitempty"`
 	// Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. The editable per-feature templates and test files are always kept automatically. Intended to stay empty in steady state.
 	Keep []string `json:"keep,omitempty"`
@@ -53,10 +53,11 @@ type PackageConfig struct {
 	Package string `json:"package,omitempty"`
 }
 
-// The two generated package targets. 'cli' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cligen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cligen's types for passthrough functions without an import cycle).
+// The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'entrypoint', when declared, is where generate writes the binary's main.go (create-once: never overwritten).
 type PackagesConfig struct {
-	Cli    *PackageConfig `json:"cli,omitempty"`
-	Cligen *PackageConfig `json:"cligen,omitempty"`
+	Cmd        *PackageConfig `json:"cmd,omitempty"`
+	Cmdgen     *PackageConfig `json:"cmdgen,omitempty"`
+	Entrypoint *PackageConfig `json:"entrypoint,omitempty"`
 }
 
 // Controls how `rotini validate` reports problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. The `--fail` flag overrides this.

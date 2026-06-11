@@ -1,10 +1,13 @@
 package internal
 
 // This file owns the `rotini initialize` operation: scaffolding a new CLI's
-// seed spec and conf under <package>/<name>/ of the current module. That is the
-// whole job — the seeds are rendered from the embedded templates (renderer.go)
-// and written to disk (writer.go); code generation is a separate, explicit
-// `rotini generate` run against the seeded files.
+// seed spec and conf under <package>/<name>/ of the current module, validating
+// them, then running one init-style generate pass over them. Init-style differs
+// from a normal generate in exactly one way: the missing root/help/version
+// handler files are seeded from the wired init templates (working -h/--help,
+// -v/--version, and help/version commands) instead of empty stubs — see
+// writeHandlerStubs. Every later `rotini generate` is the normal process; to
+// opt out of the wired handlers, delete those handler files and regenerate.
 
 import (
 	"errors"
@@ -38,15 +41,18 @@ type InitializeFn = func(name, format string, force bool) error
 // Initialize scaffolds a new standalone rotini CLI named name: the seed
 // .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the
 // current module (the package dir defaults to "cmd"; a module-root conf's
-// `initialize` block overrides it). format selects the serialization (yaml,
-// jsonc, json, or toml). The seeds are create-once: they are left untouched
-// unless force is set. Code generation is a separate `rotini generate` run.
+// `initialize` block overrides it), validated and then generated init-style —
+// so the new CLI ships with a wired root handler (-h/--help, -v/--version),
+// wired help/version command handlers, and the entrypoint main.go. format
+// selects the serialization (yaml, jsonc, json, or toml). The seeds are
+// create-once: they are left untouched unless force is set.
 func Initialize(name, format string, force bool, version string) error {
 	return NewProcessor(version).Initialize(name, format, force)
 }
 
 // initialize renders and writes the default seed spec and conf for a new CLI
-// named name under <package>/<name>/.
+// named name under <package>/<name>/, validates them, and runs the init-style
+// generate pass over them.
 func (p *Processor) initialize(name, format string, force bool) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
@@ -94,7 +100,20 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	if err != nil {
 		return err
 	}
-	return writeGeneratedFile(confPath, confBytes)
+	if err := writeGeneratedFile(confPath, confBytes); err != nil {
+		return err
+	}
+
+	// Validate the seeds exactly as `rotini validate` would, then run the one
+	// init-style generate pass (wired root/help/version handler seeds).
+	s := newSession(specPath, confPath, p.version)
+	if err := s.load(); err != nil {
+		return err
+	}
+	if err := s.validate(); err != nil {
+		return err
+	}
+	return s.generateStyled(true)
 }
 
 // initDefaults holds the resolved `rotini init` defaults.

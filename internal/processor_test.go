@@ -274,8 +274,8 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 	// The always-(re)generated combined framework + rollup file is reproduced
 	// byte-for-byte.
 	assertGoEqual(t,
-		filepath.Join(tmp, "internal/cmd/rotini/rotini.gen.go"),
-		filepath.Join(repoRoot, "internal/cmd/rotini/rotini.gen.go"))
+		filepath.Join(tmp, "internal/cmd/rotini/zz_rotini.gen.go"),
+		filepath.Join(repoRoot, "internal/cmd/rotini/zz_rotini.gen.go"))
 
 	// The companion's generated help feature files are reproduced byte-for-byte
 	// (only help is enabled in the committed companion conf).
@@ -297,8 +297,8 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 }
 
 // TestProcessorInitialize confirms the Processor's initialize scaffolds the seed
-// spec and conf under cmd/<name>/ — and nothing else (codegen is a separate
-// generate run).
+// spec and conf under cmd/<name>/, validates them, and runs the init-style
+// generate (wired handlers + entrypoint).
 func TestProcessorInitialize(t *testing.T) {
 	tmp := initTestModule(t)
 	p := NewProcessor("")
@@ -309,9 +309,9 @@ func TestProcessorInitialize(t *testing.T) {
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: internal/cmd/mycli")
-	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli")); !os.IsNotExist(err) {
-		t.Errorf("initialize should not generate code (err=%v)", err)
-	}
+	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate go tool rotini generate")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
+		"package mycli", "var Program = NewProgram(&handlers{})")
 }
 
 // TestProcessorValidatePass confirms the validate workflow composes load + validate,
@@ -360,7 +360,7 @@ func TestProcessorGeneratePass_valid(t *testing.T) {
 	if err := p.generatePass(); err != nil {
 		t.Fatalf("generatePass(valid) = %v, want nil", err)
 	}
-	mustContain(t, filepath.Join(tmp, "internal", "cmd", "rotini", "rotini.gen.go"),
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "rotini", "zz_rotini.gen.go"),
 		"package rotini", "var Program = NewProgram(&handlers{})")
 }
 
@@ -400,7 +400,7 @@ func TestProcessorGenerate_workflow(t *testing.T) {
 	t.Chdir(tmp)
 
 	noop := func(string, error) {}
-	gen := filepath.Join(tmp, "internal", "cmd", "rotini", "rotini.gen.go")
+	gen := filepath.Join(tmp, "internal", "cmd", "rotini", "zz_rotini.gen.go")
 
 	if err := NewProcessor("").Generate(".rotini.spec.yaml", "", false, noop); err != nil {
 		t.Fatalf("Generate = %v, want nil", err)
@@ -436,7 +436,7 @@ func TestProcessorWatch_regenerates(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- watchLoop(ctx, specPath, "", generatePassClosure(specPath), func(string, error) {}) }()
 
-	rtg := filepath.Join(tmp, "internal", "cmd", "mycli", "rotini.gen.go")
+	rtg := filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go")
 	if !waitForCond(3*time.Second, func() bool { return fileContains(rtg, "MycliAlpha") }) {
 		t.Fatal("initial generate did not produce MycliAlpha")
 	}

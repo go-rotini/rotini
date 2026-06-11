@@ -4,12 +4,15 @@ initialize:
   format: yaml
 generate:
   packages:
-    cli:
+    entrypoint:
+      package: cmd/rotini
+      file: main.go
+    cmd:
       package: internal/cmd/rotini
-      file: rotini.gen.go
-    cligen:
+      file: zz_rotini.gen.go
+    cmdgen:
       package: internal/cmd/rotini
-      file: rotini.gen.go
+      file: zz_rotini.gen.go
   features:
     help:
       enabled: true

@@ -40,11 +40,13 @@ func initTestModule(t *testing.T) string {
 	return tmp
 }
 
-// TestInitialize_scaffoldsSeeds verifies the whole `rotini init` job: the seed
-// spec (root command named after the CLI, with the default version/help flags)
-// and the seed conf (package layout + feature toggles) under cmd/<name>/.
-// Nothing else is written — code generation is a separate `rotini generate` run.
-func TestInitialize_scaffoldsSeeds(t *testing.T) {
+// TestInitialize_scaffolds verifies the whole `rotini init` job: the seed spec
+// (root command named after the CLI, with the default version/help flags AND the
+// version/help sub-commands) and the seed conf (package layout + feature
+// toggles) under cmd/<name>/, validated, then generated init-style — the
+// generated package, the WIRED root/help/version handlers, and the entrypoint
+// main.go, all ready to go.
+func TestInitialize_scaffolds(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -60,13 +62,85 @@ func TestInitialize_scaffoldsSeeds(t *testing.T) {
 		"file: main.go", "file: zz_rotini.gen.go",
 		"dir: internal/cmd/mycli/embed/help")
 
-	// Initialize seeds only — no main.go and no generated package.
-	if _, err := os.Stat(filepath.Join(dir, "main.go")); !os.IsNotExist(err) {
-		t.Errorf("initialize should not write main.go (err=%v)", err)
+	// The init-style generate ran: framework + rollup, wired handlers, help
+	// pages, and the entrypoint main.go.
+	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
+	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
+		"package mycli", "type ProgramHandlers interface", "var definition",
+		"var Program = NewProgram(&handlers{})",
+		"var HelpMycli string", "var HelpMycliHelp string", "var HelpMycliVersion string")
+	// Root handler: -h/--help and -v/--version wired, default prints help.
+	mustContain(t, filepath.Join(genDir, "mycli.go"),
+		"type mycliHandlers struct {",
+		"var inputs MycliInputs",
+		"case flags.Help:", "case flags.Version:",
+		"HelpMycli", "build.VersionSemantic")
+	// help command handler: wired to the generated Help resolver.
+	mustContain(t, filepath.Join(genDir, "mycli_help.go"),
+		"type mycliHelpHandlers struct {",
+		"Help(args.Commands...)", "HelpMycliHelp")
+	// version command handler: prints the bound build version.
+	mustContain(t, filepath.Join(genDir, "mycli_version.go"),
+		"type mycliVersionHandlers struct {",
+		"build.VersionSemantic", "HelpMycliVersion")
+	// Entrypoint main.go written to the conf-declared entrypoint package.
+	mustContain(t, filepath.Join(dir, "main.go"),
+		"//go:generate go tool rotini generate",
+		`cli "example.com/myclis/internal/cmd/mycli"`,
+		`Bind("parser", rotini.NewParser())`,
+		`Bind("build", rotini.BuildInfo(version))`,
+		"Execute()")
+}
+
+// TestInitialize_optOutWiredHandlers covers the documented opt-out: delete the
+// wired root/help/version handler files and run a normal `rotini generate` —
+// the empty handler stubs are seeded in their place (and main.go, a create-once
+// file, survives).
+func TestInitialize_optOutWiredHandlers(t *testing.T) {
+	tmp := initTestModule(t)
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
+		t.Fatalf("Initialize: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli")); !os.IsNotExist(err) {
-		t.Errorf("initialize should not generate code (err=%v)", err)
+
+	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
+	for _, f := range []string{"mycli.go", "mycli_help.go", "mycli_version.go"} {
+		if err := os.Remove(filepath.Join(genDir, f)); err != nil {
+			t.Fatalf("remove wired handler %s: %v", f, err)
+		}
 	}
+
+	specPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.spec.yaml")
+	confPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.conf.yaml")
+	if err := Generate(specPath, confPath, false, "", nil); err != nil {
+		t.Fatalf("Generate after opt-out: %v", err)
+	}
+
+	// Empty stubs replace the wired handlers — no parsing, no help/version wiring.
+	for _, f := range []string{"mycli.go", "mycli_help.go", "mycli_version.go"} {
+		path := filepath.Join(genDir, f)
+		mustContain(t, path, "rotini.CommandHandlers", "func (*")
+		mustNotContain(t, path, "MustGet", "HelpMycli")
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "cmd", "mycli", "main.go")); err != nil {
+		t.Errorf("main.go should survive a regenerate: %v", err)
+	}
+}
+
+// TestInitialize_preservesEditedHandlers confirms a force re-init never
+// overwrites existing handler files (they are create-once, like any stub) —
+// force applies only to the seed spec/conf.
+func TestInitialize_preservesEditedHandlers(t *testing.T) {
+	tmp := initTestModule(t)
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	stub := filepath.Join(tmp, "internal", "cmd", "mycli", "mycli.go")
+	writeTestFile(t, stub, "package mycli\n\n// EDITED BY USER\n")
+
+	if err := Initialize("mycli", "yaml", true, ""); err != nil {
+		t.Fatalf("re-init with force: %v", err)
+	}
+	mustContain(t, stub, "EDITED BY USER")
 }
 
 // TestInitialize_stampsSchemaRef covers the scaffold side of the $schema↔version

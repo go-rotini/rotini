@@ -69,12 +69,15 @@
     "PackagesConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The two generated package targets. 'cli' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cligen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cligen's types for passthrough functions without an import cycle).",
+      "description": "The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'entrypoint', when declared, is where generate writes the binary's main.go (create-once: never overwritten).",
       "properties": {
-        "cli": {
+        "entrypoint": {
           "$ref": "#/definitions/PackageConfig"
         },
-        "cligen": {
+        "cmd": {
+          "$ref": "#/definitions/PackageConfig"
+        },
+        "cmdgen": {
           "$ref": "#/definitions/PackageConfig"
         }
       }
@@ -82,7 +85,7 @@
     "PackageConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "One generated package target: the directory (import path relative to the module root) and the rotini-controlled file written into it. When 'cli' and 'cligen' resolve to the same package AND file, the framework and the handler rollup are merged into that one file; when they differ in package, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.",
+      "description": "One generated package target: the directory (import path relative to the module root) and the rotini-controlled file written into it. When 'cmd' and 'cmdgen' resolve to the same package AND file, the framework and the handler rollup are merged into that one file; when they differ in package, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.",
       "properties": {
         "package": {
           "type": "string",
@@ -90,8 +93,8 @@
         },
         "file": {
           "type": "string",
-          "description": "Name of the rotini-controlled file written into the package (must end in .go). Defaults to 'rotini.gen.go'.",
-          "default": "rotini.gen.go"
+          "description": "Name of the rotini-controlled file written into the package (must end in .go). Defaults to 'zz_rotini.gen.go'.",
+          "default": "zz_rotini.gen.go"
         },
         "keep": {
           "type": "array",
@@ -105,11 +108,11 @@
     "FeaturesConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Rendered/derived codegen features generated into the cligen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cligen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cligen package.",
+      "description": "Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cmdgen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cmdgen package.",
       "properties": {
         "help": {
           "$ref": "#/definitions/Feature",
-          "description": "Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the cligen package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir."
+          "description": "Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the cmdgen package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir."
         },
         "man": {
           "$ref": "#/definitions/Feature",
@@ -124,16 +127,16 @@
     "Feature": {
       "type": "object",
       "additionalProperties": false,
-      "description": "A rendered/derived codegen feature: a toggle plus the output directory (under the cligen package) where its files live and are embedded.",
+      "description": "A rendered/derived codegen feature: a toggle plus the output directory (under the cmdgen package) where its files live and are embedded.",
       "properties": {
         "enabled": {
           "type": "boolean",
           "default": false,
-          "description": "When true, rotini generates this feature's outputs into the cligen package and emits the embed vars + resolver. Opt-in only."
+          "description": "When true, rotini generates this feature's outputs into the cmdgen package and emits the embed vars + resolver. Opt-in only."
         },
         "dir": {
           "type": "string",
-          "description": "Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cligen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to '<cligen-package>/embed/<feature>' (e.g. 'internal/cmd/app/embed/help')."
+          "description": "Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cmdgen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to '<cmdgen-package>/embed/<feature>' (e.g. 'internal/cmd/app/embed/help')."
         }
       }
     }

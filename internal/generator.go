@@ -33,11 +33,19 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 
 // generate runs the generator phase over a loaded session (call load — and, through
 // the pass, validate — first: invalid input must never reach codegen). It applies the
-// built-in conf defaults, then emits the cli and cligen packages plus the enabled doc
+// built-in conf defaults, then emits the cmd and cmdgen packages plus the enabled doc
 // features.
 func (s *session) generate() error {
+	return s.generateStyled(false)
+}
+
+// generateStyled is generate with the stub style selected: initStyle seeds the
+// root/help/version handlers from the wired init templates instead of the empty
+// stub (see writeHandlerStubs). Only `rotini initialize` passes true — a normal
+// generate always seeds empty stubs.
+func (s *session) generateStyled(initStyle bool) error {
 	applyConfDefaults(s.conf.conf, s.spec.spec.Command.Name)
-	return generateAll(s.spec.spec, s.conf.conf, s.spec.path)
+	return generateAll(s.spec.spec, s.conf.conf, s.spec.path, initStyle)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -81,34 +89,43 @@ type genCommand struct {
 }
 
 // layout holds the resolved package locations and import paths for a single
-// generation pass. The cli (handler) package and the cligen (framework) package
+// generation pass. The cmd (handler) package and the cmdgen (framework) package
 // may be the same package — even the same file — or two distinct packages:
 //
-//   - distinct packages (split): the rollup in the cli package imports the
-//     cligen package and refers to it qualified (cligen.ProgramHandlers);
+//   - distinct packages (split): the rollup in the cmd package imports the
+//     cmdgen package and refers to it qualified (cmdgen.ProgramHandlers);
 //   - same package, distinct files: framework and rollup are two files in one
 //     package, with unqualified references;
 //   - same package and file (combined): framework and rollup are merged into a
 //     single file, with unqualified references.
+//
+// The entrypoint package is optional: when the conf declares one, generate
+// writes the binary's main.go there (create-once, never overwritten).
 type layout struct {
-	frameworkDir     string // absolute output dir for the framework (cligen) file
-	frameworkPkgName string // cligen package name, e.g. "cli" or "cligen"
-	frameworkFile    string // framework file name, e.g. "rotini.gen.go"
-	frameworkImport  string // cligen import path; "" when cli and cligen share a package
-	frameworkQual    string // qualifier for the rollup's framework refs, e.g. "cligen."; "" when same package
+	frameworkDir     string // absolute output dir for the framework (cmdgen) file
+	frameworkPkgName string // cmdgen package name, e.g. "mycli" or "cmdgen"
+	frameworkFile    string // framework file name, e.g. "zz_rotini.gen.go"
+	frameworkImport  string // cmdgen import path; "" when cmd and cmdgen share a package
+	frameworkQual    string // qualifier for the rollup's framework refs, e.g. "cmdgen."; "" when same package
 
-	handlerDir     string // absolute output dir for stubs + rollup (cli package)
-	handlerPkgName string // cli package name, e.g. "cli"
-	rollupFile     string // rollup file name, e.g. "rotini.gen.go"
+	handlerDir     string // absolute output dir for stubs + rollup (cmd package)
+	handlerPkgName string // cmd package name, e.g. "mycli"
+	handlerImport  string // cmd package import path (the entrypoint's Program import)
+	rollupFile     string // rollup file name, e.g. "zz_rotini.gen.go"
+
+	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
+	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
 
 	combined bool // same package AND same file → framework+rollup merged into one file
 }
 
 // generateAll runs a single generation pass: it resolves the spec (expanding
 // any composed $ref children), writes the framework file, creates missing
-// handler stubs, (re)writes the handler rollup, and prunes orphaned stubs when
-// configured. specPath is needed to resolve $ref paths relative to the spec.
-func generateAll(spec *Spec, conf *Conf, specPath string) error {
+// handler stubs (wired init-style stubs for root/help/version when initStyle is
+// set), writes the entrypoint main.go when the conf declares one, (re)writes
+// the handler rollup, and prunes orphaned stubs. specPath is needed to resolve
+// $ref paths relative to the spec.
+func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error {
 	moduleRoot, moduleName, err := findModule()
 	if err != nil {
 		return err
@@ -144,14 +161,14 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 			return fmt.Errorf("feature %s dir %q is not under the cligen package: %w", f.desc.name, f.cfg.Dir, err)
 		}
 		if strings.HasPrefix(embedRel, "..") {
-			return fmt.Errorf("generate.features.%s.dir %q must resolve under the cligen package %q so //go:embed can reach it", f.desc.name, f.cfg.Dir, filepath.ToSlash(conf.Generate.Packages.Cligen.Package))
+			return fmt.Errorf("generate.features.%s.dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.Dir, filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package))
 		}
 		frameworks = append(frameworks, buildFeatureFramework(nodes, filepath.ToSlash(embedRel), f.desc))
 		outputs = append(outputs, featureOutput{desc: f.desc, absDir: absDir, nodes: nodes})
 	}
 
-	// Render the framework (cligen) and the handler rollup (cli). When cli and
-	// cligen resolve to the same package AND file, the two are merged into a single
+	// Render the framework (cmdgen) and the handler rollup (cmd). When cmd and
+	// cmdgen resolve to the same package AND file, the two are merged into a single
 	// file (rollup body first, then framework body); otherwise they are written to
 	// their own files (two files in one package, or two packages).
 	fwContent, err := renderFrameworkFile(gp, lay, frameworks)
@@ -190,16 +207,19 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 			return err
 		}
 	}
-	if err := writeHandlerStubs(gp, lay); err != nil {
+	if err := writeHandlerStubs(gp, lay, initStyle); err != nil {
 		return err
 	}
-	// Pruning is implicit (always-on): drop orphaned cli stubs and orphaned cligen
+	if err := writeEntrypoint(lay); err != nil {
+		return err
+	}
+	// Pruning is implicit (always-on): drop orphaned cmd stubs and orphaned cmdgen
 	// feature outputs, sparing only the per-package `keep` paths (and test files
 	// and the editable feature templates).
-	if err := pruneStubs(gp, lay, conf.Generate.Packages.Cli.Keep); err != nil {
+	if err := pruneStubs(gp, lay, conf.Generate.Packages.Cmd.Keep); err != nil {
 		return err
 	}
-	if err := pruneCligen(lay, conf.Generate.Packages.Cligen.Keep, outputs); err != nil {
+	if err := pruneCligen(lay, conf.Generate.Packages.Cmdgen.Keep, outputs); err != nil {
 		return err
 	}
 	return nil
@@ -878,7 +898,13 @@ func renderFrameworkFile(gp *genProgram, lay layout, features []templateFeature)
 // every OWN sub-command, but only when the file does not already exist — stubs
 // are user-editable, so an existing stub is never overwritten. Composed
 // commands have no stub here; their handlers live in the child's package.
-func writeHandlerStubs(gp *genProgram, lay layout) error {
+//
+// initStyle (only `rotini initialize` sets it) seeds the root command and the
+// top-level help/version commands from the wired init templates instead of the
+// empty stub, so a fresh CLI ships with working -h/--help, -v/--version, and
+// help/version commands. To opt out, delete those handler files and run a
+// normal `rotini generate` — the empty stubs are seeded in their place.
+func writeHandlerStubs(gp *genProgram, lay layout, initStyle bool) error {
 	for _, c := range append([]genCommand{gp.root}, gp.own...) {
 		path := filepath.Join(lay.handlerDir, c.filename)
 		if _, err := os.Stat(path); err == nil {
@@ -886,7 +912,7 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		content, err := renderHandlerStubFile(lay.handlerPkgName, c.handler)
+		content, err := renderHandlerSeed(gp, lay, c, initStyle)
 		if err != nil {
 			return err
 		}
@@ -895,6 +921,48 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 		}
 	}
 	return nil
+}
+
+// renderHandlerSeed renders the seed content for one command's handler file:
+// the empty stub, or — init-style only — the wired root/help/version handler
+// matched by the command's type prefix. The wired templates lean on the help
+// feature's embed vars (Help<Prefix>) and the seed spec's flag/argument names,
+// both guaranteed by the `rotini initialize` seeds they are reserved for.
+func renderHandlerSeed(gp *genProgram, lay layout, c genCommand, initStyle bool) ([]byte, error) {
+	if initStyle {
+		switch c.prefix {
+		case gp.rootPascal:
+			return renderHandlerRootFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal)
+		case gp.rootPascal + "Help":
+			return renderHandlerHelpFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Help")
+		case gp.rootPascal + "Version":
+			return renderHandlerVersionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Version")
+		}
+	}
+	return renderHandlerStubFile(lay.handlerPkgName, c.handler)
+}
+
+// writeEntrypoint writes the binary's main.go to the conf-declared entrypoint
+// package — create-once: the file binds user-owned build metadata (version/
+// commit/date), so an existing main.go is never overwritten. A conf without an
+// entrypoint writes nothing.
+func writeEntrypoint(lay layout) error {
+	if lay.entrypointDir == "" {
+		return nil
+	}
+	path := filepath.Join(lay.entrypointDir, lay.entrypointFile)
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+	// The generated package is imported aliased as "cli" so the reference never
+	// collides with the rotini runtime package (also named "rotini").
+	content, err := renderMainFile(lay.handlerImport, "cli")
+	if err != nil {
+		return err
+	}
+	return writeGeneratedFile(path, content)
 }
 
 // renderHandlerRollup renders the handler rollup: the unexported handlers
@@ -930,15 +998,19 @@ func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
 
 // pruneStubs removes handler .go files that no longer correspond to an own
 // command, preserving the rollup file, the keep list, and any test files. The
-// cli package is flat, so keepList entries (package-relative) are just file names
-// for its top-level stubs. When cli and cligen share a package (two-files-one-
+// cmd package is flat, so keepList entries (package-relative) are just file names
+// for its top-level stubs. When cmd and cmdgen share a package (two-files-one-
 // package layout), the framework file also lives here, so it is protected too —
-// otherwise it would be pruned as an orphan.
+// otherwise it would be pruned as an orphan (and likewise the entrypoint main.go
+// when the entrypoint shares the cmd package).
 func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	protected := map[string]bool{
 		gp.root.filename:  true,
 		lay.rollupFile:    true,
 		lay.frameworkFile: true,
+	}
+	if lay.entrypointDir == lay.handlerDir && lay.entrypointFile != "" {
+		protected[lay.entrypointFile] = true
 	}
 	for _, c := range gp.own {
 		protected[c.filename] = true
@@ -1017,45 +1089,59 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 
 // resolveLayout turns the (defaulted) conf package settings into absolute
 // output directories, package names, the framework import path, and the
-// same-package/combined flags. cli and cligen may name the same package (refs
+// same-package/combined flags. cmd and cmdgen may name the same package (refs
 // become unqualified) and even the same file (framework + rollup are merged).
+// The entrypoint is optional — its layout fields are "" when undeclared.
 func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
-	cli := conf.Generate.Packages.Cli
-	cligen := conf.Generate.Packages.Cligen
+	cmd := conf.Generate.Packages.Cmd
+	cmdgen := conf.Generate.Packages.Cmdgen
 
-	cliPkgDir := filepath.ToSlash(cli.Package)
-	cligenPkgDir := filepath.ToSlash(cligen.Package)
-	samePackage := cliPkgDir == cligenPkgDir
-	combined := samePackage && cli.File == cligen.File
+	cmdPkgDir := filepath.ToSlash(cmd.Package)
+	cmdgenPkgDir := filepath.ToSlash(cmdgen.Package)
+	samePackage := cmdPkgDir == cmdgenPkgDir
+	combined := samePackage && cmd.File == cmdgen.File
 
 	frameworkImport := ""
 	frameworkQual := ""
 	if !samePackage {
-		frameworkImport = moduleName + "/" + cligenPkgDir
-		frameworkQual = filepath.Base(cligenPkgDir) + "."
+		frameworkImport = moduleName + "/" + cmdgenPkgDir
+		frameworkQual = filepath.Base(cmdgenPkgDir) + "."
 	}
 
-	return layout{
-		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(cligenPkgDir)),
-		frameworkPkgName: filepath.Base(cligenPkgDir),
-		frameworkFile:    cligen.File,
+	lay := layout{
+		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdgenPkgDir)),
+		frameworkPkgName: filepath.Base(cmdgenPkgDir),
+		frameworkFile:    cmdgen.File,
 		frameworkImport:  frameworkImport,
 		frameworkQual:    frameworkQual,
 
-		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(cliPkgDir)),
-		handlerPkgName: filepath.Base(cliPkgDir),
-		rollupFile:     cli.File,
+		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
+		handlerPkgName: filepath.Base(cmdPkgDir),
+		handlerImport:  moduleName + "/" + cmdPkgDir,
+		rollupFile:     cmd.File,
 
 		combined: combined,
-	}, nil
+	}
+
+	if ep := conf.Generate.Packages.Entrypoint; ep != nil && ep.Package != "" {
+		file := ep.File
+		if file == "" {
+			file = "main.go"
+		}
+		lay.entrypointDir = filepath.Join(moduleRoot, filepath.FromSlash(filepath.ToSlash(ep.Package)))
+		lay.entrypointFile = file
+	}
+
+	return lay, nil
 }
 
 // applyConfDefaults fills in the sane rotini conf defaults for any unset
 // generation settings, so a missing or partial conf still generates. The
-// default is one self-contained module-internal package: both cli and cligen
-// point at "internal/cmd/<root>" / "rotini.gen.go" (so framework + rollup merge
-// into a single file). rootName is the spec's root command name (e.g. "rotini"),
-// used to build that default package path.
+// default is one self-contained module-internal package: both cmd and cmdgen
+// point at "internal/cmd/<root>" / "zz_rotini.gen.go" (so framework + rollup
+// merge into a single file). The entrypoint gets no default — main.go is only
+// written when the conf declares one. rootName is the spec's root command name
+// (e.g. "rotini"), used to build the default package path.
 func applyConfDefaults(conf *Conf, rootName string) {
 	if conf.Generate == nil {
 		conf.Generate = &GenerateConfig{}
@@ -1064,15 +1150,15 @@ func applyConfDefaults(conf *Conf, rootName string) {
 		conf.Generate.Packages = &PackagesConfig{}
 	}
 	pkgs := conf.Generate.Packages
-	if pkgs.Cli == nil {
-		pkgs.Cli = &PackageConfig{}
+	if pkgs.Cmd == nil {
+		pkgs.Cmd = &PackageConfig{}
 	}
-	if pkgs.Cligen == nil {
-		pkgs.Cligen = &PackageConfig{}
+	if pkgs.Cmdgen == nil {
+		pkgs.Cmdgen = &PackageConfig{}
 	}
 	defaultPkg := "internal/cmd/" + rootName
-	const defaultFile = "rotini.gen.go"
-	for _, p := range []*PackageConfig{pkgs.Cli, pkgs.Cligen} {
+	const defaultFile = "zz_rotini.gen.go"
+	for _, p := range []*PackageConfig{pkgs.Cmd, pkgs.Cmdgen} {
 		if p.Package == "" {
 			p.Package = defaultPkg
 		}
@@ -1080,13 +1166,13 @@ func applyConfDefaults(conf *Conf, rootName string) {
 			p.File = defaultFile
 		}
 	}
-	// Each present feature defaults its output dir to "<cligen-package>/embed/<feature>"
-	// (module-relative), which always resolves under the cligen package so //go:embed
+	// Each present feature defaults its output dir to "<cmdgen-package>/embed/<feature>"
+	// (module-relative), which always resolves under the cmdgen package so //go:embed
 	// can reach it.
-	cligenDir := filepath.ToSlash(pkgs.Cligen.Package)
+	cmdgenDir := filepath.ToSlash(pkgs.Cmdgen.Package)
 	for _, f := range featureConfigs(conf) {
 		if f.cfg != nil && f.cfg.Dir == "" {
-			f.cfg.Dir = cligenDir + "/embed/" + f.desc.name
+			f.cfg.Dir = cmdgenDir + "/embed/" + f.desc.name
 		}
 	}
 }
@@ -1516,7 +1602,7 @@ func (gp *genProgram) addImport(alias, path string) {
 	gp.childImports = append(gp.childImports, templateHandlersImport{Alias: alias, Path: path})
 }
 
-// childCliImport resolves the import path of a composed child's cli package —
+// childCliImport resolves the import path of a composed child's cmd package —
 // the handler package that exposes Handlers() — reading the child's conf when
 // present and falling back to the default internal/cmd/<child> convention (named
 // after the child's source directory).
@@ -1529,8 +1615,8 @@ func childCliImport(childSpecPath, moduleName string) string {
 		}
 		cc, err := readConf(confPath)
 		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
-			cc.Generate.Packages.Cli != nil && cc.Generate.Packages.Cli.Package != "" {
-			return moduleName + "/" + filepath.ToSlash(cc.Generate.Packages.Cli.Package)
+			cc.Generate.Packages.Cmd != nil && cc.Generate.Packages.Cmd.Package != "" {
+			return moduleName + "/" + filepath.ToSlash(cc.Generate.Packages.Cmd.Package)
 		}
 	}
 	return moduleName + "/internal/cmd/" + filepath.Base(childDir)
