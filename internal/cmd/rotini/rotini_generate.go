@@ -23,7 +23,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	var inputs RotiniGenerateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		fmt.Fprintln(rtx.Stderr, "rotini:", err)
-		rtx.Exit(1)
+		rtx.SignalExit(1)
 		return
 	}
 
@@ -56,8 +56,8 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	if err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
-		rtx.Exit(1)
+		rtx.SignalExit(1)
 	}
 
-	rtx.Exit(0)
+	rtx.SignalExit(0)
 }

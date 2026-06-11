@@ -8,10 +8,10 @@ import (
 
 // TestProgram_WithExit_capturesCode proves WithExit makes Execute hand the resolved code
 // to a callback instead of calling os.Exit, so Execute returns and a test can assert on
-// the code — here a handler's rtx.Exit(2).
+// the code — here a handler's rtx.SignalExit(2).
 func TestProgram_WithExit_capturesCode(t *testing.T) {
 	var code int
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.Exit(2) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.SignalExit(2) }}
 
 	NewProgram(testDef(), h).
 		WithArgs([]string{"run", "x"}).
@@ -24,7 +24,7 @@ func TestProgram_WithExit_capturesCode(t *testing.T) {
 }
 
 // TestProgram_WithStderr_capturesDiagnostics proves WithStderr redirects the runtime's
-// own diagnostics: a panicking hook is funneled to the default OnError, which writes to
+// own diagnostics: a panicking hook is funneled to the default RecoveredPanicFn, which writes to
 // the program's stderr and exits 1.
 func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	var code int

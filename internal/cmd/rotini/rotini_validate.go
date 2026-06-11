@@ -24,7 +24,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
 		fmt.Fprintln(rtx.Stdout, HelpRotiniValidate)
-		rtx.Exit(1)
+		rtx.SignalExit(1)
 		return
 	}
 
@@ -33,7 +33,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	if flags.Help {
 		fmt.Fprintln(rtx.Stdout, HelpRotiniValidate)
-		rtx.Exit(0)
+		rtx.SignalExit(0)
 		return
 	}
 
@@ -59,8 +59,8 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	if err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
-		rtx.Exit(1)
+		rtx.SignalExit(1)
 	}
 
-	rtx.Exit(0)
+	rtx.SignalExit(0)
 }

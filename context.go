@@ -11,7 +11,7 @@ import (
 
 // ErrServiceNotFound is the sentinel reported when a registry key is unbound — the
 // [MustGet] panics a [*ServiceError] wrapping it, which the runtime
-// recovers and routes to OnError. A funnel classifies it with errors.Is:
+// recovers and routes to RecoveredPanicFn. A funnel classifies it with errors.Is:
 //
 //	case errors.Is(err, rotini.ErrServiceNotFound):
 var ErrServiceNotFound = errors.New("rotini: service not found")
@@ -61,12 +61,13 @@ type Context struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	services map[string]any
-	args     []string                                           // raw argument vector for this invocation
-	chain    []ResolvedCommand                                  // resolved command path, root → leaf
-	onError  func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures (see Program.OnError)
-	exitCode int                                                // process exit code requested via [Context.Exit] (first non-zero wins)
-	stopped  bool                                               // [Context.Exit] was called; forward progress (setup/PreRun/Run) halts, teardown still runs
+	services         map[string]any
+	args             []string                                           // raw argument vector for this invocation
+	chain            []ResolvedCommand                                  // resolved command path, root → leaf
+	recoveredPanicFn func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures (see Program.WithRecoveredPanicFn)
+	exitCode         int                                                // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
+	stopped          bool                                               // an exit was requested; forward progress (setup/PreRun/Run) halts
+	exitNow          bool                                               // [Context.Exit] (hard) was called: skip remaining teardown too
 }
 
 // NewContext returns an empty [Context] with an initialized registry and no
@@ -186,7 +187,7 @@ func (rtx *Context) Chain() []ResolvedCommand {
 //	}
 //
 // Value reports a miss as nil and never panics; prefer the typed [Get] (comma-ok)
-// or [MustGet] (panics → OnError funnel) for type-safe retrieval.
+// or [MustGet] (panics → RecoveredPanicFn funnel) for type-safe retrieval.
 func (rtx *Context) Value(key string) any {
 	if rtx == nil {
 		return nil
@@ -196,19 +197,41 @@ func (rtx *Context) Value(key string) any {
 	return rtx.services[key]
 }
 
-// Exit records the program's exit code and stops the lifecycle's forward
+// SignalExit records the program's exit code and stops the lifecycle's forward
 // progress — no further setup hook (CascadingPreRun), PreRun, or Run runs.
 // Teardown is unaffected: every PostRun/CascadingPostRun whose paired setup hook
 // began still runs, in reverse, so cleanup is never skipped. The first non-zero
-// code wins, so a later Exit (e.g. from a teardown hook) cannot change the
-// verdict. Exit does not trigger OnError — it is a clean, deliberate stop, not an
-// error. The process exits with the recorded code once the lifecycle, teardown
-// included, completes.
+// code wins, so a later SignalExit (e.g. from a teardown hook) cannot change the
+// verdict. SignalExit does not trigger RecoveredPanicFn — it is a clean, deliberate stop,
+// not an error. The process exits with the recorded code once the lifecycle,
+// teardown included, completes. For an abort that skips pending teardown, use
+// [Context.Exit].
+func (rtx *Context) SignalExit(code int) {
+	if rtx == nil {
+		return
+	}
+	rtx.stopped = true
+	if rtx.exitCode == 0 {
+		rtx.exitCode = code
+	}
+}
+
+// Exit records the program's exit code and stops the lifecycle immediately — no
+// further hook runs, teardown included: any PostRun/CascadingPostRun still
+// pending is skipped. Use it for an abort-now path where remaining cleanup must
+// not run; prefer [Context.SignalExit] for an orderly stop that still unwinds
+// every begun teardown hook. The first non-zero code wins, and Exit does not
+// itself trigger the panic funnel — it is a deliberate stop, not an error.
+//
+// Exit skips teardown, not error reporting: a panic already recovered before Exit
+// is still routed to [Program.WithRecoveredPanicFn] (and floors the code), so Exit
+// cannot silently swallow an in-flight panic.
 func (rtx *Context) Exit(code int) {
 	if rtx == nil {
 		return
 	}
 	rtx.stopped = true
+	rtx.exitNow = true
 	if rtx.exitCode == 0 {
 		rtx.exitCode = code
 	}
@@ -224,7 +247,7 @@ func (rtx *Context) Exit(code int) {
 //	}
 //
 // It never panics; use [MustGet] to route a missing/wrong-type service through the
-// OnError funnel instead of handling it inline.
+// RecoveredPanicFn funnel instead of handling it inline.
 func Get[T any](rtx *Context, key string) (T, bool) {
 	v, ok := rtx.Value(key).(T)
 	return v, ok
@@ -233,7 +256,7 @@ func Get[T any](rtx *Context, key string) (T, bool) {
 // MustGet returns the service bound under key as T, or panics with a
 // [*ServiceError] (unwrapping to [ErrServiceNotFound]) when it is absent or not a
 // T. The panic is intentional and recoverable: the runtime recovers it inside
-// dispatch and routes it through the program's OnError funnel — so a handler that
+// dispatch and routes it through the program's RecoveredPanicFn funnel — so a handler that
 // cannot run without a service reaches for MustGet instead of handling a miss
 // inline:
 //

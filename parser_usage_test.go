@@ -6,7 +6,7 @@ import (
 )
 
 // rtk's parse/bind failures (usageError) carry the usage category, so a single
-// CategoryOf call in an OnError funnel classifies them as the end-user's fault.
+// CategoryOf call in an RecoveredPanicFn funnel classifies them as the end-user's fault.
 func TestUsageError_categorizedAsUsage(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 
