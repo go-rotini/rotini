@@ -2266,6 +2266,34 @@ func TestChildCliImport(t *testing.T) {
 	if got := childCliImport(filepath.Join(dir3, ".rotini.spec.yaml"), "example.com/mod"); got != "example.com/mod/internal/cmd/"+filepath.Base(dir3) {
 		t.Errorf("childCliImport(no conf) = %q", got)
 	}
+
+	// Every conf serialization is honored — including TOML.
+	dir4 := t.TempDir()
+	writeTestFile(t, filepath.Join(dir4, ".rotini.conf.toml"),
+		"[generate.packages.cmd]\npackage = \"toml/handlers\"\n")
+	if got := childCliImport(filepath.Join(dir4, ".rotini.spec.yaml"), "example.com/mod"); got != "example.com/mod/toml/handlers" {
+		t.Errorf("childCliImport(toml conf) = %q", got)
+	}
+}
+
+// TestGenerateFeatureDirEqualsCmdgen covers the feature dir resolving to the
+// cmdgen package dir itself: the embed path must be the bare file name — a
+// "./file" pattern is invalid //go:embed syntax.
+func TestGenerateFeatureDirEqualsCmdgen(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
+		confSchemaHeader+"generate:\n  features:\n    help:\n      enabled: true\n      dir: internal/cmd/mycli\n")
+	t.Chdir(tmp)
+
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	gen := filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go")
+	mustContain(t, gen, "//go:embed help_mycli.txt")
+	mustNotContain(t, gen, "//go:embed ./")
 }
 
 func TestWriteCompletionFiles_errors(t *testing.T) {

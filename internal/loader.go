@@ -52,13 +52,16 @@ func compileSchema(kind string, schemaBytes []byte) (*jsonschema.Schema, error) 
 	return schema, nil
 }
 
-// specLoader holds the compiled spec schema together with the resolved path and decoded
-// content of the end-user's spec file.
+// specLoader holds the compiled spec schema together with the resolved path,
+// decoded content, and raw JSON instance of the end-user's spec file. The
+// instance is converted from the same single read that produced the decoded
+// spec, so schema validation judges exactly the bytes generation consumes.
 type specLoader struct {
-	version string             // running binary version, for the $schema guard
-	schema  *jsonschema.Schema // compiled spec JSON Schema
-	path    string             // resolved spec path
-	spec    *Spec              // decoded spec content
+	version  string             // running binary version, for the $schema guard
+	schema   *jsonschema.Schema // compiled spec JSON Schema
+	path     string             // resolved spec path
+	spec     *Spec              // decoded spec content
+	instance []byte             // the spec as canonical JSON, for schema validation
 }
 
 // newSpecLoader resolves the spec path (the given path, else the first .rotini.spec.* in
@@ -78,22 +81,32 @@ func newSpecLoader(path, version string) (*specLoader, error) {
 	if resolved == "" {
 		return nil, errSpecPathRequired
 	}
-	spec, err := readSpec(resolved)
+	format, data, err := readRaw(resolved)
 	if err != nil {
 		return nil, err
 	}
+	spec, err := decodeData[Spec](format, data, resolved)
+	if err != nil {
+		return nil, err
+	}
+	instance, err := bytesToJSON(format, data)
+	if err != nil {
+		return nil, fmt.Errorf("convert %s to json: %w", resolved, err)
+	}
 
-	return &specLoader{version: version, schema: schema, path: resolved, spec: spec}, nil
+	return &specLoader{version: version, schema: schema, path: resolved, spec: spec, instance: instance}, nil
 }
 
-// confLoader holds the compiled conf schema together with the resolved path and decoded
-// content of the end-user's conf file. The conf is optional: when none is found, path
-// is "" and conf is a default &Conf{}.
+// confLoader holds the compiled conf schema together with the resolved path,
+// decoded content, and raw JSON instance of the end-user's conf file. The conf
+// is optional: when none is found, path is "", conf is a default &Conf{}, and
+// instance is nil (nothing to validate).
 type confLoader struct {
-	version string             // running binary version, for the $schema guard
-	schema  *jsonschema.Schema // compiled conf JSON Schema
-	path    string             // resolved conf path ("" when none — defaults used)
-	conf    *Conf              // decoded conf content (or default)
+	version  string             // running binary version, for the $schema guard
+	schema   *jsonschema.Schema // compiled conf JSON Schema
+	path     string             // resolved conf path ("" when none — defaults used)
+	conf     *Conf              // decoded conf content (or default)
+	instance []byte             // the conf as canonical JSON, for schema validation (nil when defaulted)
 }
 
 // newConfLoader resolves the conf path (the given path, else the first .rotini.conf.*
@@ -120,10 +133,18 @@ func newConfLoader(specPath, confPath, version string) (*confLoader, error) {
 		return nil, fmt.Errorf("stat conf %s: %w", resolved, statErr)
 	}
 
-	conf, err := readConf(resolved)
+	format, data, err := readRaw(resolved)
 	if err != nil {
 		return nil, err
 	}
-	f.path, f.conf = resolved, conf
+	conf, err := decodeData[Conf](format, data, resolved)
+	if err != nil {
+		return nil, err
+	}
+	instance, err := bytesToJSON(format, data)
+	if err != nil {
+		return nil, fmt.Errorf("convert %s to json: %w", resolved, err)
+	}
+	f.path, f.conf, f.instance = resolved, conf, instance
 	return f, nil
 }

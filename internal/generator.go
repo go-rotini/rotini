@@ -643,11 +643,7 @@ func flagDefsLiteral(in *Inputs) string {
 		return ""
 	}
 	return sliceLiteral("FlagDef", in.Flags, func(b *strings.Builder, f FlagInput) {
-		ids := f.Identifiers
-		if len(ids) == 0 {
-			ids = []string{"--" + strings.ReplaceAll(f.Name, "_", "-")}
-		}
-		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(ids))
+		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(flagIdentifiers(f)))
 		b.WriteString(", Type: " + strconv.Quote(getSchemaType(f.Schema)))
 		writeSchemaCommon(b, f.Schema)
 		if f.Hidden {
@@ -843,7 +839,7 @@ func toTemplateFields(fs []fieldDef) []templateInputField {
 // (to its own file, or merged with the rollup when cli and cligen are combined).
 // It is fully generated and carries a DO NOT EDIT banner.
 func renderFrameworkFile(gp *genProgram, lay layout, features []templateFeature) ([]byte, error) {
-	own := append([]genCommand{gp.root}, gp.own...)
+	own := gp.ownCommands()
 
 	blocks := make([]templateInputBlock, 0, len(own))
 	imports := map[string]bool{}
@@ -898,7 +894,7 @@ func renderFrameworkFile(gp *genProgram, lay layout, features []templateFeature)
 // help/version commands. To opt out, delete those handler files and run a
 // normal `rotini generate` — the empty stubs are seeded in their place.
 func writeHandlerStubs(gp *genProgram, lay layout, initStyle bool) error {
-	for _, c := range append([]genCommand{gp.root}, gp.own...) {
+	for _, c := range gp.ownCommands() {
 		path := filepath.Join(lay.handlerDir, c.filename)
 		if _, err := os.Stat(path); err == nil {
 			continue
@@ -967,7 +963,7 @@ func writeEntrypoint(lay layout) error {
 // its own file, or merged with the framework when combined).
 func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
-	for _, c := range append([]genCommand{gp.root}, gp.own...) {
+	for _, c := range gp.ownCommands() {
 		methods = append(methods, templateHandlersMethod{Method: c.prefix, HandlerType: c.handler})
 	}
 	for _, c := range gp.composed {
@@ -1334,6 +1330,12 @@ type genProgram struct {
 	childImports []templateHandlersImport // unique child cli imports for the rollup
 }
 
+// ownCommands returns the commands this program emits types and stubs for —
+// the root, then every own (inline) sub-command.
+func (gp *genProgram) ownCommands() []genCommand {
+	return append([]genCommand{gp.root}, gp.own...)
+}
+
 // methods returns the ProgramHandlers method names: the root, then every own
 // and composed sub-command, sorted.
 func (gp *genProgram) methods() []string {
@@ -1623,11 +1625,7 @@ func (gp *genProgram) addImport(alias, path string) {
 // after the child's source directory).
 func childCliImport(childSpecPath, moduleName string) string {
 	childDir := filepath.Dir(childSpecPath)
-	for _, ext := range []string{"yaml", "yml", "jsonc", "json"} {
-		confPath := filepath.Join(childDir, ".rotini.conf."+ext)
-		if _, err := os.Stat(confPath); err != nil {
-			continue
-		}
+	if confPath, err := discoverConf(childDir); err == nil {
 		cc, err := readConf(confPath)
 		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
 			cc.Generate.Packages.Cmd != nil && cc.Generate.Packages.Cmd.Package != "" {
@@ -1848,31 +1846,20 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 	if h.Headings == nil {
 		return hd
 	}
+	override := func(dst *string, value string) {
+		if value != "" {
+			*dst = value
+		}
+	}
 	o := h.Headings
-	if o.Usage != "" {
-		hd.Usage = o.Usage
-	}
-	if o.Commands != "" {
-		hd.Commands = o.Commands
-	}
-	if o.Arguments != "" {
-		hd.Arguments = o.Arguments
-	}
-	if o.Flags != "" {
-		hd.Flags = o.Flags
-	}
-	if o.Environment != "" {
-		hd.Environment = o.Environment
-	}
-	if o.Configuration != "" {
-		hd.Configuration = o.Configuration
-	}
-	if o.Cascading != "" {
-		hd.Cascading = o.Cascading
-	}
-	if o.Examples != "" {
-		hd.Examples = o.Examples
-	}
+	override(&hd.Usage, o.Usage)
+	override(&hd.Commands, o.Commands)
+	override(&hd.Arguments, o.Arguments)
+	override(&hd.Flags, o.Flags)
+	override(&hd.Environment, o.Environment)
+	override(&hd.Configuration, o.Configuration)
+	override(&hd.Cascading, o.Cascading)
+	override(&hd.Examples, o.Examples)
 	return hd
 }
 
@@ -2184,7 +2171,13 @@ func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) templa
 	h := templateFeature{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
 	for _, hn := range nodes {
 		name := feat.varPrefix + hn.prefix
-		h.Vars = append(h.Vars, templateFeatureVar{Name: name, Embed: dir + "/" + hn.file})
+		// A "." dir (the feature dir IS the cmdgen package dir) embeds the bare
+		// file name — "./x" is not a valid //go:embed pattern.
+		embedPath := hn.file
+		if dir != "" && dir != "." {
+			embedPath = dir + "/" + hn.file
+		}
+		h.Vars = append(h.Vars, templateFeatureVar{Name: name, Embed: embedPath})
 		quoted := make([]string, len(hn.paths))
 		for i, p := range hn.paths {
 			quoted[i] = strconv.Quote(p)

@@ -79,9 +79,10 @@ func TestReadFile_errors(t *testing.T) {
 	}
 }
 
-// TestToJSON converts each supported serialization to canonical JSON bytes —
-// the instance form the schema validator consumes.
-func TestToJSON(t *testing.T) {
+// TestBytesToJSON converts each supported serialization to canonical JSON
+// bytes — the instance form the schema validator consumes (the loaders convert
+// the same read that produced the decoded struct).
+func TestBytesToJSON(t *testing.T) {
 	docs := map[string]string{
 		".yaml":  "name: demo\ncount: 2\n",
 		".json":  `{"name":"demo","count":2}`,
@@ -94,30 +95,29 @@ func TestToJSON(t *testing.T) {
 			if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			raw, err := toJSON(path)
+			format, data, err := readRaw(path)
 			if err != nil {
-				t.Fatalf("toJSON: %v", err)
+				t.Fatalf("readRaw: %v", err)
+			}
+			raw, err := bytesToJSON(format, data)
+			if err != nil {
+				t.Fatalf("bytesToJSON: %v", err)
 			}
 			var v map[string]any
 			if err := json.Unmarshal(raw, &v); err != nil {
-				t.Fatalf("toJSON produced invalid JSON: %v\n%s", err, raw)
+				t.Fatalf("bytesToJSON produced invalid JSON: %v\n%s", err, raw)
 			}
 			if v["name"] != "demo" {
-				t.Errorf("toJSON lost data: %v", v)
+				t.Errorf("bytesToJSON lost data: %v", v)
 			}
 		})
 	}
 
-	if _, err := toJSON(filepath.Join(t.TempDir(), "doc.xml")); !errors.Is(err, errUnsupportedFormat) {
-		t.Errorf("toJSON(.xml) err = %v, want errUnsupportedFormat", err)
+	if _, err := bytesToJSON(formatUnknown, nil); !errors.Is(err, errUnsupportedFormat) {
+		t.Errorf("bytesToJSON(unknown) err = %v, want errUnsupportedFormat", err)
 	}
-
-	bad := filepath.Join(t.TempDir(), "bad.yaml")
-	if err := os.WriteFile(bad, []byte("a: [unclosed"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := toJSON(bad); err == nil || !strings.Contains(err.Error(), "convert") {
-		t.Errorf("toJSON(bad yaml) = %v, want a convert error", err)
+	if _, err := bytesToJSON(formatYAML, []byte("a: [unclosed")); err == nil {
+		t.Error("bytesToJSON(bad yaml) = nil, want a convert error")
 	}
 }
 
@@ -199,17 +199,17 @@ func TestResolveConfBesideSpec(t *testing.T) {
 	}
 }
 
-func TestDiscoverFile(t *testing.T) {
+func TestDiscoverConf(t *testing.T) {
 	dir := t.TempDir()
 	confPath := filepath.Join(dir, ".rotini.conf.yaml")
 	if err := os.WriteFile(confPath, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := discoverFile(dir, fileTypeConf); err != nil || got != confPath {
-		t.Errorf("discoverFile(hit) = %q, %v; want %q", got, err, confPath)
+	if got, err := discoverConf(dir); err != nil || got != confPath {
+		t.Errorf("discoverConf(hit) = %q, %v; want %q", got, err, confPath)
 	}
-	if _, err := discoverFile(t.TempDir(), fileTypeConf); err == nil {
-		t.Error("discoverFile(miss) = nil, want an error")
+	if _, err := discoverConf(t.TempDir()); err == nil {
+		t.Error("discoverConf(miss) = nil, want an error")
 	}
 }
 

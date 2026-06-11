@@ -79,8 +79,16 @@ func readFile[T any](path string) (*T, error) {
 	if err != nil {
 		return nil, err
 	}
+	return decodeData[T](format, data, path)
+}
 
+// decodeData decodes one read document into a value of type T. path labels a
+// decode failure; the loaders use this (rather than readFile) so one read feeds
+// both the decoded struct and the raw JSON instance (bytesToJSON) — validation
+// then judges exactly the bytes generation consumes.
+func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) {
 	out := new(T)
+	var err error
 	switch format {
 	case formatYAML:
 		err = yaml.Unmarshal(data, out)
@@ -99,17 +107,16 @@ func readFile[T any](path string) (*T, error) {
 	return out, nil
 }
 
-// toJSON reads the file at path and returns its contents as canonical JSON bytes,
-// regardless of the source serialization. It feeds documents to the jsonschema
-// validator, which operates on JSON instances. The raw instance is returned (not a
-// decoded struct) so schema rules like additionalProperties:false still see unknown
+// bytesToJSON converts one read document to canonical JSON bytes, regardless of
+// the source serialization. It feeds documents to the jsonschema validator,
+// which operates on JSON instances. The raw instance is returned (not a decoded
+// struct) so schema rules like additionalProperties:false still see unknown
 // fields.
-func toJSON(path string) ([]byte, error) {
-	format, data, err := readRaw(path)
-	if err != nil {
-		return nil, err
-	}
-	var out []byte
+func bytesToJSON(format fileFormat, data []byte) ([]byte, error) {
+	var (
+		out []byte
+		err error
+	)
 	switch format {
 	case formatJSON:
 		return data, nil
@@ -120,10 +127,10 @@ func toJSON(path string) ([]byte, error) {
 	case formatTOML:
 		out, err = toml.ToJSON(data)
 	default:
-		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
+		return nil, errUnsupportedFormat
 	}
 	if err != nil {
-		return nil, fmt.Errorf("convert %s to json: %w", path, err)
+		return nil, fmt.Errorf("convert %s to json: %w", format, err)
 	}
 	return out, nil
 }
@@ -146,13 +153,16 @@ func readConf(path string) (*Conf, error) {
 // fallback locations resolve to a spec.
 var errSpecPathRequired = errors.New("spec file path is required")
 
+// fallbackExtensions is the spec/conf discovery precedence: the first
+// .rotini.<type>.<ext> that exists wins.
+var fallbackExtensions = []string{"yml", "yaml", "toml", "json", "jsonc"}
+
 // getFallbackPaths returns the default discovery locations for a spec or conf file
 // within dir, in extension-precedence order.
 func getFallbackPaths(dir string, fileType fileType) []string {
-	fileExtensions := []string{"yml", "yaml", "toml", "json", "jsonc"}
-	paths := make([]string, len(fileExtensions))
-	for i, fileExtension := range fileExtensions {
-		paths[i] = filepath.Join(dir, fmt.Sprintf(".rotini.%s.%s", fileType, fileExtension))
+	paths := make([]string, len(fallbackExtensions))
+	for i, ext := range fallbackExtensions {
+		paths[i] = filepath.Join(dir, fmt.Sprintf(".rotini.%s.%s", fileType, ext))
 	}
 	return paths
 }
@@ -191,15 +201,15 @@ func resolveConfBesideSpec(specPath, confPath string) string {
 	return firstExisting(getFallbackPaths(filepath.Dir(specPath), fileTypeConf))
 }
 
-// discoverFile returns the first .rotini.<fileType>.* file that exists in dir, or an
-// error when none is found. Unlike resolveSpecPath/resolveConfBesideSpec it errors on
-// a miss — the initializer uses it where a file is expected to be present (a module
-// conf, a parent CLI's spec/conf).
-func discoverFile(dir string, fileType fileType) (string, error) {
-	if path := firstExisting(getFallbackPaths(dir, fileType)); path != "" {
+// discoverConf returns the first .rotini.conf.* file that exists in dir, or an
+// error when none is found. Unlike resolveConfBesideSpec it errors on a miss —
+// its callers expect a conf to be present (a module-root conf, a composed
+// child's conf).
+func discoverConf(dir string) (string, error) {
+	if path := firstExisting(getFallbackPaths(dir, fileTypeConf)); path != "" {
 		return path, nil
 	}
-	return "", fmt.Errorf("no .rotini.%s.* file found in %s", fileType, dir)
+	return "", fmt.Errorf("no .rotini.%s.* file found in %s", fileTypeConf, dir)
 }
 
 // findModule walks up from the working directory to the nearest go.mod and

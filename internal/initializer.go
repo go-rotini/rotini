@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -32,6 +33,11 @@ func schemaURLVersion(version string) string {
 	}
 	return baselineSchemaVersion
 }
+
+// cliNameRe constrains a new CLI's name: it becomes the scaffold directory, the
+// generated Go package name, and the root command, so it must be a safe single
+// path segment that starts a valid identifier.
+var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 
 // InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
@@ -56,6 +62,9 @@ func Initialize(name, format string, force bool, version string) error {
 func (p *Processor) initialize(name, format string, force bool) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
+	}
+	if !cliNameRe.MatchString(name) {
+		return fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
 	}
 
 	moduleRoot, _, err := findModule()
@@ -129,7 +138,7 @@ type initDefaults struct {
 // present), falling back to rotini's built-ins (yaml format, "cmd" package dir).
 func moduleInitDefaults(moduleRoot string) initDefaults {
 	d := initDefaults{format: "yaml", pkg: "cmd"}
-	confPath, err := discoverFile(moduleRoot, fileTypeConf)
+	confPath, err := discoverConf(moduleRoot)
 	if err != nil {
 		return d
 	}

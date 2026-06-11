@@ -62,7 +62,7 @@ func (s *session) failFast() bool {
 // the rotini-specific rules and enforces the $schema↔version guard. It returns every
 // problem found, empty when the spec is valid.
 func (l *specLoader) validate() []error {
-	if problems := validateDocument(l.path, "spec", l.schema); len(problems) > 0 {
+	if problems := validateInstance("spec", l.instance, l.schema); len(problems) > 0 {
 		return problems
 	}
 
@@ -83,7 +83,7 @@ func (l *confLoader) validate() []error {
 	if l.path == "" {
 		return nil
 	}
-	if problems := validateDocument(l.path, "conf", l.schema); len(problems) > 0 {
+	if problems := validateInstance("conf", l.instance, l.schema); len(problems) > 0 {
 		return problems
 	}
 	if err := checkSchemaVersion("conf", l.conf.Schema, l.version); err != nil {
@@ -106,15 +106,12 @@ func (e *problem) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
 }
 
-// validateDocument reads the document at path and validates its raw JSON instance (so
-// schema rules like additionalProperties:false see unknown fields) against the given
-// compiled schema, returning one error per problem: a read/convert failure, or one
-// [*problem] per schema violation. It returns nil when the document is valid.
-func validateDocument(path, kind string, schema *jsonschema.Schema) []error {
-	instance, err := toJSON(path)
-	if err != nil {
-		return []error{fmt.Errorf("%s file: %w", kind, err)}
-	}
+// validateInstance validates a document's raw JSON instance (so schema rules
+// like additionalProperties:false see unknown fields) against the given
+// compiled schema, returning one [*problem] per violation. The instance is the
+// one the loader converted from its single read, so validation and generation
+// always judge the same bytes. It returns nil when the document is valid.
+func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) []error {
 	result, err := schema.Validate(instance)
 	if err != nil {
 		return []error{fmt.Errorf("validate %s: %w", kind, err)}
@@ -389,11 +386,11 @@ func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 		}
 		claimedBy := map[string]string{} // identifier -> the flag name that first claimed it
 		for _, f := range c.Inputs.Flags {
-			ids := f.Identifiers
-			if len(ids) == 0 {
-				ids = []string{"--" + f.Name}
-			}
-			for _, id := range ids {
+			// flagIdentifiers is the same derivation codegen emits into the
+			// Definition, so the lint catches exactly the collisions the parser
+			// would resolve silently — including derived ones ("dry_run" and
+			// "dry-run" both yield "--dry-run").
+			for _, id := range flagIdentifiers(f) {
 				if prev, dup := claimedBy[id]; dup {
 					problems = append(problems, &problem{
 						kind: "spec",

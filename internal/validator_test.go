@@ -314,6 +314,21 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 		t.Errorf("Validate(duplicate -o) = %v, want a duplicate-identifier error naming -o and output", err)
 	}
 
+	// Auto-derived collision across spellings: "dry_run" and "dry-run" both
+	// derive --dry-run (the lint shares codegen's exact derivation).
+	mixed := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: dry_run\n" +
+		"        schema: { type: bool }\n" +
+		"      - name: dry-run\n" +
+		"        schema: { type: bool }\n"
+	if err := validateOnce(writeTemp(t, "mixed.yaml", mixed), "", "", ""); err == nil || !strings.Contains(err.Error(), "--dry-run") {
+		t.Errorf("Validate(dry_run vs dry-run) = %v, want a --dry-run collision", err)
+	}
+
 	// Auto-derived collision: two flags whose names both yield --out (no identifiers).
 	spec2 := validSpecHeader +
 		"command:\n" +

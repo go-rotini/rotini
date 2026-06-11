@@ -207,6 +207,13 @@ func TestInitialize_errors(t *testing.T) {
 	if err := Initialize("x", "xml", false, ""); err == nil {
 		t.Error("unsupported format should error")
 	}
+	// The name becomes a directory, a Go package, and the root command — unsafe
+	// names are rejected before anything touches the filesystem.
+	for _, bad := range []string{"../evil", "a/b", "my cli", "9lives", ".hidden"} {
+		if err := Initialize(bad, "yaml", false, ""); err == nil || !strings.Contains(err.Error(), "invalid CLI name") {
+			t.Errorf("Initialize(%q) = %v, want an invalid-name error", bad, err)
+		}
+	}
 }
 
 func TestInitialize_outsideModule(t *testing.T) {

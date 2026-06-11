@@ -110,6 +110,36 @@ func TestWriteGeneratedFile(t *testing.T) {
 	}
 }
 
+// TestWriteGeneratedFile_skipsIdentical confirms regenerating identical content
+// leaves the file untouched (mtime-stable), so watch loops and build caches
+// keyed on mtimes stay quiet across no-op passes.
+func TestWriteGeneratedFile_skipsIdentical(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gen.go")
+	if err := writeGeneratedFile(path, []byte("package x\n")); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeGeneratedFile(path, []byte("package x\n")); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("identical content rewrote the generated file (mtime changed)")
+	}
+	if err := writeGeneratedFile(path, []byte("package y\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != "package y\n" {
+		t.Errorf("changed content not written: %q", got)
+	}
+}
+
 // writeFileBytes writes atomically and creates the parent directory: a non-Go output goes
 // to a nested missing dir with the exact content, and the atomic temp file is renamed away
 // (the target dir holds only the final file, never a torn or leftover temp).
