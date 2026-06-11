@@ -83,10 +83,10 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 	if err := validate(chain, store); err != nil {
 		return err
 	}
-	if err := validateFlagGroups(chain, rtx.Args()); err != nil {
+	if err := validateFlagGroups(chain, rtx.Args); err != nil {
 		return err
 	}
-	return validateFlagDependencies(chain, rtx.Args())
+	return validateFlagDependencies(chain, rtx.Args)
 }
 
 // Deprecation is a deprecated CLI token found in this invocation's argv: the specific
@@ -114,7 +114,7 @@ func (p *Parser) Deprecations(rtx *Context) []Deprecation {
 	if rtx == nil {
 		return nil
 	}
-	argv := rtx.Args()
+	argv := rtx.Args
 	var out []Deprecation
 	for _, frame := range rtx.Chain() {
 		// A command invoked via one of its deprecated aliases (frame.Matched is the token
@@ -158,7 +158,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 	if len(chain) == 0 {
 		return nil, nil, &usageError{msg: "rotini: no command resolved for this context"}
 	}
-	store, err := parseInto(chain, rtx.Args())
+	store, err := parseInto(chain, rtx.Args)
 	if err != nil {
 		return nil, nil, err
 	}

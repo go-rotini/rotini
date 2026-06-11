@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 )
@@ -116,5 +117,29 @@ func TestContext_concurrentRegistry(t *testing.T) {
 		if !rtx.Has(fmt.Sprintf("svc-%d", k)) {
 			t.Errorf("key svc-%d unbound after concurrent access", k)
 		}
+	}
+}
+
+// TestContext_ArgsField locks the W1 contract: rtx.Args is the exact argument
+// vector the invocation was given — os.Args[1:] or the Program.WithArgs
+// override — exposed as a plain field (the live slice, not a copy).
+func TestContext_ArgsField(t *testing.T) {
+	argv := []string{"--verbose", "run", "alice", "--", "-not-a-flag"}
+
+	// The standalone constructor round-trips argv exactly.
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, argv)
+	if !reflect.DeepEqual(rtx.Args, argv) {
+		t.Errorf("NewContextFor args = %v, want %v", rtx.Args, argv)
+	}
+
+	// The program path round-trips WithArgs exactly, including tokens after "--".
+	var got []string
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.Args }}
+	p, _, errb := newTestProgram(h, argv)
+	if code, _ := p.run(p.args); code != 0 {
+		t.Fatalf("run() = %d (stderr: %s)", code, errb)
+	}
+	if !reflect.DeepEqual(got, argv) {
+		t.Errorf("rtx.Args during Run = %v, want %v", got, argv)
 	}
 }

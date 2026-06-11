@@ -22,7 +22,7 @@ func TestRotiniGenerate(t *testing.T) {
 	}{
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"generate", "--nope"}, wantErr: "rotini:", wantCode: 1,
+			argv: []string{"generate", "--nope"}, wantOut: HelpRotiniGenerate, wantErr: "Error:", wantCode: 1,
 		},
 		{
 			name: "help flag",

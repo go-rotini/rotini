@@ -75,7 +75,7 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 	//    argv-set > env (SNAKE_UPPER of the key) > config; otherwise keep the
 	//    Parser's value (an explicit argv value or the flag's default). Each
 	//    reconciled value is recorded back into the store so step 3 validates it too.
-	if err := b.reconcileFlags(v, chain, rtx.Args(), store); err != nil {
+	if err := b.reconcileFlags(v, chain, rtx.Args, store); err != nil {
 		return err
 	}
 
@@ -85,10 +85,10 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 	if err := validate(chain, store); err != nil {
 		return err
 	}
-	if err := validateFlagGroups(chain, rtx.Args()); err != nil {
+	if err := validateFlagGroups(chain, rtx.Args); err != nil {
 		return err
 	}
-	if err := validateFlagDependencies(chain, rtx.Args()); err != nil {
+	if err := validateFlagDependencies(chain, rtx.Args); err != nil {
 		return err
 	}
 

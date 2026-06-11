@@ -19,7 +19,7 @@ const completeCommand = "__complete"
 // implements this interface, calls CompleteFlagValue with the flag's logical Name and
 // the word being typed. A nil return falls back to the flag's static enum; a non-nil
 // (possibly empty) return is authoritative. rtx carries the resolved chain
-// (rtx.Chain()), the completion words (rtx.Args()), and every service bound on the
+// (rtx.Chain()), the completion words (rtx.Args), and every service bound on the
 // Program, so a completer can reach a bound API client, the filesystem, etc.
 //
 // It is entirely opt-in — rotini generates no stub for it and adds nothing if it is
@@ -385,7 +385,7 @@ func resolveHandler[T any](handlers any, handlerName string) (T, bool) {
 func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string) {
 	if rtx != nil {
 		rtx.chain = chain
-		rtx.args = words
+		rtx.Args = words
 	}
 }
 

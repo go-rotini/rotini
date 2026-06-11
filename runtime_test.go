@@ -73,7 +73,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 	var gotArgs []string
 	args := []string{"--verbose", "run", "alice", "x", "y", "--count", "3"}
 	h := &testHandlers{log: &log, onRun: func(rtx *Context) {
-		gotChain, gotArgs = rtx.Chain(), rtx.Args()
+		gotChain, gotArgs = rtx.Chain(), rtx.Args
 	}}
 
 	p, _, errb := newTestProgram(h, args)
@@ -95,7 +95,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 		t.Errorf("Chain() during Run = %v, want [app run]", names)
 	}
 	if !reflect.DeepEqual(gotArgs, args) {
-		t.Errorf("Args() during Run = %v, want %v", gotArgs, args)
+		t.Errorf("rtx.Args during Run = %v, want %v", gotArgs, args)
 	}
 }
 

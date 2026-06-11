@@ -61,8 +61,16 @@ type Context struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
+	// Args is the raw argument vector for this invocation — os.Args[1:], or the
+	// override from [Program.WithArgs] — with everything after the resolved
+	// command path still present, so a handler can run its own parser instead of
+	// [Parser.Parse]. It is the live slice, not a copy: set before dispatch and
+	// not mutated by the runtime thereafter; a handler that mutates it changes
+	// what every later read (including the opt-in Parser/Binder) sees, and owns
+	// the consequences.
+	Args []string
+
 	services         map[string]any
-	args             []string                                           // raw argument vector for this invocation
 	chain            []ResolvedCommand                                  // resolved command path, root → leaf
 	recoveredPanicFn func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures (see Program.WithRecoveredPanicFn)
 	exitCode         int                                                // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
@@ -103,7 +111,7 @@ func NewContext() *Context {
 func NewContextFor(def Definition, argv []string) *Context {
 	rtx := NewContext()
 	chain, _ := resolveChain(def, argv)
-	rtx.args = argv
+	rtx.Args = argv
 	rtx.chain = chain
 	return rtx
 }
@@ -152,17 +160,6 @@ func (rtx *Context) Has(key string) bool {
 	defer rtx.mu.RUnlock()
 	_, ok := rtx.services[key]
 	return ok
-}
-
-// Args returns the raw argument vector for this invocation: everything after the
-// resolved command path is still present, so a handler can run its own parser
-// instead of [Parser.Parse]. The slice is the runtime's; treat it as
-// read-only.
-func (rtx *Context) Args() []string {
-	if rtx == nil {
-		return nil
-	}
-	return rtx.args
 }
 
 // Chain returns the resolved command path for this invocation, root → leaf — the

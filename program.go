@@ -232,7 +232,7 @@ func (p *Program) run(argv []string) (int, error) {
 	if rtx == nil {
 		rtx = NewContext()
 	}
-	rtx.args = argv
+	rtx.Args = argv
 	rtx.chain = chain
 	rtx.Stdin = p.stdin
 	rtx.Stdout = p.stdout
