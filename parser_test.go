@@ -1,7 +1,9 @@
 package rotini
 
 import (
+	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -106,14 +108,31 @@ func TestParse_flagNeedsValue(t *testing.T) {
 
 func TestParse_unknownCommand(t *testing.T) {
 	// "ru" is a stray positional on a branch-only root: a mistyped sub-command.
+	// The error is data, not presentation: no baked-in suggestion text — the
+	// structured fields carry the token and the sibling vocabulary so a handler
+	// composes its own response (typically with a bound [Suggestor]).
 	rtx := NewContextFor(parserTestDef(), []string{"ru"})
 	var in runInputs
 	err := NewParser().Parse(rtx, &in)
 	if err == nil || !strings.Contains(err.Error(), `unknown command "ru"`) {
 		t.Fatalf("Parse error = %v, want unknown-command", err)
 	}
-	if !strings.Contains(err.Error(), `Did you mean "run"?`) {
-		t.Errorf("Parse error missing suggestion: %v", err)
+	if strings.Contains(err.Error(), "Did you mean") {
+		t.Errorf("Parse error carries baked-in suggestion text: %v", err)
+	}
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("Parse error is not a *ParseError: %T", err)
+	}
+	if pe.Token != "ru" || pe.Command != "app" {
+		t.Errorf("ParseError fields = {Token:%q Command:%q}, want {ru app}", pe.Token, pe.Command)
+	}
+	if !slices.Contains(pe.Candidates, "run") {
+		t.Errorf("ParseError.Candidates = %v, want to contain \"run\"", pe.Candidates)
+	}
+	// The extracted Suggestor reproduces the old behavior from the data.
+	if hits := NewSuggestor().Suggest(pe.Token, pe.Candidates); len(hits) == 0 || hits[0] != "run" {
+		t.Errorf("Suggest(%q, %v) = %v, want [run ...]", pe.Token, pe.Candidates, hits)
 	}
 }
 

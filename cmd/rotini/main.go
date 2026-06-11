@@ -17,6 +17,7 @@ var (
 func main() {
 	r.Program.
 		Bind("parser", rotini.NewParser()).
+		Bind("suggestor", rotini.NewSuggestor()).
 		Bind("build", rotini.BuildInfo(version)).
 		Bind("commit", commit).
 		Bind("date", date).

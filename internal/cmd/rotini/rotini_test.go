@@ -41,6 +41,7 @@ func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string
 		WithStderr(&errb).
 		WithExit(func(c int) { code = c }).
 		Bind("parser", rotini.NewParser()).
+		Bind("suggestor", rotini.NewSuggestor()).
 		Bind("build", &rotini.Build{VersionSemantic: testVersion})
 	for _, b := range binds {
 		p.Bind(b.key, b.val)
@@ -84,6 +85,7 @@ func TestRotini(t *testing.T) {
 		{"version flag", []string{"--version"}, testVersion, "", 0},
 		{"no args prints help and fails", []string{}, HelpRotini, "", 1},
 		{"parse error on unknown flag", []string{"--nope"}, HelpRotini, "Error:", 1},
+		{"mistyped command gets a suggestion", []string{"generte"}, HelpRotini, `Did you mean "generate"?`, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

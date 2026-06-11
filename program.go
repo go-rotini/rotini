@@ -244,6 +244,17 @@ func (p *Program) run(argv []string) (int, error) {
 	return p.dispatch(ctx, chain, rtx, trapped)
 }
 
+// wiringFailure routes a Definition↔handlers mismatch through the funnel and
+// floors the exit code to 1 (a wiring failure is always a failure, even when a
+// custom funnel forgets rtx.SignalExit).
+func (p *Program) wiringFailure(ctx context.Context, rtx *Context, err error) (int, error) {
+	rtx.recoveredPanicFn(ctx, rtx, err)
+	if rtx.exitCode == 0 {
+		rtx.exitCode = 1
+	}
+	return rtx.exitCode, err
+}
+
 // defaultRecoveredPanicFn is the RecoveredPanicFn funnel used when the program supplies none: it
 // prints the error to stderr and fails with exit code 1.
 func (p *Program) defaultRecoveredPanicFn(_ context.Context, rtx *Context, err error) {
@@ -278,18 +289,18 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
+		// A wiring failure (generated Definition and handler set out of sync) is
+		// routed through the RecoveredPanicFn funnel — the single sink for every
+		// framework diagnostic — so a custom funnel sees it too; the default
+		// funnel prints it to stderr and exits 1.
 		m := hv.MethodByName(f.Handler)
 		if !m.IsValid() {
-			err := fmt.Errorf("no handler for command %q (missing method %q)", f.Name, f.Handler)
-			fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
-			return 1, err
+			return p.wiringFailure(ctx, rtx, fmt.Errorf("no handler for command %q (missing method %q)", f.Name, f.Handler))
 		}
 		out := m.Call(nil)
 		h, ok := out[0].Interface().(CommandHandlers)
 		if !ok || h == nil {
-			err := fmt.Errorf("handler %q does not implement CommandHandlers", f.Handler)
-			fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
-			return 1, err
+			return p.wiringFailure(ctx, rtx, fmt.Errorf("handler %q does not implement CommandHandlers", f.Handler))
 		}
 		handlers[i] = h
 	}

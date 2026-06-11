@@ -29,14 +29,27 @@ type scopeInputs struct {
 	args  []string
 }
 
-// usageError is a parse-time failure caused by bad input; handlers conventionally
-// map it to exit code 2 (the usual CLI usage-error code). It unwraps to
-// [ErrUsage], so CategoryOf classifies it as CategoryUsage.
-type usageError struct{ msg string }
+// ParseError is a parse-time failure caused by bad input. It is data, not
+// presentation: the message carries no opinions (no suggestions, no usage
+// dump), and the structured fields let a handler compose its own response —
+// pair Token with Candidates and a bound [Suggestor] for "did you mean", or
+// render help for Command. Handlers conventionally map it to exit code 2 (the
+// usual CLI usage-error code). It unwraps to [ErrUsage], so CategoryOf
+// classifies it as CategoryUsage; retrieve the fields with errors.As:
+//
+//	var ue *rotini.ParseError
+//	if errors.As(err, &ue) { /* ue.Token, ue.Candidates, … */ }
+type ParseError struct {
+	Msg        string   // the human-readable failure, opinion-free
+	Command    string   // the command in whose scope parsing failed ("" when not command-scoped)
+	Flag       string   // the flag involved, by the identifier or label used ("" when not flag-related)
+	Token      string   // the offending argv token or value ("" when none)
+	Candidates []string // the vocabulary Token failed against — sibling commands, declared flags, enum members (nil when none applies)
+}
 
-func (e *usageError) Error() string { return e.msg }
+func (e *ParseError) Error() string { return e.Msg }
 
-func (e *usageError) Unwrap() error { return ErrUsage }
+func (e *ParseError) Unwrap() error { return ErrUsage }
 
 // Parser is rotini's argument parser, and it is a *service*: a CLI binds it to the
 // context registry under the key "parser" so that (1) parsing is opt-in — a CLI
@@ -145,18 +158,18 @@ func (p *Parser) Deprecations(rtx *Context) []Deprecation {
 // argv). It returns the store and the resolved chain for that deferred validation.
 func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedCommand, error) {
 	if p == nil {
-		return nil, nil, &usageError{msg: "rotini: nil parser"}
+		return nil, nil, &ParseError{Msg: "rotini: nil parser"}
 	}
 	if rtx == nil {
-		return nil, nil, &usageError{msg: "rotini: parse on nil context"}
+		return nil, nil, &ParseError{Msg: "rotini: parse on nil context"}
 	}
 	rv := reflect.ValueOf(out)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return nil, nil, &usageError{msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
+		return nil, nil, &ParseError{Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
 	}
 	chain := rtx.Chain()
 	if len(chain) == 0 {
-		return nil, nil, &usageError{msg: "rotini: no command resolved for this context"}
+		return nil, nil, &ParseError{Msg: "rotini: no command resolved for this context"}
 	}
 	store, err := parseInto(chain, rtx.Args)
 	if err != nil {
@@ -169,7 +182,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 }
 
 // parseInto binds argv to an already-resolved chain, strictly: an unrecognized
-// flag, or a flag missing its value, is a usageError. Command tokens already in
+// flag, or a flag missing its value, is a [ParseError]. Command tokens already in
 // the chain are consumed; everything after the leaf command (and after "--") is a
 // positional argument of the leaf. Declared defaults are applied. parseInto does
 // not check required inputs or enums — that is [validate]'s job — so a handler can
@@ -212,7 +225,12 @@ func parseInto(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
 					i += consumed
 					continue
 				}
-				return nil, &usageError{msg: fmt.Sprintf("unknown flag %q", name)}
+				return nil, &ParseError{
+					Msg:        fmt.Sprintf("unknown flag %q", name),
+					Flag:       name,
+					Token:      name,
+					Candidates: chainFlagIdentifiers(chain),
+				}
 			}
 			var value string
 			switch {
@@ -226,7 +244,7 @@ func parseInto(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
 			default:
 				i++
 				if i >= len(argv) {
-					return nil, &usageError{msg: fmt.Sprintf("flag %q needs a value", name)}
+					return nil, &ParseError{Msg: fmt.Sprintf("flag %q needs a value", name)}
 				}
 				value = argv[i]
 			}
@@ -261,9 +279,16 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 	si := store.scopes[len(chain)-1]
 
 	// A stray positional on a command that branches but takes no arguments is a
-	// mistyped sub-command, not an argument.
+	// mistyped sub-command, not an argument. The error carries the sibling
+	// vocabulary so a handler (with a bound [Suggestor]) can offer corrections.
 	if len(leaf.Commands) > 0 && len(leaf.Arguments) == 0 && len(si.args) > 0 {
-		return &usageError{msg: unknownCommandMsg(leaf, si.args[0])}
+		tok := si.args[0]
+		return &ParseError{
+			Msg:        fmt.Sprintf("unknown command %q for %q", tok, leaf.Name),
+			Command:    leaf.Name,
+			Token:      tok,
+			Candidates: childCommandNames(leaf),
+		}
 	}
 
 	if err := requiredErrors(chain, store); err != nil {
@@ -276,10 +301,15 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 			vals := fsi.flags[fd.Name]
 			for _, v := range vals {
 				if len(fd.Enum) > 0 && !slices.Contains(fd.Enum, v) {
-					return &usageError{msg: fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), flagLabel(fd), strings.Join(fd.Enum, ", "))}
+					return &ParseError{
+						Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), flagLabel(fd), strings.Join(fd.Enum, ", ")),
+						Flag:       flagLabel(fd),
+						Token:      redactValue(v, fd.Secret),
+						Candidates: fd.Enum,
+					}
 				}
 				if isMapType(fd.Type) && !strings.Contains(v, "=") {
-					return &usageError{msg: fmt.Sprintf("%s expects key=value pairs (got %q)", flagLabel(fd), redactValue(v, fd.Secret))}
+					return &ParseError{Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", flagLabel(fd), redactValue(v, fd.Secret))}
 				}
 			}
 			if err := checkConstraints(flagLabel(fd), fd.Type, fd.Constraints, vals, fd.Secret); err != nil {
@@ -293,9 +323,9 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 	// stray positional was handled above as a mistyped sub-command.)
 	if n := len(leaf.Arguments); !hasVariadicArg(leaf.Arguments) && len(si.args) > n {
 		if n == 0 {
-			return &usageError{msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args))}
+			return &ParseError{Msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args))}
 		}
-		return &usageError{msg: fmt.Sprintf("%q accepts at most %d %s (got %d)", leaf.Name, n, plural("argument", n), len(si.args))}
+		return &ParseError{Msg: fmt.Sprintf("%q accepts at most %d %s (got %d)", leaf.Name, n, plural("argument", n), len(si.args))}
 	}
 
 	for i, ad := range leaf.Arguments {
@@ -312,7 +342,11 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 		}
 		for _, v := range vals {
 			if len(ad.Enum) > 0 && !slices.Contains(ad.Enum, v) {
-				return &usageError{msg: fmt.Sprintf("invalid value %q for <%s> (one of: %s)", redactValue(v, ad.Secret), ad.Name, strings.Join(ad.Enum, ", "))}
+				return &ParseError{
+					Msg:        fmt.Sprintf("invalid value %q for <%s> (one of: %s)", redactValue(v, ad.Secret), ad.Name, strings.Join(ad.Enum, ", ")),
+					Token:      redactValue(v, ad.Secret),
+					Candidates: ad.Enum,
+				}
 			}
 		}
 		if err := checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals, ad.Secret); err != nil {
@@ -344,9 +378,9 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 	if isArrayType(typ) || isMapType(typ) {
 		switch n := len(values); {
 		case c.MinItems > 0 && n < c.MinItems:
-			return &usageError{msg: fmt.Sprintf("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)}
+			return &ParseError{Msg: fmt.Sprintf("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)}
 		case c.MaxItems > 0 && n > c.MaxItems:
-			return &usageError{msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)}
+			return &ParseError{Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)}
 		}
 	}
 	for _, v := range values {
@@ -357,10 +391,10 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 				continue // not range-checkable; coerce already tolerates malformed input
 			}
 			if c.Minimum != 0 && n < c.Minimum {
-				return &usageError{msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(c.Minimum), redactValue(v, secret))}
+				return &ParseError{Msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(c.Minimum), redactValue(v, secret))}
 			}
 			if c.Maximum != 0 && n > c.Maximum {
-				return &usageError{msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(c.Maximum), redactValue(v, secret))}
+				return &ParseError{Msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(c.Maximum), redactValue(v, secret))}
 			}
 		case typ == "string":
 			ln := utf8.RuneCountInString(v)
@@ -369,13 +403,13 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 				gotLen = "[redacted]"
 			}
 			if c.MinLength > 0 && ln < c.MinLength {
-				return &usageError{msg: fmt.Sprintf("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)}
+				return &ParseError{Msg: fmt.Sprintf("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)}
 			} else if c.MaxLength > 0 && ln > c.MaxLength {
-				return &usageError{msg: fmt.Sprintf("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)}
+				return &ParseError{Msg: fmt.Sprintf("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)}
 			}
 			if c.Pattern != "" {
 				if ok, err := regexp.MatchString(c.Pattern, v); err == nil && !ok {
-					return &usageError{msg: fmt.Sprintf("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))}
+					return &ParseError{Msg: fmt.Sprintf("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))}
 				}
 			}
 		}
@@ -453,7 +487,7 @@ func validateFlagDependencies(chain []ResolvedCommand, argv []string) error {
 				if len(missing) > 1 {
 					noun, verb = "flags", "are"
 				}
-				return &usageError{msg: fmt.Sprintf("%s %s %s required when %s is set", noun, joinAnd(missing), verb, whenLabel)}
+				return &ParseError{Msg: fmt.Sprintf("%s %s %s required when %s is set", noun, joinAnd(missing), verb, whenLabel)}
 			}
 		}
 	}
@@ -465,22 +499,22 @@ func checkFlagGroup(kind FlagGroupKind, set, all []string) error {
 	switch kind {
 	case FlagGroupMutuallyExclusive:
 		if len(set) > 1 {
-			return &usageError{msg: "flags " + joinAnd(set) + " are mutually exclusive"}
+			return &ParseError{Msg: "flags " + joinAnd(set) + " are mutually exclusive"}
 		}
 	case FlagGroupRequiredTogether:
 		if n := len(set); n > 0 && n < len(all) {
-			return &usageError{msg: "flags " + strings.Join(all, ", ") + " must be used together"}
+			return &ParseError{Msg: "flags " + strings.Join(all, ", ") + " must be used together"}
 		}
 	case FlagGroupOneOf:
 		switch {
 		case len(set) == 0:
-			return &usageError{msg: "exactly one of " + strings.Join(all, ", ") + " is required"}
+			return &ParseError{Msg: "exactly one of " + strings.Join(all, ", ") + " is required"}
 		case len(set) > 1:
-			return &usageError{msg: "flags " + joinAnd(set) + " are mutually exclusive"}
+			return &ParseError{Msg: "flags " + joinAnd(set) + " are mutually exclusive"}
 		}
 	case FlagGroupAtLeastOne:
 		if len(set) == 0 {
-			return &usageError{msg: "at least one of " + strings.Join(all, ", ") + " is required"}
+			return &ParseError{Msg: "at least one of " + strings.Join(all, ", ") + " is required"}
 		}
 	}
 	return nil
@@ -560,7 +594,7 @@ func requiredErrors(chain []ResolvedCommand, store *parsedInputs) error {
 		}
 	}
 	if len(missing) > 0 {
-		return &usageError{msg: "missing required " + plural("input", len(missing)) + ": " + strings.Join(missing, ", ")}
+		return &ParseError{Msg: "missing required " + plural("input", len(missing)) + ": " + strings.Join(missing, ", ")}
 	}
 	return nil
 }
@@ -598,7 +632,7 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
 		if !ok {
-			return 0, &usageError{msg: fmt.Sprintf("unknown flag %q", short)}
+			return 0, &ParseError{Msg: fmt.Sprintf("unknown flag %q", short)}
 		}
 		if fdef.Type == "bool" {
 			addFlag(idx, fdef.Name, "true")
@@ -614,7 +648,7 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 			return 0, nil
 		default:
 			if i+1 >= len(argv) {
-				return 0, &usageError{msg: fmt.Sprintf("flag %q needs a value", short)}
+				return 0, &ParseError{Msg: fmt.Sprintf("flag %q needs a value", short)}
 			}
 			addFlag(idx, fdef.Name, argv[i+1])
 			return 1, nil
@@ -622,7 +656,7 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 	}
 	// Every flag in the cluster was boolean; a trailing "=value" has nothing to bind.
 	if hasInline {
-		return 0, &usageError{msg: fmt.Sprintf("flag %q does not take a value", "-"+body)}
+		return 0, &ParseError{Msg: fmt.Sprintf("flag %q does not take a value", "-"+body)}
 	}
 	return 0, nil
 }
@@ -643,45 +677,38 @@ func findFlagIndex(chain []ResolvedCommand, name string) (FlagDef, int, bool) {
 	return FlagDef{}, -1, false
 }
 
-// unknownCommandMsg builds the error for a mistyped sub-command, appending a
-// "did you mean" suggestion when a close match exists.
-func unknownCommandMsg(cur ResolvedCommand, tok string) string {
-	msg := fmt.Sprintf("unknown command %q for %q", tok, cur.Name)
-	if s := suggest(cur.Commands, tok); s != "" {
-		msg += fmt.Sprintf("\n\nDid you mean %q?", s)
-	}
-	return msg
-}
-
-// suggest returns the closest command name to tok within edit distance 2.
-func suggest(candidates []CommandDef, tok string) string {
-	best, bestDist := "", 3
-	for _, c := range candidates {
-		if d := levenshtein(tok, c.Name); d < bestDist {
-			best, bestDist = c.Name, d
+// childCommandNames is the dispatchable-name vocabulary of a command's visible
+// children — sub-command names and aliases, plus declared remotes — for a
+// mistyped-command [ParseError]'s Candidates.
+func childCommandNames(cur ResolvedCommand) []string {
+	var names []string
+	for _, c := range cur.Commands {
+		if c.Hidden {
+			continue
 		}
+		names = append(names, c.Name)
+		names = append(names, c.Aliases...)
 	}
-	return best
+	for _, r := range cur.Remotes {
+		names = append(names, r.Name)
+		names = append(names, r.Aliases...)
+	}
+	return names
 }
 
-func levenshtein(a, b string) int {
-	prev := make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		cur := make([]int, len(b)+1)
-		cur[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
+// chainFlagIdentifiers is the declared, non-hidden flag vocabulary of the whole
+// resolved chain (ancestor flags resolve on descendants), for an unknown-flag
+// [ParseError]'s Candidates.
+func chainFlagIdentifiers(chain []ResolvedCommand) []string {
+	var ids []string
+	for i := len(chain) - 1; i >= 0; i-- {
+		for _, f := range chain[i].Flags {
+			if !f.Hidden {
+				ids = append(ids, f.Identifiers...)
 			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
 		}
-		prev = cur
 	}
-	return prev[len(b)]
+	return ids
 }
 
 // bindInputs fills a <Cmd>Inputs struct: one field per command on the resolved
@@ -744,7 +771,7 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 			continue
 		}
 		if err := coerce(v.Field(i), raw); err != nil {
-			return &usageError{msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
+			return &ParseError{Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
 		}
 	}
 	return nil
@@ -775,14 +802,14 @@ func bindArgs(v reflect.Value, args []string) error {
 		label := "<" + t.Field(i).Tag.Get("rotini") + ">"
 		if f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String {
 			if err := coerce(f, args[min(idx, len(args)):]); err != nil {
-				return &usageError{msg: fmt.Sprintf("%s: %v", label, err)}
+				return &ParseError{Msg: fmt.Sprintf("%s: %v", label, err)}
 			}
 			idx = len(args)
 			continue
 		}
 		if idx < len(args) {
 			if err := coerce(f, args[idx:idx+1]); err != nil {
-				return &usageError{msg: fmt.Sprintf("%s: %v", label, err)}
+				return &ParseError{Msg: fmt.Sprintf("%s: %v", label, err)}
 			}
 			idx++
 		}

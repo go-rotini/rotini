@@ -55,11 +55,11 @@ func NewBinder(meta BindMeta) *Binder {
 // or a recon bind/validation error for env/config/stdin).
 func (b *Binder) Bind(rtx *Context, out any) error {
 	if b == nil {
-		return &usageError{msg: "rotini: nil binder"}
+		return &ParseError{Msg: "rotini: nil binder"}
 	}
 	rv := reflect.ValueOf(out)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return &usageError{msg: "rotini: Bind out argument must be a non-nil pointer to an inputs struct"}
+		return &ParseError{Msg: "rotini: Bind out argument must be a non-nil pointer to an inputs struct"}
 	}
 
 	// 1. argv → Flags + Arguments, WITHOUT validation: required/enum (and, later,
