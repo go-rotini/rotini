@@ -37,7 +37,7 @@ func TestRun_remoteExecPassesThrough(t *testing.T) {
 	}
 
 	p, out, errb := remoteProgram(def, []string{"ext", "hello", "world"})
-	if code := p.run(p.args); code != 0 {
+	if code, _ := p.run(p.args); code != 0 {
 		t.Fatalf("run = %d, want 0 (stderr: %s)", code, errb)
 	}
 	if got := strings.TrimSpace(out.String()); got != "ext ran: hello world" {
@@ -50,7 +50,7 @@ func TestRun_remotePropagatesExitCode(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", RemoteCommands: []RemoteDef{{Name: "fail", Binary: "app-fail"}}}
 
 	p, _, _ := remoteProgram(def, []string{"fail"})
-	if code := p.run(p.args); code != 3 {
+	if code, _ := p.run(p.args); code != 3 {
 		t.Errorf("remote exit code = %d, want 3", code)
 	}
 }
@@ -59,7 +59,7 @@ func TestRun_remoteNotFound(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", RemoteCommands: []RemoteDef{{Name: "missing", Binary: "app-no-such-plugin-xyz"}}}
 
 	p, _, errb := remoteProgram(def, []string{"missing"})
-	if code := p.run(p.args); code != 1 {
+	if code, _ := p.run(p.args); code != 1 {
 		t.Errorf("missing remote exit = %d, want 1", code)
 	}
 	if !strings.Contains(errb.String(), "not found") {
@@ -73,7 +73,7 @@ func TestRun_discoveryDispatch(t *testing.T) {
 
 	// `acme foo x y` is not a declared command → discovery execs acme-foo with [x y].
 	p, out, errb := remoteProgram(def, []string{"foo", "x", "y"})
-	if code := p.run(p.args); code != 0 {
+	if code, _ := p.run(p.args); code != 0 {
 		t.Fatalf("run = %d, want 0 (stderr: %s)", code, errb)
 	}
 	if got := strings.TrimSpace(out.String()); got != "plugin: x y" {
@@ -125,7 +125,7 @@ func TestRun_discoveryMissing(t *testing.T) {
 	def := Definition{Name: "acme", Handler: "App", Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}}
 
 	p, _, errb := remoteProgram(def, []string{"no-such-plugin-xyz"})
-	if code := p.run(p.args); code != 1 {
+	if code, _ := p.run(p.args); code != 1 {
 		t.Errorf("missing discovered plugin exit = %d, want 1", code)
 	}
 	if !strings.Contains(errb.String(), "not found") {

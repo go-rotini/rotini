@@ -4,29 +4,15 @@
 package main
 
 import (
-	"regexp"
-	"runtime/debug"
-
 	"github.com/go-rotini/rotini"
 	cli "github.com/go-rotini/rotini/internal/cmd/rotini"
 )
 
-func version() string {
-	verFallback := "v0.0.0"
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return verFallback
-	}
-	releaseTagRe := regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
-	if ver := info.Main.Version; releaseTagRe.MatchString(ver) {
-		return ver
-	}
-	return verFallback
-}
+var Version = "0.0.0"
 
 func main() {
 	cli.Program.
 		Bind("parser", rotini.NewParser()).
-		Bind("version", version()).
+		Bind("build", rotini.BuildInfo(Version, &rotini.BuildInformation{Version: "0.0.0"})).
 		Execute()
 }

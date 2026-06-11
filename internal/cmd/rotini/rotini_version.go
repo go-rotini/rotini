@@ -34,6 +34,6 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	version := rotini.MustGet[string](rtx, "version")
-	fmt.Fprintln(rtx.Stdout, version)
+	build := rotini.MustGet[*rotini.BuildInformation](rtx, "build")
+	fmt.Fprintln(rtx.Stdout, build.Version)
 }

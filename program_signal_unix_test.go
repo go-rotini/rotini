@@ -71,7 +71,7 @@ func TestDefaultSignals_gracefulShutdownRunsTeardown(t *testing.T) {
 		}
 	}}
 
-	code := newSigProgram(h).run(nil)
+	code, _ := newSigProgram(h).run(nil)
 
 	if code != 130 {
 		t.Errorf("exit code = %d, want 130 (graceful signal shutdown)", code)

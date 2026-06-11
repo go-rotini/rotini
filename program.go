@@ -142,14 +142,6 @@ func (p *Program) Bind(key string, value any) *Program {
 	return p
 }
 
-// BindIfAbsent registers value under key only if nothing is bound there yet — the
-// registered-default form of [Program.Bind] (see [Context.BindIfAbsent]). It returns the
-// receiver to chain.
-func (p *Program) BindIfAbsent(key string, value any) *Program {
-	p.rtx.BindIfAbsent(key, value)
-	return p
-}
-
 // OnError sets the funnel that handles any panic raised inside a hook (e.g. the
 // [MustGet] on a missing service): the runtime recovers it during
 // dispatch and calls fn(ctx, rtx, err), where fn decides the exit code by calling
@@ -158,7 +150,7 @@ func (p *Program) BindIfAbsent(key string, value any) *Program {
 // set, the default prints the error to stderr and exits 1 (and the panic path
 // floors a 0 to 1, so a funnel that forgets rtx.Exit still fails). OnError returns
 // the receiver so it chains with [program.Bind].
-func (p *Program) OnError(fn func(ctx context.Context, rtx *Context, err error)) *Program {
+func (p *Program) WithRecoveredPanicFn(fn func(ctx context.Context, rtx *Context, err error)) *Program {
 	p.onError = fn
 	return p
 }
@@ -174,8 +166,10 @@ func (p *Program) OnError(fn func(ctx context.Context, rtx *Context, err error))
 // signal forces exit immediately (code 130), skipping any remaining teardown, so a handler
 // stuck ignoring the context can always be interrupted. A caller that wants different
 // behavior supplies its own context and traps signals there.
-func (p *Program) Execute() {
-	p.exit(p.run(p.args))
+func (p *Program) Execute() error {
+	code, err := p.run(p.args)
+	p.exit(code)
+	return err
 }
 
 // run is the testable core of Execute: it resolves the invoked command (no eager
@@ -184,13 +178,13 @@ func (p *Program) Execute() {
 // dispatches the lifecycle. It returns the process exit code instead of calling
 // os.Exit. The only retained protocol intercept is the hidden __complete entry
 // the generated shell scripts invoke.
-func (p *Program) run(argv []string) int {
+func (p *Program) run(argv []string) (int, error) {
 	if len(argv) > 0 && argv[0] == completeCommand {
 		p.rtx.Stdin, p.rtx.Stdout, p.rtx.Stderr = p.stdin, p.stdout, p.stderr
 		for _, c := range complete(p.def, argv[1:], p.handlers, p.rtx) {
 			fmt.Fprintln(p.stdout, c)
 		}
-		return 0
+		return 0, nil
 	}
 
 	// The effective run context. When the caller supplied none (no WithContext), rotini
@@ -276,20 +270,22 @@ func (p *Program) defaultOnError(_ context.Context, rtx *Context, err error) {
 // between forward hooks: forward progress stops, teardown still runs, and the exit code
 // is the conventional signal status. This conversion happens only on the dispatch
 // goroutine, so rtx state stays single-writer; the signal goroutine only cancels ctx.
-func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context, trapped bool) int {
+func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context, trapped bool) (int, error) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
 		m := hv.MethodByName(f.Handler)
 		if !m.IsValid() {
-			fmt.Fprintf(p.stderr, "%s: no handler for command %q (missing method %q)\n", p.def.Name, f.Name, f.Handler)
-			return 1
+			err := fmt.Errorf("no handler for command %q (missing method %q)", f.Name, f.Handler)
+			fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
+			return 1, err
 		}
 		out := m.Call(nil)
 		h, ok := out[0].Interface().(CommandHandlers)
 		if !ok || h == nil {
-			fmt.Fprintf(p.stderr, "%s: handler %q does not implement CommandHandlers\n", p.def.Name, f.Handler)
-			return 1
+			err := fmt.Errorf("handler %q does not implement CommandHandlers", f.Handler)
+			fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
+			return 1, err
 		}
 		handlers[i] = h
 	}
@@ -363,5 +359,5 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 			rtx.exitCode = 1
 		}
 	}
-	return rtx.exitCode
+	return rtx.exitCode, failure
 }

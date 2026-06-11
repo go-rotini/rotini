@@ -77,7 +77,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 	}}
 
 	p, _, errb := newTestProgram(h, args)
-	if code := p.run(p.args); code != 0 {
+	if code, _ := p.run(p.args); code != 0 {
 		t.Fatalf("run() = %d, want 0 (stderr: %s)", code, errb)
 	}
 
@@ -102,7 +102,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 func TestRun_aliasResolves(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&testHandlers{log: &log}, []string{"r", "bob"})
-	if code := p.run(p.args); code != 0 {
+	if code, _ := p.run(p.args); code != 0 {
 		t.Fatalf("run() = %d, want 0", code)
 	}
 	if !contains(log, "run.Run") {
@@ -117,7 +117,7 @@ func TestRun_aliasResolves(t *testing.T) {
 func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&testHandlers{log: &log}, []string{"ru"}) // typo of "run"
-	if code := p.run(p.args); code != 0 {
+	if code, _ := p.run(p.args); code != 0 {
 		t.Fatalf("run() = %d, want 0 (the root handler runs; it owns input errors)", code)
 	}
 	if !contains(log, "app.Run") {
@@ -128,7 +128,7 @@ func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 func TestRun_exitCodePropagates(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.Exit(5) }}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	if code := p.run(p.args); code != 5 {
+	if code, _ := p.run(p.args); code != 5 {
 		t.Errorf("run() = %d, want 5 (handler called Exit)", code)
 	}
 }
@@ -140,13 +140,18 @@ func TestRun_mustGetRoutesToOnError(t *testing.T) {
 		panic(&ServiceError{Key: "no-such-service"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.OnError(func(_ context.Context, rtx *Context, err error) {
+	p.WithRecoveredPanicFn(func(_ context.Context, rtx *Context, err error) {
 		seen = err
 		rtx.Exit(7)
 	})
 
-	if code := p.run(p.args); code != 7 {
+	code, err := p.run(p.args)
+	if code != 7 {
 		t.Fatalf("run() = %d, want 7 (OnError's exit code)", code)
+	}
+	// The recovered panic is also returned to the caller (the new Execute err).
+	if !errors.Is(err, ErrServiceNotFound) {
+		t.Errorf("run returned err = %v, want it to wrap ErrServiceNotFound", err)
 	}
 	if !errors.Is(seen, ErrServiceNotFound) {
 		t.Errorf("OnError got %v, want it to wrap ErrServiceNotFound", seen)
@@ -164,8 +169,8 @@ func TestRun_onErrorWithoutExitStillFails(t *testing.T) {
 		panic(&ServiceError{Key: "missing"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.OnError(func(_ context.Context, _ *Context, _ error) {}) // no rtx.Exit
-	if code := p.run(p.args); code != 1 {
+	p.WithRecoveredPanicFn(func(_ context.Context, _ *Context, _ error) {}) // no rtx.Exit
+	if code, _ := p.run(p.args); code != 1 {
 		t.Errorf("run() = %d, want 1 (panic path floors to non-zero)", code)
 	}
 }
@@ -175,8 +180,13 @@ func TestRun_defaultOnErrorPrintsAndReturns1(t *testing.T) {
 		panic("boom") // a non-error panic value is wrapped before the funnel
 	}}
 	p, _, errb := newTestProgram(h, []string{"run"})
-	if code := p.run(p.args); code != 1 {
+	code, err := p.run(p.args)
+	if code != 1 {
 		t.Fatalf("run() = %d, want 1 (default OnError)", code)
+	}
+	// A non-error panic value is wrapped and returned to the caller.
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("run returned err = %v, want it to carry %q", err, "boom")
 	}
 	if !strings.Contains(errb.String(), "boom") {
 		t.Errorf("default OnError should print the error, stderr: %s", errb)
@@ -239,7 +249,8 @@ func runActs(t *testing.T, args []string, actions map[string]act) (int, []string
 	t.Helper()
 	log := []string{}
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: actions}, args)
-	return p.run(p.args), log
+	code, _ := p.run(p.args)
+	return code, log
 }
 
 // Exit in PreRun: Run is skipped, but PostRun (paired with PreRun) still runs.
@@ -320,11 +331,11 @@ func TestRun_panicRunsTeardownThenOnErrorLast(t *testing.T) {
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "Run", do: func(*Context) { panic("boom") }},
 	}}, []string{"run"})
-	p.OnError(func(_ context.Context, rtx *Context, err error) {
+	p.WithRecoveredPanicFn(func(_ context.Context, rtx *Context, err error) {
 		log = append(log, "onError:"+err.Error())
 		rtx.Exit(2)
 	})
-	code := p.run(p.args)
+	code, _ := p.run(p.args)
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
 		"run.PreRun", "run.Run",
@@ -347,11 +358,11 @@ func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 		"run": {at: "PostRun", do: func(*Context) { panic("teardown-boom") }},
 	}}, []string{"run"})
 	calls := 0
-	p.OnError(func(_ context.Context, rtx *Context, _ error) {
+	p.WithRecoveredPanicFn(func(_ context.Context, rtx *Context, _ error) {
 		calls++
 		rtx.Exit(1)
 	})
-	code := p.run(p.args)
+	code, _ := p.run(p.args)
 	if !contains(log, "app.CascadingPostRun") {
 		t.Errorf("remaining teardown did not run after a teardown panic: %v", log)
 	}

@@ -1,0 +1,20 @@
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/{{.Version}}/schema-spec.json
+command:
+  name: {{.Package}}
+  commands: []
+  inputs:
+    flags:
+      - name: version
+        summary: print version
+        identifiers:
+          - -v
+          - --version
+        schema:
+          type: bool
+      - name: help
+        summary: print help
+        identifiers:
+          - -h
+          - --help
+        schema:
+          type: bool

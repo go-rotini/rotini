@@ -34,7 +34,7 @@ func TestProgram_WithContext_threadsToHooks(t *testing.T) {
 	base := context.WithValue(context.Background(), key{}, "v")
 	var got any
 	p := newCtxProgram(ctxRec{run: func(ctx context.Context) { got = ctx.Value(key{}) }}).WithContext(base)
-	if code := p.run(nil); code != 0 {
+	if code, _ := p.run(nil); code != 0 {
 		t.Fatalf("run exit = %d, want 0", code)
 	}
 	if got != "v" {
