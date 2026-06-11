@@ -616,3 +616,36 @@ func TestValidate_featureDirLint(t *testing.T) {
 		t.Errorf("validate(dir without explicit cmdgen) = %v, want nil (generate backstops)", err)
 	}
 }
+
+// TestValidate_newSpecLints exercises the validate-time rules added for spec
+// gaps: root shape, sibling dispatch collisions (including remote shadowing),
+// duplicate input names, variadic placement, deprecated_identifiers subsets,
+// and remote timeouts.
+func TestValidate_newSpecLints(t *testing.T) {
+	cases := []struct {
+		name, spec, want string
+	}{
+		{"root with $ref", "command:\n  $ref: ./other.yaml\n", "root command cannot use $ref"},
+		{"sibling alias collision", "command:\n  name: app\n  commands:\n    - name: build\n      aliases: [b]\n    - name: bundle\n      aliases: [b]\n", `"b" is claimed by both`},
+		{"remote shadowed by command", "command:\n  name: app\n  commands:\n    - name: plugin\n  remote_commands:\n    - name: plugin\n", `"plugin" is claimed by both`},
+		{"duplicate flag names", "command:\n  name: app\n  inputs:\n    flags:\n      - name: out\n        identifiers: [-o]\n        schema: { type: string }\n      - name: out\n        identifiers: [-O]\n        schema: { type: bool }\n", `flag "out" is declared twice`},
+		{"variadic not last", "command:\n  name: app\n  inputs:\n    arguments:\n      - name: files\n        schema: { type: array }\n      - name: dest\n        schema: { type: string }\n", `"files" is variadic but not last`},
+		{"command deprecated_identifiers not an alias", "command:\n  name: app\n  commands:\n    - name: compile\n      aliases: [build]\n      deprecated_identifiers: [biuld]\n", "not one of its aliases"},
+		{"flag deprecated_identifiers not an identifier", "command:\n  name: app\n  inputs:\n    flags:\n      - name: config\n        identifiers: [--config]\n        deprecated_identifiers: [--conf]\n        schema: { type: string }\n", "not one of its identifiers"},
+		{"remote timeout unparsable", "command:\n  name: app\n  remote_commands:\n    - name: plugin\n      timeout: ten-seconds\n", "not a positive Go duration"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateOnce(writeTemp(t, "spec.yaml", validSpecHeader+tc.spec), "", "collect", "")
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("validate = %v, want a problem containing %q", err, tc.want)
+			}
+		})
+	}
+
+	// The derived flag identifier satisfies the subset rule (no explicit identifiers).
+	ok := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n      - name: dry_run\n        deprecated_identifiers: [--dry-run]\n        schema: { type: bool }\n"
+	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
+		t.Errorf("validate(derived identifier subset) = %v, want nil", err)
+	}
+}

@@ -124,11 +124,13 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 }
 
 // fillStdin decodes piped stdin into the leaf command's Stdin payload field, when it
-// declares one, using the format on its `stdin:"<format>"` tag. Stdin is a single
+// declares one, using its `stdin:"<format>[,required]"` tag. Stdin is a single
 // stream, so only the leaf (the running command) consumes it; when nothing is piped
-// the Stdin field is left nil. The bytes are read from os.Stdin — see readStdin.
-// The decoded payload is validated against the command's stdin JSON Schema (from
-// BindMeta) before binding, so a malformed document is rejected with a clear error.
+// the Stdin field is left nil — unless the spec marked the payload required, in
+// which case an empty stdin is an error. The bytes are read from os.Stdin — see
+// readStdin. The decoded payload is validated against the command's stdin JSON
+// Schema (from BindMeta) before binding, so a malformed document is rejected with
+// a clear error.
 func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 	if v.Kind() != reflect.Struct || v.NumField() == 0 {
 		return nil
@@ -146,12 +148,16 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 	if format == "" {
 		return nil
 	}
+	format, required := parseStdinTag(format)
 
 	data, err := readStdin(rtx.Stdin)
 	if err != nil {
 		return fmt.Errorf("rotini: read stdin: %w", err)
 	}
 	if len(data) == 0 {
+		if required {
+			return fmt.Errorf("rotini: required stdin payload is empty — pipe a %s document", format)
+		}
 		return nil // nothing piped → leave Stdin nil
 	}
 	codec, ok := recon.DefaultCodecs().ByName(format)
@@ -187,6 +193,14 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 	}
 	sf.Set(ptr)
 	return nil
+}
+
+// parseStdinTag splits a generated `stdin:"<format>[,required]"` tag value into
+// the decode format and the required marker (the spec's stdin schema declared
+// required: true — an empty stdin is then an error rather than a nil payload).
+func parseStdinTag(tag string) (format string, required bool) {
+	format, opt, _ := strings.Cut(tag, ",")
+	return format, opt == "required"
 }
 
 // readStdin returns the bytes available on r — the run's stdin ([Context.Stdin], which

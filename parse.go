@@ -39,7 +39,7 @@ func cmdFrame(c CommandDef) ResolvedCommand {
 		Name: c.Name, Handler: c.Handler, DeprecatedIdentifiers: c.DeprecatedIdentifiers,
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
-		Commands: c.Commands, Discovery: c.Discovery,
+		Commands: c.Commands, Remotes: c.Remotes, Discovery: c.Discovery,
 	}
 }
 

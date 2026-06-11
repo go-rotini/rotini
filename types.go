@@ -118,6 +118,7 @@ type CommandDef struct {
 	FlagGroups            []FlagGroup      // cross-flag presence rules validated at parse time
 	FlagDependencies      []FlagDependency // conditional cross-flag requirements validated at parse time
 	Commands              []CommandDef
+	Remotes               []RemoteDef         // co-located remote binaries dispatched as sub-commands of this command
 	Discovery             *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
 }
 

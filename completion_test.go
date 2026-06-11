@@ -531,3 +531,25 @@ func TestComplete_remoteOpaque(t *testing.T) {
 		t.Errorf("remote name completion = %v, want [plugin]", got)
 	}
 }
+
+// TestComplete_nestedRemote confirms remote commands declared on a sub-command
+// (now carried by CommandDef.Remotes) complete by name at depth, and that
+// completion goes opaque past them.
+func TestComplete_nestedRemote(t *testing.T) {
+	def := Definition{
+		Name: "acme", Handler: "Acme",
+		Commands: []CommandDef{{
+			Name: "cluster", Handler: "AcmeCluster",
+			Commands: []CommandDef{{Name: "list", Handler: "AcmeClusterList"}},
+			Remotes:  []RemoteDef{{Name: "scan", Binary: "acme-scan", Aliases: []string{"sc"}}},
+		}},
+	}
+	got := complete(def, []string{"cluster", ""}, nil, nil)
+	want := []string{"list", "sc", "scan"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("complete(cluster) = %v, want %v", got, want)
+	}
+	if got := complete(def, []string{"cluster", "scan", ""}, nil, nil); got != nil {
+		t.Errorf("complete past nested remote = %v, want nil", got)
+	}
+}

@@ -2454,3 +2454,64 @@ func TestGenerateHiddenInDefinition(t *testing.T) {
 		t.Error("visible flag must not carry Hidden")
 	}
 }
+
+// TestGenerateNestedRemoteCommands verifies remote_commands declared on a
+// sub-command (not just the root) reach the Definition — the runtime can only
+// dispatch/complete what the literal carries — and that remotes appear in the
+// parent command's help Commands list as the schema promises.
+func TestGenerateNestedRemoteCommands(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"command:\n"+
+			"  name: acme\n"+
+			"  commands:\n"+
+			"    - name: cluster\n"+
+			"      summary: manage clusters\n"+
+			"      remote_commands:\n"+
+			"        - name: scan\n"+
+			"          aliases: [sc]\n"+
+			"          summary: scan the cluster\n"+
+			"          timeout: 10s\n")
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
+	t.Chdir(tmp)
+
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	gen := filepath.Join(tmp, "internal", "cmd", "acme", "zz_rotini.gen.go")
+	mustContain(t, gen,
+		`Name: "cluster"`,
+		"Remotes: []rotini.RemoteDef{",
+		`{Name: "scan", Binary: "acme-scan", Aliases: []string{"sc"}, Timeout: 10000000000}`,
+	)
+	// The remote joins the cluster page's Commands list, and the usage line gains
+	// the <command> slot remotes warrant.
+	cluster := filepath.Join(tmp, "internal", "cmd", "acme", "embed", "help_acme_cluster.txt")
+	mustContain(t, cluster, "acme cluster <command>", "scan;sc", "scan the cluster")
+}
+
+// TestGenerateStdinRequiredTag verifies a required stdin payload rides the
+// generated struct tag — the binder rejects an empty stdin only when the spec
+// declared required: true.
+func TestGenerateStdinRequiredTag(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"command:\n"+
+			"  name: app\n"+
+			"  inputs:\n"+
+			"    stdin:\n"+
+			"      format: yaml\n"+
+			"      schema: { type: object, required: true }\n")
+	t.Chdir(tmp)
+
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "app", "zz_rotini.gen.go"),
+		"`stdin:\"yaml,required\"`")
+}

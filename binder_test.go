@@ -532,3 +532,60 @@ type tbNoReqCmd struct {
 		Endpoint string `rotini:"endpoint" recon:"api.endpoint"`
 	}
 }
+
+// Required-stdin shapes: the generated `stdin:"<format>,required"` tag makes an
+// empty stdin an error instead of a nil payload.
+type tbStdinReqPayload struct {
+	Kind string `recon:"kind"`
+}
+
+type tbStdinReqCommandInputs struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *tbStdinReqPayload `stdin:"yaml,required"`
+}
+
+type tbStdinReqInputs struct {
+	App tbStdinReqCommandInputs
+}
+
+// TestBinder_stdinRequired confirms the spec's stdin required: true is honored:
+// empty stdin errors, a piped document binds.
+func TestBinder_stdinRequired(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App"}
+
+	rtx := NewContextFor(def, nil)
+	rtx.Stdin = strings.NewReader("")
+	var in tbStdinReqInputs
+	err := NewBinder(BindMeta{}).Bind(rtx, &in)
+	if err == nil || !strings.Contains(err.Error(), "required stdin payload is empty") {
+		t.Errorf("Bind(empty required stdin) = %v, want a required-stdin error", err)
+	}
+
+	rtx2 := NewContextFor(def, nil)
+	rtx2.Stdin = strings.NewReader("kind: demo\n")
+	var in2 tbStdinReqInputs
+	if err := NewBinder(BindMeta{}).Bind(rtx2, &in2); err != nil {
+		t.Fatalf("Bind(piped required stdin) = %v", err)
+	}
+	if in2.App.Stdin == nil || in2.App.Stdin.Kind != "demo" {
+		t.Errorf("payload = %+v, want Kind=demo", in2.App.Stdin)
+	}
+}
+
+func TestParseStdinTag(t *testing.T) {
+	for tag, want := range map[string]struct {
+		format   string
+		required bool
+	}{
+		"yaml":          {"yaml", false},
+		"yaml,required": {"yaml", true},
+		"json,required": {"json", true},
+		"json,optional": {"json", false}, // unknown markers are ignored
+	} {
+		format, required := parseStdinTag(tag)
+		if format != want.format || required != want.required {
+			t.Errorf("parseStdinTag(%q) = (%q, %v), want (%q, %v)", tag, format, required, want.format, want.required)
+		}
+	}
+}

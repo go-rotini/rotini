@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-rotini/jsonschema"
 )
@@ -245,6 +246,7 @@ func lintFeatureDirs(conf *Conf) []error {
 // isolated testing. The order is observable (collect mode joins problems in order), so
 // keep it stable.
 var specLints = []func(*Spec) []error{
+	lintRootCommand,
 	lintImportConsistency,
 	lintLocalTimeout,
 	lintFlagGroups,
@@ -252,6 +254,179 @@ var specLints = []func(*Spec) []error{
 	lintDuplicateFlagIdentifiers,
 	lintSchemaRefs,
 	lintHandlerFilenames,
+	lintSiblingCollisions,
+	lintDuplicateInputNames,
+	lintVariadicArguments,
+	lintDeprecatedIdentifiers,
+	lintRemoteTimeouts,
+}
+
+// lintRootCommand enforces what the shared Command shape can't: the top-level
+// command is the binary itself, so it must carry a name and cannot be composed
+// via $ref. Generate enforces the same rule — validate is the gate.
+func lintRootCommand(spec *Spec) []error {
+	var problems []error
+	if spec.Command.Ref != "" {
+		problems = append(problems, &problem{kind: "spec", loc: "command", msg: "the root command cannot use $ref — compose child specs as sub-commands instead"})
+	}
+	if spec.Command.Name == "" {
+		problems = append(problems, &problem{kind: "spec", loc: "command", msg: "the root command must have a name (it is the binary name)"})
+	}
+	return problems
+}
+
+// lintSiblingCollisions rejects duplicate dispatch tokens among one command's
+// children: sub-command names and aliases, plus remote-command names and
+// aliases, all share a single namespace (dispatch tries sub-commands first, so
+// a colliding remote would be silently shadowed). Generate errors on the
+// command/alias subset of this; validate is the gate.
+func lintSiblingCollisions(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		claimedBy := map[string]string{} // token -> the sibling that first claimed it
+		claim := func(owner string, tokens ...string) {
+			for _, tok := range tokens {
+				if tok == "" {
+					continue
+				}
+				if prev, dup := claimedBy[tok]; dup {
+					problems = append(problems, &problem{
+						kind: "spec",
+						loc:  "command " + path,
+						msg:  fmt.Sprintf("dispatch token %q is claimed by both %q and %q", tok, prev, owner),
+					})
+					continue
+				}
+				claimedBy[tok] = owner
+			}
+		}
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			owner := child.Name
+			if owner == "" {
+				owner = child.Ref
+			}
+			claim(owner, append([]string{child.Name}, child.Aliases...)...)
+		}
+		for _, r := range c.RemoteCommands {
+			claim("remote "+r.Name, append([]string{r.Name}, r.Aliases...)...)
+		}
+	})
+	return problems
+}
+
+// lintDuplicateInputNames rejects two inputs of the same channel sharing a
+// logical name on one command — codegen derives one Go field per name, so a
+// duplicate would emit an uncompilable struct (caught here as a clear spec
+// error instead of a gofmt failure at generate time).
+func lintDuplicateInputNames(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		if c.Inputs == nil {
+			return
+		}
+		seen := map[string]string{} // channel+name -> first declaration
+		eachInputSchema(c.Inputs, func(channel, name string, _ *InputSchema) {
+			if name == "" {
+				return // stdin has no logical name
+			}
+			key := channel + "\x00" + name
+			if _, dup := seen[key]; dup {
+				problems = append(problems, &problem{
+					kind: "spec",
+					loc:  "command " + path,
+					msg:  fmt.Sprintf("%s %q is declared twice — each %s needs a unique name", channel, name, channel),
+				})
+				return
+			}
+			seen[key] = name
+		})
+	})
+	return problems
+}
+
+// lintVariadicArguments rejects a variadic (slice-typed) argument anywhere but
+// the last position — a trailing variadic absorbs the remaining positionals, so
+// anything declared after it could never bind.
+func lintVariadicArguments(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		if c.Inputs == nil {
+			return
+		}
+		for i, a := range c.Inputs.Arguments {
+			if i == len(c.Inputs.Arguments)-1 {
+				break
+			}
+			if strings.HasPrefix(getSchemaType(a.Schema), "[]") {
+				problems = append(problems, &problem{
+					kind: "spec",
+					loc:  "command " + path,
+					msg:  fmt.Sprintf("argument %q is variadic but not last — it would absorb every remaining positional, so later arguments could never bind", a.Name),
+				})
+			}
+		}
+	})
+	return problems
+}
+
+// lintDeprecatedIdentifiers enforces the documented subset rule: a command's
+// deprecated_identifiers must be aliases it declares, and a flag's must be
+// identifiers it declares (or derives) — an unlisted token would never be
+// reported as deprecated, silently voiding the annotation.
+func lintDeprecatedIdentifiers(spec *Spec) []error {
+	var problems []error
+	subset := func(path, owner string, declared, deprecated []string, vocab string) {
+		known := map[string]bool{}
+		for _, d := range declared {
+			known[d] = true
+		}
+		for _, d := range deprecated {
+			if !known[d] {
+				msg := fmt.Sprintf("%s deprecated_identifiers entry %q is not one of its %s — it could never be reported as deprecated", owner, d, vocab)
+				problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: didYouMean(msg, d, declared)})
+			}
+		}
+	}
+	walkCommands(spec, func(c *Command, path string) {
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			if len(child.DeprecatedIdentifiers) > 0 {
+				subset(path, fmt.Sprintf("sub-command %q", child.Name), child.Aliases, child.DeprecatedIdentifiers, "aliases")
+			}
+		}
+		if c.Inputs == nil {
+			return
+		}
+		for _, f := range c.Inputs.Flags {
+			if len(f.DeprecatedIdentifiers) > 0 {
+				subset(path, fmt.Sprintf("flag %q", f.Name), flagIdentifiers(f), f.DeprecatedIdentifiers, "identifiers")
+			}
+		}
+	})
+	return problems
+}
+
+// lintRemoteTimeouts rejects a remote_commands timeout that does not parse as a
+// Go duration — codegen would otherwise drop it silently, leaving the remote
+// unbounded despite the declared limit.
+func lintRemoteTimeouts(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		for _, r := range c.RemoteCommands {
+			if r.Timeout == "" {
+				continue
+			}
+			if d, err := time.ParseDuration(r.Timeout); err != nil || d <= 0 {
+				problems = append(problems, &problem{
+					kind: "spec",
+					loc:  "command " + path,
+					msg:  fmt.Sprintf("remote_commands %q timeout %q is not a positive Go duration (e.g. \"10s\", \"1m30s\")", r.Name, r.Timeout),
+				})
+			}
+		}
+	})
+	return problems
 }
 
 // walkCommands visits every command in the spec depth-first (pre-order), passing a

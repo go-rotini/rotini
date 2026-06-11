@@ -416,16 +416,22 @@ func stdinTypeExpr(prefix string, in *Inputs) string {
 	return "*" + prefix + "Stdin"
 }
 
-// stdinFormatExpr returns a command's stdin decode format (the binder reads it from
-// the Stdin field's `stdin:"<format>"` tag), defaulting to json. "" when no stdin.
+// stdinFormatExpr returns the value of a command's `stdin:"<format>[,required]"`
+// struct tag: the decode format (defaulting to json), with ",required" appended
+// when the spec marks the payload required — the binder then rejects an empty
+// stdin instead of leaving the payload nil. "" when no stdin.
 func stdinFormatExpr(in *Inputs) string {
 	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
 		return ""
 	}
-	if in.Stdin.Format != "" {
-		return in.Stdin.Format
+	format := in.Stdin.Format
+	if format == "" {
+		format = "json"
 	}
-	return "json"
+	if in.Stdin.Schema.Required {
+		format += ",required"
+	}
+	return format
 }
 
 // argFields returns the <Prefix>Arguments struct fields for a command's inputs.
@@ -713,6 +719,9 @@ func rnodesLiteral(host string, nodes []rnode) string {
 		writeInputDefsLiteral(b, n.inputs)
 		if cl := rnodesLiteral(host, n.children); cl != "" {
 			b.WriteString("Commands: " + cl + ",\n")
+		}
+		if rl := remoteDefsLiteral(host, n.remotes); rl != "" {
+			b.WriteString("Remotes: " + rl + ",\n")
 		}
 		if dl := discoveryLiteral(host, n.discovery); dl != "" {
 			b.WriteString("Discovery: " + dl + ",\n")
@@ -1357,14 +1366,15 @@ type rnode struct {
 	prefix                string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
 	aliases               []string
 	inputs                *Inputs
-	help                  cmdHelp          // flattened help fields; for a composed root, from the child spec
-	output                *Schema          // command's output type (own commands only; nil for composed)
-	discovery             *RemoteDiscovery // command's plugin discovery (nil = off)
-	hidden                bool             // omit from the parent's generated Commands list
-	group                 string           // group label that buckets this command in the parent's Commands list
-	deprecated            string           // deprecation note for the parent's Commands list (help annotation)
-	deprecatedIdentifiers []string         // deprecated aliases of this command (runtime Deprecations)
-	composed              bool             // grafted from a $ref'd child (its types live in the child's cligen)
+	help                  cmdHelp             // flattened help fields; for a composed root, from the child spec
+	output                *Schema             // command's output type (own commands only; nil for composed)
+	discovery             *RemoteDiscovery    // command's plugin discovery (nil = off)
+	hidden                bool                // omit from the parent's generated Commands list
+	group                 string              // group label that buckets this command in the parent's Commands list
+	deprecated            string              // deprecation note for the parent's Commands list (help annotation)
+	deprecatedIdentifiers []string            // deprecated aliases of this command (runtime Deprecations)
+	composed              bool                // grafted from a $ref'd child (its types live in the child's cligen)
+	remotes               []RemoteCommandSpec // co-located remote sub-commands declared on this command
 	children              []rnode
 }
 
@@ -1504,6 +1514,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			deprecated:            c.Deprecated,
 			deprecatedIdentifiers: c.DeprecatedIdentifiers,
 			composed:              ctx.composed,
+			remotes:               c.RemoteCommands,
 			children:              children,
 		})
 	}
@@ -1769,7 +1780,7 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootName,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree, nil),
+		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootRemotes, nil),
 	}}
 
 	// cascading carries the cascading flags accumulated from a node's ancestors
@@ -1787,7 +1798,7 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     buildHelpData(invocation, n.help, n.inputs, n.children, cascading),
+				data:     buildHelpData(invocation, n.help, n.inputs, n.children, n.remotes, cascading),
 			})
 			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
 			walk(n.children, childChain, childNames, childCascading)
@@ -1864,8 +1875,10 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 }
 
 // buildHelpData assembles the template context for one command from its help
-// fields, inputs, and direct children. Hidden children/inputs are excluded.
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, ancestorCascading []templateDocFlagRow) templateHelpData {
+// fields, inputs, direct children, and remote sub-commands. Hidden
+// children/inputs are excluded; remotes join the Commands list (they dispatch
+// like any sub-command).
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, remotes []RemoteCommandSpec, ancestorCascading []templateDocFlagRow) templateHelpData {
 	d := templateHelpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
@@ -1892,6 +1905,13 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Aliases:    c.aliases,
 			Group:      c.group,
 			Deprecated: c.deprecated,
+		})
+	}
+	for _, r := range remotes {
+		cmds = append(cmds, templateDocCommandRow{
+			Name:    r.Name,
+			Summary: r.Summary,
+			Aliases: r.Aliases,
 		})
 	}
 	d.CommandGroups = groupCommands(cmds)
@@ -1946,7 +1966,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			})
 		}
 	}
-	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children))
+	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(remotes) > 0)
 	return d
 }
 
