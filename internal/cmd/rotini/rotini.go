@@ -34,8 +34,8 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.Exit(0)
 		return
 	case flags.Version:
-		build := rotini.MustGet[*rotini.BuildInformation](rtx, "build")
-		fmt.Fprintln(rtx.Stdout, build.Version)
+		build := rotini.MustGet[*rotini.Build](rtx, "build")
+		fmt.Fprintf(rtx.Stdout, "v%s\n", build.VersionSemantic)
 		rtx.Exit(0)
 		return
 	default:

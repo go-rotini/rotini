@@ -16,18 +16,18 @@ type svc struct {
 	val any
 }
 
-// testVersion is the value the harness binds under "version" — the DI seam main.go fills
-// with version() — so the version paths print a known, stable value (and a sentinel, not a
-// real version, to prove the bound value is what flows through).
-const testVersion = "vTEST"
+// testVersion is the VersionSemantic stamped into the *rotini.Build the harness binds under
+// "build"; the version paths print it (as "v"+VersionSemantic), so this sentinel proves the
+// bound value flows through.
+const testVersion = "9.9.9"
 
 // runRotini drives the companion through the real program lifecycle exactly as main.go
 // would — capturing stdout/stderr and recording the exit code — so a handler's every path
-// is exercised end-to-end. "parser" and "version" are the services main.go binds, so both
-// are always bound here too (we are testing handler logic, not those deps). The handlers pass
-// "version" straight to internal.{Generate,Validate,Initialize}, which strip the leading "v"
-// for the $schema segment; the validate/generate paths only reach the $schema-version check
-// for a schema-valid spec, which these handler tests don't exercise. A handler's own work
+// is exercised end-to-end. "parser" and "build" are the services main.go binds, so both
+// are always bound here too (we are testing handler logic, not those deps). The version paths
+// print build.Version; the work handlers feed build.VersionSemantic to
+// internal.{Generate,Validate,Initialize} for the $schema segment, a path these handler tests
+// don't reach (their work dependency is doubled or errors out early). A handler's own work
 // dependency (generate/validate/initialize) is self-bound via BindIfAbsent, so leaving it
 // unbound here exercises that real production wiring. Extra binds inject doubles for that work
 // dependency. WithContext opts out of the default signal trap, which these tests don't exercise.
@@ -41,7 +41,7 @@ func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string
 		WithStderr(&errb).
 		WithExit(func(c int) { code = c }).
 		Bind("parser", rotini.NewParser()).
-		Bind("version", testVersion)
+		Bind("build", &rotini.Build{VersionSemantic: testVersion})
 	for _, b := range binds {
 		p.Bind(b.key, b.val)
 	}

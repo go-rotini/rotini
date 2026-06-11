@@ -39,8 +39,8 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
-	version := rotini.MustGet[string](rtx, "version")
-	rtx.BindIfAbsent("validate", internal.NewProcessor(version).Validate)
+	build := rotini.MustGet[*rotini.Build](rtx, "build")
+	rtx.BindIfAbsent("validate", internal.NewProcessor(build.VersionSemantic).Validate)
 	validate := rotini.MustGet[internal.ValidateFn](rtx, "validate")
 
 	err := validate(
