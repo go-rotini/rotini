@@ -204,6 +204,46 @@ func TestValidate_remoteTimeoutAccepted(t *testing.T) {
 	}
 }
 
+func TestValidate_dottedKeys(t *testing.T) {
+	// dotted_keys on a map[string]any flag is the valid shape.
+	valid := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: set\n" +
+		"        schema: { type: map, dotted_keys: true }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
+		t.Errorf("Validate(dotted_keys on a map flag) = %v, want nil", err)
+	}
+
+	// A typed-value map has nowhere to hang a subtree.
+	typed := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    flags:\n" +
+		"      - name: set\n" +
+		"        schema: { type: \"map[string]string\", dotted_keys: true }\n"
+	err := validateOnce(writeTemp(t, "spec.yaml", typed), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "dotted_keys") || !strings.Contains(err.Error(), "map[string]string") {
+		t.Errorf("Validate(dotted_keys on map[string]string) = %v, want a type rejection", err)
+	}
+
+	// dotted assignment is command-line grammar: flags only.
+	onEnv := validSpecHeader +
+		"command:\n" +
+		"  name: app\n" +
+		"  inputs:\n" +
+		"    env:\n" +
+		"      - name: overrides\n" +
+		"        schema: { type: map, dotted_keys: true }\n"
+	err = validateOnce(writeTemp(t, "spec.yaml", onEnv), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "flags only") {
+		t.Errorf("Validate(dotted_keys on env input) = %v, want a flags-only rejection", err)
+	}
+}
+
 func TestValidate_flagGroupUnknownFlag(t *testing.T) {
 	// A flag_groups entry referencing a flag the command doesn't declare is rejected.
 	spec := validSpecHeader +

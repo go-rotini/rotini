@@ -254,6 +254,39 @@ func TestComplete_nestedSubcommands(t *testing.T) {
 	}
 }
 
+// TestComplete_mapKeyPaths covers a map flag's declared key vocabulary: paths
+// complete up to the '=' (the value past it is the user's), and the dynamic
+// completer still outranks the static paths.
+func TestComplete_mapKeyPaths(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{
+			Name: "set", Identifiers: []string{"--set"}, Type: "map[string]any",
+			DottedKeys: true, KeyPaths: []string{"image.tag", "replicas"},
+		}},
+	}
+	cases := []struct {
+		name  string
+		words []string
+		want  []string
+	}{
+		{"all key paths", []string{"--set", ""}, []string{"image.tag=", "replicas="}},
+		{"key path prefix", []string{"--set", "ima"}, []string{"image.tag="}},
+		{"past the '=' offers nothing", []string{"--set", "image.tag="}, nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := complete(def, c.words, nil, nil)
+			if len(got) == 0 && len(c.want) == 0 {
+				return
+			}
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("complete(%v) = %v, want %v", c.words, got, c.want)
+			}
+		})
+	}
+}
+
 // TestComplete_noAutoHelpFlag pins the ethos: completion never auto-adds -h/--help.
 // They appear only when the CLI declares a help flag (Pillar 1 — no framework-injected
 // flags).

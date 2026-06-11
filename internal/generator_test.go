@@ -8,6 +8,7 @@ import (
 	"go/format"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2117,6 +2118,101 @@ func TestGoFieldType(t *testing.T) {
 	nullable.Nullable = true
 	if got := goFieldType(nullable); got != "*int" {
 		t.Errorf("goFieldType(nullable int) = %q, want *int", got)
+	}
+}
+
+func TestGetSchemaType_arrayItems(t *testing.T) {
+	cases := []struct {
+		name  string
+		typ   string
+		items *Schema
+		want  string
+	}{
+		{"array without items stays []string", "array", nil, "[]string"},
+		{"array of int", "array", &Schema{BaseSchema: BaseSchema{Type: "int"}}, "[]int"},
+		{"array of integer (JSON Schema name)", "array", &Schema{BaseSchema: BaseSchema{Type: "integer"}}, "[]int"},
+		{"array of duration", "array", &Schema{BaseSchema: BaseSchema{Type: "duration"}}, "[]time.Duration"},
+		{"array of imported type", "array", &Schema{BaseSchema: BaseSchema{Type: "uuid.UUID"}}, "[]uuid.UUID"},
+		{"array of named schema", "array", &Schema{BaseSchema: BaseSchema{Ref: "#/schemas/Widget"}}, "[]Widget"},
+		{"[]string spelling honors items too", "[]string", &Schema{BaseSchema: BaseSchema{Type: "int"}}, "[]int"},
+		{"items without a type default to string", "array", &Schema{}, "[]string"},
+		{"non-array type ignores items", "int", &Schema{BaseSchema: BaseSchema{Type: "bool"}}, "int"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &InputSchema{BaseSchema: BaseSchema{Type: tc.typ, Items: tc.items}}
+			if got := getSchemaType(s); got != tc.want {
+				t.Errorf("getSchemaType(%s items=%+v) = %q, want %q", tc.typ, tc.items, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestKeyPaths(t *testing.T) {
+	obj := func(props map[string]Schema) Schema {
+		return Schema{BaseSchema: BaseSchema{Type: "object", Properties: props}}
+	}
+	nested := map[string]Schema{
+		"image":    obj(map[string]Schema{"tag": {}, "pullPolicy": {}}),
+		"replicas": {},
+	}
+
+	dotted := &InputSchema{BaseSchema: BaseSchema{Type: "map", Properties: nested}, DottedKeys: true}
+	if got, want := keyPaths(dotted), []string{"image.pullPolicy", "image.tag", "replicas"}; !slices.Equal(got, want) {
+		t.Errorf("keyPaths(dotted) = %v, want %v", got, want)
+	}
+
+	// Without dotted_keys only top-level names are keys ('.' would be literal).
+	plain := &InputSchema{BaseSchema: BaseSchema{Type: "map", Properties: nested}}
+	if got, want := keyPaths(plain), []string{"image", "replicas"}; !slices.Equal(got, want) {
+		t.Errorf("keyPaths(plain) = %v, want %v", got, want)
+	}
+
+	// Non-map types and property-less maps offer no key vocabulary.
+	if got := keyPaths(&InputSchema{BaseSchema: BaseSchema{Type: "string", Properties: nested}}); got != nil {
+		t.Errorf("keyPaths(non-map) = %v, want nil", got)
+	}
+	if got := keyPaths(&InputSchema{BaseSchema: BaseSchema{Type: "map"}}); got != nil {
+		t.Errorf("keyPaths(no properties) = %v, want nil", got)
+	}
+	if got := keyPaths(nil); got != nil {
+		t.Errorf("keyPaths(nil) = %v, want nil", got)
+	}
+}
+
+func TestFlagDefsLiteral_dottedKeys(t *testing.T) {
+	in := &Inputs{Flags: []FlagInput{{
+		Name: "set",
+		Schema: &InputSchema{
+			BaseSchema: BaseSchema{Type: "map", Properties: map[string]Schema{"replicas": {}}},
+			DottedKeys: true,
+		},
+	}}}
+	got := flagDefsLiteral(in)
+	for _, want := range []string{"DottedKeys: true", `KeyPaths: []string{"replicas"}`, `Type: "map[string]any"`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("flagDefsLiteral missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestFieldImport_arrayItems(t *testing.T) {
+	cases := []struct {
+		name   string
+		schema *InputSchema
+		want   string
+	}{
+		{"items duration implies time", &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Type: "duration"}}}}, "time"},
+		{"items explicit import", &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Type: "uuid.UUID", Import: "github.com/google/uuid"}}}}, "github.com/google/uuid"},
+		{"schema-level import wins", &InputSchema{BaseSchema: BaseSchema{Type: "array", Import: "example.com/x", Items: &Schema{BaseSchema: BaseSchema{Type: "duration"}}}}, "example.com/x"},
+		{"plain array needs none", &InputSchema{BaseSchema: BaseSchema{Type: "array"}}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fieldImport(tc.schema); got != tc.want {
+				t.Errorf("fieldImport = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

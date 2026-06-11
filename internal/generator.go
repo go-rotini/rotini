@@ -658,7 +658,41 @@ func flagDefsLiteral(in *Inputs) string {
 		if len(f.DeprecatedIdentifiers) > 0 {
 			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
 		}
+		if f.Schema != nil && f.Schema.DottedKeys {
+			b.WriteString(", DottedKeys: true")
+		}
+		if kp := keyPaths(f.Schema); len(kp) > 0 {
+			b.WriteString(", KeyPaths: " + goStringSlice(kp))
+		}
 	})
+}
+
+// keyPaths flattens a map flag's declared properties into the key vocabulary
+// shell completion offers before the '=': dotted paths through nested object
+// properties when the flag opts into dotted_keys, top-level property names
+// otherwise. Sorted, since properties is a map. Nil for non-map flags.
+func keyPaths(schema *InputSchema) []string {
+	if schema == nil || !strings.HasPrefix(getSchemaType(schema), "map[") || len(schema.Properties) == 0 {
+		return nil
+	}
+	var out []string
+	var walk func(prefix string, props map[string]Schema)
+	walk = func(prefix string, props map[string]Schema) {
+		for name, p := range props {
+			path := name
+			if prefix != "" {
+				path = prefix + "." + name
+			}
+			if schema.DottedKeys && len(p.Properties) > 0 {
+				walk(path, p.Properties)
+				continue
+			}
+			out = append(out, path)
+		}
+	}
+	walk("", schema.Properties)
+	sort.Strings(out)
+	return out
 }
 
 func argDefsLiteral(in *Inputs) string {
@@ -785,15 +819,32 @@ func constraintsLiteral(schema *InputSchema) string {
 }
 
 // getSchemaType resolves an input schema to the Definition's type string,
-// defaulting to "string".
+// defaulting to "string". An array schema honors its `items:` element type
+// ("array" + items int → "[]int"); without items it stays "[]string".
 func getSchemaType(schema *InputSchema) string {
 	if schema != nil {
 		if name := refTypeName(schema.Ref); name != "" {
 			return name
 		}
 		if schema.Type != "" {
-			return jsonSchemaTypeToGo(schema.Type)
+			t := jsonSchemaTypeToGo(schema.Type)
+			if t == "[]string" && schema.Items != nil {
+				return "[]" + itemGoType(schema.Items)
+			}
+			return t
 		}
+	}
+	return "string"
+}
+
+// itemGoType resolves an array schema's items to the element Go type,
+// defaulting to "string".
+func itemGoType(items *Schema) string {
+	if name := refTypeName(items.Ref); name != "" {
+		return name
+	}
+	if items.Type != "" {
+		return jsonSchemaTypeToGo(items.Type)
 	}
 	return "string"
 }
@@ -1191,6 +1242,14 @@ func fieldImport(schema *InputSchema) string {
 	}
 	if imp := strings.TrimSpace(schema.Import); imp != "" {
 		return imp
+	}
+	// An array's element type carries the import: explicit items.import first,
+	// then the built-in vocabulary (items duration → "time").
+	if schema.Items != nil && jsonSchemaTypeToGo(schema.Type) == "[]string" {
+		if imp := strings.TrimSpace(schema.Items.Import); imp != "" {
+			return imp
+		}
+		return builtinImport(schema.Items.Type)
 	}
 	return builtinImport(schema.Type)
 }

@@ -210,11 +210,19 @@ func pendingValueFlag(context []string) (string, bool) {
 }
 
 // flagValueCandidates returns the candidates for one flag's value: the owning
-// handler's dynamic completer when it answers, else the flag's static enum,
-// else nothing (so the shell falls back to its default completion).
+// handler's dynamic completer when it answers, else a map flag's declared key
+// vocabulary (completed up to the '='), else the flag's static enum, else
+// nothing (so the shell falls back to its default completion).
 func flagValueCandidates(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner string, fd FlagDef, partial string) []string {
 	if cands, dyn := dynamicFlagValues(handlers, rtx, chain, words, owner, fd.Name, partial); dyn {
 		return cands
+	}
+	if len(fd.KeyPaths) > 0 && isMapType(fd.Type) && !strings.Contains(partial, "=") {
+		keys := make([]string, len(fd.KeyPaths))
+		for i, k := range fd.KeyPaths {
+			keys[i] = k + "=" // the value past the '=' is the user's to write
+		}
+		return keys
 	}
 	return fd.Enum
 }

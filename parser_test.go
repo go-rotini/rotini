@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -292,6 +293,48 @@ func TestParse_variadicArgItemCount(t *testing.T) {
 	}
 	if err := NewParser().Parse(NewContextFor(def, []string{"a", "b"}), &in); err != nil {
 		t.Errorf("unexpected error for two files: %v", err)
+	}
+}
+
+// TestParse_doubleDashTerminator pins FLAG-07 through Parser.Parse (resolveChain's
+// handling has its own test): everything after "--" is positional — even tokens
+// that look like flags — and bare "-" is an ordinary positional value anywhere
+// (its stdin-sentinel *meaning* belongs to the handler; the grammar just passes
+// it through).
+func TestParse_doubleDashTerminator(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags:     []FlagDef{{Name: "verbose", Identifiers: []string{"--verbose", "-v"}, Type: "bool"}},
+		Arguments: []ArgDef{{Name: "files", Type: "[]string", Variadic: true}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Verbose bool `rotini:"verbose"`
+			}
+			Arguments struct {
+				Files []string `rotini:"files"`
+			}
+		}
+	}
+
+	var in inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--verbose", "--", "--not-a-flag", "-", "-v"}), &in); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if !in.App.Flags.Verbose {
+		t.Error("flag before the -- terminator not parsed")
+	}
+	if want := []string{"--not-a-flag", "-", "-v"}; !reflect.DeepEqual(in.App.Arguments.Files, want) {
+		t.Errorf("post-terminator positionals = %v, want %v (flag-looking tokens included)", in.App.Arguments.Files, want)
+	}
+
+	var alone inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"-"}), &alone); err != nil {
+		t.Fatalf("Parse(bare -): %v", err)
+	}
+	if want := []string{"-"}; !reflect.DeepEqual(alone.App.Arguments.Files, want) {
+		t.Errorf("bare - = %v, want %v (a value, never a flag)", alone.App.Arguments.Files, want)
 	}
 }
 
@@ -1037,6 +1080,318 @@ func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
 	}
 	if got := in.Run.Arguments.Rest; len(got) != 2 || got[0] != "extra1" || got[1] != "extra2" {
 		t.Errorf("Rest = %v, want [extra1 extra2]", got)
+	}
+}
+
+// Typed-slice shapes: array flags/arguments whose items: declares a non-string
+// element type (W4-S1) — generated as []int / []time.Duration / named-string
+// slices, each element coerced individually.
+type tsFlags struct {
+	Ports  []int           `rotini:"ports"`
+	Waits  []time.Duration `rotini:"waits"`
+	Levels []logLevel      `rotini:"levels"` // named string kind — must not panic
+}
+type logLevel string
+type tsArgs struct {
+	Counts []int `rotini:"counts"` // typed variadic
+}
+type tsInputs struct {
+	App struct {
+		Flags     tsFlags
+		Arguments tsArgs
+	}
+}
+
+func tsDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "ports", Identifiers: []string{"--port"}, Type: "[]int"},
+			{Name: "waits", Identifiers: []string{"--wait"}, Type: "[]time.Duration"},
+			{Name: "levels", Identifiers: []string{"--level"}, Type: "[]logLevel"},
+		},
+		Arguments: []ArgDef{{Name: "counts", Type: "[]int", Variadic: true}},
+	}
+}
+
+func TestParse_typedSlices(t *testing.T) {
+	rtx := NewContextFor(tsDef(), []string{
+		"--port", "80", "--port", "443",
+		"--wait", "1s", "--wait", "2m",
+		"--level", "info", "--level", "warn",
+		"1", "2", "3",
+	})
+	var in tsInputs
+	if err := NewParser().Parse(rtx, &in); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if got := in.App.Flags.Ports; len(got) != 2 || got[0] != 80 || got[1] != 443 {
+		t.Errorf("Ports = %v, want [80 443]", got)
+	}
+	if got := in.App.Flags.Waits; len(got) != 2 || got[0] != time.Second || got[1] != 2*time.Minute {
+		t.Errorf("Waits = %v, want [1s 2m]", got)
+	}
+	if got := in.App.Flags.Levels; len(got) != 2 || got[0] != "info" || got[1] != "warn" {
+		t.Errorf("Levels = %v, want [info warn]", got)
+	}
+	if got := in.App.Arguments.Counts; len(got) != 3 || got[0] != 1 || got[2] != 3 {
+		t.Errorf("variadic Counts = %v, want [1 2 3]", got)
+	}
+
+	// An element that doesn't parse is a usage error naming the flag, not a zeroed slice.
+	rtx2 := NewContextFor(tsDef(), []string{"--port", "80", "--port", "oops"})
+	var in2 tsInputs
+	err := NewParser().Parse(rtx2, &in2)
+	if err == nil || !strings.Contains(err.Error(), "--port") || !strings.Contains(err.Error(), "oops") {
+		t.Errorf("Parse(bad slice element) = %v, want a usage error naming --port and the value", err)
+	}
+}
+
+// ── the type conformance matrix (W4-S4) ─────────────────────────────────────
+//
+// One regression wall for "spec types to Go types is solid": every type in the
+// spec vocabulary, exercised through argv text → coerce → generated field. The
+// spec-alias half (boolean→bool, array+items→[]T, …) is pinned by the internal
+// package's TestJSONSchemaTypeToGo/TestGetSchemaType_arrayItems; this is the
+// runtime half over the resulting FlagDef.Type + field. Channel boundaries:
+// argv accepts every type below; env/config are scalar-only (recon coerces
+// them — binder_test pins int/string/secret/constraints; repeatable
+// arrays/maps have no env/config form); stdin is a document decode, not a
+// per-value coercion (binder_test pins yaml/json + schema validation).
+
+// upperString is the matrix's custom TextUnmarshaler: parse = uppercase,
+// rejecting "bad" — proving the contract's parse+validate hook both ways.
+type upperString string
+
+func (u *upperString) UnmarshalText(text []byte) error {
+	if string(text) == "bad" {
+		return fmt.Errorf("upperString rejects %q", text)
+	}
+	*u = upperString(strings.ToUpper(string(text)))
+	return nil
+}
+
+type matrixFlags struct {
+	B   bool              `rotini:"b"`
+	I   int               `rotini:"i"`
+	F   float64           `rotini:"f"`
+	S   string            `rotini:"s"`
+	A   []string          `rotini:"a"`
+	AI  []int             `rotini:"ai"`
+	AD  []time.Duration   `rotini:"ad"`
+	M   map[string]any    `rotini:"m"`
+	MS  map[string]string `rotini:"ms"`
+	MI  map[string]int    `rotini:"mi"`
+	D   time.Duration     `rotini:"d"`
+	T   time.Time         `rotini:"t"`
+	U   upperString       `rotini:"u"`
+	NI  *int              `rotini:"ni"`
+	E   string            `rotini:"e"`
+	Def string            `rotini:"def"`
+}
+type matrixInputs struct {
+	App struct {
+		Flags     matrixFlags
+		Arguments struct{}
+	}
+}
+
+func matrixDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "b", Identifiers: []string{"--b"}, Type: "bool"},
+			{Name: "i", Identifiers: []string{"--i"}, Type: "int"},
+			{Name: "f", Identifiers: []string{"--f"}, Type: "float64"},
+			{Name: "s", Identifiers: []string{"--s"}, Type: "string"},
+			{Name: "a", Identifiers: []string{"--a"}, Type: "[]string"},
+			{Name: "ai", Identifiers: []string{"--ai"}, Type: "[]int"},
+			{Name: "ad", Identifiers: []string{"--ad"}, Type: "[]time.Duration"},
+			{Name: "m", Identifiers: []string{"--m"}, Type: "map[string]any"},
+			{Name: "ms", Identifiers: []string{"--ms"}, Type: "map[string]string"},
+			{Name: "mi", Identifiers: []string{"--mi"}, Type: "map[string]int"},
+			{Name: "d", Identifiers: []string{"--d"}, Type: "time.Duration"},
+			{Name: "t", Identifiers: []string{"--t"}, Type: "time.Time"},
+			{Name: "u", Identifiers: []string{"--u"}, Type: "upperString"},
+			{Name: "ni", Identifiers: []string{"--ni"}, Type: "*int"},
+			{Name: "e", Identifiers: []string{"--e"}, Type: "string", Enum: []string{"red", "green"}},
+			{Name: "def", Identifiers: []string{"--def"}, Type: "string", Default: "fallback"},
+		},
+	}
+}
+
+func TestTypeConformanceMatrix(t *testing.T) {
+	parse := func(t *testing.T, argv ...string) (matrixInputs, error) {
+		t.Helper()
+		var in matrixInputs
+		err := NewParser().Parse(NewContextFor(matrixDef(), argv), &in)
+		return in, err
+	}
+
+	t.Run("every type parses from argv text", func(t *testing.T) {
+		in, err := parse(t,
+			"--b", "--i", "42", "--f", "2.5", "--s", "hi",
+			"--a", "x", "--a", "y",
+			"--ai", "1", "--ai", "2",
+			"--ad", "1s", "--ad", "2m",
+			"--m", "k=v", "--ms", "k=v", "--mi", "k=7",
+			"--d", "1m30s", "--t", "2026-05-22T00:00:00Z",
+			"--u", "loud", "--ni", "4", "--e", "red",
+		)
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		ni := 4
+		want := matrixFlags{
+			B: true, I: 42, F: 2.5, S: "hi",
+			A:   []string{"x", "y"},
+			AI:  []int{1, 2},
+			AD:  []time.Duration{time.Second, 2 * time.Minute},
+			M:   map[string]any{"k": "v"},
+			MS:  map[string]string{"k": "v"},
+			MI:  map[string]int{"k": 7},
+			D:   90 * time.Second,
+			T:   time.Date(2026, 5, 22, 0, 0, 0, 0, time.UTC),
+			U:   "LOUD",
+			NI:  &ni,
+			E:   "red",
+			Def: "fallback", // not supplied — the declared default fills it
+		}
+		if !reflect.DeepEqual(in.App.Flags, want) {
+			t.Errorf("matrix mismatch:\n got %+v\nwant %+v", in.App.Flags, want)
+		}
+	})
+
+	t.Run("nothing supplied: defaults fill, nullable stays nil, rest zero", func(t *testing.T) {
+		in, err := parse(t)
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if in.App.Flags.Def != "fallback" {
+			t.Errorf("Def = %q, want the declared default", in.App.Flags.Def)
+		}
+		if in.App.Flags.NI != nil {
+			t.Errorf("NI = %v, want nil — a nullable input not provided stays nil", in.App.Flags.NI)
+		}
+		if in.App.Flags.I != 0 || in.App.Flags.A != nil || in.App.Flags.M != nil {
+			t.Errorf("unsupplied fields should stay zero: %+v", in.App.Flags)
+		}
+	})
+
+	// Per-type rejection: each bad value is a usage error naming the flag.
+	// (A bool's value is inline-only — "--b yep" parses --b true plus the
+	// positional "yep" by design — so the bad-bool spelling is the = form.)
+	rejects := []struct {
+		argv []string
+		name string
+	}{
+		{[]string{"--b=yep"}, "--b"},
+		{[]string{"--i", "4.5"}, "--i"},
+		{[]string{"--f", "x"}, "--f"},
+		{[]string{"--ai", "x"}, "--ai"},
+		{[]string{"--ad", "fast"}, "--ad"},
+		{[]string{"--mi", "k=x"}, "--mi"},
+		{[]string{"--d", "90"}, "--d"},
+		{[]string{"--t", "yesterday"}, "--t"},
+		{[]string{"--u", "bad"}, "--u"},  // the type's own UnmarshalText error
+		{[]string{"--e", "blue"}, "--e"}, // outside the enum
+		{[]string{"--ni", "x"}, "--ni"},  // bad value through the nullable pointer
+	}
+	for _, r := range rejects {
+		t.Run("rejects "+strings.Join(r.argv, " "), func(t *testing.T) {
+			_, err := parse(t, r.argv...)
+			if err == nil || !strings.Contains(err.Error(), r.name) {
+				t.Errorf("Parse(%v) = %v, want a usage error naming %s", r.argv, err, r.name)
+			}
+		})
+	}
+}
+
+// Dotted-key shapes (spec dotted_keys): a map[string]any flag whose key=value
+// keys are '.'-separated paths into nested maps, next to a plain map flag where
+// '.' stays a literal key character.
+type dkInputs struct {
+	App struct {
+		Flags struct {
+			Set    map[string]any    `rotini:"set"`
+			Labels map[string]string `rotini:"labels"`
+		}
+		Arguments struct{}
+	}
+}
+
+func dkDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "set", Identifiers: []string{"--set"}, Type: "map[string]any", DottedKeys: true},
+			{Name: "labels", Identifiers: []string{"--label"}, Type: "map[string]string"},
+		},
+	}
+}
+
+func TestParse_dottedKeys(t *testing.T) {
+	parse := func(t *testing.T, argv ...string) (dkInputs, error) {
+		t.Helper()
+		var in dkInputs
+		err := NewParser().Parse(NewContextFor(dkDef(), argv), &in)
+		return in, err
+	}
+
+	in, err := parse(t,
+		"--set", "image.tag=v2", "--set", "image.pull=Always", "--set", "replicas=3",
+		"--label", "team.name=core",
+	)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	image, ok := in.App.Flags.Set["image"].(map[string]any)
+	if !ok || image["tag"] != "v2" || image["pull"] != "Always" {
+		t.Errorf("Set[image] = %#v, want nested {tag: v2, pull: Always}", in.App.Flags.Set["image"])
+	}
+	if in.App.Flags.Set["replicas"] != "3" {
+		t.Errorf("Set[replicas] = %#v, want %q", in.App.Flags.Set["replicas"], "3")
+	}
+	if in.App.Flags.Labels["team.name"] != "core" {
+		t.Errorf("plain map = %v, want the literal key team.name (dotted_keys is opt-in)", in.App.Flags.Labels)
+	}
+
+	// Later assignments overwrite whatever sits at their path — both a scalar
+	// replaced by a subtree and a subtree replaced by a scalar.
+	if in, err := parse(t, "--set", "a=1", "--set", "a.b=2"); err != nil {
+		t.Errorf("Parse: %v", err)
+	} else if sub, ok := in.App.Flags.Set["a"].(map[string]any); !ok || sub["b"] != "2" {
+		t.Errorf("scalar→subtree: Set[a] = %#v, want map[b:2]", in.App.Flags.Set["a"])
+	}
+	if in, err := parse(t, "--set", "a.b=2", "--set", "a=1"); err != nil {
+		t.Errorf("Parse: %v", err)
+	} else if in.App.Flags.Set["a"] != "1" {
+		t.Errorf("subtree→scalar: Set[a] = %#v, want %q", in.App.Flags.Set["a"], "1")
+	}
+
+	// An empty path segment is a usage error naming the flag.
+	if _, err := parse(t, "--set", "a..b=1"); err == nil || !strings.Contains(err.Error(), "--set") || !strings.Contains(err.Error(), "empty segment") {
+		t.Errorf("Parse(a..b=1) = %v, want an empty-segment usage error naming --set", err)
+	}
+	// The key=value shape requirement still applies to dotted maps.
+	if _, err := parse(t, "--set", "novalue"); err == nil || !strings.Contains(err.Error(), "key=value") {
+		t.Errorf("Parse(novalue) = %v, want the key=value usage error", err)
+	}
+}
+
+func TestCoerce_unsupportedTypeIsLoud(t *testing.T) {
+	// A type coerce has no rule for must error (the TextUnmarshaler contract),
+	// never silently zero the field.
+	var s struct{ X struct{ A int } }
+	err := coerce(reflect.ValueOf(&s.X).Elem(), []string{"v"})
+	if err == nil || !strings.Contains(err.Error(), "encoding.TextUnmarshaler") {
+		t.Errorf("coerce(plain struct) = %v, want the TextUnmarshaler contract error", err)
+	}
+
+	// An `any` field stores the raw string.
+	var a any
+	if err := coerce(reflect.ValueOf(&a).Elem(), []string{"raw"}); err != nil || a != "raw" {
+		t.Errorf("coerce(any) = %v / %v, want raw stored", a, err)
 	}
 }
 

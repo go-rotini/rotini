@@ -218,7 +218,8 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string) (*parsedInputs, err
 	}
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
-	startedArgs := false
+	startedArgs := false   // a positional has been seen: command descent is over
+	terminated := false    // "--" has been seen: flag parsing is over too
 
 	addFlag := func(idx int, name, value string) {
 		if store.scopes[idx].flags == nil {
@@ -237,12 +238,13 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string) (*parsedInputs, err
 	for i := 0; i < len(argv); i++ {
 		tok := argv[i]
 
-		if tok == "--" { // explicit end of flags; the rest are positional
-			startedArgs = true
+		if !terminated && tok == "--" { // explicit end of flags; the rest are
+			terminated = true  // positional, even flag-looking tokens (and any
+			startedArgs = true // further "--" is a literal positional)
 			continue
 		}
 
-		if isFlag(tok) {
+		if !terminated && isFlag(tok) {
 			name, inline, hasInline := splitFlag(tok)
 			fdef, idx, ok := findFlagIndex(chain, name)
 			if !ok {
@@ -800,6 +802,12 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 		if !ok {
 			continue
 		}
+		if def, ok := findFlagDef(defs, name); ok && def.DottedKeys {
+			if err := coerceMapDotted(v.Field(i), raw); err != nil {
+				return &ParseError{Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
+			}
+			continue
+		}
 		if err := coerce(v.Field(i), raw); err != nil {
 			return &ParseError{Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
 		}
@@ -830,7 +838,7 @@ func bindArgs(v reflect.Value, args []string) error {
 	for i := range v.NumField() {
 		f := v.Field(i)
 		label := "<" + t.Field(i).Tag.Get("rotini") + ">"
-		if f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String {
+		if f.Kind() == reflect.Slice { // a slice argument is variadic, whatever its element type
 			if err := coerce(f, args[min(idx, len(args)):]); err != nil {
 				return &ParseError{Msg: fmt.Sprintf("%s: %v", label, err)}
 			}
@@ -911,12 +919,39 @@ func coerce(f reflect.Value, raw []string) error {
 		}
 		f.SetFloat(x)
 	case reflect.Slice:
-		if f.Type().Elem().Kind() == reflect.String {
-			f.Set(reflect.ValueOf(append([]string{}, raw...)))
-		}
+		return coerceSlice(f, raw)
 	case reflect.Map:
 		return coerceMap(f, raw)
+	case reflect.Interface:
+		if f.Type().NumMethod() != 0 {
+			return unsupportedType(f.Type())
+		}
+		f.Set(reflect.ValueOf(last)) // an `any` input holds the raw string
+	default:
+		return unsupportedType(f.Type())
 	}
+	return nil
+}
+
+// unsupportedType is the loud refusal for a field type coerce has no rule for:
+// silence here would zero the field and hide a spec/codegen mistake. The fix is
+// the documented contract — give the type an UnmarshalText.
+func unsupportedType(t reflect.Type) error {
+	return fmt.Errorf("cannot parse into %s — the type must implement encoding.TextUnmarshaler", t)
+}
+
+// coerceSlice fills a slice field from the raw values (one per repeated flag
+// occurrence, or the trailing positionals for a variadic argument), coercing
+// each element into the slice's element type — []string verbatim, []int parsed,
+// []time.Duration / TextUnmarshaler elements through their own parsers.
+func coerceSlice(f reflect.Value, raw []string) error {
+	out := reflect.MakeSlice(f.Type(), len(raw), len(raw))
+	for i, r := range raw {
+		if err := coerce(out.Index(i), []string{r}); err != nil {
+			return err
+		}
+	}
+	f.Set(out)
 	return nil
 }
 
@@ -930,6 +965,42 @@ func notValid(value, typeName string) error {
 // element type (string/int/…); an `any` element stores the raw string. Later pairs win
 // on a duplicate key. Malformed (no '=') pairs are skipped — validation rejects them. A
 // value that doesn't parse into the element type is returned as an error.
+// coerceMapDotted fills a map[string]any flag (spec dotted_keys) from raw
+// "key=value" pairs whose keys are '.'-separated paths into nested maps:
+// "image.tag=v2" → m["image"].(map[string]any)["tag"] = "v2". Each assignment
+// overwrites whatever sits at its path (creating intermediate maps as needed),
+// so later pairs win — including a pair that replaces a scalar with a subtree
+// or vice versa. Malformed (no '=') pairs are skipped — validation rejects
+// them; an empty path segment ("a..b", ".a", "a.") is an error.
+func coerceMapDotted(f reflect.Value, raw []string) error {
+	m := map[string]any{}
+	if !reflect.TypeOf(m).AssignableTo(f.Type()) {
+		return fmt.Errorf("dotted keys need a map[string]any flag, not %s", f.Type())
+	}
+	for _, pair := range raw {
+		k, v, ok := strings.Cut(pair, "=")
+		if !ok {
+			continue
+		}
+		segs := strings.Split(k, ".")
+		if slices.Contains(segs, "") {
+			return fmt.Errorf("invalid key path %q — empty segment", k)
+		}
+		cur := m
+		for _, seg := range segs[:len(segs)-1] {
+			next, ok := cur[seg].(map[string]any)
+			if !ok {
+				next = map[string]any{}
+				cur[seg] = next
+			}
+			cur = next
+		}
+		cur[segs[len(segs)-1]] = v
+	}
+	f.Set(reflect.ValueOf(m))
+	return nil
+}
+
 func coerceMap(f reflect.Value, raw []string) error {
 	kt := f.Type().Key()
 	if kt.Kind() != reflect.String {

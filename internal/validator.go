@@ -259,6 +259,7 @@ var specLints = []func(*Spec) []error{
 	lintVariadicArguments,
 	lintDeprecatedIdentifiers,
 	lintRemoteTimeouts,
+	lintDottedKeys,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -366,6 +367,38 @@ func lintVariadicArguments(spec *Spec) []error {
 				})
 			}
 		}
+	})
+	return problems
+}
+
+// lintDottedKeys enforces dotted_keys' documented scope: it is a flag-only
+// option (dotted assignment is command-line grammar), and the flag must store
+// nested maps — map[string]any ('map'/'object'), since a typed-value map like
+// map[string]string has nowhere to hang a subtree.
+func lintDottedKeys(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+			if schema == nil || !schema.DottedKeys {
+				return
+			}
+			loc := "command " + path
+			if channel != "flag" {
+				problems = append(problems, &problem{
+					kind: "spec",
+					loc:  loc,
+					msg:  fmt.Sprintf("%s %q sets dotted_keys, which applies to flags only", channel, name),
+				})
+				return
+			}
+			if t := getSchemaType(schema); t != "map[string]any" {
+				problems = append(problems, &problem{
+					kind: "spec",
+					loc:  loc,
+					msg:  fmt.Sprintf("flag %q sets dotted_keys but its type is %s — dotted keys need 'map' (map[string]any) to nest into", name, t),
+				})
+			}
+		})
 	})
 	return problems
 }

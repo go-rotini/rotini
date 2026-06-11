@@ -618,7 +618,7 @@ func argPresence(set Presence, layerName, topName string, ci reflect.Value, fram
 	for j := range s.NumField() {
 		fieldName := st.Field(j).Name
 		f := s.Field(j)
-		variadic := f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String
+		variadic := f.Kind() == reflect.Slice // a slice argument is variadic, whatever its element type
 		var vals []string
 		switch {
 		case variadic:

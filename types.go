@@ -152,6 +152,8 @@ type FlagDef struct {
 	Secret                bool     // when true, the value is redacted in usage/validation error output
 	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen
 	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Parser.Deprecations] reports when used
+	DottedKeys            bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
+	KeyPaths              []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
 	Constraints
 }
 

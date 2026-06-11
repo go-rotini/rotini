@@ -50,7 +50,7 @@ type BaseSchema struct {
 	// Regular expression the value must match (string type only)
 	Pattern    string            `json:"pattern,omitempty"`
 	Properties map[string]Schema `json:"properties,omitempty"`
-	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. A '[]…' flag is repeatable (--tag a --tag b → slice). A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path.
+	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.)
 	Type string `json:"type,omitempty"`
 }
 
@@ -204,6 +204,8 @@ type InputSchema struct {
 	BaseSchema
 	// Default value applied when the input is not provided
 	Default any `json:"default,omitempty"`
+	// Map-typed flags only, and only with 'any' values ('map'/'object' → map[string]any). When true, a '.'-separated key in a key=value pair assigns into nested maps, helm-style: --set image.tag=v2 → map[image][tag]=v2. Opt-in because '.' is a legal character in plain map keys — without it, --label a.b=c stores the literal key 'a.b'. Each assignment overwrites whatever is at its path (creating intermediate maps as needed), so later pairs win and --set a=1 --set a.b=2 leaves a nested map under 'a'. Declare 'properties' on the flag's schema to give shell completion the known key paths (offered up to the '=').
+	DottedKeys bool `json:"dotted_keys,omitempty"`
 	// Config file logical name to read from (config inputs only)
 	File string `json:"file,omitempty"`
 	// Key path within the config file (config inputs only, e.g., 'server.port')
