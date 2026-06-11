@@ -235,22 +235,22 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 	return rotini.NewProgram(definition, handlers)
 }
 
-//go:embed embed/rotini_help.txt
+//go:embed embed/help_rotini.txt
 var HelpRotini string
 
-//go:embed embed/rotini_initialize_help.txt
+//go:embed embed/help_rotini_initialize.txt
 var HelpRotiniInitialize string
 
-//go:embed embed/rotini_generate_help.txt
+//go:embed embed/help_rotini_generate.txt
 var HelpRotiniGenerate string
 
-//go:embed embed/rotini_validate_help.txt
+//go:embed embed/help_rotini_validate.txt
 var HelpRotiniValidate string
 
-//go:embed embed/rotini_help_help.txt
+//go:embed embed/help_rotini_help.txt
 var HelpRotiniHelp string
 
-//go:embed embed/rotini_version_help.txt
+//go:embed embed/help_rotini_version.txt
 var HelpRotiniVersion string
 
 // Help returns the generated help text for the command identified by path
@@ -272,5 +272,74 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniVersion, nil
 	default:
 		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
+	}
+}
+
+//go:embed embed/man_rotini.txt
+var ManRotini string
+
+//go:embed embed/man_rotini_initialize.txt
+var ManRotiniInitialize string
+
+//go:embed embed/man_rotini_generate.txt
+var ManRotiniGenerate string
+
+//go:embed embed/man_rotini_validate.txt
+var ManRotiniValidate string
+
+//go:embed embed/man_rotini_help.txt
+var ManRotiniHelp string
+
+//go:embed embed/man_rotini_version.txt
+var ManRotiniVersion string
+
+// Man returns the generated man text for the command identified by path
+// (command names or aliases; no arguments for the root command). It returns an
+// error when path does not match a known command.
+func Man(path ...string) (string, error) {
+	switch strings.Join(path, " ") {
+	case "":
+		return ManRotini, nil
+	case "initialize", "init":
+		return ManRotiniInitialize, nil
+	case "generate", "gen":
+		return ManRotiniGenerate, nil
+	case "validate", "val":
+		return ManRotiniValidate, nil
+	case "help":
+		return ManRotiniHelp, nil
+	case "version":
+		return ManRotiniVersion, nil
+	default:
+		return "", fmt.Errorf("no man for command %q", strings.Join(path, " "))
+	}
+}
+
+//go:embed embed/zz_completion_bash.txt
+var CompletionBash string
+
+//go:embed embed/zz_completion_zsh.txt
+var CompletionZsh string
+
+//go:embed embed/zz_completion_fish.txt
+var CompletionFish string
+
+//go:embed embed/zz_completion_powershell.txt
+var CompletionPowershell string
+
+// Completion returns the embedded completion script for shell, or an error when
+// shell is not one rotini generated a script for.
+func Completion(shell string) (string, error) {
+	switch shell {
+	case "bash":
+		return CompletionBash, nil
+	case "zsh":
+		return CompletionZsh, nil
+	case "fish":
+		return CompletionFish, nil
+	case "powershell":
+		return CompletionPowershell, nil
+	default:
+		return "", fmt.Errorf("no completion for shell %q", shell)
 	}
 }

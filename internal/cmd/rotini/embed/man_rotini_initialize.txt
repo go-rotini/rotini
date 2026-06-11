@@ -1,0 +1,24 @@
+NAME
+    rotini initialize - scaffold a cli program
+
+SYNOPSIS
+    rotini initialize [name] [flags]
+
+DESCRIPTION
+    Initialize a new rotini cli program spec file.
+
+ARGUMENTS
+    [name]    the root command name written to the created spec file (expected binary name)
+
+OPTIONS
+    --format string    the created rotini spec file format (defaults to the module conf's initialize.format, else yaml) [yaml|json|jsonc|toml]
+    --force            force re-initialization if files exist that init would overwrite
+    -h,--help          print help
+
+EXAMPLES
+    rotini initialize mycli
+    rotini init mycli --format json
+    rotini init mycli --force
+    rotini init -i
+
+Use "rotini help <command>" for more information about a command.

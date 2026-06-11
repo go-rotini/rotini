@@ -1,0 +1,21 @@
+NAME
+    rotini help - print help
+
+SYNOPSIS
+    rotini help [command...] [flags]
+
+DESCRIPTION
+    Print help for a specific command.
+
+ARGUMENTS
+    [command...]    name of the command to print help for
+
+OPTIONS
+    -h,--help    print help
+
+EXAMPLES
+    rotini help
+    rotini help generate
+    rotini help init
+
+Use "rotini help <command>" for more information about a command.

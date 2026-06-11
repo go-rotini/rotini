@@ -1,0 +1,16 @@
+NAME
+    rotini version - print version
+
+SYNOPSIS
+    rotini version [flags]
+
+DESCRIPTION
+    Print the rotini cli version.
+
+OPTIONS
+    -h,--help    print help
+
+EXAMPLES
+    rotini version
+
+Use "rotini help <command>" for more information about a command.

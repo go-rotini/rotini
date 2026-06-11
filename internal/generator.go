@@ -1668,17 +1668,18 @@ const (
 // per-command verbatim spec string escapes the render.
 //
 // All enabled features default to ONE shared embed dir, so each feature's
-// output files must be distinguishable by name alone: ext is a feature-unique
-// suffix ("_help.txt" / "_man.txt"), filePrefix a feature-unique prefix
-// ("zz_completion_"), and pruning only considers files matching both — features
-// sharing a dir can never prune (or collide with) each other's files.
+// output files must be distinguishable by name alone: filePrefix is a
+// feature-unique prefix ("help_" / "man_" / "zz_completion_") that also groups
+// each feature's files together in directory listings, ext the file suffix,
+// and pruning only considers files matching both — features sharing a dir can
+// never prune (or collide with) each other's files.
 type docFeature struct {
 	name       string               // feature key, e.g. "help"
 	noun       string               // word used in the resolver doc comment / error, e.g. "help"
 	varPrefix  string               // embed-var prefix, e.g. "Help" → HelpRotiniGenerate
 	resolver   string               // resolver func name, e.g. "Help"
-	ext        string               // feature-unique output file suffix, e.g. "_help.txt"
-	filePrefix string               // feature-unique output file prefix ("" = none), e.g. "zz_completion_"
+	ext        string               // output file suffix, e.g. ".txt"
+	filePrefix string               // feature-unique output file prefix, e.g. "help_"
 	tmplFile   string               // editable template file name in the feature dir ("" = none)
 	embedded   string               // embedded default template text, from renderer.go ("" = none)
 	verbatim   func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
@@ -1688,12 +1689,12 @@ type docFeature struct {
 var (
 	helpFeatureDesc = docFeature{
 		name: "help", noun: "help", varPrefix: "Help", resolver: "Help",
-		ext: "_help.txt", tmplFile: helpTemplateName, embedded: templateHelp,
+		ext: ".txt", filePrefix: "help_", tmplFile: helpTemplateName, embedded: templateHelp,
 		verbatim: func(h cmdHelp) string { return h.Help },
 	}
 	manFeatureDesc = docFeature{
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
-		ext: "_man.txt", tmplFile: manTemplateName, embedded: templateMan,
+		ext: ".txt", filePrefix: "man_", tmplFile: manTemplateName, embedded: templateMan,
 		verbatim: func(h cmdHelp) string { return h.Man },
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
@@ -1757,7 +1758,7 @@ func commandHelp(c Command) cmdHelp {
 func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 	out := []helpNode{{
 		prefix:   gp.rootPascal,
-		file:     gp.rootName + feat.ext,
+		file:     feat.filePrefix + gp.rootName + feat.ext,
 		paths:    []string{""},
 		name:     gp.rootName,
 		verbatim: feat.verbatim(gp.rootHelp),
@@ -1775,7 +1776,7 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 			invocation := gp.rootName + " " + strings.Join(childNames, " ")
 			out = append(out, helpNode{
 				prefix:   n.prefix,
-				file:     gp.rootName + "_" + strings.Join(childNames, "_") + feat.ext,
+				file:     feat.filePrefix + gp.rootName + "_" + strings.Join(childNames, "_") + feat.ext,
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),

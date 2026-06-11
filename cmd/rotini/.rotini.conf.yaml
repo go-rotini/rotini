@@ -18,10 +18,10 @@ generate:
       enabled: true
       dir: internal/cmd/rotini/embed
     man:
-      enabled: false
+      enabled: true
       dir: internal/cmd/rotini/embed
     completion:
-      enabled: false
+      enabled: true
       dir: internal/cmd/rotini/embed
 validate:
   fail: collect
