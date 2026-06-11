@@ -10,17 +10,22 @@ import (
 // synthetic build information (and exercise the no-info path).
 var readBuildInfo = debug.ReadBuildInfo
 
-// BuildInfo is a JSON-friendly projection of [debug.BuildInfo]. The standard
+// BuildInformation is a JSON-friendly projection of [debug.BuildInfo]. The standard
 // struct buries the most-asked-for build facts (the VCS revision, whether the
 // tree was dirty, the target platform, the toolchain) inside an untyped
 // []debug.BuildSetting slice, which marshals to an awkward array of {Key,Value}
-// pairs. BuildInfo lifts those settings into named, individually-tagged fields so
-// a `version`/`--version` command can emit a clean, stable object.
+// pairs. BuildInformation lifts those settings into named, individually-tagged
+// fields so a `version`/`--version` command can emit a clean, stable object.
 //
-// [NewBuildInfo] reads the live build info and resolves every field. A BuildInfo
+// [BuildInfo] reads the live build info and resolves every field. A BuildInformation
 // may carry a fallback supplying values to use when the embedded build metadata
 // is missing — common for `go run`, `go test`, or binaries built without module
 // information, where the runtime reports a "(devel)" or empty Version.
+//
+// BuildInformation deliberately models only Go's embedded build metadata. Extra,
+// build-system-supplied values (e.g. a GoReleaser commit or date) belong in the
+// program registry as their own bindings — `Bind("commit", commit)` — retrieved
+// where needed with [MustGet]; they are not grafted onto this type.
 type BuildInformation struct {
 	// Version is the main module's version: a release tag ("v1.2.3"), a
 	// pseudo-version, "(devel)" for an unstamped build, or "" outside a module.
@@ -49,21 +54,16 @@ type BuildInformation struct {
 	// Dirty reports whether the working tree had uncommitted changes at build
 	// time (vcs.modified == "true").
 	Dirty bool `json:"dirty,omitempty"`
-	// ldflagVersion is a build-time `-ldflags -X` injected version string. When
-	// non-empty it takes precedence over the live Main.Version for [BuildInfo.Version].
-	ldflagVersion string
 	// fallback supplies values for fields the live build info leaves empty.
 	fallback *BuildInformation
 }
 
-// NewBuildInfo reads the binary's embedded build information and returns a fully
-// resolved BuildInfo. ldflagVersion is an optional `-ldflags -X` injected version
-// string ("" to disable); when non-empty it wins over the live build version.
-// fallback (may be nil) supplies values for fields the live build info leaves empty.
-func BuildInfo(ldflagVersion string, fallback *BuildInformation) *BuildInformation {
+// BuildInfo reads the binary's embedded build information and returns a fully
+// resolved BuildInformation. fallback (may be nil) supplies values for fields the
+// live build info leaves empty.
+func BuildInfo(fallback *BuildInformation) *BuildInformation {
 	b := &BuildInformation{
-		ldflagVersion: ldflagVersion,
-		fallback:      fallback,
+		fallback: fallback,
 	}
 
 	info, ok := readBuildInfo()
@@ -105,19 +105,12 @@ func BuildInfo(ldflagVersion string, fallback *BuildInformation) *BuildInformati
 	return b
 }
 
-// overlay resolves b's final field values. Version follows the precedence
-// ldflagVersion > live Main.Version > fallback.Version > "" (an ldflag value
-// always wins; a "(devel)" or empty live value defers to the fallback). The
-// remaining empty fields are filled from b.fallback. Booleans are not overlaid:
-// false is indistinguishable from unset, and the live build settings are the
-// authoritative source for them.
+// overlay fills b's empty fields from b.fallback: a "(devel)" or empty Version
+// defers to the fallback, and each other field still at its zero value inherits
+// the fallback's. Booleans are not overlaid: false is indistinguishable from
+// unset, and the live build settings are the authoritative source for them.
 func (b *BuildInformation) overlay() {
-	if b.ldflagVersion != "" {
-		b.Version = b.ldflagVersion
-	}
-
 	fb := b.fallback
-
 	if fb == nil {
 		return
 	}
@@ -167,7 +160,7 @@ func (b *BuildInformation) overlay() {
 // a Go module version, with an optional "v" prefix.
 var versionCoreRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)`)
 
-// CleanVersion returns the bare MAJOR.MINOR.PATCH core of [BuildInfo.Version],
+// CleanVersion returns the bare MAJOR.MINOR.PATCH core of [BuildInformation.Version],
 // dropping the leading "v", any pseudo-version suffix, and build metadata — e.g.
 // "v0.0.0-20260610090009-0ddb0aafb83c+dirty" becomes "0.0.0". It returns "" when
 // Version carries no recognizable semver core (e.g. "" or "(devel)").

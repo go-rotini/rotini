@@ -36,27 +36,22 @@ func fullBuildInfo() *debug.BuildInfo {
 	}
 }
 
-func TestNewBuildInfo(t *testing.T) {
+func TestBuildInfo_storesFallback(t *testing.T) {
 	fb := &BuildInformation{Version: "v9.9.9"}
-	b := BuildInfo("v1.0.0", fb)
-
-	if b.ldflagVersion != "v1.0.0" {
-		t.Errorf("ldflagVersion = %q, want %q", b.ldflagVersion, "v1.0.0")
-	}
-	if b.fallback != fb {
+	if b := BuildInfo(fb); b.fallback != fb {
 		t.Errorf("fallback = %v, want %v", b.fallback, fb)
 	}
 
-	// nil fallback and empty ldflag version are both accepted.
-	if got := BuildInfo("", nil); got.fallback != nil || got.ldflagVersion != "" {
-		t.Errorf("NewBuildInfo(\"\", nil) = %+v, want zeroed", got)
+	// A nil fallback is accepted.
+	if got := BuildInfo(nil); got.fallback != nil {
+		t.Errorf("BuildInfo(nil).fallback = %v, want nil", got.fallback)
 	}
 }
 
 func TestGet_fullSettings(t *testing.T) {
 	stubReadBuildInfo(t, fullBuildInfo(), true)
 
-	b := BuildInfo("", nil)
+	b := BuildInfo(nil)
 
 	wantTime := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
 	want := BuildInformation{
@@ -89,7 +84,7 @@ func TestGet_falseyAndBadTime(t *testing.T) {
 	}
 	stubReadBuildInfo(t, info, true)
 
-	b := BuildInfo("", nil)
+	b := BuildInfo(nil)
 
 	if b.CGO {
 		t.Error("CGO should be false for CGO_ENABLED=0")
@@ -102,23 +97,12 @@ func TestGet_falseyAndBadTime(t *testing.T) {
 	}
 }
 
-// ldflagVersion wins over a live Main.Version.
-func TestGet_ldflagVersionOverridesLive(t *testing.T) {
-	stubReadBuildInfo(t, fullBuildInfo(), true)
-
-	b := BuildInfo("v2.0.0-ld", nil)
-
-	if b.Version != "v2.0.0-ld" {
-		t.Errorf("Version = %q, want ldflag value %q", b.Version, "v2.0.0-ld")
-	}
-}
-
-// A "(devel)" live version defers to the fallback; ldflag is empty here.
+// A "(devel)" live version defers to the fallback.
 func TestGet_develDefersToFallback(t *testing.T) {
 	info := &debug.BuildInfo{Main: debug.Module{Version: "(devel)"}}
 	stubReadBuildInfo(t, info, true)
 
-	b := BuildInfo("", &BuildInformation{Version: "v3.0.0"})
+	b := BuildInfo(&BuildInformation{Version: "v3.0.0"})
 
 	if b.Version != "v3.0.0" {
 		t.Errorf("Version = %q, want fallback %q", b.Version, "v3.0.0")
@@ -129,7 +113,7 @@ func TestGet_develDefersToFallback(t *testing.T) {
 func TestGet_liveVersionBeatsFallback(t *testing.T) {
 	stubReadBuildInfo(t, fullBuildInfo(), true)
 
-	b := BuildInfo("", &BuildInformation{Version: "v3.0.0"})
+	b := BuildInfo(&BuildInformation{Version: "v3.0.0"})
 
 	if b.Version != "v1.2.3" {
 		t.Errorf("Version = %q, want live %q", b.Version, "v1.2.3")
@@ -154,32 +138,20 @@ func TestGet_noBuildInfoOverlaysFallback(t *testing.T) {
 		Revision:  "deadbeef",
 		Time:      wantTime,
 	}
-	b := BuildInfo("", fb)
+	b := BuildInfo(fb)
 
 	want := *fb // every string/time field should be copied over
 	assertFields(t, b, want)
 }
 
-// No build info and no fallback yields a zero-valued BuildInfo (Version "").
+// No build info and no fallback yields a zero-valued BuildInformation (Version "").
 func TestGet_noBuildInfoNoFallback(t *testing.T) {
 	stubReadBuildInfo(t, nil, false)
 
-	b := BuildInfo("", nil)
+	b := BuildInfo(nil)
 
 	if (*b) != (BuildInformation{}) {
-		t.Errorf("Get() = %+v, want zero value", *b)
-	}
-}
-
-// No build info but an ldflag version: the ldflag value applies even without a
-// fallback (the overlay sets it before the nil-fallback short-circuit).
-func TestGet_noBuildInfoLdflagApplies(t *testing.T) {
-	stubReadBuildInfo(t, nil, false)
-
-	b := BuildInfo("v4.0.0", nil)
-
-	if b.Version != "v4.0.0" {
-		t.Errorf("Version = %q, want ldflag %q", b.Version, "v4.0.0")
+		t.Errorf("BuildInfo(nil) = %+v, want zero value", *b)
 	}
 }
 

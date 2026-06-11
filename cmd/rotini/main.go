@@ -8,11 +8,17 @@ import (
 	cli "github.com/go-rotini/rotini/internal/cmd/rotini"
 )
 
-var Version = "0.0.0"
+var (
+	version = "0.0.0"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
 	cli.Program.
 		Bind("parser", rotini.NewParser()).
-		Bind("build", rotini.BuildInfo(Version, &rotini.BuildInformation{Version: "0.0.0"})).
+		Bind("build", rotini.BuildInfo(&rotini.BuildInformation{Version: version})).
+		Bind("commit", commit).
+		Bind("date", date).
 		Execute()
 }
