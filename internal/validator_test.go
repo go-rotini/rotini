@@ -544,3 +544,75 @@ func TestValidate_invalidConf(t *testing.T) {
 		t.Errorf("error does not identify the conf file: %v", err)
 	}
 }
+
+// TestValidate_confFilePattern: the schema rejects a generated-file name that is
+// not a bare *.go (generate would otherwise emit Go source into it blindly).
+func TestValidate_confFilePattern(t *testing.T) {
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+	for _, bad := range []string{"not-go.txt", "sub/x.go"} {
+		conf := writeTemp(t, "conf.yaml", validConfHeader+"generate:\n  packages:\n    cmd:\n      file: "+bad+"\n")
+		if err := validateOnce(spec, conf, "", ""); err == nil || !strings.Contains(err.Error(), "pattern") {
+			t.Errorf("validate(file=%q) = %v, want a pattern violation", bad, err)
+		}
+	}
+}
+
+// TestValidate_entrypointLints: accepted-but-ignored entrypoint pieces are
+// rejected rather than silently dropped — file/keep without the required
+// package, and keep at all (the entrypoint is never pruned).
+func TestValidate_entrypointLints(t *testing.T) {
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+
+	orphan := writeTemp(t, "conf.yaml", validConfHeader+"generate:\n  packages:\n    entrypoint:\n      file: main.go\n")
+	if err := validateOnce(spec, orphan, "", ""); err == nil || !strings.Contains(err.Error(), "entrypoint.package is set") {
+		t.Errorf("validate(entrypoint file without package) = %v, want an entrypoint lint", err)
+	}
+
+	keep := writeTemp(t, "conf2.yaml", validConfHeader+"generate:\n  packages:\n    entrypoint:\n      package: cmd/demo\n      keep: [main.go]\n")
+	if err := validateOnce(spec, keep, "", ""); err == nil || !strings.Contains(err.Error(), "never pruned") {
+		t.Errorf("validate(entrypoint keep) = %v, want a keep-has-no-effect lint", err)
+	}
+
+	ok := writeTemp(t, "conf3.yaml", validConfHeader+"generate:\n  packages:\n    entrypoint:\n      package: cmd/demo\n      file: main.go\n")
+	if err := validateOnce(spec, ok, "", ""); err != nil {
+		t.Errorf("validate(well-formed entrypoint) = %v, want nil", err)
+	}
+}
+
+// TestValidate_featureDirLint: an enabled feature whose explicit dir cannot
+// nest under the explicit cmdgen package fails at validate time (generate would
+// reject it later — validate is the gate). Unset sides defer to the defaults.
+func TestValidate_featureDirLint(t *testing.T) {
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+
+	cases := []struct {
+		name, dir string
+		wantErr   bool
+	}{
+		{"outside the package", "docs/help", true},
+		{"escapes via ..", "internal/cmd/demo/../../docs", true},
+		{"under the package", "internal/cmd/demo/embed", false},
+		{"the package itself", "internal/cmd/demo", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conf := writeTemp(t, "conf.yaml", validConfHeader+
+				"generate:\n  packages:\n    cmdgen:\n      package: internal/cmd/demo\n"+
+				"  features:\n    help:\n      enabled: true\n      dir: "+tc.dir+"\n")
+			err := validateOnce(spec, conf, "", "")
+			if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "must resolve under the cmdgen package")) {
+				t.Errorf("validate(dir=%q) = %v, want a feature-dir lint", tc.dir, err)
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("validate(dir=%q) = %v, want nil", tc.dir, err)
+			}
+		})
+	}
+
+	// Disabled features and unset cmdgen packages are not checked.
+	lax := writeTemp(t, "lax.yaml", validConfHeader+
+		"generate:\n  features:\n    help:\n      enabled: true\n      dir: docs/help\n")
+	if err := validateOnce(spec, lax, "", ""); err != nil {
+		t.Errorf("validate(dir without explicit cmdgen) = %v, want nil (generate backstops)", err)
+	}
+}

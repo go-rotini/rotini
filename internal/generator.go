@@ -155,7 +155,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error 
 		absDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.Dir))
 		embedRel, err := filepath.Rel(lay.frameworkDir, absDir)
 		if err != nil {
-			return fmt.Errorf("feature %s dir %q is not under the cligen package: %w", f.desc.name, f.cfg.Dir, err)
+			return fmt.Errorf("feature %s dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.Dir, err)
 		}
 		if strings.HasPrefix(embedRel, "..") {
 			return fmt.Errorf("generate.features.%s.dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.Dir, filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package))

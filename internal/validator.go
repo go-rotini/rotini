@@ -3,6 +3,8 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -77,7 +79,8 @@ func (l *specLoader) validate() []error {
 }
 
 // validate schema-validates the conf against its compiled schema on the raw JSON
-// instance when one was resolved, then enforces the $schema↔version guard. A default
+// instance when one was resolved, then — only when it is schema-valid — runs the
+// rotini-specific conf rules and enforces the $schema↔version guard. A default
 // conf (no file) has nothing to validate. It returns every problem found.
 func (l *confLoader) validate() []error {
 	if l.path == "" {
@@ -86,10 +89,15 @@ func (l *confLoader) validate() []error {
 	if problems := validateInstance("conf", l.instance, l.schema); len(problems) > 0 {
 		return problems
 	}
-	if err := checkSchemaVersion("conf", l.conf.Schema, l.version); err != nil {
-		return []error{err}
+
+	var problems []error
+	for _, rule := range confLints {
+		problems = append(problems, rule(l.conf)...)
 	}
-	return nil
+	if err := checkSchemaVersion("conf", l.conf.Schema, l.version); err != nil {
+		problems = append(problems, err)
+	}
+	return problems
 }
 
 // ─── schema validation + the $schema↔version guard ─────────────────────────────
@@ -163,6 +171,74 @@ func checkSchemaVersion(kind, docSchema, version string) error {
 }
 
 // ─── the rotini-specific rules (what the JSON Schema can't express) ─────────────
+
+// confLints is the ordered set of conf rules run after the conf is schema-valid,
+// mirroring specLints. Like the spec rules, they reject configuration that would
+// be silently ignored or that generate would reject later — validate is the gate.
+var confLints = []func(*Conf) []error{
+	lintEntrypoint,
+	lintFeatureDirs,
+}
+
+// lintEntrypoint rejects an entrypoint block whose pieces would be silently
+// ignored: 'file'/'keep' without the required 'package' (the entrypoint is only
+// written when its package is declared), and 'keep' at all (the entrypoint
+// package is never pruned, so a keep list is an accepted lie).
+func lintEntrypoint(conf *Conf) []error {
+	if conf.Generate == nil || conf.Generate.Packages == nil || conf.Generate.Packages.Entrypoint == nil {
+		return nil
+	}
+	ep := conf.Generate.Packages.Entrypoint
+	var problems []error
+	if ep.Package == "" && (ep.File != "" || len(ep.Keep) > 0) {
+		problems = append(problems, &problem{
+			kind: "conf",
+			loc:  "generate.packages.entrypoint",
+			msg:  "declares file/keep but no package — the entrypoint main.go is only written when entrypoint.package is set",
+		})
+	}
+	if len(ep.Keep) > 0 {
+		problems = append(problems, &problem{
+			kind: "conf",
+			loc:  "generate.packages.entrypoint.keep",
+			msg:  "has no effect — the entrypoint package is never pruned; remove it",
+		})
+	}
+	return problems
+}
+
+// lintFeatureDirs rejects an enabled feature whose explicit dir cannot resolve
+// under an explicitly-set cmdgen package — //go:embed could never reach it, so
+// generate would fail; validate is the gate. When either side is unset the
+// defaults guarantee nesting (the default dir is <cmdgen>/embed), so there is
+// nothing to check — generate's resolution backstops the remaining cases.
+func lintFeatureDirs(conf *Conf) []error {
+	if conf.Generate == nil || conf.Generate.Features == nil ||
+		conf.Generate.Packages == nil || conf.Generate.Packages.Cmdgen == nil ||
+		conf.Generate.Packages.Cmdgen.Package == "" {
+		return nil
+	}
+	cmdgen := strings.TrimSuffix(filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package), "/")
+	feats := conf.Generate.Features
+	var problems []error
+	check := func(name string, f *Feature) {
+		if f == nil || !f.Enabled || f.Dir == "" {
+			return
+		}
+		dir := path.Clean(filepath.ToSlash(f.Dir))
+		if dir != cmdgen && !strings.HasPrefix(dir, cmdgen+"/") {
+			problems = append(problems, &problem{
+				kind: "conf",
+				loc:  "generate.features." + name + ".dir",
+				msg:  fmt.Sprintf("%q must resolve under the cmdgen package %q so //go:embed can reach it", f.Dir, cmdgen),
+			})
+		}
+	}
+	check("help", feats.Help)
+	check("man", feats.Man)
+	check("completion", feats.Completion)
+	return problems
+}
 
 // specLints is the ordered set of spec rules run after the spec is schema-valid.
 // Adding a rule is a one-line append here; each stays a pure func(*Spec) []error for
