@@ -1,4 +1,4 @@
-package initializer
+package codegen
 
 import (
 	"bytes"
@@ -272,5 +272,26 @@ type templateHandlersData struct {
 }
 
 func renderHandlersFile() ([]byte, error) {
+	return nil, nil
+}
+
+type templateRotiniData struct {
+}
+
+func renderRotiniFile() ([]byte, error) {
+	return nil, nil
+}
+
+type templateHelp struct {
+}
+
+func renderHelpFile() ([]byte, error) {
+	return nil, nil
+}
+
+type templateMan struct {
+}
+
+func renderManFile() ([]byte, error) {
 	return nil, nil
 }
