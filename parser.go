@@ -19,7 +19,18 @@ import (
 // statically-composed child still reads its inputs through its own generated types
 // unchanged: those describe its own root→leaf tail of the chain, bound leaf-first.
 type parsedInputs struct {
-	scopes []scopeInputs // one entry per resolved chain frame, root → leaf
+	scopes  []scopeInputs     // one entry per resolved chain frame, root → leaf
+	argvSet []map[string]bool // per frame: logical flag names explicitly set on argv (not defaults, not env/config fallback)
+}
+
+// setOnArgv reports whether the flag with logical name was explicitly provided
+// on argv in chain frame idx — the presence convention flag groups and
+// dependencies enforce (a default or env/config fallback does not count).
+func (p *parsedInputs) setOnArgv(idx int, name string) bool {
+	if p == nil || idx < 0 || idx >= len(p.argvSet) || p.argvSet[idx] == nil {
+		return false
+	}
+	return p.argvSet[idx][name]
 }
 
 // scopeInputs holds one chain frame's parsed values: flag values by logical name
@@ -96,10 +107,10 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 	if err := validate(chain, store); err != nil {
 		return err
 	}
-	if err := validateFlagGroups(chain, rtx.Args); err != nil {
+	if err := validateFlagGroups(chain, store); err != nil {
 		return err
 	}
-	return validateFlagDependencies(chain, rtx.Args)
+	return validateFlagDependencies(chain, store)
 }
 
 // Deprecation is a deprecated CLI token found in this invocation's argv: the specific
@@ -188,7 +199,23 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 // not check required inputs or enums — that is [validate]'s job — so a handler can
 // inspect what was supplied before deciding how strict to be.
 func parseInto(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
-	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
+	store, err := parseArgvTokens(chain, argv)
+	if err != nil {
+		return nil, err
+	}
+	applyDefaults(chain, store)
+	return store, nil
+}
+
+// parseArgvTokens is parseInto minus defaults: exactly what argv supplied,
+// nothing more. It records each explicitly-set flag in the store's argvSet, the
+// single source of truth for "set on the command line" (flag groups,
+// dependencies, and the argv overlay layer all read it).
+func parseArgvTokens(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
+	store := &parsedInputs{
+		scopes:  make([]scopeInputs, len(chain)),
+		argvSet: make([]map[string]bool, len(chain)),
+	}
 	leaf := len(chain) - 1 // chain index of the leaf command
 	depth := 1             // index of the next chain frame we might descend into
 	startedArgs := false
@@ -198,6 +225,10 @@ func parseInto(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
 			store.scopes[idx].flags = map[string][]string{}
 		}
 		store.scopes[idx].flags[name] = append(store.scopes[idx].flags[name], value)
+		if store.argvSet[idx] == nil {
+			store.argvSet[idx] = map[string]bool{}
+		}
+		store.argvSet[idx][name] = true
 	}
 	addArg := func(value string) {
 		store.scopes[leaf].args = append(store.scopes[leaf].args, value)
@@ -264,7 +295,6 @@ func parseInto(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
 		addArg(tok)
 	}
 
-	applyDefaults(chain, store)
 	return store, nil
 }
 
@@ -429,21 +459,21 @@ func redactValue(v string, secret bool) string {
 // validateFlagGroups enforces each command's cross-flag presence rules (mutually
 // exclusive / required together / one-of / at-least-one). "Set" means explicitly
 // provided on argv — a default or env/config fallback does not count (matching the
-// command-line-presence convention of cobra/clap). Each violation is a usage error.
-func validateFlagGroups(chain []ResolvedCommand, argv []string) error {
-	for _, f := range chain {
+// command-line-presence convention of cobra/clap) — read from the store's argvSet
+// (which, unlike a raw argv re-scan, also sees flags set inside short clusters).
+// Each violation is a usage error.
+func validateFlagGroups(chain []ResolvedCommand, store *parsedInputs) error {
+	for i, f := range chain {
 		for _, g := range f.FlagGroups {
 			all := make([]string, 0, len(g.Flags))
 			var set []string
 			for _, name := range g.Flags {
 				label := "--" + name
-				provided := false
 				if fd, ok := findFlagDef(f.Flags, name); ok {
 					label = flagLabel(fd)
-					provided = flagWasSet(argv, fd.Identifiers)
 				}
 				all = append(all, label)
-				if provided {
+				if store.setOnArgv(i, name) {
 					set = append(set, label)
 				}
 			}
@@ -457,25 +487,25 @@ func validateFlagGroups(chain []ResolvedCommand, argv []string) error {
 
 // validateFlagDependencies enforces each command's conditional cross-flag requirements:
 // when a dependency's When flag is explicitly set on argv, every flag it Requires must
-// also be set. "Set" follows the same explicit-argv convention as flag groups; a missing
-// requirement is a usage error naming the absent flag(s) and the trigger.
-func validateFlagDependencies(chain []ResolvedCommand, argv []string) error {
-	for _, f := range chain {
+// also be set. "Set" follows the same explicit-argv convention as flag groups (the
+// store's argvSet); a missing requirement is a usage error naming the absent flag(s)
+// and the trigger.
+func validateFlagDependencies(chain []ResolvedCommand, store *parsedInputs) error {
+	for i, f := range chain {
 		for _, dep := range f.FlagDependencies {
-			whenLabel := "--" + dep.When
 			whenFD, ok := findFlagDef(f.Flags, dep.When)
 			if !ok {
 				continue // unknown trigger flag (a spec lint rejects this) — nothing to enforce
 			}
-			whenLabel = flagLabel(whenFD)
-			if !flagWasSet(argv, whenFD.Identifiers) {
+			whenLabel := flagLabel(whenFD)
+			if !store.setOnArgv(i, dep.When) {
 				continue // the trigger is absent — the requirement does not apply
 			}
 			var missing []string
 			for _, name := range dep.Requires {
 				label := "--" + name
 				if fd, ok := findFlagDef(f.Flags, name); ok {
-					if flagWasSet(argv, fd.Identifiers) {
+					if store.setOnArgv(i, name) {
 						continue
 					}
 					label = flagLabel(fd)

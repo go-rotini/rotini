@@ -85,10 +85,10 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 	if err := validate(chain, store); err != nil {
 		return err
 	}
-	if err := validateFlagGroups(chain, rtx.Args); err != nil {
+	if err := validateFlagGroups(chain, store); err != nil {
 		return err
 	}
-	if err := validateFlagDependencies(chain, rtx.Args); err != nil {
+	if err := validateFlagDependencies(chain, store); err != nil {
 		return err
 	}
 
