@@ -24,35 +24,32 @@ const (
 
 var (
 	//go:embed templates/.rotini.spec.yaml.tmpl
-	templateDefaultSpecText string
+	templateSpec string
 	//go:embed templates/.rotini.conf.yaml.tmpl
-	templateDefaultConfText string
+	templateConf string
+	//go:embed templates/main.go.tmpl
+	templateMain string
+	//go:embed templates/handler_stub.go.tmpl
+	templateHandlerStub string
+	//go:embed templates/handler_root.go.tmpl
+	templateHandlerRoot string
+	//go:embed templates/handler_version.go.tmpl
+	templateHandlerVersion string
+	//go:embed templates/handler_help.go.tmpl
+	templateHandlerHelp string
+	//go:embed templates/handlers.go.tmpl
+	templateHandlers string
+	//go:embed templates/rotini.go.tmpl
+	templateRotini string
+	//go:embed templates/help.txt.tmpl
+	templateHelp string
+	//go:embed templates/man.txt.tmpl
+	templateMan string
 
-	errUnsupportedFormat = errors.New("unsupported file format")
+	ErrUnsupportedFileFormat = errors.New("unsupported spec file format")
 )
 
-type renderedFiles struct {
-	SpecFileBytes []byte
-	ConfFileBytes []byte
-}
-
-type renderer struct {
-	version    string
-	pkg        string
-	fileFormat FileFormat
-}
-
-type templateDefaultSpecData struct {
-	Version string
-	Package string
-}
-
-type templateDefaultConfData struct {
-	Version string
-	Package string
-}
-
-func format(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
+func convert(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
 	if fileFormat == FileFormatYAML {
 		return yamlBytes, nil
 	}
@@ -87,67 +84,193 @@ func format(yamlBytes []byte, fileFormat FileFormat) ([]byte, error) {
 		}
 		return out, nil
 	default:
-		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, fileFormat)
+		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFileFormat, fileFormat)
 	}
 }
 
-func renderTemplate[T any](name string, text string, data T, fileFormat FileFormat) ([]byte, error) {
+func renderTemplate[T any](name string, text string, data T) ([]byte, error) {
 	tmpl, err := template.New(name).Parse(text)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s seed template: %w", name, err)
+		return nil, fmt.Errorf("parse %s template: %w", name, err)
 	}
 
 	var buffer bytes.Buffer
 	if err := tmpl.Execute(&buffer, data); err != nil {
-		return nil, fmt.Errorf("render %s seed: %w", name, err)
+		return nil, fmt.Errorf("render %s template: %w", name, err)
 	}
 
-	return format(buffer.Bytes(), fileFormat)
+	return buffer.Bytes(), nil
 }
 
-func (r *renderer) renderDefaultSpecFile() ([]byte, error) {
-	return renderTemplate(
+type templateSpecData struct {
+	Version string
+	Package string
+}
+
+func renderSpecFile(version string, pkg string, fileFormat FileFormat) ([]byte, error) {
+	bytes, err := renderTemplate(
 		"spec",
-		templateDefaultSpecText,
-		templateDefaultSpecData{
-			Version: r.version,
-			Package: r.pkg,
+		templateSpec,
+		templateSpecData{
+			Version: version,
+			Package: pkg,
 		},
-		r.fileFormat,
 	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return convert(bytes, fileFormat)
 }
 
-func (r *renderer) renderDefaultConfFile() ([]byte, error) {
-	return renderTemplate(
+type templateConfData struct {
+	Version string
+	Package string
+}
+
+func renderConfFile(version string, pkg string, fileFormat FileFormat) ([]byte, error) {
+	bytes, err := renderTemplate(
 		"conf",
-		templateDefaultConfText,
-		templateDefaultConfData{
-			Version: r.version,
-			Package: r.pkg,
+		templateConf,
+		templateConfData{
+			Version: version,
+			Package: pkg,
 		},
-		r.fileFormat,
 	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return convert(bytes, fileFormat)
 }
 
-func renderFiles(version string, pkg string, fileFormat FileFormat) (*renderedFiles, error) {
-	r := &renderer{
-		version:    version,
-		pkg:        pkg,
-		fileFormat: fileFormat,
-	}
+type templateMainData struct {
+	Package      string
+	PackageAlias string
+}
 
-	specFileBytes, err := r.renderDefaultSpecFile()
+func renderMainFile(pkg string, pkgAlias string) ([]byte, error) {
+	bytes, err := renderTemplate(
+		"main",
+		templateMain,
+		templateMainData{
+			Package:      pkg,
+			PackageAlias: pkgAlias,
+		},
+	)
+
 	if err != nil {
-		return nil, fmt.Errorf("render spec: %w", err)
+		return nil, err
 	}
 
-	confFileBytes, err := r.renderDefaultConfFile()
+	return bytes, nil
+}
+
+type templateHandlerStubData struct {
+	Package      string
+	HandlersType string
+}
+
+func renderHandlerStubFile(pkg string, handlersType string) ([]byte, error) {
+	bytes, err := renderTemplate(
+		"handler_stub",
+		templateHandlerStub,
+		templateHandlerStubData{
+			Package:      pkg,
+			HandlersType: handlersType,
+		},
+	)
+
 	if err != nil {
-		return nil, fmt.Errorf("render conf: %w", err)
+		return nil, err
 	}
 
-	return &renderedFiles{
-		SpecFileBytes: specFileBytes,
-		ConfFileBytes: confFileBytes,
-	}, nil
+	return bytes, nil
+}
+
+type templateHandlerRootData struct {
+	Package         string
+	HandlersType    string
+	RootCommandName string
+	HelpVar         string
+}
+
+func renderHandlerRootFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
+	bytes, err := renderTemplate(
+		"handler_stub",
+		templateHandlerRoot,
+		templateHandlerRootData{
+			Package:         pkg,
+			HandlersType:    handlersType,
+			RootCommandName: rootCommandName,
+			HelpVar:         helpVar,
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes, nil
+}
+
+type templateHandlerVersionData struct {
+	Package         string
+	HandlersType    string
+	RootCommandName string
+	HelpVar         string
+}
+
+func renderHandlerVersionFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
+	bytes, err := renderTemplate(
+		"handler_version",
+		templateHandlerVersion,
+		templateHandlerVersionData{
+			Package:         pkg,
+			HandlersType:    handlersType,
+			RootCommandName: rootCommandName,
+			HelpVar:         helpVar,
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes, nil
+}
+
+type templateHandlerHelpData struct {
+	Package         string
+	HandlersType    string
+	RootCommandName string
+	HelpVar         string
+}
+
+func renderHandlerHelpFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
+	bytes, err := renderTemplate(
+		"handler_help",
+		templateHandlerHelp,
+		templateHandlerHelpData{
+			Package:         pkg,
+			HandlersType:    handlersType,
+			RootCommandName: rootCommandName,
+			HelpVar:         helpVar,
+		},
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes, nil
+}
+
+type templateHandlersData struct {
+}
+
+func renderHandlersFile() ([]byte, error) {
+	return nil, nil
 }

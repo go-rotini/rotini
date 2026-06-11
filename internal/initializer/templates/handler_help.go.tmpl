@@ -1,45 +1,44 @@
-package rotini
+package {{.Package}}
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-rotini/rotini"
 )
 
-type rotiniHelpHandlers struct {
+type {{.HandlersType}} struct{
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
 }
 
-var _ rotini.CommandHandlers = (*rotiniHelpHandlers)(nil)
+var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 
-func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
 
-	var inputs RotiniHelpInputs
+	var inputs {{.RootCommandName}}HelpInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
+		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
 		rtx.SignalExit(1)
 		return
 	}
 
-	args := inputs.RotiniHelp.Arguments
-	flags := inputs.RotiniHelp.Flags
+	args := inputs.{{.RootCommandName}}Help.Arguments
+	flags := inputs.{{.RootCommandName}}Help.Flags
 
 	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
+		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
 		rtx.SignalExit(0)
 		return
 	}
 
-	help, err := Help(args.Command...)
+	help, err := Help(args.Commands...)
 	if err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
+		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
 		rtx.SignalExit(1)
 		return
 	}

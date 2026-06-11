@@ -1,0 +1,19 @@
+package {{.Package}}
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type {{.HandlersType}} struct{
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
+
+func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
+}
