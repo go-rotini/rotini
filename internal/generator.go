@@ -130,10 +130,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error 
 	if err != nil {
 		return err
 	}
-	lay, err := resolveLayout(conf, moduleRoot, moduleName)
-	if err != nil {
-		return err
-	}
+	lay := resolveLayout(conf, moduleRoot, moduleName)
 	gp, err := resolveTree(spec, specPath, moduleRoot, moduleName)
 	if err != nil {
 		return err
@@ -264,20 +261,6 @@ func enabledFeatures(conf *Conf) []confFeature {
 	return out
 }
 
-// methods returns the ProgramHandlers method names: the root, then every own
-// and composed sub-command, sorted.
-func (gp *genProgram) methods() []string {
-	out := []string{gp.root.prefix}
-	for _, c := range gp.own {
-		out = append(out, c.prefix)
-	}
-	for _, c := range gp.composed {
-		out = append(out, c.prefix)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // inputsFields returns the fields of a command's <Prefix>Inputs struct: one per
 // ancestor command (root first, then each intermediate) plus the command itself,
 // in root→leaf order. Each field is named after the command's PascalCase prefix
@@ -285,8 +268,9 @@ func (gp *genProgram) methods() []string {
 // the binder maps fields to resolved-chain frames by position (aligned at the
 // leaf), so command names can never collide along a path.
 func inputsFields(rootPascal, path string) []fieldDef {
-	fields := []fieldDef{{Field: rootPascal, GoType: rootPascal + "CommandInputs"}}
 	segments := strings.Split(path, "_")
+	fields := make([]fieldDef, 0, 1+len(segments))
+	fields = append(fields, fieldDef{Field: rootPascal, GoType: rootPascal + "CommandInputs"})
 	for i := 1; i <= len(segments); i++ {
 		prefix := rootPascal + toPascalCase(strings.Join(segments[:i], "_"))
 		fields = append(fields, fieldDef{Field: prefix, GoType: prefix + "CommandInputs"})
@@ -619,8 +603,6 @@ func discoveryLiteral(host string, d *RemoteDiscovery) string {
 	return b.String()
 }
 
-// remoteDefsLiteral renders the []rotini.RemoteDef literal for a command's
-// remote/co-located sub-commands. The expected binary is "<host>-<name>".
 // sliceLiteral renders a "[]rotini.<typeName>{ ... }" Go literal (one element per
 // item), or "" when items is empty. renderItem writes one element's body — the
 // text between the element's surrounding "{" and "}," which sliceLiteral supplies.
@@ -639,6 +621,8 @@ func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.
 	return b.String()
 }
 
+// remoteDefsLiteral renders the []rotini.RemoteDef literal for a command's
+// remote/co-located sub-commands. The expected binary is "<host>-<name>".
 func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 	return sliceLiteral("RemoteDef", rcs, func(b *strings.Builder, rc RemoteCommandSpec) {
 		b.WriteString("Name: " + strconv.Quote(rc.Name))
@@ -973,7 +957,7 @@ func writeEntrypoint(lay layout) error {
 // package, else qualified with the cligen package name. The caller writes it (to
 // its own file, or merged with the framework when combined).
 func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
-	var methods []templateHandlersMethod
+	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
 	for _, c := range append([]genCommand{gp.root}, gp.own...) {
 		methods = append(methods, templateHandlersMethod{Method: c.prefix, HandlerType: c.handler})
 	}
@@ -989,8 +973,8 @@ func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
 
 	return renderHandlersFile(templateHandlersData{
 		Package:         lay.handlerPkgName,
-		FrameworkImport: lay.frameworkImport, // "" when cli and cligen share a package
-		FrameworkQual:   lay.frameworkQual,   // e.g. "cligen."; "" when same package
+		FrameworkImport: lay.frameworkImport, // "" when cmd and cmdgen share a package
+		FrameworkQual:   lay.frameworkQual,   // e.g. "cmdgen."; "" when same package
 		ChildImports:    gp.childImports,
 		Methods:         methods,
 	})
@@ -1097,7 +1081,7 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 // same-package/combined flags. cmd and cmdgen may name the same package (refs
 // become unqualified) and even the same file (framework + rollup are merged).
 // The entrypoint is optional — its layout fields are "" when undeclared.
-func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
+func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 	cmd := conf.Generate.Packages.Cmd
 	cmdgen := conf.Generate.Packages.Cmdgen
 
@@ -1133,11 +1117,11 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) (layout, error) {
 		if file == "" {
 			file = "main.go"
 		}
-		lay.entrypointDir = filepath.Join(moduleRoot, filepath.FromSlash(filepath.ToSlash(ep.Package)))
+		lay.entrypointDir = filepath.Join(moduleRoot, filepath.FromSlash(ep.Package))
 		lay.entrypointFile = file
 	}
 
-	return lay, nil
+	return lay
 }
 
 // applyConfDefaults fills in the sane rotini conf defaults for any unset
@@ -1339,6 +1323,21 @@ type genProgram struct {
 	composed     []composedCmd            // composed sub-commands, sorted by prefix
 	tree         []rnode                  // full resolved tree (own + grafted), for the Definition
 	childImports []templateHandlersImport // unique child cli imports for the rollup
+}
+
+// methods returns the ProgramHandlers method names: the root, then every own
+// and composed sub-command, sorted.
+func (gp *genProgram) methods() []string {
+	out := make([]string, 0, 1+len(gp.own)+len(gp.composed))
+	out = append(out, gp.root.prefix)
+	for _, c := range gp.own {
+		out = append(out, c.prefix)
+	}
+	for _, c := range gp.composed {
+		out = append(out, c.prefix)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // rnode is one node of the resolved command tree used to render the Definition.
@@ -1655,9 +1654,13 @@ func checkCollisions(nodes []rnode) error {
 // Doc features — help / man / completion page generation.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// helpTemplateName is the editable, seed-once help template file living in the
-// help feature's dir (the only user-owned file there). Pruning always keeps it.
-const helpTemplateName = "help.txt.tmpl"
+// helpTemplateName / manTemplateName are the editable, seed-once doc templates
+// living in the feature dir (the only user-owned files there). Pruning always
+// keeps them.
+const (
+	helpTemplateName = "help.txt.tmpl"
+	manTemplateName  = "man.txt.tmpl"
+)
 
 // docFeature describes one doc-rendered codegen feature (help, man). Both share
 // the doc-data pipeline (buildHelpData → renderDocText) and differ only in their
@@ -1690,7 +1693,7 @@ var (
 	}
 	manFeatureDesc = docFeature{
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
-		ext: "_man.txt", tmplFile: "man.txt.tmpl", embedded: templateMan,
+		ext: "_man.txt", tmplFile: manTemplateName, embedded: templateMan,
 		verbatim: func(h cmdHelp) string { return h.Man },
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,

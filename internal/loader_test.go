@@ -2,104 +2,103 @@ package internal
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 )
 
-// supportedExts is the set of extensions readSpec/writeSpec round-trip.
-var supportedExts = []string{".yaml", ".yml", ".json", ".jsonc"}
-
-func TestSpecRoundTrip(t *testing.T) {
-	want := &Spec{
-		Schema: "https://example.com/spec.json",
-		Command: Command{
-			Name:     "demo",
-			Aliases:  []string{"d"},
-			Timeout:  "10s",
-			Commands: []Command{{Name: "sub", Aliases: []string{"s"}}},
-		},
+// TestLoadSchemas confirms both embedded JSON Schemas compile, and that the
+// once-cache hands back the same compiled instance on every call.
+func TestLoadSchemas(t *testing.T) {
+	spec1, err := loadSpecSchema()
+	if err != nil || spec1 == nil {
+		t.Fatalf("loadSpecSchema = %v, %v; want a compiled schema", spec1, err)
 	}
-	for _, ext := range supportedExts {
-		t.Run(ext, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "spec"+ext)
-			if err := writeSpec(path, want); err != nil {
-				t.Fatalf("writeSpec: %v", err)
-			}
-			got, err := readSpec(path)
-			if err != nil {
-				t.Fatalf("readSpec: %v", err)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("round-trip mismatch:\n got=%+v\nwant=%+v", got, want)
-			}
-		})
+	spec2, _ := loadSpecSchema()
+	if spec1 != spec2 {
+		t.Error("loadSpecSchema recompiled instead of returning the cached schema")
+	}
+
+	conf1, err := loadConfSchema()
+	if err != nil || conf1 == nil {
+		t.Fatalf("loadConfSchema = %v, %v; want a compiled schema", conf1, err)
+	}
+	conf2, _ := loadConfSchema()
+	if conf1 != conf2 {
+		t.Error("loadConfSchema recompiled instead of returning the cached schema")
 	}
 }
 
-func TestConfRoundTrip(t *testing.T) {
-	want := &Conf{
-		Schema: "https://example.com/conf.json",
-		Generate: &GenerateConfig{
-			Packages: &PackagesConfig{
-				Cmd: &PackageConfig{Package: "internal/handlers", File: "handlers.gen.go"},
-			},
-		},
-	}
-	for _, ext := range supportedExts {
-		t.Run(ext, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "conf"+ext)
-			if err := writeConf(path, want); err != nil {
-				t.Fatalf("writeConf: %v", err)
-			}
-			got, err := readConf(path)
-			if err != nil {
-				t.Fatalf("readConf: %v", err)
-			}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("round-trip mismatch:\n got=%+v\nwant=%+v", got, want)
-			}
-		})
+// TestCompileSchema_error confirms a broken schema reports the kind in the error.
+func TestCompileSchema_error(t *testing.T) {
+	if _, err := compileSchema("spec", []byte("{not json")); err == nil {
+		t.Error("compileSchema(broken) = nil, want an error")
 	}
 }
 
-// TestReadSpec_formatsAndTags reads hand-authored documents in each format
-// to confirm format detection and that the json struct tags ("$schema",
-// "command") drive decoding across YAML/JSON/JSONC alike.
-func TestReadSpec_formatsAndTags(t *testing.T) {
-	docs := map[string]string{
-		".yaml": "$schema: https://x/spec.json\ncommand:\n  name: demo\n  commands:\n    - name: sub\n",
-		".json": `{"$schema":"https://x/spec.json","command":{"name":"demo","commands":[{"name":"sub"}]}}`,
-		".jsonc": "{\n  // leading comment\n  \"$schema\": \"https://x/spec.json\",\n" +
-			"  \"command\": { \"name\": \"demo\", \"commands\": [{\"name\": \"sub\"}] },\n}\n",
+// TestNewSpecLoader covers the loader pairing: the compiled schema plus the
+// resolved path and decoded content of the user's spec.
+func TestNewSpecLoader(t *testing.T) {
+	path := writeTemp(t, "spec.yaml", "command:\n  name: demo\n")
+	l, err := newSpecLoader(path, "1.0.0")
+	if err != nil {
+		t.Fatalf("newSpecLoader: %v", err)
 	}
-	for ext, doc := range docs {
-		t.Run(ext, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "spec"+ext)
-			if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
-				t.Fatalf("seed file: %v", err)
-			}
-			got, err := readSpec(path)
-			if err != nil {
-				t.Fatalf("readSpec: %v", err)
-			}
-			if got.Schema != "https://x/spec.json" || got.Command.Name != "demo" {
-				t.Errorf("tag mapping wrong: %+v", got)
-			}
-			if len(got.Command.Commands) != 1 || got.Command.Commands[0].Name != "sub" {
-				t.Errorf("commands wrong: %+v", got)
-			}
-		})
+	if l.schema == nil || l.path != path || l.spec.Command.Name != "demo" || l.version != "1.0.0" {
+		t.Errorf("loader not fully populated: %+v", l)
+	}
+
+	// The spec is required: no explicit path and no discovery match errors.
+	t.Chdir(t.TempDir())
+	if _, err := newSpecLoader("", ""); !errors.Is(err, errSpecPathRequired) {
+		t.Errorf("newSpecLoader(no spec) = %v, want errSpecPathRequired", err)
+	}
+
+	// An undecodable spec surfaces the read error.
+	bad := writeTemp(t, "bad.yaml", "command: [unclosed")
+	if _, err := newSpecLoader(bad, ""); err == nil {
+		t.Error("newSpecLoader(bad yaml) = nil, want a decode error")
 	}
 }
 
-func TestUnsupportedFormat(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "spec.xml")
-	if _, err := readSpec(path); !errors.Is(err, errUnsupportedFormat) {
-		t.Errorf("readSpec err = %v, want errUnsupportedFormat", err)
+// TestNewConfLoader covers the conf's optionality: discovered beside the spec
+// when present, a default &Conf{} with an empty path when not.
+func TestNewConfLoader(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, ".rotini.spec.yaml")
+	confPath := filepath.Join(dir, ".rotini.conf.yaml")
+	writeTestFile(t, specPath, "command:\n  name: demo\n")
+	writeTestFile(t, confPath, "$schema: https://x/conf.json\n")
+
+	l, err := newConfLoader(specPath, "", "2.0.0")
+	if err != nil {
+		t.Fatalf("newConfLoader: %v", err)
 	}
-	if err := writeSpec(path, &Spec{}); !errors.Is(err, errUnsupportedFormat) {
-		t.Errorf("writeSpec err = %v, want errUnsupportedFormat", err)
+	if l.path != confPath || l.conf.Schema != "https://x/conf.json" || l.version != "2.0.0" {
+		t.Errorf("conf loader not fully populated: %+v", l)
+	}
+
+	// No conf anywhere → a usable default with an empty path.
+	lonely := filepath.Join(t.TempDir(), "spec.yaml")
+	def, err := newConfLoader(lonely, "", "")
+	if err != nil {
+		t.Fatalf("newConfLoader(default): %v", err)
+	}
+	if def.path != "" || def.conf == nil {
+		t.Errorf("default conf loader = %+v, want empty path and a non-nil default Conf", def)
+	}
+
+	// An explicit-but-missing conf path also defaults (the conf is optional).
+	missing, err := newConfLoader(lonely, filepath.Join(t.TempDir(), "nope.yaml"), "")
+	if err != nil || missing.path != "" {
+		t.Errorf("newConfLoader(missing explicit) = %+v, %v; want defaults", missing, err)
+	}
+
+	// An undecodable conf surfaces the read error.
+	badDir := t.TempDir()
+	badSpec := filepath.Join(badDir, ".rotini.spec.yaml")
+	writeTestFile(t, badSpec, "command:\n  name: demo\n")
+	writeTestFile(t, filepath.Join(badDir, ".rotini.conf.yaml"), "generate: [unclosed")
+	if _, err := newConfLoader(badSpec, "", ""); err == nil {
+		t.Error("newConfLoader(bad yaml) = nil, want a decode error")
 	}
 }

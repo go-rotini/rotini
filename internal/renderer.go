@@ -55,8 +55,8 @@ var (
 // pretty-printed JSON (a valid JSONC document); toml is transcoded through
 // JSON. Conversion goes through an untyped value, so it carries every field
 // the template declares.
-func convert(yamlBytes []byte, format fileFormat) ([]byte, error) {
-	if format == formatYAML {
+func convert(yamlBytes []byte, target fileFormat) ([]byte, error) {
+	if target == formatYAML {
 		return yamlBytes, nil
 	}
 
@@ -65,7 +65,7 @@ func convert(yamlBytes []byte, format fileFormat) ([]byte, error) {
 		return nil, fmt.Errorf("convert seed to json: %w", err)
 	}
 
-	switch format {
+	switch target {
 	case formatJSON:
 		var v any
 		if err := json.Unmarshal(jsonBytes, &v); err != nil {
@@ -93,11 +93,11 @@ func convert(yamlBytes []byte, format fileFormat) ([]byte, error) {
 		}
 		return out, nil
 	default:
-		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, format)
+		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, target)
 	}
 }
 
-func renderTemplate(name string, text string, data any) ([]byte, error) {
+func renderTemplate(name, text string, data any) ([]byte, error) {
 	tmpl, err := template.New(name).Funcs(templateFuncMap()).Parse(text)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s template: %w", name, err)
@@ -115,7 +115,7 @@ func renderTemplate(name string, text string, data any) ([]byte, error) {
 // groups its imports, so templates need no whitespace gymnastics and malformed
 // output fails at render time. A formatting failure includes the unformatted
 // source to make template bugs diagnosable.
-func renderGoFile(name string, text string, data any) ([]byte, error) {
+func renderGoFile(name, text string, data any) ([]byte, error) {
 	rendered, err := renderTemplate(name, text, data)
 	if err != nil {
 		return nil, err
@@ -137,7 +137,7 @@ type templateSeedData struct {
 
 // renderSeedFile renders one YAML seed template and transcodes it to the
 // requested file format.
-func renderSeedFile(name string, text string, version string, pkg string, format fileFormat) ([]byte, error) {
+func renderSeedFile(name, text, version, pkg string, target fileFormat) ([]byte, error) {
 	rendered, err := renderTemplate(name, text, templateSeedData{
 		Version: version,
 		Package: pkg,
@@ -147,15 +147,15 @@ func renderSeedFile(name string, text string, version string, pkg string, format
 		return nil, err
 	}
 
-	return convert(rendered, format)
+	return convert(rendered, target)
 }
 
-func renderSpecFile(version string, pkg string, format fileFormat) ([]byte, error) {
-	return renderSeedFile("spec", templateSpec, version, pkg, format)
+func renderSpecFile(version, pkg string, target fileFormat) ([]byte, error) {
+	return renderSeedFile("spec", templateSpec, version, pkg, target)
 }
 
-func renderConfFile(version string, pkg string, format fileFormat) ([]byte, error) {
-	return renderSeedFile("conf", templateConf, version, pkg, format)
+func renderConfFile(version, pkg string, target fileFormat) ([]byte, error) {
+	return renderSeedFile("conf", templateConf, version, pkg, target)
 }
 
 type templateMainData struct {
@@ -163,7 +163,7 @@ type templateMainData struct {
 	PackageAlias string
 }
 
-func renderMainFile(pkg string, pkgAlias string) ([]byte, error) {
+func renderMainFile(pkg, pkgAlias string) ([]byte, error) {
 	return renderGoFile("main", templateMain, templateMainData{
 		Package:      pkg,
 		PackageAlias: pkgAlias,
@@ -180,14 +180,14 @@ type templateHandlerData struct {
 	HelpVar         string
 }
 
-func renderHandlerStubFile(pkg string, handlersType string) ([]byte, error) {
+func renderHandlerStubFile(pkg, handlersType string) ([]byte, error) {
 	return renderGoFile("handler_stub", templateHandlerStub, templateHandlerData{
 		Package:      pkg,
 		HandlersType: handlersType,
 	})
 }
 
-func renderHandlerRootFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
+func renderHandlerRootFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
 	return renderGoFile("handler_root", templateHandlerRoot, templateHandlerData{
 		Package:         pkg,
 		HandlersType:    handlersType,
@@ -196,7 +196,7 @@ func renderHandlerRootFile(pkg string, handlersType string, rootCommandName stri
 	})
 }
 
-func renderHandlerVersionFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
+func renderHandlerVersionFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
 	return renderGoFile("handler_version", templateHandlerVersion, templateHandlerData{
 		Package:         pkg,
 		HandlersType:    handlersType,
@@ -205,7 +205,7 @@ func renderHandlerVersionFile(pkg string, handlersType string, rootCommandName s
 	})
 }
 
-func renderHandlerHelpFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
+func renderHandlerHelpFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
 	return renderGoFile("handler_help", templateHandlerHelp, templateHandlerData{
 		Package:         pkg,
 		HandlersType:    handlersType,
@@ -214,7 +214,7 @@ func renderHandlerHelpFile(pkg string, handlersType string, rootCommandName stri
 	})
 }
 
-// templateHandlersImport is one child cli package import in the handlers
+// templateHandlersImport is one child cmd package import in the handlers
 // rollup; composed commands delegate to the child's Handlers().
 type templateHandlersImport struct {
 	Alias string
@@ -223,7 +223,7 @@ type templateHandlersImport struct {
 
 // templateHandlersMethod is one ProgramHandlers method in the handlers rollup:
 // own commands return a local handler type, composed commands delegate to the
-// child's cli package.
+// child's cmd package.
 type templateHandlersMethod struct {
 	Method         string
 	Composed       bool
@@ -234,8 +234,8 @@ type templateHandlersMethod struct {
 
 type templateHandlersData struct {
 	Package         string
-	FrameworkImport string // "" when cli and cligen share a package
-	FrameworkQual   string // e.g. "cligen."; "" when same package
+	FrameworkImport string // "" when cmd and cmdgen share a package
+	FrameworkQual   string // e.g. "cmdgen."; "" when same package
 	ChildImports    []templateHandlersImport
 	Methods         []templateHandlersMethod
 }
@@ -257,7 +257,7 @@ type templateInputField struct {
 // field: the rotini tag plus the optional recon / env / constraint tags.
 // constraint is pre-rendered space-separated tags (e.g. `min:"1" max:"65535"`);
 // every part but rotiniTag may be empty.
-func inputFieldTag(rotiniTag string, recon string, envVar string, constraint string) string {
+func inputFieldTag(rotiniTag, recon, envVar, constraint string) string {
 	tag := fmt.Sprintf("rotini:%q", rotiniTag)
 	if recon != "" {
 		tag += fmt.Sprintf(" recon:%q", recon)
@@ -426,7 +426,7 @@ func renderManFile(data templateManData) ([]byte, error) {
 // embedded defaults). The doc features render user-editable templates instead —
 // parse those once with parseDocTemplate and render each page with
 // renderDocText.
-func renderDocFile(name string, text string, data templateHelpData) ([]byte, error) {
+func renderDocFile(name, text string, data templateHelpData) ([]byte, error) {
 	tmpl, err := parseDocTemplate(name, text)
 	if err != nil {
 		return nil, err
@@ -441,7 +441,7 @@ func renderDocFile(name string, text string, data templateHelpData) ([]byte, err
 }
 
 // parseDocTemplate parses doc-template text (help/man) with the shared FuncMap.
-func parseDocTemplate(name string, text string) (*template.Template, error) {
+func parseDocTemplate(name, text string) (*template.Template, error) {
 	tmpl, err := template.New(name).Funcs(templateFuncMap()).Parse(text)
 	if err != nil {
 		return nil, fmt.Errorf("parse %s template: %w", name, err)
@@ -458,12 +458,7 @@ func renderDocText(tmpl *template.Template, data templateHelpData) (string, erro
 		return "", fmt.Errorf("execute %s template: %w", tmpl.Name(), err)
 	}
 
-	aligned, err := tabAlign(buffer.String())
-	if err != nil {
-		return "", err
-	}
-
-	return tidy(aligned), nil
+	return tidy(tabAlign(buffer.String())), nil
 }
 
 // sanitizeDocData replaces tabs/newlines in row text (which would corrupt
@@ -519,16 +514,16 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 }
 
 // tabAlign aligns each contiguous block of tab-separated lines with tabwriter.
-func tabAlign(s string) (string, error) {
+func tabAlign(s string) string {
 	var buffer bytes.Buffer
 	tw := tabwriter.NewWriter(&buffer, 0, 0, 4, ' ', 0)
 	if _, err := tw.Write([]byte(s)); err != nil {
-		return "", fmt.Errorf("tabwriter write: %w", err)
+		panic(err) // unreachable: writes to a bytes.Buffer cannot fail
 	}
 	if err := tw.Flush(); err != nil {
-		return "", fmt.Errorf("tabwriter flush: %w", err)
+		panic(err) // unreachable: flushing to a bytes.Buffer cannot fail
 	}
-	return buffer.String(), nil
+	return buffer.String()
 }
 
 // tidy trims trailing whitespace per line and collapses runs of blank lines to
@@ -669,7 +664,7 @@ func splitGoFile(src []byte) (imports []string, body []byte, err error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("parse generated source: %w", err)
 	}
 	bodyStart := fset.Position(f.Name.End()).Offset
 	for _, d := range f.Decls {
@@ -678,7 +673,10 @@ func splitGoFile(src []byte) (imports []string, body []byte, err error) {
 			continue
 		}
 		for _, s := range gd.Specs {
-			is := s.(*ast.ImportSpec)
+			is, ok := s.(*ast.ImportSpec)
+			if !ok {
+				continue // an IMPORT decl holds only ImportSpecs
+			}
 			if is.Name != nil {
 				imports = append(imports, is.Name.Name+" "+is.Path.Value)
 			} else {
@@ -721,7 +719,10 @@ func groupImports(src []byte) ([]byte, error) {
 	if decl != nil && len(decl.Specs) >= 2 {
 		var std, third []string
 		for _, s := range decl.Specs {
-			is := s.(*ast.ImportSpec)
+			is, ok := s.(*ast.ImportSpec)
+			if !ok {
+				continue // an IMPORT decl holds only ImportSpecs
+			}
 			spec := is.Path.Value
 			if is.Name != nil {
 				spec = is.Name.Name + " " + spec

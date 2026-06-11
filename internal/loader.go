@@ -23,29 +23,33 @@ var (
 	schemaConfFileBytes []byte
 )
 
-// The embedded rotini JSON Schemas are immutable, so each is compiled at most once
-// per process and the result cached — the cache spares the recompile when a fresh
-// specLoader/confLoader is built per pass (e.g. watch mode rebuilds one on every change).
+// The embedded rotini JSON Schemas are immutable, so each is compiled at most
+// once per process and the result cached — the cache spares the recompile when
+// a fresh specLoader/confLoader is built per pass (e.g. watch mode rebuilds one
+// on every change).
 var (
-	specSchemaOnce sync.Once
-	specSchema     *jsonschema.Schema
-	specSchemaErr  error
+	// loadSpecSchema compiles the embedded spec schema once and returns the
+	// cached result.
+	loadSpecSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+		return compileSchema("spec", schemaSpecFileBytes)
+	})
 
-	confSchemaOnce sync.Once
-	confSchema     *jsonschema.Schema
-	confSchemaErr  error
+	// loadConfSchema compiles the embedded conf schema once and returns the
+	// cached result.
+	loadConfSchema = sync.OnceValues(func() (*jsonschema.Schema, error) {
+		return compileSchema("conf", schemaConfFileBytes)
+	})
 )
 
-// loadSpecSchema compiles the embedded spec schema once and returns the cached result.
-func loadSpecSchema() (*jsonschema.Schema, error) {
-	specSchemaOnce.Do(func() { specSchema, specSchemaErr = jsonschema.Compile(schemaSpecFileBytes) })
-	return specSchema, specSchemaErr
-}
-
-// loadConfSchema compiles the embedded conf schema once and returns the cached result.
-func loadConfSchema() (*jsonschema.Schema, error) {
-	confSchemaOnce.Do(func() { confSchema, confSchemaErr = jsonschema.Compile(schemaConfFileBytes) })
-	return confSchema, confSchemaErr
+// compileSchema compiles one embedded rotini JSON Schema, labeling a failure
+// with the schema kind ("spec"/"conf"). The embedded schemas are fixed at build
+// time, so an error here is a rotini packaging bug, not user input.
+func compileSchema(kind string, schemaBytes []byte) (*jsonschema.Schema, error) {
+	schema, err := jsonschema.Compile(schemaBytes)
+	if err != nil {
+		return nil, fmt.Errorf("compile embedded %s schema: %w", kind, err)
+	}
+	return schema, nil
 }
 
 // specLoader holds the compiled spec schema together with the resolved path and decoded

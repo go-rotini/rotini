@@ -82,8 +82,11 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	if !force {
 		for _, pth := range []string{specPath, confPath} {
 			if _, statErr := os.Stat(pth); statErr == nil {
-				rel, _ := filepath.Rel(moduleRoot, pth)
-				return fmt.Errorf("%s already exists (use --force to overwrite)", filepath.ToSlash(rel))
+				display := pth
+				if rel, relErr := filepath.Rel(moduleRoot, pth); relErr == nil {
+					display = rel
+				}
+				return fmt.Errorf("%s already exists (use --force to overwrite)", filepath.ToSlash(display))
 			}
 		}
 	}

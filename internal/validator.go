@@ -430,11 +430,11 @@ func lintSchemaRefs(spec *Spec) []error {
 			if name == "" || declared[name] {
 				return
 			}
-			if key := name + "\x00" + loc; reported[key] {
+			key := name + "\x00" + loc
+			if reported[key] {
 				return
-			} else {
-				reported[key] = true
 			}
+			reported[key] = true
 			msg := fmt.Sprintf("$ref %q points to an undeclared schema (no %q under the document-level \"schemas\")", b.Ref, name)
 			problems = append(problems, &problem{kind: "spec", loc: loc, msg: didYouMean(msg, name, names)})
 		}

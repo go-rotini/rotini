@@ -27,8 +27,8 @@ func mustWriteConf(t *testing.T, path string, c *Conf) {
 	}
 }
 
-// newProcessor builds a session (the per-pass loaded unit) for tests.
-func newProcessor(t *testing.T, specPath, confPath string) *session {
+// newTestSession builds a session (the per-pass loaded unit) for tests.
+func newTestSession(t *testing.T, specPath, confPath string) *session {
 	t.Helper()
 	return newSession(specPath, confPath, "")
 }
@@ -42,7 +42,7 @@ func TestLoad_explicitSpec_confBesideSpec(t *testing.T) {
 	confPath := filepath.Join(dir, ".rotini.conf.yaml")
 	mustWriteConf(t, confPath, &Conf{Schema: "https://x/conf.json"})
 
-	p := newProcessor(t, specPath, "")
+	p := newTestSession(t, specPath, "")
 	if err := p.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestLoad_confDefaultsWhenAbsent(t *testing.T) {
 	specPath := filepath.Join(dir, "spec.yaml")
 	mustWriteSpec(t, specPath, &Spec{Command: Command{Name: "demo"}})
 
-	p := newProcessor(t, specPath, "")
+	p := newTestSession(t, specPath, "")
 	if err := p.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestLoad_confTOMLFallback(t *testing.T) {
 	confPath := filepath.Join(dir, ".rotini.conf.toml")
 	mustWriteConf(t, confPath, &Conf{Schema: "https://x/conf.json"})
 
-	p := newProcessor(t, specPath, "")
+	p := newTestSession(t, specPath, "")
 	if err := p.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestLoadSpec_cwdFallback(t *testing.T) {
 	t.Chdir(dir)
 	mustWriteSpec(t, filepath.Join(dir, ".rotini.spec.yaml"), &Spec{Command: Command{Name: "demo"}})
 
-	p := newProcessor(t, "", "")
+	p := newTestSession(t, "", "")
 	if err := p.load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestLoadSpec_cwdFallback(t *testing.T) {
 func TestLoadSpec_requiredErr(t *testing.T) {
 	t.Chdir(t.TempDir()) // empty dir — no .rotini.spec.*
 
-	p := newProcessor(t, "", "")
+	p := newTestSession(t, "", "")
 	if err := p.load(); !errors.Is(err, errSpecPathRequired) {
 		t.Errorf("load err = %v, want errSpecPathRequired", err)
 	}
@@ -139,7 +139,7 @@ func TestLoadConf_explicitMissingDefaults(t *testing.T) {
 	specPath := filepath.Join(dir, "spec.yaml")
 	mustWriteSpec(t, specPath, &Spec{Command: Command{Name: "demo"}})
 
-	p := newProcessor(t, specPath, filepath.Join(dir, "does-not-exist.yaml"))
+	p := newTestSession(t, specPath, filepath.Join(dir, "does-not-exist.yaml"))
 	if err := p.load(); err != nil {
 		t.Fatalf("load with missing explicit conf = %v, want nil (defaults used)", err)
 	}
@@ -318,12 +318,12 @@ func TestProcessorInitialize(t *testing.T) {
 // propagating a load failure.
 func TestProcessorValidatePass(t *testing.T) {
 	good := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
-	if err := newProcessor(t, good, "").validatePass(); err != nil {
+	if err := newTestSession(t, good, "").validatePass(); err != nil {
 		t.Errorf("validatePass(valid) = %v, want nil", err)
 	}
 
 	missing := filepath.Join(t.TempDir(), "nope.yaml")
-	if err := newProcessor(t, missing, "").validatePass(); err == nil {
+	if err := newTestSession(t, missing, "").validatePass(); err == nil {
 		t.Error("validatePass(missing spec) = nil, want a load error")
 	}
 }
@@ -338,7 +338,7 @@ func TestProcessorGeneratePass_gatesOnValidation(t *testing.T) {
 	writeTestFile(t, specPath, validSpecHeader) // no command → schema-invalid
 	t.Chdir(tmp)
 
-	p := newProcessor(t, specPath, "")
+	p := newTestSession(t, specPath, "")
 	if err := p.generatePass(); err == nil {
 		t.Fatal("generatePass(invalid spec) = nil, want a validation error")
 	}
@@ -356,7 +356,7 @@ func TestProcessorGeneratePass_valid(t *testing.T) {
 		validSpecHeader+"command:\n  name: rotini\n  commands:\n    - name: generate\n")
 	t.Chdir(tmp)
 
-	p := newProcessor(t, ".rotini.spec.yaml", "")
+	p := newTestSession(t, ".rotini.spec.yaml", "")
 	if err := p.generatePass(); err != nil {
 		t.Fatalf("generatePass(valid) = %v, want nil", err)
 	}

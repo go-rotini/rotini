@@ -182,3 +182,137 @@ func TestSmokeConvertJSONC(t *testing.T) {
 	}
 	t.Logf("jsonc:\n%s", out)
 }
+
+// TestTemplateFuncMapHelpers executes a template exercising every helper —
+// including the branchy ones (default/first/last with and without content) —
+// so the documented allowlist is proven to behave, not just to exist.
+func TestTemplateFuncMapHelpers(t *testing.T) {
+	const text = `{{join .List ","}}
+{{upper "ab"}} {{lower "AB"}} {{title "foo-bar baz"}}
+{{trim "  t  "}} {{trimPrefix "p-" "p-u"}} {{trimSuffix "-s" "w-s"}}
+{{replace "a" "b" "aaa"}} {{repeat 3 "-"}}
+{{default "fallback" ""}} {{default "kept" "set"}}
+{{contains "b" "abc"}} {{contains "z" "abc"}}
+{{hasPrefix "a" "abc"}} {{hasSuffix "z" "abc"}}
+{{first .List}} {{last .List}} {{first .Empty}} {{last .Empty}}
+{{indent 2 .Block}}`
+	data := map[string]any{
+		"List":  []string{"a", "b"},
+		"Empty": []string{},
+		"Block": "one\n\ntwo",
+	}
+	out, err := renderTemplate("funcs", text, data)
+	if err != nil {
+		t.Fatalf("renderTemplate: %v", err)
+	}
+	want := "a,b\nAB ab Foo-Bar Baz\nt u w\nbbb ---\nfallback set\ntrue false\ntrue false\na b  \n  one\n\n  two"
+	if string(out) != want {
+		t.Errorf("helpers output mismatch:\n got %q\nwant %q", out, want)
+	}
+}
+
+func TestRenderTemplate_errors(t *testing.T) {
+	if _, err := renderTemplate("broken", "{{", nil); err == nil {
+		t.Error("renderTemplate(unparsable) = nil, want a parse error")
+	}
+	// Execution failure: referencing a field the data type does not have.
+	if _, err := renderTemplate("exec", "{{.Nope}}", struct{}{}); err == nil {
+		t.Error("renderTemplate(bad field) = nil, want an execute error")
+	}
+}
+
+func TestRenderGoFile_gofmtError(t *testing.T) {
+	_, err := renderGoFile("invalid", "package x\nfunc {", nil)
+	if err == nil || !strings.Contains(err.Error(), "gofmt") {
+		t.Errorf("renderGoFile(invalid Go) = %v, want a gofmt error with source context", err)
+	}
+}
+
+func TestConvert_errors(t *testing.T) {
+	if _, err := convert([]byte("a: 1\n"), formatUnknown); err == nil {
+		t.Error("convert(unknown format) = nil, want errUnsupportedFormat")
+	}
+	if _, err := convert([]byte("a: [unclosed"), formatJSON); err == nil {
+		t.Error("convert(bad yaml) = nil, want a conversion error")
+	}
+}
+
+func TestParseDocTemplate_error(t *testing.T) {
+	if _, err := parseDocTemplate("broken", "{{"); err == nil {
+		t.Error("parseDocTemplate(unparsable) = nil, want a parse error")
+	}
+}
+
+func TestRenderDocText_execError(t *testing.T) {
+	tmpl, err := parseDocTemplate("exec", `{{template "missing"}}`)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if _, err := renderDocText(tmpl, templateHelpData{}); err == nil {
+		t.Error("renderDocText(missing sub-template) = nil, want an execute error")
+	}
+}
+
+func TestRenderDocFile_parseError(t *testing.T) {
+	if _, err := renderDocFile("broken", "{{", templateHelpData{}); err == nil {
+		t.Error("renderDocFile(unparsable) = nil, want a parse error")
+	}
+}
+
+func TestSplitGoFile_parseError(t *testing.T) {
+	if _, _, err := splitGoFile([]byte("not go")); err == nil {
+		t.Error("splitGoFile(invalid) = nil, want a parse error")
+	}
+}
+
+func TestGroupImports_parseError(t *testing.T) {
+	if _, err := groupImports([]byte("not go")); err == nil {
+		t.Error("groupImports(invalid) = nil, want a parse error")
+	}
+}
+
+func TestMergeGenFile_parseErrors(t *testing.T) {
+	good := []byte("package x\n\nvar A = 1\n")
+	if _, err := mergeGenFile("x", []byte("not go"), good); err == nil {
+		t.Error("mergeGenFile(bad rollup) = nil, want a parse error")
+	}
+	if _, err := mergeGenFile("x", good, []byte("not go")); err == nil {
+		t.Error("mergeGenFile(bad framework) = nil, want a parse error")
+	}
+}
+
+func TestInputFieldTag(t *testing.T) {
+	cases := []struct {
+		rotini, recon, envVar, constraint, want string
+	}{
+		{"name", "", "", "", "`rotini:\"name\"`"},
+		{"name", "key", "", "", "`rotini:\"name\" recon:\"key\"`"},
+		{"name", "key", "VAR", "", "`rotini:\"name\" recon:\"key\" env:\"VAR\"`"},
+		{"name", "key", "VAR", `min:"1"`, "`rotini:\"name\" recon:\"key\" env:\"VAR\" min:\"1\"`"},
+	}
+	for _, tc := range cases {
+		if got := inputFieldTag(tc.rotini, tc.recon, tc.envVar, tc.constraint); got != tc.want {
+			t.Errorf("inputFieldTag(%q,%q,%q,%q) = %s, want %s", tc.rotini, tc.recon, tc.envVar, tc.constraint, got, tc.want)
+		}
+	}
+}
+
+// TestSanitizeDocData_copies confirms sanitization never mutates the caller's
+// slices — render passes must stay pure functions of their input.
+func TestSanitizeDocData_copies(t *testing.T) {
+	in := templateHelpData{
+		Flags:    []templateDocFlagRow{{Summary: "a\tb"}},
+		SeeAlso:  []string{"x\ty"},
+		Examples: []string{"kept\tintact"}, // examples are block-ish: untouched
+	}
+	out := sanitizeDocData(in)
+	if in.Flags[0].Summary != "a\tb" || in.SeeAlso[0] != "x\ty" {
+		t.Error("sanitizeDocData mutated the input")
+	}
+	if out.Flags[0].Summary != "a b" || out.SeeAlso[0] != "x y" {
+		t.Errorf("sanitizeDocData did not clean rows: %+v", out)
+	}
+	if out.Examples[0] != "kept\tintact" {
+		t.Errorf("examples should be untouched, got %q", out.Examples[0])
+	}
+}

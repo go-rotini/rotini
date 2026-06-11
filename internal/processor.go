@@ -11,11 +11,11 @@ import (
 )
 
 // Processor is the top-level rotini controller — the value the companion handlers in
-// cmd/rotini/cli construct and drive. It holds process-wide state (the running binary
+// cmd/rotini construct and drive. It holds process-wide state (the running binary
 // version, for the $schema guard) and exposes the workflows: Generate, Validate, and
 // Initialize. Each workflow resolves the spec/conf paths, then runs — once, or on every
-// change in watch mode — building a fresh session per pass (see session and loader.go,
-// which owns all spec/conf file handling).
+// change in watch mode — building a fresh session per pass (see session; reading and
+// discovery live in reader.go, the schema-holding loaders in loader.go).
 type Processor struct {
 	version string // running binary version string ("vX.Y.Z" / "v0.0.0"; "" → guard skipped)
 }
@@ -78,8 +78,8 @@ func (p *Processor) run(specPath, confPath, failMode string, watch bool, pass fu
 }
 
 // session is one pass over one spec/conf pair — built fresh per pass (so watch
-// re-reads). It loads the files as a specLoader/confLoader (file.go), validates them, and
-// generates the program.
+// re-reads). It loads the files as a specLoader/confLoader (loader.go), validates
+// them, and generates the program.
 type session struct {
 	version  string // for the $schema guard, threaded onto the loaded files
 	specPath string // explicit spec path ("" → resolved from the fallback locations)
@@ -219,7 +219,7 @@ func roundDuration(d time.Duration) time.Duration {
 }
 
 // forwardChanges fans one watcher's events into changed, coalescing to at most
-// one pending signal, until events closes or ctx is cancelled.
+// one pending signal, until events closes or ctx is canceled.
 func forwardChanges(ctx context.Context, events <-chan fs.WatchEvent, changed chan<- struct{}) {
 	for {
 		select {
