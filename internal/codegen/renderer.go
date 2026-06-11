@@ -199,7 +199,7 @@ type templateHandlerRootData struct {
 
 func renderHandlerRootFile(pkg string, handlersType string, rootCommandName string, helpVar string) ([]byte, error) {
 	bytes, err := renderTemplate(
-		"handler_stub",
+		"handler_root",
 		templateHandlerRoot,
 		templateHandlerRootData{
 			Package:         pkg,
