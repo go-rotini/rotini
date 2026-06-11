@@ -282,14 +282,14 @@ func renderRotiniFile() ([]byte, error) {
 	return nil, nil
 }
 
-type templateHelp struct {
+type templateHelpData struct {
 }
 
 func renderHelpFile() ([]byte, error) {
 	return nil, nil
 }
 
-type templateMan struct {
+type templateManData struct {
 }
 
 func renderManFile() ([]byte, error) {
