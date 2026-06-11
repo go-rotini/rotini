@@ -5,7 +5,7 @@ package main
 
 import (
 	"github.com/go-rotini/rotini"
-	cli "github.com/go-rotini/rotini/internal/cmd/rotini"
+	r "github.com/go-rotini/rotini/internal/cmd/rotini"
 )
 
 var (
@@ -15,7 +15,7 @@ var (
 )
 
 func main() {
-	cli.Program.
+	r.Program.
 		Bind("parser", rotini.NewParser()).
 		Bind("build", rotini.BuildInfo(version)).
 		Bind("commit", commit).
