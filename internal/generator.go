@@ -61,12 +61,14 @@ const rotiniPkgName = "rotini"
 // `rotini` struct-tag content — a flag/argument logical name (empty for the
 // per-command fields of an <Cmd>Inputs struct, which the binder maps by position).
 type fieldDef struct {
-	Field  string
-	GoType string
-	Tag    string
-	Import string // Go import path backing GoType ("" for builtins); aliased form "alias path"
-	Recon  string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
-	EnvVar string // explicit environment variable name for an env field (schema.variable); "" = snake-upper default
+	Field   string
+	GoType  string
+	Tag     string
+	Import  string // Go import path backing GoType ("" for builtins); aliased form "alias path"
+	Recon   string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
+	EnvVar  string // explicit environment variable name for an env field (schema.variable); "" = snake-upper default
+	EnvNest string // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
+	CfgFile string // a config input's pinned source file (schema.file): the value is read from that configuration_files entry ONLY
 	// Constraint is the space-separated validation struct-tags for an env/config field
 	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), which the binder enforces over the
 	// reconciled value; "" when the input declares no numeric/string/array constraints.
@@ -313,11 +315,23 @@ func envFields(in *Inputs) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Env))
 	for _, e := range in.Env {
-		fields = append(fields, fieldDef{
+		fd := fieldDef{
 			Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name,
 			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema), EnvVar: envVarOf(e.Schema),
 			Constraint: constraintTags(e.Schema),
-		})
+		}
+		// A nested input's variable is a family PREFIX, not the value's own env
+		// var — it rides in the envnest tag instead of env:, and rotini (not
+		// recon) enforces required, since recon resolves leaf keys only.
+		if e.Schema != nil && e.Schema.Nesting != "" {
+			fd.EnvNest = envVarName(e) + "," + e.Schema.Nesting
+			if e.Schema.Required {
+				fd.EnvNest += ",required"
+			}
+			fd.EnvVar = ""
+			fd.Recon = nestedReconTag(e.Name, e.Schema)
+		}
+		fields = append(fields, fd)
 	}
 	return fields
 }
@@ -372,11 +386,15 @@ func configFields(in *Inputs) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Config))
 	for _, c := range in.Config {
-		fields = append(fields, fieldDef{
+		fd := fieldDef{
 			Field: toPascalCase(c.Name), GoType: goFieldType(c.Schema), Tag: c.Name,
 			Import: fieldImport(c.Schema), Recon: reconTag(configKey(c), c.Schema),
 			Constraint: constraintTags(c.Schema),
-		})
+		}
+		if c.Schema != nil && c.Schema.File != "" {
+			fd.CfgFile = c.Schema.File
+		}
+		fields = append(fields, fd)
 	}
 	return fields
 }
@@ -387,6 +405,17 @@ func configKey(c ConfigInput) string {
 		return c.Schema.Key
 	}
 	return c.Name
+}
+
+// nestedReconTag is the recon tag body for a nested env input: key + secret
+// only — required/default are the envnest fill's concern (recon would judge
+// them against a leaf key that never resolves).
+func nestedReconTag(key string, schema *InputSchema) string {
+	parts := []string{key}
+	if schema.Secret {
+		parts = append(parts, "secret")
+	}
+	return strings.Join(parts, ",")
 }
 
 // reconTag builds an env/config field's recon struct-tag body: the canonical key,
@@ -550,11 +579,35 @@ func renderBindMeta(gp *genProgram) string {
 	b.WriteString("// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.\n")
 	b.WriteString("var BindMeta = " + rotiniPkgName + ".BindMeta{\n")
 	if len(files) > 0 {
+		pathFrom := collectPathFrom(gp)
 		b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
 		for _, f := range files {
-			b.WriteString("{Name: " + strconv.Quote(f.Name) + ", Path: " + strconv.Quote(f.Path))
+			b.WriteString("{Name: " + strconv.Quote(f.Name))
+			if f.Path != "" {
+				b.WriteString(", Path: " + strconv.Quote(f.Path))
+			}
 			if f.Format != "" {
 				b.WriteString(", Format: " + strconv.Quote(f.Format))
+			}
+			if d := f.Discover; d != nil {
+				b.WriteString(", Discover: &" + rotiniPkgName + ".DiscoverDef{Strategy: " + strconv.Quote(d.Strategy) + ", File: " + strconv.Quote(d.File))
+				if d.App != "" {
+					b.WriteString(", App: " + strconv.Quote(d.App))
+				}
+				b.WriteString("}")
+			}
+			if c, ok := pathFrom[f.Name]; ok {
+				b.WriteString(", PathFrom: &" + rotiniPkgName + ".PathFromDef{")
+				if c.flag != "" {
+					b.WriteString("Flag: " + strconv.Quote(c.flag))
+					if c.env != "" {
+						b.WriteString(", ")
+					}
+				}
+				if c.env != "" {
+					b.WriteString("Env: " + strconv.Quote(c.env))
+				}
+				b.WriteString("}")
 			}
 			b.WriteString("},\n")
 		}
@@ -663,6 +716,9 @@ func flagDefsLiteral(in *Inputs) string {
 		}
 		if kp := keyPaths(f.Schema); len(kp) > 0 {
 			b.WriteString(", KeyPaths: " + goStringSlice(kp))
+		}
+		if f.Schema != nil && len(f.Schema.From) > 0 {
+			b.WriteString(", From: " + goStringSlice(f.Schema.From))
 		}
 	})
 }
@@ -887,7 +943,7 @@ func toTemplateFields(fs []fieldDef) []templateInputField {
 	for _, f := range fs {
 		tf := templateInputField{Field: f.Field, GoType: f.GoType}
 		if f.Tag != "" {
-			tf.Tag = inputFieldTag(f.Tag, f.Recon, f.EnvVar, f.Constraint)
+			tf.Tag = inputFieldTag(f)
 		}
 		out = append(out, tf)
 	}
@@ -2423,6 +2479,54 @@ func collectOutputDefs(gp *genProgram) map[string]any {
 		addStdin(n.prefix, n.inputs)
 	})
 	return defs
+}
+
+// pathFromClaim accumulates the config_source inputs claiming one
+// configuration_files entry: a flag's logical name and/or an env input's
+// variable.
+type pathFromClaim struct {
+	flag string
+	env  string
+}
+
+// collectPathFrom maps each configuration_files name to the inputs that supply
+// its path (spec config_source), across the whole command tree: a flag claims
+// by logical name; an env input by its variable (explicit `variable:`, else
+// the SNAKE_UPPER projection of its name). Validation guarantees single
+// claims per channel and that the named entry exists.
+func collectPathFrom(gp *genProgram) map[string]pathFromClaim {
+	out := map[string]pathFromClaim{}
+	add := func(in *Inputs) {
+		if in == nil {
+			return
+		}
+		for _, f := range in.Flags {
+			if f.Schema != nil && f.Schema.ConfigSource != "" {
+				c := out[f.Schema.ConfigSource]
+				c.flag = f.Name
+				out[f.Schema.ConfigSource] = c
+			}
+		}
+		for _, e := range in.Env {
+			if e.Schema != nil && e.Schema.ConfigSource != "" {
+				c := out[e.Schema.ConfigSource]
+				c.env = envVarName(e)
+				out[e.Schema.ConfigSource] = c
+			}
+		}
+	}
+	add(gp.rootInputs)
+	eachOwnNode(gp.tree, func(n *rnode) { add(n.inputs) })
+	return out
+}
+
+// envVarName is an env input's environment variable: the explicit `variable:`
+// when declared, else the SNAKE_UPPER projection of its name (recon's default).
+func envVarName(e EnvInput) string {
+	if v := envVarOf(e.Schema); v != "" {
+		return v
+	}
+	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(e.Name))
 }
 
 // collectStdinSchemas builds the per-command stdin validation schemas for BindMeta:

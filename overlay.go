@@ -305,7 +305,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := parseArgvTokens(chain, rtx.Args)
+	store, err := parseArgvTokens(chain, rtx.Args, rtx.Stdin)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -416,8 +416,7 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 	if err != nil {
 		return nil, nil, err
 	}
-	envReg, err := recon.New(recon.WithSource(
-		recon.NewOSEnvSource(recon.WithEnvTransform(envTransform(envExplicit(v))))))
+	envReg, err := recon.New(recon.WithSources(envSources(v)...))
 	if err != nil {
 		return nil, nil, fmt.Errorf("rotini: env registry: %w", err)
 	}
@@ -431,29 +430,36 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 	}
 	defer flagReg.Close()
 
-	return channelLayer(v, chain, "env", "Env", envReg, flagReg)
+	return channelLayer(v, chain, "env", "Env", envReg, flagReg, nil)
 }
 
 // filesLayer acquires the config-files channel (Config structs + flag
-// config-fallbacks) into v.
+// config-fallbacks) into v. config_source paths are honored here too: the
+// argv+env phase is re-read best-effort to learn where the files channel
+// should look (a malformed argv contributes nothing — ParseArgv owns
+// reporting it).
 func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return nil, nil, err
 	}
-	cfgReg, err := b.configRegistry()
+	overrides := map[string]string{}
+	if store, err := parseInto(chain, rtx.Args, rtx.Stdin); err == nil {
+		overrides = b.pathOverrides(chain, store)
+	}
+	cfg, err := b.configRegs(overrides)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer cfgReg.Close()
-	return channelLayer(v, chain, "files", "Config", cfgReg, cfgReg)
+	defer cfg.Close()
+	return channelLayer(v, chain, "files", "Config", cfg.merged, cfg.merged, cfg)
 }
 
 // channelLayer is the shared env/files core: recon-bind each command's channel
 // struct (required + defaults are recon's contract), constraint-check provided
 // values, fill flag fallbacks for recon-keyed flags, and record presence for
 // everything the channel actually supplied.
-func channelLayer(v reflect.Value, chain []ResolvedCommand, layerName, structName string, reg, flagReg *recon.Registry) (Presence, *layerCore, error) {
+func channelLayer(v reflect.Value, chain []ResolvedCommand, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs) (Presence, *layerCore, error) {
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	var bindErr error
@@ -469,17 +475,47 @@ func channelLayer(v reflect.Value, chain []ResolvedCommand, layerName, structNam
 				bindErr = fmt.Errorf("rotini: bind %s: %w", strings.ToLower(structName), err)
 				return
 			}
-			if err := validateChannelStruct(cs, reg); err != nil {
+			if err := validateChannelStruct(cs, reg, cfg); err != nil {
 				bindErr = err
 				return
 			}
+			if cfg != nil {
+				if err := bindPinnedConfig(cs, cfg); err != nil {
+					bindErr = err
+					return
+				}
+			}
+			// Nested env families (envnest) are filled directly — recon
+			// resolves leaf keys only — and recorded as non-textual presence.
+			nested := map[string]bool{}
+			if structName == "Env" {
+				var err error
+				if nested, err = fillEnvNested(cs); err != nil {
+					bindErr = err
+					return
+				}
+			}
 			eachTaggedField(ci, structName, func(fieldName, logical string, _ reflect.Value) {
-				body := taggedFieldTag(ci, structName, fieldName).Get("recon")
+				tag := taggedFieldTag(ci, structName, fieldName)
+				body := tag.Get("recon")
 				key := reconKey(body)
 				if key == "" {
 					return
 				}
-				if val, found, err := reg.Get(key); err == nil && found {
+				fieldReg := reg
+				if pin := tag.Get("cfgfile"); pin != "" && cfg != nil {
+					if pinned, err := cfg.For(pin); err == nil {
+						fieldReg = pinned
+					}
+				}
+				if nested[key] {
+					set[fieldPath(topName, structName, fieldName)] = Provenance{
+						Layer: layerName,
+						Raw:   redactValue("", reconHasSecret(body)),
+					}
+					return
+				}
+				if val, found, err := fieldReg.Get(key); err == nil && found {
 					set[fieldPath(topName, structName, fieldName)] = Provenance{
 						Layer: layerName,
 						Raw:   redactValue(val.String(), reconHasSecret(body)),

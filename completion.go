@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -214,6 +215,11 @@ func pendingValueFlag(context []string) (string, bool) {
 // vocabulary (completed up to the '='), else the flag's static enum, else
 // nothing (so the shell falls back to its default completion).
 func flagValueCandidates(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner string, fd FlagDef, partial string) []string {
+	// An '@' on a from:file flag is a path in progress — offer nothing, so the
+	// shell falls back to its own file completion.
+	if strings.HasPrefix(partial, "@") && slices.Contains(fd.From, "file") {
+		return nil
+	}
 	if cands, dyn := dynamicFlagValues(handlers, rtx, chain, words, owner, fd.Name, partial); dyn {
 		return cands
 	}

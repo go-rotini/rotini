@@ -254,19 +254,26 @@ type templateInputField struct {
 }
 
 // inputFieldTag assembles a complete struct-tag literal for a generated input
-// field: the rotini tag plus the optional recon / env / constraint tags.
-// constraint is pre-rendered space-separated tags (e.g. `min:"1" max:"65535"`);
-// every part but rotiniTag may be empty.
-func inputFieldTag(rotiniTag, recon, envVar, constraint string) string {
-	tag := fmt.Sprintf("rotini:%q", rotiniTag)
-	if recon != "" {
-		tag += fmt.Sprintf(" recon:%q", recon)
+// field from its fieldDef: the rotini tag plus the optional recon / env /
+// envnest / cfgfile / constraint tags. Constraint is pre-rendered
+// space-separated tags (e.g. `min:"1" max:"65535"`); every part but Tag may
+// be empty.
+func inputFieldTag(f fieldDef) string {
+	tag := fmt.Sprintf("rotini:%q", f.Tag)
+	if f.Recon != "" {
+		tag += fmt.Sprintf(" recon:%q", f.Recon)
 	}
-	if envVar != "" {
-		tag += fmt.Sprintf(" env:%q", envVar)
+	if f.EnvVar != "" {
+		tag += fmt.Sprintf(" env:%q", f.EnvVar)
 	}
-	if constraint != "" {
-		tag += " " + constraint
+	if f.EnvNest != "" {
+		tag += fmt.Sprintf(" envnest:%q", f.EnvNest)
+	}
+	if f.CfgFile != "" {
+		tag += fmt.Sprintf(" cfgfile:%q", f.CfgFile)
+	}
+	if f.Constraint != "" {
+		tag += " " + f.Constraint
 	}
 	return "`" + tag + "`"
 }

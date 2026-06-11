@@ -88,10 +88,33 @@ type BindMeta struct {
 }
 
 // ConfigFile is one configuration-file source the binder reads (reconciled by recon).
+// Exactly one of Path and Discover locates the file (the spec enforces this).
 type ConfigFile struct {
-	Name   string // logical name
-	Path   string // file path (may contain ~)
-	Format string // "json" | "yaml" | "toml"; "" lets the binder infer from the extension
+	Name     string       // logical name
+	Path     string       // fixed file path (may contain ~)
+	Format   string       // "json" | "yaml" | "toml"; "" lets the binder infer from the extension
+	Discover *DiscoverDef // run-time location strategy, instead of a fixed Path
+	PathFrom *PathFromDef // runtime inputs that supply/override the path (spec config_source)
+}
+
+// PathFromDef names the runtime inputs that supply a [ConfigFile]'s path (the
+// spec's config_source) — the declarative two-phase parse: argv and env are
+// read first, then the file channel opens whatever they pointed at. The path
+// precedence is: the flag explicitly set on argv, then the env variable, then
+// the flag's declared default, then the entry's own path/discover. A path
+// supplied this way must exist — the user explicitly asked for it.
+type PathFromDef struct {
+	Flag string // logical flag name searched across the resolved chain
+	Env  string // environment variable read directly
+}
+
+// DiscoverDef locates a configuration file at run time (the spec's discover:).
+// The strategy orders the directories searched for File; the first directory
+// containing it wins, and a file found nowhere is simply absent.
+type DiscoverDef struct {
+	Strategy string // "walk-up" (working directory up to the filesystem root) | "xdg" ($XDG_CONFIG_HOME/<app>, default ~/.config/<app>)
+	File     string // the file name looked for in each searched directory
+	App      string // the application directory under the XDG config root (xdg only)
 }
 
 // RemoteDiscoveryDef enables kubectl/git/gh-style plugin discovery on a command:
@@ -154,6 +177,7 @@ type FlagDef struct {
 	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Parser.Deprecations] reports when used
 	DottedKeys            bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
 	KeyPaths              []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
+	From                  []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
 	Constraints
 }
 

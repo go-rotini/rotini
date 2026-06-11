@@ -287,6 +287,25 @@ func TestComplete_mapKeyPaths(t *testing.T) {
 	}
 }
 
+// TestComplete_fromFileFallsBack pins the from:file completion contract: an '@'
+// partial offers nothing (the shell falls back to file completion), even when
+// the flag has a static enum; without from:file the enum still answers.
+func TestComplete_fromFileFallsBack(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Enum: []string{"@literal", "abc"}, From: []string{"file"}},
+			{Name: "plain", Identifiers: []string{"--plain"}, Type: "string", Enum: []string{"@literal", "abc"}},
+		},
+	}
+	if got := complete(def, []string{"--token", "@"}, nil, nil); len(got) != 0 {
+		t.Errorf("complete(@ on from:file) = %v, want nothing (shell file fallback)", got)
+	}
+	if got := complete(def, []string{"--plain", "@"}, nil, nil); !reflect.DeepEqual(got, []string{"@literal"}) {
+		t.Errorf("complete(@ on plain flag) = %v, want the enum match", got)
+	}
+}
+
 // TestComplete_noAutoHelpFlag pins the ethos: completion never auto-adds -h/--help.
 // They appear only when the CLI declares a help flag (Pillar 1 — no framework-injected
 // flags).

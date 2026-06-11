@@ -685,7 +685,8 @@ func TestGenerateInputChannels(t *testing.T) {
 		// recon tags drive the binder; env key = name, config key = schema.key, + secret/required.
 		// An env input's explicit `variable` rides on an `env:"…"` tag.
 		"recon:\"region\" env:\"WIDGET_REGION\"",
-		"`rotini:\"endpoint\" recon:\"api.endpoint\"`",
+		// file: pins the input to that configuration_files entry (cfgfile tag).
+		"`rotini:\"endpoint\" recon:\"api.endpoint\" cfgfile:\"app\"`",
 		"`rotini:\"token\" recon:\"api.token,required,secret\"`",
 		// the BindMeta descriptor carries the config-file sources.
 		"var BindMeta = rotini.BindMeta{",
@@ -2000,6 +2001,10 @@ const helpGoldenEnvConfigSpec = goldenSpecSchema +
       - name: timeout
         summary: request timeout
         schema: { type: int, default: 30 }
+configuration_files:
+  - name: app
+    path: ~/.app.yaml
+    format: yaml
 `
 
 // TestHelpGolden_EnvConfig locks the rendering of env-var and config inputs in the
@@ -2193,6 +2198,16 @@ func TestFlagDefsLiteral_dottedKeys(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("flagDefsLiteral missing %q in:\n%s", want, got)
 		}
+	}
+}
+
+func TestFlagDefsLiteral_from(t *testing.T) {
+	in := &Inputs{Flags: []FlagInput{{
+		Name:   "token",
+		Schema: &InputSchema{BaseSchema: BaseSchema{Type: "string"}, From: []string{"value", "file"}},
+	}}}
+	if got, want := flagDefsLiteral(in), `From: []string{"value", "file"}`; !strings.Contains(got, want) {
+		t.Errorf("flagDefsLiteral missing %q in:\n%s", want, got)
 	}
 }
 

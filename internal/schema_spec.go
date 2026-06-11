@@ -122,14 +122,26 @@ type ConfigInput struct {
 }
 
 type ConfigurationFile struct {
+	// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared configuration_files order remains precedence order.
+	Discover *ConfigurationFileDiscover `json:"discover,omitempty"`
 	// File format
 	Format string `json:"format,omitempty"`
 	// Logical name for the config file (e.g., 'app-config')
 	Name string `json:"name"`
-	// File path (supports ~ for home dir)
-	Path string `json:"path"`
+	// File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
+	Path string `json:"path,omitempty"`
 	// When set, generates a typed config struct and validates required fields at load time.
 	Schema *Schema `json:"schema,omitempty"`
+}
+
+// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared configuration_files order remains precedence order.
+type ConfigurationFileDiscover struct {
+	// The application directory under the XDG config root (xdg strategy only, required there).
+	App string `json:"app,omitempty"`
+	// The file name to look for in each searched directory (e.g. '.acme.toml', 'config.yaml').
+	File string `json:"file"`
+	// 'walk-up': search from the working directory upward to the filesystem root (project-local config, git-style). 'xdg': search $XDG_CONFIG_HOME/<app> (default ~/.config/<app>), the conventional per-user location.
+	Strategy string `json:"strategy"`
 }
 
 type EnvInput struct {
@@ -202,17 +214,23 @@ type HelpHeadings struct {
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.
 type InputSchema struct {
 	BaseSchema
+	// Flag and env inputs only: names a configuration_files entry whose file PATH this input supplies — the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist — unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry.
+	ConfigSource string `json:"config_source,omitempty"`
 	// Default value applied when the input is not provided
 	Default any `json:"default,omitempty"`
 	// Map-typed flags only, and only with 'any' values ('map'/'object' → map[string]any). When true, a '.'-separated key in a key=value pair assigns into nested maps, helm-style: --set image.tag=v2 → map[image][tag]=v2. Opt-in because '.' is a legal character in plain map keys — without it, --label a.b=c stores the literal key 'a.b'. Each assignment overwrites whatever is at its path (creating intermediate maps as needed), so later pairs win and --set a=1 --set a.b=2 leaves a nested map under 'a'. Declare 'properties' on the flag's schema to give shell completion the known key paths (offered up to the '=').
 	DottedKeys bool `json:"dotted_keys,omitempty"`
-	// Config file logical name to read from (config inputs only)
+	// Config inputs only: pins this input to ONE named configuration_files entry — the value (and its 'required') is read from that file ONLY, never from the merged precedence chain, so a key present in another file does not satisfy it. Omit to read through the declared precedence order (first file with the key wins).
 	File string `json:"file,omitempty"`
+	// Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text is whitespace-trimmed, then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text (a structured stdin payload is the stdin: channel's job, not a flag's). Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only.
+	From []string `json:"from,omitempty"`
 	// Key path within the config file (config inputs only, e.g., 'server.port')
 	Key string `json:"key,omitempty"`
+	// Env inputs only, map-typed ('map'/'object' → map[string]any): the separator that aggregates a FAMILY of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the SNAKE_UPPER of the input's name. With name: http, variable: ACME_HTTP, nesting: "__" — ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: "30", retry: {max: "9"}} (segments lowercased; values are strings). 'required: true' errors when no matching variables exist. 'default:' is rejected — seed defaults in code or config instead.
+	Nesting string `json:"nesting,omitempty"`
 	// When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean — unlike the string-array 'required' on Schema.
 	Required bool `json:"required,omitempty"`
-	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag.
+	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag. rotini ships no interactive secret prompt (the UX layer is deliberately out of scope): a handler wanting one reads rtx.Stdin with any prompt library; for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 	Secret bool `json:"secret,omitempty"`
 	// Environment variable name (env inputs only)
 	Variable string `json:"variable,omitempty"`

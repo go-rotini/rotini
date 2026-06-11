@@ -61,16 +61,16 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 			{
 				Prefix: "App",
 				Flags: []templateInputField{
-					{Field: "Verbose", GoType: "bool", Tag: inputFieldTag("flag:verbose", "", "", "")},
+					{Field: "Verbose", GoType: "bool", Tag: inputFieldTag(fieldDef{Tag: "flag:verbose"})},
 				},
 				Arguments: []templateInputField{
-					{Field: "Paths", GoType: "[]string", Tag: inputFieldTag("argument:paths", "", "", "")},
+					{Field: "Paths", GoType: "[]string", Tag: inputFieldTag(fieldDef{Tag: "argument:paths"})},
 				},
 				Env: []templateInputField{
-					{Field: "Home", GoType: "string", Tag: inputFieldTag("env:home", "key:home", "APP_HOME", `min:"1"`)},
+					{Field: "Home", GoType: "string", Tag: inputFieldTag(fieldDef{Tag: "env:home", Recon: "key:home", EnvVar: "APP_HOME", Constraint: `min:"1"`})},
 				},
 				Config: []templateInputField{
-					{Field: "Timeout", GoType: "time.Duration", Tag: inputFieldTag("config:timeout", "key:timeout", "", "")},
+					{Field: "Timeout", GoType: "time.Duration", Tag: inputFieldTag(fieldDef{Tag: "config:timeout", Recon: "key:timeout"})},
 				},
 				StdinType:    "*AppStdin",
 				StdinFormat:  "yaml",
@@ -283,16 +283,19 @@ func TestMergeGenFile_parseErrors(t *testing.T) {
 
 func TestInputFieldTag(t *testing.T) {
 	cases := []struct {
-		rotini, recon, envVar, constraint, want string
+		f    fieldDef
+		want string
 	}{
-		{"name", "", "", "", "`rotini:\"name\"`"},
-		{"name", "key", "", "", "`rotini:\"name\" recon:\"key\"`"},
-		{"name", "key", "VAR", "", "`rotini:\"name\" recon:\"key\" env:\"VAR\"`"},
-		{"name", "key", "VAR", `min:"1"`, "`rotini:\"name\" recon:\"key\" env:\"VAR\" min:\"1\"`"},
+		{fieldDef{Tag: "name"}, "`rotini:\"name\"`"},
+		{fieldDef{Tag: "name", Recon: "key"}, "`rotini:\"name\" recon:\"key\"`"},
+		{fieldDef{Tag: "name", Recon: "key", EnvVar: "VAR"}, "`rotini:\"name\" recon:\"key\" env:\"VAR\"`"},
+		{fieldDef{Tag: "name", Recon: "key", EnvVar: "VAR", Constraint: `min:"1"`}, "`rotini:\"name\" recon:\"key\" env:\"VAR\" min:\"1\"`"},
+		{fieldDef{Tag: "name", Recon: "key", EnvNest: "ACME_HTTP,__"}, "`rotini:\"name\" recon:\"key\" envnest:\"ACME_HTTP,__\"`"},
+		{fieldDef{Tag: "name", Recon: "key", CfgFile: "project"}, "`rotini:\"name\" recon:\"key\" cfgfile:\"project\"`"},
 	}
 	for _, tc := range cases {
-		if got := inputFieldTag(tc.rotini, tc.recon, tc.envVar, tc.constraint); got != tc.want {
-			t.Errorf("inputFieldTag(%q,%q,%q,%q) = %s, want %s", tc.rotini, tc.recon, tc.envVar, tc.constraint, got, tc.want)
+		if got := inputFieldTag(tc.f); got != tc.want {
+			t.Errorf("inputFieldTag(%+v) = %s, want %s", tc.f, got, tc.want)
 		}
 	}
 }

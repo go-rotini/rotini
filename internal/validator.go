@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -260,6 +261,11 @@ var specLints = []func(*Spec) []error{
 	lintDeprecatedIdentifiers,
 	lintRemoteTimeouts,
 	lintDottedKeys,
+	lintFrom,
+	lintConfigurationFiles,
+	lintConfigSource,
+	lintEnvNesting,
+	lintConfigInputFiles,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -397,6 +403,208 @@ func lintDottedKeys(spec *Spec) []error {
 					loc:  loc,
 					msg:  fmt.Sprintf("flag %q sets dotted_keys but its type is %s — dotted keys need 'map' (map[string]any) to nest into", name, t),
 				})
+			}
+		})
+	})
+	return problems
+}
+
+// lintConfigurationFiles enforces each configuration_files entry's location
+// contract: exactly one of path/discover, and the discover strategies' own
+// requirements (xdg needs app; walk-up has no app to ignore silently).
+func lintConfigurationFiles(spec *Spec) []error {
+	var problems []error
+	add := func(name, msg string) {
+		problems = append(problems, &problem{kind: "spec", loc: "configuration_files " + name, msg: msg})
+	}
+	seen := map[string]bool{}
+	for _, cf := range spec.ConfigurationFiles {
+		if seen[cf.Name] {
+			add(cf.Name, "is declared twice — logical names identify entries (file: pins, config_source) and must be unique")
+		}
+		seen[cf.Name] = true
+		switch {
+		case cf.Path == "" && cf.Discover == nil:
+			add(cf.Name, "needs a location — set 'path' or 'discover'")
+		case cf.Path != "" && cf.Discover != nil:
+			add(cf.Name, "sets both 'path' and 'discover' — exactly one locates the file")
+		}
+		if d := cf.Discover; d != nil {
+			if d.Strategy == "xdg" && d.App == "" {
+				add(cf.Name, "discover strategy 'xdg' needs 'app' (the directory under the XDG config root)")
+			}
+			if d.Strategy == "walk-up" && d.App != "" {
+				add(cf.Name, "discover strategy 'walk-up' does not use 'app' — remove it (it would be silently ignored)")
+			}
+		}
+	}
+	return problems
+}
+
+// lintEnvNesting enforces nesting:'s contract — a variable FAMILY aggregates
+// into one nested map, so it is env-channel-only, needs map[string]any to nest
+// into, and cannot carry a default (a single default string has no map shape;
+// seed defaults in code or config instead).
+func lintEnvNesting(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		loc := "command " + path
+		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Nesting == "" {
+				return
+			}
+			if channel != "env" {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("%s %q sets nesting, which applies to env inputs only", channel, name),
+				})
+				return
+			}
+			if t := getSchemaType(schema); t != "map[string]any" {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("env %q sets nesting but its type is %s — a variable family needs 'map' (map[string]any) to nest into", name, t),
+				})
+			}
+			if schema.Default != nil {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("env %q sets both nesting and default — a nested family has no single default; seed defaults in code or config instead", name),
+				})
+			}
+		})
+	})
+	return problems
+}
+
+// lintConfigSource enforces config_source's contract: flag/env inputs only,
+// string-typed, naming a declared configuration_files entry, with at most one
+// flag and one env input claiming any entry (a second claim would silently
+// shadow the first).
+func lintConfigSource(spec *Spec) []error {
+	var problems []error
+	declared := map[string]bool{}
+	for _, cf := range spec.ConfigurationFiles {
+		declared[cf.Name] = true
+	}
+	claims := map[string]map[string]string{} // file → channel → claiming input
+	walkCommands(spec, func(c *Command, path string) {
+		loc := "command " + path
+		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.ConfigSource == "" {
+				return
+			}
+			target := schema.ConfigSource
+			if channel != "flag" && channel != "env" {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("%s %q sets config_source, which applies to flag and env inputs only", channel, name),
+				})
+				return
+			}
+			if !declared[target] {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("%s %q names config_source %q, which is not a declared configuration_files entry", channel, name, target),
+				})
+				return
+			}
+			if t := getSchemaType(schema); t != "string" {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("%s %q sets config_source but its type is %s — a file path is a string", channel, name, t),
+				})
+			}
+			if claims[target] == nil {
+				claims[target] = map[string]string{}
+			}
+			if prev, dup := claims[target][channel]; dup {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("%s %q claims config_source %q, already claimed by %s %q — one %s per entry", channel, name, target, channel, prev, channel),
+				})
+				return
+			}
+			claims[target][channel] = name
+		})
+	})
+	return problems
+}
+
+// lintConfigInputFiles enforces file:'s contract: config inputs only, naming a
+// declared configuration_files entry — the input's value is then read from
+// that file ONLY (not the merged precedence chain), including its required.
+func lintConfigInputFiles(spec *Spec) []error {
+	var problems []error
+	declared := map[string]bool{}
+	for _, cf := range spec.ConfigurationFiles {
+		declared[cf.Name] = true
+	}
+	walkCommands(spec, func(c *Command, path string) {
+		loc := "command " + path
+		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.File == "" {
+				return
+			}
+			if channel != "config" {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("%s %q sets file:, which applies to config inputs only", channel, name),
+				})
+				return
+			}
+			if !declared[schema.File] {
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("config %q pins file %q, which is not a declared configuration_files entry", name, schema.File),
+				})
+			}
+		})
+	})
+	return problems
+}
+
+// lintFrom enforces from:'s documented scope — acquisition sentinels are argv
+// flag grammar: flags only, never bool flags (their value is inline-only), and
+// stdin has one consumer, so a from:stdin flag cannot coexist with a declared
+// stdin: channel or another from:stdin flag on the same command.
+func lintFrom(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		loc := "command " + path
+		stdinClaim := "" // what already claimed this command's stdin
+		if c.Inputs != nil && c.Inputs.Stdin != nil {
+			stdinClaim = "the stdin: channel"
+		}
+		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+			if schema == nil || len(schema.From) == 0 {
+				return
+			}
+			if channel != "flag" {
+				problems = append(problems, &problem{
+					kind: "spec",
+					loc:  loc,
+					msg:  fmt.Sprintf("%s %q sets from:, which applies to flags only", channel, name),
+				})
+				return
+			}
+			if t := getSchemaType(schema); t == "bool" {
+				problems = append(problems, &problem{
+					kind: "spec",
+					loc:  loc,
+					msg:  fmt.Sprintf("flag %q sets from: but is bool — a bool takes no value to resolve", name),
+				})
+			}
+			if slices.Contains(schema.From, "stdin") {
+				if stdinClaim != "" {
+					problems = append(problems, &problem{
+						kind: "spec",
+						loc:  loc,
+						msg:  fmt.Sprintf("flag %q declares from: stdin but %s already consumes stdin — stdin has one consumer", name, stdinClaim),
+					})
+					return
+				}
+				stdinClaim = fmt.Sprintf("flag %q", name)
 			}
 		})
 	})

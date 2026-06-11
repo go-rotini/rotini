@@ -3,6 +3,8 @@ package rotini
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -1304,6 +1306,114 @@ func TestTypeConformanceMatrix(t *testing.T) {
 				t.Errorf("Parse(%v) = %v, want a usage error naming %s", r.argv, err, r.name)
 			}
 		})
+	}
+}
+
+// from: shapes (spec from:): a token flag resolving @file values (the secret
+// token-file idiom), a payload flag resolving the bare "-" stdin sentinel, and
+// a plain flag where both stay literal.
+type fromInputs struct {
+	App struct {
+		Flags struct {
+			Token   string `rotini:"token"`
+			Payload string `rotini:"payload"`
+			Plain   string `rotini:"plain"`
+		}
+		Arguments struct{}
+	}
+}
+
+func fromDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Secret: true, From: []string{"value", "file"}},
+			{Name: "payload", Identifiers: []string{"-f", "--payload"}, Type: "string", From: []string{"value", "stdin"}},
+			{Name: "plain", Identifiers: []string{"--plain"}, Type: "string"},
+		},
+	}
+}
+
+func TestParse_fromFile(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("sk-12345\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var in fromInputs
+	if err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token", "@" + tokenFile}), &in); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if in.App.Flags.Token != "sk-12345" {
+		t.Errorf("Token = %q, want the file's trimmed contents", in.App.Flags.Token)
+	}
+
+	// The inline form resolves too.
+	var in2 fromInputs
+	if err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token=@" + tokenFile}), &in2); err != nil {
+		t.Fatalf("Parse(inline): %v", err)
+	}
+	if in2.App.Flags.Token != "sk-12345" {
+		t.Errorf("inline Token = %q, want the file's contents", in2.App.Flags.Token)
+	}
+
+	// An unreadable file is a usage error naming the flag and the @path — never
+	// a silent literal.
+	var in3 fromInputs
+	err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token", "@/nonexistent/nope"}), &in3)
+	if err == nil || !strings.Contains(err.Error(), "--token") || !strings.Contains(err.Error(), "@/nonexistent/nope") {
+		t.Errorf("Parse(missing file) = %v, want a cannot-read usage error", err)
+	}
+
+	// STDIN-04 conformance: a plain path (no '@') stays literal even on a
+	// from:-enabled flag — the handler opens it itself.
+	var inPath fromInputs
+	if err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token", tokenFile}), &inPath); err != nil {
+		t.Fatalf("Parse(plain path): %v", err)
+	}
+	if inPath.App.Flags.Token != tokenFile {
+		t.Errorf("Token = %q, want the literal path %q", inPath.App.Flags.Token, tokenFile)
+	}
+
+	// Without from: file, '@' is an ordinary character.
+	var in4 fromInputs
+	if err := NewParser().Parse(NewContextFor(fromDef(), []string{"--plain", "@literal"}), &in4); err != nil {
+		t.Fatalf("Parse(plain @): %v", err)
+	}
+	if in4.App.Flags.Plain != "@literal" {
+		t.Errorf("Plain = %q, want the literal @ value (from: is opt-in)", in4.App.Flags.Plain)
+	}
+}
+
+func TestParse_fromStdin(t *testing.T) {
+	rtx := NewContextFor(fromDef(), []string{"-f", "-"})
+	rtx.Stdin = strings.NewReader("kind: Widget\n")
+	var in fromInputs
+	if err := NewParser().Parse(rtx, &in); err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if in.App.Flags.Payload != "kind: Widget" {
+		t.Errorf("Payload = %q, want the trimmed piped text", in.App.Flags.Payload)
+	}
+
+	// Giving "-" demands a pipe: empty stdin is a usage error (the required-
+	// stdin error path).
+	rtx2 := NewContextFor(fromDef(), []string{"-f", "-"})
+	rtx2.Stdin = strings.NewReader("")
+	var in2 fromInputs
+	err := NewParser().Parse(rtx2, &in2)
+	if err == nil || !strings.Contains(err.Error(), "stdin is empty") {
+		t.Errorf("Parse(empty stdin) = %v, want a stdin-is-empty usage error", err)
+	}
+
+	// Without from: stdin, "-" is an ordinary value.
+	rtx3 := NewContextFor(fromDef(), []string{"--plain", "-"})
+	var in3 fromInputs
+	if err := NewParser().Parse(rtx3, &in3); err != nil {
+		t.Fatalf("Parse(plain -): %v", err)
+	}
+	if in3.App.Flags.Plain != "-" {
+		t.Errorf("Plain = %q, want the literal -", in3.App.Flags.Plain)
 	}
 }
 

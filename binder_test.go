@@ -99,6 +99,153 @@ func TestBinder_noConfigFilesLeavesConfigZero(t *testing.T) {
 	}
 }
 
+// Discovery shapes (spec discover:): a walk-up entry found in an ancestor of
+// the working directory, and an xdg entry under $XDG_CONFIG_HOME/<app>.
+func TestBinder_discoverWalkUp(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The file lives two levels above the working directory.
+	if err := os.WriteFile(filepath.Join(root, ".app.yaml"), []byte("api:\n  endpoint: from-walk-up\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(nested)
+
+	meta := BindMeta{ConfigFiles: []ConfigFile{{
+		Name: "project", Format: "yaml",
+		Discover: &DiscoverDef{Strategy: "walk-up", File: ".app.yaml"},
+	}}}
+	var in tbNoReqInputs
+	if err := NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Config.Endpoint != "from-walk-up" {
+		t.Errorf("Endpoint = %q, want from-walk-up (discovered above the cwd)", in.App.Config.Endpoint)
+	}
+
+	// The nearest directory wins: a file in the cwd shadows the ancestor's.
+	if err := os.WriteFile(filepath.Join(nested, ".app.yaml"), []byte("api:\n  endpoint: from-cwd\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var in2 tbNoReqInputs
+	if err := NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in2); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in2.App.Config.Endpoint != "from-cwd" {
+		t.Errorf("Endpoint = %q, want from-cwd (nearest directory wins)", in2.App.Config.Endpoint)
+	}
+}
+
+func TestBinder_discoverXDG(t *testing.T) {
+	xdg := t.TempDir()
+	appDir := filepath.Join(xdg, "acme")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "config.yaml"), []byte("api:\n  endpoint: from-xdg\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	meta := BindMeta{ConfigFiles: []ConfigFile{{
+		Name: "user", Format: "yaml",
+		Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"},
+	}}}
+	var in tbNoReqInputs
+	if err := NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Config.Endpoint != "from-xdg" {
+		t.Errorf("Endpoint = %q, want from-xdg", in.App.Config.Endpoint)
+	}
+
+	// An absent discovered file is simply absent — same as a missing fixed path.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	var in2 tbNoReqInputs
+	if err := NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in2); err != nil {
+		t.Fatalf("Bind(absent discovered file): %v", err)
+	}
+	if in2.App.Config.Endpoint != "" {
+		t.Errorf("Endpoint = %q, want empty", in2.App.Config.Endpoint)
+	}
+}
+
+// config_source shapes (spec config_source): a --config flag (and an env
+// fallback variable) supplies the file the config channel then reads — the
+// declarative two-phase parse.
+type tbCfgSrcInputs struct {
+	App struct {
+		Flags struct {
+			Config string `rotini:"config"`
+		}
+		Arguments struct{}
+		Config    struct {
+			Endpoint string `rotini:"endpoint" recon:"api.endpoint"`
+		}
+	}
+}
+
+func tbCfgSrcDef(withDefault string) Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "config", Identifiers: []string{"--config"}, Type: "string", Default: withDefault}},
+	}
+}
+
+func TestBinder_configSourceTwoPhase(t *testing.T) {
+	declared := writeConfig(t, "api:\n  endpoint: from-declared\n")
+	flagged := writeConfig(t, "api:\n  endpoint: from-flag\n")
+	fromEnv := writeConfig(t, "api:\n  endpoint: from-env\n")
+	meta := BindMeta{ConfigFiles: []ConfigFile{{
+		Name: "app", Path: declared, Format: "yaml",
+		PathFrom: &PathFromDef{Flag: "config", Env: "APP_CONFIG"},
+	}}}
+	bind := func(t *testing.T, def Definition, argv []string) tbCfgSrcInputs {
+		t.Helper()
+		var in tbCfgSrcInputs
+		if err := NewBinder(meta).Bind(NewContextFor(def, argv), &in); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		return in
+	}
+
+	t.Run("argv flag wins over everything", func(t *testing.T) {
+		t.Setenv("APP_CONFIG", fromEnv)
+		in := bind(t, tbCfgSrcDef(declared), []string{"--config", flagged})
+		if in.App.Config.Endpoint != "from-flag" {
+			t.Errorf("Endpoint = %q, want from-flag", in.App.Config.Endpoint)
+		}
+	})
+	t.Run("env var over flag default and declared path", func(t *testing.T) {
+		t.Setenv("APP_CONFIG", fromEnv)
+		in := bind(t, tbCfgSrcDef(declared), nil)
+		if in.App.Config.Endpoint != "from-env" {
+			t.Errorf("Endpoint = %q, want from-env", in.App.Config.Endpoint)
+		}
+	})
+	t.Run("flag default over the declared path", func(t *testing.T) {
+		in := bind(t, tbCfgSrcDef(flagged), nil)
+		if in.App.Config.Endpoint != "from-flag" {
+			t.Errorf("Endpoint = %q, want from-flag (the flag's default)", in.App.Config.Endpoint)
+		}
+	})
+	t.Run("nothing supplied: the declared path stands", func(t *testing.T) {
+		in := bind(t, tbCfgSrcDef(""), nil)
+		if in.App.Config.Endpoint != "from-declared" {
+			t.Errorf("Endpoint = %q, want from-declared", in.App.Config.Endpoint)
+		}
+	})
+	t.Run("an explicitly-supplied missing file errors", func(t *testing.T) {
+		var in tbCfgSrcInputs
+		err := NewBinder(meta).Bind(NewContextFor(tbCfgSrcDef(""), []string{"--config", "/nonexistent/app.yaml"}), &in)
+		if err == nil {
+			t.Error("Bind = nil error, want a missing-file error — the user explicitly asked for that file")
+		}
+	})
+}
+
 // Explicit-env-var shape: an env field whose `env:"…"` tag pins the environment
 // variable (the spec's `variable`), overriding recon's SNAKE_UPPER default.
 type tbEnvVarInputs struct {
@@ -122,6 +269,116 @@ func TestBinder_explicitEnvVar(t *testing.T) {
 	}
 	if in.App.Env.Token != "s3cret" {
 		t.Errorf("Env.Token = %q, want s3cret (from $WIDGET_TOKEN, not $TOKEN)", in.App.Env.Token)
+	}
+}
+
+// Pinned-config shapes (spec file:): an input read from ONE named
+// configuration_files entry, not the merged precedence chain.
+func TestBinder_configFilePinned(t *testing.T) {
+	system := writeConfig(t, "api:\n  endpoint: from-system\n  token: sys-token\n")
+	user := writeConfig(t, "api:\n  endpoint: from-user\n")
+	meta := BindMeta{ConfigFiles: []ConfigFile{
+		{Name: "system", Path: system, Format: "yaml"}, // higher precedence
+		{Name: "user", Path: user, Format: "yaml"},
+	}}
+
+	type pinned struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Config    struct {
+				// Pinned to "user": must NOT see system's value despite precedence.
+				Endpoint string `rotini:"endpoint" recon:"api.endpoint" cfgfile:"user"`
+			}
+		}
+	}
+	var in pinned
+	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Config.Endpoint != "from-user" {
+		t.Errorf("Endpoint = %q, want from-user — file: pins the source", in.App.Config.Endpoint)
+	}
+
+	// A pinned required key is judged against ITS file: present elsewhere
+	// doesn't count.
+	type pinnedReq struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Config    struct {
+				Token string `rotini:"token" recon:"api.token,required" cfgfile:"user"`
+			}
+		}
+	}
+	var in2 pinnedReq
+	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in2); err == nil {
+		t.Error("Bind = nil error, want missing-required — api.token lives in system, not the pinned user file")
+	}
+
+	// A pin naming an undeclared entry is a loud error, never a silent merge.
+	type pinnedBad struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Config    struct {
+				X string `rotini:"x" recon:"api.endpoint" cfgfile:"nope"`
+			}
+		}
+	}
+	var in3 pinnedBad
+	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in3); err == nil || !strings.Contains(err.Error(), "nope") {
+		t.Errorf("Bind(unknown pin) = %v, want an unknown-configuration-file error", err)
+	}
+}
+
+// Nested-env shapes (spec nesting:): a map-typed env input aggregating a
+// variable family — `envnest:"<BASE>,<sep>"` as codegen emits it.
+type tbNestInputs struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Env       struct {
+			HTTP map[string]any `rotini:"http" recon:"http" envnest:"ACME_HTTP,__"`
+		}
+	}
+}
+
+func TestBinder_envNesting(t *testing.T) {
+	t.Setenv("ACME_HTTP__TIMEOUT", "30")
+	t.Setenv("ACME_HTTP__RETRY__MAX", "9")
+	t.Setenv("ACME_HTTPX", "decoy") // wrong separator boundary — not family
+
+	var in tbNestInputs
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if got := in.App.Env.HTTP["timeout"]; got != "30" {
+		t.Errorf("http[timeout] = %#v, want %q", got, "30")
+	}
+	retry, ok := in.App.Env.HTTP["retry"].(map[string]any)
+	if !ok || retry["max"] != "9" {
+		t.Errorf("http[retry] = %#v, want nested {max: 9}", in.App.Env.HTTP["retry"])
+	}
+	if len(in.App.Env.HTTP) != 2 {
+		t.Errorf("http = %#v, want exactly timeout + retry (the decoy must not join the family)", in.App.Env.HTTP)
+	}
+}
+
+func TestBinder_envNestingRequired(t *testing.T) {
+	// No ACME_DB__* variables exist: a required nested family errors via recon.
+	type reqNest struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Env       struct {
+				DB map[string]any `rotini:"db" recon:"db" envnest:"ACME_DB,__,required"`
+			}
+		}
+	}
+	var in reqNest
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in); err == nil {
+		t.Error("Bind = nil error, want a missing-required error for the empty variable family")
 	}
 }
 

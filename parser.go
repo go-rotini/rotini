@@ -3,6 +3,8 @@ package rotini
 import (
 	"encoding"
 	"fmt"
+	"io"
+	"os"
 	"reflect"
 	"regexp"
 	"slices"
@@ -182,7 +184,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 	if len(chain) == 0 {
 		return nil, nil, &ParseError{Msg: "rotini: no command resolved for this context"}
 	}
-	store, err := parseInto(chain, rtx.Args)
+	store, err := parseInto(chain, rtx.Args, rtx.Stdin)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -198,8 +200,8 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 // positional argument of the leaf. Declared defaults are applied. parseInto does
 // not check required inputs or enums — that is [validate]'s job — so a handler can
 // inspect what was supplied before deciding how strict to be.
-func parseInto(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
-	store, err := parseArgvTokens(chain, argv)
+func parseInto(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsedInputs, error) {
+	store, err := parseArgvTokens(chain, argv, stdin)
 	if err != nil {
 		return nil, err
 	}
@@ -210,8 +212,10 @@ func parseInto(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
 // parseArgvTokens is parseInto minus defaults: exactly what argv supplied,
 // nothing more. It records each explicitly-set flag in the store's argvSet, the
 // single source of truth for "set on the command line" (flag groups,
-// dependencies, and the argv overlay layer all read it).
-func parseArgvTokens(chain []ResolvedCommand, argv []string) (*parsedInputs, error) {
+// dependencies, and the argv overlay layer all read it). stdin backs the
+// from:stdin sentinel — a flag value of exactly "-" on a flag that opted in
+// (it is only read when such a value actually appears).
+func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsedInputs, error) {
 	store := &parsedInputs{
 		scopes:  make([]scopeInputs, len(chain)),
 		argvSet: make([]map[string]bool, len(chain)),
@@ -221,15 +225,20 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string) (*parsedInputs, err
 	startedArgs := false   // a positional has been seen: command descent is over
 	terminated := false    // "--" has been seen: flag parsing is over too
 
-	addFlag := func(idx int, name, value string) {
+	addFlag := func(idx int, fd FlagDef, value string) error {
+		value, err := resolveFlagValue(fd, value, stdin)
+		if err != nil {
+			return err
+		}
 		if store.scopes[idx].flags == nil {
 			store.scopes[idx].flags = map[string][]string{}
 		}
-		store.scopes[idx].flags[name] = append(store.scopes[idx].flags[name], value)
+		store.scopes[idx].flags[fd.Name] = append(store.scopes[idx].flags[fd.Name], value)
 		if store.argvSet[idx] == nil {
 			store.argvSet[idx] = map[string]bool{}
 		}
-		store.argvSet[idx][name] = true
+		store.argvSet[idx][fd.Name] = true
+		return nil
 	}
 	addArg := func(value string) {
 		store.scopes[leaf].args = append(store.scopes[leaf].args, value)
@@ -281,7 +290,9 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string) (*parsedInputs, err
 				}
 				value = argv[i]
 			}
-			addFlag(idx, fdef.Name, value)
+			if err := addFlag(idx, fdef, value); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -645,6 +656,42 @@ func plural(word string, n int) string {
 	return word + "s"
 }
 
+// resolveFlagValue applies a flag's declared acquisition modes (spec `from:`)
+// to one argv-supplied value. With "file", a value starting with '@' is
+// replaced by the named file's contents; with "stdin", a value of exactly "-"
+// is replaced by the piped stdin (which must not be empty — giving "-" demands
+// a pipe). Resolved text is whitespace-trimmed (token files end in a newline)
+// and then flows through the same coercion/enum/constraint checks as a literal
+// value — the flag's value IS the resolved text. Without the matching `from`
+// mode, '@' and '-' are ordinary characters. Declared defaults and env/config
+// fallbacks never resolve — sentinels are argv grammar.
+func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error) {
+	switch {
+	case strings.HasPrefix(value, "@") && slices.Contains(fd.From, "file"):
+		data, err := os.ReadFile(value[1:])
+		if err != nil {
+			return "", &ParseError{
+				Msg:  fmt.Sprintf("%s: cannot read %q: %v", flagLabel(fd), value, err),
+				Flag: flagLabel(fd), Token: value,
+			}
+		}
+		return strings.TrimSpace(string(data)), nil
+	case value == "-" && slices.Contains(fd.From, "stdin"):
+		data, err := readStdin(stdin)
+		if err != nil {
+			return "", &ParseError{Msg: fmt.Sprintf("%s: read stdin: %v", flagLabel(fd), err), Flag: flagLabel(fd)}
+		}
+		if len(data) == 0 {
+			return "", &ParseError{
+				Msg:  fmt.Sprintf("%s: stdin is empty — %q asks for a piped value", flagLabel(fd), "-"),
+				Flag: flagLabel(fd),
+			}
+		}
+		return strings.TrimSpace(string(data)), nil
+	}
+	return value, nil
+}
+
 // isShortCluster reports whether name is a candidate POSIX short-flag cluster: a
 // single-dash token with more than one character (e.g. "-vh", "-n5") — as opposed
 // to a long flag ("--x") or a bare short flag ("-v", which the exact match already
@@ -659,7 +706,7 @@ func isShortCluster(name string) bool {
 // and the first value-taking flag consumes the rest of the cluster, then the
 // inline "=value", then the next argv token — whichever is present. It returns how
 // many extra argv tokens it consumed (0 or 1).
-func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, name, value string)) (int, error) {
+func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value string) error) (int, error) {
 	for k := 0; k < len(body); k++ {
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
@@ -667,23 +714,22 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 			return 0, &ParseError{Msg: fmt.Sprintf("unknown flag %q", short)}
 		}
 		if fdef.Type == "bool" {
-			addFlag(idx, fdef.Name, "true")
+			if err := addFlag(idx, fdef, "true"); err != nil {
+				return 0, err
+			}
 			continue
 		}
 		// A value-taking flag ends the cluster: its value is whatever follows.
 		switch rest := body[k+1:]; {
 		case rest != "":
-			addFlag(idx, fdef.Name, rest)
-			return 0, nil
+			return 0, addFlag(idx, fdef, rest)
 		case hasInline:
-			addFlag(idx, fdef.Name, inline)
-			return 0, nil
+			return 0, addFlag(idx, fdef, inline)
 		default:
 			if i+1 >= len(argv) {
 				return 0, &ParseError{Msg: fmt.Sprintf("flag %q needs a value", short)}
 			}
-			addFlag(idx, fdef.Name, argv[i+1])
-			return 1, nil
+			return 1, addFlag(idx, fdef, argv[i+1])
 		}
 	}
 	// Every flag in the cluster was boolean; a trailing "=value" has nothing to bind.
