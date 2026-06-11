@@ -418,16 +418,16 @@ func TestGenerateCompletionEnabled(t *testing.T) {
 	compDir := filepath.Join(tmp, "internal", "cmd", "mycli", "embed")
 	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
 		`_ "embed"`,
-		"//go:embed embed/zz_completion_bash.txt", "var CompletionBash string",
+		"//go:embed embed/completion_bash.txt", "var CompletionBash string",
 		"var CompletionZsh string", "var CompletionFish string",
 		"var CompletionPowershell string",
 		"func Completion(shell string) (string, error)",
 		`case "bash":`,
 	)
 	// Scripts written per shell, program name substituted.
-	mustContain(t, filepath.Join(compDir, "zz_completion_bash.txt"),
+	mustContain(t, filepath.Join(compDir, "completion_bash.txt"),
 		"mycli __complete", "complete -o default -F _mycli_complete mycli")
-	for _, sh := range []string{"zz_completion_bash.txt", "zz_completion_zsh.txt", "zz_completion_fish.txt", "zz_completion_powershell.txt"} {
+	for _, sh := range []string{"completion_bash.txt", "completion_zsh.txt", "completion_fish.txt", "completion_powershell.txt"} {
 		if _, err := os.Stat(filepath.Join(compDir, sh)); err != nil {
 			t.Errorf("missing completion script %s: %v", sh, err)
 		}

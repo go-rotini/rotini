@@ -315,16 +315,16 @@ func Man(path ...string) (string, error) {
 	}
 }
 
-//go:embed embed/zz_completion_bash.txt
+//go:embed embed/completion_bash.txt
 var CompletionBash string
 
-//go:embed embed/zz_completion_zsh.txt
+//go:embed embed/completion_zsh.txt
 var CompletionZsh string
 
-//go:embed embed/zz_completion_fish.txt
+//go:embed embed/completion_fish.txt
 var CompletionFish string
 
-//go:embed embed/zz_completion_powershell.txt
+//go:embed embed/completion_powershell.txt
 var CompletionPowershell string
 
 // Completion returns the embedded completion script for shell, or an error when

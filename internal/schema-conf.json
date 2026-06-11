@@ -108,7 +108,7 @@
     "FeaturesConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cmdgen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cmdgen package. All features default to ONE shared '<cmdgen-package>/embed' dir — their output files never collide: help pages are named 'help_*.txt', man pages 'man_*.txt', and completion scripts 'zz_completion_<shell>.txt', with pruning scoped to each feature's own files.",
+      "description": "Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cmdgen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cmdgen package. All features default to ONE shared '<cmdgen-package>/embed' dir — their output files never collide: help pages are named 'help_*.txt', man pages 'man_*.txt', and completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.",
       "properties": {
         "help": {
           "$ref": "#/definitions/Feature",
@@ -136,7 +136,7 @@
         },
         "dir": {
           "type": "string",
-          "description": "Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cmdgen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to the shared '<cmdgen-package>/embed' (e.g. 'internal/cmd/app/embed') — feature-unique file-name prefixes (help_ / man_ / zz_completion_) keep co-located features collision-free and grouped."
+          "description": "Path (relative to the module root) of the directory where this feature's rotini-managed output files (and, for the doc-rendered features, the editable template) live and are embedded. Must resolve under the cmdgen package so //go:embed can reach it; rotini derives the package-relative embed path from it. Defaults to the shared '<cmdgen-package>/embed' (e.g. 'internal/cmd/app/embed') — feature-unique file-name prefixes (help_ / man_ / completion_) keep co-located features collision-free and grouped."
         }
       }
     }

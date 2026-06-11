@@ -1669,7 +1669,7 @@ const (
 //
 // All enabled features default to ONE shared embed dir, so each feature's
 // output files must be distinguishable by name alone: filePrefix is a
-// feature-unique prefix ("help_" / "man_" / "zz_completion_") that also groups
+// feature-unique prefix ("help_" / "man_" / "completion_") that also groups
 // each feature's files together in directory listings, ext the file suffix,
 // and pruning only considers files matching both — features sharing a dir can
 // never prune (or collide with) each other's files.
@@ -1701,7 +1701,7 @@ var (
 	// no template, no verbatim. Scripts come from completionScript at codegen.
 	completionFeatureDesc = docFeature{
 		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "Completion",
-		ext: ".txt", filePrefix: "zz_completion_", perShell: true,
+		ext: ".txt", filePrefix: "completion_", perShell: true,
 	}
 )
 
@@ -1792,7 +1792,7 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 
 // completionNodes produces one node per supported shell for the completion
 // feature: keyed by shell name (the resolver case), file
-// zz_completion_<shell>.txt, embed var Completion<Shell>. No doc-data or
+// completion_<shell>.txt, embed var Completion<Shell>. No doc-data or
 // verbatim — the script comes from writeCompletionFiles.
 func completionNodes() []helpNode {
 	out := make([]helpNode, 0, len(completionShells))

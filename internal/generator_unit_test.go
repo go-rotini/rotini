@@ -221,7 +221,7 @@ func TestWriteCompletionFiles_errors(t *testing.T) {
 	if err := writeCompletionFiles("", "app", nil); err == nil {
 		t.Error("writeCompletionFiles(empty dir) = nil, want an error")
 	}
-	badShell := []helpNode{{name: "nushell", file: "zz_completion_nushell.txt"}}
+	badShell := []helpNode{{name: "nushell", file: "completion_nushell.txt"}}
 	if err := writeCompletionFiles(t.TempDir(), "app", badShell); err == nil {
 		t.Error("writeCompletionFiles(unsupported shell) = nil, want an error")
 	}
