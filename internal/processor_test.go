@@ -279,7 +279,7 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 
 	// The companion's generated help feature files are reproduced byte-for-byte
 	// (only help is enabled in the committed companion conf).
-	featRel := "internal/cmd/rotini/embed/help"
+	featRel := "internal/cmd/rotini/embed"
 	entries, err := os.ReadDir(filepath.Join(repoRoot, featRel))
 	if err != nil {
 		t.Fatalf("read companion help dir: %v", err)

@@ -30,13 +30,13 @@ generate:
   features:
     help:
       enabled: true
-      dir: internal/cmd/rotini/embed/help
+      dir: internal/cmd/rotini/embed
     man:
       enabled: false
-      dir: internal/cmd/rotini/embed/man
+      dir: internal/cmd/rotini/embed
     completion:
       enabled: false
-      dir: internal/cmd/rotini/embed/completion
+      dir: internal/cmd/rotini/embed
 `
 
 // minimalGoMod uses the same module path the committed handlers rollup imports,
@@ -76,7 +76,8 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 	// golden: the dogfooded output is reproduced byte-for-byte from the committed
 	// spec. Only help is enabled in the committed companion conf.
 	for _, feat := range []string{"help"} {
-		featRel := "internal/cmd/rotini/embed/" + feat
+		_ = feat // only help is enabled; every feature shares the one embed dir
+		featRel := "internal/cmd/rotini/embed"
 		entries, err := os.ReadDir(filepath.Join(repoRoot, featRel))
 		if err != nil {
 			t.Fatalf("read companion %s dir: %v", feat, err)
@@ -357,7 +358,7 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 }
 
 // helpKeepConf enables help and keeps one rtg feature-dir file by package-relative path.
-const helpKeepConf = confSchemaHeader + "generate:\n  packages:\n    cmdgen:\n      keep:\n        - embed/help/legacy.txt\n  features:\n    help:\n      enabled: true\n"
+const helpKeepConf = confSchemaHeader + "generate:\n  packages:\n    cmdgen:\n      keep:\n        - embed/legacy_help.txt\n  features:\n    help:\n      enabled: true\n"
 
 // TestGeneratePrunesOrphanHelp verifies rtg pruning (implicit/always-on): a help
 // .txt for a command no longer in the spec is removed on regenerate, while the
@@ -373,9 +374,9 @@ func TestGeneratePrunesOrphanHelp(t *testing.T) {
 		t.Fatalf("first Generate: %v", err)
 	}
 
-	helpDir := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help")
-	orphan := filepath.Join(helpDir, "mycli_obsolete.txt")
-	legacy := filepath.Join(helpDir, "legacy.txt")
+	helpDir := filepath.Join(tmp, "internal", "cmd", "mycli", "embed")
+	orphan := filepath.Join(helpDir, "mycli_obsolete_help.txt")
+	legacy := filepath.Join(helpDir, "legacy_help.txt")
 	writeTestFile(t, orphan, "stale\n")
 	writeTestFile(t, legacy, "kept\n")
 
@@ -392,8 +393,8 @@ func TestGeneratePrunesOrphanHelp(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(helpDir, helpTemplateName)); err != nil {
 		t.Errorf("editable help template was removed: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(helpDir, "mycli.txt")); err != nil {
-		t.Errorf("current command help .txt missing: %v", err)
+	if _, err := os.Stat(filepath.Join(helpDir, "mycli_help.txt")); err != nil {
+		t.Errorf("current command help page missing: %v", err)
 	}
 }
 
@@ -415,19 +416,19 @@ func TestGenerateCompletionEnabled(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	compDir := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "completion")
+	compDir := filepath.Join(tmp, "internal", "cmd", "mycli", "embed")
 	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
 		`_ "embed"`,
-		"//go:embed embed/completion/bash.txt", "var CompletionBash string",
+		"//go:embed embed/zz_completion_bash.txt", "var CompletionBash string",
 		"var CompletionZsh string", "var CompletionFish string",
 		"var CompletionPowershell string",
 		"func Completion(shell string) (string, error)",
 		`case "bash":`,
 	)
 	// Scripts written per shell, program name substituted.
-	mustContain(t, filepath.Join(compDir, "bash.txt"),
+	mustContain(t, filepath.Join(compDir, "zz_completion_bash.txt"),
 		"mycli __complete", "complete -o default -F _mycli_complete mycli")
-	for _, sh := range []string{"bash.txt", "zsh.txt", "fish.txt", "powershell.txt"} {
+	for _, sh := range []string{"zz_completion_bash.txt", "zz_completion_zsh.txt", "zz_completion_fish.txt", "zz_completion_powershell.txt"} {
 		if _, err := os.Stat(filepath.Join(compDir, sh)); err != nil {
 			t.Errorf("missing completion script %s: %v", sh, err)
 		}
@@ -745,7 +746,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 
 	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
 		`_ "embed"`,
-		"//go:embed embed/help/mycli.txt",
+		"//go:embed embed/mycli_help.txt",
 		"var HelpMycli string",
 		"var HelpMycliBuild string",
 		"func Help(path ...string) (string, error)",
@@ -754,13 +755,13 @@ func TestGenerateHelpEnabled(t *testing.T) {
 	)
 
 	// The editable default template was seeded.
-	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "help.txt.tmpl")); err != nil {
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help.txt.tmpl")); err != nil {
 		t.Errorf("default help template not seeded: %v", err)
 	}
 
 	// The root page renders the description, a derived usage line, the commands
 	// list (with the alias and summary), and the footer.
-	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli.txt")
+	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_help.txt")
 	mustContain(t, root,
 		"A demo CLI.",
 		"Usage:",
@@ -775,7 +776,7 @@ func TestGenerateHelpEnabled(t *testing.T) {
 		t.Errorf("generated help should not end with a trailing newline; got %q", got)
 	}
 	// The leaf page renders derived usage, the decorated required arg, and the flag.
-	build := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli_build.txt")
+	build := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_build_help.txt")
 	mustContain(t, build,
 		"mycli build <target> [flags]",
 		"Arguments:",
@@ -820,7 +821,7 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 	}
 
 	// A hand edit to a generate-mode file is overwritten on the next pass.
-	build := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli_build.txt")
+	build := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_build_help.txt")
 	writeTestFile(t, build, "hand-written help for build\n")
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate (regenerate): %v", err)
@@ -850,18 +851,18 @@ func TestGenerateManEnabled(t *testing.T) {
 	genFile := filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go")
 	mustContain(t, genFile,
 		`_ "embed"`,
-		"//go:embed embed/man/mycli.txt", "var ManMycli string", "var ManMycliBuild string",
+		"//go:embed embed/mycli_man.txt", "var ManMycli string", "var ManMycliBuild string",
 		"func Man(path ...string) (string, error)",
 		`case "build", "b":`,
 	)
 	// Help was not enabled — no Help resolver, no help dir.
 	mustNotContain(t, genFile, "func Help(")
-	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help")); !os.IsNotExist(err) {
-		t.Errorf("help dir should not exist when help is off (err=%v)", err)
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_help.txt")); !os.IsNotExist(err) {
+		t.Errorf("help page should not exist when help is off (err=%v)", err)
 	}
 
 	for _, p := range []string{
-		"internal/cmd/mycli/embed/man/man.txt.tmpl", "internal/cmd/mycli/embed/man/mycli.txt", "internal/cmd/mycli/embed/man/mycli_build.txt",
+		"internal/cmd/mycli/embed/man.txt.tmpl", "internal/cmd/mycli/embed/mycli_man.txt", "internal/cmd/mycli/embed/mycli_build_man.txt",
 	} {
 		if _, err := os.Stat(filepath.Join(tmp, filepath.FromSlash(p))); err != nil {
 			t.Errorf("expected generated %s: %v", p, err)
@@ -889,10 +890,10 @@ func TestGenerateManVerbatim(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "man", "mycli.txt"), "MYCLI(1)\nexact man page")
+	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_man.txt"), "MYCLI(1)\nexact man page")
 
 	// Nothing renders (root supplies verbatim, no sub-commands) → no template seeded.
-	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "man", "man.txt.tmpl")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "man.txt.tmpl")); !os.IsNotExist(err) {
 		t.Errorf("man.txt.tmpl should not be seeded when no command renders (err=%v)", err)
 	}
 }
@@ -921,7 +922,7 @@ func TestGenerateManExitStatusAndSeeAlso(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	manPath := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "man", "mycli.txt")
+	manPath := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_man.txt")
 	mustContain(t, manPath,
 		"EXIT STATUS", "0", "success", "2", "a usage error",
 		"SEE ALSO", "mycli-build(1), https://example.com/docs",
@@ -948,15 +949,15 @@ func TestGenerateHelpVerbatim(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	// Exactly the supplied bytes — no trailing newline added.
-	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli.txt"), "my exact help page\nline two")
+	mustFileEqual(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_help.txt"), "my exact help page\nline two")
 
 	// Nothing renders (root supplies verbatim help, no sub-commands) → no template.
-	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "help.txt.tmpl")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help.txt.tmpl")); !os.IsNotExist(err) {
 		t.Errorf("help.txt.tmpl should not be seeded when no command renders (err=%v)", err)
 	}
 
 	// The verbatim string wins; a hand edit is overwritten back to the spec value.
-	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli.txt")
+	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_help.txt")
 	writeTestFile(t, root, "tampered\n")
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate (regenerate): %v", err)
@@ -1695,11 +1696,11 @@ func TestGenerateHelpHiddenDeprecated(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli.txt")
+	root := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_help.txt")
 	mustContain(t, root, "legacy", "(deprecated: use modern instead)", "an old command")
 	mustNotContain(t, root, "secret", "a hidden command")
 
-	run := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help", "mycli_run.txt")
+	run := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "mycli_run_help.txt")
 	mustContain(t, run, "<target>", "(deprecated: positional is going away)", "-v", "chatty output")
 	mustNotContain(t, run, "--secret", "a hidden flag")
 }
@@ -1745,14 +1746,14 @@ func TestGenerateHelpComposition(t *testing.T) {
 	}
 
 	// The parent's command list shows the composed child via the child's summary.
-	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/help/parent.txt"),
+	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/parent_help.txt"),
 		"child", "the child program")
 	// The composed child's own page (rendered by the parent) carries the child's
 	// content, including its sub-command.
-	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/help/parent_child.txt"),
+	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/parent_child_help.txt"),
 		"A composed child.", "greet", "say hello")
 	// And the grandchild command page exists with its content.
-	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/help/parent_child_greet.txt"),
+	mustContain(t, filepath.Join(tmp, "cmd/parent/rtg/embed/parent_child_greet_help.txt"),
 		"parent child greet")
 }
 
@@ -1808,13 +1809,13 @@ func genHelp(t *testing.T, spec, preTmpl string) string {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 	if preTmpl != "" {
-		writeTestFile(t, filepath.Join(tmp, "internal", "cmd", "app", "embed", "help", "help.txt.tmpl"), preTmpl)
+		writeTestFile(t, filepath.Join(tmp, "internal", "cmd", "app", "embed", "help.txt.tmpl"), preTmpl)
 	}
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	return filepath.Join(tmp, "internal", "cmd", "app", "embed", "help")
+	return filepath.Join(tmp, "internal", "cmd", "app", "embed")
 }
 
 // helpGoldenGeneratedSpec exercises the full generated-help surface: root header/
@@ -1888,8 +1889,8 @@ const helpGoldenGeneratedSpec = goldenSpecSchema +
 func TestHelpGolden_Generated(t *testing.T) {
 	goldenDir := helpGoldenDir(t)
 	helpDir := genHelp(t, helpGoldenGeneratedSpec, "")
-	for _, f := range []string{"app.txt", "app_build.txt", "app_oldcmd.txt", "app_secretcmd.txt"} {
-		assertHelpGolden(t, goldenDir, "generated_"+f, readFileString(t, filepath.Join(helpDir, f)))
+	for _, f := range []string{"app", "app_build", "app_oldcmd", "app_secretcmd"} {
+		assertHelpGolden(t, goldenDir, "generated_"+f+".txt", readFileString(t, filepath.Join(helpDir, f+"_help.txt")))
 	}
 }
 
@@ -1931,7 +1932,7 @@ const helpGoldenCustomTmpl = `{{- with .Summary}}{{upper .}}
 func TestHelpGolden_CustomTemplate(t *testing.T) {
 	goldenDir := helpGoldenDir(t)
 	helpDir := genHelp(t, helpGoldenCustomSpec, helpGoldenCustomTmpl)
-	assertHelpGolden(t, goldenDir, "custom_app_run.txt", readFileString(t, filepath.Join(helpDir, "app_run.txt")))
+	assertHelpGolden(t, goldenDir, "custom_app_run.txt", readFileString(t, filepath.Join(helpDir, "app_run_help.txt")))
 	// The user's template survives generation untouched.
 	mustFileEqual(t, filepath.Join(helpDir, "help.txt.tmpl"), helpGoldenCustomTmpl)
 }
@@ -1957,8 +1958,8 @@ const helpGoldenVerbatimSpec = goldenSpecSchema +
 func TestHelpGolden_Verbatim(t *testing.T) {
 	goldenDir := helpGoldenDir(t)
 	helpDir := genHelp(t, helpGoldenVerbatimSpec, "")
-	assertHelpGolden(t, goldenDir, "verbatim_app.txt", readFileString(t, filepath.Join(helpDir, "app.txt")))
-	assertHelpGolden(t, goldenDir, "verbatim_app_run.txt", readFileString(t, filepath.Join(helpDir, "app_run.txt")))
+	assertHelpGolden(t, goldenDir, "verbatim_app.txt", readFileString(t, filepath.Join(helpDir, "app_help.txt")))
+	assertHelpGolden(t, goldenDir, "verbatim_app_run.txt", readFileString(t, filepath.Join(helpDir, "app_run_help.txt")))
 	if _, err := os.Stat(filepath.Join(helpDir, "help.txt.tmpl")); !os.IsNotExist(err) {
 		t.Errorf("template should not be seeded when every command is verbatim (err=%v)", err)
 	}
@@ -2010,8 +2011,8 @@ const helpGoldenCascadingSpec = goldenSpecSchema +
 func TestHelpGolden_Cascading(t *testing.T) {
 	goldenDir := helpGoldenDir(t)
 	helpDir := genHelp(t, helpGoldenCascadingSpec, "")
-	for _, f := range []string{"app.txt", "app_run.txt", "app_deploy.txt"} {
-		assertHelpGolden(t, goldenDir, "cascading_"+f, readFileString(t, filepath.Join(helpDir, f)))
+	for _, f := range []string{"app", "app_run", "app_deploy"} {
+		assertHelpGolden(t, goldenDir, "cascading_"+f+".txt", readFileString(t, filepath.Join(helpDir, f+"_help.txt")))
 	}
 }
 
@@ -2044,7 +2045,7 @@ const helpGoldenEnvConfigSpec = goldenSpecSchema +
 func TestHelpGolden_EnvConfig(t *testing.T) {
 	goldenDir := helpGoldenDir(t)
 	helpDir := genHelp(t, helpGoldenEnvConfigSpec, "")
-	assertHelpGolden(t, goldenDir, "envconfig_app.txt", readFileString(t, filepath.Join(helpDir, "app.txt")))
+	assertHelpGolden(t, goldenDir, "envconfig_app.txt", readFileString(t, filepath.Join(helpDir, "app_help.txt")))
 }
 
 // helpGoldenGroupsSpec exercises command grouping: an ungrouped command (default
@@ -2073,7 +2074,7 @@ const helpGoldenGroupsSpec = goldenSpecSchema +
 func TestHelpGolden_CommandGroups(t *testing.T) {
 	goldenDir := helpGoldenDir(t)
 	helpDir := genHelp(t, helpGoldenGroupsSpec, "")
-	assertHelpGolden(t, goldenDir, "groups_app.txt", readFileString(t, filepath.Join(helpDir, "app.txt")))
+	assertHelpGolden(t, goldenDir, "groups_app.txt", readFileString(t, filepath.Join(helpDir, "app_help.txt")))
 }
 
 func TestCompletionScript(t *testing.T) {

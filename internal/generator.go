@@ -1039,11 +1039,13 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 }
 
 // pruneCligen removes orphaned rotini-managed outputs in each enabled feature's
-// dir (under the cligen package) — the per-command pages (matching the feature's
-// extension) for commands no longer in the spec. The editable per-feature
-// template, test files, and any keep-listed (package-relative) path are
-// preserved. Top-level cligen files (the gen file) are never auto-removed.
-// keepList entries are package-relative to the cligen package.
+// dir (under the cmdgen package) — the per-command pages for commands no longer
+// in the spec. Only files matching the feature's unique suffix AND prefix are
+// candidates, so features sharing one embed dir never prune each other's files.
+// The editable per-feature template, test files, and any keep-listed
+// (package-relative) path are preserved. Top-level cmdgen files (the gen file)
+// are never auto-removed. keepList entries are package-relative to the cmdgen
+// package.
 func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 	keep := make(map[string]bool, len(keepList))
 	for _, k := range keepList {
@@ -1068,10 +1070,13 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 			if e.IsDir() || !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
 				continue
 			}
+			if o.desc.filePrefix != "" && !strings.HasPrefix(name, o.desc.filePrefix) {
+				continue
+			}
 			if protected[name] {
 				continue
 			}
-			// keep entries are package-relative (to the cligen package).
+			// keep entries are package-relative (to the cmdgen package).
 			rel := name
 			if r, err := filepath.Rel(lay.frameworkDir, filepath.Join(o.absDir, name)); err == nil {
 				rel = filepath.ToSlash(r)
@@ -1166,13 +1171,15 @@ func applyConfDefaults(conf *Conf, rootName string) {
 			p.File = defaultFile
 		}
 	}
-	// Each present feature defaults its output dir to "<cmdgen-package>/embed/<feature>"
-	// (module-relative), which always resolves under the cmdgen package so //go:embed
-	// can reach it.
+	// Each present feature defaults its output dir to the SHARED
+	// "<cmdgen-package>/embed" (module-relative), which always resolves under the
+	// cmdgen package so //go:embed can reach it. Co-located features cannot
+	// collide: every feature's files carry a feature-unique suffix/prefix (see
+	// docFeature) and pruning is scoped to them.
 	cmdgenDir := filepath.ToSlash(pkgs.Cmdgen.Package)
 	for _, f := range featureConfigs(conf) {
 		if f.cfg != nil && f.cfg.Dir == "" {
-			f.cfg.Dir = cmdgenDir + "/embed/" + f.desc.name
+			f.cfg.Dir = cmdgenDir + "/embed"
 		}
 	}
 }
@@ -1654,36 +1661,43 @@ const helpTemplateName = "help.txt.tmpl"
 
 // docFeature describes one doc-rendered codegen feature (help, man). Both share
 // the doc-data pipeline (buildHelpData → renderDocText) and differ only in their
-// file extension, embed-var/resolver names, the editable template, and which
+// file suffix, embed-var/resolver names, the editable template, and which
 // per-command verbatim spec string escapes the render.
+//
+// All enabled features default to ONE shared embed dir, so each feature's
+// output files must be distinguishable by name alone: ext is a feature-unique
+// suffix ("_help.txt" / "_man.txt"), filePrefix a feature-unique prefix
+// ("zz_completion_"), and pruning only considers files matching both — features
+// sharing a dir can never prune (or collide with) each other's files.
 type docFeature struct {
-	name      string               // feature key + default dir, e.g. "help"
-	noun      string               // word used in the resolver doc comment / error, e.g. "help"
-	varPrefix string               // embed-var prefix, e.g. "Help" → HelpRotiniGenerate
-	resolver  string               // resolver func name, e.g. "Help"
-	ext       string               // output file extension, e.g. ".txt" / ".md"
-	tmplFile  string               // editable template file name in the feature dir ("" = none)
-	embedded  string               // embedded default template text, from renderer.go ("" = none)
-	verbatim  func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
-	perShell  bool                 // completion: keyed by shell name, not command path
+	name       string               // feature key, e.g. "help"
+	noun       string               // word used in the resolver doc comment / error, e.g. "help"
+	varPrefix  string               // embed-var prefix, e.g. "Help" → HelpRotiniGenerate
+	resolver   string               // resolver func name, e.g. "Help"
+	ext        string               // feature-unique output file suffix, e.g. "_help.txt"
+	filePrefix string               // feature-unique output file prefix ("" = none), e.g. "zz_completion_"
+	tmplFile   string               // editable template file name in the feature dir ("" = none)
+	embedded   string               // embedded default template text, from renderer.go ("" = none)
+	verbatim   func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
+	perShell   bool                 // completion: keyed by shell name, not command path
 }
 
 var (
 	helpFeatureDesc = docFeature{
 		name: "help", noun: "help", varPrefix: "Help", resolver: "Help",
-		ext: ".txt", tmplFile: helpTemplateName, embedded: templateHelp,
+		ext: "_help.txt", tmplFile: helpTemplateName, embedded: templateHelp,
 		verbatim: func(h cmdHelp) string { return h.Help },
 	}
 	manFeatureDesc = docFeature{
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
-		ext: ".txt", tmplFile: "man.txt.tmpl", embedded: templateMan,
+		ext: "_man.txt", tmplFile: "man.txt.tmpl", embedded: templateMan,
 		verbatim: func(h cmdHelp) string { return h.Man },
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
 	// no template, no verbatim. Scripts come from completionScript at codegen.
 	completionFeatureDesc = docFeature{
 		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "Completion",
-		ext: ".txt", perShell: true,
+		ext: ".txt", filePrefix: "zz_completion_", perShell: true,
 	}
 )
 
@@ -1773,15 +1787,15 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 }
 
 // completionNodes produces one node per supported shell for the completion
-// feature: keyed by shell name (the resolver case), file <shell>.txt, embed var
-// Completion<Shell>. No doc-data or verbatim — the script comes from
-// writeCompletionFiles.
+// feature: keyed by shell name (the resolver case), file
+// zz_completion_<shell>.txt, embed var Completion<Shell>. No doc-data or
+// verbatim — the script comes from writeCompletionFiles.
 func completionNodes() []helpNode {
 	out := make([]helpNode, 0, len(completionShells))
 	for _, sh := range completionShells {
 		out = append(out, helpNode{
 			prefix: toPascalCase(sh),
-			file:   sh + completionFeatureDesc.ext,
+			file:   completionFeatureDesc.filePrefix + sh + completionFeatureDesc.ext,
 			paths:  []string{sh},
 			name:   sh,
 		})

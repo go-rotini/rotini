@@ -60,7 +60,7 @@ func TestInitialize_scaffolds(t *testing.T) {
 		"schema-conf.json",
 		"package: cmd/mycli", "package: internal/cmd/mycli",
 		"file: main.go", "file: zz_rotini.gen.go",
-		"dir: internal/cmd/mycli/embed/help")
+		"dir: internal/cmd/mycli/embed")
 
 	// The init-style generate ran: framework + rollup, wired handlers, help
 	// pages, and the entrypoint main.go.

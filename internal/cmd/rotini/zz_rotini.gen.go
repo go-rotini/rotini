@@ -235,22 +235,22 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 	return rotini.NewProgram(definition, handlers)
 }
 
-//go:embed embed/rotini.txt
+//go:embed embed/rotini_help.txt
 var HelpRotini string
 
-//go:embed embed/rotini_initialize.txt
+//go:embed embed/rotini_initialize_help.txt
 var HelpRotiniInitialize string
 
-//go:embed embed/rotini_generate.txt
+//go:embed embed/rotini_generate_help.txt
 var HelpRotiniGenerate string
 
-//go:embed embed/rotini_validate.txt
+//go:embed embed/rotini_validate_help.txt
 var HelpRotiniValidate string
 
-//go:embed embed/rotini_help.txt
+//go:embed embed/rotini_help_help.txt
 var HelpRotiniHelp string
 
-//go:embed embed/rotini_version.txt
+//go:embed embed/rotini_version_help.txt
 var HelpRotiniVersion string
 
 // Help returns the generated help text for the command identified by path

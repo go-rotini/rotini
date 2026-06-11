@@ -16,12 +16,12 @@ generate:
   features:
     help:
       enabled: true
-      dir: internal/cmd/{{.Package}}/embed/help
+      dir: internal/cmd/{{.Package}}/embed
     man:
       enabled: false
-      dir: internal/cmd/{{.Package}}/embed/man
+      dir: internal/cmd/{{.Package}}/embed
     completion:
       enabled: false
-      dir: internal/cmd/{{.Package}}/embed/completion
+      dir: internal/cmd/{{.Package}}/embed
 validate:
   fail: collect
