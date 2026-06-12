@@ -194,6 +194,36 @@ func TestValidate_localTimeoutRejected(t *testing.T) {
 // deprecated_identifiers are sub-command routing surface — the root has no
 // routing token, so declaring them there was an accepted lie. Sub-command
 // aliasing is unaffected.
+// TestValidate_zeroBounds pins the F4 fallback (spec-fidelity plan, F0-D4
+// reversal): an explicit zero numeric bound would be silently ignored at
+// every layer it travels (zero-sentinel float64s end to end), so validation
+// rejects it loudly — everywhere in the document, including named schemas
+// and stdin shapes, whose rendered validation schemas drop zeros too.
+func TestValidate_zeroBounds(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"flag minimum", "  inputs:\n    flags:\n      - name: port\n        schema: { type: int, minimum: 0, maximum: 10 }\n"},
+		{"flag maximum", "  inputs:\n    flags:\n      - name: delta\n        schema: { type: int, maximum: 0 }\n"},
+		{"named schema", "schemas:\n  Widget:\n    type: object\n    properties:\n      size: { type: integer, minimum: 0 }\n"},
+		{"stdin shape", "  inputs:\n    stdin:\n      schema:\n        type: object\n        properties:\n          port: { type: integer, minimum: 0 }\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			spec := validSpecHeader + "command:\n  name: app\n" + c.body
+			err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
+			if err == nil || !strings.Contains(err.Error(), "zero bound") {
+				t.Errorf("Validate = %v, want the zero-bound rejection", err)
+			}
+		})
+	}
+
+	// Non-zero bounds are untouched, including bounds spanning zero.
+	ok := validSpecHeader + "command:\n  name: app\n" +
+		"  inputs:\n    flags:\n      - name: delta\n        schema: { type: int, minimum: -5, maximum: 5 }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", ok), "", "", ""); err != nil {
+		t.Errorf("Validate(non-zero bounds) = %v, want nil", err)
+	}
+}
+
 // TestValidate_initializeLocation pins the F6 rule: an `initialize` block is
 // honored only in the module-root conf — anywhere else it would be silently
 // ignored, so validation rejects it; with no module above, the location is

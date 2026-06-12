@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -75,8 +76,56 @@ func (l *specLoader) validate() []error {
 	for _, rule := range specLints {
 		problems = append(problems, rule(l.spec)...)
 	}
+	problems = append(problems, lintZeroBounds(l.instance)...)
 	if err := checkSchemaVersion("spec", l.spec.Schema, l.version); err != nil {
 		problems = append(problems, err)
+	}
+	return problems
+}
+
+// lintZeroBounds rejects an explicit `minimum: 0` / `maximum: 0` ANYWHERE in
+// the spec document. Numeric bounds travel as zero-sentinel float64s through
+// every layer — the gentypes-decoded InputSchema, the emitted Constraints
+// literals, the env/config struct tags, and schemaToDoc's omitempty render of
+// stdin/config validation schemas — so a declared zero bound would be
+// silently ignored at all of them. Rejecting it loudly is the fallback
+// decided at F0-D4 (the proper fix, presence-carrying bounds, needs
+// scalar-pointer support in the jsonschema Go generator — recorded as the
+// follow-up). It is a raw-instance rule, like nothing the typed lints can
+// see: the decode itself is where the explicitness is lost.
+func lintZeroBounds(instance []byte) []error {
+	var doc any
+	if err := json.Unmarshal(instance, &doc); err != nil {
+		return nil // an unparseable instance already failed schema validation
+	}
+	var locs []string
+	var walk func(v any, path string)
+	walk = func(v any, path string) {
+		switch t := v.(type) {
+		case map[string]any:
+			for k, val := range t {
+				p := path + "/" + k
+				if (k == "minimum" || k == "maximum") && val == 0.0 {
+					locs = append(locs, p)
+					continue
+				}
+				walk(val, p)
+			}
+		case []any:
+			for i, e := range t {
+				walk(e, fmt.Sprintf("%s/%d", path, i))
+			}
+		}
+	}
+	walk(doc, "")
+	sort.Strings(locs)
+	problems := make([]error, 0, len(locs))
+	for _, loc := range locs {
+		problems = append(problems, &problem{
+			kind: "spec", loc: loc,
+			msg: "a zero bound is not enforceable — bounds use 0 as \"unset\", so it would be silently ignored everywhere it travels; " +
+				"for a non-negative integer use type: uint (which enforces >= 0 natively), or restate the bound (e.g. minimum: 1)",
+		})
 	}
 	return problems
 }
