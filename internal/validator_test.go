@@ -230,6 +230,22 @@ func TestValidate_constraintApplicability(t *testing.T) {
 	}
 }
 
+// TestValidate_patternCompiles pins the R-detour rule: a typo'd pattern would
+// otherwise silently never enforce (the runtime tolerates a failed compile).
+func TestValidate_patternCompiles(t *testing.T) {
+	bad := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
+		"      - name: title\n        schema: { type: string, pattern: \"([unclosed\" }\n"
+	err := validateOnce(writeTemp(t, "spec.yaml", bad), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "does not compile") {
+		t.Errorf("Validate(bad pattern) = %v, want the compile rejection", err)
+	}
+	good := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
+		"      - name: title\n        schema: { type: string, pattern: \"^[a-z]+$\" }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", good), "", "", ""); err != nil {
+		t.Errorf("Validate(good pattern) = %v, want nil", err)
+	}
+}
+
 // TestValidate_zeroBounds pins the F4 fallback (spec-fidelity plan, F0-D4
 // reversal): an explicit zero numeric bound would be silently ignored at
 // every layer it travels (zero-sentinel float64s end to end), so validation
@@ -780,9 +796,9 @@ func TestValidate_handlerFilenameCollision(t *testing.T) {
 // a bare "*.go" name that Go does not read specially; a valid, unique one passes.
 func TestValidate_handlerFilenameOverride(t *testing.T) {
 	for _, tc := range []struct{ name, filename, wantErr string }{
-		{"reserved", "app_test.go", "read specially"},
-		{"noGoExt", "handlers", `end in ".go"`},
-		{"hasDir", "sub/x.go", "bare file name"},
+		{"reserved", "app_test.go", "read specially"},     // Go-side: the pattern can't know _test/GOOS/GOARCH
+		{"noGoExt", "handlers", "does not match pattern"}, // schema-rejected (R-detour: rule codified)
+		{"hasDir", "sub/x.go", "does not match pattern"},  // schema-rejected
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			spec := validSpecHeader + "command:\n  name: app\n  commands:\n    - name: build\n      filename: " + tc.filename + "\n"
@@ -1007,7 +1023,10 @@ func TestValidate_newSpecLints(t *testing.T) {
 		{"variadic not last", "command:\n  name: app\n  inputs:\n    arguments:\n      - name: files\n        schema: { type: array }\n      - name: dest\n        schema: { type: string }\n", `"files" is variadic but not last`},
 		{"command deprecated_identifiers not an alias", "command:\n  name: app\n  commands:\n    - name: compile\n      aliases: [build]\n      deprecated_identifiers: [biuld]\n", "not one of its aliases"},
 		{"flag deprecated_identifiers not an identifier", "command:\n  name: app\n  inputs:\n    flags:\n      - name: config\n        identifiers: [--config]\n        deprecated_identifiers: [--conf]\n        schema: { type: string }\n", "not one of its identifiers"},
-		{"remote timeout unparsable", "command:\n  name: app\n  remote_commands:\n    - name: plugin\n      timeout: ten-seconds\n", "not a positive Go duration"},
+		// The duration SHAPE is schema-codified (R-detour); the lint still owns
+		// what the pattern can't say: a pattern-valid but non-positive duration.
+		{"remote timeout malformed (schema)", "command:\n  name: app\n  remote_commands:\n    - name: plugin\n      timeout: ten-seconds\n", "does not match pattern"},
+		{"remote timeout non-positive (lint)", "command:\n  name: app\n  remote_commands:\n    - name: plugin\n      timeout: 0s\n", "not a positive Go duration"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

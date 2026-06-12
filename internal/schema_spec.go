@@ -10,7 +10,7 @@ type Spec struct {
 	Command Command `json:"command"`
 	// Config-file sources the program loads at startup (document-level). Per-command 'config' inputs bind typed values from these by name + key.
 	ConfigurationFiles []ConfigurationFile `json:"configuration_files,omitempty"`
-	// Reusable named schema definitions (document-level). Referenced elsewhere via "$ref": "#/schemas/<Name>".
+	// Reusable named schema definitions (document-level). Referenced elsewhere via "$ref": "#/schemas/<Name>". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type that other packages may import (a cmd/cmdgen split makes them cross-package).
 	Schemas map[string]Schema `json:"schemas,omitempty"`
 }
 
@@ -31,11 +31,12 @@ type ArgumentInput struct {
 type BaseSchema struct {
 	// Reference to a named schema in the top-level schemas map (e.g. '#/schemas/MySchema'). Resolved at codegen time.
 	Ref string `json:"$ref,omitempty"`
-	// Allowed values; parsed values are validated against this list
+	// Allowed values, validated over the FULLY reconciled value (an env/config-supplied flag value is enum-checked too). At least one member — an empty list would mean the same as absent.
 	Enum []string `json:"enum,omitempty"`
 	// Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.
-	Import string  `json:"import,omitempty"`
-	Items  *Schema `json:"items,omitempty"`
+	Import string `json:"import,omitempty"`
+	// Element schema for an array type: 'array' + items int generates []int, items $ref a named-type slice; omitted items default to string elements. Per-value constraints and the TextUnmarshaler contract apply per element (see 'type').
+	Items *Schema `json:"items,omitempty"`
 	// Maximum number of values for a repeatable (array or map) input — rejected on scalar types.
 	MaxItems int `json:"maxItems,omitempty"`
 	// Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types.
@@ -47,10 +48,12 @@ type BaseSchema struct {
 	// Minimum string length in runes (string types only; for []string, each element) — rejected on non-string types.
 	MinLength int `json:"minLength,omitempty"`
 	// Minimum allowed value. Numeric-family types only (int/uint/float and their aliases; for arrays, each element) — declared on any other type it is rejected by validation, since it could never be checked. Duration bounds are not supported: validate in the handler or wrap the value in a TextUnmarshaler type. An explicit 0 is rejected (zero-sentinel rule) — use type: uint for non-negative integers.
-	Minimum  float64 `json:"minimum,omitempty"`
-	Nullable bool    `json:"nullable,omitempty"`
+	Minimum float64 `json:"minimum,omitempty"`
+	// Generate the field as a pointer (*T): nil means the input was not provided, distinguishable from its zero value. Defaults/values coerce through the pointer.
+	Nullable bool `json:"nullable,omitempty"`
 	// Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match.
-	Pattern    string            `json:"pattern,omitempty"`
+	Pattern string `json:"pattern,omitempty"`
+	// Property schemas for an object shape. Used by document shapes (output, stdin payloads, named schemas) — and, on a map-typed FLAG, the declared property names feed shell completion's key vocabulary (dotted paths when dotted_keys is set, offered up to the '=').
 	Properties map[string]Schema `json:"properties,omitempty"`
 	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.) The contract applies element-wise to arrays: 'array' with items naming a non-builtin type — including items: { $ref: "#/schemas/X" }, which generates a named-type slice — parses argv elements only if that Go type implements encoding.TextUnmarshaler. Named schemas are primarily for 'output' and 'stdin' document shapes, which DECODE structured documents rather than parse argv text.
 	Type string `json:"type,omitempty"`
@@ -126,9 +129,9 @@ type ConfigInput struct {
 type ConfigurationFile struct {
 	// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared configuration_files order remains precedence order.
 	Discover *ConfigurationFileDiscover `json:"discover,omitempty"`
-	// File format
+	// Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) — declare it when the extension is absent or misleading.
 	Format string `json:"format,omitempty"`
-	// Logical name for the config file (e.g., 'app-config')
+	// Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique among the declared entries.
 	Name string `json:"name"`
 	// File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
 	Path string `json:"path,omitempty"`
@@ -160,7 +163,7 @@ type EnvInput struct {
 }
 
 type ExitStatusEntry struct {
-	// The process exit code this entry documents.
+	// The exit status code being documented (0-255 — the range a process can actually return).
 	Code int `json:"code"`
 	// What this exit code means.
 	Summary string `json:"summary,omitempty"`
@@ -176,6 +179,7 @@ type FlagDependency struct {
 
 // A constraint on which of this command's flags may (or must) be set together. 'flags' references flag logical names; 'set' means explicitly provided on the command line (a default or env/config fallback does not count).
 type FlagGroup struct {
+	// The logical flag names the rule covers (at least two). Each must be a flag declared on the same command — validation rejects unknown names. "Set" means explicitly set on argv: defaults and env/config fallbacks neither trip nor satisfy a group.
 	Flags []string `json:"flags"`
 	// mutually_exclusive: at most one set. required_together: all or none. one_of: exactly one. at_least_one: one or more.
 	Kind string `json:"kind"`
@@ -186,7 +190,7 @@ type FlagInput struct {
 	Cascading bool `json:"cascading,omitempty"`
 	// Deprecation message; the flag is annotated as deprecated in generated help.
 	Deprecated string `json:"deprecated,omitempty"`
-	// CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rtk's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input.
+	// CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rtk's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
 	// When true, the flag is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
@@ -202,15 +206,22 @@ type FlagInput struct {
 
 // Section heading overrides for generated help pages.
 type HelpHeadings struct {
+	// Heading rendered above the arguments section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Arguments:".
 	Arguments string `json:"arguments,omitempty"`
 	// Heading for the cascading-flags section on descendant pages. Defaults to 'Global Flags:'. The value is rendered verbatim, so include a trailing ':' if you want one.
-	Cascading     string `json:"cascading,omitempty"`
-	Commands      string `json:"commands,omitempty"`
+	Cascading string `json:"cascading,omitempty"`
+	// Heading rendered above the commands section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Commands:".
+	Commands string `json:"commands,omitempty"`
+	// Heading rendered above the configuration section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Configuration:".
 	Configuration string `json:"configuration,omitempty"`
-	Environment   string `json:"environment,omitempty"`
-	Examples      string `json:"examples,omitempty"`
-	Flags         string `json:"flags,omitempty"`
-	Usage         string `json:"usage,omitempty"`
+	// Heading rendered above the environment section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Environment:".
+	Environment string `json:"environment,omitempty"`
+	// Heading rendered above the examples section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Examples:".
+	Examples string `json:"examples,omitempty"`
+	// Heading rendered above the flags section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Flags:".
+	Flags string `json:"flags,omitempty"`
+	// Heading rendered above the usage section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Usage:".
+	Usage string `json:"usage,omitempty"`
 }
 
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.
@@ -226,7 +237,7 @@ type InputSchema struct {
 	File string `json:"file,omitempty"`
 	// Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text is whitespace-trimmed, then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text (a structured stdin payload is the stdin: channel's job, not a flag's). Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only.
 	From []string `json:"from,omitempty"`
-	// Key path within the config file (config inputs only, e.g., 'server.port')
+	// Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; recon resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).
 	Key string `json:"key,omitempty"`
 	// Env inputs only, map-typed ('map'/'object' → map[string]any): the separator that aggregates a FAMILY of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the SNAKE_UPPER of the input's name. With name: http, variable: ACME_HTTP, nesting: "__" — ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: "30", retry: {max: "9"}} (segments lowercased; values are strings). 'required: true' errors when no matching variables exist. 'default:' is rejected — seed defaults in code or config instead.
 	Nesting string `json:"nesting,omitempty"`

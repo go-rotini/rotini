@@ -361,6 +361,7 @@ var specLints = []func(*Spec) []error{
 	lintEnvNesting,
 	lintConfigInputFiles,
 	lintConstraintApplicability,
+	lintPatternCompiles,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -695,6 +696,31 @@ func lintConstraintApplicability(spec *Spec) []error {
 			if (schema.MinItems != 0 || schema.MaxItems != 0) &&
 				!strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[") {
 				add(fmt.Sprintf("minItems/maxItems apply to repeatable (array/map) types only, not %s — the count bound would be silently ignored", typ))
+			}
+		})
+	})
+	return problems
+}
+
+// lintPatternCompiles rejects a `pattern` constraint that is not a valid Go
+// regular expression. The runtime's constraint check deliberately tolerates a
+// failed compile (a hand-built Definition is the author's problem), which
+// means a spec-declared typo'd pattern would otherwise SILENTLY never enforce
+// — the worst of both worlds for a validation rule. (Patterns inside stdin/
+// config document schemas are exempt here: their rendered JSON Schemas fail
+// loudly at bind time when invalid.)
+func lintPatternCompiles(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+			if channel == "stdin" || schema == nil || schema.Pattern == "" {
+				return
+			}
+			if _, err := regexp.Compile(schema.Pattern); err != nil {
+				problems = append(problems, &problem{
+					kind: "spec", loc: "command " + path,
+					msg: fmt.Sprintf("%s %q: pattern %q does not compile (%v) — it would silently never enforce", channel, name, schema.Pattern, err),
+				})
 			}
 		})
 	})

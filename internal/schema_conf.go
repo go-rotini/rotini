@@ -5,10 +5,13 @@ package internal
 // Schema for a Rotini CLI configuration file.
 type Conf struct {
 	// URL identifying the rotini configuration schema version. The version segment must match the installed rotini binary version.
-	Schema     string            `json:"$schema"`
-	Generate   *GenerateConfig   `json:"generate,omitempty"`
+	Schema string `json:"$schema"`
+	// Controls `rotini generate`: package targets and derived features. Omitted entirely → the defaults (merged single-file layout under internal/cmd/<root>, all features off).
+	Generate *GenerateConfig `json:"generate,omitempty"`
+	// Defaults for `rotini init`. Module-root confs ONLY — rejected by validation anywhere else (the block would be silently ignored).
 	Initialize *InitializeConfig `json:"initialize,omitempty"`
-	Validate   *ValidateConfig   `json:"validate,omitempty"`
+	// Controls how `rotini validate` reports problems (collect everything vs. fail fast).
+	Validate *ValidateConfig `json:"validate,omitempty"`
 }
 
 // A rendered/derived codegen feature: a toggle plus the output directory (under the cmdgen package) where its files live and are embedded.
@@ -31,7 +34,9 @@ type FeaturesConfig struct {
 
 // Controls `rotini generate`: where the generated code is written ('packages') and which derived doc/completion outputs are emitted ('features').
 type GenerateConfig struct {
+	// The derived codegen outputs (help/man/completion), each an opt-in toggle plus its rotini-managed embed directory.
 	Features *FeaturesConfig `json:"features,omitempty"`
+	// Where the generated code is written: the entrypoint main.go, the handler-logic package (cmd), and the generated-framework package (cmdgen).
 	Packages *PackagesConfig `json:"packages,omitempty"`
 }
 

@@ -27,9 +27,12 @@
     },
     "schemas": {
       "type": "object",
-      "description": "Reusable named schema definitions (document-level). Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\".",
+      "description": "Reusable named schema definitions (document-level). Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type that other packages may import (a cmd/cmdgen split makes them cross-package).",
       "additionalProperties": {
         "$ref": "#/definitions/Schema"
+      },
+      "propertyNames": {
+        "pattern": "^[A-Z][A-Za-z0-9_]*$"
       }
     }
   },
@@ -71,13 +74,15 @@
         "deprecated_identifiers": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
           },
           "description": "Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation."
         },
         "timeout": {
           "type": "string",
-          "description": "Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)"
+          "description": "Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
         },
         "inputs": {
           "$ref": "#/definitions/Inputs",
@@ -141,7 +146,8 @@
         },
         "filename": {
           "type": "string",
-          "description": "Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go'), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first."
+          "description": "Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go'), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.",
+          "pattern": "^[^/\\\\]+\\.go$"
         },
         "commands": {
           "type": "array",
@@ -184,7 +190,8 @@
       "properties": {
         "prefix": {
           "type": "string",
-          "description": "Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-')."
+          "description": "Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-').",
+          "minLength": 1
         },
         "path": {
           "type": "string",
@@ -203,29 +210,36 @@
       "additionalProperties": false,
       "properties": {
         "usage": {
-          "type": "string"
+          "type": "string",
+          "description": "Heading rendered above the usage section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: \"Usage:\"."
         },
         "commands": {
-          "type": "string"
+          "type": "string",
+          "description": "Heading rendered above the commands section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: \"Commands:\"."
         },
         "arguments": {
-          "type": "string"
+          "type": "string",
+          "description": "Heading rendered above the arguments section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: \"Arguments:\"."
         },
         "flags": {
-          "type": "string"
+          "type": "string",
+          "description": "Heading rendered above the flags section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: \"Flags:\"."
         },
         "environment": {
-          "type": "string"
+          "type": "string",
+          "description": "Heading rendered above the environment section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: \"Environment:\"."
         },
         "configuration": {
-          "type": "string"
+          "type": "string",
+          "description": "Heading rendered above the configuration section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: \"Configuration:\"."
         },
         "cascading": {
           "type": "string",
           "description": "Heading for the cascading-flags section on descendant pages. Defaults to 'Global Flags:'. The value is rendered verbatim, so include a trailing ':' if you want one."
         },
         "examples": {
-          "type": "string"
+          "type": "string",
+          "description": "Heading rendered above the examples section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: \"Examples:\"."
         }
       }
     },
@@ -244,18 +258,21 @@
         },
         "import": {
           "type": "string",
-          "description": "Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec."
+          "description": "Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.",
+          "pattern": "^\\S+( \\S+)?$"
         },
         "nullable": {
           "type": "boolean",
-          "default": false
+          "default": false,
+          "description": "Generate the field as a pointer (*T): nil means the input was not provided, distinguishable from its zero value. Defaults/values coerce through the pointer."
         },
         "enum": {
           "type": "array",
-          "description": "Allowed values; parsed values are validated against this list",
+          "description": "Allowed values, validated over the FULLY reconciled value (an env/config-supplied flag value is enum-checked too). At least one member — an empty list would mean the same as absent.",
           "items": {
             "type": "string"
-          }
+          },
+          "minItems": 1
         },
         "pattern": {
           "type": "string",
@@ -293,10 +310,12 @@
           "type": "object",
           "additionalProperties": {
             "$ref": "#/definitions/Schema"
-          }
+          },
+          "description": "Property schemas for an object shape. Used by document shapes (output, stdin payloads, named schemas) — and, on a map-typed FLAG, the declared property names feed shell completion's key vocabulary (dotted paths when dotted_keys is set, offered up to the '=')."
         },
         "items": {
-          "$ref": "#/definitions/Schema"
+          "$ref": "#/definitions/Schema",
+          "description": "Element schema for an array type: 'array' + items int generates []int, items $ref a named-type slice; omitted items default to string elements. Per-value constraints and the TextUnmarshaler contract apply per element (see 'type')."
         }
       }
     },
@@ -344,11 +363,13 @@
             },
             "file": {
               "type": "string",
-              "description": "Config inputs only: pins this input to ONE named configuration_files entry — the value (and its 'required') is read from that file ONLY, never from the merged precedence chain, so a key present in another file does not satisfy it. Omit to read through the declared precedence order (first file with the key wins)."
+              "description": "Config inputs only: pins this input to ONE named configuration_files entry — the value (and its 'required') is read from that file ONLY, never from the merged precedence chain, so a key present in another file does not satisfy it. Omit to read through the declared precedence order (first file with the key wins).",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
             },
             "key": {
               "type": "string",
-              "description": "Key path within the config file (config inputs only, e.g., 'server.port')"
+              "description": "Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; recon resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).",
+              "pattern": "^[a-zA-Z0-9_-]+(\\.[a-zA-Z0-9_-]+)*$"
             },
             "secret": {
               "type": "boolean",
@@ -374,7 +395,8 @@
             },
             "config_source": {
               "type": "string",
-              "description": "Flag and env inputs only: names a configuration_files entry whose file PATH this input supplies — the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist — unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry."
+              "description": "Flag and env inputs only: names a configuration_files entry whose file PATH this input supplies — the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist — unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry.",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
             },
             "nesting": {
               "type": "string",
@@ -431,9 +453,10 @@
         "deprecated_identifiers": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$"
           },
-          "description": "CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rtk's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input."
+          "description": "CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rtk's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input"
         }
       }
     },
@@ -653,7 +676,8 @@
           "items": {
             "type": "string",
             "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
-          }
+          },
+          "description": "The logical flag names the rule covers (at least two). Each must be a flag declared on the same command — validation rejects unknown names. \"Set\" means explicitly set on argv: defaults and env/config fallbacks neither trip nor satisfy a group."
         }
       }
     },
@@ -683,7 +707,8 @@
         },
         "timeout": {
           "type": "string",
-          "description": "Host-side timeout for the remote binary execution. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."
+          "description": "Host-side timeout for the remote binary execution. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout.",
+          "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
         }
       }
     },
@@ -696,11 +721,13 @@
       "properties": {
         "name": {
           "type": "string",
-          "description": "Logical name for the config file (e.g., 'app-config')"
+          "description": "Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique among the declared entries.",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
         },
         "path": {
           "type": "string",
-          "description": "File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set."
+          "description": "File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.",
+          "minLength": 1
         },
         "format": {
           "type": "string",
@@ -709,8 +736,7 @@
             "yaml",
             "toml"
           ],
-          "default": "json",
-          "description": "File format"
+          "description": "Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) — declare it when the extension is absent or misleading."
         },
         "schema": {
           "$ref": "#/definitions/Schema",
@@ -735,11 +761,13 @@
             },
             "file": {
               "type": "string",
-              "description": "The file name to look for in each searched directory (e.g. '.acme.toml', 'config.yaml')."
+              "description": "The file name to look for in each searched directory (e.g. '.acme.toml', 'config.yaml').",
+              "minLength": 1
             },
             "app": {
               "type": "string",
-              "description": "The application directory under the XDG config root (xdg strategy only, required there)."
+              "description": "The application directory under the XDG config root (xdg strategy only, required there).",
+              "pattern": "^[^/\\\\]+$"
             }
           }
         }
@@ -754,7 +782,9 @@
       "properties": {
         "code": {
           "type": "integer",
-          "description": "The process exit code this entry documents."
+          "description": "The exit status code being documented (0-255 — the range a process can actually return).",
+          "minimum": 0,
+          "maximum": 255
         },
         "summary": {
           "type": "string",
