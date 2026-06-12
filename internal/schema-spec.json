@@ -292,12 +292,40 @@
           "description": "Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match."
         },
         "minimum": {
-          "type": "number",
-          "description": "Minimum allowed value. Numeric-family types only (int/uint/float and their aliases; for arrays, each element) — declared on any other type it is rejected by validation, since it could never be checked. Duration bounds are not supported: validate in the handler or wrap the value in a TextUnmarshaler type. An explicit 0 is rejected (zero-sentinel rule) — use type: uint for non-negative integers."
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Minimum allowed value (inclusive). Numeric-family types only (int/uint/float variants and the integer/number aliases) — rejected on any other type, where it would be silently ignored; for a repeatable numeric input the bound applies to each ELEMENT. Duration/time bounds are rejected (validate in the handler, or wrap the value in a TextUnmarshaler type). minimum: 0 is a real, enforced bound (use uint when you want the type system to carry non-negativity instead)."
         },
         "maximum": {
-          "type": "number",
-          "description": "Maximum allowed value. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere, explicit 0 rejected)."
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere); maximum: 0 is a real, enforced bound."
+        },
+        "exclusiveMinimum": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere). exclusiveMinimum: 0 expresses \"positive\" exactly."
+        },
+        "exclusiveMaximum": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'."
+        },
+        "multipleOf": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "description": "The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numeric-family types only, per-element for arrays; must be strictly positive."
         },
         "minLength": {
           "type": "integer",

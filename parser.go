@@ -4,6 +4,7 @@ import (
 	"encoding"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"reflect"
 	"regexp"
@@ -458,11 +459,20 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 			if err != nil {
 				continue // not range-checkable; coerce already tolerates malformed input
 			}
-			if c.Minimum != 0 && n < c.Minimum {
-				return &ParseError{Msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(c.Minimum), redactValue(v, secret))}
+			if c.Minimum != nil && n < *c.Minimum {
+				return &ParseError{Msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(*c.Minimum), redactValue(v, secret))}
 			}
-			if c.Maximum != 0 && n > c.Maximum {
-				return &ParseError{Msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(c.Maximum), redactValue(v, secret))}
+			if c.Maximum != nil && n > *c.Maximum {
+				return &ParseError{Msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(*c.Maximum), redactValue(v, secret))}
+			}
+			if c.ExclusiveMinimum != nil && n <= *c.ExclusiveMinimum {
+				return &ParseError{Msg: fmt.Sprintf("%s must be > %s (got %s)", label, formatNum(*c.ExclusiveMinimum), redactValue(v, secret))}
+			}
+			if c.ExclusiveMaximum != nil && n >= *c.ExclusiveMaximum {
+				return &ParseError{Msg: fmt.Sprintf("%s must be < %s (got %s)", label, formatNum(*c.ExclusiveMaximum), redactValue(v, secret))}
+			}
+			if c.MultipleOf != nil && !isMultipleOf(n, *c.MultipleOf) {
+				return &ParseError{Msg: fmt.Sprintf("%s must be a multiple of %s (got %s)", label, formatNum(*c.MultipleOf), redactValue(v, secret))}
 			}
 		case elem == "string":
 			ln := utf8.RuneCountInString(v)
@@ -483,6 +493,18 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 		}
 	}
 	return nil
+}
+
+// isMultipleOf reports whether n is an integer multiple of m (JSON Schema
+// semantics: the division yields an integer), with a small relative tolerance
+// for float representation (1.2 / 0.1 must count). A non-positive m never
+// matches — validation rejects it before it gets here.
+func isMultipleOf(n, m float64) bool {
+	if m <= 0 {
+		return false
+	}
+	q := n / m
+	return math.Abs(q-math.Round(q)) < 1e-9
 }
 
 // redactValue returns "[redacted]" for a secret input, else the value unchanged — so a

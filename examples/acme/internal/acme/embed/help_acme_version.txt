@@ -1,5 +1,0 @@
-Usage:
-  acme version [flags]
-
-Flags:
-  -h,--help    print help

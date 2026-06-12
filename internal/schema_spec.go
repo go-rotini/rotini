@@ -35,6 +35,10 @@ type BaseSchema struct {
 	Ref string `json:"$ref,omitempty"`
 	// Allowed values, validated over the FULLY reconciled value (an env/config-supplied flag value is enum-checked too). At least one member — an empty list would mean the same as absent.
 	Enum []string `json:"enum,omitempty"`
+	// Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'.
+	ExclusiveMaximum *float64 `json:"exclusiveMaximum,omitempty"`
+	// Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere). exclusiveMinimum: 0 expresses "positive" exactly.
+	ExclusiveMinimum *float64 `json:"exclusiveMinimum,omitempty"`
 	// Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.
 	Import string `json:"import,omitempty"`
 	// Element schema for an array type: 'array' + items int generates []int, items $ref a named-type slice; omitted items default to string elements. Per-value constraints and the TextUnmarshaler contract apply per element (see 'type').
@@ -43,14 +47,16 @@ type BaseSchema struct {
 	MaxItems int `json:"maxItems,omitempty"`
 	// Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types.
 	MaxLength int `json:"maxLength,omitempty"`
-	// Maximum allowed value. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere, explicit 0 rejected).
-	Maximum float64 `json:"maximum,omitempty"`
+	// Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere); maximum: 0 is a real, enforced bound.
+	Maximum *float64 `json:"maximum,omitempty"`
 	// Minimum number of values for a repeatable (array or map) input — rejected on scalar types.
 	MinItems int `json:"minItems,omitempty"`
 	// Minimum string length in runes (string types only; for []string, each element) — rejected on non-string types.
 	MinLength int `json:"minLength,omitempty"`
-	// Minimum allowed value. Numeric-family types only (int/uint/float and their aliases; for arrays, each element) — declared on any other type it is rejected by validation, since it could never be checked. Duration bounds are not supported: validate in the handler or wrap the value in a TextUnmarshaler type. An explicit 0 is rejected (zero-sentinel rule) — use type: uint for non-negative integers.
-	Minimum float64 `json:"minimum,omitempty"`
+	// Minimum allowed value (inclusive). Numeric-family types only (int/uint/float variants and the integer/number aliases) — rejected on any other type, where it would be silently ignored; for a repeatable numeric input the bound applies to each ELEMENT. Duration/time bounds are rejected (validate in the handler, or wrap the value in a TextUnmarshaler type). minimum: 0 is a real, enforced bound (use uint when you want the type system to carry non-negativity instead).
+	Minimum *float64 `json:"minimum,omitempty"`
+	// The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numeric-family types only, per-element for arrays; must be strictly positive.
+	MultipleOf *float64 `json:"multipleOf,omitempty"`
 	// Generate the field as a pointer (*T): nil means the input was not provided, distinguishable from its zero value. Defaults/values coerce through the pointer.
 	Nullable bool `json:"nullable,omitempty"`
 	// Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match.

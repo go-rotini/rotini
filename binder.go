@@ -971,18 +971,35 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) e
 }
 
 // channelConstraints reads the validation struct-tags codegen emits on a channel field
-// (min/max/minlen/maxlen/minitems/maxitems/pattern) into a [Constraints].
+// (min/max/xmin/xmax/multipleof/minlen/maxlen/minitems/maxitems/pattern) into a
+// [Constraints]. Tag PRESENCE is what carries a numeric bound's declaredness —
+// min:"0" is a real, enforced >= 0.
 func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 	var c Constraints
 	has := false
 	if v := tag.Get("min"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.Minimum, has = f, true
+			c.Minimum, has = Ptr(f), true
 		}
 	}
 	if v := tag.Get("max"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.Maximum, has = f, true
+			c.Maximum, has = Ptr(f), true
+		}
+	}
+	if v := tag.Get("xmin"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.ExclusiveMinimum, has = Ptr(f), true
+		}
+	}
+	if v := tag.Get("xmax"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.ExclusiveMaximum, has = Ptr(f), true
+		}
+	}
+	if v := tag.Get("multipleof"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			c.MultipleOf, has = Ptr(f), true
 		}
 	}
 	if v := tag.Get("minlen"); v != "" {

@@ -100,15 +100,18 @@ func TestValidate_sourcePositions(t *testing.T) {
 		}
 	})
 
-	t.Run("zero-bound lint, yaml", func(t *testing.T) {
+	t.Run("nested schema violation, yaml", func(t *testing.T) {
+		// multipleOf must be strictly positive (the meta-schema's own
+		// exclusiveMinimum: 0): a negative lands a pointer-shaped problem on
+		// the exact value byte.
 		spec := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
-			"      - name: port\n        schema: { type: int, minimum: 0 }\n"
+			"      - name: port\n        schema: { type: int, multipleOf: -2 }\n"
 		path := writeTemp(t, "spec.yaml", spec)
 		err := validateOnce(path, "", "", "")
 		if err == nil {
-			t.Fatal("want the zero-bound rejection")
+			t.Fatal("want a schema violation")
 		}
-		if want := path + ":7:39: /command/inputs/flags/0/schema/minimum"; !strings.Contains(err.Error(), want) {
+		if want := path + ":7:42: /command/inputs/flags/0/schema/multipleOf"; !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %v\nwant it to contain %q", err, want)
 		}
 	})
@@ -116,16 +119,16 @@ func TestValidate_sourcePositions(t *testing.T) {
 	t.Run("toml degrades to pointer-only", func(t *testing.T) {
 		spec := "\"$schema\" = \"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\"\n" +
 			"[command]\nname = \"app\"\n[[command.inputs.flags]]\nname = \"port\"\n" +
-			"[command.inputs.flags.schema]\ntype = \"int\"\nminimum = 0\n"
+			"[command.inputs.flags.schema]\ntype = \"int\"\nmultipleOf = -2\n"
 		path := writeTemp(t, "spec.toml", spec)
 		err := validateOnce(path, "", "", "")
 		if err == nil {
-			t.Fatal("want the zero-bound rejection")
+			t.Fatal("want a schema violation")
 		}
 		if strings.Contains(err.Error(), filepath.Base(path)+":") {
 			t.Errorf("err = %v\nTOML should not claim a position", err)
 		}
-		if !strings.Contains(err.Error(), "/command/inputs/flags/0/schema/minimum") {
+		if !strings.Contains(err.Error(), "/command/inputs/flags/0/schema/multipleOf") {
 			t.Errorf("err = %v\nwant the pointer-only loc", err)
 		}
 	})

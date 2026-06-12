@@ -208,6 +208,9 @@ func TestValidate_constraintApplicability(t *testing.T) {
 		{"pattern on int", "      - name: n\n        schema: { type: int, pattern: \"^x\" }\n", "string types only"},
 		{"length on bool", "      - name: b\n        schema: { type: bool, minLength: 1 }\n", "string types only"},
 		{"items on scalar", "      - name: s\n        schema: { type: string, minItems: 2 }\n", "repeatable (array/map) types only"},
+		{"exclusive bound on string", "      - name: s\n        schema: { type: string, exclusiveMinimum: 0 }\n", "numeric types only"},
+		{"multipleOf on bool", "      - name: b\n        schema: { type: bool, multipleOf: 2 }\n", "numeric types only"},
+		{"exclusive bound on duration", "      - name: ttl\n        schema: { type: duration, exclusiveMaximum: 60 }\n", "duration bounds are not supported"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -222,6 +225,8 @@ func TestValidate_constraintApplicability(t *testing.T) {
 	// []int, element pattern on []string, counts on arrays and maps.
 	valid := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
 		"      - name: workers\n        schema: { type: uint, minimum: 1, maximum: 64 }\n" +
+		"      - name: rate\n        schema: { type: float64, exclusiveMinimum: 0, exclusiveMaximum: 1 }\n" +
+		"      - name: step\n        schema: { type: int, multipleOf: 5 }\n" +
 		"      - name: port\n        schema: { type: array, items: { type: int }, minimum: 1, maxItems: 3 }\n" +
 		"      - name: tag\n        schema: { type: \"[]string\", pattern: \"^[a-z]+$\", minItems: 1 }\n" +
 		"      - name: label\n        schema: { type: map, maxItems: 5 }\n"
@@ -326,27 +331,23 @@ func TestValidate_patternCompiles(t *testing.T) {
 // rejects it loudly — everywhere in the document, including named schemas
 // and stdin shapes, whose rendered validation schemas drop zeros too.
 func TestValidate_zeroBounds(t *testing.T) {
+	// The F4 fallback is REVERSED (R2-S7): bounds are presence-carrying
+	// pointers end to end, so an explicit zero bound is ACCEPTED and enforced —
+	// the old document-wide rejection is gone.
 	cases := []struct{ name, body string }{
 		{"flag minimum", "  inputs:\n    flags:\n      - name: port\n        schema: { type: int, minimum: 0, maximum: 10 }\n"},
 		{"flag maximum", "  inputs:\n    flags:\n      - name: delta\n        schema: { type: int, maximum: 0 }\n"},
 		{"named schema", "schemas:\n  Widget:\n    type: object\n    properties:\n      size: { type: integer, minimum: 0 }\n"},
 		{"stdin shape", "  inputs:\n    stdin:\n      schema:\n        type: object\n        properties:\n          port: { type: integer, minimum: 0 }\n"},
+		{"exclusive zero", "  inputs:\n    flags:\n      - name: rate\n        schema: { type: float64, exclusiveMinimum: 0 }\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			spec := validSpecHeader + "command:\n  name: app\n" + c.body
-			err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
-			if err == nil || !strings.Contains(err.Error(), "zero bound") {
-				t.Errorf("Validate = %v, want the zero-bound rejection", err)
+			if err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", ""); err != nil {
+				t.Errorf("Validate = %v, want nil — a zero bound is a real, enforced bound now", err)
 			}
 		})
-	}
-
-	// Non-zero bounds are untouched, including bounds spanning zero.
-	ok := validSpecHeader + "command:\n  name: app\n" +
-		"  inputs:\n    flags:\n      - name: delta\n        schema: { type: int, minimum: -5, maximum: 5 }\n"
-	if err := validateOnce(writeTemp(t, "spec.yaml", ok), "", "", ""); err != nil {
-		t.Errorf("Validate(non-zero bounds) = %v, want nil", err)
 	}
 }
 

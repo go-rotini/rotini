@@ -2583,15 +2583,20 @@ func TestSchemaAccessors_nil(t *testing.T) {
 	}
 }
 
+func ptrF(f float64) *float64 { return &f }
+
 func TestConstraintsLiteral(t *testing.T) {
 	full := &InputSchema{}
-	full.Minimum, full.Maximum = 1, 65535
+	full.Minimum, full.Maximum = ptrF(1), ptrF(65535)
+	full.ExclusiveMinimum, full.MultipleOf = ptrF(0), ptrF(0.5)
 	full.MinLength, full.MaxLength = 2, 5
 	full.MinItems, full.MaxItems = 3, 4
 	full.Pattern = "^x$"
 	got := constraintsLiteral(full)
 	for _, want := range []string{
-		"Minimum: 1", "Maximum: 65535", "MinLength: 2", "MaxLength: 5",
+		"Minimum: rotini.Ptr[float64](1)", "Maximum: rotini.Ptr[float64](65535)",
+		"ExclusiveMinimum: rotini.Ptr[float64](0)", "MultipleOf: rotini.Ptr[float64](0.5)",
+		"MinLength: 2", "MaxLength: 5",
 		"MinItems: 3", "MaxItems: 4", `Pattern: "^x$"`,
 	} {
 		if !strings.Contains(got, want) {

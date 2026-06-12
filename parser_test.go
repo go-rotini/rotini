@@ -237,7 +237,7 @@ func TestParse_numericConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Constraints: Constraints{Minimum: 1, Maximum: 65535},
+			Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0)},
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -252,6 +252,63 @@ func TestParse_numericConstraints(t *testing.T) {
 }
 
 // TestParse_constraintsWidenedTypes pins the R1 fix: bounds enforce across
+// The R2-S7 constraint set: presence-carrying bounds make minimum: 0 a real,
+// enforced bound (the F4 zero-sentinel rejection is reversed), and the
+// exclusive bounds + multipleOf land with it — per-element on repeatables,
+// like every numeric constraint.
+func TestParse_constraintsExclusiveAndZero(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "delta", Identifiers: []string{"--delta"}, Type: "int",
+				Constraints: Constraints{Minimum: Ptr(0.0)}}, // the once-rejected zero bound
+			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float64",
+				Constraints: Constraints{ExclusiveMinimum: Ptr(0.0), ExclusiveMaximum: Ptr(1.0)}},
+			{Name: "step", Identifiers: []string{"--step"}, Type: "int",
+				Constraints: Constraints{MultipleOf: Ptr(5.0)}},
+			{Name: "ports", Identifiers: []string{"--ports"}, Type: "[]int",
+				Constraints: Constraints{MultipleOf: Ptr(2.0)}},
+		},
+	}
+	cases := []struct {
+		argv    []string
+		wantErr string // "" = must parse clean
+	}{
+		{[]string{"--delta", "0"}, ""},
+		{[]string{"--delta", "-1"}, "must be >= 0"},
+		{[]string{"--rate", "0.5"}, ""},
+		{[]string{"--rate", "0"}, "must be > 0"},
+		{[]string{"--rate", "1"}, "must be < 1"},
+		{[]string{"--step", "15"}, ""},
+		{[]string{"--step", "7"}, "must be a multiple of 5"},
+		{[]string{"--ports", "4", "--ports", "6"}, ""},
+		{[]string{"--ports", "4", "--ports", "5"}, "must be a multiple of 2"}, // per element
+	}
+	for _, c := range cases {
+		var in struct {
+			App struct {
+				Flags struct {
+					Delta int     `rotini:"delta"`
+					Rate  float64 `rotini:"rate"`
+					Step  int     `rotini:"step"`
+					Ports []int   `rotini:"ports"`
+				}
+				Arguments struct{}
+			}
+		}
+		err := NewParser().Parse(NewContextFor(def, c.argv), &in)
+		if c.wantErr == "" {
+			if err != nil {
+				t.Errorf("Parse(%v) = %v, want nil", c.argv, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+			t.Errorf("Parse(%v) = %v, want an error containing %q", c.argv, err, c.wantErr)
+		}
+	}
+}
+
 // the full numeric family (the old allowlist was int|float64 only — uint,
 // int64, float32 bounds were silently ignored), and per-value constraints
 // apply to a repeatable input's ELEMENTS.
@@ -260,13 +317,13 @@ func TestParse_constraintsWidenedTypes(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "workers", Identifiers: []string{"--workers"}, Type: "uint",
-				Constraints: Constraints{Minimum: 1, Maximum: 64}},
+				Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(64.0)}},
 			{Name: "offset", Identifiers: []string{"--offset"}, Type: "int64",
-				Constraints: Constraints{Minimum: -100, Maximum: 100}},
+				Constraints: Constraints{Minimum: Ptr(-100.0), Maximum: Ptr(100.0)}},
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float32",
-				Constraints: Constraints{Maximum: 1}},
+				Constraints: Constraints{Maximum: Ptr(1.0)}},
 			{Name: "port", Identifiers: []string{"--port"}, Type: "[]int",
-				Constraints: Constraints{Minimum: 1, Maximum: 65535, MaxItems: 3}},
+				Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0), MaxItems: 3}},
 			{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
 				Constraints: Constraints{MinLength: 2}},
 		},

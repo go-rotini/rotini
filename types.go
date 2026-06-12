@@ -162,21 +162,28 @@ type CommandDef struct {
 
 // Constraints carries the optional JSON-schema-style validation bounds a spec may
 // declare on a flag or argument; the parser enforces them after reconciliation (so a
-// value supplied via env/config is checked too). A zero value means "unset",
-// consistent with the rest of a Definition: a 0 numeric bound, a 0 length/item bound,
-// or an empty Pattern is not enforced. A consequence of that zero-sentinel
-// representation is that `minimum: 0` and `maximum: 0` are treated as no bound — a
-// documented limitation (use a small epsilon, or rely on the unsigned type, if a
-// literal-zero bound matters).
+// value supplied via env/config is checked too). The numeric bounds are
+// presence-carrying pointers — nil means "unset", so `minimum: 0` is a real,
+// enforced bound ([Ptr] builds one in a hand-authored Definition). The
+// length/count bounds keep the zero-sentinel convention: a 0 minimum is
+// vacuous, and a 0 maximum is not expressible (no real-world demand recorded).
 type Constraints struct {
-	Minimum   float64 // numeric lower bound (int/float types); 0 = unset
-	Maximum   float64 // numeric upper bound (int/float types); 0 = unset
-	MinLength int     // minimum string length in runes; 0 = unset
-	MaxLength int     // maximum string length in runes; 0 = unset
-	MinItems  int     // minimum item count (repeatable flag / variadic argument); 0 = unset
-	MaxItems  int     // maximum item count; 0 = unset
-	Pattern   string  // regular expression the value must contain (string types); "" = unset
+	Minimum          *float64 // inclusive numeric lower bound; nil = unset
+	Maximum          *float64 // inclusive numeric upper bound; nil = unset
+	ExclusiveMinimum *float64 // strict numeric lower bound (value must be >); nil = unset
+	ExclusiveMaximum *float64 // strict numeric upper bound (value must be <); nil = unset
+	MultipleOf       *float64 // the value must be an integer multiple (strictly positive); nil = unset
+	MinLength        int      // minimum string length in runes; 0 = unset
+	MaxLength        int      // maximum string length in runes; 0 = unset
+	MinItems         int      // minimum item count (repeatable flag / variadic argument); 0 = unset
+	MaxItems         int      // maximum item count; 0 = unset
+	Pattern          string   // regular expression the value must contain (string types); "" = unset
 }
+
+// Ptr returns a pointer to v — sugar for the presence-carrying [Constraints]
+// bounds in a hand-authored [Definition] (generated code uses it too):
+// Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0.
+func Ptr[T any](v T) *T { return &v }
 
 // takesValue reports whether a flag consumes a value token: everything except
 // the presence flags — bool (value form is inline-only) and count (no value at

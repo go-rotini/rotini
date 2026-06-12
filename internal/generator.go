@@ -348,11 +348,20 @@ func constraintTags(schema *InputSchema) string {
 		return ""
 	}
 	var parts []string
-	if schema.Minimum != 0 {
-		parts = append(parts, `min:"`+strconv.FormatFloat(schema.Minimum, 'g', -1, 64)+`"`)
+	if schema.Minimum != nil {
+		parts = append(parts, `min:"`+strconv.FormatFloat(*schema.Minimum, 'g', -1, 64)+`"`)
 	}
-	if schema.Maximum != 0 {
-		parts = append(parts, `max:"`+strconv.FormatFloat(schema.Maximum, 'g', -1, 64)+`"`)
+	if schema.Maximum != nil {
+		parts = append(parts, `max:"`+strconv.FormatFloat(*schema.Maximum, 'g', -1, 64)+`"`)
+	}
+	if schema.ExclusiveMinimum != nil {
+		parts = append(parts, `xmin:"`+strconv.FormatFloat(*schema.ExclusiveMinimum, 'g', -1, 64)+`"`)
+	}
+	if schema.ExclusiveMaximum != nil {
+		parts = append(parts, `xmax:"`+strconv.FormatFloat(*schema.ExclusiveMaximum, 'g', -1, 64)+`"`)
+	}
+	if schema.MultipleOf != nil {
+		parts = append(parts, `multipleof:"`+strconv.FormatFloat(*schema.MultipleOf, 'g', -1, 64)+`"`)
 	}
 	if schema.MinLength != 0 {
 		parts = append(parts, `minlen:"`+strconv.Itoa(schema.MinLength)+`"`)
@@ -872,15 +881,31 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 }
 
 // constraintsLiteral renders a rotini.Constraints{…} literal from a schema's declared
-// numeric/string/array bounds, or "" when none are set (a zero bound or empty pattern
-// is "unset", matching the Definition's zero-sentinel convention).
+// numeric/string/array bounds, or "" when none are set. The numeric bounds are
+// presence-carrying: a declared bound (0 included) emits a rotini.Ptr literal;
+// an undeclared one emits nothing. Length/count bounds keep the zero-sentinel
+// convention.
 func constraintsLiteral(schema *InputSchema) string {
-	var parts []string
-	if schema.Minimum != 0 {
-		parts = append(parts, "Minimum: "+strconv.FormatFloat(schema.Minimum, 'g', -1, 64))
+	// The explicit type parameter matters: Ptr(1) would infer *int and the
+	// generated literal would not compile against the *float64 field.
+	ptr := func(f float64) string {
+		return rotiniPkgName + ".Ptr[float64](" + strconv.FormatFloat(f, 'g', -1, 64) + ")"
 	}
-	if schema.Maximum != 0 {
-		parts = append(parts, "Maximum: "+strconv.FormatFloat(schema.Maximum, 'g', -1, 64))
+	var parts []string
+	if schema.Minimum != nil {
+		parts = append(parts, "Minimum: "+ptr(*schema.Minimum))
+	}
+	if schema.Maximum != nil {
+		parts = append(parts, "Maximum: "+ptr(*schema.Maximum))
+	}
+	if schema.ExclusiveMinimum != nil {
+		parts = append(parts, "ExclusiveMinimum: "+ptr(*schema.ExclusiveMinimum))
+	}
+	if schema.ExclusiveMaximum != nil {
+		parts = append(parts, "ExclusiveMaximum: "+ptr(*schema.ExclusiveMaximum))
+	}
+	if schema.MultipleOf != nil {
+		parts = append(parts, "MultipleOf: "+ptr(*schema.MultipleOf))
 	}
 	if schema.MinLength != 0 {
 		parts = append(parts, "MinLength: "+strconv.Itoa(schema.MinLength))

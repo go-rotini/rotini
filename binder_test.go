@@ -702,7 +702,7 @@ func tbPortDef() Definition {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Constraints: Constraints{Minimum: 1, Maximum: 65535},
+			Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0)},
 		}},
 	}
 }
