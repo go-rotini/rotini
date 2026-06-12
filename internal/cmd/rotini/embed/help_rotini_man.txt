@@ -1,0 +1,16 @@
+Print the embedded manual page for a rotini command.
+
+Usage:
+  rotini man [commands...] [flags]
+
+Arguments:
+  [commands...]    the command path to print the manual for
+
+Flags:
+  -h,--help    print help
+
+Examples:
+  rotini man
+  rotini man generate
+
+Use "rotini help <command>" for more information about a command.

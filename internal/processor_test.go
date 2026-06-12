@@ -303,7 +303,7 @@ func TestProcessorInitialize(t *testing.T) {
 	tmp := initTestModule(t)
 	p := NewProcessor("")
 
-	if err := p.initialize("mycli", "yaml", false); err != nil {
+	if err := p.initialize("mycli", "yaml", false, nil); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	dir := filepath.Join(tmp, "cmd", "mycli")

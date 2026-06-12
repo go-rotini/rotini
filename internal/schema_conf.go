@@ -22,7 +22,7 @@ type Feature struct {
 	Enabled bool `json:"enabled,omitempty"`
 }
 
-// Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cmdgen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cmdgen package. All features default to ONE shared '<cmdgen-package>/embed' dir — their output files never collide: help pages are named 'help_*.txt', man pages 'man_*.txt', and completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.
+// Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cmdgen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cmdgen package. All features default to ONE shared '<cmdgen-package>/embed' dir — their output files never collide: help pages are named 'help_*.txt', man pages 'man_*.txt', markdown references 'markdown_*.md', and completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.
 type FeaturesConfig struct {
 	// Embedded shell completion scripts — the features group's exception: generated per supported shell (bash/zsh/fish) from the program name, not per command, with no doc-data, no editable template, and no verbatim escape. Emits 'Completion<Shell>' vars plus a 'Completion(shell string) (string, error)' resolver that a handler reads instead of building the script itself.
 	Completion *Feature `json:"completion,omitempty"`
@@ -30,6 +30,8 @@ type FeaturesConfig struct {
 	Help *Feature `json:"help,omitempty"`
 	// Embedded, per-command man pages. Same render-or-verbatim contract as help: each command's .txt is rendered from its doc-fields through the editable man template in the feature's dir, or written verbatim when the command sets a 'man' string in the spec. Emits 'Man<Prefix>' vars plus a 'Man(path ...string) (string, error)' resolver.
 	Man *Feature `json:"man,omitempty"`
+	// Per-command reference markdown — the fourth doc feature, same render-or-verbatim contract as help/man: each command's .md is rendered from its doc-fields through the editable markdown template in the feature's dir ('markdown.md.tmpl'), or written verbatim when the command sets a 'markdown' string in the spec. Emits 'Markdown<Prefix>' vars plus a 'Markdown(path ...string) (string, error)' resolver; files are named 'markdown_*.md'. The build-time feedstock for a docs site — unlike help/man there is no wired command to serve it at run time.
+	Markdown *Feature `json:"markdown,omitempty"`
 }
 
 // Controls `rotini generate`: where the generated code is written ('packages') and which derived doc/completion outputs are emitted ('features').

@@ -7,10 +7,10 @@ import (
 
 func TestSmokeRenderSeedFiles(t *testing.T) {
 	for _, format := range []fileFormat{formatYAML, formatJSON, formatJSONC, formatTOML} {
-		if _, err := renderSpecFile("v1.0.0", "app", format); err != nil {
+		if _, err := renderSpecFile("v1.0.0", "app", format, nil); err != nil {
 			t.Errorf("spec %s: %v", format, err)
 		}
-		if _, err := renderConfFile("v1.0.0", "app", format); err != nil {
+		if _, err := renderConfFile("v1.0.0", "app", format, nil); err != nil {
 			t.Errorf("conf %s: %v", format, err)
 		}
 	}

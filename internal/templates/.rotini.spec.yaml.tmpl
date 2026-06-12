@@ -29,6 +29,48 @@ command:
               - --help
             schema:
               type: bool
+{{- if .WireMan}}
+    - name: man
+      summary: print the manual page for a command
+      inputs:
+        arguments:
+          - name: commands
+            summary: the command path to print the manual for
+            schema:
+              type: array
+        flags:
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
+{{- end}}
+{{- if .WireCompletion}}
+    - name: completion
+      summary: print a shell completion script
+      inputs:
+        arguments:
+          - name: shell
+            summary: the target shell
+            schema:
+              type: string
+              required: true
+              enum:
+                - bash
+                - zsh
+                - fish
+                - powershell
+        flags:
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
+{{- end}}
   inputs:
     flags:
       - name: version

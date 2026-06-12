@@ -40,6 +40,10 @@ var (
 	templateHandlerVersion string
 	//go:embed templates/handler_help.go.tmpl
 	templateHandlerHelp string
+	//go:embed templates/handler_man.go.tmpl
+	templateHandlerMan string
+	//go:embed templates/handler_completion.go.tmpl
+	templateHandlerCompletion string
 	//go:embed templates/handlers.go.tmpl
 	templateHandlers string
 	//go:embed templates/rotini.go.tmpl
@@ -48,6 +52,8 @@ var (
 	templateHelp string
 	//go:embed templates/man.txt.tmpl
 	templateMan string
+	//go:embed templates/markdown.md.tmpl
+	templateMarkdown string
 )
 
 // convert transcodes a rendered YAML document to the target serialization.
@@ -133,14 +139,22 @@ func renderGoFile(name, text string, data any) ([]byte, error) {
 type templateSeedData struct {
 	Version string
 	Package string
+	// the `rotini init --wire` toggles: each adds its feature (and serving
+	// command, when it has one) to the seeds. Help is default-wired — no toggle.
+	WireMan        bool
+	WireCompletion bool
+	WireMarkdown   bool
 }
 
 // renderSeedFile renders one YAML seed template and transcodes it to the
 // requested file format.
-func renderSeedFile(name, text, version, pkg string, target fileFormat) ([]byte, error) {
+func renderSeedFile(name, text, version, pkg string, target fileFormat, wired map[string]bool) ([]byte, error) {
 	rendered, err := renderTemplate(name, text, templateSeedData{
-		Version: version,
-		Package: pkg,
+		Version:        version,
+		Package:        pkg,
+		WireMan:        wired["man"],
+		WireCompletion: wired["completion"],
+		WireMarkdown:   wired["markdown"],
 	})
 
 	if err != nil {
@@ -150,12 +164,12 @@ func renderSeedFile(name, text, version, pkg string, target fileFormat) ([]byte,
 	return convert(rendered, target)
 }
 
-func renderSpecFile(version, pkg string, target fileFormat) ([]byte, error) {
-	return renderSeedFile("spec", templateSpec, version, pkg, target)
+func renderSpecFile(version, pkg string, target fileFormat, wired map[string]bool) ([]byte, error) {
+	return renderSeedFile("spec", templateSpec, version, pkg, target, wired)
 }
 
-func renderConfFile(version, pkg string, target fileFormat) ([]byte, error) {
-	return renderSeedFile("conf", templateConf, version, pkg, target)
+func renderConfFile(version, pkg string, target fileFormat, wired map[string]bool) ([]byte, error) {
+	return renderSeedFile("conf", templateConf, version, pkg, target, wired)
 }
 
 type templateMainData struct {
@@ -207,6 +221,24 @@ func renderHandlerVersionFile(pkg, handlersType, rootCommandName, helpVar string
 
 func renderHandlerHelpFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
 	return renderGoFile("handler_help", templateHandlerHelp, templateHandlerData{
+		Package:         pkg,
+		HandlersType:    handlersType,
+		RootCommandName: rootCommandName,
+		HelpVar:         helpVar,
+	})
+}
+
+func renderHandlerManFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
+	return renderGoFile("handler_man", templateHandlerMan, templateHandlerData{
+		Package:         pkg,
+		HandlersType:    handlersType,
+		RootCommandName: rootCommandName,
+		HelpVar:         helpVar,
+	})
+}
+
+func renderHandlerCompletionFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
+	return renderGoFile("handler_completion", templateHandlerCompletion, templateHandlerData{
 		Package:         pkg,
 		HandlersType:    handlersType,
 		RootCommandName: rootCommandName,

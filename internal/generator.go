@@ -249,6 +249,7 @@ func featureConfigs(conf *Conf) []confFeature {
 	return []confFeature{
 		{helpFeatureDesc, feats.Help},
 		{manFeatureDesc, feats.Man},
+		{markdownFeatureDesc, feats.Markdown},
 		{completionFeatureDesc, feats.Completion},
 	}
 }
@@ -1061,6 +1062,10 @@ func renderHandlerSeed(gp *genProgram, lay layout, c genCommand, initStyle bool)
 			return renderHandlerHelpFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Help")
 		case gp.rootPascal + "Version":
 			return renderHandlerVersionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Version")
+		case gp.rootPascal + "Man":
+			return renderHandlerManFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Man")
+		case gp.rootPascal + "Completion":
+			return renderHandlerCompletionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Completion")
 		}
 	}
 	return renderHandlerStubFile(lay.handlerPkgName, c.handler)
@@ -1814,8 +1819,9 @@ func checkCollisions(nodes []rnode) error {
 // living in the feature dir (the only user-owned files there). Pruning always
 // keeps them.
 const (
-	helpTemplateName = "help.txt.tmpl"
-	manTemplateName  = "man.txt.tmpl"
+	helpTemplateName     = "help.txt.tmpl"
+	manTemplateName      = "man.txt.tmpl"
+	markdownTemplateName = "markdown.md.tmpl"
 )
 
 // docFeature describes one doc-rendered codegen feature (help, man). Both share
@@ -1852,6 +1858,11 @@ var (
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
 		ext: ".txt", filePrefix: "man_", tmplFile: manTemplateName, embedded: templateMan,
 		verbatim: func(h cmdHelp) string { return h.Man },
+	}
+	markdownFeatureDesc = docFeature{
+		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
+		ext: ".md", filePrefix: "markdown_", tmplFile: markdownTemplateName, embedded: templateMarkdown,
+		verbatim: func(h cmdHelp) string { return h.Markdown },
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
 	// no template, no verbatim. Scripts come from completionScript at codegen.
@@ -1894,6 +1905,7 @@ type cmdHelp struct {
 	SeeAlso     []string          // command.see_also (man SEE ALSO section)
 	Help        string            // verbatim help page (command.help)
 	Man         string            // verbatim man page (command.man)
+	Markdown    string            // verbatim markdown reference page (command.markdown)
 }
 
 // commandHelp gathers the flattened doc-fields off a command (root or sub).
@@ -1902,7 +1914,7 @@ func commandHelp(c Command) cmdHelp {
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
 		Header: c.Header, Footer: c.Footer, Headings: c.Headings,
 		Examples: c.Examples, ExitStatus: c.ExitStatus, SeeAlso: c.SeeAlso,
-		Help: c.Help, Man: c.Man,
+		Help: c.Help, Man: c.Man, Markdown: c.Markdown,
 	}
 }
 

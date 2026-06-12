@@ -1,0 +1,20 @@
+NAME
+    rotini completion - print a shell completion script
+
+SYNOPSIS
+    rotini completion <shell> [flags]
+
+DESCRIPTION
+    Print the completion script for a shell; load it with your shell's source/eval idiom.
+
+ARGUMENTS
+    <shell>    the target shell [bash|zsh|fish|powershell]
+
+OPTIONS
+    -h,--help    print help
+
+EXAMPLES
+    rotini completion zsh
+    source <(rotini completion bash)
+
+Use "rotini help <command>" for more information about a command.

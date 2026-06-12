@@ -15,10 +15,13 @@ generate:
       enabled: true
       dir: internal/cmd/{{.Package}}/embed
     man:
-      enabled: false
+      enabled: {{if .WireMan}}true{{else}}false{{end}}
       dir: internal/cmd/{{.Package}}/embed
     completion:
-      enabled: false
+      enabled: {{if .WireCompletion}}true{{else}}false{{end}}
+      dir: internal/cmd/{{.Package}}/embed
+    markdown:
+      enabled: {{if .WireMarkdown}}true{{else}}false{{end}}
       dir: internal/cmd/{{.Package}}/embed
 validate:
   fail: collect

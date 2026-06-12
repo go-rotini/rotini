@@ -38,6 +38,7 @@ command:
       examples:
         - rotini initialize mycli
         - rotini init mycli --format json
+        - rotini init mycli --wire completion --wire man
         - rotini init mycli --force
         - rotini init -i
       footer: Use "rotini help <command>" for more information about a command.
@@ -65,6 +66,17 @@ command:
               - --force
             schema:
               type: bool
+          - name: wire
+            summary: wire a doc feature into the new CLI (enable it in the conf, seed its command and handler)
+            identifiers:
+              - --wire
+            schema:
+              type: "[]string"
+              enum:
+                - help
+                - man
+                - completion
+                - markdown
           - name: help
             summary: print help
             identifiers:
@@ -188,6 +200,54 @@ command:
         - rotini version
       footer: Use "rotini help <command>" for more information about a command.
       inputs:
+        flags:
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
+    - name: man
+      summary: print the manual page for a command
+      description: Print the embedded manual page for a rotini command.
+      examples:
+        - rotini man
+        - rotini man generate
+      footer: Use "rotini help <command>" for more information about a command.
+      inputs:
+        arguments:
+          - name: commands
+            summary: the command path to print the manual for
+            schema:
+              type: array
+        flags:
+          - name: help
+            summary: print help
+            identifiers:
+              - -h
+              - --help
+            schema:
+              type: bool
+    - name: completion
+      summary: print a shell completion script
+      description: Print the completion script for a shell; load it with your shell's source/eval idiom.
+      examples:
+        - rotini completion zsh
+        - source <(rotini completion bash)
+      footer: Use "rotini help <command>" for more information about a command.
+      inputs:
+        arguments:
+          - name: shell
+            summary: the target shell
+            schema:
+              type: string
+              required: true
+              enum:
+                - bash
+                - zsh
+                - fish
+                - powershell
         flags:
           - name: help
             summary: print help

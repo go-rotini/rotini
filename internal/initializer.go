@@ -42,7 +42,15 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 // InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double (see [GenerateFn]).
-type InitializeFn = func(name, format string, force bool) error
+type InitializeFn = func(name, format string, force bool, wire []string) error
+
+// wireFeatures are the `rotini init --wire` vocabulary: each named feature is
+// enabled in the seed conf, its serving command (when it has one) is added to
+// the seed spec, and the init-style generate seeds that command's wired
+// handler. "help" is default-wired already (the wired root handler's -h/usage
+// output depends on the help embeds) — naming it is explicit and idempotent.
+// "markdown" has no run-time command: wiring it only flips the feature toggle.
+var wireFeatures = []string{"help", "man", "completion", "markdown"}
 
 // Initialize scaffolds a new standalone rotini CLI named name: the seed
 // .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the
@@ -52,19 +60,23 @@ type InitializeFn = func(name, format string, force bool) error
 // wired help/version command handlers, and the entrypoint main.go. format
 // selects the serialization (yaml, jsonc, json, or toml). The seeds are
 // create-once: they are left untouched unless force is set.
-func Initialize(name, format string, force bool, version string) error {
-	return NewProcessor(version).Initialize(name, format, force)
+func Initialize(name, format string, force bool, version string, wire []string) error {
+	return NewProcessor(version).Initialize(name, format, force, wire)
 }
 
 // initialize renders and writes the default seed spec and conf for a new CLI
 // named name under <package>/<name>/, validates them, and runs the init-style
 // generate pass over them.
-func (p *Processor) initialize(name, format string, force bool) error {
+func (p *Processor) initialize(name, format string, force bool, wire []string) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
 	if !cliNameRe.MatchString(name) {
 		return fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+	}
+	wired, err := wireSet(wire)
+	if err != nil {
+		return err
 	}
 
 	moduleRoot, _, err := findModule()
@@ -101,14 +113,14 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	}
 
 	version := schemaURLVersion(p.version)
-	specBytes, err := renderSpecFile(version, name, f)
+	specBytes, err := renderSpecFile(version, name, f, wired)
 	if err != nil {
 		return err
 	}
 	if err := writeGeneratedFile(specPath, specBytes); err != nil {
 		return err
 	}
-	confBytes, err := renderConfFile(version, name, f)
+	confBytes, err := renderConfFile(version, name, f, wired)
 	if err != nil {
 		return err
 	}
@@ -126,6 +138,27 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		return err
 	}
 	return s.generateStyled(true)
+}
+
+// wireSet validates `--wire` values against the wireFeatures vocabulary and
+// returns them as a set. The rotini CLI's own enum already constrains the flag;
+// this guards direct API callers with the same loud rejection.
+func wireSet(wire []string) (map[string]bool, error) {
+	set := map[string]bool{}
+	for _, w := range wire {
+		ok := false
+		for _, v := range wireFeatures {
+			if w == v {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return nil, fmt.Errorf("unknown --wire value %q: must be one of %s", w, strings.Join(wireFeatures, ", "))
+		}
+		set[w] = true
+	}
+	return set, nil
 }
 
 // initDefaults holds the resolved `rotini init` defaults.

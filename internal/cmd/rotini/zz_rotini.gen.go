@@ -23,6 +23,10 @@ func (*handlers) Rotini() rotini.CommandHandlers {
 	return &rotiniHandlers{}
 }
 
+func (*handlers) RotiniCompletion() rotini.CommandHandlers {
+	return &rotiniCompletionHandlers{}
+}
+
 func (*handlers) RotiniGenerate() rotini.CommandHandlers {
 	return &rotiniGenerateHandlers{}
 }
@@ -35,6 +39,10 @@ func (*handlers) RotiniInitialize() rotini.CommandHandlers {
 	return &rotiniInitializeHandlers{}
 }
 
+func (*handlers) RotiniMan() rotini.CommandHandlers {
+	return &rotiniManHandlers{}
+}
+
 func (*handlers) RotiniValidate() rotini.CommandHandlers {
 	return &rotiniValidateHandlers{}
 }
@@ -45,9 +53,11 @@ func (*handlers) RotiniVersion() rotini.CommandHandlers {
 
 type ProgramHandlers interface {
 	Rotini() rotini.CommandHandlers
+	RotiniCompletion() rotini.CommandHandlers
 	RotiniGenerate() rotini.CommandHandlers
 	RotiniHelp() rotini.CommandHandlers
 	RotiniInitialize() rotini.CommandHandlers
+	RotiniMan() rotini.CommandHandlers
 	RotiniValidate() rotini.CommandHandlers
 	RotiniVersion() rotini.CommandHandlers
 }
@@ -66,6 +76,7 @@ var definition = rotini.Definition{
 			Flags: []rotini.FlagDef{
 				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Enum: []string{"yaml", "json", "jsonc", "toml"}},
 				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
+				{Name: "wire", Identifiers: []string{"--wire"}, Type: "[]string", Enum: []string{"help", "man", "completion", "markdown"}},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
@@ -112,6 +123,24 @@ var definition = rotini.Definition{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
 			},
 		},
+		{Name: "man",
+			Handler: "RotiniMan",
+			Flags: []rotini.FlagDef{
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "commands", Type: "[]string", Variadic: true},
+			},
+		},
+		{Name: "completion",
+			Handler: "RotiniCompletion",
+			Flags: []rotini.FlagDef{
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+			},
+			Arguments: []rotini.ArgDef{
+				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell"}},
+			},
+		},
 	},
 }
 
@@ -129,6 +158,24 @@ type RotiniCommandInputs struct {
 
 type RotiniInputs struct {
 	Rotini RotiniCommandInputs
+}
+
+type RotiniCompletionFlags struct {
+	Help bool `rotini:"help"`
+}
+
+type RotiniCompletionArguments struct {
+	Shell string `rotini:"shell"`
+}
+
+type RotiniCompletionCommandInputs struct {
+	Flags     RotiniCompletionFlags
+	Arguments RotiniCompletionArguments
+}
+
+type RotiniCompletionInputs struct {
+	Rotini           RotiniCommandInputs
+	RotiniCompletion RotiniCompletionCommandInputs
 }
 
 type RotiniGenerateFlags struct {
@@ -170,9 +217,10 @@ type RotiniHelpInputs struct {
 }
 
 type RotiniInitializeFlags struct {
-	Format string `rotini:"format"`
-	Force  bool   `rotini:"force"`
-	Help   bool   `rotini:"help"`
+	Format string   `rotini:"format"`
+	Force  bool     `rotini:"force"`
+	Wire   []string `rotini:"wire"`
+	Help   bool     `rotini:"help"`
 }
 
 type RotiniInitializeArguments struct {
@@ -187,6 +235,24 @@ type RotiniInitializeCommandInputs struct {
 type RotiniInitializeInputs struct {
 	Rotini           RotiniCommandInputs
 	RotiniInitialize RotiniInitializeCommandInputs
+}
+
+type RotiniManFlags struct {
+	Help bool `rotini:"help"`
+}
+
+type RotiniManArguments struct {
+	Commands []string `rotini:"commands"`
+}
+
+type RotiniManCommandInputs struct {
+	Flags     RotiniManFlags
+	Arguments RotiniManArguments
+}
+
+type RotiniManInputs struct {
+	Rotini    RotiniCommandInputs
+	RotiniMan RotiniManCommandInputs
 }
 
 type RotiniValidateFlags struct {
@@ -253,6 +319,12 @@ var HelpRotiniHelp string
 //go:embed embed/help_rotini_version.txt
 var HelpRotiniVersion string
 
+//go:embed embed/help_rotini_man.txt
+var HelpRotiniMan string
+
+//go:embed embed/help_rotini_completion.txt
+var HelpRotiniCompletion string
+
 // Help returns the generated help text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
 // error when path does not match a known command.
@@ -270,6 +342,10 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniHelp, nil
 	case "version":
 		return HelpRotiniVersion, nil
+	case "man":
+		return HelpRotiniMan, nil
+	case "completion":
+		return HelpRotiniCompletion, nil
 	default:
 		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
 	}
@@ -293,6 +369,12 @@ var ManRotiniHelp string
 //go:embed embed/man_rotini_version.txt
 var ManRotiniVersion string
 
+//go:embed embed/man_rotini_man.txt
+var ManRotiniMan string
+
+//go:embed embed/man_rotini_completion.txt
+var ManRotiniCompletion string
+
 // Man returns the generated man text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
 // error when path does not match a known command.
@@ -310,6 +392,10 @@ func Man(path ...string) (string, error) {
 		return ManRotiniHelp, nil
 	case "version":
 		return ManRotiniVersion, nil
+	case "man":
+		return ManRotiniMan, nil
+	case "completion":
+		return ManRotiniCompletion, nil
 	default:
 		return "", fmt.Errorf("no man for command %q", strings.Join(path, " "))
 	}

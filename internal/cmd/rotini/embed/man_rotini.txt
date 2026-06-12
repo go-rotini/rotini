@@ -16,6 +16,8 @@ COMMANDS
     validate;val       validate a spec file
     help               print help
     version            print version
+    man                print the manual page for a command
+    completion         print a shell completion script
 
 OPTIONS
     -v,--version    print version

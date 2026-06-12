@@ -1,0 +1,50 @@
+package {{.Package}}
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type {{.HandlersType}} struct{
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
+
+func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
+	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
+
+	var inputs {{.RootCommandName}}CompletionInputs
+	if err := parser.Parse(rtx, &inputs); err != nil {
+		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
+		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+		rtx.SignalExit(rotini.ExitUsage)
+		return
+	}
+
+	args := inputs.{{.RootCommandName}}Completion.Arguments
+	flags := inputs.{{.RootCommandName}}Completion.Flags
+
+	if flags.Help {
+		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+		rtx.SignalExit(0)
+		return
+	}
+
+	// The shell arg is enum-constrained in the spec, so an unsupported shell
+	// never reaches here — Parse already rejected it.
+	script, err := Completion(args.Shell)
+	if err != nil {
+		fmt.Fprintln(rtx.Stderr, "Error:", err)
+		rtx.SignalExit(1)
+		return
+	}
+
+	// The `source <(mycli completion zsh)` idiom: the script, stdout, nothing else.
+	fmt.Fprintln(rtx.Stdout, script)
+}

@@ -47,7 +47,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.BindIfAbsent("initialize", internal.NewProcessor(v.VersionSemantic).Initialize)
 	initialize := rotini.MustGet[internal.InitializeFn](rtx, "initialize")
 
-	if err := initialize(args.Name, flags.Format, flags.Force); err != nil {
+	if err := initialize(args.Name, flags.Format, flags.Force, flags.Wire); err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.SignalExit(1)
 		return

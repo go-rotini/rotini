@@ -9,11 +9,13 @@ Arguments:
 Flags:
   --format string    the created rotini spec file format (defaults to the module conf's initialize.format, else yaml) [yaml|json|jsonc|toml]
   --force            force re-initialization if files exist that init would overwrite
+  --wire []string    wire a doc feature into the new CLI (enable it in the conf, seed its command and handler) [help|man|completion|markdown]
   -h,--help          print help
 
 Examples:
   rotini initialize mycli
   rotini init mycli --format json
+  rotini init mycli --wire completion --wire man
   rotini init mycli --force
   rotini init -i
 

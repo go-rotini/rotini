@@ -847,6 +847,64 @@ func TestGenerateEnvPrefix(t *testing.T) {
 	)
 }
 
+// The markdown feature is the fourth doc feature: same render-or-verbatim
+// contract as help/man, .md files, Markdown<Prefix> vars + Markdown resolver,
+// editable markdown.md.tmpl seeded into the feature dir.
+func TestGenerateMarkdownEnabled(t *testing.T) {
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: mycli\n" +
+		"  summary: my cli\n" +
+		"  description: A demo CLI.\n" +
+		"  commands:\n" +
+		"    - name: build\n" +
+		"      summary: build the project\n" +
+		"      inputs:\n" +
+		"        flags:\n" +
+		"          - name: verbose\n" +
+		"            summary: chattier output\n" +
+		"            identifiers: [-v, --verbose]\n" +
+		"            schema: { type: bool }\n" +
+		"    - name: verbatim\n" +
+		"      summary: hand-written page\n" +
+		"      markdown: |\n" +
+		"        # custom page\n" +
+		"        byte-for-byte.\n"
+	conf := confSchemaHeader + "generate:\n  features:\n    markdown:\n      enabled: true\n"
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), conf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	embedDir := filepath.Join(tmp, "internal", "cmd", "mycli", "embed")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
+		"//go:embed embed/markdown_mycli.md",
+		"var MarkdownMycli string",
+		"var MarkdownMycliBuild string",
+		"func Markdown(path ...string) (string, error)",
+	)
+	// Rendered page: markdown shapes from the doc-data.
+	mustContain(t, filepath.Join(embedDir, "markdown_mycli_build.md"),
+		"# mycli build",
+		"## Usage",
+		"`-v, --verbose`",
+		"chattier output",
+	)
+	// The verbatim escape writes byte-for-byte.
+	mustContain(t, filepath.Join(embedDir, "markdown_mycli_verbatim.md"),
+		"# custom page",
+	)
+	// The editable default template was seeded.
+	if _, err := os.Stat(filepath.Join(embedDir, "markdown.md.tmpl")); err != nil {
+		t.Errorf("default markdown template not seeded: %v", err)
+	}
+}
+
 // A passthrough command's CommandDef literal carries the flag — the parser's
 // signal that every token after the command is a raw positional.
 func TestGeneratePassthrough(t *testing.T) {

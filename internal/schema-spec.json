@@ -189,6 +189,10 @@
         "passthrough": {
           "type": "boolean",
           "description": "When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no remote commands or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion."
+        },
+        "markdown": {
+          "type": "string",
+          "description": "Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it byte-for-byte; when unset, the page is rendered from the structured doc-fields through the markdown template."
         }
       }
     },

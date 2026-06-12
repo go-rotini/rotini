@@ -1,0 +1,20 @@
+NAME
+    rotini man - print the manual page for a command
+
+SYNOPSIS
+    rotini man [commands...] [flags]
+
+DESCRIPTION
+    Print the embedded manual page for a rotini command.
+
+ARGUMENTS
+    [commands...]    the command path to print the manual for
+
+OPTIONS
+    -h,--help    print help
+
+EXAMPLES
+    rotini man
+    rotini man generate
+
+Use "rotini help <command>" for more information about a command.

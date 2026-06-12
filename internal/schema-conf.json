@@ -130,7 +130,7 @@
     "FeaturesConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cmdgen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cmdgen package. All features default to ONE shared '<cmdgen-package>/embed' dir — their output files never collide: help pages are named 'help_*.txt', man pages 'man_*.txt', and completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.",
+      "description": "Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle, a rotini-managed output dir, an editable per-feature template (for the doc-rendered features), a per-command verbatim spec escape, and an embedded var + resolver in the cmdgen file. Because Go's //go:embed can only reach files beneath the embedding package, each enabled feature's 'dir' must resolve under the cmdgen package. All features default to ONE shared '<cmdgen-package>/embed' dir — their output files never collide: help pages are named 'help_*.txt', man pages 'man_*.txt', markdown references 'markdown_*.md', and completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.",
       "properties": {
         "help": {
           "$ref": "#/definitions/Feature",
@@ -143,6 +143,10 @@
         "completion": {
           "$ref": "#/definitions/Feature",
           "description": "Embedded shell completion scripts — the features group's exception: generated per supported shell (bash/zsh/fish) from the program name, not per command, with no doc-data, no editable template, and no verbatim escape. Emits 'Completion<Shell>' vars plus a 'Completion(shell string) (string, error)' resolver that a handler reads instead of building the script itself."
+        },
+        "markdown": {
+          "$ref": "#/definitions/Feature",
+          "description": "Per-command reference markdown — the fourth doc feature, same render-or-verbatim contract as help/man: each command's .md is rendered from its doc-fields through the editable markdown template in the feature's dir ('markdown.md.tmpl'), or written verbatim when the command sets a 'markdown' string in the spec. Emits 'Markdown<Prefix>' vars plus a 'Markdown(path ...string) (string, error)' resolver; files are named 'markdown_*.md'. The build-time feedstock for a docs site — unlike help/man there is no wired command to serve it at run time."
         }
       }
     },
