@@ -668,11 +668,33 @@ func discoverDirs(d *DiscoverDef) ([]string, error) {
 }
 
 // envSources builds the env channel's recon sources for one inputs value: the
-// process environment honoring explicit `variable:` mappings. (Nested env
-// families — envnest — are not registry data: recon resolves leaf keys only,
-// so fillEnvNested sets those fields directly.)
+// process environment honoring explicit `variable:` mappings — in BOTH
+// directions. The forward transform (key → variable) alone is not enough:
+// recon's registry resolves through a snapshot keyed by the names its source
+// ENUMERATES, and the default enumeration parses variable names by the
+// SNAKE_UPPER convention — an explicitly-named variable (WIDGET_TOKEN for key
+// "token") would land at the wrong path and the input would bind only when a
+// convention-named variable happened to exist as an anchor. The key parser
+// here maps explicit variables back to their declared keys, so an
+// explicit-only variable resolves on its own. (Nested env families — envnest
+// — are not registry data at all: recon resolves leaf keys only, so
+// fillEnvNested sets those fields directly.)
 func envSources(v reflect.Value) []recon.Source {
-	return []recon.Source{recon.NewOSEnvSource(recon.WithEnvTransform(envTransform(envExplicit(v))))}
+	explicit := envExplicit(v)
+	inverse := make(map[string]string, len(explicit)) // VARIABLE → key
+	for key, variable := range explicit {
+		inverse[variable] = key
+	}
+	parser := func(name string) recon.Path {
+		if key, ok := inverse[name]; ok {
+			return recon.ParsePath(key)
+		}
+		// recon's default projection: every underscore is a separator.
+		return recon.MakePath(strings.Split(strings.ToLower(name), "_")...)
+	}
+	return []recon.Source{recon.NewOSEnvSource(
+		recon.WithEnvTransform(envTransform(explicit)),
+		recon.WithEnvKeyParser(parser))}
 }
 
 // fillEnvNested fills each nested env input of one Env struct (the generated

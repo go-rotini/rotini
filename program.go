@@ -37,8 +37,8 @@ type Program struct {
 	handlers         any
 	rtx              *Context                                           // pre-seeded registry; user Bind calls land here
 	recoveredPanicFn func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures; nil → defaultRecoveredPanicFn
-	resolver         Resolver  // resolve phase override; nil → DefaultResolver
-	lifecycle        Lifecycle // run-phase plan override; nil → DefaultLifecycle
+	resolver         Resolver                                           // resolve phase override; nil → DefaultResolver
+	lifecycle        Lifecycle                                          // run-phase plan override; nil → DefaultLifecycle
 	stdin            io.Reader
 	stdout           io.Writer
 	stderr           io.Writer

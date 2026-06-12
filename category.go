@@ -36,6 +36,20 @@ func (c Category) String() string {
 	}
 }
 
+// ExitUsage and ExitInternal name the conventional exit codes for the two
+// categories — the mapping rotini's docs, templates, and conformance suite
+// recommend a funnel apply. They are a suggestion, never an enforcement:
+// rotini itself maps NO category to a code (Pillar 1 — handlers own exits);
+// these constants exist so a CLI that adopts the convention spells it
+// readably (rtx.SignalExit(rotini.ExitUsage)) instead of re-deriving magic
+// numbers. The values follow long CLI tradition: 2 for bad usage (the
+// near-universal getopt convention), 70 for an internal software error (BSD
+// sysexits' EX_SOFTWARE).
+const (
+	ExitUsage    = 2
+	ExitInternal = 70
+)
+
 // ErrUsage and ErrInternal are the sentinels the categories match on. rotini's own
 // errors wrap the appropriate one, and [CategoryOf] resolves a category by testing an
 // error against them with errors.Is — so a funnel may match either way:

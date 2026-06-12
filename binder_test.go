@@ -270,6 +270,18 @@ func TestBinder_explicitEnvVar(t *testing.T) {
 	if in.App.Env.Token != "s3cret" {
 		t.Errorf("Env.Token = %q, want s3cret (from $WIDGET_TOKEN, not $TOKEN)", in.App.Env.Token)
 	}
+
+	// Regression (found by the conformance suite): the explicit variable must
+	// resolve ON ITS OWN — with no convention-named $TOKEN anchoring the
+	// registry snapshot, $WIDGET_TOKEN used to silently not bind at all.
+	os.Unsetenv("TOKEN")
+	var alone tbEnvVarInputs
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &alone); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if alone.App.Env.Token != "s3cret" {
+		t.Errorf("Env.Token = %q, want s3cret from the explicit-only variable", alone.App.Env.Token)
+	}
 }
 
 // Pinned-config shapes (spec file:): an input read from ONE named

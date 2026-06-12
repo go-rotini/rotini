@@ -254,6 +254,29 @@ func TestComplete_nestedSubcommands(t *testing.T) {
 	}
 }
 
+// BenchmarkComplete budgets the per-keystroke completion path — the generated
+// shell scripts call __complete on every TAB, so this must stay comfortably
+// sub-millisecond. The ceiling exists so future token handling (from:, dotted
+// keys) cannot quietly make typing laggy; `make test-bench` reports it.
+func BenchmarkComplete(b *testing.B) {
+	def := completionDef()
+	cases := []struct {
+		name  string
+		words []string
+	}{
+		{"commands", []string{""}},
+		{"flag-names", []string{"build", "-"}},
+		{"flag-value", []string{"build", "--mode", ""}},
+	}
+	for _, c := range cases {
+		b.Run(c.name, func(b *testing.B) {
+			for b.Loop() {
+				complete(def, c.words, nil, nil)
+			}
+		})
+	}
+}
+
 // TestComplete_mapKeyPaths covers a map flag's declared key vocabulary: paths
 // complete up to the '=' (the value past it is the user's), and the dynamic
 // completer still outranks the static paths.

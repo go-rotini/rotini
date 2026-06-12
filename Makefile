@@ -1,7 +1,6 @@
 # Fuzz targets discovered automatically — every FuzzXxx test under ./... runs
-# in test-fuzz when at least one matches. Empty until M1.8 lands the conformance
-# suite + initial fuzz targets.
-FUZZ_TARGETS :=
+# in test-fuzz when at least one matches.
+FUZZ_TARGETS := FuzzParse
 
 .PHONY: all clean lint test test-acceptance test-bench \
         test-conformance test-fuzz test-mutation test-race

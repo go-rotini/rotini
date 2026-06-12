@@ -188,6 +188,38 @@ func TestParse_defaultsApplied(t *testing.T) {
 	}
 }
 
+// FuzzParse drives the full argv grammar (descent, long/short/inline/cluster
+// flags, the -- terminator, negative numbers, repeats, typed coercion across
+// every vocabulary type) with arbitrary token streams. Errors are expected and
+// fine — a panic is the only failure. The fuzzed definitions deliberately
+// declare no from: modes, so the fuzzer cannot make the parser read arbitrary
+// files; the stdin reader is pinned.
+func FuzzParse(f *testing.F) {
+	for _, seed := range []string{
+		"run alice x y --count 3",
+		"--verbose run -- -5 --flag=x",
+		"-v run --count=2 -- --",
+		"run --count --count 2 -",
+		"--b=yep --ai 1 --ai x --mi k=v --t bad -- -0.5",
+		"--label a.b=c --label = --label =x",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, argline string) {
+		argv := strings.Fields(argline)
+
+		var chained runInputs
+		rtx := NewContextFor(parserTestDef(), argv)
+		rtx.Stdin = strings.NewReader("payload")
+		_ = NewParser().Parse(rtx, &chained)
+
+		var typed matrixInputs
+		rtx2 := NewContextFor(matrixDef(), argv)
+		rtx2.Stdin = strings.NewReader("payload")
+		_ = NewParser().Parse(rtx2, &typed)
+	})
+}
+
 // assertConstraint checks that err satisfies wantErr: when wantErr is "" the value
 // must pass; otherwise the error must contain wantErr.
 func assertConstraint(t *testing.T, val string, err error, wantErr string) {
