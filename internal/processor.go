@@ -49,8 +49,8 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode str
 
 // Initialize scaffolds a new rotini CLI named name and generates it.
 // format selects the spec/conf serialization; force overwrites the create-once files.
-func (p *Processor) Initialize(name, format string, force bool, wire []string) error {
-	return p.initialize(name, format, force, wire)
+func (p *Processor) Initialize(name, format string, force bool, with []string) error {
+	return p.initialize(name, format, force, with)
 }
 
 // run resolves the spec/conf paths up-front (so watch watches exactly the files read),

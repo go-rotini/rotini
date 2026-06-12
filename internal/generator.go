@@ -1085,10 +1085,10 @@ func writeHandlerStubs(gp *genProgram, lay layout, initStyle bool) error {
 // renderHandlerSeed renders the seed content for one command's handler file:
 // the empty stub, or — init-style only — the wired root/help/version/completion
 // handler matched by the command's type prefix. What the seed spec DECLARED is
-// the source of truth: a wired command exists only when its --wire value asked
+// the source of truth: a wired command exists only when its --with value asked
 // for it, and the root's help/version branches (plus any Help* embed
 // references) are emitted only when the root declares those flags — so a
-// partially wired seed (e.g. --wire version without --wire help) still
+// partially wired seed (e.g. --with version without --with help) still
 // compiles. A root with neither flag gets the plain stub: nothing wired,
 // nothing special.
 func renderHandlerSeed(gp *genProgram, lay layout, c genCommand, initStyle bool) ([]byte, error) {

@@ -137,29 +137,29 @@ func renderGoFile(name, text string, data any) ([]byte, error) {
 type templateSeedData struct {
 	Version string
 	Package string
-	// the `rotini init --wire` toggles. WireMan/WireMarkdown flip conf feature
-	// toggles only; WireHelp enables the help feature and seeds the -h flags +
-	// the help command; WireCompletion seeds the completion command;
-	// WireVersion seeds the root -v flag + the version command. Each wired
+	// the `rotini init --with` toggles. WithMan/WithMarkdown flip conf feature
+	// toggles only; WithHelp enables the help feature and seeds the -h flags +
+	// the help command; WithCompletion seeds the completion command;
+	// WithVersion seeds the root -v flag + the version command. Each wired
 	// command also gets its wired handler at the init-style generate.
-	WireHelp       bool
-	WireMan        bool
-	WireCompletion bool
-	WireMarkdown   bool
-	WireVersion    bool
+	WithHelp       bool
+	WithMan        bool
+	WithCompletion bool
+	WithMarkdown   bool
+	WithVersion    bool
 }
 
 // renderSeedFile renders one YAML seed template and transcodes it to the
 // requested file format.
-func renderSeedFile(name, text, version, pkg string, target fileFormat, wired map[string]bool) ([]byte, error) {
+func renderSeedFile(name, text, version, pkg string, target fileFormat, with map[string]bool) ([]byte, error) {
 	rendered, err := renderTemplate(name, text, templateSeedData{
 		Version:        version,
 		Package:        pkg,
-		WireHelp:       wired["help"],
-		WireMan:        wired["man"],
-		WireCompletion: wired["completion"],
-		WireMarkdown:   wired["markdown"],
-		WireVersion:    wired["version"],
+		WithHelp:       with["help"],
+		WithMan:        with["man"],
+		WithCompletion: with["completion"],
+		WithMarkdown:   with["markdown"],
+		WithVersion:    with["version"],
 	})
 
 	if err != nil {
@@ -169,12 +169,12 @@ func renderSeedFile(name, text, version, pkg string, target fileFormat, wired ma
 	return convert(rendered, target)
 }
 
-func renderSpecFile(version, pkg string, target fileFormat, wired map[string]bool) ([]byte, error) {
-	return renderSeedFile("spec", templateSpec, version, pkg, target, wired)
+func renderSpecFile(version, pkg string, target fileFormat, with map[string]bool) ([]byte, error) {
+	return renderSeedFile("spec", templateSpec, version, pkg, target, with)
 }
 
-func renderConfFile(version, pkg string, target fileFormat, wired map[string]bool) ([]byte, error) {
-	return renderSeedFile("conf", templateConf, version, pkg, target, wired)
+func renderConfFile(version, pkg string, target fileFormat, with map[string]bool) ([]byte, error) {
+	return renderSeedFile("conf", templateConf, version, pkg, target, with)
 }
 
 type templateMainData struct {

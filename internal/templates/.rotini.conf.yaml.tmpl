@@ -12,16 +12,16 @@ generate:
       file: zz_rotini.gen.go
   features:
     help:
-      enabled: {{if .WireHelp}}true{{else}}false{{end}}
+      enabled: {{if .WithHelp}}true{{else}}false{{end}}
       dir: internal/cmd/{{.Package}}/embed
     man:
-      enabled: {{if .WireMan}}true{{else}}false{{end}}
+      enabled: {{if .WithMan}}true{{else}}false{{end}}
       dir: internal/cmd/{{.Package}}/embed
     completion:
-      enabled: {{if .WireCompletion}}true{{else}}false{{end}}
+      enabled: {{if .WithCompletion}}true{{else}}false{{end}}
       dir: internal/cmd/{{.Package}}/embed
     markdown:
-      enabled: {{if .WireMarkdown}}true{{else}}false{{end}}
+      enabled: {{if .WithMarkdown}}true{{else}}false{{end}}
       dir: internal/cmd/{{.Package}}/embed
 validate:
   fail: collect

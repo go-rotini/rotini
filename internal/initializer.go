@@ -4,10 +4,10 @@ package internal
 // seed spec and conf under <package>/<name>/ of the current module, validating
 // them, then running one init-style generate pass over them. Init-style differs
 // from a normal generate in exactly one way: the missing handler files of
-// --wire'd commands are seeded from the wired init templates instead of empty
+// --with'd commands are seeded from the wired init templates instead of empty
 // stubs — see writeHandlerStubs. Everything is opt-in: a bare `rotini init`
-// seeds a minimal root (plain stub, no flags, no commands); `--wire help`
-// brings -h/--help + the help command + the help feature, `--wire version`
+// seeds a minimal root (plain stub, no flags, no commands); `--with help`
+// brings -h/--help + the help command + the help feature, `--with version`
 // brings -v/--version + the version command, and so on. Every later
 // `rotini generate` is the normal process; to opt out of a wired handler,
 // delete the handler file and regenerate.
@@ -45,9 +45,9 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 // InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double (see [GenerateFn]).
-type InitializeFn = func(name, format string, force bool, wire []string) error
+type InitializeFn = func(name, format string, force bool, with []string) error
 
-// wireFeatures are the `rotini init --wire` vocabulary. Everything is opt-in:
+// withFeatures are the `rotini init --with` vocabulary. Everything is opt-in:
 // "help" enables the help feature AND seeds the -h/--help flags, the help
 // command, and their wired handlers; "version" seeds the root -v/--version
 // flag, the version command, and its wired handler; "completion" enables the
@@ -55,32 +55,32 @@ type InitializeFn = func(name, format string, force bool, wire []string) error
 // only flip their conf feature toggles — embeds + resolver, no command (a
 // man-printing command is unconventional; serve it from your own handler if
 // you want one, rotini's own CLI is the worked example). "all" expands to
-// everything. A bare init (no --wire) seeds a minimal skeleton.
-var wireFeatures = []string{"all", "help", "man", "completion", "markdown", "version"}
+// everything. A bare init (no --with) seeds a minimal skeleton.
+var withFeatures = []string{"all", "help", "man", "completion", "markdown", "version"}
 
 // Initialize scaffolds a new standalone rotini CLI named name: the seed
 // .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the
 // current module (the package dir defaults to "cmd"; a module-root conf's
 // `initialize` block overrides it), validated and then generated init-style —
-// the entrypoint main.go plus, per --wire value, the wired flags/commands/
-// handlers (see wireFeatures). format selects the serialization (yaml, jsonc,
+// the entrypoint main.go plus, per --with value, the wired flags/commands/
+// handlers (see withFeatures). format selects the serialization (yaml, jsonc,
 // json, or toml). The seeds are create-once: they are left untouched unless
 // force is set.
-func Initialize(name, format string, force bool, version string, wire []string) error {
-	return NewProcessor(version).Initialize(name, format, force, wire)
+func Initialize(name, format string, force bool, version string, with []string) error {
+	return NewProcessor(version).Initialize(name, format, force, with)
 }
 
 // initialize renders and writes the default seed spec and conf for a new CLI
 // named name under <package>/<name>/, validates them, and runs the init-style
 // generate pass over them.
-func (p *Processor) initialize(name, format string, force bool, wire []string) error {
+func (p *Processor) initialize(name, format string, force bool, with []string) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
 	if !cliNameRe.MatchString(name) {
 		return fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
 	}
-	wired, err := wireSet(wire)
+	selected, err := withSet(with)
 	if err != nil {
 		return err
 	}
@@ -119,14 +119,14 @@ func (p *Processor) initialize(name, format string, force bool, wire []string) e
 	}
 
 	version := schemaURLVersion(p.version)
-	specBytes, err := renderSpecFile(version, name, f, wired)
+	specBytes, err := renderSpecFile(version, name, f, selected)
 	if err != nil {
 		return err
 	}
 	if err := writeGeneratedFile(specPath, specBytes); err != nil {
 		return err
 	}
-	confBytes, err := renderConfFile(version, name, f, wired)
+	confBytes, err := renderConfFile(version, name, f, selected)
 	if err != nil {
 		return err
 	}
@@ -146,25 +146,25 @@ func (p *Processor) initialize(name, format string, force bool, wire []string) e
 	return s.generateStyled(true)
 }
 
-// wireSet validates `--wire` values against the wireFeatures vocabulary and
+// withSet validates `--with` values against the withFeatures vocabulary and
 // returns them as a set, with "all" expanded to every concrete value. The
 // rotini CLI's own enum already constrains the flag; this guards direct API
 // callers with the same loud rejection.
-func wireSet(wire []string) (map[string]bool, error) {
+func withSet(with []string) (map[string]bool, error) {
 	set := map[string]bool{}
-	for _, w := range wire {
+	for _, w := range with {
 		ok := false
-		for _, v := range wireFeatures {
+		for _, v := range withFeatures {
 			if w == v {
 				ok = true
 				break
 			}
 		}
 		if !ok {
-			return nil, fmt.Errorf("unknown --wire value %q: must be one of %s", w, strings.Join(wireFeatures, ", "))
+			return nil, fmt.Errorf("unknown --with value %q: must be one of %s", w, strings.Join(withFeatures, ", "))
 		}
 		if w == "all" {
-			for _, v := range wireFeatures[1:] { // every concrete value
+			for _, v := range withFeatures[1:] { // every concrete value
 				set[v] = true
 			}
 			continue

@@ -77,7 +77,7 @@ var definition = rotini.Definition{
 			Flags: []rotini.FlagDef{
 				{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format (defaults to the module conf's initialize.format, else yaml)", Type: "string", Enum: []string{"yaml", "json", "jsonc", "toml"}},
 				{Name: "force", Identifiers: []string{"--force"}, Summary: "force re-initialization if files exist that init would overwrite", Type: "bool"},
-				{Name: "wire", Identifiers: []string{"--wire"}, Summary: "wire optional setup into the new CLI (feature toggles, command definitions, wired handlers; 'all' for everything)", Type: "[]string", Enum: []string{"all", "help", "man", "completion", "markdown", "version"}},
+				{Name: "with", Identifiers: []string{"--with"}, Summary: "wire optional setup into the new CLI (feature toggles, command definitions, wired handlers; 'all' for everything)", Type: "[]string", Enum: []string{"all", "help", "man", "completion", "markdown", "version"}},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
@@ -226,7 +226,7 @@ type RotiniHelpInputs struct {
 type RotiniInitializeFlags struct {
 	Format string   `rotini:"format"`
 	Force  bool     `rotini:"force"`
-	Wire   []string `rotini:"wire"`
+	With   []string `rotini:"with"`
 	Help   bool     `rotini:"help"`
 }
 

@@ -41,7 +41,7 @@ func initTestModule(t *testing.T) string {
 }
 
 // TestInitialize_scaffolds verifies the whole `rotini init` job for a BARE
-// init (no --wire): everything is opt-in, so the seed spec is a minimal root
+// init (no --with): everything is opt-in, so the seed spec is a minimal root
 // (no flags, no commands), the seed conf has every feature off, the root
 // handler is the plain stub, and the entrypoint main.go is written — a clean
 // skeleton ready for the user's own spec work.
@@ -87,17 +87,17 @@ func TestInitialize_scaffolds(t *testing.T) {
 		"Execute()")
 }
 
-// TestInitialize_wire covers `rotini init --wire`: "help" seeds the -h flags,
+// TestInitialize_with covers `rotini init --with`: "help" seeds the -h flags,
 // the help command, the help feature, and the wired root/help handlers;
 // "version" seeds the root -v flag, the version command, and its wired
 // handler; "completion" seeds its command + handler; "man"/"markdown" only
 // flip conf feature toggles (no command); "all" expands to everything — and a
 // PARTIAL wiring (version without help) still generates compiling, help-less
 // handlers.
-func TestInitialize_wire(t *testing.T) {
+func TestInitialize_with(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("mycli", "yaml", false, "", []string{"all"}); err != nil {
-		t.Fatalf("Initialize(--wire all): %v", err)
+		t.Fatalf("Initialize(--with all): %v", err)
 	}
 
 	dir := filepath.Join(tmp, "cmd", "mycli")
@@ -145,7 +145,7 @@ func TestInitialize_wire(t *testing.T) {
 	// branch but no help branch (and no Help* embed references anywhere), and
 	// the version command/handler carry no -h flag.
 	if err := Initialize("partial", "yaml", false, "", []string{"version"}); err != nil {
-		t.Fatalf("Initialize(--wire version): %v", err)
+		t.Fatalf("Initialize(--with version): %v", err)
 	}
 	pSpec := readFileString(t, filepath.Join(tmp, "cmd", "partial", ".rotini.spec.yaml"))
 	if strings.Contains(pSpec, "--help") || strings.Contains(pSpec, "name: help") {
@@ -158,8 +158,8 @@ func TestInitialize_wire(t *testing.T) {
 	mustNotContain(t, filepath.Join(pGen, "partial_version.go"), "Help")
 
 	// Unknown values are loud.
-	if err := Initialize("bad", "yaml", false, "", []string{"tui"}); err == nil || !strings.Contains(err.Error(), `unknown --wire value "tui"`) {
-		t.Errorf("Initialize(--wire tui) = %v, want the unknown-value rejection", err)
+	if err := Initialize("bad", "yaml", false, "", []string{"tui"}); err == nil || !strings.Contains(err.Error(), `unknown --with value "tui"`) {
+		t.Errorf("Initialize(--with tui) = %v, want the unknown-value rejection", err)
 	}
 }
 
