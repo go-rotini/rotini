@@ -2,6 +2,10 @@ package rotini
 
 import "sort"
 
+// KeySuggestor is the conventional registry key the generated main binds the
+// [Suggestor] under (and handlers retrieve it by).
+const KeySuggestor = "suggestor"
+
 // Suggestor ranks "did you mean" candidates for a mistyped token. It is a
 // *service*, not framework behavior: rotini never suggests anything on its own —
 // parse failures carry the offending token and its vocabulary as data
@@ -9,12 +13,12 @@ import "sort"
 // suggestions binds a Suggestor and composes the two:
 //
 //	// main.go
-//	cmd.Program.Bind("suggestor", rotini.NewSuggestor()).Execute()
+//	cmd.Program.Bind(rotini.KeySuggestor, rotini.NewSuggestor()).Execute()
 //
 //	// a handler, after a failed Parse
 //	var ue *rotini.ParseError
 //	if errors.As(err, &ue) && ue.Token != "" {
-//		if s, ok := rotini.Get[*rotini.Suggestor](rtx, "suggestor"); ok {
+//		if s, ok := rotini.Get[*rotini.Suggestor](rtx, rotini.KeySuggestor); ok {
 //			if hits := s.Suggest(ue.Token, ue.Candidates); len(hits) > 0 {
 //				fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
 //			}
@@ -54,7 +58,7 @@ func WithMaxResults(n int) SuggestorOption {
 }
 
 // NewSuggestor returns a [Suggestor] ready to bind under a registry key
-// (conventionally "suggestor").
+// (conventionally [KeySuggestor]).
 func NewSuggestor(opts ...SuggestorOption) *Suggestor {
 	s := &Suggestor{maxDistance: 2, maxResults: 3}
 	for _, opt := range opts {

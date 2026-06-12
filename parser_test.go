@@ -52,9 +52,9 @@ func TestParse_bindsInputs(t *testing.T) {
 // the registry, retrieved via rtx.Get (ctx.Value style), then used to parse.
 func TestParse_viaRegistryGet(t *testing.T) {
 	rtx := NewContextFor(parserTestDef(), []string{"run", "alice"})
-	rtx.Bind("parser", NewParser())
+	rtx.Bind(KeyParser, NewParser())
 
-	parser, ok := rtx.Value("parser").(*Parser)
+	parser, ok := rtx.Value(KeyParser).(*Parser)
 	if !ok {
 		t.Fatal("parser not retrievable from registry")
 	}

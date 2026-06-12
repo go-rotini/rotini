@@ -18,7 +18,7 @@ type rotiniGenerateHandlers struct {
 var _ rotini.CommandHandlers = (*rotiniGenerateHandlers)(nil)
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
+	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
 
 	var inputs RotiniGenerateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
@@ -38,8 +38,8 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
-	build := rotini.MustGet[*rotini.Build](rtx, "build")
-	rtx.BindIfAbsent("generate", internal.NewProcessor(build.VersionSemantic).Generate)
+	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
+	rtx.BindIfAbsent("generate", internal.NewProcessor(v.VersionSemantic).Generate)
 	generate := rotini.MustGet[internal.GenerateFn](rtx, "generate")
 
 	err := generate(

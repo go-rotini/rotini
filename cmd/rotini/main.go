@@ -14,8 +14,8 @@ var (
 
 func main() {
 	r.Program.
-		Bind("parser", rotini.NewParser()).
-		Bind("suggestor", rotini.NewSuggestor()).
-		Bind("build", rotini.BuildInfo(version)).
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Bind(rotini.KeySuggestor, rotini.NewSuggestor()).
+		Bind(rotini.KeyVersioner, rotini.NewVersioner(version)).
 		Execute()
 }

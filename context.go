@@ -97,9 +97,9 @@ func newContext() *Context {
 // single hook, against a Definition you construct:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
-//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"}).Bind("parser", rotini.NewParser())
+//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"}).Bind(rotini.KeyParser, rotini.NewParser())
 //	var in appInputs
-//	err := rotini.MustGet[*rotini.Parser](rtx, "parser").Parse(rtx, &in)
+//	err := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser).Parse(rtx, &in)
 //
 // To drive a whole *generated* program end-to-end (the usual handler test), construct it
 // with the generated NewProgram and run it under a recording exit + capture streams —
@@ -119,7 +119,7 @@ func NewContextFor(def Definition, argv []string) *Context {
 // Bind associates value with key, overwriting any prior binding. It returns the
 // receiver so calls can be chained:
 //
-//	cmd.Program.Bind("parser", customParser).Bind("binder", customBinder).Execute()
+//	cmd.Program.Bind(rotini.KeyParser, customParser).Bind(rotini.KeyBinder, customBinder).Execute()
 //
 // Bind is safe for concurrent use.
 func (rtx *Context) Bind(key string, value any) *Context {
@@ -170,7 +170,7 @@ func (rtx *Context) Chain() []ResolvedCommand {
 // accessor, mirroring [context.Context.Value]. Callers type-assert to the expected
 // type, using the comma-ok form to handle an unbound (or wrong-type) service:
 //
-//	parser, ok := rtx.Value("parser").(*rotini.Parser)
+//	parser, ok := rtx.Value(rotini.KeyParser).(*rotini.Parser)
 //	if !ok {
 //		// not bound — fail the command, or fall back
 //	}
@@ -230,7 +230,7 @@ func (rtx *Context) Exit(code int) {
 // raw [Context.Value] (which returns any). ok is false when no service is bound
 // under key or the bound value is not a T:
 //
-//	parser, ok := rotini.Get[*rotini.Parser](rtx, "parser")
+//	parser, ok := rotini.Get[*rotini.Parser](rtx, rotini.KeyParser)
 //	if !ok {
 //		// not bound — fail the command, or fall back
 //	}
@@ -249,7 +249,7 @@ func Get[T any](rtx *Context, key string) (T, bool) {
 // cannot run without a service reaches for MustGet instead of handling a miss
 // inline:
 //
-//	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
+//	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
 //	var in rtg.MycliInputs
 //	err := parser.Parse(rtx, &in)
 func MustGet[T any](rtx *Context, key string) T {

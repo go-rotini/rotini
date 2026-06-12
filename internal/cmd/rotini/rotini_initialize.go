@@ -18,7 +18,7 @@ type rotiniInitializeHandlers struct {
 var _ rotini.CommandHandlers = (*rotiniInitializeHandlers)(nil)
 
 func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
+	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
 
 	var inputs RotiniInitializeInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
@@ -43,8 +43,8 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	build := rotini.MustGet[*rotini.Build](rtx, "build")
-	rtx.BindIfAbsent("initialize", internal.NewProcessor(build.VersionSemantic).Initialize)
+	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
+	rtx.BindIfAbsent("initialize", internal.NewProcessor(v.VersionSemantic).Initialize)
 	initialize := rotini.MustGet[internal.InitializeFn](rtx, "initialize")
 
 	if err := initialize(args.Name, flags.Format, flags.Force); err != nil {

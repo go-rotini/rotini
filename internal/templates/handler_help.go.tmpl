@@ -17,7 +17,7 @@ type {{.HandlersType}} struct{
 var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
+	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
 
 	var inputs {{.RootCommandName}}HelpInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {

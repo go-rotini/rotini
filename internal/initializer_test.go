@@ -74,7 +74,7 @@ func TestInitialize_scaffolds(t *testing.T) {
 		"type mycliHandlers struct {",
 		"var inputs MycliInputs",
 		"case flags.Help:", "case flags.Version:",
-		"HelpMycli", "build.VersionSemantic")
+		"HelpMycli", "v.VersionSemantic")
 	// help command handler: wired to the generated Help resolver.
 	mustContain(t, filepath.Join(genDir, "mycli_help.go"),
 		"type mycliHelpHandlers struct {",
@@ -82,13 +82,13 @@ func TestInitialize_scaffolds(t *testing.T) {
 	// version command handler: prints the bound build version.
 	mustContain(t, filepath.Join(genDir, "mycli_version.go"),
 		"type mycliVersionHandlers struct {",
-		"build.VersionSemantic", "HelpMycliVersion")
+		"v.VersionSemantic", "HelpMycliVersion")
 	// Entrypoint main.go written to the conf-declared entrypoint package.
 	mustContain(t, filepath.Join(dir, "main.go"),
 		"//go:generate go tool rotini generate",
 		`cli "example.com/myclis/internal/cmd/mycli"`,
-		`Bind("parser", rotini.NewParser())`,
-		`Bind("build", rotini.BuildInfo(version))`,
+		`Bind(rotini.KeyParser, rotini.NewParser())`,
+		`Bind(rotini.KeyVersioner, rotini.NewVersioner(version))`,
 		"Execute()")
 }
 

@@ -12,6 +12,11 @@ import (
 	"github.com/go-rotini/recon"
 )
 
+// KeyBinder is the conventional registry key a main binds the [Binder] under
+// (and handlers retrieve it by). The binder is opt-in like every service —
+// the generated main binds it only when the spec declares non-argv channels.
+const KeyBinder = "binder"
+
 // Binder is the default multi-source input binder: it fills a command's typed
 // inputs from argv (flags + positional arguments, via the embedded [Parser]) and
 // from the non-argv channels — environment variables and configuration files —
@@ -19,11 +24,11 @@ import (
 //
 //	// main.go
 //	rth.Program.
-//	    Bind("binder", rotini.NewBinder(rtg.BindMeta)).
+//	    Bind(rotini.KeyBinder, rotini.NewBinder(rtg.BindMeta)).
 //	    Execute()
 //
 //	// a handler
-//	binder := rotini.MustGet[*rotini.Binder](rtx, "binder")
+//	binder := rotini.MustGet[*rotini.Binder](rtx, rotini.KeyBinder)
 //	var in rtg.WidgetCreateInputs
 //	if err := binder.Bind(rtx, &in); err != nil { /* handler owns it */ }
 //

@@ -14,6 +14,10 @@ import (
 	"unicode/utf8"
 )
 
+// KeyParser is the conventional registry key the generated main binds the
+// [Parser] under (and handlers retrieve it by) — see [Program.Bind].
+const KeyParser = "parser"
+
 // parsedInputs is one invocation's parsed argv, indexed by position in the
 // resolved command chain (root = 0 … leaf). [Parse] builds it via [parseInto] and
 // reads it back through the reflective binder. Keying by chain position — not by
@@ -72,10 +76,10 @@ func (e *ParseError) Unwrap() error { return ErrUsage }
 // calls [Parser.Parse]:
 //
 //	// main.go
-//	rth.Program.Bind("parser", rotini.NewParser()).Execute()
+//	rth.Program.Bind(rotini.KeyParser, rotini.NewParser()).Execute()
 //
 //	// a handler
-//	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
+//	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
 //	var in rtg.MycliInputs
 //	err := parser.Parse(rtx, &in)
 type Parser struct{}

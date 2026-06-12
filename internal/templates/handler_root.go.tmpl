@@ -18,7 +18,7 @@ type {{.HandlersType}} struct{
 var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, "parser")
+	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
 
 	var inputs {{.RootCommandName}}Inputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
@@ -28,7 +28,7 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		msg := err.Error()
 		var parseErr *rotini.ParseError
 		if errors.As(err, &parseErr) && parseErr.Token != "" {
-			if suggestor, ok := rotini.Get[*rotini.Suggestor](rtx, "suggestor"); ok {
+			if suggestor, ok := rotini.Get[*rotini.Suggestor](rtx, rotini.KeySuggestor); ok {
 				if hits := suggestor.Suggest(parseErr.Token, parseErr.Candidates); len(hits) > 0 {
 					msg += fmt.Sprintf("\n\nDid you mean %q?", hits[0])
 				}
@@ -47,8 +47,8 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(0)
 		return
 	case flags.Version:
-		build := rotini.MustGet[*rotini.Build](rtx, "build")
-		fmt.Fprintf(rtx.Stdout, "v%s\n", build.VersionSemantic)
+		v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
+		fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
 		rtx.SignalExit(0)
 		return
 	default:
