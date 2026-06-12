@@ -47,13 +47,13 @@ func cmdFrame(c CommandDef) ResolvedCommand {
 // validating inputs. It descends sub-commands by name/alias, skips flags (and a
 // flag's separate value, so it is never mistaken for a command), and stops at the
 // first positional argument. If a token names a remote/co-located command it
-// returns the chain so far plus a non-nil remoteDispatch the runtime should exec
-// instead of dispatching the chain.
+// returns the chain so far plus a non-nil [RemoteDispatch] the runtime should
+// exec instead of dispatching the chain.
 //
 // Resolution is intentionally lenient — unknown flags, missing values, and bad
 // input are not errors here. Parsing and validation are opt-in, performed by the
 // handler via [Parser.Parse].
-func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *remoteDispatch) {
+func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDispatch) {
 	chain := []ResolvedCommand{rootFrame(def)}
 	for i := 0; i < len(argv); i++ {
 		tok := argv[i]
@@ -82,14 +82,14 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *remoteDisp
 			continue
 		}
 		if rd, ok := findRemote(cur, tok); ok {
-			return chain, &remoteDispatch{def: rd, args: append([]string{}, argv[i+1:]...)}
+			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...)}
 		}
 		// Plugin discovery: at a discovery-enabled command, an unmatched token is
 		// dispatched to the sibling executable <prefix><token> (kubectl-plugin style).
 		// The binary is resolved (and any error reported) at exec time.
 		if d := cur.Discovery; d != nil {
 			rd := RemoteDef{Name: tok, Binary: d.Prefix + tok}
-			return chain, &remoteDispatch{def: rd, args: append([]string{}, argv[i+1:]...), dir: d.Path}
+			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: d.Path}
 		}
 		break // first positional argument; stop descending
 	}

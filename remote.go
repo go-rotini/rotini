@@ -9,33 +9,35 @@ import (
 	"path/filepath"
 )
 
-// remoteDispatch is a resolved remote/co-located sub-command invocation: the
-// plugin binary def.Binary run with args (everything after the command name).
-// dir is an extra directory to search first (from remote_discovery.path), empty
-// for a declared remote command.
-type remoteDispatch struct {
-	def  RemoteDef
-	args []string
-	dir  string
+// RemoteDispatch is a resolved remote/co-located sub-command invocation: the
+// plugin binary Def.Binary run with Args (everything after the command name).
+// Dir is an extra directory to search first (from remote_discovery.path),
+// empty for a declared remote command. The default resolver produces one for
+// declared remote_commands and discovered plugins; a custom [Resolver] may
+// return its own in [Resolution.Remote].
+type RemoteDispatch struct {
+	Def  RemoteDef
+	Args []string
+	Dir  string
 }
 
 // execRemote locates and runs the co-located plugin binary, passing stdio
 // through, honoring the run context (so a signal/cancellation kills the subprocess)
 // and any timeout, and returning the plugin's exit code.
-func (p *Program) execRemote(ctx context.Context, r *remoteDispatch) (int, error) {
-	path, err := resolveRemoteBinary(r.def.Binary, r.dir)
+func (p *Program) execRemote(ctx context.Context, r *RemoteDispatch) (int, error) {
+	path, err := resolveRemoteBinary(r.Def.Binary, r.Dir)
 	if err != nil {
 		fmt.Fprintf(p.stderr, "%s: %s\n", p.def.Name, err)
 		return 1, err
 	}
 
-	if r.def.Timeout > 0 {
+	if r.Def.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, r.def.Timeout)
+		ctx, cancel = context.WithTimeout(ctx, r.Def.Timeout)
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, path, r.args...)
+	cmd := exec.CommandContext(ctx, path, r.Args...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = p.stdout
 	cmd.Stderr = p.stderr
@@ -44,14 +46,14 @@ func (p *Program) execRemote(ctx context.Context, r *remoteDispatch) (int, error
 	case err == nil:
 		return 0, nil
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		fmt.Fprintf(p.stderr, "%s: %s: timed out after %s\n", p.def.Name, r.def.Name, r.def.Timeout)
+		fmt.Fprintf(p.stderr, "%s: %s: timed out after %s\n", p.def.Name, r.Def.Name, r.Def.Timeout)
 		return 1, err
 	default:
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			return ee.ExitCode(), err
 		}
-		fmt.Fprintf(p.stderr, "%s: %s: %s\n", p.def.Name, r.def.Name, err)
+		fmt.Fprintf(p.stderr, "%s: %s: %s\n", p.def.Name, r.Def.Name, err)
 		return 1, err
 	}
 }

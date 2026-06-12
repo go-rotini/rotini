@@ -107,8 +107,8 @@ func TestResolveChain_detectsRemote(t *testing.T) {
 	if got := chainNames(chain); len(got) != 1 || got[0] != "app" {
 		t.Errorf("chain = %v, want [app]", got)
 	}
-	if len(remote.args) != 2 || remote.args[0] != "a" || remote.args[1] != "b" {
-		t.Errorf("remote args = %v, want [a b]", remote.args)
+	if len(remote.Args) != 2 || remote.Args[0] != "a" || remote.Args[1] != "b" {
+		t.Errorf("remote args = %v, want [a b]", remote.Args)
 	}
 }
 
@@ -129,14 +129,14 @@ func TestResolveChain_discoversPlugin(t *testing.T) {
 	if remote == nil {
 		t.Fatal("expected a discovery dispatch for an unmatched token")
 	}
-	if remote.def.Name != "foo" || remote.def.Binary != "acme-foo" {
-		t.Errorf("discovery dispatch = {Name:%q Binary:%q}, want {foo acme-foo}", remote.def.Name, remote.def.Binary)
+	if remote.Def.Name != "foo" || remote.Def.Binary != "acme-foo" {
+		t.Errorf("discovery dispatch = {Name:%q Binary:%q}, want {foo acme-foo}", remote.Def.Name, remote.Def.Binary)
 	}
-	if remote.dir != "/opt/acme/plugins" {
-		t.Errorf("dispatch dir = %q, want /opt/acme/plugins", remote.dir)
+	if remote.Dir != "/opt/acme/plugins" {
+		t.Errorf("dispatch dir = %q, want /opt/acme/plugins", remote.Dir)
 	}
-	if len(remote.args) != 2 || remote.args[0] != "x" || remote.args[1] != "y" {
-		t.Errorf("discovery args = %v, want [x y]", remote.args)
+	if len(remote.Args) != 2 || remote.Args[0] != "x" || remote.Args[1] != "y" {
+		t.Errorf("discovery args = %v, want [x y]", remote.Args)
 	}
 	_ = chain
 

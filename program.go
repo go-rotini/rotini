@@ -37,6 +37,8 @@ type Program struct {
 	handlers         any
 	rtx              *Context                                           // pre-seeded registry; user Bind calls land here
 	recoveredPanicFn func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures; nil → defaultRecoveredPanicFn
+	resolver         Resolver  // resolve phase override; nil → DefaultResolver
+	lifecycle        Lifecycle // run-phase plan override; nil → DefaultLifecycle
 	stdin            io.Reader
 	stdout           io.Writer
 	stderr           io.Writer
@@ -158,6 +160,37 @@ func (p *Program) WithRecoveredPanicFn(fn func(ctx context.Context, rtx *Context
 	return p
 }
 
+// WithResolver overrides the resolve phase — argv to invocation target (the
+// command chain to dispatch, or a remote dispatch, plus the argv the parsers
+// later see). Wrap [DefaultResolver] rather than re-deriving it: a resolver
+// that rewrites tokens (an alias, a shorthand expansion) rewrites argv, hands
+// it to the default, and returns the result — routing and parsing then agree.
+// A resolver error is routed through the RecoveredPanicFn funnel and fails the
+// run. The hidden __complete protocol intercept runs before resolution, and
+// completion candidates walk the Definition — a resolver-only alias is
+// dispatchable but not completable (declare real aliases in the spec for
+// that). A nil resolver is ignored. It returns the receiver to chain.
+func (p *Program) WithResolver(fn Resolver) *Program {
+	if fn != nil {
+		p.resolver = fn
+	}
+	return p
+}
+
+// WithLifecycle overrides the run phase's PLAN — which declared hooks run, in
+// what pairing and order (see [Lifecycle] and the contract in [DefaultLifecycle]).
+// The execution semantics around the plan (halt on SignalExit/Exit/panic/
+// signal, balanced reverse unwind of begun steps, teardown-to-completion, the
+// panic funnel, exit codes) are rotini's and stay fixed. Wrap
+// [DefaultLifecycle] to adjust rather than re-derive. A nil lifecycle is
+// ignored. It returns the receiver to chain.
+func (p *Program) WithLifecycle(fn Lifecycle) *Program {
+	if fn != nil {
+		p.lifecycle = fn
+	}
+	return p
+}
+
 // Execute resolves the command, runs its lifecycle, and ends with the resulting status
 // code via the program's exit action ([os.Exit] by default; override with
 // [Program.WithExit] to capture the code or embed without terminating).
@@ -223,17 +256,14 @@ func (p *Program) run(argv []string) (int, error) {
 		}()
 	}
 
-	chain, remote := resolveChain(p.def, argv)
-	if remote != nil {
-		return p.execRemote(ctx, remote)
+	resolve := p.resolver
+	if resolve == nil {
+		resolve = DefaultResolver
 	}
-
 	rtx := p.rtx
 	if rtx == nil {
 		rtx = NewContext()
 	}
-	rtx.Args = argv
-	rtx.chain = chain
 	rtx.Stdin = p.stdin
 	rtx.Stdout = p.stdout
 	rtx.Stderr = p.stderr
@@ -241,7 +271,24 @@ func (p *Program) run(argv []string) (int, error) {
 	if rtx.recoveredPanicFn == nil {
 		rtx.recoveredPanicFn = p.defaultRecoveredPanicFn
 	}
-	return p.dispatch(ctx, chain, rtx, trapped)
+
+	res, err := resolve(p.def, argv)
+	if err != nil {
+		return p.wiringFailure(ctx, rtx, fmt.Errorf("resolve: %w", err))
+	}
+	if res.Remote != nil {
+		return p.execRemote(ctx, res.Remote)
+	}
+	if len(res.Chain) == 0 {
+		return p.wiringFailure(ctx, rtx, fmt.Errorf("resolver returned an empty chain — the root frame is always resolvable"))
+	}
+
+	rtx.Args = argv
+	if res.Args != nil {
+		rtx.Args = res.Args
+	}
+	rtx.chain = res.Chain
+	return p.dispatch(ctx, res.Chain, rtx, trapped)
 }
 
 // wiringFailure routes a Definition↔handlers mismatch through the funnel and
@@ -263,17 +310,17 @@ func (p *Program) defaultRecoveredPanicFn(_ context.Context, rtx *Context, err e
 }
 
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the
-// recorded Handler method name, via reflection on the aggregate handlers) and
-// runs the lifecycle as a balanced, LIFO setup/teardown:
+// recorded Handler method name, via reflection on the aggregate handlers),
+// asks the lifecycle planner for the step plan (the default plan reproduces
+// the contract table in lifecycle.go), and executes it as a balanced, LIFO
+// setup/teardown:
 //
-//   - Setup runs forward, root→leaf: CascadingPreRun for each command, then the
-//     leaf's PreRun, then the leaf's Run (the innermost "work"). It halts the
-//     moment a hook calls rtx.SignalExit/rtx.Exit or panics.
-//   - Teardown runs in reverse for every hook that BEGAN: the leaf's PostRun (if
-//     its PreRun began), then CascadingPostRun leaf→root for each command whose
-//     CascadingPreRun began. Teardown otherwise runs to completion — a panic or
-//     rtx.SignalExit inside a teardown hook neither aborts the rest nor displaces
-//     the first failure or exit code; only a hard rtx.Exit skips what remains.
+//   - Forward: each step's Do, in plan order, halting the moment a hook calls
+//     rtx.SignalExit/rtx.Exit or panics (or a trapped signal cancels ctx).
+//   - Unwind: the Undo of every step whose Do BEGAN, in reverse, to
+//     completion — a panic or rtx.SignalExit inside an Undo neither aborts the
+//     rest nor displaces the first failure or exit code; only a hard rtx.Exit
+//     skips what remains.
 //
 // rtx.SignalExit is a clean stop that still runs teardown; rtx.Exit is a hard stop that
 // skips it. A panic anywhere (e.g. the [MustGet] on a missing service) is recovered, does
@@ -304,7 +351,15 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		}
 		handlers[i] = h
 	}
-	leaf := handlers[len(handlers)-1]
+
+	// The plan: which declared hooks run, paired and ordered. The wiring above
+	// happened first, so a custom lifecycle orders resolved handlers — it
+	// cannot bypass the handler rules.
+	plan := p.lifecycle
+	if plan == nil {
+		plan = DefaultLifecycle
+	}
+	steps := plan(chain, handlers)
 
 	// failure is the first panic seen anywhere in the lifecycle. run wraps every
 	// hook so a panic is recovered (keeping only the first) rather than unwinding —
@@ -338,34 +393,26 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		return rtx.stopped || failure != nil
 	}
 
-	// Setup + work, forward — halting on rtx.SignalExit/rtx.Exit (rtx.stopped), a panic, or a signal.
-	// began and preRan record how far setup got, so teardown unwinds only what began.
-	began, preRan := 0, false
-	func() {
-		for i, h := range handlers {
-			began = i + 1
-			run(h.CascadingPreRun)
-			if halt() {
-				return
-			}
-		}
-		preRan = true
-		run(leaf.PreRun)
+	// Forward — every step's Do in plan order, halting on rtx.SignalExit/rtx.Exit
+	// (rtx.stopped), a panic, or a signal. began records how far the plan got, so
+	// the unwind covers exactly the begun steps. The final halt() call records the
+	// signal exit code when the last hook returned because the context was canceled.
+	began := 0
+	for _, s := range steps {
+		began++
+		run(s.Do)
 		if halt() {
-			return
+			break
 		}
-		run(leaf.Run)
-		halt() // record the signal exit code if Run returned because the context was canceled
-	}()
+	}
 
-	// Teardown, reverse — every begun hook's pair, to completion — unless a hard
+	// Unwind, reverse — every begun step's Undo, to completion — unless a hard
 	// [Context.Exit] asked to stop now, which skips any teardown still pending
 	// (including one requested from within a teardown hook).
-	if preRan && !rtx.exitNow {
-		run(leaf.PostRun)
-	}
 	for i := began - 1; i >= 0 && !rtx.exitNow; i-- {
-		run(handlers[i].CascadingPostRun)
+		if steps[i].Undo != nil {
+			run(steps[i].Undo)
+		}
 	}
 
 	// A panic is funneled to RecoveredPanicFn last, after teardown. The panic path is always
