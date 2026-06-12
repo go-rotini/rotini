@@ -1096,8 +1096,6 @@ func renderHandlerSeed(gp *genProgram, lay layout, c genCommand, initStyle bool)
 			return renderHandlerHelpFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Help")
 		case gp.rootPascal + "Version":
 			return renderHandlerVersionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Version")
-		case gp.rootPascal + "Man":
-			return renderHandlerManFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Man")
 		case gp.rootPascal + "Completion":
 			return renderHandlerCompletionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Completion")
 		}

@@ -41,11 +41,11 @@ func initTestModule(t *testing.T) string {
 }
 
 // TestInitialize_scaffolds verifies the whole `rotini init` job: the seed spec
-// (root command named after the CLI, with the default version/help flags AND the
-// version/help sub-commands) and the seed conf (package layout + feature
-// toggles) under cmd/<name>/, validated, then generated init-style — the
-// generated package, the WIRED root/help/version handlers, and the entrypoint
-// main.go, all ready to go.
+// (root command named after the CLI, with the default version/help flags and
+// the help sub-command — the version COMMAND is `--wire version`) and the seed
+// conf (package layout + feature toggles) under cmd/<name>/, validated, then
+// generated init-style — the generated package, the WIRED root/help handlers,
+// and the entrypoint main.go, all ready to go.
 func TestInitialize_scaffolds(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("mycli", "yaml", false, "", nil); err != nil {
@@ -55,7 +55,11 @@ func TestInitialize_scaffolds(t *testing.T) {
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"),
 		"name: mycli", "schema-spec.json",
-		"name: version", "--version", "name: help", "--help")
+		"--version", "name: help", "--help")
+	// The version COMMAND is wire-gated (`--wire version`); the root
+	// -v/--version FLAG above is default wiring. (The flag is also literally
+	// "name: version", so the needle is the command-indented two-line shape.)
+	mustNotContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "    - name: version\n      summary: print version")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"),
 		"schema-conf.json",
 		"package: cmd/mycli", "package: internal/cmd/mycli",
@@ -68,7 +72,7 @@ func TestInitialize_scaffolds(t *testing.T) {
 	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
 		"package mycli", "type ProgramHandlers interface", "var definition",
 		"var Program = NewProgram(&handlers{})",
-		"var HelpMycli string", "var HelpMycliHelp string", "var HelpMycliVersion string")
+		"var HelpMycli string", "var HelpMycliHelp string")
 	// Root handler: -h/--help and -v/--version wired, default prints help.
 	mustContain(t, filepath.Join(genDir, "mycli.go"),
 		"type mycliHandlers struct {",
@@ -79,10 +83,10 @@ func TestInitialize_scaffolds(t *testing.T) {
 	mustContain(t, filepath.Join(genDir, "mycli_help.go"),
 		"type mycliHelpHandlers struct {",
 		"Help(args.Commands...)", "HelpMycliHelp")
-	// version command handler: prints the bound build version.
-	mustContain(t, filepath.Join(genDir, "mycli_version.go"),
-		"type mycliVersionHandlers struct {",
-		"v.VersionSemantic", "HelpMycliVersion")
+	// No version command handler by default — it rides `--wire version`.
+	if _, err := os.Stat(filepath.Join(genDir, "mycli_version.go")); !os.IsNotExist(err) {
+		t.Errorf("mycli_version.go should not exist on a default init (stat err = %v)", err)
+	}
 	// Entrypoint main.go written to the conf-declared entrypoint package.
 	mustContain(t, filepath.Join(dir, "main.go"),
 		"//go:generate go tool rotini generate",
@@ -92,21 +96,24 @@ func TestInitialize_scaffolds(t *testing.T) {
 		"Execute()")
 }
 
-// TestInitialize_wire covers `rotini init --wire`: each named feature is
-// enabled in the seed conf, its serving command (man/completion) is added to
-// the seed spec, and the init-style generate seeds that command's WIRED
-// handler. markdown has no command — wiring it only flips the toggle. help is
-// default-wired already; naming it is accepted and idempotent.
+// TestInitialize_wire covers `rotini init --wire`: "completion" and "version"
+// seed their commands + WIRED handlers; "man" and "markdown" only flip their
+// conf feature toggles (no command — a man-printing command is
+// unconventional); "help" is default-wired and idempotent; "all" expands to
+// everything.
 func TestInitialize_wire(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false, "", []string{"help", "man", "completion", "markdown"}); err != nil {
-		t.Fatalf("Initialize(--wire ...): %v", err)
+	if err := Initialize("mycli", "yaml", false, "", []string{"all"}); err != nil {
+		t.Fatalf("Initialize(--wire all): %v", err)
 	}
 
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"),
-		"name: man", "name: completion", "name: shell",
+		"name: completion", "name: shell",
+		"    - name: version\n      summary: print version", // the COMMAND, not the root flag
 		"- bash", "- zsh", "- fish", "- powershell")
+	// man is feature-only: no command in the spec.
+	mustNotContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: man")
 	// Every wired feature toggled on in the conf (help was already true).
 	conf := readFileString(t, filepath.Join(dir, ".rotini.conf.yaml"))
 	for _, feat := range []string{"help", "man", "completion", "markdown"} {
@@ -122,14 +129,17 @@ func TestInitialize_wire(t *testing.T) {
 		"func Markdown(path ...string) (string, error)",
 		"func Completion(shell string) (string, error)",
 		"var CompletionZsh string")
-	// …and the wired handlers read them.
+	// …the wired handlers read theirs…
 	mustContain(t, filepath.Join(genDir, "mycli_completion.go"),
 		"type mycliCompletionHandlers struct {",
 		"Completion(args.Shell)", "HelpMycliCompletion")
-	mustContain(t, filepath.Join(genDir, "mycli_man.go"),
-		"type mycliManHandlers struct {",
-		"Man(args.Commands...)", "HelpMycliMan")
-	// markdown emitted its .md pages (no command to wire).
+	mustContain(t, filepath.Join(genDir, "mycli_version.go"),
+		"type mycliVersionHandlers struct {",
+		"v.VersionSemantic", "HelpMycliVersion")
+	// …man has no handler file (feature-only), and markdown emitted its pages.
+	if _, err := os.Stat(filepath.Join(genDir, "mycli_man.go")); !os.IsNotExist(err) {
+		t.Errorf("mycli_man.go should not exist (stat err = %v)", err)
+	}
 	if _, err := os.Stat(filepath.Join(genDir, "embed", "markdown_mycli.md")); err != nil {
 		t.Errorf("markdown feature output missing: %v", err)
 	}
@@ -148,6 +158,7 @@ func TestInitialize_wire(t *testing.T) {
 		"man:\n      enabled: false",
 		"completion:\n      enabled: false",
 		"markdown:\n      enabled: false")
+	mustNotContain(t, filepath.Join(tmp, "cmd", "plain", ".rotini.spec.yaml"), "    - name: version\n      summary: print version")
 	if err := Initialize("bad", "yaml", false, "", []string{"tui"}); err == nil || !strings.Contains(err.Error(), `unknown --wire value "tui"`) {
 		t.Errorf("Initialize(--wire tui) = %v, want the unknown-value rejection", err)
 	}
@@ -164,7 +175,7 @@ func TestInitialize_optOutWiredHandlers(t *testing.T) {
 	}
 
 	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
-	for _, f := range []string{"mycli.go", "mycli_help.go", "mycli_version.go"} {
+	for _, f := range []string{"mycli.go", "mycli_help.go"} {
 		if err := os.Remove(filepath.Join(genDir, f)); err != nil {
 			t.Fatalf("remove wired handler %s: %v", f, err)
 		}
@@ -176,8 +187,8 @@ func TestInitialize_optOutWiredHandlers(t *testing.T) {
 		t.Fatalf("Generate after opt-out: %v", err)
 	}
 
-	// Empty stubs replace the wired handlers — no parsing, no help/version wiring.
-	for _, f := range []string{"mycli.go", "mycli_help.go", "mycli_version.go"} {
+	// Empty stubs replace the wired handlers — no parsing, no help wiring.
+	for _, f := range []string{"mycli.go", "mycli_help.go"} {
 		path := filepath.Join(genDir, f)
 		mustContain(t, path, "rotini.CommandHandlers", "func (*")
 		mustNotContain(t, path, "MustGet", "HelpMycli")

@@ -40,8 +40,6 @@ var (
 	templateHandlerVersion string
 	//go:embed templates/handler_help.go.tmpl
 	templateHandlerHelp string
-	//go:embed templates/handler_man.go.tmpl
-	templateHandlerMan string
 	//go:embed templates/handler_completion.go.tmpl
 	templateHandlerCompletion string
 	//go:embed templates/handlers.go.tmpl
@@ -139,11 +137,14 @@ func renderGoFile(name, text string, data any) ([]byte, error) {
 type templateSeedData struct {
 	Version string
 	Package string
-	// the `rotini init --wire` toggles: each adds its feature (and serving
-	// command, when it has one) to the seeds. Help is default-wired — no toggle.
+	// the `rotini init --wire` toggles. WireMan/WireMarkdown flip conf feature
+	// toggles only; WireCompletion also seeds the completion command (+ wired
+	// handler); WireVersion seeds the version command (+ wired handler) — the
+	// root -v flag is default wiring either way. Help is default-wired — no toggle.
 	WireMan        bool
 	WireCompletion bool
 	WireMarkdown   bool
+	WireVersion    bool
 }
 
 // renderSeedFile renders one YAML seed template and transcodes it to the
@@ -155,6 +156,7 @@ func renderSeedFile(name, text, version, pkg string, target fileFormat, wired ma
 		WireMan:        wired["man"],
 		WireCompletion: wired["completion"],
 		WireMarkdown:   wired["markdown"],
+		WireVersion:    wired["version"],
 	})
 
 	if err != nil {
@@ -221,15 +223,6 @@ func renderHandlerVersionFile(pkg, handlersType, rootCommandName, helpVar string
 
 func renderHandlerHelpFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
 	return renderGoFile("handler_help", templateHandlerHelp, templateHandlerData{
-		Package:         pkg,
-		HandlersType:    handlersType,
-		RootCommandName: rootCommandName,
-		HelpVar:         helpVar,
-	})
-}
-
-func renderHandlerManFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
-	return renderGoFile("handler_man", templateHandlerMan, templateHandlerData{
 		Package:         pkg,
 		HandlersType:    handlersType,
 		RootCommandName: rootCommandName,

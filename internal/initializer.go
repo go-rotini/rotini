@@ -44,13 +44,16 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 // double (see [GenerateFn]).
 type InitializeFn = func(name, format string, force bool, wire []string) error
 
-// wireFeatures are the `rotini init --wire` vocabulary: each named feature is
-// enabled in the seed conf, its serving command (when it has one) is added to
-// the seed spec, and the init-style generate seeds that command's wired
-// handler. "help" is default-wired already (the wired root handler's -h/usage
-// output depends on the help embeds) — naming it is explicit and idempotent.
-// "markdown" has no run-time command: wiring it only flips the feature toggle.
-var wireFeatures = []string{"help", "man", "completion", "markdown"}
+// wireFeatures are the `rotini init --wire` vocabulary. "completion" enables
+// the feature AND seeds its serving command + wired handler; "version" seeds
+// the version command + wired handler (the root -v/--version flag is part of
+// the default root wiring either way); "man" and "markdown" only flip their
+// conf feature toggles — embeds + resolver, no command (a man-printing
+// command is unconventional; serve it from your own handler if you want one,
+// rotini's own CLI is the worked example). "help" is default-wired already
+// (the wired root handler's -h/usage output depends on the help embeds) —
+// naming it is explicit and idempotent. "all" expands to everything.
+var wireFeatures = []string{"all", "help", "man", "completion", "markdown", "version"}
 
 // Initialize scaffolds a new standalone rotini CLI named name: the seed
 // .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the
@@ -141,8 +144,9 @@ func (p *Processor) initialize(name, format string, force bool, wire []string) e
 }
 
 // wireSet validates `--wire` values against the wireFeatures vocabulary and
-// returns them as a set. The rotini CLI's own enum already constrains the flag;
-// this guards direct API callers with the same loud rejection.
+// returns them as a set, with "all" expanded to every concrete value. The
+// rotini CLI's own enum already constrains the flag; this guards direct API
+// callers with the same loud rejection.
 func wireSet(wire []string) (map[string]bool, error) {
 	set := map[string]bool{}
 	for _, w := range wire {
@@ -155,6 +159,12 @@ func wireSet(wire []string) (map[string]bool, error) {
 		}
 		if !ok {
 			return nil, fmt.Errorf("unknown --wire value %q: must be one of %s", w, strings.Join(wireFeatures, ", "))
+		}
+		if w == "all" {
+			for _, v := range wireFeatures[1:] { // every concrete value
+				set[v] = true
+			}
+			continue
 		}
 		set[w] = true
 	}

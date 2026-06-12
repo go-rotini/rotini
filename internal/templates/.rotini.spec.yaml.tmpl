@@ -2,6 +2,7 @@ $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/{{.Version
 command:
   name: {{.Package}}
   commands:
+{{- if .WireVersion}}
     - name: version
       summary: print version
       inputs:
@@ -13,6 +14,7 @@ command:
               - --help
             schema:
               type: bool
+{{- end}}
     - name: help
       summary: print help for a command
       inputs:
@@ -29,24 +31,6 @@ command:
               - --help
             schema:
               type: bool
-{{- if .WireMan}}
-    - name: man
-      summary: print the manual page for a command
-      inputs:
-        arguments:
-          - name: commands
-            summary: the command path to print the manual for
-            schema:
-              type: array
-        flags:
-          - name: help
-            summary: print help
-            identifiers:
-              - -h
-              - --help
-            schema:
-              type: bool
-{{- end}}
 {{- if .WireCompletion}}
     - name: completion
       summary: print a shell completion script

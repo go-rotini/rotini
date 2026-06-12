@@ -38,7 +38,8 @@ command:
       examples:
         - rotini initialize mycli
         - rotini init mycli --format json
-        - rotini init mycli --wire completion --wire man
+        - rotini init mycli --wire completion --wire version
+        - rotini init mycli --wire all
         - rotini init mycli --force
         - rotini init -i
       footer: Use "rotini help <command>" for more information about a command.
@@ -67,16 +68,18 @@ command:
             schema:
               type: bool
           - name: wire
-            summary: wire a doc feature into the new CLI (enable it in the conf, seed its command and handler)
+            summary: wire optional setup into the new CLI (feature toggles, command definitions, wired handlers; 'all' for everything)
             identifiers:
               - --wire
             schema:
               type: "[]string"
               enum:
+                - all
                 - help
                 - man
                 - completion
                 - markdown
+                - version
           - name: help
             summary: print help
             identifiers:
