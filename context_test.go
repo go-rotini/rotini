@@ -10,7 +10,7 @@ import (
 )
 
 func TestGet_typed(t *testing.T) {
-	rtx := NewContext()
+	rtx := newContext()
 	buf := &bytes.Buffer{}
 	rtx.Bind("buf", buf)
 
@@ -26,7 +26,7 @@ func TestGet_typed(t *testing.T) {
 }
 
 func TestBindIfAbsent_keepsExistingElseRegistersDefault(t *testing.T) {
-	rtx := NewContext()
+	rtx := newContext()
 	injected, def := &bytes.Buffer{}, &bytes.Buffer{}
 
 	// A prior binding (e.g. a test's double) is kept — BindIfAbsent no-ops.
@@ -44,7 +44,7 @@ func TestBindIfAbsent_keepsExistingElseRegistersDefault(t *testing.T) {
 }
 
 func TestMustGet_returnsBoundService(t *testing.T) {
-	rtx := NewContext()
+	rtx := newContext()
 	buf := &bytes.Buffer{}
 	rtx.Bind("buf", buf)
 	if MustGet[*bytes.Buffer](rtx, "buf") != buf {
@@ -53,7 +53,7 @@ func TestMustGet_returnsBoundService(t *testing.T) {
 }
 
 func TestMustGet_panicsServiceError(t *testing.T) {
-	rtx := NewContext() // nothing bound
+	rtx := newContext() // nothing bound
 
 	defer func() {
 		r := recover()
@@ -74,7 +74,7 @@ func TestMustGet_panicsServiceError(t *testing.T) {
 }
 
 func TestMustGet_panicsOnWrongType(t *testing.T) {
-	rtx := NewContext()
+	rtx := newContext()
 	rtx.Bind("buf", &bytes.Buffer{})
 
 	defer func() {
@@ -91,7 +91,7 @@ func TestMustGet_panicsOnWrongType(t *testing.T) {
 // Bind/Has/Value/Get from many goroutines so the race detector proves the RWMutex
 // guards every path, and confirms all bindings survive the storm.
 func TestContext_concurrentRegistry(t *testing.T) {
-	rtx := NewContext()
+	rtx := newContext()
 	const (
 		workers = 64
 		keys    = 8
@@ -105,7 +105,6 @@ func TestContext_concurrentRegistry(t *testing.T) {
 			key := fmt.Sprintf("svc-%d", w%keys)
 			for i := 0; i < iters; i++ {
 				rtx.Bind(key, w)
-				_ = rtx.Has(key)
 				_ = rtx.Value(key)
 				_, _ = Get[int](rtx, key)
 			}
@@ -114,7 +113,7 @@ func TestContext_concurrentRegistry(t *testing.T) {
 	wg.Wait()
 
 	for k := 0; k < keys; k++ {
-		if !rtx.Has(fmt.Sprintf("svc-%d", k)) {
+		if rtx.Value(fmt.Sprintf("svc-%d", k)) == nil {
 			t.Errorf("key svc-%d unbound after concurrent access", k)
 		}
 	}

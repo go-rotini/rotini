@@ -56,7 +56,7 @@ type Context struct {
 	// through these rather than os.Std* directly, so the same handler code is exercised in
 	// a test by configuring the Program's streams (the Binder reads its stdin channel from
 	// [Context.Stdin] too). They are set before dispatch and not mutated thereafter; never
-	// nil (a standalone [NewContext] defaults them to os.Std*).
+	// nil (a standalone [NewContextFor] defaults them to os.Std*).
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -78,11 +78,11 @@ type Context struct {
 	exitNow  bool                                               // [Context.Exit] (hard) was called: skip remaining teardown too
 }
 
-// NewContext returns an empty [Context] with an initialized registry and no
+// newContext returns an empty [Context] with an initialized registry and no
 // resolved command. The runtime builds one per invocation and fills in the
-// resolved chain before dispatch; tests and standalone tooling can use it
-// directly, or [NewContextFor] to also resolve a command.
-func NewContext() *Context {
+// resolved chain before dispatch; [NewContextFor] is the public entry for
+// tests and standalone tooling (pass an empty Definition for a bare registry).
+func newContext() *Context {
 	return &Context{
 		services: make(map[string]any),
 		Stdin:    os.Stdin,
@@ -109,7 +109,7 @@ func NewContext() *Context {
 // A remote/co-located token resolves to as much of the chain as precedes it; the
 // runtime would exec the sibling binary, which NewContextFor does not.
 func NewContextFor(def Definition, argv []string) *Context {
-	rtx := NewContext()
+	rtx := newContext()
 	chain, _ := resolveChain(def, argv)
 	rtx.Args = argv
 	rtx.chain = chain
@@ -152,14 +152,6 @@ func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 		rtx.services[key] = value
 	}
 	return rtx
-}
-
-// Has reports whether a binding exists under key.
-func (rtx *Context) Has(key string) bool {
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	_, ok := rtx.services[key]
-	return ok
 }
 
 // Chain returns the resolved command path for this invocation, root → leaf — the

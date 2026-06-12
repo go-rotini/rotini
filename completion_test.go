@@ -407,7 +407,7 @@ func TestComplete_dynamicFlagValue(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := complete(def, c.words, c.handlers, NewContext())
+			got := complete(def, c.words, c.handlers, newContext())
 			if !reflect.DeepEqual(got, c.want) {
 				t.Errorf("complete(%v) = %v, want %v", c.words, got, c.want)
 			}
@@ -419,7 +419,7 @@ func TestComplete_dynamicFlagValue(t *testing.T) {
 // and the completion words via rtx, and can read services bound on the Program.
 func TestComplete_dynamicReceivesContext(t *testing.T) {
 	def := dynCompletionDef()
-	rtx := NewContext()
+	rtx := newContext()
 	got := complete(def, []string{"build", "--mode", "x"}, dynCtxHandlers{t: t}, rtx)
 	if !reflect.DeepEqual(got, []string{"x-leaf-build"}) {
 		t.Errorf("completer did not observe rtx chain/args: %v", got)

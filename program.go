@@ -56,7 +56,7 @@ func NewProgram(def Definition, handlers any) *Program {
 		args:     os.Args[1:],
 		def:      def,
 		handlers: handlers,
-		rtx:      NewContext(),
+		rtx:      newContext(),
 		stdin:    os.Stdin,
 		stdout:   os.Stdout,
 		stderr:   os.Stderr,
@@ -282,7 +282,7 @@ func (p *Program) run(argv []string) (int, error) {
 	}
 	rtx := p.rtx
 	if rtx == nil {
-		rtx = NewContext()
+		rtx = newContext()
 	}
 	rtx.Stdin = p.stdin
 	rtx.Stdout = p.stdout

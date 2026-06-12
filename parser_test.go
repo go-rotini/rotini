@@ -85,7 +85,7 @@ func TestParse_outMustBePointer(t *testing.T) {
 
 func TestParse_unresolvedContext(t *testing.T) {
 	var in runInputs
-	if err := NewParser().Parse(NewContext(), &in); err == nil {
+	if err := NewParser().Parse(newContext(), &in); err == nil {
 		t.Error("Parse on an unresolved context should error")
 	}
 	if in.Run.Flags.Count != 0 || in.App.Flags.Verbose {
