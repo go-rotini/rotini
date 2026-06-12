@@ -62,6 +62,7 @@ type specLoader struct {
 	path     string             // resolved spec path
 	spec     *Spec              // decoded spec content
 	instance []byte             // the spec as canonical JSON, for schema validation
+	locate   sourceLocator      // pointer → source line:col (nil: format has no positions)
 }
 
 // newSpecLoader resolves the spec path (the given path, else the first .rotini.spec.* in
@@ -94,7 +95,10 @@ func newSpecLoader(path, version string) (*specLoader, error) {
 		return nil, fmt.Errorf("convert %s to json: %w", resolved, err)
 	}
 
-	return &specLoader{version: version, schema: schema, path: resolved, spec: spec, instance: instance}, nil
+	return &specLoader{
+		version: version, schema: schema, path: resolved, spec: spec,
+		instance: instance, locate: newSourceLocator(format, data),
+	}, nil
 }
 
 // confLoader holds the compiled conf schema together with the resolved path,
@@ -107,6 +111,7 @@ type confLoader struct {
 	path     string             // resolved conf path ("" when none — defaults used)
 	conf     *Conf              // decoded conf content (or default)
 	instance []byte             // the conf as canonical JSON, for schema validation (nil when defaulted)
+	locate   sourceLocator      // pointer → source line:col (nil: no file, or no position support)
 }
 
 // newConfLoader resolves the conf path (the given path, else the first .rotini.conf.*
@@ -146,5 +151,6 @@ func newConfLoader(specPath, confPath, version string) (*confLoader, error) {
 		return nil, fmt.Errorf("convert %s to json: %w", resolved, err)
 	}
 	f.path, f.conf, f.instance = resolved, conf, instance
+	f.locate = newSourceLocator(format, data)
 	return f, nil
 }

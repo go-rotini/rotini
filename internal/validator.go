@@ -69,6 +69,7 @@ func (s *session) failFast() bool {
 // problem found, empty when the spec is valid.
 func (l *specLoader) validate() []error {
 	if problems := validateInstance("spec", l.instance, l.schema); len(problems) > 0 {
+		locateProblems(problems, l.path, l.locate)
 		return problems
 	}
 
@@ -77,6 +78,7 @@ func (l *specLoader) validate() []error {
 		problems = append(problems, rule(l.spec)...)
 	}
 	problems = append(problems, lintZeroBounds(l.instance)...)
+	locateProblems(problems, l.path, l.locate) // positions the pointer-shaped (zero-bound) ones
 	if err := checkSchemaVersion("spec", l.spec.Schema, l.version); err != nil {
 		problems = append(problems, err)
 	}
@@ -139,6 +141,7 @@ func (l *confLoader) validate() []error {
 		return nil
 	}
 	if problems := validateInstance("conf", l.instance, l.schema); len(problems) > 0 {
+		locateProblems(problems, l.path, l.locate)
 		return problems
 	}
 
@@ -202,11 +205,35 @@ func lintInitializeLocation(conf *Conf, confPath string) []error {
 type problem struct {
 	kind string
 	loc  string
+	pos  string // "path:line:col" in the original source; "" degrades to loc-only
 	msg  string
 }
 
 func (e *problem) Error() string {
+	if e.pos != "" {
+		return fmt.Sprintf("%s: %s: %s: %s", e.kind, e.pos, e.loc, e.msg)
+	}
 	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
+}
+
+// locateProblems back-fills source positions onto pointer-shaped problems: a
+// problem whose loc is a JSON-pointer instance location gains "path:line:col"
+// when the document's locator can resolve it. Lint problems with semantic locs
+// ("command app deploy") pass through untouched, as do all problems when the
+// format carries no positions (TOML) — pointer-only is the documented degrade.
+func locateProblems(problems []error, path string, locate sourceLocator) {
+	if locate == nil || path == "" {
+		return
+	}
+	for _, e := range problems {
+		p, ok := e.(*problem)
+		if !ok || !strings.HasPrefix(p.loc, "/") {
+			continue
+		}
+		if line, col, ok := locate(p.loc); ok {
+			p.pos = fmt.Sprintf("%s:%d:%d", path, line, col)
+		}
+	}
 }
 
 // validateInstance validates a document's raw JSON instance (so schema rules
