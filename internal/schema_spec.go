@@ -58,13 +58,13 @@ type BaseSchema struct {
 type Command struct {
 	// Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name. Not valid on the root command.
 	Ref string `json:"$ref,omitempty"`
-	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases.
+	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.
 	Aliases []string `json:"aliases,omitempty"`
 	// Sub-commands of this command (inline or composed via $ref).
 	Commands []Command `json:"commands,omitempty"`
 	// Deprecation message; the command is annotated as deprecated in its parent's generated Commands list.
 	Deprecated string `json:"deprecated,omitempty"`
-	// Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected.
+	// Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation.
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
 	// Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set.
 	Description string `json:"description,omitempty"`

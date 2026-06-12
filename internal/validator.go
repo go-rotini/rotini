@@ -248,6 +248,7 @@ func lintFeatureDirs(conf *Conf) []error {
 // keep it stable.
 var specLints = []func(*Spec) []error{
 	lintRootCommand,
+	lintRootAliases,
 	lintImportConsistency,
 	lintLocalTimeout,
 	lintFlagGroups,
@@ -278,6 +279,29 @@ func lintRootCommand(spec *Spec) []error {
 	}
 	if spec.Command.Name == "" {
 		problems = append(problems, &problem{kind: "spec", loc: "command", msg: "the root command must have a name (it is the binary name)"})
+	}
+	return problems
+}
+
+// lintRootAliases rejects aliases (and therefore deprecated_identifiers, their
+// subset) on the ROOT command: the root is reached by invoking the binary —
+// argv[0] is not a routing token — so root aliases dispatch nothing and root
+// deprecated_identifiers can never fire. Declare aliases on sub-commands.
+// (Busybox-style multi-call argv[0] dispatch, if ever wanted, will be its own
+// opt-in feature — never implied by root aliases.)
+func lintRootAliases(spec *Spec) []error {
+	var problems []error
+	if len(spec.Command.Aliases) > 0 {
+		problems = append(problems, &problem{
+			kind: "spec", loc: "command",
+			msg: "the root command cannot declare aliases — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
+		})
+	}
+	if len(spec.Command.DeprecatedIdentifiers) > 0 {
+		problems = append(problems, &problem{
+			kind: "spec", loc: "command",
+			msg: "the root command cannot declare deprecated_identifiers — with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
+		})
 	}
 	return problems
 }

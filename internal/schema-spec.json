@@ -62,7 +62,7 @@
         },
         "aliases": {
           "type": "array",
-          "description": "Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases.",
+          "description": "Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.",
           "items": {
             "type": "string",
             "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
@@ -73,7 +73,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected."
+          "description": "Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation."
         },
         "timeout": {
           "type": "string",

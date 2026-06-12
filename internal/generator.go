@@ -549,9 +549,6 @@ func renderDefinition(gp *genProgram) string {
 	b.WriteString("var definition = " + rotiniPkgName + ".Definition{\n")
 	b.WriteString("Name: " + strconv.Quote(gp.rootName) + ",\n")
 	b.WriteString("Handler: " + strconv.Quote(gp.rootPascal) + ",\n")
-	if len(gp.rootAliases) > 0 {
-		b.WriteString("Aliases: " + goStringSlice(gp.rootAliases) + ",\n")
-	}
 	writeInputDefsLiteral(&b, gp.rootInputs)
 	if cl := rnodesLiteral(gp.rootName, gp.tree); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
@@ -1439,7 +1436,6 @@ type genProgram struct {
 	rootName      string
 	rootPascal    string
 	rootInputs    *Inputs
-	rootAliases   []string
 	rootRemotes   []RemoteCommandSpec // root-level remote/co-located sub-commands
 	rootHelp      cmdHelp             // root command's flattened help fields
 	rootOutput    *Schema             // root command's output type (nil when unset)
@@ -1520,7 +1516,6 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootName:      root.Name,
 		rootPascal:    toPascalCase(root.Name),
 		rootInputs:    root.Inputs,
-		rootAliases:   root.Aliases,
 		rootRemotes:   root.RemoteCommands,
 		rootHelp:      commandHelp(root),
 		rootOutput:    root.Output,

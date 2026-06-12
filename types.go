@@ -22,7 +22,6 @@ type CommandHandlers interface {
 // completion. It is data only — behavior lives in the handlers.
 type Definition struct {
 	Name             string
-	Aliases          []string
 	Handler          string // ProgramHandlers method for the root command, e.g. "Rotini"
 	Flags            []FlagDef
 	Arguments        []ArgDef

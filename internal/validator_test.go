@@ -190,6 +190,32 @@ func TestValidate_localTimeoutRejected(t *testing.T) {
 	}
 }
 
+// TestValidate_rootAliases pins the F3 lint (spec-fidelity plan): aliases and
+// deprecated_identifiers are sub-command routing surface — the root has no
+// routing token, so declaring them there was an accepted lie. Sub-command
+// aliasing is unaffected.
+func TestValidate_rootAliases(t *testing.T) {
+	rootAliases := validSpecHeader +
+		"command:\n  name: app\n  aliases: [ap]\n"
+	err := validateOnce(writeTemp(t, "spec.yaml", rootAliases), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "root command cannot declare aliases") {
+		t.Errorf("Validate(root aliases) = %v, want the targeted rejection", err)
+	}
+
+	rootDeprecated := validSpecHeader +
+		"command:\n  name: app\n  deprecated_identifiers: [old]\n"
+	err = validateOnce(writeTemp(t, "spec.yaml", rootDeprecated), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "deprecated_identifiers") {
+		t.Errorf("Validate(root deprecated_identifiers) = %v, want the targeted rejection", err)
+	}
+
+	subAliases := validSpecHeader +
+		"command:\n  name: app\n  commands:\n    - name: build\n      aliases: [b, bld]\n      deprecated_identifiers: [bld]\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", subAliases), "", "", ""); err != nil {
+		t.Errorf("Validate(sub-command aliases) = %v, want nil — only the root is restricted", err)
+	}
+}
+
 // TestValidate_remoteDescriptionRejected pins the F2 deletion (spec-fidelity
 // plan): `description` on a remote command was schema-accepted but consumed by
 // nothing — a remote's long-form docs belong to the remote binary itself. The
