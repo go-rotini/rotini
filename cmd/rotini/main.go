@@ -10,8 +10,6 @@ import (
 
 var (
 	version = "0.0.0"
-	commit  = "none"
-	date    = "unknown"
 )
 
 func main() {
@@ -19,7 +17,5 @@ func main() {
 		Bind("parser", rotini.NewParser()).
 		Bind("suggestor", rotini.NewSuggestor()).
 		Bind("build", rotini.BuildInfo(version)).
-		Bind("commit", commit).
-		Bind("date", date).
 		Execute()
 }
