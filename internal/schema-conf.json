@@ -142,7 +142,7 @@
         },
         "completion": {
           "$ref": "#/definitions/Feature",
-          "description": "Embedded shell completion scripts — the features group's exception: generated per supported shell (bash/zsh/fish) from the program name, not per command, with no doc-data, no editable template, and no verbatim escape. Emits 'Completion<Shell>' vars plus a 'Completion(shell string) (string, error)' resolver that a handler reads instead of building the script itself."
+          "description": "Embedded shell completion scripts — the features group's exception: generated per supported shell (bash/zsh/fish/powershell) from the program name, not per command, with no doc-data, no editable template, and no verbatim escape. Emits 'Completion<Shell>' vars plus a 'Completion(shell string) (string, error)' resolver that a handler reads instead of building the script itself (`rotini init --wire completion` seeds exactly that handler). The scripts call the binary's hidden `__complete` entry, whose candidates are one per line, each optionally carrying a one-line description after a tab ('name\\tdescription' — command/flag summaries ride automatically): zsh/fish/powershell render the description beside the name, bash strips it."
         },
         "markdown": {
           "$ref": "#/definitions/Feature",

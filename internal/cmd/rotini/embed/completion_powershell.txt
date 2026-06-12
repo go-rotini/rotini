@@ -4,6 +4,11 @@ Register-ArgumentCompleter -Native -CommandName rotini -ScriptBlock {
     $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })
     if ($wordToComplete -eq '') { $tokens += '' }
     rotini __complete @tokens 2>$null | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        # Candidates arrive as "name<TAB>description"; the description becomes
+        # the CompletionResult tooltip.
+        $parts = $_ -split "`t", 2
+        $text = $parts[0]
+        $tip = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { $text }
+        [System.Management.Automation.CompletionResult]::new($text, $text, 'ParameterValue', $tip)
     }
 }

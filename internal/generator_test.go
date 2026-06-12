@@ -425,9 +425,19 @@ func TestGenerateCompletionEnabled(t *testing.T) {
 		"func Completion(shell string) (string, error)",
 		`case "bash":`,
 	)
-	// Scripts written per shell, program name substituted.
+	// Scripts written per shell, program name substituted — and each handles
+	// the "name\tdescription" wire shape its shell's way: bash strips the
+	// description, zsh feeds _describe, fish renders natively (the comment
+	// documents it), powershell makes it the tooltip.
 	mustContain(t, filepath.Join(compDir, "completion_bash.txt"),
-		"mycli __complete", "complete -o default -F _mycli_complete mycli")
+		"mycli __complete", "complete -o default -F _mycli_complete mycli",
+		`${line%%$'\t'*}`)
+	mustContain(t, filepath.Join(compDir, "completion_zsh.txt"),
+		"_describe 'mycli' pairs")
+	mustContain(t, filepath.Join(compDir, "completion_fish.txt"),
+		"fish renders that shape natively")
+	mustContain(t, filepath.Join(compDir, "completion_powershell.txt"),
+		"-split \"`t\", 2")
 	for _, sh := range []string{"completion_bash.txt", "completion_zsh.txt", "completion_fish.txt", "completion_powershell.txt"} {
 		if _, err := os.Stat(filepath.Join(compDir, sh)); err != nil {
 			t.Errorf("missing completion script %s: %v", sh, err)
@@ -2888,7 +2898,7 @@ func TestGenerateNestedRemoteCommands(t *testing.T) {
 	mustContain(t, gen,
 		`Name: "cluster"`,
 		"Remotes: []rotini.RemoteDef{",
-		`{Name: "scan", Binary: "acme-scan", Aliases: []string{"sc"}, Timeout: 10000000000}`,
+		`{Name: "scan", Summary: "scan the cluster", Binary: "acme-scan", Aliases: []string{"sc"}, Timeout: 10000000000}`,
 	)
 	// The remote joins the cluster page's Commands list, and the usage line gains
 	// the <command> slot remotes warrant.

@@ -66,18 +66,19 @@ var definition = rotini.Definition{
 	Name:    "rotini",
 	Handler: "Rotini",
 	Flags: []rotini.FlagDef{
-		{Name: "version", Identifiers: []string{"-v", "--version"}, Type: "bool"},
-		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+		{Name: "version", Identifiers: []string{"-v", "--version"}, Summary: "print version", Type: "bool"},
+		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 	},
 	Commands: []rotini.CommandDef{
 		{Name: "initialize",
 			Handler: "RotiniInitialize",
+			Summary: "scaffold a cli program",
 			Aliases: []string{"init"},
 			Flags: []rotini.FlagDef{
-				{Name: "format", Identifiers: []string{"--format"}, Type: "string", Enum: []string{"yaml", "json", "jsonc", "toml"}},
-				{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
-				{Name: "wire", Identifiers: []string{"--wire"}, Type: "[]string", Enum: []string{"help", "man", "completion", "markdown"}},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format (defaults to the module conf's initialize.format, else yaml)", Type: "string", Enum: []string{"yaml", "json", "jsonc", "toml"}},
+				{Name: "force", Identifiers: []string{"--force"}, Summary: "force re-initialization if files exist that init would overwrite", Type: "bool"},
+				{Name: "wire", Identifiers: []string{"--wire"}, Summary: "wire a doc feature into the new CLI (enable it in the conf, seed its command and handler)", Type: "[]string", Enum: []string{"help", "man", "completion", "markdown"}},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "name", Type: "string"},
@@ -85,11 +86,12 @@ var definition = rotini.Definition{
 		},
 		{Name: "generate",
 			Handler: "RotiniGenerate",
+			Summary: "generate a cli program",
 			Aliases: []string{"gen"},
 			Flags: []rotini.FlagDef{
-				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Type: "string", Default: ".rotini.conf.yaml"},
-				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Summary: "path to the rotini conf file", Type: "string", Default: ".rotini.conf.yaml"},
+				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Summary: "watch a rotini spec file for changes and re-generate", Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Default: ".rotini.spec.yaml"},
@@ -97,12 +99,13 @@ var definition = rotini.Definition{
 		},
 		{Name: "validate",
 			Handler: "RotiniValidate",
+			Summary: "validate a spec file",
 			Aliases: []string{"val"},
 			Flags: []rotini.FlagDef{
-				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Type: "string", Default: ".rotini.conf.yaml"},
-				{Name: "fail", Identifiers: []string{"--fail"}, Type: "string", Enum: []string{"fast", "collect"}},
-				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Type: "bool"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Summary: "path to the rotini conf file", Type: "string", Default: ".rotini.conf.yaml"},
+				{Name: "fail", Identifiers: []string{"--fail"}, Summary: "failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect", Type: "string", Enum: []string{"fast", "collect"}},
+				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Summary: "watch a rotini spec file for changes and re-generate", Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "spec_file_path", Type: "string", Default: ".rotini.spec.yaml"},
@@ -110,8 +113,9 @@ var definition = rotini.Definition{
 		},
 		{Name: "help",
 			Handler: "RotiniHelp",
+			Summary: "print help",
 			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "command", Type: "[]string", Variadic: true},
@@ -119,14 +123,16 @@ var definition = rotini.Definition{
 		},
 		{Name: "version",
 			Handler: "RotiniVersion",
+			Summary: "print version",
 			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 		},
 		{Name: "man",
 			Handler: "RotiniMan",
+			Summary: "print the manual page for a command",
 			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "commands", Type: "[]string", Variadic: true},
@@ -134,8 +140,9 @@ var definition = rotini.Definition{
 		},
 		{Name: "completion",
 			Handler: "RotiniCompletion",
+			Summary: "print a shell completion script",
 			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell"}},

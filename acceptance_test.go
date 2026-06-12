@@ -134,11 +134,32 @@ func TestAcceptance_completionProtocol(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	got := strings.Fields(stdout)
+	// One candidate per line; a described candidate is "name\tdescription",
+	// an undescribed one is bare — both shapes ride the same wire.
+	byName := map[string]string{}
+	for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+		name, desc, _ := strings.Cut(line, "\t")
+		byName[name] = desc
+	}
 	for _, want := range []string{"widget", "apply", "ingest", "sleep"} {
-		if !contains(got, want) {
-			t.Errorf("candidates %v missing %q", got, want)
+		if _, ok := byName[want]; !ok {
+			t.Errorf("candidates %v missing %q", byName, want)
 		}
+	}
+	if byName["widget"] != "manage widgets" {
+		t.Errorf("widget description = %q, want the fixture summary", byName["widget"])
+	}
+	if byName["ingest"] != "" {
+		t.Errorf("ingest description = %q, want bare (no summary declared)", byName["ingest"])
+	}
+
+	// A flag candidate carries its summary on every identifier.
+	stdout, _, code = acmeRun(t, "", "__complete", "apply", "--f")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if want := "--file\tmanifest path, or - for stdin"; !strings.Contains(stdout, want) {
+		t.Errorf("flag candidates = %q, want %q", stdout, want)
 	}
 }
 

@@ -55,12 +55,12 @@ func definition() rotini.Definition {
 	return rotini.Definition{
 		Name: "acme", Handler: "Acme",
 		Commands: []rotini.CommandDef{
-			{Name: "widget", Handler: "AcmeWidget", Commands: []rotini.CommandDef{
+			{Name: "widget", Handler: "AcmeWidget", Summary: "manage widgets", Commands: []rotini.CommandDef{
 				{Name: "get", Handler: "AcmeWidgetGet",
 					Arguments: []rotini.ArgDef{{Name: "name", Type: "string", Required: true}}},
 			}},
-			{Name: "apply", Handler: "AcmeApply", Flags: []rotini.FlagDef{
-				{Name: "file", Identifiers: []string{"--file", "-f"}, Type: "string", From: []string{"value", "stdin"}},
+			{Name: "apply", Handler: "AcmeApply", Summary: "apply a manifest", Flags: []rotini.FlagDef{
+				{Name: "file", Identifiers: []string{"--file", "-f"}, Summary: "manifest path, or - for stdin", Type: "string", From: []string{"value", "stdin"}},
 			}},
 			{Name: "ingest", Handler: "AcmeIngest"},
 			{Name: "sleep", Handler: "AcmeSleep"},

@@ -698,6 +698,9 @@ func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.
 func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 	return sliceLiteral("RemoteDef", rcs, func(b *strings.Builder, rc RemoteCommandSpec) {
 		b.WriteString("Name: " + strconv.Quote(rc.Name))
+		if rc.Summary != "" {
+			b.WriteString(", Summary: " + strconv.Quote(rc.Summary))
+		}
 		b.WriteString(", Binary: " + strconv.Quote(host+"-"+rc.Name))
 		if len(rc.Aliases) > 0 {
 			b.WriteString(", Aliases: " + goStringSlice(rc.Aliases))
@@ -716,6 +719,9 @@ func flagDefsLiteral(in *Inputs) string {
 	}
 	return sliceLiteral("FlagDef", in.Flags, func(b *strings.Builder, f FlagInput) {
 		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(flagIdentifiers(f)))
+		if f.Summary != "" {
+			b.WriteString(", Summary: " + strconv.Quote(f.Summary))
+		}
 		defType := getSchemaType(f.Schema)
 		if f.Schema != nil && f.Schema.Type == "count" {
 			defType = "count" // the parser needs the count semantics; the FIELD is int
@@ -814,6 +820,9 @@ func rnodesLiteral(host string, nodes []rnode) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		b.WriteString("Name: " + strconv.Quote(n.name) + ",\n")
 		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
+		if n.help.Summary != "" {
+			b.WriteString("Summary: " + strconv.Quote(n.help.Summary) + ",\n")
+		}
 		if n.hidden {
 			b.WriteString("Hidden: true,\n")
 		}
@@ -2727,19 +2736,36 @@ func completionScript(prog, shell string) (string, error) {
 }
 
 const bashCompletionTemplate = `# bash completion for PROG
+# Candidates arrive as "name<TAB>description"; bash cannot render descriptions,
+# so everything from the first tab is stripped.
 _PROG_complete() {
-    local args IFS=$'\n'
+    local args line IFS=$'\n'
     args=("${COMP_WORDS[@]:1:$COMP_CWORD}")
-    COMPREPLY=($(PROG __complete "${args[@]}" 2>/dev/null))
+    COMPREPLY=()
+    for line in $(PROG __complete "${args[@]}" 2>/dev/null); do
+        COMPREPLY+=("${line%%$'\t'*}")
+    done
 }
 complete -o default -F _PROG_complete PROG
 `
 
 const zshCompletionTemplate = `#compdef PROG
+# Candidates arrive as "name<TAB>description"; zsh renders the description
+# beside the name via _describe (colons in either part are escaped).
 _PROG() {
-    local -a completions
-    completions=(${(f)"$(PROG __complete ${words[2,$CURRENT]} 2>/dev/null)"})
-    compadd -a completions
+    local -a lines pairs
+    local line name desc
+    lines=(${(f)"$(PROG __complete ${words[2,$CURRENT]} 2>/dev/null)"})
+    for line in $lines; do
+        if [[ $line == *$'\t'* ]]; then
+            name=${line%%$'\t'*}
+            desc=${line#*$'\t'}
+            pairs+=("${name//:/\\:}:${desc//:/\\:}")
+        else
+            pairs+=("${line//:/\\:}")
+        fi
+    done
+    _describe 'PROG' pairs
 }
 compdef _PROG PROG
 `
@@ -2757,7 +2783,8 @@ end
 
 # Offer the binary's candidates when it has any; otherwise fall back to fish's
 # file completion (the binary returns nothing for path-valued flags and
-# arguments, exactly so the shell takes over).
+# arguments, exactly so the shell takes over). Candidates arrive as
+# "name<TAB>description" — fish renders that shape natively.
 complete -c PROG -f -n '__PROG_has_results' -a '$__PROG_results'
 complete -c PROG -F -n 'not __PROG_has_results'
 `
@@ -2768,7 +2795,12 @@ Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
     $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })
     if ($wordToComplete -eq '') { $tokens += '' }
     PROG __complete @tokens 2>$null | ForEach-Object {
-        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        # Candidates arrive as "name<TAB>description"; the description becomes
+        # the CompletionResult tooltip.
+        $parts = $_ -split "` + "`" + `t", 2
+        $text = $parts[0]
+        $tip = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { $text }
+        [System.Management.Automation.CompletionResult]::new($text, $text, 'ParameterValue', $tip)
     }
 }
 `

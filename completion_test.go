@@ -590,6 +590,50 @@ func TestComplete_dynamicArgValue(t *testing.T) {
 	}
 }
 
+// TestComplete_descriptions pins the wire shape: a candidate with a summary is
+// "name\tsummary" (aliases share the command's summary; every identifier
+// carries its flag's), one WITHOUT stays bare, the prefix filter matches the
+// name part only, and enum values ride bare.
+func TestComplete_descriptions(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Summary: "chattier output", Type: "bool"},
+			{Name: "config", Identifiers: []string{"--config"}, Type: "string"}, // no summary: bare
+		},
+		Commands: []CommandDef{
+			{Name: "deploy", Handler: "AppDeploy", Summary: "ship it", Aliases: []string{"dep"},
+				Flags: []FlagDef{{Name: "env", Identifiers: []string{"--env"}, Summary: "target environment", Type: "string", Enum: []string{"dev", "prod"}}}},
+			{Name: "status", Handler: "AppStatus"}, // no summary: bare
+		},
+		RemoteCommands: []RemoteDef{{Name: "scan", Binary: "app-scan", Summary: "scan things"}},
+	}
+
+	got := complete(def, []string{""}, nil, nil)
+	want := []string{"dep\tship it", "deploy\tship it", "scan\tscan things", "status"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("command candidates = %v, want %v", got, want)
+	}
+
+	// The prefix filter matches the NAME, not the description.
+	if got := complete(def, []string{"dep"}, nil, nil); !reflect.DeepEqual(got, []string{"dep\tship it", "deploy\tship it"}) {
+		t.Errorf("prefix-filtered = %v, want the dep/deploy pair", got)
+	}
+
+	// Flags: every identifier carries the summary; a summary-less flag is bare.
+	got = complete(def, []string{"-"}, nil, nil)
+	want = []string{"--config", "--verbose\tchattier output", "-v\tchattier output"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("flag candidates = %v, want %v", got, want)
+	}
+
+	// Enum values stay bare — they describe themselves.
+	got = complete(def, []string{"deploy", "--env", ""}, nil, nil)
+	if !reflect.DeepEqual(got, []string{"dev", "prod"}) {
+		t.Errorf("enum candidates = %v, want bare values", got)
+	}
+}
+
 // TestComplete_remoteOpaque confirms completion goes silent past a remote or
 // discovered-plugin token — the dispatched binary owns that argument surface.
 func TestComplete_remoteOpaque(t *testing.T) {

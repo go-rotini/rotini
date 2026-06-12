@@ -72,6 +72,7 @@ type FlagDependency struct {
 type RemoteDef struct {
 	Name    string
 	Aliases []string
+	Summary string        // one-line description (completion candidates carry it as "name\tsummary")
 	Binary  string        // expected executable name, e.g. "kubectl-ctx"
 	Timeout time.Duration // 0 means no timeout
 }
@@ -145,6 +146,7 @@ type RemoteDiscoveryDef struct {
 type CommandDef struct {
 	Name                  string
 	Aliases               []string
+	Summary               string   // one-line description (completion candidates carry it as "name\tsummary")
 	Handler               string   // ProgramHandlers method, e.g. "RotiniGenerate"
 	Hidden                bool     // omitted from completion candidates (it still dispatches); help omission happens at codegen
 	DeprecatedIdentifiers []string // aliases (subset of Aliases) that [Parser.Deprecations] reports when used to invoke
@@ -186,6 +188,7 @@ func takesValue(fd FlagDef) bool { return fd.Type != "bool" && fd.Type != "count
 type FlagDef struct {
 	Name                  string
 	Identifiers           []string // CLI forms, e.g. {"--loud", "-l"}
+	Summary               string   // one-line description (completion candidates carry it as "identifier\tsummary")
 	Type                  string   // resolved Go type, e.g. "bool", "string", "[]string", "int", "time.Duration"
 	Required              bool
 	Default               string

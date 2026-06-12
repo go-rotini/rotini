@@ -1,7 +1,19 @@
 #compdef rotini
+# Candidates arrive as "name<TAB>description"; zsh renders the description
+# beside the name via _describe (colons in either part are escaped).
 _rotini() {
-    local -a completions
-    completions=(${(f)"$(rotini __complete ${words[2,$CURRENT]} 2>/dev/null)"})
-    compadd -a completions
+    local -a lines pairs
+    local line name desc
+    lines=(${(f)"$(rotini __complete ${words[2,$CURRENT]} 2>/dev/null)"})
+    for line in $lines; do
+        if [[ $line == *$'\t'* ]]; then
+            name=${line%%$'\t'*}
+            desc=${line#*$'\t'}
+            pairs+=("${name//:/\\:}:${desc//:/\\:}")
+        else
+            pairs+=("${line//:/\\:}")
+        fi
+    done
+    _describe 'rotini' pairs
 }
 compdef _rotini rotini

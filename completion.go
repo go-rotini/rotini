@@ -27,6 +27,11 @@ const completeCommand = "__complete"
 // absent — and, like any user callback, a panic in it is the caller's
 // bug, not recovered. It may be called on every keystroke, so it must be read-only and
 // fast.
+//
+// A returned candidate MAY carry a one-line description after a tab —
+// "value\tdescription", the same wire shape command and flag candidates use:
+// zsh/fish/powershell render it beside the value, bash strips it. Bare values
+// stay bare; nothing breaks when descriptions are absent.
 type FlagValueCompleter interface {
 	CompleteFlagValue(rtx *Context, flag, partial string) []string
 }
@@ -39,7 +44,8 @@ type FlagValueCompleter interface {
 // CompleteArgValue with the argument's logical Name and the word being typed. A
 // nil return falls back to the argument's static enum; a non-nil (possibly
 // empty) return is authoritative. The same opt-in, read-only, called-on-every-
-// keystroke contract as FlagValueCompleter applies.
+// keystroke contract as FlagValueCompleter applies — including the optional
+// "value\tdescription" candidate shape.
 type ArgValueCompleter interface {
 	CompleteArgValue(rtx *Context, arg, partial string) []string
 }
@@ -115,7 +121,9 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 		for i := len(cc.chain) - 1; i >= 0; i-- {
 			for _, f := range cc.chain[i].Flags {
 				if !f.Hidden {
-					ids = append(ids, f.Identifiers...)
+					for _, id := range f.Identifiers {
+						ids = append(ids, withDescription(id, f.Summary))
+					}
 				}
 			}
 		}
@@ -131,12 +139,16 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 			if c.Hidden {
 				continue
 			}
-			names = append(names, c.Name)
-			names = append(names, c.Aliases...)
+			names = append(names, withDescription(c.Name, c.Summary))
+			for _, a := range c.Aliases {
+				names = append(names, withDescription(a, c.Summary))
+			}
 		}
 		for _, r := range cur.Remotes {
-			names = append(names, r.Name)
-			names = append(names, r.Aliases...)
+			names = append(names, withDescription(r.Name, r.Summary))
+			for _, a := range r.Aliases {
+				names = append(names, withDescription(a, r.Summary))
+			}
 		}
 		names = append(names, DiscoveredPlugins(cur)...)
 	}
@@ -461,11 +473,36 @@ func filterPrefix(candidates []string, prefix string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(candidates))
 	for _, c := range candidates {
-		if c != "" && strings.HasPrefix(c, prefix) && !seen[c] {
-			seen[c] = true
+		// A candidate may carry a "\t<description>" suffix (see withDescription);
+		// the prefix matches — and duplicates collapse — on the NAME part only.
+		name := c
+		if i := strings.IndexByte(c, '\t'); i >= 0 {
+			name = c[:i]
+		}
+		if name != "" && strings.HasPrefix(name, prefix) && !seen[name] {
+			seen[name] = true
 			out = append(out, c)
 		}
 	}
 	sort.Strings(out)
 	return out
+}
+
+// withDescription suffixes a completion candidate with its one-line description
+// as "name\tdescription" — the wire protocol descriptions ride on. zsh/fish/
+// powershell render the description beside the name; the bash script strips it.
+// An empty summary leaves the candidate bare, and only the summary's first line
+// rides (the protocol is line-based). Dynamic completers (FlagValueCompleter /
+// ArgValueCompleter) may return the same shape; bare values stay bare.
+func withDescription(name, summary string) string {
+	if summary == "" {
+		return name
+	}
+	if i := strings.IndexByte(summary, '\n'); i >= 0 {
+		summary = summary[:i]
+	}
+	if summary = strings.TrimSpace(summary); summary == "" {
+		return name
+	}
+	return name + "\t" + summary
 }
