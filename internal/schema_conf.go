@@ -35,7 +35,7 @@ type GenerateConfig struct {
 	Packages *PackagesConfig `json:"packages,omitempty"`
 }
 
-// Defaults for `rotini init`, read from the .rotini.conf.* at the module root when present. A project without such a conf gets rotini's built-in defaults. Explicit `rotini init` flags override these.
+// Defaults for `rotini init`, read ONLY from the .rotini.conf.* at the module root (beside go.mod). A project without such a conf gets rotini's built-in defaults; explicit `rotini init` flags override these. Declared in any conf that is NOT at the module root, the block would be silently ignored — rotini validation rejects it there.
 type InitializeConfig struct {
 	// Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default "yaml".
 	Format string `json:"format,omitempty"`

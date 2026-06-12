@@ -3,6 +3,7 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -96,10 +97,53 @@ func (l *confLoader) validate() []error {
 	for _, rule := range confLints {
 		problems = append(problems, rule(l.conf)...)
 	}
+	problems = append(problems, lintInitializeLocation(l.conf, l.path)...)
 	if err := checkSchemaVersion("conf", l.conf.Schema, l.version); err != nil {
 		problems = append(problems, err)
 	}
 	return problems
+}
+
+// lintInitializeLocation rejects an `initialize` block in a conf that is not
+// at the module root — `rotini initialize` reads its defaults ONLY from the
+// module-root conf, so anywhere else the block is an accepted lie (the seed
+// template used to plant one in every per-CLI conf; fidelity F6 removed it).
+// It is the one location-aware conf rule, so it runs beside the confLints
+// (which see only the decoded document, not its path). With no go.mod above
+// the conf the check is undecidable and skipped (a standalone document).
+func lintInitializeLocation(conf *Conf, confPath string) []error {
+	if conf.Initialize == nil {
+		return nil
+	}
+	abs, err := filepath.Abs(confPath)
+	if err != nil {
+		return nil
+	}
+	confDir := filepath.Dir(abs)
+	root := confDir
+	for {
+		if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+			break
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			return nil // no module above: undecidable, skip
+		}
+		root = parent
+	}
+	if root == confDir {
+		return nil
+	}
+	rel, err := filepath.Rel(root, confDir)
+	if err != nil {
+		rel = confDir
+	}
+	return []error{&problem{
+		kind: "conf",
+		loc:  "initialize",
+		msg: fmt.Sprintf("declared in %s but `rotini initialize` reads only the module-root conf — move this block to a .rotini.conf.* beside go.mod (or remove it)",
+			filepath.ToSlash(rel)),
+	}}
 }
 
 // ─── schema validation + the $schema↔version guard ─────────────────────────────

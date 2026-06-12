@@ -3,7 +3,9 @@
   "title": "Rotini Configuration Schema",
   "description": "Schema for a Rotini CLI configuration file.",
   "type": "object",
-  "required": ["$schema"],
+  "required": [
+    "$schema"
+  ],
   "additionalProperties": false,
   "properties": {
     "$schema": {
@@ -25,11 +27,16 @@
     "InitializeConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Defaults for `rotini init`, read from the .rotini.conf.* at the module root when present. A project without such a conf gets rotini's built-in defaults. Explicit `rotini init` flags override these.",
+      "description": "Defaults for `rotini init`, read ONLY from the .rotini.conf.* at the module root (beside go.mod). A project without such a conf gets rotini's built-in defaults; explicit `rotini init` flags override these. Declared in any conf that is NOT at the module root, the block would be silently ignored — rotini validation rejects it there.",
       "properties": {
         "format": {
           "type": "string",
-          "enum": ["yaml", "jsonc", "json", "toml"],
+          "enum": [
+            "yaml",
+            "jsonc",
+            "json",
+            "toml"
+          ],
           "default": "yaml",
           "description": "Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default \"yaml\"."
         },
@@ -47,7 +54,10 @@
       "properties": {
         "fail": {
           "type": "string",
-          "enum": ["fast", "collect"],
+          "enum": [
+            "fast",
+            "collect"
+          ],
           "default": "collect",
           "description": "fast = stop at and report the first problem; collect = run to completion and report every problem at once (default)."
         }

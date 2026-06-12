@@ -194,6 +194,64 @@ func TestValidate_localTimeoutRejected(t *testing.T) {
 // deprecated_identifiers are sub-command routing surface — the root has no
 // routing token, so declaring them there was an accepted lie. Sub-command
 // aliasing is unaffected.
+// TestValidate_initializeLocation pins the F6 rule: an `initialize` block is
+// honored only in the module-root conf — anywhere else it would be silently
+// ignored, so validation rejects it; with no module above, the location is
+// undecidable and the check is skipped.
+func TestValidate_initializeLocation(t *testing.T) {
+	confBody := validConfHeader + "initialize:\n  format: yaml\n"
+	spec := func(t *testing.T, dir string) string {
+		t.Helper()
+		path := filepath.Join(dir, "spec.yaml")
+		if err := os.WriteFile(path, []byte(validSpecHeader+"command:\n  name: app\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	t.Run("module-root conf passes", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/m\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		conf := filepath.Join(dir, ".rotini.conf.yaml")
+		if err := os.WriteFile(conf, []byte(confBody), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateOnce(spec(t, dir), conf, "", ""); err != nil {
+			t.Errorf("Validate(root conf initialize) = %v, want nil", err)
+		}
+	})
+	t.Run("nested conf is rejected", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/m\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		nested := filepath.Join(dir, "cmd", "app")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		conf := filepath.Join(nested, ".rotini.conf.yaml")
+		if err := os.WriteFile(conf, []byte(confBody), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := validateOnce(spec(t, nested), conf, "", "")
+		if err == nil || !strings.Contains(err.Error(), "module-root conf") {
+			t.Errorf("Validate(nested conf initialize) = %v, want the move-to-root rejection", err)
+		}
+	})
+	t.Run("no module above: undecidable, skipped", func(t *testing.T) {
+		dir := t.TempDir() // no go.mod anywhere above a temp dir
+		conf := filepath.Join(dir, ".rotini.conf.yaml")
+		if err := os.WriteFile(conf, []byte(confBody), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateOnce(spec(t, dir), conf, "", ""); err != nil {
+			t.Errorf("Validate(standalone conf initialize) = %v, want nil (skip)", err)
+		}
+	})
+}
+
 func TestValidate_rootAliases(t *testing.T) {
 	rootAliases := validSpecHeader +
 		"command:\n  name: app\n  aliases: [ap]\n"
