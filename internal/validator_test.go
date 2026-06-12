@@ -194,6 +194,42 @@ func TestValidate_localTimeoutRejected(t *testing.T) {
 // deprecated_identifiers are sub-command routing surface — the root has no
 // routing token, so declaring them there was an accepted lie. Sub-command
 // aliasing is unaffected.
+// TestValidate_constraintApplicability pins the R1 lint: a constraint
+// declared on a type it can never check is rejected — it was previously
+// accepted and silently ignored at parse time.
+func TestValidate_constraintApplicability(t *testing.T) {
+	make_ := func(flag string) string {
+		return validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" + flag
+	}
+	cases := []struct{ name, flag, want string }{
+		{"bounds on string", "      - name: x\n        schema: { type: string, minimum: 1 }\n", "numeric types only"},
+		{"bounds on duration", "      - name: ttl\n        schema: { type: duration, maximum: 60 }\n", "duration bounds are not supported"},
+		{"bounds on imported type", "      - name: id\n        schema: { type: uuid.UUID, import: github.com/google/uuid, minimum: 1 }\n", "numeric types only"},
+		{"pattern on int", "      - name: n\n        schema: { type: int, pattern: \"^x\" }\n", "string types only"},
+		{"length on bool", "      - name: b\n        schema: { type: bool, minLength: 1 }\n", "string types only"},
+		{"items on scalar", "      - name: s\n        schema: { type: string, minItems: 2 }\n", "repeatable (array/map) types only"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateOnce(writeTemp(t, "spec.yaml", make_(c.flag)), "", "", "")
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("Validate = %v, want an error containing %q", err, c.want)
+			}
+		})
+	}
+
+	// Applicable combinations pass: numeric bounds on uint, element bounds on
+	// []int, element pattern on []string, counts on arrays and maps.
+	valid := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
+		"      - name: workers\n        schema: { type: uint, minimum: 1, maximum: 64 }\n" +
+		"      - name: port\n        schema: { type: array, items: { type: int }, minimum: 1, maxItems: 3 }\n" +
+		"      - name: tag\n        schema: { type: \"[]string\", pattern: \"^[a-z]+$\", minItems: 1 }\n" +
+		"      - name: label\n        schema: { type: map, maxItems: 5 }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
+		t.Errorf("Validate(applicable constraints) = %v, want nil", err)
+	}
+}
+
 // TestValidate_zeroBounds pins the F4 fallback (spec-fidelity plan, F0-D4
 // reversal): an explicit zero numeric bound would be silently ignored at
 // every layer it travels (zero-sentinel float64s end to end), so validation

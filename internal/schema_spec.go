@@ -34,20 +34,22 @@ type BaseSchema struct {
 	// Allowed values; parsed values are validated against this list
 	Enum []string `json:"enum,omitempty"`
 	// Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.
-	Import   string  `json:"import,omitempty"`
-	Items    *Schema `json:"items,omitempty"`
-	MaxItems int     `json:"maxItems,omitempty"`
-	// Maximum string length (string type only)
+	Import string  `json:"import,omitempty"`
+	Items  *Schema `json:"items,omitempty"`
+	// Maximum number of values for a repeatable (array or map) input — rejected on scalar types.
+	MaxItems int `json:"maxItems,omitempty"`
+	// Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types.
 	MaxLength int `json:"maxLength,omitempty"`
-	// Maximum allowed value (numeric types only)
-	Maximum  float64 `json:"maximum,omitempty"`
-	MinItems int     `json:"minItems,omitempty"`
-	// Minimum string length (string type only)
+	// Maximum allowed value. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere, explicit 0 rejected).
+	Maximum float64 `json:"maximum,omitempty"`
+	// Minimum number of values for a repeatable (array or map) input — rejected on scalar types.
+	MinItems int `json:"minItems,omitempty"`
+	// Minimum string length in runes (string types only; for []string, each element) — rejected on non-string types.
 	MinLength int `json:"minLength,omitempty"`
-	// Minimum allowed value (numeric types only)
+	// Minimum allowed value. Numeric-family types only (int/uint/float and their aliases; for arrays, each element) — declared on any other type it is rejected by validation, since it could never be checked. Duration bounds are not supported: validate in the handler or wrap the value in a TextUnmarshaler type. An explicit 0 is rejected (zero-sentinel rule) — use type: uint for non-negative integers.
 	Minimum  float64 `json:"minimum,omitempty"`
 	Nullable bool    `json:"nullable,omitempty"`
-	// Regular expression the value must match (string type only)
+	// Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match.
 	Pattern    string            `json:"pattern,omitempty"`
 	Properties map[string]Schema `json:"properties,omitempty"`
 	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.) The contract applies element-wise to arrays: 'array' with items naming a non-builtin type — including items: { $ref: "#/schemas/X" }, which generates a named-type slice — parses argv elements only if that Go type implements encoding.TextUnmarshaler. Named schemas are primarily for 'output' and 'stdin' document shapes, which DECODE structured documents rather than parse argv text.

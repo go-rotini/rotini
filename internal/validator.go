@@ -360,6 +360,7 @@ var specLints = []func(*Spec) []error{
 	lintConfigSource,
 	lintEnvNesting,
 	lintConfigInputFiles,
+	lintConstraintApplicability,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -643,6 +644,58 @@ func lintConfigSource(spec *Spec) []error {
 				return
 			}
 			claims[target][channel] = name
+		})
+	})
+	return problems
+}
+
+// constraintNumericFamily mirrors the runtime's range-checkable vocabulary
+// (parser.go numericFamily): the full int/uint/float family plus the
+// JSON-Schema aliases.
+var constraintNumericFamily = map[string]bool{
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"float32": true, "float64": true,
+	"integer": true, "number": true,
+}
+
+// lintConstraintApplicability rejects a constraint declared on a type it can
+// never check (production-readiness R1): numeric bounds on non-numeric types
+// (notably duration/time and imported types — see the message), length/pattern
+// on non-strings, item counts on non-collections. Before this rule, such
+// declarations were accepted and silently ignored at parse time. For arrays
+// the per-value constraints apply to the ELEMENT type, matching the runtime.
+// The stdin channel is exempt: its schema validates the piped DOCUMENT with
+// full JSON-Schema semantics, where every keyword is real.
+func lintConstraintApplicability(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		loc := "command " + path
+		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+			if channel == "stdin" || schema == nil {
+				return
+			}
+			typ := getSchemaType(schema)
+			elem := strings.TrimPrefix(typ, "[]")
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", loc: loc,
+					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
+			}
+			if (schema.Minimum != 0 || schema.Maximum != 0) && !constraintNumericFamily[elem] {
+				hint := ""
+				switch elem {
+				case "duration", "time.Duration":
+					hint = " (duration bounds are not supported — validate in the handler, or wrap the value in a TextUnmarshaler type that enforces the range)"
+				}
+				add(fmt.Sprintf("minimum/maximum apply to numeric types only, not %s — the bound would be silently ignored%s", typ, hint))
+			}
+			if (schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "") && elem != "string" {
+				add(fmt.Sprintf("minLength/maxLength/pattern apply to string types only, not %s — the constraint would be silently ignored", typ))
+			}
+			if (schema.MinItems != 0 || schema.MaxItems != 0) &&
+				!strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[") {
+				add(fmt.Sprintf("minItems/maxItems apply to repeatable (array/map) types only, not %s — the count bound would be silently ignored", typ))
+			}
 		})
 	})
 	return problems

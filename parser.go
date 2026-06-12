@@ -417,10 +417,14 @@ func hasVariadicArg(args []ArgDef) bool {
 // checkConstraints enforces an input's declared numeric/string/array bounds against
 // the value(s) supplied for it (one element for a scalar; possibly many for a
 // repeatable flag or variadic argument). label is the human-facing identifier; typ is
-// the resolved Go type. A zero bound (or empty pattern) is unset and skipped; numeric
-// bounds apply to int/float types, length/pattern to strings, and item counts to
-// arrays — a constraint declared on an incompatible type is silently ignored. When
-// secret is true the offending value (and its length) is redacted in the error.
+// the resolved Go type. A zero bound (or empty pattern) is unset and skipped. Numeric
+// bounds apply to the full int/uint/float family, length/pattern to strings, and item
+// counts to arrays/maps; for a repeatable input the per-value checks apply to each
+// ELEMENT (a []int's minimum bounds every occurrence). A constraint declared on a
+// type none of those fit cannot come from a valid spec (lintConstraintApplicability
+// rejects it at validate time); a hand-built Definition that does it anyway is
+// skipped here, not guessed at. When secret is true the offending value (and its
+// length) is redacted in the error.
 func checkConstraints(label, typ string, c Constraints, values []string, secret bool) error {
 	if isArrayType(typ) || isMapType(typ) {
 		switch n := len(values); {
@@ -430,9 +434,10 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 			return &ParseError{Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)}
 		}
 	}
+	elem := constraintElemType(typ)
 	for _, v := range values {
 		switch {
-		case isNumericType(typ):
+		case isNumericType(elem):
 			n, err := strconv.ParseFloat(v, 64)
 			if err != nil {
 				continue // not range-checkable; coerce already tolerates malformed input
@@ -443,7 +448,7 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 			if c.Maximum != 0 && n > c.Maximum {
 				return &ParseError{Msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(c.Maximum), redactValue(v, secret))}
 			}
-		case typ == "string":
+		case elem == "string":
 			ln := utf8.RuneCountInString(v)
 			gotLen := strconv.Itoa(ln)
 			if secret {
@@ -581,7 +586,26 @@ func joinAnd(items []string) string {
 	}
 }
 
-func isNumericType(typ string) bool { return typ == "int" || typ == "float64" }
+// numericFamily is every resolved type string whose values are range-checkable
+// numbers — the full int/uint/float vocabulary plus the JSON-Schema aliases
+// (hand-built Definitions may use either spelling). The old allowlist was
+// int|float64 only, which silently ignored bounds on every other numeric type
+// (production-readiness R1).
+var numericFamily = map[string]bool{
+	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
+	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
+	"float32": true, "float64": true,
+	"integer": true, "number": true,
+}
+
+func isNumericType(typ string) bool { return numericFamily[typ] }
+
+// constraintElemType is the type a constraint's PER-VALUE checks apply to: the
+// element type for an array/repeatable input (each occurrence is one value),
+// the type itself otherwise. Item-count bounds stay on the collection.
+func constraintElemType(typ string) string {
+	return strings.TrimPrefix(typ, "[]")
+}
 
 func isArrayType(typ string) bool { return strings.HasPrefix(typ, "[]") }
 

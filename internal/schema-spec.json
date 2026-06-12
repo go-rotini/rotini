@@ -259,33 +259,35 @@
         },
         "pattern": {
           "type": "string",
-          "description": "Regular expression the value must match (string type only)"
+          "description": "Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match."
         },
         "minimum": {
           "type": "number",
-          "description": "Minimum allowed value (numeric types only)"
+          "description": "Minimum allowed value. Numeric-family types only (int/uint/float and their aliases; for arrays, each element) — declared on any other type it is rejected by validation, since it could never be checked. Duration bounds are not supported: validate in the handler or wrap the value in a TextUnmarshaler type. An explicit 0 is rejected (zero-sentinel rule) — use type: uint for non-negative integers."
         },
         "maximum": {
           "type": "number",
-          "description": "Maximum allowed value (numeric types only)"
+          "description": "Maximum allowed value. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere, explicit 0 rejected)."
         },
         "minLength": {
           "type": "integer",
           "minimum": 0,
-          "description": "Minimum string length (string type only)"
+          "description": "Minimum string length in runes (string types only; for []string, each element) — rejected on non-string types."
         },
         "maxLength": {
           "type": "integer",
           "minimum": 0,
-          "description": "Maximum string length (string type only)"
+          "description": "Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types."
         },
         "minItems": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Minimum number of values for a repeatable (array or map) input — rejected on scalar types."
         },
         "maxItems": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "description": "Maximum number of values for a repeatable (array or map) input — rejected on scalar types."
         },
         "properties": {
           "type": "object",

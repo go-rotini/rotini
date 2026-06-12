@@ -251,6 +251,47 @@ func TestParse_numericConstraints(t *testing.T) {
 	}
 }
 
+// TestParse_constraintsWidenedTypes pins the R1 fix: bounds enforce across
+// the full numeric family (the old allowlist was int|float64 only — uint,
+// int64, float32 bounds were silently ignored), and per-value constraints
+// apply to a repeatable input's ELEMENTS.
+func TestParse_constraintsWidenedTypes(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "workers", Identifiers: []string{"--workers"}, Type: "uint",
+				Constraints: Constraints{Minimum: 1, Maximum: 64}},
+			{Name: "offset", Identifiers: []string{"--offset"}, Type: "int64",
+				Constraints: Constraints{Minimum: -100, Maximum: 100}},
+			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float32",
+				Constraints: Constraints{Maximum: 1}},
+			{Name: "port", Identifiers: []string{"--port"}, Type: "[]int",
+				Constraints: Constraints{Minimum: 1, Maximum: 65535, MaxItems: 3}},
+			{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
+				Constraints: Constraints{MinLength: 2}},
+		},
+	}
+	cases := []struct {
+		argv    []string
+		wantErr string // "" = must pass
+	}{
+		{[]string{"--workers", "8"}, ""},
+		{[]string{"--workers", "0"}, "must be >= 1"},    // was silently accepted pre-R1
+		{[]string{"--workers", "100"}, "must be <= 64"}, //
+		{[]string{"--offset", "-200"}, "must be >= -100"},
+		{[]string{"--rate", "1.5"}, "must be <= 1"},
+		{[]string{"--port", "80", "--port", "443"}, ""},
+		{[]string{"--port", "80", "--port", "0"}, "must be >= 1"}, // element bounds
+		{[]string{"--port", "1", "--port", "2", "--port", "3", "--port", "4"}, "at most 3"},
+		{[]string{"--tag", "ok", "--tag", "x"}, "at least 2 characters"}, // element length
+	}
+	for _, c := range cases {
+		var in struct{}
+		err := NewParser().Parse(NewContextFor(def, c.argv), &in)
+		assertConstraint(t, strings.Join(c.argv, " "), err, c.wantErr)
+	}
+}
+
 func TestParse_stringLengthConstraints(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
