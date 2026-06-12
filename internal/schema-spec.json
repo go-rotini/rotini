@@ -712,7 +712,7 @@
         },
         "schema": {
           "$ref": "#/definitions/Schema",
-          "description": "When set, generates a typed config struct and validates required fields at load time."
+          "description": "Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via \"$ref\": \"#/schemas/<Name>\". No typed struct is generated from this — typed access to config values is the config: inputs channel."
         },
         "discover": {
           "type": "object",

@@ -589,7 +589,52 @@ func (b *Binder) fileSource(f ConfigFile, overrides map[string]string) (recon.So
 	if err != nil {
 		return nil, fmt.Errorf("rotini: config source %q (%s): %w", f.Name, path, err)
 	}
+	if err := validateConfigFile(f, src); err != nil {
+		return nil, err
+	}
 	return namedSource{Source: src, name: f.Name}, nil
+}
+
+// validateConfigFile checks the loaded document of one configuration_files
+// entry against its declared schema (the spec entry's `schema:`) — the same
+// load-time gate the stdin channel applies to its payload. The file recon
+// actually resolved (after ~ expansion, discovery, or a config_source
+// override) is the file validated. An absent optional file passes vacuously:
+// document-shape validation gates what IS loaded; absence is the per-input
+// `required`'s concern. The extra read happens once per source construction
+// and only for entries that declare a schema.
+func validateConfigFile(f ConfigFile, src recon.Source) error {
+	if f.Schema == "" {
+		return nil
+	}
+	fs, ok := src.(*recon.FileSource)
+	if !ok {
+		return nil
+	}
+	path := fs.Path()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // absent: vacuous
+		}
+		return fmt.Errorf("rotini: config %q (%s): %w", f.Name, path, err)
+	}
+	codec, ok := recon.DefaultCodecs().ByName(fs.Format())
+	if !ok {
+		return fmt.Errorf("rotini: config %q (%s): unsupported format %q", f.Name, path, fs.Format())
+	}
+	m, err := codec.Decode(data)
+	if err != nil {
+		return fmt.Errorf("rotini: config %q (%s): %w", f.Name, path, err)
+	}
+	validator, err := recon.NewJSONSchemaValidator([]byte(f.Schema))
+	if err != nil {
+		return fmt.Errorf("rotini: config %q schema: %w", f.Name, err)
+	}
+	if err := validator.Validate(m); err != nil {
+		return fmt.Errorf("rotini: invalid config %q (%s): %w", f.Name, path, err)
+	}
+	return nil
 }
 
 // pathOverrides resolves each ConfigFile's config_source inputs (PathFrom) to

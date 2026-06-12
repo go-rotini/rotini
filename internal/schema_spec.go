@@ -130,7 +130,7 @@ type ConfigurationFile struct {
 	Name string `json:"name"`
 	// File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
 	Path string `json:"path,omitempty"`
-	// When set, generates a typed config struct and validates required fields at load time.
+	// Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/<Name>". No typed struct is generated from this — typed access to config values is the config: inputs channel.
 	Schema *Schema `json:"schema,omitempty"`
 }
 

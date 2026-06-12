@@ -172,6 +172,82 @@ func TestBinder_discoverXDG(t *testing.T) {
 	}
 }
 
+// Config-schema shapes (spec configuration_files[].schema): the loaded
+// document is validated at bind time, before any value is read (fidelity F1).
+const tbCfgSchema = `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","required":["api"],"properties":{"api":{"type":"object","required":["endpoint"],"properties":{"endpoint":{"type":"string"}}}}}`
+
+func TestBinder_configSchemaValidation(t *testing.T) {
+	bind := func(t *testing.T, meta BindMeta) error {
+		t.Helper()
+		var in tbNoReqInputs
+		return NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in)
+	}
+	withSchema := func(cf ConfigFile) BindMeta {
+		cf.Schema = tbCfgSchema
+		return BindMeta{ConfigFiles: []ConfigFile{cf}}
+	}
+
+	t.Run("conforming file passes", func(t *testing.T) {
+		cfg := writeConfig(t, "api:\n  endpoint: https://api.example\n")
+		if err := bind(t, withSchema(ConfigFile{Name: "app", Path: cfg, Format: "yaml"})); err != nil {
+			t.Errorf("Bind = %v, want nil", err)
+		}
+	})
+	t.Run("non-conforming file errors naming the file", func(t *testing.T) {
+		cfg := writeConfig(t, "api:\n  retries: 3\n") // api.endpoint missing
+		err := bind(t, withSchema(ConfigFile{Name: "app", Path: cfg, Format: "yaml"}))
+		if err == nil || !strings.Contains(err.Error(), cfg) || !strings.Contains(err.Error(), "app") {
+			t.Errorf("Bind = %v, want a violation naming the entry and the file", err)
+		}
+	})
+	t.Run("absent file passes vacuously", func(t *testing.T) {
+		missing := filepath.Join(t.TempDir(), "nope.yaml")
+		if err := bind(t, withSchema(ConfigFile{Name: "app", Path: missing, Format: "yaml"})); err != nil {
+			t.Errorf("Bind(absent) = %v, want nil — absence is required's concern", err)
+		}
+	})
+	t.Run("discovered file is validated", func(t *testing.T) {
+		xdg := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(xdg, "acme"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(xdg, "acme", "config.yaml"), []byte("api:\n  retries: 3\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("XDG_CONFIG_HOME", xdg)
+		meta := withSchema(ConfigFile{Name: "user", Format: "yaml",
+			Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"}})
+		if err := bind(t, meta); err == nil {
+			t.Error("Bind(discovered non-conforming file) = nil, want the validation error")
+		}
+	})
+	t.Run("config_source-supplied file is validated", func(t *testing.T) {
+		bad := writeConfig(t, "api:\n  retries: 3\n")
+		meta := withSchema(ConfigFile{Name: "app", Path: filepath.Join(t.TempDir(), "declared.yaml"), Format: "yaml",
+			PathFrom: &PathFromDef{Env: "APP_CONFIG"}})
+		t.Setenv("APP_CONFIG", bad)
+		if err := bind(t, meta); err == nil {
+			t.Error("Bind(config_source non-conforming file) = nil, want the validation error")
+		}
+	})
+	t.Run("a pinned input's registry validates too", func(t *testing.T) {
+		bad := writeConfig(t, "api:\n  retries: 3\n")
+		meta := withSchema(ConfigFile{Name: "app", Path: bad, Format: "yaml"})
+		var in struct {
+			App struct {
+				Flags     struct{}
+				Arguments struct{}
+				Config    struct {
+					Endpoint string `rotini:"endpoint" recon:"api.endpoint" cfgfile:"app"`
+				}
+			}
+		}
+		if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in); err == nil {
+			t.Error("Bind(pinned, non-conforming file) = nil, want the validation error")
+		}
+	})
+}
+
 // config_source shapes (spec config_source): a --config flag (and an env
 // fallback variable) supplies the file the config channel then reads — the
 // declarative two-phase parse.

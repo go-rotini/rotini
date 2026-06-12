@@ -519,6 +519,42 @@ func TestGenerateDeprecated(t *testing.T) {
 	)
 }
 
+// TestGenerateConfigSchema verifies a configuration_files entry's schema: is
+// rendered as a self-contained JSON Schema into the BindMeta ConfigFile
+// literal (fidelity F1), with document-level named schemas as definitions.
+func TestGenerateConfigSchema(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: app\n" +
+		"configuration_files:\n" +
+		"  - name: main\n" +
+		"    path: ~/.app.yaml\n" +
+		"    format: yaml\n" +
+		"    schema:\n" +
+		"      type: object\n" +
+		"      required: [server]\n" +
+		"      properties:\n" +
+		"        server: { $ref: \"#/schemas/Server\" }\n" +
+		"schemas:\n" +
+		"  Server:\n" +
+		"    type: object\n" +
+		"    properties:\n" +
+		"      port: { type: integer }\n"
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "app", "zz_rotini.gen.go"),
+		`{Name: "main", Path: "~/.app.yaml", Format: "yaml", Schema: `,
+		`"required":["server"]`,
+		`"definitions"`, `"Server"`, // named schemas resolve inside the rendered schema
+	)
+}
+
 func TestGenerateMapFlag(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)

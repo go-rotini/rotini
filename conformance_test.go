@@ -583,6 +583,26 @@ func conformanceCases() []inputCase {
 				}
 			}},
 
+		{id: "CFG-07", args: []string{"deploy"},
+			files: map[string]string{"acme.yaml": "acme:\n  output: json\n"}, // no acme.env — violates the schema below
+			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+				// A configuration_files entry's schema: gates the loaded
+				// document at bind time, before any value is read.
+				meta.ConfigFiles[0].Schema = `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","required":["acme"],"properties":{"acme":{"type":"object","required":["env"]}}}`
+				var in acDeployInputs
+				err := NewBinder(meta).Bind(rtx, &in)
+				if err == nil || !strings.Contains(err.Error(), "acme.yaml") {
+					t.Errorf("Bind = %v, want a schema violation naming the file", err)
+				}
+				// The same schema passes once the file conforms.
+				if err := os.WriteFile(filepath.Join("..", "acme.yaml"), []byte("acme:\n  env: prod\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), rtx.Args), meta); in.Deploy.Flags.Env != "prod" {
+					t.Errorf("env = %q, want prod from the now-conforming file", in.Deploy.Flags.Env)
+				}
+			}},
+
 		// ── SEC — secret-safe input paths ──
 		{id: "SEC-01", args: []string{"login", "--token", "@token.txt"},
 			files: map[string]string{"work/token.txt": "sk_live_from_file\n"},
@@ -722,7 +742,7 @@ func TestConformance_matrixComplete(t *testing.T) {
 		"FLAG-09", "FLAG-10", "FLAG-11",
 		"STDIN-01", "STDIN-02", "STDIN-03", "STDIN-04", "STDIN-05", "STDIN-06", "STDIN-07",
 		"ENV-01", "ENV-02", "ENV-03", "ENV-04", "ENV-05",
-		"CFG-01", "CFG-02", "CFG-03", "CFG-04", "CFG-05", "CFG-06",
+		"CFG-01", "CFG-02", "CFG-03", "CFG-04", "CFG-05", "CFG-06", "CFG-07",
 		"SEC-01", "SEC-02", "SEC-03",
 		"PREC-01", "PREC-02", "PREC-03", "PREC-04",
 	}

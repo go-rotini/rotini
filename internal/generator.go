@@ -595,6 +595,11 @@ func renderBindMeta(gp *genProgram) string {
 				}
 				b.WriteString("}")
 			}
+			if f.Schema != nil {
+				if js := validationSchema(*f.Schema, gp.schemas); js != "" {
+					b.WriteString(", Schema: " + goRawString(js))
+				}
+			}
 			if c, ok := pathFrom[f.Name]; ok {
 				b.WriteString(", PathFrom: &" + rotiniPkgName + ".PathFromDef{")
 				if c.flag != "" {
@@ -2562,12 +2567,20 @@ func collectStdinSchemas(gp *genProgram) map[string]string {
 	return out
 }
 
-// stdinValidationSchema renders a self-contained JSON Schema (as a JSON string) for a
-// stdin payload: the payload's type/properties/constraints, plus the document's named
-// schemas as `definitions` (so any "#/schemas/X" refs resolve). It uses only the
-// schema-shape of the InputSchema (the BaseSchema), matching the generated type.
+// stdinValidationSchema renders the stdin payload's load-time validation
+// schema. It uses only the schema-shape of the InputSchema (the BaseSchema),
+// matching the generated type.
 func stdinValidationSchema(stdin *InputSchema, docSchemas map[string]Schema) string {
-	body, ok := schemaToDoc(Schema{BaseSchema: stdin.BaseSchema}).(map[string]any)
+	return validationSchema(Schema{BaseSchema: stdin.BaseSchema}, docSchemas)
+}
+
+// validationSchema renders a self-contained JSON Schema (as a JSON string) for
+// load-time document validation — the stdin payload and configuration_files
+// entries share it: the declared type/properties/constraints, plus the
+// document's named schemas as `definitions` (so any "#/schemas/X" refs
+// resolve).
+func validationSchema(schema Schema, docSchemas map[string]Schema) string {
+	body, ok := schemaToDoc(schema).(map[string]any)
 	if !ok {
 		return ""
 	}

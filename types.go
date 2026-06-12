@@ -94,6 +94,12 @@ type ConfigFile struct {
 	Format   string       // "json" | "yaml" | "toml"; "" lets the binder infer from the extension
 	Discover *DiscoverDef // run-time location strategy, instead of a fixed Path
 	PathFrom *PathFromDef // runtime inputs that supply/override the path (spec config_source)
+	// Schema is the self-contained JSON Schema the binder validates the loaded
+	// document against at bind time (the spec entry's `schema:`); "" = none.
+	// The file that actually resolved — fixed, discovered, or
+	// config_source-supplied — is the file validated; an absent optional file
+	// passes vacuously.
+	Schema string
 }
 
 // PathFromDef names the runtime inputs that supply a [ConfigFile]'s path (the
