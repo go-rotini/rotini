@@ -84,8 +84,8 @@ func TestRotini(t *testing.T) {
 		{"help flag", []string{"--help"}, HelpRotini, "", 0},
 		{"version flag", []string{"--version"}, testVersion, "", 0},
 		{"no args prints help and fails", []string{}, HelpRotini, "", 1},
-		{"parse error on unknown flag", []string{"--nope"}, HelpRotini, "Error:", 1},
-		{"mistyped command gets a suggestion", []string{"generte"}, HelpRotini, `Did you mean "generate"?`, 1},
+		{"parse error on unknown flag", []string{"--nope"}, HelpRotini, "Error:", rotini.ExitUsage},
+		{"mistyped command gets a suggestion", []string{"generte"}, HelpRotini, `Did you mean "generate"?`, rotini.ExitUsage},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

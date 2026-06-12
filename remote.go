@@ -23,12 +23,15 @@ type RemoteDispatch struct {
 
 // execRemote locates and runs the co-located plugin binary, passing stdio
 // through, honoring the run context (so a signal/cancellation kills the subprocess)
-// and any timeout, and returning the plugin's exit code.
-func (p *Program) execRemote(ctx context.Context, r *RemoteDispatch) (int, error) {
+// and any timeout, and returning the plugin's exit code. rotini-authored
+// diagnostics (binary not found, timeout, spawn failure) are routed through
+// the RecoveredPanicFn funnel — the single sink for every framework
+// diagnostic — with the exit floored to 1; the plugin's own non-zero exit
+// passes through untouched (the plugin already spoke for itself).
+func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatch) (int, error) {
 	path, err := resolveRemoteBinary(r.Def.Binary, r.Dir)
 	if err != nil {
-		fmt.Fprintf(p.stderr, "%s: %s\n", p.def.Name, err)
-		return 1, err
+		return p.wiringFailure(ctx, rtx, err)
 	}
 
 	if r.Def.Timeout > 0 {
@@ -46,15 +49,13 @@ func (p *Program) execRemote(ctx context.Context, r *RemoteDispatch) (int, error
 	case err == nil:
 		return 0, nil
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		fmt.Fprintf(p.stderr, "%s: %s: timed out after %s\n", p.def.Name, r.Def.Name, r.Def.Timeout)
-		return 1, err
+		return p.wiringFailure(ctx, rtx, fmt.Errorf("%s: timed out after %s", r.Def.Name, r.Def.Timeout))
 	default:
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			return ee.ExitCode(), err
 		}
-		fmt.Fprintf(p.stderr, "%s: %s: %s\n", p.def.Name, r.Def.Name, err)
-		return 1, err
+		return p.wiringFailure(ctx, rtx, fmt.Errorf("%s: %w", r.Def.Name, err))
 	}
 }
 

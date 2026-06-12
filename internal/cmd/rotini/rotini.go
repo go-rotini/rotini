@@ -36,7 +36,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		}
 		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", msg)
 		fmt.Fprintln(rtx.Stdout, HelpRotini)
-		rtx.SignalExit(1)
+		rtx.SignalExit(rotini.ExitUsage) // bad input → the conventional usage exit code
 		return
 	}
 

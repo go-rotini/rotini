@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -567,6 +568,9 @@ func conformanceCases() []inputCase {
 		{id: "CFG-06", args: []string{"deploy"},
 			files: map[string]string{"acme.yaml": "acme:\n  output: secret-perms\n"},
 			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+				if runtime.GOOS == "windows" {
+					t.Skip("0o000 permission bits don't deny the owner on windows")
+				}
 				if os.Geteuid() == 0 {
 					t.Skip("running as root: permission bits don't bite")
 				}

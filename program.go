@@ -277,7 +277,7 @@ func (p *Program) run(argv []string) (int, error) {
 		return p.wiringFailure(ctx, rtx, fmt.Errorf("resolve: %w", err))
 	}
 	if res.Remote != nil {
-		return p.execRemote(ctx, res.Remote)
+		return p.execRemote(ctx, rtx, res.Remote)
 	}
 	if len(res.Chain) == 0 {
 		return p.wiringFailure(ctx, rtx, fmt.Errorf("resolver returned an empty chain — the root frame is always resolvable"))
