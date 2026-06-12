@@ -69,6 +69,7 @@ type fieldDef struct {
 	EnvVar  string // explicit environment variable name for an env field (schema.variable); "" = snake-upper default
 	EnvNest string // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
 	CfgFile string // a config input's pinned source file (schema.file): the value is read from that configuration_files entry ONLY
+	Comment string // trailing line-comment on the generated field ("" for none) — e.g. the TextUnmarshaler contract nudge on explicitly-imported argv types
 	// Constraint is the space-separated validation struct-tags for an env/config field
 	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), which the binder enforces over the
 	// reconciled value; "" when the input declares no numeric/string/array constraints.
@@ -292,6 +293,7 @@ func flagFields(in *Inputs) []fieldDef {
 		fields = append(fields, fieldDef{
 			Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name,
 			Import: fieldImport(f.Schema), Recon: flagReconKey(f.Schema),
+			Comment: contractComment(f.Schema),
 		})
 	}
 	return fields
@@ -470,7 +472,7 @@ func argFields(in *Inputs) []fieldDef {
 	}
 	fields := make([]fieldDef, 0, len(in.Arguments))
 	for _, a := range in.Arguments {
-		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema)})
+		fields = append(fields, fieldDef{Field: toPascalCase(a.Name), GoType: goFieldType(a.Schema), Tag: a.Name, Import: fieldImport(a.Schema), Comment: contractComment(a.Schema)})
 	}
 	return fields
 }
@@ -938,7 +940,7 @@ func defaultString(v any) string {
 func toTemplateFields(fs []fieldDef) []templateInputField {
 	out := make([]templateInputField, 0, len(fs))
 	for _, f := range fs {
-		tf := templateInputField{Field: f.Field, GoType: f.GoType}
+		tf := templateInputField{Field: f.Field, GoType: f.GoType, Comment: f.Comment}
 		if f.Tag != "" {
 			tf.Tag = inputFieldTag(f)
 		}
@@ -2513,6 +2515,19 @@ func collectPathFrom(gp *genProgram) map[string]pathFromClaim {
 	add(gp.rootInputs)
 	eachOwnNode(gp.tree, func(n *rnode) { add(n.inputs) })
 	return out
+}
+
+// contractComment is the TextUnmarshaler nudge emitted as a trailing comment
+// on flag/argument fields whose type comes from an explicit spec `import:` —
+// the contract is enforced by the argv coerce path, and this puts it where the
+// user reads their own generated code. Builtin aliases (duration/time) have
+// their own parsing and get no comment; env/config fields decode via recon, a
+// different path, so they get none either.
+func contractComment(schema *InputSchema) string {
+	if schema == nil || strings.TrimSpace(schema.Import) == "" {
+		return ""
+	}
+	return "// parsed via its encoding.TextUnmarshaler (see the spec schema's `type` docs)"
 }
 
 // envVarName is an env input's environment variable: the explicit `variable:`

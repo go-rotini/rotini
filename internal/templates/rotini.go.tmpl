@@ -25,7 +25,7 @@ type ProgramHandlers interface {
 {{if .Flags}}
 type {{.Prefix}}Flags struct {
 {{- range .Flags}}
-	{{.Field}} {{.GoType}} {{.Tag}}
+	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 }
 {{- else}}
@@ -34,7 +34,7 @@ type {{.Prefix}}Flags struct{}
 {{if .Arguments}}
 type {{.Prefix}}Arguments struct {
 {{- range .Arguments}}
-	{{.Field}} {{.GoType}} {{.Tag}}
+	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 }
 {{- else}}
@@ -44,7 +44,7 @@ type {{.Prefix}}Arguments struct{}
 
 type {{.Prefix}}Env struct {
 {{- range .Env}}
-	{{.Field}} {{.GoType}} {{.Tag}}
+	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 }
 {{- end}}
@@ -52,7 +52,7 @@ type {{.Prefix}}Env struct {
 
 type {{.Prefix}}Config struct {
 {{- range .Config}}
-	{{.Field}} {{.GoType}} {{.Tag}}
+	{{.Field}} {{.GoType}} {{.Tag}}{{if .Comment}} {{.Comment}}{{end}}
 {{- end}}
 }
 {{- end}}

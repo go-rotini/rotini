@@ -248,9 +248,10 @@ func renderHandlersFile(data templateHandlersData) ([]byte, error) {
 // config, or a <Prefix>Inputs field). Tag is the complete struct-tag literal,
 // backticks included ("" when the field carries no tag) — see inputFieldTag.
 type templateInputField struct {
-	Field  string
-	GoType string
-	Tag    string
+	Field   string
+	GoType  string
+	Tag     string
+	Comment string // optional trailing line-comment ("" for none)
 }
 
 // inputFieldTag assembles a complete struct-tag literal for a generated input

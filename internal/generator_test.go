@@ -580,7 +580,18 @@ func TestGenerateInputImports(t *testing.T) {
 		"urlx \"net/url\"",           // aliased form rendered as `urlx "net/url"`
 		"type WidgetFlags struct {",
 		"uuid.UUID", "urlx.URL", // the typed flag fields
+		// explicitly-imported argv fields carry the contract nudge (F5-S2);
+		// the builtin `duration` alias does not.
+		"// parsed via its encoding.TextUnmarshaler",
 	)
+	for _, line := range strings.Split(readFileString(t, rotiniGo), "\n") {
+		if strings.Contains(line, "`rotini:\"ttl\"`") && strings.Contains(line, "//") {
+			t.Errorf("builtin duration alias must NOT carry the contract comment: %s", line)
+		}
+		if strings.Contains(line, "`rotini:\"id\"`") && !strings.Contains(line, "encoding.TextUnmarshaler") {
+			t.Errorf("explicitly-imported field missing the contract comment: %s", line)
+		}
+	}
 	// "time" appears once in the import block (deduped), not twice.
 	if got := readFileString(t, rotiniGo); strings.Count(got, "\t\"time\"\n") != 1 {
 		t.Errorf("expected exactly one \"time\" import line, got %d:\n%s", strings.Count(got, "\t\"time\"\n"), got)
