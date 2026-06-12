@@ -190,6 +190,24 @@ func TestValidate_localTimeoutRejected(t *testing.T) {
 	}
 }
 
+// TestValidate_remoteDescriptionRejected pins the F2 deletion (spec-fidelity
+// plan): `description` on a remote command was schema-accepted but consumed by
+// nothing — a remote's long-form docs belong to the remote binary itself. The
+// key is now rejected, never silently ignored.
+func TestValidate_remoteDescriptionRejected(t *testing.T) {
+	spec := validSpecHeader +
+		"command:\n" +
+		"  name: demo\n" +
+		"  remote_commands:\n" +
+		"    - name: plugin\n" +
+		"      summary: a plugin\n" +
+		"      description: belongs to the plugin, not here\n"
+	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
+	if err == nil || !strings.Contains(err.Error(), "description") {
+		t.Errorf("Validate(remote description) = %v, want a rejection naming the field", err)
+	}
+}
+
 func TestValidate_remoteTimeoutAccepted(t *testing.T) {
 	// timeout on a remote_commands entry (host-side) is valid.
 	spec := validSpecHeader +

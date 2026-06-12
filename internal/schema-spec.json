@@ -679,10 +679,6 @@
           "type": "string",
           "description": "Short one-liner shown next to this remote command in its parent's generated Commands list."
         },
-        "description": {
-          "type": "string",
-          "description": "Long description block for this remote command's generated help page."
-        },
         "timeout": {
           "type": "string",
           "description": "Host-side timeout for the remote binary execution. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout."

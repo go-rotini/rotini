@@ -256,8 +256,6 @@ type Inputs struct {
 type RemoteCommandSpec struct {
 	// Additional names that invoke this remote command.
 	Aliases []string `json:"aliases,omitempty"`
-	// Long description block for this remote command's generated help page.
-	Description string `json:"description,omitempty"`
 	// Name of the remote command. The dispatched binary must be named <program>-<name> and located in the same directory as the host binary.
 	Name string `json:"name"`
 	// Short one-liner shown next to this remote command in its parent's generated Commands list.
