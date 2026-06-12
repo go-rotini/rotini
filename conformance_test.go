@@ -26,6 +26,7 @@ import (
 type acRootFlags struct {
 	Config  string `rotini:"config"`
 	Verbose bool   `rotini:"verbose"`
+	Loud    int    `rotini:"loud"` // type:count — the occurrence tally
 }
 type acRootCmd struct {
 	Flags     acRootFlags
@@ -131,6 +132,16 @@ type acImportInputs struct {
 	}
 }
 
+type acWrapInputs struct {
+	Acme acRootCmd
+	Wrap struct {
+		Flags     struct{}
+		Arguments struct {
+			Cmdline []string `rotini:"cmdline"`
+		}
+	}
+}
+
 type acIngestPayload struct {
 	Kind string `recon:"kind"`
 }
@@ -149,6 +160,7 @@ func acmeDef() Definition {
 		Flags: []FlagDef{
 			{Name: "config", Identifiers: []string{"--config"}, Type: "string"},
 			{Name: "verbose", Identifiers: []string{"--verbose", "-v"}, Type: "bool"},
+			{Name: "loud", Identifiers: []string{"--loud", "-l"}, Type: "count"},
 		},
 		Commands: []CommandDef{
 			{Name: "deploy", Handler: "AcmeDeploy", Flags: []FlagDef{
@@ -177,6 +189,8 @@ func acmeDef() Definition {
 			{Name: "import", Handler: "AcmeImport",
 				Arguments: []ArgDef{{Name: "path", Type: "string", Required: true}}},
 			{Name: "ingest", Handler: "AcmeIngest"},
+			{Name: "wrap", Handler: "AcmeWrap", Passthrough: true,
+				Arguments: []ArgDef{{Name: "cmdline", Type: "[]string", Variadic: true}}},
 		},
 	}
 }
@@ -317,6 +331,21 @@ func conformanceCases() []inputCase {
 				in := bindAs[acRunInputs](t, rtx, meta)
 				if want := []string{"-5", "-0.5"}; !reflect.DeepEqual(in.Run.Arguments.Script, want) {
 					t.Errorf("script = %v, want negative numbers as positionals %v", in.Run.Arguments.Script, want)
+				}
+			}},
+
+		{id: "ARG-09", args: []string{"--verbose", "wrap", "--dry-run", "-x", "--", "literal", "-"},
+			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+				// Passthrough: ancestor flags BEFORE the command parse normally;
+				// everything after it — flag-shaped tokens, "--", bare "-" — is a
+				// raw positional, verbatim and in order.
+				in := bindAs[acWrapInputs](t, rtx, meta)
+				if !in.Acme.Flags.Verbose {
+					t.Error("root --verbose before the passthrough boundary did not parse")
+				}
+				want := []string{"--dry-run", "-x", "--", "literal", "-"}
+				if !reflect.DeepEqual(in.Wrap.Arguments.Cmdline, want) {
+					t.Errorf("cmdline = %v, want the raw tokens %v", in.Wrap.Arguments.Cmdline, want)
 				}
 			}},
 
@@ -510,7 +539,67 @@ func conformanceCases() []inputCase {
 				}
 			}},
 
+		{id: "ENV-06", args: []string{"deploy"},
+			env: map[string]string{
+				"ACME_CITY":   "portland",          // prefixed derived name → binds
+				"CITY":        "wrong",             // unprefixed conventional name → scoped out
+				"MOOD":        "wrong",             // ditto, with no prefixed var at all
+				"ACME_OUTPUT": "from-prefixed-env", // a flag's env fallback, prefixed
+				"PLAIN_OTHER": "exempt-value",      // explicit variable: exempt from the prefix
+			},
+			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+				// env_prefix scopes every DERIVED env name under PREFIX_; explicit
+				// variable: names stay exact.
+				meta.EnvPrefix = "ACME"
+				type envPrefixInputs struct {
+					Acme   acRootCmd
+					Deploy struct {
+						Flags struct {
+							Output string `rotini:"output" recon:"output"`
+						}
+						Arguments struct{}
+						Env       struct {
+							City  string `rotini:"city" recon:"city"`
+							Mood  string `rotini:"mood" recon:"mood"`
+							Other string `rotini:"other" recon:"other" env:"PLAIN_OTHER"`
+						}
+					}
+				}
+				in := bindAs[envPrefixInputs](t, rtx, meta)
+				if in.Deploy.Env.City != "portland" {
+					t.Errorf("city = %q, want the ACME_CITY value", in.Deploy.Env.City)
+				}
+				if in.Deploy.Env.Mood != "" {
+					t.Errorf("mood = %q, want empty — bare MOOD must not bind under a prefix", in.Deploy.Env.Mood)
+				}
+				if in.Deploy.Env.Other != "exempt-value" {
+					t.Errorf("other = %q, want the explicit PLAIN_OTHER value (prefix-exempt)", in.Deploy.Env.Other)
+				}
+				if in.Deploy.Flags.Output != "from-prefixed-env" {
+					t.Errorf("output = %q, want the ACME_OUTPUT flag fallback", in.Deploy.Flags.Output)
+				}
+			}},
+
 		// ── CFG — config files ──
+		{id: "FLAG-12", args: []string{"--loud", "-ll", "deploy"},
+			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+				// A count flag tallies occurrences across long, short, and
+				// clustered forms — no value is ever consumed.
+				if in := bindAs[acDeployInputs](t, rtx, meta); in.Acme.Flags.Loud != 3 {
+					t.Errorf("loud = %d, want 3 (--loud + -ll)", in.Acme.Flags.Loud)
+				}
+				// The value form is a parse error: there is no value to give.
+				rtx2 := NewContextFor(acmeDef(), []string{"--loud=2", "deploy"})
+				var in acDeployInputs
+				if err := NewBinder(meta).Bind(rtx2, &in); err == nil || !strings.Contains(err.Error(), "takes no value") {
+					t.Errorf("Bind(--loud=2) = %v, want the counts-occurrences parse error", err)
+				}
+				// Unset stays the zero tally.
+				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), []string{"deploy"}), meta); in.Acme.Flags.Loud != 0 {
+					t.Errorf("unset loud = %d, want 0", in.Acme.Flags.Loud)
+				}
+			}},
+
 		{id: "CFG-01", args: []string{"--config", "../explicit.yaml", "deploy"},
 			files: map[string]string{"explicit.yaml": "acme:\n  output: from-explicit\n"},
 			check: func(t *testing.T, rtx *Context, meta BindMeta) {
@@ -604,6 +693,39 @@ func conformanceCases() []inputCase {
 			}},
 
 		// ── SEC — secret-safe input paths ──
+		{id: "CFG-08", args: []string{"deploy"},
+			files: map[string]string{
+				"app.jsonc": "{\n  // jsonc: comments and trailing commas decode\n  \"acme\": {\"output\": \"from-jsonc\"},\n}\n",
+				"app.env":   "ACME_GREETING=hello-from-dotenv\n",
+			},
+			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+				// The format enum's jsonc/dotenv members ride the same declared-
+				// format passthrough as yaml/json/toml. jsonc keeps dotted keys,
+				// so the ordinary flag fallback reads it…
+				meta.ConfigFiles = append(meta.ConfigFiles,
+					ConfigFile{Name: "extra-jsonc", Path: "../app.jsonc", Format: "jsonc"},
+					ConfigFile{Name: "extra-env", Path: "../app.env", Format: "dotenv"},
+				)
+				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-jsonc" {
+					t.Errorf("output = %q, want from-jsonc through the declared-format jsonc entry", in.Deploy.Flags.Output)
+				}
+				// …while dotenv keys stay VERBATIM (KEY=value lines, no dotted
+				// projection): the reading input declares the variable name.
+				type dotenvInputs struct {
+					Acme   acRootCmd
+					Deploy struct {
+						Flags     struct{}
+						Arguments struct{}
+						Config    struct {
+							Greeting string `rotini:"greeting" recon:"ACME_GREETING"`
+						}
+					}
+				}
+				if in := bindAs[dotenvInputs](t, rtx, meta); in.Deploy.Config.Greeting != "hello-from-dotenv" {
+					t.Errorf("greeting = %q, want the dotenv value under its verbatim key", in.Deploy.Config.Greeting)
+				}
+			}},
+
 		{id: "SEC-01", args: []string{"login", "--token", "@token.txt"},
 			files: map[string]string{"work/token.txt": "sk_live_from_file\n"},
 			check: func(t *testing.T, rtx *Context, meta BindMeta) {
@@ -737,12 +859,12 @@ func TestConformance_InputMatrix(t *testing.T) {
 // appears exactly once across both tiers, and nothing is missing.
 func TestConformance_matrixComplete(t *testing.T) {
 	want := []string{
-		"ARG-01", "ARG-02", "ARG-03", "ARG-04", "ARG-05", "ARG-06", "ARG-07", "ARG-08",
+		"ARG-01", "ARG-02", "ARG-03", "ARG-04", "ARG-05", "ARG-06", "ARG-07", "ARG-08", "ARG-09",
 		"FLAG-01", "FLAG-02", "FLAG-03", "FLAG-04", "FLAG-05", "FLAG-06", "FLAG-07", "FLAG-08",
-		"FLAG-09", "FLAG-10", "FLAG-11",
+		"FLAG-09", "FLAG-10", "FLAG-11", "FLAG-12",
 		"STDIN-01", "STDIN-02", "STDIN-03", "STDIN-04", "STDIN-05", "STDIN-06", "STDIN-07",
-		"ENV-01", "ENV-02", "ENV-03", "ENV-04", "ENV-05",
-		"CFG-01", "CFG-02", "CFG-03", "CFG-04", "CFG-05", "CFG-06", "CFG-07",
+		"ENV-01", "ENV-02", "ENV-03", "ENV-04", "ENV-05", "ENV-06",
+		"CFG-01", "CFG-02", "CFG-03", "CFG-04", "CFG-05", "CFG-06", "CFG-07", "CFG-08",
 		"SEC-01", "SEC-02", "SEC-03",
 		"PREC-01", "PREC-02", "PREC-03", "PREC-04",
 	}

@@ -311,7 +311,7 @@ func flagReconKey(schema *InputSchema) string {
 
 // envFields returns the <Prefix>Env struct fields: one per pure environment input.
 // The recon key is the input name (recon's env source maps it to SNAKE_UPPER).
-func envFields(in *Inputs) []fieldDef {
+func envFields(in *Inputs, envPrefix string) []fieldDef {
 	if in == nil {
 		return nil
 	}
@@ -326,7 +326,7 @@ func envFields(in *Inputs) []fieldDef {
 		// var — it rides in the envnest tag instead of env:, and rotini (not
 		// recon) enforces required, since recon resolves leaf keys only.
 		if e.Schema != nil && e.Schema.Nesting != "" {
-			fd.EnvNest = envVarName(e) + "," + e.Schema.Nesting
+			fd.EnvNest = envVarName(e, envPrefix) + "," + e.Schema.Nesting
 			if e.Schema.Required {
 				fd.EnvNest += ",required"
 			}
@@ -513,6 +513,8 @@ func jsonSchemaTypeToGo(t string) string {
 		return "[]string"
 	case "object", "map":
 		return "map[string]any"
+	case "count":
+		return "int" // presence counter: the field tallies occurrences (-vvv → 3)
 	case "duration":
 		return "time.Duration"
 	case "time", "datetime", "date":
@@ -551,6 +553,9 @@ func renderDefinition(gp *genProgram) string {
 	b.WriteString("var definition = " + rotiniPkgName + ".Definition{\n")
 	b.WriteString("Name: " + strconv.Quote(gp.rootName) + ",\n")
 	b.WriteString("Handler: " + strconv.Quote(gp.rootPascal) + ",\n")
+	if gp.rootPassthrough {
+		b.WriteString("Passthrough: true,\n")
+	}
 	writeInputDefsLiteral(&b, gp.rootInputs)
 	if cl := rnodesLiteral(gp.rootName, gp.tree); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
@@ -571,12 +576,15 @@ func renderDefinition(gp *genProgram) string {
 func renderBindMeta(gp *genProgram) string {
 	files := gp.configFiles
 	stdinSchemas := collectStdinSchemas(gp)
-	if len(files) == 0 && len(stdinSchemas) == 0 {
+	if len(files) == 0 && len(stdinSchemas) == 0 && gp.envPrefix == "" {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.\n")
 	b.WriteString("var BindMeta = " + rotiniPkgName + ".BindMeta{\n")
+	if gp.envPrefix != "" {
+		b.WriteString("EnvPrefix: " + strconv.Quote(gp.envPrefix) + ",\n")
+	}
 	if len(files) > 0 {
 		pathFrom := collectPathFrom(gp)
 		b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
@@ -707,7 +715,11 @@ func flagDefsLiteral(in *Inputs) string {
 	}
 	return sliceLiteral("FlagDef", in.Flags, func(b *strings.Builder, f FlagInput) {
 		b.WriteString("Name: " + strconv.Quote(f.Name) + ", Identifiers: " + goStringSlice(flagIdentifiers(f)))
-		b.WriteString(", Type: " + strconv.Quote(getSchemaType(f.Schema)))
+		defType := getSchemaType(f.Schema)
+		if f.Schema != nil && f.Schema.Type == "count" {
+			defType = "count" // the parser needs the count semantics; the FIELD is int
+		}
+		b.WriteString(", Type: " + strconv.Quote(defType))
 		writeSchemaCommon(b, f.Schema)
 		if f.Hidden {
 			b.WriteString(", Hidden: true")
@@ -803,6 +815,9 @@ func rnodesLiteral(host string, nodes []rnode) string {
 		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
 		if n.hidden {
 			b.WriteString("Hidden: true,\n")
+		}
+		if n.passthrough {
+			b.WriteString("Passthrough: true,\n")
 		}
 		if len(n.aliases) > 0 {
 			b.WriteString("Aliases: " + goStringSlice(n.aliases) + ",\n")
@@ -1440,15 +1455,17 @@ func commandStubFilename(rootName, path, override string) string {
 // local stub) plus any statically composed commands pulled in via `$ref` (emit
 // a rollup method that delegates to the child's cli package; no types or stubs).
 type genProgram struct {
-	rootName      string
-	rootPascal    string
-	rootInputs    *Inputs
-	rootRemotes   []RemoteCommandSpec // root-level remote/co-located sub-commands
-	rootHelp      cmdHelp             // root command's flattened help fields
-	rootOutput    *Schema             // root command's output type (nil when unset)
-	rootDiscovery *RemoteDiscovery    // root command's plugin discovery (nil = off)
-	schemas       map[string]Schema   // document-level named schemas (for output codegen)
-	configFiles   []ConfigurationFile // document-level config-file sources (for the binder)
+	rootName        string
+	rootPascal      string
+	rootInputs      *Inputs
+	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
+	rootHelp        cmdHelp             // root command's flattened help fields
+	rootOutput      *Schema             // root command's output type (nil when unset)
+	rootDiscovery   *RemoteDiscovery    // root command's plugin discovery (nil = off)
+	rootPassthrough bool                // root command's passthrough (raw positionals)
+	schemas         map[string]Schema   // document-level named schemas (for output codegen)
+	configFiles     []ConfigurationFile // document-level config-file sources (for the binder)
+	envPrefix       string              // document-level env_prefix for DERIVED env-var names
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -1491,6 +1508,7 @@ type rnode struct {
 	group                 string              // group label that buckets this command in the parent's Commands list
 	deprecated            string              // deprecation note for the parent's Commands list (help annotation)
 	deprecatedIdentifiers []string            // deprecated aliases of this command (runtime Deprecations)
+	passthrough           bool                // every token after this command is a raw positional
 	composed              bool                // grafted from a $ref'd child (its types live in the child's cligen)
 	remotes               []RemoteCommandSpec // co-located remote sub-commands declared on this command
 	children              []rnode
@@ -1520,15 +1538,17 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		return nil, fmt.Errorf("root command must have a name (the top-level \"command\" cannot use $ref)")
 	}
 	gp := &genProgram{
-		rootName:      root.Name,
-		rootPascal:    toPascalCase(root.Name),
-		rootInputs:    root.Inputs,
-		rootRemotes:   root.RemoteCommands,
-		rootHelp:      commandHelp(root),
-		rootOutput:    root.Output,
-		rootDiscovery: root.RemoteDiscovery,
-		schemas:       spec.Schemas,
-		configFiles:   spec.ConfigurationFiles,
+		rootName:        root.Name,
+		rootPascal:      toPascalCase(root.Name),
+		rootInputs:      root.Inputs,
+		rootRemotes:     root.RemoteCommands,
+		rootHelp:        commandHelp(root),
+		rootOutput:      root.Output,
+		rootDiscovery:   root.RemoteDiscovery,
+		rootPassthrough: root.Passthrough,
+		schemas:         spec.Schemas,
+		configFiles:     spec.ConfigurationFiles,
+		envPrefix:       spec.EnvPrefix,
 	}
 	gp.root = genCommand{
 		prefix:      gp.rootPascal,
@@ -1536,7 +1556,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		filename:    commandStubFilename(root.Name, "", root.Filename),
 		flags:       flagFields(root.Inputs),
 		args:        argFields(root.Inputs),
-		env:         envFields(root.Inputs),
+		env:         envFields(root.Inputs, gp.envPrefix),
 		config:      configFields(root.Inputs),
 		stdinType:   stdinTypeExpr(gp.rootPascal, root.Inputs),
 		stdinFormat: stdinFormatExpr(root.Inputs),
@@ -1606,7 +1626,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 				filename:    commandStubFilename(gp.rootName, path, c.Filename),
 				flags:       flagFields(c.Inputs),
 				args:        argFields(c.Inputs),
-				env:         envFields(c.Inputs),
+				env:         envFields(c.Inputs, gp.envPrefix),
 				config:      configFields(c.Inputs),
 				stdinType:   stdinTypeExpr(prefix, c.Inputs),
 				stdinFormat: stdinFormatExpr(c.Inputs),
@@ -1630,6 +1650,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			group:                 c.Group,
 			deprecated:            c.Deprecated,
 			deprecatedIdentifiers: c.DeprecatedIdentifiers,
+			passthrough:           c.Passthrough,
 			composed:              ctx.composed,
 			remotes:               c.RemoteCommands,
 			children:              children,
@@ -1897,7 +1918,7 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootName,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootRemotes, nil),
+		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootRemotes, nil, gp.envPrefix),
 	}}
 
 	// cascading carries the cascading flags accumulated from a node's ancestors
@@ -1915,7 +1936,7 @@ func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     buildHelpData(invocation, n.help, n.inputs, n.children, n.remotes, cascading),
+				data:     buildHelpData(invocation, n.help, n.inputs, n.children, n.remotes, cascading, gp.envPrefix),
 			})
 			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
 			walk(n.children, childChain, childNames, childCascading)
@@ -1995,7 +2016,7 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 // fields, inputs, direct children, and remote sub-commands. Hidden
 // children/inputs are excluded; remotes join the Commands list (they dispatch
 // like any sub-command).
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, remotes []RemoteCommandSpec, ancestorCascading []templateDocFlagRow) templateHelpData {
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, remotes []RemoteCommandSpec, ancestorCascading []templateDocFlagRow, envPrefix string) templateHelpData {
 	d := templateHelpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
@@ -2058,7 +2079,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 				continue
 			}
 			d.Environment = append(d.Environment, templateDocEnvRow{
-				Var:        envVarLabel(e),
+				Var:        envVarLabel(e, envPrefix),
 				Summary:    e.Summary,
 				Type:       flagDisplayType(e.Schema),
 				Required:   e.Schema != nil && e.Schema.Required,
@@ -2090,9 +2111,12 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 // envVarLabel is the environment variable an env input reads: its explicit
 // schema.variable, else the snake-upper form of its logical name (mirroring the
 // binder's default key→env-var derivation, e.g. "apiKey" → "API_KEY").
-func envVarLabel(e EnvInput) string {
+func envVarLabel(e EnvInput, envPrefix string) string {
 	if e.Schema != nil && e.Schema.Variable != "" {
-		return e.Schema.Variable
+		return e.Schema.Variable // explicit: exempt from env_prefix
+	}
+	if envPrefix != "" {
+		return envPrefix + "_" + snakeUpper(e.Name)
 	}
 	return snakeUpper(e.Name)
 }
@@ -2207,6 +2231,9 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 				continue
 			}
 			name := a.Name
+			if a.Schema != nil && a.Schema.Placeholder != "" {
+				name = a.Schema.Placeholder // the <>/[]/… decoration still applies
+			}
 			if isVariadicSchema(a.Schema) {
 				name += "..."
 			}
@@ -2227,12 +2254,16 @@ func isVariadicSchema(schema *InputSchema) bool {
 	return strings.HasPrefix(getSchemaType(schema), "[]")
 }
 
-// flagDisplayType returns the type token shown after a flag's identifiers, or ""
-// for bool flags (which don't take a value).
+// flagDisplayType returns the value token shown after a flag's identifiers in
+// help/man: the declared placeholder when set, else the resolved type; "" for
+// bool flags (which take no value).
 func flagDisplayType(schema *InputSchema) string {
 	t := getSchemaType(schema)
-	if t == "bool" {
-		return ""
+	if t == "bool" || (schema != nil && schema.Type == "count") {
+		return "" // presence flags take no value token
+	}
+	if schema != nil && schema.Placeholder != "" {
+		return schema.Placeholder
 	}
 	return t
 }
@@ -2512,7 +2543,7 @@ func collectPathFrom(gp *genProgram) map[string]pathFromClaim {
 		for _, e := range in.Env {
 			if e.Schema != nil && e.Schema.ConfigSource != "" {
 				c := out[e.Schema.ConfigSource]
-				c.env = envVarName(e)
+				c.env = envVarName(e, gp.envPrefix)
 				out[e.Schema.ConfigSource] = c
 			}
 		}
@@ -2537,11 +2568,15 @@ func contractComment(schema *InputSchema) string {
 
 // envVarName is an env input's environment variable: the explicit `variable:`
 // when declared, else the SNAKE_UPPER projection of its name (recon's default).
-func envVarName(e EnvInput) string {
+func envVarName(e EnvInput, envPrefix string) string {
 	if v := envVarOf(e.Schema); v != "" {
-		return v
+		return v // explicit variable: exempt from env_prefix — already exact
 	}
-	return strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(e.Name))
+	derived := strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(e.Name))
+	if envPrefix != "" {
+		return envPrefix + "_" + derived
+	}
+	return derived
 }
 
 // collectStdinSchemas builds the per-command stdin validation schemas for BindMeta:

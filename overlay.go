@@ -416,7 +416,7 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 	if err != nil {
 		return nil, nil, err
 	}
-	envReg, err := recon.New(recon.WithSources(envSources(v)...))
+	envReg, err := recon.New(recon.WithSources(envSources(v, b.envPrefix)...))
 	if err != nil {
 		return nil, nil, fmt.Errorf("rotini: env registry: %w", err)
 	}
@@ -424,7 +424,7 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 
 	// Flag env-fallbacks read the plain env projection of the recon key, the
 	// same source order reconcileFlags gives them.
-	flagReg, err := recon.New(recon.WithSource(recon.NewOSEnvSource()))
+	flagReg, err := recon.New(recon.WithSource(flagEnvSource(b.envPrefix)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("rotini: env registry: %w", err)
 	}

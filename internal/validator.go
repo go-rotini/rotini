@@ -361,6 +361,8 @@ var specLints = []func(*Spec) []error{
 	lintEnvNesting,
 	lintConfigInputFiles,
 	lintConstraintApplicability,
+	lintCountFlags,
+	lintPassthrough,
 	lintPatternCompiles,
 }
 
@@ -696,6 +698,95 @@ func lintConstraintApplicability(spec *Spec) []error {
 			if (schema.MinItems != 0 || schema.MaxItems != 0) &&
 				!strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[") {
 				add(fmt.Sprintf("minItems/maxItems apply to repeatable (array/map) types only, not %s — the count bound would be silently ignored", typ))
+			}
+		})
+	})
+	return problems
+}
+
+// lintPassthrough enforces `passthrough: true`'s contract: every token after
+// the command is a raw positional, so the command can own no flag vocabulary
+// and no descent surface (sub-commands, remote commands, discovery), and its
+// last argument must be a variadic []string — the declared receiver of the raw
+// tokens. Without that receiver every forwarded token would be a parse error,
+// which would make the key an accepted lie.
+func lintPassthrough(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		if !c.Passthrough {
+			return
+		}
+		add := func(msg string) {
+			problems = append(problems, &problem{kind: "spec", loc: "command " + path,
+				msg: "passthrough: " + msg})
+		}
+		if c.Inputs != nil && len(c.Inputs.Flags) > 0 {
+			add("the command declares flags, but a passthrough command parses none — its tokens are raw positionals")
+		}
+		if len(c.Commands) > 0 {
+			add("the command declares sub-commands, but a passthrough command never descends — a child token is a raw positional")
+		}
+		if len(c.RemoteCommands) > 0 || c.RemoteDiscovery != nil {
+			add("the command declares remote commands/discovery, but a passthrough command never dispatches — the token is a raw positional")
+		}
+		args := []ArgumentInput{}
+		if c.Inputs != nil {
+			args = c.Inputs.Arguments
+		}
+		if len(args) == 0 || getSchemaType(args[len(args)-1].Schema) != "[]string" {
+			add("declare a variadic []string as the last argument — the receiver of the raw tokens")
+		}
+	})
+	return problems
+}
+
+// lintCountFlags enforces `type: count`'s contract: a count flag is an argv
+// presence counter — the flag takes no value and the generated int field is the
+// occurrence tally, computed rather than parsed. It exists on the flag channel
+// only, and every value-shaped key is rejected: there is no value to default,
+// enumerate, constrain, redact, placeholder, or acquire from elsewhere.
+func lintCountFlags(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Type != "count" {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", loc: "command " + path,
+					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
+			}
+			if channel != "flag" {
+				add("type count counts argv flag occurrences — it applies to flags only")
+				return
+			}
+			var bad []string
+			for key, set := range map[string]bool{
+				"default":                     schema.Default != nil,
+				"enum":                        len(schema.Enum) > 0,
+				"required":                    schema.Required,
+				"nullable":                    schema.Nullable,
+				"secret":                      schema.Secret,
+				"placeholder":                 schema.Placeholder != "",
+				"key":                         schema.Key != "",
+				"file":                        schema.File != "",
+				"variable":                    schema.Variable != "",
+				"from":                        len(schema.From) > 0,
+				"config_source":               schema.ConfigSource != "",
+				"dotted_keys":                 schema.DottedKeys,
+				"nesting":                     schema.Nesting != "",
+				"items":                       schema.Items != nil,
+				"minimum/maximum":             schema.Minimum != 0 || schema.Maximum != 0,
+				"minLength/maxLength/pattern": schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "",
+				"minItems/maxItems":           schema.MinItems != 0 || schema.MaxItems != 0,
+			} {
+				if set {
+					bad = append(bad, key)
+				}
+			}
+			if len(bad) > 0 {
+				sort.Strings(bad)
+				add(fmt.Sprintf("a count flag has no value to resolve — %s do(es) not apply (the int field is the occurrence tally)", strings.Join(bad, ", ")))
 			}
 		})
 	})

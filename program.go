@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"reflect"
+	"runtime/debug"
 	"sync/atomic"
 	"syscall"
 )
@@ -169,7 +170,10 @@ func (p *Program) Bind(key string, value any) *Program {
 //   - A recovered panic from any hook (e.g. the [MustGet] on a missing service), AFTER
 //     all teardown has unwound: forward progress halts at the panic, every begun step's
 //     teardown still runs, and only then is the first panic (later ones are dropped)
-//     reported here, last.
+//     reported here, last — always as a [*PanicError] carrying the goroutine stack from
+//     the recovery point. Error() is the panicked value alone (the default funnel stays
+//     one-line); a funnel that wants the stack reaches it with errors.As. Unwrap exposes
+//     a panicked error value, so sentinels and [CategoryOf] tags survive the wrapping.
 //
 // A funnel therefore must not assume handler-initialized state — on the diagnostic paths
 // nothing has run. Deliberate exits ([Context.SignalExit]/[Context.Exit]) are not
@@ -178,6 +182,27 @@ func (p *Program) Bind(key string, value any) *Program {
 func (p *Program) WithErrorFn(fn func(ctx context.Context, rtx *Context, err error)) *Program {
 	p.errorFn = fn
 	return p
+}
+
+// PanicError is how a panic recovered from a lifecycle hook reaches the
+// [Program.WithErrorFn] funnel: Value is the value passed to panic, Stack is the
+// goroutine stack captured at the recovery point (runtime/debug.Stack) — the
+// information the recover would otherwise discard. Error renders Value alone, so
+// default output stays one line; a funnel that wants the stack asks with errors.As.
+type PanicError struct {
+	Value any
+	Stack []byte
+}
+
+func (e *PanicError) Error() string { return fmt.Sprintf("%v", e.Value) }
+
+// Unwrap exposes a panicked error value so errors.Is/errors.As and [CategoryOf]
+// see through the wrapping; it is nil for non-error panic values.
+func (e *PanicError) Unwrap() error {
+	if err, ok := e.Value.(error); ok {
+		return err
+	}
+	return nil
 }
 
 // WithResolver overrides the resolve phase — argv to invocation target (the
@@ -401,12 +426,8 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 			if r == nil {
 				return
 			}
-			err, ok := r.(error)
-			if !ok {
-				err = fmt.Errorf("%v", r)
-			}
 			if failure == nil {
-				failure = err
+				failure = &PanicError{Value: r, Stack: debug.Stack()}
 			}
 		}()
 		hook(ctx, rtx)

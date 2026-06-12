@@ -76,6 +76,9 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 		return nil // the remote binary owns its own argument surface
 	}
 	cur := cc.chain[len(cc.chain)-1]
+	if cur.Passthrough {
+		return nil // raw tokens past the boundary: let the shell fall back to files
+	}
 
 	// Completing the value of the preceding flag (the separate-word form,
 	// including bash's "--flag = val" word splitting). The handler of the command
@@ -85,7 +88,7 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	// sub-command names, which dispatch would treat as this flag's value.
 	if !cc.afterTerminator {
 		if name, ok := pendingValueFlag(context); ok {
-			if fd, owner, found := findFlag(cc.chain, name); found && fd.Type != "bool" {
+			if fd, owner, found := findFlag(cc.chain, name); found && takesValue(fd) {
 				return filterPrefix(flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, partial), partial)
 			}
 		}
@@ -98,7 +101,7 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	// descendants at runtime.
 	if !cc.afterTerminator && strings.HasPrefix(partial, "-") {
 		if name, val, hasInline := splitFlag(partial); hasInline {
-			if fd, owner, found := findFlag(cc.chain, name); found && fd.Type != "bool" {
+			if fd, owner, found := findFlag(cc.chain, name); found && takesValue(fd) {
 				cands := flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, val)
 				out := make([]string, 0, len(cands))
 				for _, c := range cands {
@@ -167,7 +170,7 @@ func walkContext(def Definition, context []string) completionContext {
 			name, _, hasInline := splitFlag(tok)
 			// Skip a separate value token so it is not mistaken for a command —
 			// unless it is the "=" glue, which the next iteration handles.
-			if fd, _, ok := findFlag(cc.chain, name); ok && fd.Type != "bool" && !hasInline {
+			if fd, _, ok := findFlag(cc.chain, name); ok && takesValue(fd) && !hasInline {
 				if i+1 < len(context) && context[i+1] != "=" {
 					i++
 				}

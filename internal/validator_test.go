@@ -230,6 +230,80 @@ func TestValidate_constraintApplicability(t *testing.T) {
 	}
 }
 
+// TestValidate_passthrough pins `passthrough: true`'s contract: no flags, no
+// descent surface, and a mandatory variadic []string receiver.
+func TestValidate_passthrough(t *testing.T) {
+	wrap := func(body string) string {
+		return validSpecHeader + "command:\n  name: app\n  commands:\n    - name: exec\n      passthrough: true\n" + body
+	}
+	recv := "      inputs:\n        arguments:\n          - name: cmdline\n            schema: { type: \"[]string\" }\n"
+	cases := []struct{ name, body, want string }{
+		{"flags rejected", recv + "      inputs2:\n", "declares flags"},
+		{"sub-commands rejected", recv + "      commands:\n        - name: sub\n", "never descends"},
+		{"missing receiver", "", "variadic []string"},
+		{"non-string receiver",
+			"      inputs:\n        arguments:\n          - name: ns\n            schema: { type: array, items: { type: int } }\n",
+			"variadic []string"},
+	}
+	// fix the "flags rejected" body: a passthrough command with both a flag and the receiver
+	cases[0].body = "      inputs:\n        flags:\n          - name: x\n            schema: { type: string }\n        arguments:\n          - name: cmdline\n            schema: { type: \"[]string\" }\n"
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateOnce(writeTemp(t, "spec.yaml", wrap(c.body)), "", "", "")
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("Validate = %v, want an error containing %q", err, c.want)
+			}
+		})
+	}
+
+	// The honest shape passes: a leading fixed argument plus the variadic receiver.
+	valid := wrap("      inputs:\n        arguments:\n          - name: program\n            schema: { type: string, required: true }\n          - name: cmdline\n            schema: { type: \"[]string\" }\n")
+	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
+		t.Errorf("Validate(passthrough with receiver) = %v, want nil", err)
+	}
+}
+
+// TestValidate_countFlags pins `type: count`'s contract: flag-channel only,
+// and every value-shaped key is rejected — the tally is computed, never parsed.
+func TestValidate_countFlags(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"count on env input",
+			"    env:\n      - name: depth\n        schema: { type: count }\n",
+			"applies to flags only"},
+		{"count on argument",
+			"    arguments:\n      - name: depth\n        schema: { type: count }\n",
+			"applies to flags only"},
+		{"default on count",
+			"    flags:\n      - name: v\n        schema: { type: count, default: 2 }\n",
+			"do(es) not apply"},
+		{"enum on count",
+			"    flags:\n      - name: v\n        schema: { type: count, enum: [one, two] }\n",
+			"do(es) not apply"},
+		{"bounds on count",
+			"    flags:\n      - name: v\n        schema: { type: count, maximum: 3 }\n",
+			"do(es) not apply"},
+		{"from on count",
+			"    flags:\n      - name: v\n        schema: { type: count, from: [stdin] }\n",
+			"do(es) not apply"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			spec := validSpecHeader + "command:\n  name: app\n  inputs:\n" + c.body
+			err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
+			if err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Errorf("Validate = %v, want an error containing %q", err, c.want)
+			}
+		})
+	}
+
+	// The plain shape passes: identifiers, summary, hidden, deprecated.
+	valid := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
+		"      - name: verbose\n        identifiers: [--verbose, -v]\n        summary: Crank it up.\n        schema: { type: count }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
+		t.Errorf("Validate(plain count flag) = %v, want nil", err)
+	}
+}
+
 // TestValidate_patternCompiles pins the R-detour rule: a typo'd pattern would
 // otherwise silently never enforce (the runtime tolerates a failed compile).
 func TestValidate_patternCompiles(t *testing.T) {

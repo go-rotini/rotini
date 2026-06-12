@@ -42,13 +42,14 @@ type Binder struct {
 	parser       *Parser
 	configFiles  []ConfigFile
 	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
+	envPrefix    string            // BindMeta.EnvPrefix: scopes derived env-var names
 }
 
 // NewBinder returns the default binder, configured from the generated descriptor
 // (the rtg package's BindMeta var) — its configuration_files sources and per-command
 // stdin payload schemas.
 func NewBinder(meta BindMeta) *Binder {
-	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas}
+	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas, envPrefix: meta.EnvPrefix}
 }
 
 // Bind fills out — a non-nil pointer to the typed inputs struct rtg emits — from
@@ -106,7 +107,7 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 	//    (so an env var never leaks into a config field, or vice versa); recon
 	//    enforces each channel's own required/validator. The env source honors an
 	//    input's explicit `variable` (else recon's SNAKE_UPPER).
-	envReg, err := recon.New(recon.WithSources(envSources(v)...))
+	envReg, err := recon.New(recon.WithSources(envSources(v, b.envPrefix)...))
 	if err != nil {
 		return fmt.Errorf("rotini: env registry: %w", err)
 	}
@@ -245,7 +246,7 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
 	offset := len(chain) - v.NumField()
-	srcs := []recon.Source{recon.NewMapSource("flags", flagOverrides(v, chain, argv)), recon.NewOSEnvSource()}
+	srcs := []recon.Source{recon.NewMapSource("flags", flagOverrides(v, chain, argv)), flagEnvSource(b.envPrefix)}
 	files, err := b.fileSources(overrides)
 	if err != nil {
 		return err
@@ -729,7 +730,7 @@ func discoverDirs(d *DiscoverDef) ([]string, error) {
 // explicit-only variable resolves on its own. (Nested env families — envnest
 // — are not registry data at all: recon resolves leaf keys only, so
 // fillEnvNested sets those fields directly.)
-func envSources(v reflect.Value) []recon.Source {
+func envSources(v reflect.Value, envPrefix string) []recon.Source {
 	explicit := envExplicit(v)
 	inverse := make(map[string]string, len(explicit)) // VARIABLE → key
 	for key, variable := range explicit {
@@ -739,12 +740,29 @@ func envSources(v reflect.Value) []recon.Source {
 		if key, ok := inverse[name]; ok {
 			return recon.ParsePath(key)
 		}
+		if envPrefix != "" {
+			rest, ok := strings.CutPrefix(name, envPrefix+"_")
+			if !ok {
+				return recon.Path{} // empty Path skips: a prefix SCOPES the derived namespace
+			}
+			name = rest
+		}
 		// recon's default projection: every underscore is a separator.
 		return recon.MakePath(strings.Split(strings.ToLower(name), "_")...)
 	}
 	return []recon.Source{recon.NewOSEnvSource(
-		recon.WithEnvTransform(envTransform(explicit)),
+		recon.WithEnvTransform(envTransform(explicit, envPrefix)),
 		recon.WithEnvKeyParser(parser))}
+}
+
+// flagEnvSource is the env source flags' fallbacks read: the plain SNAKE_UPPER
+// projection of each recon key, scoped under env_prefix when one is declared
+// (recon strips the prefix before parsing and prepends it when projecting).
+func flagEnvSource(envPrefix string) recon.Source {
+	if envPrefix == "" {
+		return recon.NewOSEnvSource()
+	}
+	return recon.NewOSEnvSource(recon.WithEnvPrefix(envPrefix + "_"))
 }
 
 // fillEnvNested fills each nested env input of one Env struct (the generated
@@ -830,10 +848,13 @@ func envExplicit(v reflect.Value) map[string]string {
 
 // envTransform maps a recon key to its environment variable: an explicit `variable`
 // when the input declared one, else recon's snake-upper projection.
-func envTransform(explicit map[string]string) recon.KeyTransform {
+func envTransform(explicit map[string]string, envPrefix string) recon.KeyTransform {
 	return func(p recon.Path) string {
 		if v, ok := explicit[p.String()]; ok {
-			return v
+			return v // explicit variable: exempt from env_prefix
+		}
+		if envPrefix != "" {
+			return recon.SnakeUpperPrefixTransform(envPrefix + "_")(p)
 		}
 		return recon.SnakeUpperTransform(p)
 	}

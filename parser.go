@@ -248,8 +248,19 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 		store.scopes[leaf].args = append(store.scopes[leaf].args, value)
 	}
 
+	// Passthrough: once the chain's passthrough leaf has been entered, every
+	// remaining token — flag-shaped, "--", anything — is a raw positional.
+	passthrough := func() bool {
+		return chain[len(chain)-1].Passthrough && depth == len(chain)
+	}
+
 	for i := 0; i < len(argv); i++ {
 		tok := argv[i]
+
+		if passthrough() {
+			addArg(tok)
+			continue
+		}
 
 		if !terminated && tok == "--" { // explicit end of flags; the rest are
 			terminated = true  // positional, even flag-looking tokens (and any
@@ -280,6 +291,11 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 			}
 			var value string
 			switch {
+			case fdef.Type == "count":
+				if hasInline {
+					return nil, &ParseError{Msg: fmt.Sprintf("flag %q counts occurrences and takes no value", name), Flag: name}
+				}
+				value = "1" // each occurrence appends one marker; the binder tallies them
 			case fdef.Type == "bool":
 				value = "true"
 				if hasInline {
@@ -741,8 +757,12 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 		if !ok {
 			return 0, &ParseError{Msg: fmt.Sprintf("unknown flag %q", short)}
 		}
-		if fdef.Type == "bool" {
-			if err := addFlag(idx, fdef, "true"); err != nil {
+		if fdef.Type == "bool" || fdef.Type == "count" {
+			v := "true"
+			if fdef.Type == "count" {
+				v = "1"
+			}
+			if err := addFlag(idx, fdef, v); err != nil {
 				return 0, err
 			}
 			continue
@@ -876,11 +896,20 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 		if !ok {
 			continue
 		}
-		if def, ok := findFlagDef(defs, name); ok && def.DottedKeys {
-			if err := coerceMapDotted(v.Field(i), raw); err != nil {
-				return &ParseError{Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
+		if def, ok := findFlagDef(defs, name); ok {
+			switch {
+			case def.DottedKeys:
+				if err := coerceMapDotted(v.Field(i), raw); err != nil {
+					return &ParseError{Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
+				}
+				continue
+			case def.Type == "count":
+				// Each argv occurrence appended one marker; the field is the tally.
+				if f := v.Field(i); f.CanSet() && f.Kind() == reflect.Int {
+					f.SetInt(int64(len(raw)))
+				}
+				continue
 			}
-			continue
 		}
 		if err := coerce(v.Field(i), raw); err != nil {
 			return &ParseError{Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}

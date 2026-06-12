@@ -222,6 +222,84 @@ func TestWithLifecycle_customPlanKeepsUnwindContract(t *testing.T) {
 	}
 }
 
+// panicValueHandlers panics in the leaf's Run with an arbitrary value, to
+// exercise the PanicError contract across value shapes.
+type panicValueHandlers struct {
+	log *[]string
+	val any
+}
+
+func (t *panicValueHandlers) App() CommandHandlers { return &recHandler{name: "app", log: t.log} }
+func (t *panicValueHandlers) AppRun() CommandHandlers {
+	return &panicRunHandler{recHandler{name: "run", log: t.log}, t.val}
+}
+
+type panicRunHandler struct {
+	recHandler
+	val any
+}
+
+func (h *panicRunHandler) Run(context.Context, *Context) { panic(h.val) }
+
+// A recovered panic reaches the funnel as a *PanicError: the recovery-point
+// stack rides along, Error() stays the panicked value alone (the default
+// funnel's one-line output is pinned by the unwind test above), and a panicked
+// error value keeps its sentinels and category tags through Unwrap.
+func TestPanicError(t *testing.T) {
+	// capture runs argv against handlers and returns what the funnel was handed.
+	capture := func(t *testing.T, h any) error {
+		t.Helper()
+		var got error
+		p, _, _ := newTestProgram(h, []string{"run"})
+		p.WithErrorFn(func(_ context.Context, rtx *Context, err error) { got = err })
+		if code, _ := p.run(p.args); code != 1 {
+			t.Fatalf("run() = %d, want the panic path's floored 1", code)
+		}
+		return got
+	}
+
+	t.Run("error value: stack + message + unwrap", func(t *testing.T) {
+		var log []string
+		got := capture(t, &haltHandlers{log: &log})
+		var pe *PanicError
+		if !errors.As(got, &pe) {
+			t.Fatalf("funneled %T, want a *PanicError", got)
+		}
+		if pe.Error() != "setup failed" {
+			t.Errorf("Error() = %q, want the panicked message verbatim", pe.Error())
+		}
+		if !strings.Contains(string(pe.Stack), "PreRun") {
+			t.Error("Stack does not name the panicking hook")
+		}
+		if !strings.Contains(string(pe.Stack), "panicPreRunHandler") {
+			t.Error("Stack does not name the panicking type")
+		}
+	})
+
+	t.Run("tagged error: category survives the wrapping", func(t *testing.T) {
+		var log []string
+		got := capture(t, &panicValueHandlers{log: &log, val: UsageError(errors.New("bad input"))})
+		if CategoryOf(got) != CategoryUsage {
+			t.Errorf("CategoryOf = %v, want usage — the tag must survive PanicError", CategoryOf(got))
+		}
+	})
+
+	t.Run("non-error value: rendered, nothing to unwrap", func(t *testing.T) {
+		var log []string
+		got := capture(t, &panicValueHandlers{log: &log, val: 42})
+		var pe *PanicError
+		if !errors.As(got, &pe) {
+			t.Fatalf("funneled %T, want a *PanicError", got)
+		}
+		if pe.Error() != "42" {
+			t.Errorf("Error() = %q, want \"42\"", pe.Error())
+		}
+		if pe.Unwrap() != nil {
+			t.Errorf("Unwrap() = %v, want nil for a non-error value", pe.Unwrap())
+		}
+	})
+}
+
 // ── documented examples ──────────────────────────────────────────────────────
 
 // exHandlers is the example programs' handler set: every hook prints itself.

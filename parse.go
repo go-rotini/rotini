@@ -23,6 +23,7 @@ type ResolvedCommand struct {
 	Commands              []CommandDef
 	Remotes               []RemoteDef
 	Discovery             *RemoteDiscoveryDef
+	Passthrough           bool
 }
 
 func rootFrame(def Definition) ResolvedCommand {
@@ -31,6 +32,7 @@ func rootFrame(def Definition) ResolvedCommand {
 		Flags: def.Flags, Arguments: def.Arguments,
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Remotes: def.RemoteCommands, Discovery: def.Discovery,
+		Passthrough: def.Passthrough,
 	}
 }
 
@@ -40,6 +42,7 @@ func cmdFrame(c CommandDef) ResolvedCommand {
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Remotes: c.Remotes, Discovery: c.Discovery,
+		Passthrough: c.Passthrough,
 	}
 }
 
@@ -55,6 +58,9 @@ func cmdFrame(c CommandDef) ResolvedCommand {
 // handler via [Parser.Parse].
 func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDispatch) {
 	chain := []ResolvedCommand{rootFrame(def)}
+	if def.Passthrough {
+		return chain, nil // a passthrough root: every token is a positional
+	}
 	for i := 0; i < len(argv); i++ {
 		tok := argv[i]
 		if tok == "--" {
@@ -63,7 +69,7 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDisp
 		if isFlag(tok) {
 			name, _, hasInline := splitFlag(tok)
 			// Skip a separate value token so it is not mistaken for a command.
-			if fd, _, ok := findFlag(chain, name); ok && fd.Type != "bool" && !hasInline {
+			if fd, _, ok := findFlag(chain, name); ok && takesValue(fd) && !hasInline {
 				i++
 			}
 			continue
@@ -79,6 +85,9 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDisp
 			frame := cmdFrame(child)
 			frame.Matched = tok // record the token used (name or alias) for deprecation detection
 			chain = append(chain, frame)
+			if frame.Passthrough {
+				break // raw tokens from here on — no further descent, no flag skipping
+			}
 			continue
 		}
 		if rd, ok := findRemote(cur, tok); ok {

@@ -18,6 +18,11 @@
       "$ref": "#/definitions/Command",
       "description": "The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, schemas) live at the document level beside it."
     },
+    "env_prefix": {
+      "type": "string",
+      "pattern": "^[A-Z][A-Z0-9_]*[A-Z0-9]$|^[A-Z]$",
+      "description": "Document-level prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator)."
+    },
     "configuration_files": {
       "type": "array",
       "description": "Config-file sources the program loads at startup (document-level). Per-command 'config' inputs bind typed values from these by name + key.",
@@ -180,6 +185,10 @@
           "items": {
             "type": "string"
           }
+        },
+        "passthrough": {
+          "type": "boolean",
+          "description": "When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no remote commands or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion."
         }
       }
     },
@@ -254,7 +263,7 @@
         },
         "type": {
           "type": "string",
-          "description": "The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.) The contract applies element-wise to arrays: 'array' with items naming a non-builtin type — including items: { $ref: \"#/schemas/X\" }, which generates a named-type slice — parses argv elements only if that Go type implements encoding.TextUnmarshaler. Named schemas are primarily for 'output' and 'stdin' document shapes, which DECODE structured documents rather than parse argv text."
+          "description": "The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. 'count' (FLAG inputs only) declares a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv → 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, …) is rejected — the tally is computed, never parsed. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.) The contract applies element-wise to arrays: 'array' with items naming a non-builtin type — including items: { $ref: \"#/schemas/X\" }, which generates a named-type slice — parses argv elements only if that Go type implements encoding.TextUnmarshaler. Named schemas are primarily for 'output' and 'stdin' document shapes, which DECODE structured documents rather than parse argv text."
         },
         "import": {
           "type": "string",
@@ -402,6 +411,11 @@
               "type": "string",
               "minLength": 1,
               "description": "Env inputs only, map-typed ('map'/'object' → map[string]any): the separator that aggregates a FAMILY of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the SNAKE_UPPER of the input's name. With name: http, variable: ACME_HTTP, nesting: \"__\" — ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: \"30\", retry: {max: \"9\"}} (segments lowercased; values are strings). 'required: true' errors when no matching variables exist. 'default:' is rejected — seed defaults in code or config instead."
+            },
+            "placeholder": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Display name for this input's VALUE in generated help/man/usage — `--file <PATH>` instead of the Go type token, `<PATH>` instead of the argument's name. Pure presentation: parsing, completion, and the generated field are untouched. Conventionally UPPERCASE or <angle-bracketed>."
             }
           }
         }
@@ -734,9 +748,11 @@
           "enum": [
             "json",
             "yaml",
-            "toml"
+            "toml",
+            "jsonc",
+            "dotenv"
           ],
-          "description": "Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) — declare it when the extension is absent or misleading."
+          "description": "Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) — declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path."
         },
         "schema": {
           "$ref": "#/definitions/Schema",

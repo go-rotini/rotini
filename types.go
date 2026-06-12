@@ -30,6 +30,7 @@ type Definition struct {
 	Commands         []CommandDef
 	RemoteCommands   []RemoteDef         // co-located plugin sub-commands (Model 3)
 	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on the root command (nil = off)
+	Passthrough      bool                // every token after the program name is a raw positional (no flag parsing)
 }
 
 // FlagGroupKind names a cross-flag presence rule. The value is the spec's `kind`.
@@ -81,6 +82,12 @@ type RemoteDef struct {
 // `var BindMeta = rotini.BindMeta{…}`; main.go passes it to [NewBinder].
 type BindMeta struct {
 	ConfigFiles []ConfigFile // document-level configuration_files sources, in declared order
+	// EnvPrefix scopes every DERIVED env-var name (the SNAKE_UPPER projections:
+	// plain env inputs without variable:, envnest bases, flags' env fallbacks)
+	// under "<EnvPrefix>_". Explicit variable: names are exempt, and with a
+	// prefix set the unprefixed conventional names no longer bind. The spec's
+	// document-level env_prefix; "" = no prefix (the default projection).
+	EnvPrefix string
 	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
 	// self-contained JSON Schema the binder validates the decoded payload against.
 	StdinSchemas map[string]string
@@ -148,6 +155,7 @@ type CommandDef struct {
 	Commands              []CommandDef
 	Remotes               []RemoteDef         // co-located remote binaries dispatched as sub-commands of this command
 	Discovery             *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
+	Passthrough           bool                // every token after this command is a raw positional (no flag parsing)
 }
 
 // Constraints carries the optional JSON-schema-style validation bounds a spec may
@@ -167,6 +175,11 @@ type Constraints struct {
 	MaxItems  int     // maximum item count; 0 = unset
 	Pattern   string  // regular expression the value must contain (string types); "" = unset
 }
+
+// takesValue reports whether a flag consumes a value token: everything except
+// the presence flags — bool (value form is inline-only) and count (no value at
+// all; each occurrence increments the generated int field).
+func takesValue(fd FlagDef) bool { return fd.Type != "bool" && fd.Type != "count" }
 
 // FlagDef describes a single flag of a command. Name is the logical name and
 // matches the `rotini:"<name>"` tag on the corresponding generated input field.

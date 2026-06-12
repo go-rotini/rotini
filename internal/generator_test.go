@@ -777,6 +777,193 @@ const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotin
 
 const helpEnabledConf = confSchemaHeader + "generate:\n  features:\n    help:\n      enabled: true\n"
 
+const placeholderSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+	"command:\n" +
+	"  name: mycli\n" +
+	"  summary: my cli\n" +
+	"  commands:\n" +
+	"    - name: build\n" +
+	"      summary: build the project\n" +
+	"      inputs:\n" +
+	"        arguments:\n" +
+	"          - name: target\n" +
+	"            summary: thing to build\n" +
+	"            schema:\n" +
+	"              type: string\n" +
+	"              required: true\n" +
+	"              placeholder: TARGET\n" +
+	"        flags:\n" +
+	"          - name: out\n" +
+	"            summary: write result here\n" +
+	"            identifiers: [-o, --out]\n" +
+	"            schema:\n" +
+	"              type: string\n" +
+	"              placeholder: <PATH>\n" +
+	"          - name: verbose\n" +
+	"            summary: chattier output\n" +
+	"            identifiers: [--verbose]\n" +
+	"            schema:\n" +
+	"              type: bool\n"
+
+const envPrefixSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+	"env_prefix: ACME\n" +
+	"command:\n" +
+	"  name: mycli\n" +
+	"  summary: my cli\n" +
+	"  inputs:\n" +
+	"    env:\n" +
+	"      - name: home\n" +
+	"        summary: home override\n" +
+	"        schema: { type: string }\n" +
+	"      - name: region\n" +
+	"        summary: region override\n" +
+	"        schema: { type: string, variable: PLAIN_REGION }\n" +
+	"      - name: http\n" +
+	"        summary: http family\n" +
+	"        schema: { type: map, nesting: \"__\" }\n"
+
+// env_prefix flows into every codegen artifact that names a DERIVED env var:
+// the BindMeta descriptor (the runtime's signal), the envnest tag's base, and
+// the help page's Environment rows — while an explicit variable: stays exact.
+func TestGenerateEnvPrefix(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), envPrefixSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
+		`EnvPrefix: "ACME"`,      // BindMeta carries the prefix to the binder
+		`envnest:"ACME_HTTP,__"`, // derived family base is prefixed
+		`env:"PLAIN_REGION"`,     // explicit variable: exempt
+	)
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help_mycli.txt"),
+		"ACME_HOME",    // derived row shows the real, prefixed name
+		"PLAIN_REGION", // explicit row stays exact
+	)
+}
+
+// A passthrough command's CommandDef literal carries the flag — the parser's
+// signal that every token after the command is a raw positional.
+func TestGeneratePassthrough(t *testing.T) {
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: mycli\n" +
+		"  summary: my cli\n" +
+		"  commands:\n" +
+		"    - name: exec\n" +
+		"      summary: run a wrapped command\n" +
+		"      passthrough: true\n" +
+		"      inputs:\n" +
+		"        arguments:\n" +
+		"          - name: cmdline\n" +
+		"            summary: the wrapped command line\n" +
+		"            schema: { type: \"[]string\" }\n"
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
+		"Passthrough: true,",
+	)
+}
+
+const countSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+	"command:\n" +
+	"  name: mycli\n" +
+	"  summary: my cli\n" +
+	"  commands:\n" +
+	"    - name: build\n" +
+	"      summary: build the project\n" +
+	"      inputs:\n" +
+	"        flags:\n" +
+	"          - name: verbose\n" +
+	"            summary: chattier output, per occurrence\n" +
+	"            identifiers: [-v, --verbose]\n" +
+	"            schema:\n" +
+	"              type: count\n"
+
+// A count flag generates an int field, a Type:"count" FlagDef (the parser's
+// signal that occurrences increment and no value is consumed), and a help row
+// with no value token — exactly a bool's presentation.
+func TestGenerateCountFlag(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), countSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	fw := readFileString(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"))
+	if !strings.Contains(fw, `Type: "count"`) {
+		t.Errorf("FlagDef literal missing Type:\"count\":\n%s", fw)
+	}
+	var field string
+	for _, line := range strings.Split(fw, "\n") {
+		if strings.Contains(line, "rotini:\"verbose\"") {
+			field = line
+			break
+		}
+	}
+	if !strings.Contains(field, "Verbose") || !strings.Contains(field, "int") {
+		t.Errorf("generated field = %q, want an int tally", field)
+	}
+	build := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help_mycli_build.txt")
+	mustContain(t, build, "-v,--verbose")
+	if got := readFileString(t, build); strings.Contains(got, "--verbose count") || strings.Contains(got, "--verbose int") {
+		t.Errorf("count flag shows a value token in help:\n%s", got)
+	}
+}
+
+// A placeholder replaces the value's display token only: the flag row shows it
+// instead of the Go type, the usage line shows it inside the argument's
+// existing <>/[] decoration, and the generated field/parse behavior is
+// untouched (the field stays a plain string).
+func TestGeneratePlaceholder(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), placeholderSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	build := filepath.Join(tmp, "internal", "cmd", "mycli", "embed", "help_mycli_build.txt")
+	mustContain(t, build,
+		"mycli build <TARGET> [flags]", // placeholder under the required decoration
+		"-o,--out <PATH>",              // placeholder instead of "string"
+	)
+	if got := readFileString(t, build); strings.Contains(got, "--out string") {
+		t.Errorf("flag row still shows the type token despite a placeholder:\n%s", got)
+	}
+	// Presentation only: the generated input field is untouched (a plain
+	// string; gofmt may pad the alignment, so match the pieces per line).
+	fw := readFileString(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"))
+	var outField string
+	for _, line := range strings.Split(fw, "\n") {
+		if strings.Contains(line, "rotini:\"out\"") {
+			outField = line
+			break
+		}
+	}
+	if !strings.Contains(outField, "Out") || !strings.Contains(outField, "string") {
+		t.Errorf("generated out field = %q, want a plain string field", outField)
+	}
+}
+
 // TestGenerateHelpEnabled verifies that, with generate.help enabled, the
 // framework file gains the embedded Help<Prefix> vars + an alias-aware Help
 // resolver, and that each command's help .txt is rendered from the spec (the
