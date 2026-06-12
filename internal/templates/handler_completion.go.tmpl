@@ -22,29 +22,30 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	var inputs {{.RootCommandName}}CompletionInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
+{{- if .HasHelp}}
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+{{- end}}
 		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
+{{- if .HasHelp}}
 
-	args := inputs.{{.RootCommandName}}Completion.Arguments
-	flags := inputs.{{.RootCommandName}}Completion.Flags
-
-	if flags.Help {
+	if inputs.{{.RootCommandName}}Completion.Flags.Help {
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
 		rtx.SignalExit(0)
 		return
 	}
+{{- end}}
 
 	// The shell arg is enum-constrained in the spec, so an unsupported shell
 	// never reaches here — Parse already rejected it.
-	script, err := Completion(args.Shell)
+	script, err := Completion(inputs.{{.RootCommandName}}Completion.Arguments.Shell)
 	if err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
 		rtx.SignalExit(1)
 		return
 	}
 
-	// The `source <(mycli completion zsh)` idiom: the script, stdout, nothing else.
+	// The `source <({{.Package}} completion zsh)` idiom: the script, stdout, nothing else.
 	fmt.Fprintln(rtx.Stdout, script)
 }

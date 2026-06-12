@@ -22,17 +22,20 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	var inputs {{.RootCommandName}}VersionInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
+{{- if .HasHelp}}
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
-		rtx.SignalExit(1)
+{{- end}}
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
+{{- if .HasHelp}}
 
-	flags := inputs.{{.RootCommandName}}Version.Flags
-	if flags.Help {
+	if inputs.{{.RootCommandName}}Version.Flags.Help {
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
 		rtx.SignalExit(0)
 		return
 	}
+{{- end}}
 
 	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
 	fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)

@@ -3,11 +3,14 @@ package internal
 // This file owns the `rotini initialize` operation: scaffolding a new CLI's
 // seed spec and conf under <package>/<name>/ of the current module, validating
 // them, then running one init-style generate pass over them. Init-style differs
-// from a normal generate in exactly one way: the missing root/help/version
-// handler files are seeded from the wired init templates (working -h/--help,
-// -v/--version, and help/version commands) instead of empty stubs — see
-// writeHandlerStubs. Every later `rotini generate` is the normal process; to
-// opt out of the wired handlers, delete those handler files and regenerate.
+// from a normal generate in exactly one way: the missing handler files of
+// --wire'd commands are seeded from the wired init templates instead of empty
+// stubs — see writeHandlerStubs. Everything is opt-in: a bare `rotini init`
+// seeds a minimal root (plain stub, no flags, no commands); `--wire help`
+// brings -h/--help + the help command + the help feature, `--wire version`
+// brings -v/--version + the version command, and so on. Every later
+// `rotini generate` is the normal process; to opt out of a wired handler,
+// delete the handler file and regenerate.
 
 import (
 	"errors"
@@ -44,25 +47,25 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 // double (see [GenerateFn]).
 type InitializeFn = func(name, format string, force bool, wire []string) error
 
-// wireFeatures are the `rotini init --wire` vocabulary. "completion" enables
-// the feature AND seeds its serving command + wired handler; "version" seeds
-// the version command + wired handler (the root -v/--version flag is part of
-// the default root wiring either way); "man" and "markdown" only flip their
-// conf feature toggles — embeds + resolver, no command (a man-printing
-// command is unconventional; serve it from your own handler if you want one,
-// rotini's own CLI is the worked example). "help" is default-wired already
-// (the wired root handler's -h/usage output depends on the help embeds) —
-// naming it is explicit and idempotent. "all" expands to everything.
+// wireFeatures are the `rotini init --wire` vocabulary. Everything is opt-in:
+// "help" enables the help feature AND seeds the -h/--help flags, the help
+// command, and their wired handlers; "version" seeds the root -v/--version
+// flag, the version command, and its wired handler; "completion" enables the
+// feature and seeds its serving command + wired handler; "man" and "markdown"
+// only flip their conf feature toggles — embeds + resolver, no command (a
+// man-printing command is unconventional; serve it from your own handler if
+// you want one, rotini's own CLI is the worked example). "all" expands to
+// everything. A bare init (no --wire) seeds a minimal skeleton.
 var wireFeatures = []string{"all", "help", "man", "completion", "markdown", "version"}
 
 // Initialize scaffolds a new standalone rotini CLI named name: the seed
 // .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the
 // current module (the package dir defaults to "cmd"; a module-root conf's
 // `initialize` block overrides it), validated and then generated init-style —
-// so the new CLI ships with a wired root handler (-h/--help, -v/--version),
-// wired help/version command handlers, and the entrypoint main.go. format
-// selects the serialization (yaml, jsonc, json, or toml). The seeds are
-// create-once: they are left untouched unless force is set.
+// the entrypoint main.go plus, per --wire value, the wired flags/commands/
+// handlers (see wireFeatures). format selects the serialization (yaml, jsonc,
+// json, or toml). The seeds are create-once: they are left untouched unless
+// force is set.
 func Initialize(name, format string, force bool, version string, wire []string) error {
 	return NewProcessor(version).Initialize(name, format, force, wire)
 }

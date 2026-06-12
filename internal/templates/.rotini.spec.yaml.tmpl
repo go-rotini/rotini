@@ -1,10 +1,13 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/{{.Version}}/schema-spec.json
 command:
   name: {{.Package}}
+{{- if or .WireHelp .WireCompletion .WireVersion}}
   commands:
+{{- end}}
 {{- if .WireVersion}}
     - name: version
       summary: print version
+{{- if .WireHelp}}
       inputs:
         flags:
           - name: help
@@ -15,6 +18,8 @@ command:
             schema:
               type: bool
 {{- end}}
+{{- end}}
+{{- if .WireHelp}}
     - name: help
       summary: print help for a command
       inputs:
@@ -31,6 +36,7 @@ command:
               - --help
             schema:
               type: bool
+{{- end}}
 {{- if .WireCompletion}}
     - name: completion
       summary: print a shell completion script
@@ -46,6 +52,7 @@ command:
                 - zsh
                 - fish
                 - powershell
+{{- if .WireHelp}}
         flags:
           - name: help
             summary: print help
@@ -55,8 +62,11 @@ command:
             schema:
               type: bool
 {{- end}}
+{{- end}}
+{{- if or .WireHelp .WireVersion}}
   inputs:
     flags:
+{{- if .WireVersion}}
       - name: version
         summary: print version
         identifiers:
@@ -64,6 +74,8 @@ command:
           - --version
         schema:
           type: bool
+{{- end}}
+{{- if .WireHelp}}
       - name: help
         summary: print help
         identifiers:
@@ -71,3 +83,5 @@ command:
           - --help
         schema:
           type: bool
+{{- end}}
+{{- end}}

@@ -138,9 +138,11 @@ type templateSeedData struct {
 	Version string
 	Package string
 	// the `rotini init --wire` toggles. WireMan/WireMarkdown flip conf feature
-	// toggles only; WireCompletion also seeds the completion command (+ wired
-	// handler); WireVersion seeds the version command (+ wired handler) — the
-	// root -v flag is default wiring either way. Help is default-wired — no toggle.
+	// toggles only; WireHelp enables the help feature and seeds the -h flags +
+	// the help command; WireCompletion seeds the completion command;
+	// WireVersion seeds the root -v flag + the version command. Each wired
+	// command also gets its wired handler at the init-style generate.
+	WireHelp       bool
 	WireMan        bool
 	WireCompletion bool
 	WireMarkdown   bool
@@ -153,6 +155,7 @@ func renderSeedFile(name, text, version, pkg string, target fileFormat, wired ma
 	rendered, err := renderTemplate(name, text, templateSeedData{
 		Version:        version,
 		Package:        pkg,
+		WireHelp:       wired["help"],
 		WireMan:        wired["man"],
 		WireCompletion: wired["completion"],
 		WireMarkdown:   wired["markdown"],
@@ -190,6 +193,13 @@ func renderMainFile(pkg, pkgAlias string) ([]byte, error) {
 // stub/root/version/help handler templates (the stub reads only Package and
 // HandlersType).
 type templateHandlerData struct {
+	// HasHelp / HasVersion mirror what the seed spec declared (derived from
+	// the root's flags at generate time): the wired handler templates emit the
+	// help/version branches — and any Help* embed references — only when the
+	// wiring exists, so a partially wired seed still compiles.
+	HasHelp    bool
+	HasVersion bool
+
 	Package         string
 	HandlersType    string
 	RootCommandName string
@@ -203,21 +213,24 @@ func renderHandlerStubFile(pkg, handlersType string) ([]byte, error) {
 	})
 }
 
-func renderHandlerRootFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
+func renderHandlerRootFile(pkg, handlersType, rootCommandName, helpVar string, hasHelp, hasVersion bool) ([]byte, error) {
 	return renderGoFile("handler_root", templateHandlerRoot, templateHandlerData{
 		Package:         pkg,
 		HandlersType:    handlersType,
 		RootCommandName: rootCommandName,
 		HelpVar:         helpVar,
+		HasHelp:         hasHelp,
+		HasVersion:      hasVersion,
 	})
 }
 
-func renderHandlerVersionFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
+func renderHandlerVersionFile(pkg, handlersType, rootCommandName, helpVar string, hasHelp bool) ([]byte, error) {
 	return renderGoFile("handler_version", templateHandlerVersion, templateHandlerData{
 		Package:         pkg,
 		HandlersType:    handlersType,
 		RootCommandName: rootCommandName,
 		HelpVar:         helpVar,
+		HasHelp:         hasHelp,
 	})
 }
 
@@ -230,12 +243,13 @@ func renderHandlerHelpFile(pkg, handlersType, rootCommandName, helpVar string) (
 	})
 }
 
-func renderHandlerCompletionFile(pkg, handlersType, rootCommandName, helpVar string) ([]byte, error) {
+func renderHandlerCompletionFile(pkg, handlersType, rootCommandName, helpVar string, hasHelp bool) ([]byte, error) {
 	return renderGoFile("handler_completion", templateHandlerCompletion, templateHandlerData{
 		Package:         pkg,
 		HandlersType:    handlersType,
 		RootCommandName: rootCommandName,
 		HelpVar:         helpVar,
+		HasHelp:         hasHelp,
 	})
 }
 

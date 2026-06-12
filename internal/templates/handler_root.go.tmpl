@@ -35,24 +35,34 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 			}
 		}
 		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", msg)
+{{- if .HasHelp}}
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+{{- end}}
 		rtx.SignalExit(rotini.ExitUsage) // bad input → the conventional usage exit code
 		return
 	}
 
 	flags := inputs.{{.RootCommandName}}.Flags
 	switch {
+{{- if .HasHelp}}
 	case flags.Help:
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
 		rtx.SignalExit(0)
 		return
+{{- end}}
+{{- if .HasVersion}}
 	case flags.Version:
 		v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
 		fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
 		rtx.SignalExit(0)
 		return
+{{- end}}
 	default:
+{{- if .HasHelp}}
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+{{- else}}
+		fmt.Fprintln(rtx.Stderr, "Error: no input provided")
+{{- end}}
 		rtx.SignalExit(1)
 		return
 	}

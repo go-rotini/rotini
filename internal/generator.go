@@ -1083,24 +1083,45 @@ func writeHandlerStubs(gp *genProgram, lay layout, initStyle bool) error {
 }
 
 // renderHandlerSeed renders the seed content for one command's handler file:
-// the empty stub, or — init-style only — the wired root/help/version handler
-// matched by the command's type prefix. The wired templates lean on the help
-// feature's embed vars (Help<Prefix>) and the seed spec's flag/argument names,
-// both guaranteed by the `rotini initialize` seeds they are reserved for.
+// the empty stub, or — init-style only — the wired root/help/version/completion
+// handler matched by the command's type prefix. What the seed spec DECLARED is
+// the source of truth: a wired command exists only when its --wire value asked
+// for it, and the root's help/version branches (plus any Help* embed
+// references) are emitted only when the root declares those flags — so a
+// partially wired seed (e.g. --wire version without --wire help) still
+// compiles. A root with neither flag gets the plain stub: nothing wired,
+// nothing special.
 func renderHandlerSeed(gp *genProgram, lay layout, c genCommand, initStyle bool) ([]byte, error) {
 	if initStyle {
+		hasHelp := hasInputFlag(gp.rootInputs, "help")
+		hasVersion := hasInputFlag(gp.rootInputs, "version")
 		switch c.prefix {
 		case gp.rootPascal:
-			return renderHandlerRootFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal)
+			if hasHelp || hasVersion {
+				return renderHandlerRootFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal, hasHelp, hasVersion)
+			}
 		case gp.rootPascal + "Help":
 			return renderHandlerHelpFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Help")
 		case gp.rootPascal + "Version":
-			return renderHandlerVersionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Version")
+			return renderHandlerVersionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Version", hasHelp)
 		case gp.rootPascal + "Completion":
-			return renderHandlerCompletionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Completion")
+			return renderHandlerCompletionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Completion", hasHelp)
 		}
 	}
 	return renderHandlerStubFile(lay.handlerPkgName, c.handler)
+}
+
+// hasInputFlag reports whether in declares a flag named name.
+func hasInputFlag(in *Inputs, name string) bool {
+	if in == nil {
+		return false
+	}
+	for _, f := range in.Flags {
+		if f.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint

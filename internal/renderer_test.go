@@ -23,11 +23,19 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 	if _, err := renderHandlerStubFile("cli", "appSubHandlers"); err != nil {
 		t.Errorf("handler stub: %v", err)
 	}
-	if _, err := renderHandlerRootFile("cli", "appHandlers", "App", "HelpApp"); err != nil {
+	if _, err := renderHandlerRootFile("cli", "appHandlers", "App", "HelpApp", true, true); err != nil {
 		t.Errorf("handler root: %v", err)
 	}
-	if _, err := renderHandlerVersionFile("cli", "appVersionHandlers", "App", "HelpAppVersion"); err != nil {
+	// The partially wired shapes render too (version-only root; help-less
+	// version handler).
+	if _, err := renderHandlerRootFile("cli", "appHandlers", "App", "HelpApp", false, true); err != nil {
+		t.Errorf("handler root (version only): %v", err)
+	}
+	if _, err := renderHandlerVersionFile("cli", "appVersionHandlers", "App", "HelpAppVersion", true); err != nil {
 		t.Errorf("handler version: %v", err)
+	}
+	if _, err := renderHandlerVersionFile("cli", "appVersionHandlers", "App", "HelpAppVersion", false); err != nil {
+		t.Errorf("handler version (no help): %v", err)
 	}
 	if _, err := renderHandlerHelpFile("cli", "appHelpHandlers", "App", "HelpAppHelp"); err != nil {
 		t.Errorf("handler help: %v", err)
