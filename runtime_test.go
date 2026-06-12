@@ -133,63 +133,63 @@ func TestRun_exitCodePropagates(t *testing.T) {
 	}
 }
 
-func TestRun_mustGetRoutesToRecoveredPanicFn(t *testing.T) {
+func TestRun_mustGetRoutesToErrorFn(t *testing.T) {
 	var seen error
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		// What rotini.MustGet panics on a missing service; recovered into the funnel.
 		panic(&ServiceError{Key: "no-such-service"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithRecoveredPanicFn(func(_ context.Context, rtx *Context, err error) {
+	p.WithErrorFn(func(_ context.Context, rtx *Context, err error) {
 		seen = err
 		rtx.SignalExit(7)
 	})
 
 	code, err := p.run(p.args)
 	if code != 7 {
-		t.Fatalf("run() = %d, want 7 (RecoveredPanicFn's exit code)", code)
+		t.Fatalf("run() = %d, want 7 (ErrorFn's exit code)", code)
 	}
 	// The recovered panic is also returned to the caller (the new Execute err).
 	if !errors.Is(err, ErrServiceNotFound) {
 		t.Errorf("run returned err = %v, want it to wrap ErrServiceNotFound", err)
 	}
 	if !errors.Is(seen, ErrServiceNotFound) {
-		t.Errorf("RecoveredPanicFn got %v, want it to wrap ErrServiceNotFound", seen)
+		t.Errorf("ErrorFn got %v, want it to wrap ErrServiceNotFound", seen)
 	}
 	var se *ServiceError
 	if !errors.As(seen, &se) || se.Key != "no-such-service" {
-		t.Errorf("RecoveredPanicFn error did not carry the key: %v", seen)
+		t.Errorf("ErrorFn error did not carry the key: %v", seen)
 	}
 }
 
-func TestRun_recoveredPanicFnWithoutExitStillFails(t *testing.T) {
+func TestRun_errorFnWithoutExitStillFails(t *testing.T) {
 	// A funnel that classifies/logs but forgets to call rtx.Exit must not leak a
 	// success code out of a panic: dispatch floors the panic path to 1.
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic(&ServiceError{Key: "missing"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithRecoveredPanicFn(func(_ context.Context, _ *Context, _ error) {}) // no rtx.Exit
+	p.WithErrorFn(func(_ context.Context, _ *Context, _ error) {}) // no rtx.Exit
 	if code, _ := p.run(p.args); code != 1 {
 		t.Errorf("run() = %d, want 1 (panic path floors to non-zero)", code)
 	}
 }
 
-func TestRun_defaultRecoveredPanicFnPrintsAndReturns1(t *testing.T) {
+func TestRun_defaultErrorFnPrintsAndReturns1(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic("boom") // a non-error panic value is wrapped before the funnel
 	}}
 	p, _, errb := newTestProgram(h, []string{"run"})
 	code, err := p.run(p.args)
 	if code != 1 {
-		t.Fatalf("run() = %d, want 1 (default RecoveredPanicFn)", code)
+		t.Fatalf("run() = %d, want 1 (default ErrorFn)", code)
 	}
 	// A non-error panic value is wrapped and returned to the caller.
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("run returned err = %v, want it to carry %q", err, "boom")
 	}
 	if !strings.Contains(errb.String(), "boom") {
-		t.Errorf("default RecoveredPanicFn should print the error, stderr: %s", errb)
+		t.Errorf("default ErrorFn should print the error, stderr: %s", errb)
 	}
 }
 
@@ -202,7 +202,7 @@ func contains(ss []string, want string) bool {
 	return false
 }
 
-// --- rtx.Exit / teardown / RecoveredPanicFn behavior (see .docs/ROTINI_RTX_EXIT.md) ---
+// --- rtx.Exit / teardown / ErrorFn behavior (see .docs/ROTINI_RTX_EXIT.md) ---
 
 // act is an action injected into one named hook of one command.
 type act struct {
@@ -320,14 +320,14 @@ func TestRun_hardExitInTeardownSkipsRemainingTeardown(t *testing.T) {
 }
 
 // A hard Exit skips remaining teardown but does NOT bypass the panic funnel: a
-// panic recovered before the Exit is still routed to WithRecoveredPanicFn after the
+// panic recovered before the Exit is still routed to WithErrorFn after the
 // (skipped) teardown. Run panics, then the leaf's PostRun hard-Exits — the trailing
 // CascadingPostRuns are skipped, yet the funnel still fires with the panic.
 func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 	var log []string
 	var seen error
 	p, _, _ := newTestProgram(&panicThenHardExit{log: &log}, []string{"run"})
-	p.WithRecoveredPanicFn(func(_ context.Context, _ *Context, err error) { seen = err })
+	p.WithErrorFn(func(_ context.Context, _ *Context, err error) { seen = err })
 
 	code, err := p.run(p.args)
 
@@ -415,14 +415,14 @@ func TestRun_firstNonZeroExitWins(t *testing.T) {
 	}
 }
 
-// A panic runs all begun teardown first, then funnels to RecoveredPanicFn last.
-func TestRun_panicRunsTeardownThenRecoveredPanicFnLast(t *testing.T) {
+// A panic runs all begun teardown first, then funnels to ErrorFn last.
+func TestRun_panicRunsTeardownThenErrorFnLast(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "Run", do: func(*Context) { panic("boom") }},
 	}}, []string{"run"})
-	p.WithRecoveredPanicFn(func(_ context.Context, rtx *Context, err error) {
-		log = append(log, "recoveredPanicFn:"+err.Error())
+	p.WithErrorFn(func(_ context.Context, rtx *Context, err error) {
+		log = append(log, "errorFn:"+err.Error())
 		rtx.SignalExit(2)
 	})
 	code, _ := p.run(p.args)
@@ -430,25 +430,25 @@ func TestRun_panicRunsTeardownThenRecoveredPanicFnLast(t *testing.T) {
 		"app.CascadingPreRun", "run.CascadingPreRun",
 		"run.PreRun", "run.Run",
 		"run.PostRun", "run.CascadingPostRun", "app.CascadingPostRun",
-		"recoveredPanicFn:boom",
+		"errorFn:boom",
 	}
 	if !reflect.DeepEqual(log, want) {
-		t.Errorf("teardown-then-RecoveredPanicFn order:\n got=%v\nwant=%v", log, want)
+		t.Errorf("teardown-then-ErrorFn order:\n got=%v\nwant=%v", log, want)
 	}
 	if code != 2 {
-		t.Errorf("code = %d, want 2 (RecoveredPanicFn's exit)", code)
+		t.Errorf("code = %d, want 2 (ErrorFn's exit)", code)
 	}
 }
 
 // A panic inside a teardown hook is recovered: the remaining teardown still runs
-// and RecoveredPanicFn is funneled exactly once.
+// and ErrorFn is funneled exactly once.
 func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "PostRun", do: func(*Context) { panic("teardown-boom") }},
 	}}, []string{"run"})
 	calls := 0
-	p.WithRecoveredPanicFn(func(_ context.Context, rtx *Context, _ error) {
+	p.WithErrorFn(func(_ context.Context, rtx *Context, _ error) {
 		calls++
 		rtx.SignalExit(1)
 	})
@@ -457,7 +457,7 @@ func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 		t.Errorf("remaining teardown did not run after a teardown panic: %v", log)
 	}
 	if calls != 1 {
-		t.Errorf("RecoveredPanicFn called %d times, want 1", calls)
+		t.Errorf("ErrorFn called %d times, want 1", calls)
 	}
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)

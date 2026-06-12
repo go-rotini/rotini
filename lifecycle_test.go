@@ -75,7 +75,8 @@ func TestWithResolver_alias(t *testing.T) {
 }
 
 // A resolver error is a wiring-class failure: routed through the funnel,
-// exit floored to 1, no hooks run.
+// exit floored to 1, no hooks run, and pre-classified CategoryInternal —
+// unless the resolver tagged its own category, which must survive.
 func TestWithResolver_error(t *testing.T) {
 	var log []string
 	p, _, errb := newTestProgram(&testHandlers{log: &log}, []string{"run"})
@@ -91,6 +92,41 @@ func TestWithResolver_error(t *testing.T) {
 	}
 	if len(log) != 0 {
 		t.Errorf("hooks ran despite a resolver failure: %v", log)
+	}
+	if CategoryOf(err) != CategoryInternal {
+		t.Errorf("CategoryOf = %v, want internal (an untagged resolver error is a wiring-class failure)", CategoryOf(err))
+	}
+
+	// A resolver that classifies its own error keeps that classification.
+	p2, _, _ := newTestProgram(&testHandlers{log: &log}, []string{"run"})
+	p2.WithResolver(func(Definition, []string) (Resolution, error) {
+		return Resolution{}, UsageError(errors.New("bad token"))
+	})
+	_, err2 := p2.run(p2.args)
+	if CategoryOf(err2) != CategoryUsage {
+		t.Errorf("CategoryOf = %v, want usage — the resolver's own tag must survive", CategoryOf(err2))
+	}
+}
+
+// The pre-classified diagnostics make the documented one-switch funnel work:
+// a custom funnel maps CategoryInternal to ExitInternal with no taxonomy
+// re-derivation of its own.
+func TestWithErrorFn_categorySwitch(t *testing.T) {
+	def := Definition{Name: "app", Handler: "Nope"} // no such handler method: a wiring failure
+	p, _, _ := newTestProgram(&testHandlers{log: &[]string{}}, nil)
+	p.def = def
+	p.WithErrorFn(func(_ context.Context, rtx *Context, err error) {
+		switch CategoryOf(err) {
+		case CategoryUsage:
+			rtx.SignalExit(ExitUsage)
+		case CategoryInternal:
+			rtx.SignalExit(ExitInternal)
+		default:
+			rtx.SignalExit(1)
+		}
+	})
+	if code, _ := p.run(p.args); code != ExitInternal {
+		t.Errorf("run() = %d, want %d via the category switch", code, ExitInternal)
 	}
 }
 

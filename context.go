@@ -11,7 +11,7 @@ import (
 
 // ErrServiceNotFound is the sentinel reported when a registry key is unbound — the
 // [MustGet] panics a [*ServiceError] wrapping it, which the runtime
-// recovers and routes to RecoveredPanicFn. A funnel classifies it with errors.Is:
+// recovers and routes to ErrorFn. A funnel classifies it with errors.Is:
 //
 //	case errors.Is(err, rotini.ErrServiceNotFound):
 var ErrServiceNotFound = errors.New("rotini: service not found")
@@ -70,12 +70,12 @@ type Context struct {
 	// the consequences.
 	Args []string
 
-	services         map[string]any
-	chain            []ResolvedCommand                                  // resolved command path, root → leaf
-	recoveredPanicFn func(ctx context.Context, rtx *Context, err error) // funnel for MustGet/panic failures (see Program.WithRecoveredPanicFn)
-	exitCode         int                                                // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
-	stopped          bool                                               // an exit was requested; forward progress (setup/PreRun/Run) halts
-	exitNow          bool                                               // [Context.Exit] (hard) was called: skip remaining teardown too
+	services map[string]any
+	chain    []ResolvedCommand                                  // resolved command path, root → leaf
+	errorFn  func(ctx context.Context, rtx *Context, err error) // funnel for framework diagnostics + recovered panics (see Program.WithErrorFn)
+	exitCode int                                                // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
+	stopped  bool                                               // an exit was requested; forward progress (setup/PreRun/Run) halts
+	exitNow  bool                                               // [Context.Exit] (hard) was called: skip remaining teardown too
 }
 
 // NewContext returns an empty [Context] with an initialized registry and no
@@ -184,7 +184,7 @@ func (rtx *Context) Chain() []ResolvedCommand {
 //	}
 //
 // Value reports a miss as nil and never panics; prefer the typed [Get] (comma-ok)
-// or [MustGet] (panics → RecoveredPanicFn funnel) for type-safe retrieval.
+// or [MustGet] (panics → ErrorFn funnel) for type-safe retrieval.
 func (rtx *Context) Value(key string) any {
 	if rtx == nil {
 		return nil
@@ -199,7 +199,7 @@ func (rtx *Context) Value(key string) any {
 // Teardown is unaffected: every PostRun/CascadingPostRun whose paired setup hook
 // began still runs, in reverse, so cleanup is never skipped. The first non-zero
 // code wins, so a later SignalExit (e.g. from a teardown hook) cannot change the
-// verdict. SignalExit does not trigger RecoveredPanicFn — it is a clean, deliberate stop,
+// verdict. SignalExit does not trigger ErrorFn — it is a clean, deliberate stop,
 // not an error. The process exits with the recorded code once the lifecycle,
 // teardown included, completes. For an abort that skips pending teardown, use
 // [Context.Exit].
@@ -221,7 +221,7 @@ func (rtx *Context) SignalExit(code int) {
 // itself trigger the panic funnel — it is a deliberate stop, not an error.
 //
 // Exit skips teardown, not error reporting: a panic already recovered before Exit
-// is still routed to [Program.WithRecoveredPanicFn] (and floors the code), so Exit
+// is still routed to [Program.WithErrorFn] (and floors the code), so Exit
 // cannot silently swallow an in-flight panic.
 func (rtx *Context) Exit(code int) {
 	if rtx == nil {
@@ -244,7 +244,7 @@ func (rtx *Context) Exit(code int) {
 //	}
 //
 // It never panics; use [MustGet] to route a missing/wrong-type service through the
-// RecoveredPanicFn funnel instead of handling it inline.
+// ErrorFn funnel instead of handling it inline.
 func Get[T any](rtx *Context, key string) (T, bool) {
 	v, ok := rtx.Value(key).(T)
 	return v, ok
@@ -253,7 +253,7 @@ func Get[T any](rtx *Context, key string) (T, bool) {
 // MustGet returns the service bound under key as T, or panics with a
 // [*ServiceError] (unwrapping to [ErrServiceNotFound]) when it is absent or not a
 // T. The panic is intentional and recoverable: the runtime recovers it inside
-// dispatch and routes it through the program's RecoveredPanicFn funnel — so a handler that
+// dispatch and routes it through the program's ErrorFn funnel — so a handler that
 // cannot run without a service reaches for MustGet instead of handling a miss
 // inline:
 //

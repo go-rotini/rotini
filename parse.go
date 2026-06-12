@@ -89,7 +89,7 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDisp
 		// The binary is resolved (and any error reported) at exec time.
 		if d := cur.Discovery; d != nil {
 			rd := RemoteDef{Name: tok, Binary: d.Prefix + tok}
-			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: d.Path}
+			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: d.Path, Discovered: true}
 		}
 		break // first positional argument; stop descending
 	}

@@ -59,11 +59,16 @@ func TestRun_remoteNotFound(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", RemoteCommands: []RemoteDef{{Name: "missing", Binary: "app-no-such-plugin-xyz"}}}
 
 	p, _, errb := remoteProgram(def, []string{"missing"})
-	if code, _ := p.run(p.args); code != 1 {
+	code, err := p.run(p.args)
+	if code != 1 {
 		t.Errorf("missing remote exit = %d, want 1", code)
 	}
 	if !strings.Contains(errb.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", errb)
+	}
+	// A DECLARED remote whose binary is missing is an install/wiring problem.
+	if CategoryOf(err) != CategoryInternal {
+		t.Errorf("CategoryOf = %v, want internal", CategoryOf(err))
 	}
 }
 
@@ -125,10 +130,15 @@ func TestRun_discoveryMissing(t *testing.T) {
 	def := Definition{Name: "acme", Handler: "App", Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}}
 
 	p, _, errb := remoteProgram(def, []string{"no-such-plugin-xyz"})
-	if code, _ := p.run(p.args); code != 1 {
+	code, err := p.run(p.args)
+	if code != 1 {
 		t.Errorf("missing discovered plugin exit = %d, want 1", code)
 	}
 	if !strings.Contains(errb.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", errb)
+	}
+	// A DISCOVERED token that resolves to no binary is the user's typo.
+	if CategoryOf(err) != CategoryUsage {
+		t.Errorf("CategoryOf = %v, want usage", CategoryOf(err))
 	}
 }
