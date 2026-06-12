@@ -1,0 +1,79 @@
+# The examples/acme spec: a small but REAL rotini CLI exercising the spec
+# surface end to end — flags/arguments/env/config channels, enum + constraint
+# validation, a count flag, env_prefix scoping, walk-up config discovery, and
+# the help feature the wired-style handlers serve. Regenerate with:
+#   go run ./cmd/rotini generate ./examples/acme/.rotini.spec.yaml --config ./examples/acme/.rotini.conf.yaml
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+
+env_prefix: ACME
+
+command:
+  name: acme
+  summary: an example rotini CLI
+  description: A compact, buildable demonstration of a rotini-built program.
+  footer: Run 'acme deploy --help' to see the input channels in action.
+  inputs:
+    flags:
+      - name: help
+        summary: print help
+        identifiers: [-h, --help]
+        schema: { type: bool }
+      - name: version
+        summary: print version
+        identifiers: [-v, --version]
+        schema: { type: bool }
+  commands:
+    - name: deploy
+      summary: deploy a service
+      description: Deploys a service, reconciling argv, environment, and config-file inputs.
+      examples:
+        - acme deploy api
+        - acme deploy api --env prod --replicas 3
+        - ACME_REGION=eu-west acme deploy api --explain
+      inputs:
+        arguments:
+          - name: service
+            summary: the service to deploy
+            schema: { type: string, required: true, placeholder: SERVICE }
+        flags:
+          - name: env
+            summary: target environment
+            identifiers: [--env, -e]
+            schema:
+              type: string
+              enum: [dev, staging, prod]
+              default: dev
+              key: deploy.env      # falls back to $ACME_DEPLOY_ENV, then the config file
+          - name: replicas
+            summary: desired replica count
+            identifiers: [--replicas]
+            schema: { type: int, minimum: 1, maximum: 10, default: 1, placeholder: N }
+          - name: dry-run
+            summary: print the plan without applying it
+            identifiers: [--dry-run]
+            schema: { type: bool }
+          - name: loud
+            summary: crank up verbosity, per occurrence
+            identifiers: [--loud, -l]
+            schema: { type: count }
+          - name: explain
+            summary: show where every reconciled value came from
+            identifiers: [--explain]
+            schema: { type: bool }
+        env:
+          - name: region
+            summary: deployment region
+            schema: { type: string }   # derived name, scoped by env_prefix → $ACME_REGION
+    - name: version
+      summary: print version
+      inputs:
+        flags:
+          - name: help
+            summary: print help
+            identifiers: [-h, --help]
+            schema: { type: bool }
+
+configuration_files:
+  - name: project
+    format: yaml
+    discover: { strategy: walk-up, file: .acme.yaml }

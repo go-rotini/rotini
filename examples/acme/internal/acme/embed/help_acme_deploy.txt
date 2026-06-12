@@ -1,0 +1,22 @@
+Deploys a service, reconciling argv, environment, and config-file inputs.
+
+Usage:
+  acme deploy <SERVICE> [flags]
+
+Arguments:
+  <service>    the service to deploy
+
+Flags:
+  --env,-e string    target environment (default dev) [dev|staging|prod]
+  --replicas N       desired replica count (default 1)
+  --dry-run          print the plan without applying it
+  --loud,-l          crank up verbosity, per occurrence
+  --explain          show where every reconciled value came from
+
+Environment:
+  ACME_REGION string    deployment region
+
+Examples:
+  acme deploy api
+  acme deploy api --env prod --replicas 3
+  ACME_REGION=eu-west acme deploy api --explain
