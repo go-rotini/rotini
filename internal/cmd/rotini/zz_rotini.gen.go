@@ -2,7 +2,6 @@
 package rotini
 
 import (
-	_ "embed"
 	"fmt"
 	"strings"
 
@@ -324,51 +323,6 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniCompletion, nil
 	default:
 		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
-	}
-}
-
-//go:embed embed/man_rotini.txt
-var ManRotini string
-
-//go:embed embed/man_rotini_initialize.txt
-var ManRotiniInitialize string
-
-//go:embed embed/man_rotini_generate.txt
-var ManRotiniGenerate string
-
-//go:embed embed/man_rotini_validate.txt
-var ManRotiniValidate string
-
-//go:embed embed/man_rotini_help.txt
-var ManRotiniHelp string
-
-//go:embed embed/man_rotini_version.txt
-var ManRotiniVersion string
-
-//go:embed embed/man_rotini_completion.txt
-var ManRotiniCompletion string
-
-// Man returns the generated man text for the command identified by path
-// (command names or aliases; no arguments for the root command). It returns an
-// error when path does not match a known command.
-func Man(path ...string) (string, error) {
-	switch strings.Join(path, " ") {
-	case "":
-		return ManRotini, nil
-	case "initialize", "init":
-		return ManRotiniInitialize, nil
-	case "generate", "gen":
-		return ManRotiniGenerate, nil
-	case "validate", "val":
-		return ManRotiniValidate, nil
-	case "help":
-		return ManRotiniHelp, nil
-	case "version":
-		return ManRotiniVersion, nil
-	case "completion":
-		return ManRotiniCompletion, nil
-	default:
-		return "", fmt.Errorf("no man for command %q", strings.Join(path, " "))
 	}
 }
 
