@@ -79,6 +79,12 @@
 //     vocabulary into "did you mean" suggestions; [Versioner] resolves one
 //     version string whether the binary was built with -ldflags or installed
 //     by module path.
+//   - [Styles] is the one (deliberately narrow) output helper: SGR text
+//     styling ([Styles.With] composes [Attribute]s into a reusable [Style])
+//     and [StripStyles] to remove styling from already-styled text (a help
+//     page's spec-authored ANSI). Whether to style is the program's call via
+//     [WithCondition] — rotini ships no terminal/NO_COLOR detection, and no
+//     tables/prompts/progress (the deleted UX layer stays deleted).
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve
 //     and orchestration phases wholesale; [FlagValueCompleter] and
 //     [ArgValueCompleter] feed dynamic completion candidates.

@@ -19,7 +19,7 @@ var _ rotini.CommandHandlers = (*rotiniHandlers)(nil)
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// Collect, not Parse: one call reconciles every declared channel — the
-	// argv flags AND the env channel ($ROTINI_NO_STYLES) — against the
+	// argv flags AND the env channel ($ROTINI_NO_STYLES, $CI) — against the
 	// generated BindMeta the program bound at NewProgram time.
 	inputs, err := rotini.Collect[RotiniInputs](rtx)
 	if err != nil {
@@ -36,19 +36,25 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 			}
 		}
 		// The env channel may not have bound on a usage error, so only the
-		// flag can speak for no-styles here.
+		// --no-styles flag can speak for no-styles here.
 		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", msg)
-		fmt.Fprintln(rtx.Stdout, StripStyles(HelpRotini, inputs.Rotini.Flags.NoStyles, inputs.Rotini.Env.Ci))
+		fmt.Fprintln(rtx.Stdout, rotini.StripStyles(HelpRotini, func() bool {
+			return inputs.Rotini.Flags.NoStyles
+		}))
 		rtx.SignalExit(rotini.ExitUsage) // bad input → the conventional usage exit code
 		return
 	}
 
 	flags := inputs.Rotini.Flags
-	envInputs := inputs.Rotini.Env
+	env := inputs.Rotini.Env
+
+	// Strip the help page's spec-authored styling when any no-styles signal is
+	// set: the --no-styles flag, $ROTINI_NO_STYLES, or a CI environment ($CI).
+	noStyles := func() bool { return flags.NoStyles || env.NoStyles || env.Ci }
 
 	switch {
 	case flags.Help:
-		fmt.Fprintln(rtx.Stdout, StripStyles(HelpRotini, flags.NoStyles, envInputs.NoStyles))
+		fmt.Fprintln(rtx.Stdout, rotini.StripStyles(HelpRotini, noStyles))
 		rtx.SignalExit(0)
 		return
 	case flags.Version:
@@ -57,7 +63,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(0)
 		return
 	default:
-		fmt.Fprintln(rtx.Stdout, StripStyles(HelpRotini, flags.NoStyles, envInputs.NoStyles))
+		fmt.Fprintln(rtx.Stdout, rotini.StripStyles(HelpRotini, noStyles))
 		rtx.SignalExit(1)
 		return
 	}

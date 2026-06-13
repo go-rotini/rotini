@@ -7,8 +7,6 @@ generate:
     cmd:
       package: internal/cmd/rotini
       file: zz_rotini.gen.go
-      keep:
-        - zz_help.go
     cmdgen:
       package: internal/cmd/rotini
       file: zz_rotini.gen.go
