@@ -19,10 +19,7 @@ var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[{{.RootCommandName}}CompletionInputs](rtx)
 	if err != nil {
-		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-{{- if .HasHelp}}
-		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
-{{- end}}
+		rtx.RecordErr(err)
 		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
@@ -37,8 +34,8 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 
 	script, err := Completion(inputs.{{.RootCommandName}}Completion.Arguments.Shell)
 	if err != nil {
-		fmt.Fprintln(rtx.Stderr, "Error:", err)
-		rtx.SignalExit(1)
+		rtx.RecordErr(err)
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
 

@@ -19,9 +19,8 @@ var _ rotini.CommandHandlers = (*rotiniVersionHandlers)(nil)
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniVersionInputs](rtx)
 	if err != nil {
-		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-		fmt.Fprintln(rtx.Stdout, HelpRotiniVersion)
-		rtx.SignalExit(1)
+		rtx.RecordErr(err)
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
 

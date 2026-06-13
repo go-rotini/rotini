@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/internal"
 )
 
@@ -26,7 +27,7 @@ func TestRotiniValidate(t *testing.T) {
 		},
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"validate", "--nope"}, wantOut: HelpRotiniValidate, wantErr: "Error:", wantCode: 1,
+			argv: []string{"validate", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: rotini.ExitUsage,
 		},
 		{
 			name: "success: header and the pass summary print",
@@ -42,14 +43,16 @@ func TestRotiniValidate(t *testing.T) {
 			argv: []string{"validate"},
 			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
 				cb("[12:00:00] 1ms", nil)              // a clean pass → stdout
-				cb("", errors.New("schema violation")) // a failing pass → stderr
+				cb("", errors.New("schema violation")) // a failing pass → stderr, inline, non-terminal
 				return errors.New("validation failed")
 			})}},
-			wantOut: "[12:00:00] 1ms", wantErr: "schema violation", wantCode: 1,
+			// The per-pass callback error still prints inline; the final error is
+			// recorded and reported by the default OnError, exit code stands.
+			wantOut: "[12:00:00] 1ms", wantErr: "schema violation", wantCode: rotini.ExitUsage,
 		},
 		{
 			name: "real validate on a missing spec errors (integration)",
-			argv: []string{"validate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "Error:", wantCode: 1,
+			argv: []string{"validate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "rotini:", wantCode: rotini.ExitUsage,
 		},
 	}
 	for _, tc := range cases {

@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/go-rotini/rotini"
@@ -22,9 +23,8 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs RotiniInitializeInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-		fmt.Fprintln(rtx.Stdout, HelpRotiniInitialize)
-		rtx.SignalExit(1)
+		rtx.RecordErr(err)
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
 
@@ -38,8 +38,8 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	if args.Name == "" {
-		fmt.Fprintln(rtx.Stderr, "Error: a name argument is required")
-		rtx.SignalExit(1)
+		rtx.RecordErr(rotini.UsageError(errors.New("a name argument is required")))
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
 
@@ -48,8 +48,8 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	initialize := rotini.MustGet[internal.InitializeFn](rtx, "initialize")
 
 	if err := initialize(args.Name, flags.Format, flags.Force, flags.With); err != nil {
-		fmt.Fprintln(rtx.Stderr, "Error:", err)
-		rtx.SignalExit(1)
+		rtx.RecordErr(err)
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
 }

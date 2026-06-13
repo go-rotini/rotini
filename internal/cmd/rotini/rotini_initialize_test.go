@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/internal"
 )
 
@@ -27,11 +28,11 @@ func TestRotiniInitialize(t *testing.T) {
 		},
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"init", "--nope"}, wantOut: HelpRotiniInitialize, wantErr: "Error:", wantCode: 1,
+			argv: []string{"init", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: rotini.ExitUsage,
 		},
 		{
 			name: "missing name argument (guarded before any work)",
-			argv: []string{"init"}, wantErr: "a name argument is required", wantCode: 1,
+			argv: []string{"init"}, wantErr: "a name argument is required", wantCode: rotini.ExitUsage,
 		},
 		{
 			name:     "success is silent",
@@ -43,12 +44,12 @@ func TestRotiniInitialize(t *testing.T) {
 			name:    "initialize error surfaces",
 			argv:    []string{"init", "mycli"},
 			binds:   []svc{{"initialize", internal.InitializeFn(func(_, _ string, _ bool, _ []string) error { return errors.New("already exists") })}},
-			wantErr: "already exists", wantCode: 1,
+			wantErr: "already exists", wantCode: rotini.ExitUsage,
 		},
 		{
 			name:  "real initialize outside a module errors (integration)",
 			setup: func(t *testing.T) { t.Chdir(t.TempDir()) }, // no go.mod → module resolution fails
-			argv:  []string{"init", "mycli"}, wantErr: "Error:", wantCode: 1,
+			argv:  []string{"init", "mycli"}, wantErr: "rotini:", wantCode: rotini.ExitUsage,
 		},
 	}
 	for _, tc := range cases {

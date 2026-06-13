@@ -2,7 +2,6 @@ package {{.Package}}
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/go-rotini/rotini"
@@ -20,20 +19,12 @@ var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[{{.RootCommandName}}Inputs](rtx)
 	if err != nil {
-		msg := err.Error()
-		var parseErr *rotini.ParseError
-		if errors.As(err, &parseErr) && parseErr.Token != "" {
-			if suggestor, ok := rotini.Get[*rotini.Suggestor](rtx, rotini.KeySuggestor); ok {
-				if hits := suggestor.Suggest(parseErr.Token, parseErr.Candidates); len(hits) > 0 {
-					msg += fmt.Sprintf("\n\nDid you mean %q?", hits[0])
-				}
-			}
-		}
-		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", msg)
-{{- if .HasHelp}}
-		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
-{{- end}}
-		rtx.SignalExit(1)
+		// Record the error and stop: the program's OnError funnel reports it
+		// (rotini's default prints it and exits by category). To report it your
+		// own way — a "did you mean" from the bound Suggestor, a help dump, a
+		// logger — set Program.WithOnErrorFn; nothing is printed here.
+		rtx.RecordErr(err)
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
 

@@ -73,7 +73,9 @@ func check(t *testing.T, gotOut, gotErr string, gotCode int, wantOut, wantErr st
 }
 
 // TestRotini covers the root command handler (rotini.go): the --help and --version flags,
-// the no-flags default (help + exit 1), and a parse error.
+// the no-flags default (help + exit 1), and parse errors. The handler now records the
+// parse error and stops; rotini's default OnError prints "rotini: <err>" to stderr and
+// exits by category (no help dump, and — per the opt-in rules — no "did you mean").
 func TestRotini(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -84,13 +86,25 @@ func TestRotini(t *testing.T) {
 		{"help flag", []string{"--help"}, HelpRotini, "", 0},
 		{"version flag", []string{"--version"}, testVersion, "", 0},
 		{"no args prints help and fails", []string{}, HelpRotini, "", 1},
-		{"parse error on unknown flag", []string{"--nope"}, HelpRotini, "Error:", rotini.ExitUsage},
-		{"mistyped command gets a suggestion", []string{"generte"}, HelpRotini, `Did you mean "generate"?`, rotini.ExitUsage},
+		{"parse error on unknown flag", []string{"--nope"}, "", `rotini: unknown flag "--nope"`, rotini.ExitUsage},
+		{"mistyped command, no auto-suggestion", []string{"generte"}, "", `rotini: unknown command "generte"`, rotini.ExitUsage},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			out, errb, code := runRotini(t, tc.argv)
 			check(t, out, errb, code, tc.wantOut, tc.wantErr, tc.wantCode)
 		})
+	}
+}
+
+// TestRotini_neverSuggests pins the opt-in rule: rotini's own CLI never emits a
+// "did you mean" — suggestions are the end-user's OnError to add, against the
+// bound Suggestor. A mistyped command surfaces the plain unknown-command error.
+func TestRotini_neverSuggests(t *testing.T) {
+	out, errb, _ := runRotini(t, []string{"generte"})
+	for _, s := range []string{out, errb} {
+		if bytes.Contains([]byte(s), []byte("Did you mean")) || bytes.Contains([]byte(s), []byte("generate")) {
+			t.Errorf("output suggested a correction (must not): out=%q err=%q", out, errb)
+		}
 	}
 }

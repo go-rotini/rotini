@@ -19,8 +19,7 @@ var _ rotini.CommandHandlers = (*rotiniCompletionHandlers)(nil)
 func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniCompletionInputs](rtx)
 	if err != nil {
-		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
-		fmt.Fprintln(rtx.Stdout, HelpRotiniCompletion)
+		rtx.RecordErr(err)
 		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
@@ -38,8 +37,8 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// never reaches here — Parse already rejected it.
 	script, err := Completion(args.Shell)
 	if err != nil {
-		fmt.Fprintln(rtx.Stderr, "Error:", err)
-		rtx.SignalExit(1)
+		rtx.RecordErr(err)
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
 

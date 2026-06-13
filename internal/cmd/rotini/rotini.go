@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/go-rotini/rotini"
@@ -23,25 +22,13 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// generated BindMeta the program bound at NewProgram time.
 	inputs, err := rotini.Collect[RotiniInputs](rtx)
 	if err != nil {
-		// Parse failures are data: the ParseError carries the offending token and
-		// its vocabulary, and the bound Suggestor (see main.go) turns them into a
-		// suggestion. Remove the bind — or this block — to opt out.
-		msg := err.Error()
-		var parseErr *rotini.ParseError
-		if errors.As(err, &parseErr) && parseErr.Token != "" {
-			if suggestor, ok := rotini.Get[*rotini.Suggestor](rtx, rotini.KeySuggestor); ok {
-				if hits := suggestor.Suggest(parseErr.Token, parseErr.Candidates); len(hits) > 0 {
-					msg += fmt.Sprintf("\n\nDid you mean %q?", hits[0])
-				}
-			}
-		}
-		// The env channel may not have bound on a usage error, so only the
-		// --no-styles flag can speak for no-styles here.
-		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", msg)
-		fmt.Fprintln(rtx.Stdout, rotini.StripStyles(HelpRotini, func() bool {
-			return inputs.Rotini.Flags.Nostyles
-		}))
-		rtx.SignalExit(rotini.ExitUsage) // bad input → the conventional usage exit code
+		// Record and stop: the program's OnError funnel reports it. With no
+		// custom WithOnErrorFn wired (see main.go), rotini's default prints the
+		// error to stderr and exits by category (a parse error → ExitUsage).
+		// Suggestions ("did you mean") are deliberately NOT here — that is the
+		// end-user's own OnError to add, against the bound Suggestor.
+		rtx.RecordErr(err)
+		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
 
