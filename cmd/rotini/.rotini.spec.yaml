@@ -1,10 +1,7 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
 command:
   name: rotini
-  description: |
-    The rotini cli framework companion cli.
-
-    Find more information at: https://rotini.dev
+  description: "\e[1mThe rotini cli framework companion cli.\e[0m\n\nFind more information at: https://rotini.dev"
   usage: |
     rotini <command> <arguments> [flags]
            [-v | --version] [-h | --help]
@@ -220,27 +217,6 @@ command:
         - rotini version
       footer: Use "rotini help <command>" for more information about a command.
       inputs:
-        flags:
-          - name: help
-            summary: print help
-            identifiers:
-              - -h
-              - --help
-            schema:
-              type: bool
-    - name: man
-      summary: print the manual page for a command
-      description: Print the embedded manual page for a rotini command.
-      examples:
-        - rotini man
-        - rotini man generate
-      footer: Use "rotini help <command>" for more information about a command.
-      inputs:
-        arguments:
-          - name: commands
-            summary: the command path to print the manual for
-            schema:
-              type: array
         flags:
           - name: help
             summary: print help

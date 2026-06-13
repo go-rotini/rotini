@@ -39,10 +39,6 @@ func (*handlers) RotiniInitialize() rotini.CommandHandlers {
 	return &rotiniInitializeHandlers{}
 }
 
-func (*handlers) RotiniMan() rotini.CommandHandlers {
-	return &rotiniManHandlers{}
-}
-
 func (*handlers) RotiniValidate() rotini.CommandHandlers {
 	return &rotiniValidateHandlers{}
 }
@@ -57,7 +53,6 @@ type ProgramHandlers interface {
 	RotiniGenerate() rotini.CommandHandlers
 	RotiniHelp() rotini.CommandHandlers
 	RotiniInitialize() rotini.CommandHandlers
-	RotiniMan() rotini.CommandHandlers
 	RotiniValidate() rotini.CommandHandlers
 	RotiniVersion() rotini.CommandHandlers
 }
@@ -127,16 +122,6 @@ var definition = rotini.Definition{
 			Summary: "print version",
 			Flags: []rotini.FlagDef{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
-			},
-		},
-		{Name: "man",
-			Handler: "RotiniMan",
-			Summary: "print the manual page for a command",
-			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
-			},
-			Arguments: []rotini.ArgDef{
-				{Name: "commands", Type: "[]string", Variadic: true},
 			},
 		},
 		{Name: "completion",
@@ -252,24 +237,6 @@ type RotiniInitializeInputs struct {
 	RotiniInitialize RotiniInitializeCommandInputs
 }
 
-type RotiniManFlags struct {
-	Help bool `rotini:"help"`
-}
-
-type RotiniManArguments struct {
-	Commands []string `rotini:"commands"`
-}
-
-type RotiniManCommandInputs struct {
-	Flags     RotiniManFlags
-	Arguments RotiniManArguments
-}
-
-type RotiniManInputs struct {
-	Rotini    RotiniCommandInputs
-	RotiniMan RotiniManCommandInputs
-}
-
 type RotiniValidateFlags struct {
 	ConfFilePath string `rotini:"conf_file_path"`
 	Fail         string `rotini:"fail"`
@@ -334,9 +301,6 @@ var HelpRotiniHelp string
 //go:embed embed/help_rotini_version.txt
 var HelpRotiniVersion string
 
-//go:embed embed/help_rotini_man.txt
-var HelpRotiniMan string
-
 //go:embed embed/help_rotini_completion.txt
 var HelpRotiniCompletion string
 
@@ -357,8 +321,6 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniHelp, nil
 	case "version":
 		return HelpRotiniVersion, nil
-	case "man":
-		return HelpRotiniMan, nil
 	case "completion":
 		return HelpRotiniCompletion, nil
 	default:
@@ -384,9 +346,6 @@ var ManRotiniHelp string
 //go:embed embed/man_rotini_version.txt
 var ManRotiniVersion string
 
-//go:embed embed/man_rotini_man.txt
-var ManRotiniMan string
-
 //go:embed embed/man_rotini_completion.txt
 var ManRotiniCompletion string
 
@@ -407,8 +366,6 @@ func Man(path ...string) (string, error) {
 		return ManRotiniHelp, nil
 	case "version":
 		return ManRotiniVersion, nil
-	case "man":
-		return ManRotiniMan, nil
 	case "completion":
 		return ManRotiniCompletion, nil
 	default:
