@@ -6,7 +6,7 @@ SYNOPSIS
            [-v | --version] [-h | --help]
 
 DESCRIPTION
-    [1mThe rotini cli framework companion cli.[0m
+    The rotini cli framework companion cli.
 
     Find more information at: https://rotini.dev
 

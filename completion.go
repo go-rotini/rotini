@@ -493,7 +493,10 @@ func filterPrefix(candidates []string, prefix string) []string {
 // powershell render the description beside the name; the bash script strips it.
 // An empty summary leaves the candidate bare, and only the summary's first line
 // rides (the protocol is line-based). Dynamic completers (FlagValueCompleter /
-// ArgValueCompleter) may return the same shape; bare values stay bare.
+// ArgValueCompleter) may return the same shape; bare values stay bare. Any ANSI
+// styling in the summary is stripped (E6-S2): a styled summary is legitimate on
+// the help-list surface, but escape sequences would corrupt the shell's
+// completion rendering — the wire is the honest plain-text projection.
 func withDescription(name, summary string) string {
 	if summary == "" {
 		return name
@@ -501,6 +504,7 @@ func withDescription(name, summary string) string {
 	if i := strings.IndexByte(summary, '\n'); i >= 0 {
 		summary = summary[:i]
 	}
+	summary = StripStyles(summary)
 	if summary = strings.TrimSpace(summary); summary == "" {
 		return name
 	}

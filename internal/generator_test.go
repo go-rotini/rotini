@@ -1232,6 +1232,63 @@ func TestGenerateManExitStatusAndSeeAlso(t *testing.T) {
 	)
 }
 
+// TestGenerateStripsStylesPerSurface pins E6-S1: spec-authored ANSI is KEPT in
+// the help page (the terminal surface) but STRIPPED from man and markdown —
+// both in rendered doc-fields (a styled root description) and in verbatim
+// feature pages (a styled `man`/`markdown` string). Help is the only surface
+// that renders escapes; the others are roff/plain/markdown text.
+func TestGenerateStripsStylesPerSurface(t *testing.T) {
+	const esc = "\x1b" // assertions look for the real ESC byte in generated files
+	// The spec carries ANSI two ways: a rendered field (the root description,
+	// YAML \e escape → ESC) and verbatim feature pages on a sub-command.
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n" +
+		"  name: mycli\n" +
+		"  summary: a tool\n" +
+		"  description: \"\\e[1mBold desc\\e[0m\"\n" +
+		"  commands:\n" +
+		"    - name: build\n" +
+		"      summary: build it\n" +
+		"      man: \"\\e[1mMAN PAGE\\e[0m\"\n" +
+		"      markdown: \"# \\e[1mMD\\e[0m\"\n"
+	conf := confSchemaHeader + "generate:\n  features:\n" +
+		"    help:\n      enabled: true\n" +
+		"    man:\n      enabled: true\n" +
+		"    markdown:\n      enabled: true\n"
+
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), conf)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	embed := func(name string) string {
+		return readFileString(t, filepath.Join(tmp, "internal", "cmd", "mycli", "embed", name))
+	}
+
+	// Help KEEPS the rendered styling.
+	if help := embed("help_mycli.txt"); !strings.Contains(help, esc) {
+		t.Errorf("help page lost its ANSI styling:\n%q", help)
+	}
+	// Man + markdown STRIP it — rendered field (root) AND verbatim pages (build).
+	for _, f := range []string{"man_mycli.txt", "markdown_mycli.md", "man_mycli_build.txt", "markdown_mycli_build.md"} {
+		if got := embed(f); strings.Contains(got, esc) {
+			t.Errorf("%s carries ANSI, want stripped:\n%q", f, got)
+		}
+	}
+	// The verbatim text itself survives, just de-styled.
+	if got := embed("man_mycli_build.txt"); !strings.Contains(got, "MAN PAGE") {
+		t.Errorf("man verbatim text lost its content: %q", got)
+	}
+	if got := embed("markdown_mycli_build.md"); !strings.Contains(got, "# MD") {
+		t.Errorf("markdown verbatim text lost its content: %q", got)
+	}
+}
+
 // TestGenerateHelpVerbatim verifies that a populated `help` string is written
 // EXACTLY as supplied — byte-for-byte, with no trailing-newline normalization (a
 // YAML `|-` strip block yields no trailing newline, and rotini keeps it that way) —

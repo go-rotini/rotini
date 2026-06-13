@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"github.com/go-rotini/jsonschema"
+	"github.com/go-rotini/rotini"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1899,6 +1900,7 @@ type docFeature struct {
 	embedded   string               // embedded default template text, from renderer.go ("" = none)
 	verbatim   func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
 	perShell   bool                 // completion: keyed by shell name, not command path
+	strip      bool                 // strip spec-authored ANSI from the output (man/markdown — never help)
 }
 
 var (
@@ -1906,16 +1908,19 @@ var (
 		name: "help", noun: "help", varPrefix: "Help", resolver: "Help",
 		ext: ".txt", filePrefix: "help_", tmplFile: helpTemplateName, embedded: templateHelp,
 		verbatim: func(h cmdHelp) string { return h.Help },
+		// help is the TERMINAL surface — spec-authored styling is kept.
 	}
 	manFeatureDesc = docFeature{
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
 		ext: ".txt", filePrefix: "man_", tmplFile: manTemplateName, embedded: templateMan,
 		verbatim: func(h cmdHelp) string { return h.Man },
+		strip:    true, // a roff/plain man page carries no legitimate SGR (E6-S1)
 	}
 	markdownFeatureDesc = docFeature{
 		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
 		ext: ".md", filePrefix: "markdown_", tmplFile: markdownTemplateName, embedded: templateMarkdown,
 		verbatim: func(h cmdHelp) string { return h.Markdown },
+		strip:    true, // a markdown file carries no legitimate SGR (E6-S1)
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
 	// no template, no verbatim. Scripts come from completionScript at codegen.
@@ -2457,7 +2462,9 @@ func writeFeatureFiles(featDir string, nodes []helpNode, feat docFeature) error 
 		if hn.verbatim != "" {
 			// Verbatim: write exactly what the spec supplied — byte-for-byte, no
 			// trailing-newline normalization (the author controls it via YAML).
-			if err := writeIfChanged(path, hn.verbatim); err != nil {
+			// A strip feature (man/markdown) still removes any ANSI: a verbatim
+			// page is no more a terminal surface than a rendered one.
+			if err := writeIfChanged(path, stripForFeature(feat, hn.verbatim)); err != nil {
 				return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
 			}
 			continue
@@ -2466,11 +2473,22 @@ func writeFeatureFiles(featDir string, nodes []helpNode, feat docFeature) error 
 		if err != nil {
 			return fmt.Errorf("render %s for %q: %w", feat.name, hn.name, err)
 		}
-		if err := writeIfChanged(path, rendered); err != nil {
+		if err := writeIfChanged(path, stripForFeature(feat, rendered)); err != nil {
 			return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
 		}
 	}
 	return nil
+}
+
+// stripForFeature removes spec-authored ANSI styling from a feature's output
+// when the feature is not a terminal surface (man, markdown — E6-S1). Help
+// keeps its styling; this returns text unchanged for non-strip features. The
+// strip semantics are the runtime's, single-sourced via rotini.StripStyles.
+func stripForFeature(feat docFeature, text string) string {
+	if !feat.strip {
+		return text
+	}
+	return rotini.StripStyles(text)
 }
 
 // loadFeatureTemplate reads the feature dir's editable template, seeding it from

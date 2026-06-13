@@ -634,6 +634,23 @@ func TestComplete_descriptions(t *testing.T) {
 	}
 }
 
+// TestComplete_stripsStyledSummary pins E6-S2: a summary carrying ANSI (a
+// styled value the author also uses on the help-list surface) reaches the
+// completion wire as PLAIN text — escapes would corrupt the shell's rendering.
+func TestComplete_stripsStyledSummary(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{
+			{Name: "deploy", Handler: "AppDeploy", Summary: "\x1b[1mship it\x1b[0m"},
+		},
+	}
+	got := complete(def, []string{""}, nil, nil)
+	want := []string{"deploy\tship it"} // styling gone, text intact
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("styled-summary completion = %q, want %q (no ANSI on the wire)", got, want)
+	}
+}
+
 // TestComplete_remoteOpaque confirms completion goes silent past a remote or
 // discovered-plugin token — the dispatched binary owns that argument surface.
 func TestComplete_remoteOpaque(t *testing.T) {
