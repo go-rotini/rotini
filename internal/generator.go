@@ -584,11 +584,11 @@ func renderDefinition(gp *genProgram) string {
 // default binder consumes — the document-level config-file sources. Returns "" when
 // there are none (so a CLI with no configuration_files stays unchanged).
 func renderBindMeta(gp *genProgram) string {
+	// Emitted UNCONDITIONALLY (ergonomics E3-S2): an empty descriptor is the
+	// honest zero — handler and main.go code can reference BindMeta uniformly,
+	// and the generated NewProgram binds it under rotini.KeyBindMeta either way.
 	files := gp.configFiles
 	stdinSchemas := collectStdinSchemas(gp)
-	if len(files) == 0 && len(stdinSchemas) == 0 && gp.envPrefix == "" {
-		return ""
-	}
 	var b strings.Builder
 	b.WriteString("// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.\n")
 	b.WriteString("var BindMeta = " + rotiniPkgName + ".BindMeta{\n")

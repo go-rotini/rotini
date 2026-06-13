@@ -89,7 +89,10 @@ type {{.Prefix}}Inputs struct {
 // your handlers satisfy ProgramHandlers. The command tree is an unexported
 // implementation detail — you hold a *rotini.Program, never the Definition.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	return rotini.NewProgram(definition, handlers)
+	// BindMeta rides the registry so the per-channel input functions
+	// (rotini.ParseEnv, rotini.ParseFiles, …) need only the Context.
+	return rotini.NewProgram(definition, handlers).
+		Bind(rotini.KeyBindMeta, BindMeta)
 }
 {{range .Features}}
 {{range .Vars}}

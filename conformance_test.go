@@ -522,7 +522,7 @@ func conformanceCases() []inputCase {
 			check: func(t *testing.T, rtx *Context, _ BindMeta) {
 				// Presence semantics: an empty-string variable IS set; an
 				// unset one is not. The env layer's Presence distinguishes them.
-				layer, err := ParseEnv[acDeployInputs](NewBinder(BindMeta{}), rtx)
+				layer, err := ParseEnv[acDeployInputs](rtx)
 				if err != nil {
 					t.Fatalf("ParseEnv: %v", err)
 				}
@@ -530,7 +530,7 @@ func conformanceCases() []inputCase {
 					t.Error("empty $ACME_REGION not recorded as present — empty must differ from unset")
 				}
 				os.Unsetenv("ACME_REGION")
-				layer2, err := ParseEnv[acDeployInputs](NewBinder(BindMeta{}), NewContextFor(acmeDef(), rtx.Args))
+				layer2, err := ParseEnv[acDeployInputs](NewContextFor(acmeDef(), rtx.Args))
 				if err != nil {
 					t.Fatalf("ParseEnv(unset): %v", err)
 				}
@@ -765,7 +765,7 @@ func conformanceCases() []inputCase {
 					t.Errorf("enum error should carry the redaction marker: %v", err)
 				}
 				// Provenance redacts too (env-supplied secret).
-				layer, perr := ParseEnv[acLoginInputs](NewBinder(BindMeta{}), rtx)
+				layer, perr := ParseEnv[acLoginInputs](rtx)
 				if perr != nil {
 					t.Fatalf("ParseEnv: %v", perr)
 				}
@@ -818,11 +818,11 @@ func conformanceCases() []inputCase {
 			check: func(t *testing.T, rtx *Context, _ BindMeta) {
 				// Provenance: the Report knows WHICH layer won, and the full
 				// history beneath it.
-				b := NewBinder(acmeMeta(filepath.Dir(mustGetwd(t))))
+				rtx.Bind(KeyBindMeta, acmeMeta(filepath.Dir(mustGetwd(t))))
 				defaults, _ := Defaults[acDeployInputs](rtx)
-				files, _ := ParseFiles[acDeployInputs](b, rtx)
-				env, _ := ParseEnv[acDeployInputs](b, rtx)
-				argv, _ := ParseArgv[acDeployInputs](b, rtx)
+				files, _ := ParseFiles[acDeployInputs](rtx)
+				env, _ := ParseEnv[acDeployInputs](rtx)
+				argv, _ := ParseArgv[acDeployInputs](rtx)
 				_, rep := OverlayInputsP(defaults, files, env, argv)
 				win, ok := rep.Winner("Deploy.Flags.Env")
 				if !ok || win.Layer != "argv" || win.Raw != "prod" {

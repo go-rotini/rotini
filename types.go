@@ -1,6 +1,8 @@
 package rotini
 
 import (
+	"github.com/go-rotini/recon"
+
 	"context"
 	"time"
 )
@@ -89,6 +91,17 @@ type BindMeta struct {
 	// prefix set the unprefixed conventional names no longer bind. The spec's
 	// document-level env_prefix; "" = no prefix (the default projection).
 	EnvPrefix string
+	// Sources are custom recon sources (a secrets manager, a remote config
+	// service — anything implementing recon.Source) joined into the Binder's
+	// config precedence AFTER the declared configuration_files: explicit
+	// files beat ambient services; custom sources beat nothing. Appended by
+	// the program's own code (conventionally main.go: meta := cli.BindMeta;
+	// meta.Sources = append(meta.Sources, vaultSource) — codegen never
+	// emits one), they serve config inputs and flags' config fallbacks
+	// alike. Per-input `file:` pins stay configuration_files anchors and
+	// cannot name a custom source. Source names must not collide with
+	// declared file names — the registry rejects duplicates loudly.
+	Sources []recon.Source
 	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
 	// self-contained JSON Schema the binder validates the decoded payload against.
 	StdinSchemas map[string]string

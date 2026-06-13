@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/recon"
 )
 
 // Generated-shape inputs for the binder tests: one command "app" with an argv flag,
@@ -68,6 +70,66 @@ func TestBinder_fillsEnvAndConfig(t *testing.T) {
 	if in.App.Config.Token != "secret123" {
 		t.Errorf("Config.Token = %q, want secret123", in.App.Config.Token)
 	}
+}
+
+// TestBinder_customSources pins the BindMeta.Sources seam (ergonomics E1/
+// E3-S4): custom recon sources join the config layer AFTER the declared
+// configuration_files — explicit files beat ambient services — serving both
+// config inputs and flags' config fallbacks, through Bind and the per-channel
+// surface alike.
+func TestBinder_customSources(t *testing.T) {
+	vault := func() recon.Source {
+		// MapSource takes the NESTED shape a config decoder produces.
+		return recon.NewMapSource("vault", map[string]any{
+			"api": map[string]any{
+				"endpoint": "vault-endpoint",
+				"token":    "vault-token",
+			},
+		})
+	}
+
+	t.Run("sources alone supply config inputs", func(t *testing.T) {
+		rtx := NewContextFor(tbDef(), nil)
+		var in tbInputs
+		err := NewBinder(BindMeta{Sources: []recon.Source{vault()}}).Bind(rtx, &in)
+		if err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		if in.App.Config.Endpoint != "vault-endpoint" || in.App.Config.Token != "vault-token" {
+			t.Errorf("config = %q/%q, want the custom source's values", in.App.Config.Endpoint, in.App.Config.Token)
+		}
+	})
+
+	t.Run("declared files beat custom sources", func(t *testing.T) {
+		cfg := writeConfig(t, "api:\n  endpoint: file-endpoint\n") // no token: vault still supplies it
+		rtx := NewContextFor(tbDef(), nil)
+		var in tbInputs
+		meta := BindMeta{
+			ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}},
+			Sources:     []recon.Source{vault()},
+		}
+		if err := NewBinder(meta).Bind(rtx, &in); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		if in.App.Config.Endpoint != "file-endpoint" {
+			t.Errorf("endpoint = %q, want the declared file to win", in.App.Config.Endpoint)
+		}
+		if in.App.Config.Token != "vault-token" {
+			t.Errorf("token = %q, want the custom source to fill the gap", in.App.Config.Token)
+		}
+	})
+
+	t.Run("per-channel surface sees sources via KeyBindMeta", func(t *testing.T) {
+		rtx := NewContextFor(tbDef(), nil)
+		rtx.Bind(KeyBindMeta, BindMeta{Sources: []recon.Source{vault()}})
+		files, err := ParseFiles[tbInputs](rtx)
+		if err != nil {
+			t.Fatalf("ParseFiles: %v", err)
+		}
+		if files.Values.App.Config.Token != "vault-token" {
+			t.Errorf("files layer token = %q, want the custom source's value", files.Values.App.Config.Token)
+		}
+	})
 }
 
 func TestBinder_requiredConfigMissing(t *testing.T) {

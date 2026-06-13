@@ -49,20 +49,20 @@ func ovDef() Definition {
 // (defaults < files < env < argv), failing the test on any acquisition error.
 func ovLayers(t *testing.T, rtx *Context, meta BindMeta) []Layer[ovInputs] {
 	t.Helper()
-	b := NewBinder(meta)
+	rtx.Bind(KeyBindMeta, meta) // the channel functions derive their meta from the Context
 	defaults, err := Defaults[ovInputs](rtx)
 	if err != nil {
 		t.Fatalf("Defaults: %v", err)
 	}
-	files, err := ParseFiles[ovInputs](b, rtx)
+	files, err := ParseFiles[ovInputs](rtx)
 	if err != nil {
 		t.Fatalf("ParseFiles: %v", err)
 	}
-	env, err := ParseEnv[ovInputs](b, rtx)
+	env, err := ParseEnv[ovInputs](rtx)
 	if err != nil {
 		t.Fatalf("ParseEnv: %v", err)
 	}
-	argv, err := ParseArgv[ovInputs](b, rtx)
+	argv, err := ParseArgv[ovInputs](rtx)
 	if err != nil {
 		t.Fatalf("ParseArgv: %v", err)
 	}
@@ -308,17 +308,16 @@ func ovReqDef() Definition {
 func TestOverlay_validateRequiredAcrossLayers(t *testing.T) {
 	acquire := func(t *testing.T) (ovReqInputs, Report) {
 		t.Helper()
-		rtx := NewContextFor(ovReqDef(), nil) // never on argv
-		b := NewBinder(BindMeta{})
+		rtx := NewContextFor(ovReqDef(), nil) // never on argv; no meta to bind
 		defaults, err := Defaults[ovReqInputs](rtx)
 		if err != nil {
 			t.Fatalf("Defaults: %v", err)
 		}
-		env, err := ParseEnv[ovReqInputs](b, rtx)
+		env, err := ParseEnv[ovReqInputs](rtx)
 		if err != nil {
 			t.Fatalf("ParseEnv: %v", err)
 		}
-		argv, err := ParseArgv[ovReqInputs](b, rtx)
+		argv, err := ParseArgv[ovReqInputs](rtx)
 		if err != nil {
 			t.Fatalf("ParseArgv: %v", err)
 		}
@@ -367,7 +366,7 @@ func TestOverlay_stdinLayer(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Stdin = strings.NewReader("kind: Widget\nname: foo\n")
 
-	stdin, err := ParseStdin[tbStdinInputs](NewBinder(BindMeta{}), rtx)
+	stdin, err := ParseStdin[tbStdinInputs](rtx)
 	if err != nil {
 		t.Fatalf("ParseStdin: %v", err)
 	}
@@ -383,7 +382,7 @@ func TestOverlay_stdinLayer(t *testing.T) {
 	// No piped input: nothing decoded, nothing recorded.
 	rtx2 := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx2.Stdin = strings.NewReader("")
-	empty, err := ParseStdin[tbStdinInputs](NewBinder(BindMeta{}), rtx2)
+	empty, err := ParseStdin[tbStdinInputs](rtx2)
 	if err != nil {
 		t.Fatalf("ParseStdin(empty): %v", err)
 	}
@@ -449,7 +448,7 @@ func ovVarDef() Definition {
 
 func TestOverlay_edgeCases(t *testing.T) {
 	t.Run("nil context is a ParseError", func(t *testing.T) {
-		if _, err := ParseArgv[ovInputs](NewBinder(BindMeta{}), nil); err == nil {
+		if _, err := ParseArgv[ovInputs](nil); err == nil {
 			t.Error("ParseArgv(nil context) = nil error, want a ParseError")
 		}
 		if _, err := Defaults[ovInputs](nil); err == nil {
@@ -468,7 +467,7 @@ func TestOverlay_edgeCases(t *testing.T) {
 			}
 		}
 		rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
-		if _, err := ParseEnv[reqEnvInputs](NewBinder(BindMeta{}), rtx); err == nil {
+		if _, err := ParseEnv[reqEnvInputs](rtx); err == nil {
 			t.Error("ParseEnv with a missing required env input = nil error, want the channel's error")
 		}
 	})
@@ -489,7 +488,7 @@ func TestOverlay_edgeCases(t *testing.T) {
 
 	t.Run("variadic argument presence", func(t *testing.T) {
 		rtx := NewContextFor(ovVarDef(), []string{"alpha", "beta", "gamma"})
-		argv, err := ParseArgv[ovVarInputs](NewBinder(BindMeta{}), rtx)
+		argv, err := ParseArgv[ovVarInputs](rtx)
 		if err != nil {
 			t.Fatalf("ParseArgv: %v", err)
 		}

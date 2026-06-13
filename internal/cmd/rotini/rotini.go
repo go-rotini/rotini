@@ -19,9 +19,10 @@ var _ rotini.CommandHandlers = (*rotiniHandlers)(nil)
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// Bind, not Parse: the env channel (RotiniEnv — $ROTINI_NO_STYLES) is the
-	// Binder's job. One Bind fills argv flags AND env values; rotini declares
-	// no configuration_files, so the meta is empty.
-	binder := rotini.NewBinder(rotini.BindMeta{})
+	// Binder's job. One Bind fills argv flags AND env values; BindMeta is the
+	// generated descriptor (emitted unconditionally — empty here, since rotini
+	// declares no configuration_files).
+	binder := rotini.NewBinder(BindMeta)
 
 	var inputs RotiniInputs
 	if err := binder.Bind(rtx, &inputs); err != nil {

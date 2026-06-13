@@ -43,13 +43,32 @@ type Binder struct {
 	configFiles  []ConfigFile
 	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
 	envPrefix    string            // BindMeta.EnvPrefix: scopes derived env-var names
+	sources      []recon.Source    // BindMeta.Sources: custom sources, after the declared files
+}
+
+// KeyBindMeta is the registry key the generated NewProgram binds the CLI's
+// [BindMeta] descriptor under, so the per-channel functions ([ParseEnv],
+// [ParseFiles], [ParseStdin], …) can derive their configuration from the
+// [Context] alone. A standalone Context (tests, [NewContextFor]) opts in the
+// same way: rtx.Bind(rotini.KeyBindMeta, meta).
+const KeyBindMeta = "bindmeta"
+
+// binderFor builds a Binder from the Context's bound BindMeta — the zero meta
+// when none is bound, so a CLI with no config files/stdin schemas/env prefix
+// needs no ceremony at all.
+func binderFor(rtx *Context) *Binder {
+	if rtx == nil {
+		return NewBinder(BindMeta{}) // the channel layer reports the nil context as a ParseError
+	}
+	meta, _ := Get[BindMeta](rtx, KeyBindMeta)
+	return NewBinder(meta)
 }
 
 // NewBinder returns the default binder, configured from the generated descriptor
 // (the rtg package's BindMeta var) — its configuration_files sources and per-command
 // stdin payload schemas.
 func NewBinder(meta BindMeta) *Binder {
-	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas, envPrefix: meta.EnvPrefix}
+	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas, envPrefix: meta.EnvPrefix, sources: meta.Sources}
 }
 
 // Bind fills out — a non-nil pointer to the typed inputs struct rtg emits — from
@@ -539,8 +558,10 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 // time) — the first directory containing the file wins. An entry whose path
 // was supplied through config_source (overrides) reads that exact file and is
 // NOT optional: the user explicitly asked for it, so a missing file errors.
+// Custom BindMeta.Sources follow the declared files — explicit files beat
+// ambient services (decided at ergonomics E1/E3-S4).
 func (b *Binder) fileSources(overrides map[string]string) ([]recon.Source, error) {
-	srcs := make([]recon.Source, 0, len(b.configFiles))
+	srcs := make([]recon.Source, 0, len(b.configFiles)+len(b.sources))
 	for _, f := range b.configFiles {
 		src, err := b.fileSource(f, overrides)
 		if err != nil {
@@ -548,7 +569,7 @@ func (b *Binder) fileSources(overrides map[string]string) ([]recon.Source, error
 		}
 		srcs = append(srcs, src)
 	}
-	return srcs, nil
+	return append(srcs, b.sources...), nil
 }
 
 // namedSource renames a recon source to its configuration_files logical name.

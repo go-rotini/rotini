@@ -6,13 +6,15 @@ package rotini
 // OverlayInputs, which merges layers where slice order IS precedence
 // (low → high). The one-call Binder.Bind remains the convenience path over the
 // same machinery; these functions exist so a handler can acquire, inspect,
-// reorder, or replace any channel individually:
+// reorder, or replace any channel individually. Each derives its
+// configuration from the Context's bound [BindMeta] (the generated NewProgram
+// binds it under [KeyBindMeta]; a standalone Context binds its own, or none
+// for a CLI without config files):
 //
-//	binder := rotini.NewBinder(cmdgen.BindMeta)
 //	defaults, _ := rotini.Defaults[cmdgen.MycliInputs](rtx)
-//	files, _    := rotini.ParseFiles[cmdgen.MycliInputs](binder, rtx)
-//	env, _      := rotini.ParseEnv[cmdgen.MycliInputs](binder, rtx)
-//	argv, _     := rotini.ParseArgv[cmdgen.MycliInputs](binder, rtx)
+//	files, _    := rotini.ParseFiles[cmdgen.MycliInputs](rtx)
+//	env, _      := rotini.ParseEnv[cmdgen.MycliInputs](rtx)
+//	argv, _     := rotini.ParseArgv[cmdgen.MycliInputs](rtx)
 //	inputs, report := rotini.OverlayInputsP(defaults, files, env, argv)
 //	if err := report.Validate(); err != nil { /* handler owns it */ }
 
@@ -76,8 +78,7 @@ type layerCore struct {
 // no required/enum validation (validate the overlaid result via
 // [Report.Validate], so a required flag satisfied by another layer passes).
 // Parse failures (unknown flag, missing value) are [ParseError]s.
-func ParseArgv[T any](b *Binder, rtx *Context) (Layer[T], error) {
-	_ = b // uniform signature with the other channels; argv needs no BindMeta
+func ParseArgv[T any](rtx *Context) (Layer[T], error) {
 	var t T
 	set, core, err := argvLayer(rtx, reflect.ValueOf(&t).Elem())
 	return Layer[T]{Name: "argv", Values: t, Set: set, core: core}, err
@@ -88,9 +89,9 @@ func ParseArgv[T any](b *Binder, rtx *Context) (Layer[T], error) {
 // fallback of any flag that declares a recon key. Channel-owned semantics stay
 // in-channel, exactly as in [Binder.Bind]: a required env input missing or a
 // constraint violation is this call's error.
-func ParseEnv[T any](b *Binder, rtx *Context) (Layer[T], error) {
+func ParseEnv[T any](rtx *Context) (Layer[T], error) {
 	var t T
-	set, core, err := envLayer(b, rtx, reflect.ValueOf(&t).Elem())
+	set, core, err := envLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
 	return Layer[T]{Name: "env", Values: t, Set: set, core: core}, err
 }
 
@@ -98,18 +99,18 @@ func ParseEnv[T any](b *Binder, rtx *Context) (Layer[T], error) {
 // the BindMeta sources (declared order = precedence), plus the config fallback
 // of any flag that declares a recon key. Channel-owned semantics (required,
 // constraints) are this call's errors, exactly as in [Binder.Bind].
-func ParseFiles[T any](b *Binder, rtx *Context) (Layer[T], error) {
+func ParseFiles[T any](rtx *Context) (Layer[T], error) {
 	var t T
-	set, core, err := filesLayer(b, rtx, reflect.ValueOf(&t).Elem())
+	set, core, err := filesLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
 	return Layer[T]{Name: "files", Values: t, Set: set, core: core}, err
 }
 
 // ParseStdin acquires the stdin channel: the leaf command's typed payload,
 // decoded per its declared format, schema-validated, and honoring required —
 // exactly the [Binder.Bind] stdin step.
-func ParseStdin[T any](b *Binder, rtx *Context) (Layer[T], error) {
+func ParseStdin[T any](rtx *Context) (Layer[T], error) {
 	var t T
-	set, core, err := stdinLayer(b, rtx, reflect.ValueOf(&t).Elem())
+	set, core, err := stdinLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
 	return Layer[T]{Name: "stdin", Values: t, Set: set, core: core}, err
 }
 

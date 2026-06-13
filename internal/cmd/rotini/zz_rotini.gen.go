@@ -274,13 +274,19 @@ type RotiniVersionInputs struct {
 	RotiniVersion RotiniVersionCommandInputs
 }
 
+// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.
+var BindMeta = rotini.BindMeta{}
+
 // NewProgram builds the program from the generated command tree and the typed
 // ProgramHandlers, delegating to rotini.NewProgram (which takes the handlers
 // as an untyped value). Construct your program with this so the compiler verifies
 // your handlers satisfy ProgramHandlers. The command tree is an unexported
 // implementation detail — you hold a *rotini.Program, never the Definition.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	return rotini.NewProgram(definition, handlers)
+	// BindMeta rides the registry so the per-channel input functions
+	// (rotini.ParseEnv, rotini.ParseFiles, …) need only the Context.
+	return rotini.NewProgram(definition, handlers).
+		Bind(rotini.KeyBindMeta, BindMeta)
 }
 
 //go:embed embed/help_rotini.txt
