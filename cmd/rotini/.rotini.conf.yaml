@@ -14,18 +14,26 @@ generate:
     help:
       enabled: true
       embed: false
-      dir: internal/cmd/rotini/embed
+      embed_dir: internal/cmd/rotini/renders
+      template: false
+      template_dir: internal/cmd/rotini/templates
     completion:
       enabled: true
       embed: false
-      dir: internal/cmd/rotini/embed
+      embed_dir: internal/cmd/rotini/renders
+      template: false
+      template_dir: internal/cmd/rotini/templates
     man:
       enabled: false
       embed: false
-      dir: internal/cmd/rotini/embed
+      embed_dir: internal/cmd/rotini/renders
+      template: false
+      template_dir: internal/cmd/rotini/templates
     markdown:
       enabled: false
       embed: false
-      dir: internal/cmd/rotini/embed
+      embed_dir: internal/cmd/rotini/renders
+      template: false
+      template_dir: internal/cmd/rotini/templates
 validate:
   fail: collect
