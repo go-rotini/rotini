@@ -110,10 +110,10 @@ type RemoteDispatch struct {
 // execRemote locates and runs the co-located plugin binary, passing stdio
 // through, honoring the run context (so a signal/cancellation kills the subprocess)
 // and any timeout, and returning the plugin's exit code. rotini-authored
-// diagnostics (binary not found, timeout, spawn failure) are routed through
-// the OnError funnel — the single sink for every framework
-// diagnostic — with the exit floored to 1; the plugin's own non-zero exit
-// passes through untouched (the plugin already spoke for itself).
+// diagnostics (binary not found, timeout, spawn failure) are recorded as errors
+// and routed through the OnError funnel (a plugin's environment is the
+// end-user's, not a rotini fault — see [Program.remoteFailure]); the plugin's
+// own non-zero exit passes through untouched (the plugin already spoke for itself).
 func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatch) (int, error) {
 	path, err := resolveRemoteBinary(r.Def.Binary, r.Dir)
 	if err != nil {
@@ -123,7 +123,7 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 		if r.Discovered {
 			cat = CategoryUsage
 		}
-		return p.wiringFailure(ctx, rtx, &RemoteError{
+		return p.remoteFailure(ctx, rtx, &RemoteError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: RemoteBinaryNotFound,
 			Cause: err, Msg: err.Error(), cat: cat,
 		})
@@ -147,7 +147,7 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 		// Deliberately CategoryNone (cat unset): a timeout is operational —
 		// neither the user's command nor the author's wiring is "wrong" — but
 		// still As-able as a *RemoteError so a funnel can special-case it.
-		return p.wiringFailure(ctx, rtx, &RemoteError{
+		return p.remoteFailure(ctx, rtx, &RemoteError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: RemoteTimeout, Timeout: r.Def.Timeout,
 			Msg: fmt.Sprintf("%s: timed out after %s", r.Def.Name, r.Def.Timeout),
 		})
@@ -156,11 +156,21 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 		if errors.As(err, &ee) {
 			return ee.ExitCode(), err
 		}
-		return p.wiringFailure(ctx, rtx, &RemoteError{
+		return p.remoteFailure(ctx, rtx, &RemoteError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: RemoteSpawnFailed,
 			Cause: err, Msg: fmt.Sprintf("%s: %v", r.Def.Name, err), cat: CategoryInternal,
 		})
 	}
+}
+
+// remoteFailure records a rotini-authored remote dispatch error and reports it
+// through the OnError funnel. A missing / timed-out / unspawnable plugin is
+// ENVIRONMENTAL — the engineer who built this binary cannot control whether the
+// consumer installed the plugin being dispatched to — so it is the end-user's
+// error (OnError), not rotini's "should never happen" fault (OnPanic).
+func (p *Program) remoteFailure(ctx context.Context, rtx *Context, re *RemoteError) (int, error) {
+	rtx.RecordError(re)
+	return p.settle(ctx, rtx)
 }
 
 // resolveRemoteBinary finds the plugin binary: first adjacent to the running

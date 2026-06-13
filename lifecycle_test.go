@@ -228,8 +228,8 @@ func TestWithLifecycle_customPlanKeepsUnwindContract(t *testing.T) {
 	p, _, errb := newTestProgram(&haltHandlers{log: &log}, []string{"run"})
 	p.WithLifecycle(DefaultLifecycle) // explicitly seamed; the engine owns halting/unwind
 	code, err := p.run(p.args)
-	if code != 1 || err == nil {
-		t.Fatalf("run() = (%d, %v), want (1, the panic)", code, err)
+	if code != ExitInternal || err == nil {
+		t.Fatalf("run() = (%d, %v), want (%d, the panic via OnPanic)", code, err, ExitInternal)
 	}
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
@@ -264,19 +264,19 @@ type panicRunHandler struct {
 
 func (h *panicRunHandler) Run(context.Context, *Context) { panic(h.val) }
 
-// A recovered panic reaches the funnel as a *PanicError: the recovery-point
-// stack rides along, Error() stays the panicked value alone (the default
-// funnel's one-line output is pinned by the unwind test above), and a panicked
-// error value keeps its sentinels and category tags through Unwrap.
+// A recovered panic reaches the OnPanic funnel as a *PanicError: the
+// recovery-point stack rides along, Error() stays the panicked value alone (the
+// default funnel's one-line output is pinned by the unwind test above), and a
+// panicked error value keeps its sentinels and category tags through Unwrap.
 func TestPanicError(t *testing.T) {
-	// capture runs argv against handlers and returns what the funnel was handed.
+	// capture runs argv against handlers and returns what the OnPanic funnel was handed.
 	capture := func(t *testing.T, h any) error {
 		t.Helper()
 		var got error
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithOnErrorFn(func(_ context.Context, rtx *Context, err error) { got = err })
-		if code, _ := p.run(p.args); code != 1 {
-			t.Fatalf("run() = %d, want the panic path's floored 1", code)
+		p.WithOnPanicFn(func(_ context.Context, rtx *Context, pe *PanicError) { got = pe })
+		if code, _ := p.run(p.args); code != ExitInternal {
+			t.Fatalf("run() = %d, want the fault path's ExitInternal", code)
 		}
 		return got
 	}

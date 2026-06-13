@@ -24,8 +24,8 @@ func TestProgram_WithExit_capturesCode(t *testing.T) {
 }
 
 // TestProgram_WithStderr_capturesDiagnostics proves WithStderr redirects the runtime's
-// own diagnostics: a panicking hook is funneled to the default OnError, which writes to
-// the program's stderr and exits 1.
+// own diagnostics: a panicking hook is funneled to the default OnPanic, which writes to
+// the program's stderr and exits ExitInternal.
 func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	var code int
 	errb := &bytes.Buffer{}
@@ -37,8 +37,8 @@ func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 		WithExit(func(c int) { code = c }).
 		Execute()
 
-	if code != 1 {
-		t.Errorf("panic exit code = %d, want 1", code)
+	if code != ExitInternal {
+		t.Errorf("panic exit code = %d, want %d", code, ExitInternal)
 	}
 	if !strings.Contains(errb.String(), "boom") {
 		t.Errorf("stderr = %q, want it to contain the panic message", errb.String())

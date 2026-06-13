@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -11,7 +10,8 @@ import (
 
 // ErrServiceNotFound is the sentinel reported when a registry key is unbound — the
 // [MustGet] panics a [*ServiceError] wrapping it, which the runtime
-// recovers and routes to OnError. A funnel classifies it with errors.Is:
+// recovers and routes to the OnPanic funnel (a missing service is rotini's
+// "should never happen", not the end-user's error). A funnel classifies it with errors.Is:
 //
 //	case errors.Is(err, rotini.ErrServiceNotFound):
 var ErrServiceNotFound = errors.New("rotini: service not found")
@@ -71,15 +71,14 @@ type Context struct {
 	Args []string
 
 	services  map[string]any
-	chain     []ResolvedCommand                                  // resolved command path, root → leaf
-	onErrorFn func(ctx context.Context, rtx *Context, err error) // funnel for framework diagnostics + recovered panics (see Program.WithOnErrorFn)
-	exitCode  int                                                // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
-	stopped   bool                                               // an exit was requested; forward progress (setup/PreRun/Run) halts
-	exitNow   bool                                               // [Context.Exit] (hard) was called: skip remaining teardown too
-	recorded  []error                                            // errors recorded this run via [Context.RecordError]; drained by the OnError funnel
-	warnings  []error                                            // warnings recorded this run via [Context.RecordWarning]; drained by the OnWarning funnel
-	successes []string                                           // successes recorded this run via [Context.RecordSuccess]; drained by the OnSuccess funnel
-	faults    []*PanicError                                      // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); drained by the OnPanic funnel
+	chain     []ResolvedCommand // resolved command path, root → leaf
+	exitCode  int               // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
+	stopped   bool              // an exit was requested; forward progress (setup/PreRun/Run) halts
+	exitNow   bool              // [Context.Exit] (hard) was called: skip remaining teardown too
+	recorded  []error           // errors recorded this run via [Context.RecordError]; drained by the OnError funnel
+	warnings  []error           // warnings recorded this run via [Context.RecordWarning]; drained by the OnWarning funnel
+	successes []string          // successes recorded this run via [Context.RecordSuccess]; drained by the OnSuccess funnel
+	faults    []*PanicError     // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); drained by the OnPanic funnel
 }
 
 // newContext returns an empty [Context] with an initialized registry and no
@@ -180,7 +179,7 @@ func (rtx *Context) Chain() []ResolvedCommand {
 //	}
 //
 // Value reports a miss as nil and never panics; prefer the typed [Get] (comma-ok)
-// or [MustGet] (panics → OnError funnel) for type-safe retrieval.
+// or [MustGet] (panics → OnPanic funnel) for type-safe retrieval.
 func (rtx *Context) Value(key string) any {
 	if rtx == nil {
 		return nil
@@ -216,9 +215,9 @@ func (rtx *Context) SignalExit(code int) {
 // every begun teardown hook. The first non-zero code wins, and Exit does not
 // itself trigger the panic funnel — it is a deliberate stop, not an error.
 //
-// Exit skips teardown, not error reporting: a panic already recovered before Exit
-// is still routed to [Program.WithOnErrorFn] (and floors the code), so Exit
-// cannot silently swallow an in-flight panic.
+// Exit skips teardown, not fault reporting: a panic already recovered before Exit
+// is still routed to [Program.WithOnPanicFn] (and the code is never masked to 0),
+// so Exit cannot silently swallow an in-flight panic.
 func (rtx *Context) Exit(code int) {
 	if rtx == nil {
 		return
@@ -230,16 +229,21 @@ func (rtx *Context) Exit(code int) {
 	}
 }
 
-// RecordError records err as a failure of this run, to be reported once the
-// lifecycle settles. It does NOT print and does NOT stop the lifecycle — a
-// handler accumulates one or more errors with RecordError (it may call it any
-// number of times, across any hook), then chooses HOW to stop independently:
-// [Context.SignalExit] for a graceful stop that still unwinds teardown, or
-// [Context.Exit] to skip teardown. Either way — and even if neither is called —
-// the program's OnError funnel ([Program.WithOnErrorFn]) fires once at the end
-// whenever any error was recorded, draining them via [Context.Errors]. A nil
-// err is ignored. rotini records framework diagnostics and recovered panics
-// here too, so OnError is the single sink for every error class:
+// RecordError records err as one of THIS run's errors — the end-user's own
+// failures, to be reported once the lifecycle settles. It does NOT print and
+// does NOT stop the lifecycle — a handler accumulates one or more errors with
+// RecordError (it may call it any number of times, across any hook), then
+// chooses HOW to stop independently: [Context.SignalExit] for a graceful stop
+// that still unwinds teardown, or [Context.Exit] to skip teardown. Either way —
+// and even if neither is called — the program's OnError funnel
+// ([Program.WithOnErrorFn]) fires once at the end whenever any error was
+// recorded, draining them via [Context.Errors]. A nil err is ignored.
+//
+// This is the error channel of four outcome channels. Recovered panics and
+// rotini-detected faults (a wiring mismatch, a resolver fault, a [MustGet] on a
+// missing service) are NOT recorded here — the lifecycle captures them and the
+// OnPanic funnel reports them; recorded successes/warnings have their own
+// channels ([Context.RecordSuccess] / [Context.RecordWarning]).
 //
 //	inputs, err := rotini.Collect[cmdgen.MycliInputs](rtx)
 //	if err != nil {
@@ -386,7 +390,7 @@ func (rtx *Context) recordFault(pe *PanicError) {
 //	}
 //
 // It never panics; use [MustGet] to route a missing/wrong-type service through the
-// OnError funnel instead of handling it inline.
+// OnPanic funnel instead of handling it inline.
 func Get[T any](rtx *Context, key string) (T, bool) {
 	v, ok := rtx.Value(key).(T)
 	return v, ok
@@ -395,7 +399,7 @@ func Get[T any](rtx *Context, key string) (T, bool) {
 // MustGet returns the service bound under key as T, or panics with a
 // [*ServiceError] (unwrapping to [ErrServiceNotFound]) when it is absent or not a
 // T. The panic is intentional and recoverable: the runtime recovers it inside
-// dispatch and routes it through the program's OnError funnel — so a handler that
+// dispatch and routes it through the program's OnPanic funnel — so a handler that
 // cannot run without a service reaches for MustGet instead of handling a miss
 // inline:
 //
