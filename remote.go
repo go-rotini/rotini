@@ -7,7 +7,86 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
+
+// RemoteErrorKind classifies a remote-dispatch failure: the plugin binary could
+// not be located, it exceeded its declared timeout, or it could not be spawned.
+type RemoteErrorKind int
+
+const (
+	// RemoteBinaryNotFound: no binary was found next to the executable, in the
+	// discovery path, or on PATH.
+	RemoteBinaryNotFound RemoteErrorKind = iota
+	// RemoteTimeout: the plugin ran past its declared timeout and was killed.
+	RemoteTimeout
+	// RemoteSpawnFailed: the binary was found but could not be started (a fork/
+	// exec or pipe failure — NOT the plugin's own non-zero exit, which passes
+	// through untouched).
+	RemoteSpawnFailed
+)
+
+// String renders the kind as a short, stable label.
+func (k RemoteErrorKind) String() string {
+	switch k {
+	case RemoteBinaryNotFound:
+		return "binary-not-found"
+	case RemoteTimeout:
+		return "timeout"
+	case RemoteSpawnFailed:
+		return "spawn-failed"
+	default:
+		return "unknown"
+	}
+}
+
+// RemoteError reports a rotini-authored failure carrying out a remote/plugin
+// dispatch (NOT the plugin's own non-zero exit, which rotini passes through —
+// the plugin already spoke for itself). It is the remote channel's typed,
+// errors.As-able error, so a funnel can special-case a timeout or a missing
+// plugin without matching the message:
+//
+//	var re *rotini.RemoteError
+//	if errors.As(err, &re) && re.Kind == rotini.RemoteTimeout {
+//	    fmt.Fprintf(os.Stderr, "%s timed out after %s\n", re.Name, re.Timeout)
+//	}
+//
+// Category follows D4: a missing binary is the user's typo when DISCOVERED
+// ([CategoryUsage]) and an install/wiring problem when DECLARED
+// ([CategoryInternal]); a spawn failure is [CategoryInternal]; a timeout is
+// deliberately [CategoryNone] — operational, neither party's fault — but still
+// As-able here so a funnel that wants to treat it specially can. The underlying
+// OS/exec Cause stays reachable via errors.As (nil for a synthesized
+// not-found).
+type RemoteError struct {
+	Name    string          // the remote command name (or discovery token)
+	Binary  string          // the plugin binary that was sought or spawned
+	Kind    RemoteErrorKind // what went wrong
+	Timeout time.Duration   // the elapsed deadline, for Kind == RemoteTimeout (else 0)
+	Cause   error           // the underlying OS/exec error, reachable via errors.As (may be nil)
+	Msg     string          // the human-readable failure
+
+	cat Category // how CategoryOf classifies it (CategoryNone for a timeout)
+}
+
+func (e *RemoteError) Error() string { return e.Msg }
+
+// Unwrap exposes the Cause (when present) and the category sentinel
+// ([ErrUsage]/[ErrInternal]) so errors.Is/As reach both; a timeout adds no
+// sentinel, so [CategoryOf] reports [CategoryNone].
+func (e *RemoteError) Unwrap() []error {
+	var out []error
+	if e.Cause != nil {
+		out = append(out, e.Cause)
+	}
+	switch e.cat {
+	case CategoryUsage:
+		out = append(out, ErrUsage)
+	case CategoryInternal:
+		out = append(out, ErrInternal)
+	}
+	return out
+}
 
 // RemoteDispatch is a resolved remote/co-located sub-command invocation: the
 // plugin binary Def.Binary run with Args (everything after the command name).
@@ -38,10 +117,16 @@ type RemoteDispatch struct {
 func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatch) (int, error) {
 	path, err := resolveRemoteBinary(r.Def.Binary, r.Dir)
 	if err != nil {
+		// A DISCOVERED token's missing binary is the user's typo (Usage); a
+		// DECLARED remote's is an install/wiring problem (Internal).
+		cat := CategoryInternal
 		if r.Discovered {
-			return p.wiringFailure(ctx, rtx, UsageError(err)) // the user's typo, not a wiring bug
+			cat = CategoryUsage
 		}
-		return p.wiringFailure(ctx, rtx, InternalError(err))
+		return p.wiringFailure(ctx, rtx, &RemoteError{
+			Name: r.Def.Name, Binary: r.Def.Binary, Kind: RemoteBinaryNotFound,
+			Cause: err, Msg: err.Error(), cat: cat,
+		})
 	}
 
 	if r.Def.Timeout > 0 {
@@ -59,15 +144,22 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 	case err == nil:
 		return 0, nil
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		// Deliberately untagged (CategoryNone): a timeout is operational —
-		// neither the user's command nor the author's wiring is "wrong".
-		return p.wiringFailure(ctx, rtx, fmt.Errorf("%s: timed out after %s", r.Def.Name, r.Def.Timeout))
+		// Deliberately CategoryNone (cat unset): a timeout is operational —
+		// neither the user's command nor the author's wiring is "wrong" — but
+		// still As-able as a *RemoteError so a funnel can special-case it.
+		return p.wiringFailure(ctx, rtx, &RemoteError{
+			Name: r.Def.Name, Binary: r.Def.Binary, Kind: RemoteTimeout, Timeout: r.Def.Timeout,
+			Msg: fmt.Sprintf("%s: timed out after %s", r.Def.Name, r.Def.Timeout),
+		})
 	default:
 		var ee *exec.ExitError
 		if errors.As(err, &ee) {
 			return ee.ExitCode(), err
 		}
-		return p.wiringFailure(ctx, rtx, InternalError(fmt.Errorf("%s: %w", r.Def.Name, err)))
+		return p.wiringFailure(ctx, rtx, &RemoteError{
+			Name: r.Def.Name, Binary: r.Def.Binary, Kind: RemoteSpawnFailed,
+			Cause: err, Msg: fmt.Sprintf("%s: %v", r.Def.Name, err), cat: CategoryInternal,
+		})
 	}
 }
 

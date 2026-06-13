@@ -2,10 +2,12 @@ package rotini
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // writeFakeBinary writes an executable shell script to a fresh dir on PATH and
@@ -71,6 +73,13 @@ func TestRun_remoteNotFound(t *testing.T) {
 	// A DECLARED remote whose binary is missing is an install/wiring problem.
 	if CategoryOf(err) != CategoryInternal {
 		t.Errorf("CategoryOf = %v, want internal", CategoryOf(err))
+	}
+	// EH6: a typed, As-able *RemoteError naming the kind.
+	var re *RemoteError
+	if !errors.As(err, &re) || re.Kind != RemoteBinaryNotFound {
+		t.Errorf("err = %v, want a *RemoteError of kind binary-not-found", err)
+	} else if re.Name != "missing" {
+		t.Errorf("RemoteError.Name = %q, want missing", re.Name)
 	}
 }
 
@@ -144,5 +153,39 @@ func TestRun_discoveryMissing(t *testing.T) {
 	// A DISCOVERED token that resolves to no binary is the user's typo.
 	if CategoryOf(err) != CategoryUsage {
 		t.Errorf("CategoryOf = %v, want usage", CategoryOf(err))
+	}
+	// EH6: same typed *RemoteError, but usage-categorized for a discovered miss.
+	var re *RemoteError
+	if !errors.As(err, &re) || re.Kind != RemoteBinaryNotFound {
+		t.Errorf("err = %v, want a *RemoteError of kind binary-not-found", err)
+	}
+}
+
+// TestRun_remoteTimeout: a plugin that runs past its declared timeout is killed
+// and surfaced as a *RemoteError of kind timeout — deliberately CategoryNone
+// (operational), so the default OnError exits 1, not 70/2.
+func TestRun_remoteTimeout(t *testing.T) {
+	writeFakeBinary(t, "app-slow", "#!/bin/sh\nsleep 5\n")
+	def := Definition{Name: "app", Handler: "App", RemoteCommands: []RemoteDef{
+		{Name: "slow", Binary: "app-slow", Timeout: 50 * time.Millisecond},
+	}}
+
+	p, _, errb := remoteProgram(def, []string{"slow"})
+	code, err := p.run(p.args)
+	var re *RemoteError
+	if !errors.As(err, &re) || re.Kind != RemoteTimeout {
+		t.Fatalf("err = %v, want a *RemoteError of kind timeout", err)
+	}
+	if re.Timeout != 50*time.Millisecond {
+		t.Errorf("RemoteError.Timeout = %s, want 50ms", re.Timeout)
+	}
+	if CategoryOf(err) != CategoryNone {
+		t.Errorf("CategoryOf = %v, want none (a timeout is neither party's fault)", CategoryOf(err))
+	}
+	if code != 1 {
+		t.Errorf("exit = %d, want 1 (CategoryNone floors to 1)", code)
+	}
+	if !strings.Contains(errb.String(), "timed out") {
+		t.Errorf("stderr = %q, want 'timed out'", errb)
 	}
 }

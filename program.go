@@ -210,6 +210,27 @@ func (e *PanicError) Unwrap() error {
 	return nil
 }
 
+// WiringError reports that the generated [Definition] and the handler set are
+// out of sync — a resolved command names a handler method that does not exist,
+// or whose return value does not implement [CommandHandlers]. It is a build-
+// time bug surfaced at run time (always [CategoryInternal]); the structured
+// fields name the offending command and method so a funnel can report it
+// precisely without matching the message:
+//
+//	var we *rotini.WiringError
+//	if errors.As(err, &we) { log.Fatalf("wire %s → %s", we.Command, we.Handler) }
+type WiringError struct {
+	Command string // the command whose handler wiring is broken
+	Handler string // the handler method name the Definition referenced
+	Msg     string // the human-readable failure
+}
+
+func (e *WiringError) Error() string { return e.Msg }
+
+// Unwrap reports [ErrInternal]: a wiring mismatch is always the author's bug,
+// never the end-user's.
+func (e *WiringError) Unwrap() error { return ErrInternal }
+
 // WithResolver overrides the resolve phase — argv to invocation target (the
 // command chain to dispatch, or a remote dispatch, plus the argv the parsers
 // later see). Wrap [DefaultResolver] rather than re-deriving it: a resolver
@@ -434,12 +455,18 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		// funnel prints it to stderr and exits 1.
 		m := hv.MethodByName(f.Handler)
 		if !m.IsValid() {
-			return p.wiringFailure(ctx, rtx, InternalError(fmt.Errorf("no handler for command %q (missing method %q)", f.Name, f.Handler)))
+			return p.wiringFailure(ctx, rtx, &WiringError{
+				Command: f.Name, Handler: f.Handler,
+				Msg: fmt.Sprintf("no handler for command %q (missing method %q)", f.Name, f.Handler),
+			})
 		}
 		out := m.Call(nil)
 		h, ok := out[0].Interface().(CommandHandlers)
 		if !ok || h == nil {
-			return p.wiringFailure(ctx, rtx, InternalError(fmt.Errorf("handler %q does not implement CommandHandlers", f.Handler)))
+			return p.wiringFailure(ctx, rtx, &WiringError{
+				Command: f.Name, Handler: f.Handler,
+				Msg: fmt.Sprintf("handler %q does not implement CommandHandlers", f.Handler),
+			})
 		}
 		handlers[i] = h
 	}

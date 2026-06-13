@@ -132,6 +132,24 @@ func TestWithOnErrorFn_categorySwitch(t *testing.T) {
 	}
 }
 
+// EH6: a Definition↔handlers mismatch is a typed, As-able *WiringError naming
+// the command and method, and always CategoryInternal.
+func TestRun_wiringError(t *testing.T) {
+	p, _, _ := newTestProgram(&testHandlers{log: &[]string{}}, nil)
+	p.def = Definition{Name: "app", Handler: "Nope"} // no such handler method
+	_, err := p.run(p.args)
+	var we *WiringError
+	if !errors.As(err, &we) {
+		t.Fatalf("err is not a *WiringError: %T (%v)", err, err)
+	}
+	if we.Command != "app" || we.Handler != "Nope" {
+		t.Errorf("WiringError = {Command:%q Handler:%q}, want {app Nope}", we.Command, we.Handler)
+	}
+	if CategoryOf(err) != CategoryInternal {
+		t.Errorf("CategoryOf = %v, want internal", CategoryOf(err))
+	}
+}
+
 // An empty chain is a resolver bug, reported loudly — never a silent no-op.
 func TestWithResolver_emptyChain(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: &[]string{}}, nil)
