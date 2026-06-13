@@ -76,7 +76,10 @@ type Context struct {
 	exitCode  int                                                // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
 	stopped   bool                                               // an exit was requested; forward progress (setup/PreRun/Run) halts
 	exitNow   bool                                               // [Context.Exit] (hard) was called: skip remaining teardown too
-	recorded  []error                                            // errors recorded this run via [Context.RecordErr] (plus framework/panic); drained by the OnError funnel
+	recorded  []error                                            // errors recorded this run via [Context.RecordError]; drained by the OnError funnel
+	warnings  []error                                            // warnings recorded this run via [Context.RecordWarning]; drained by the OnWarning funnel
+	successes []string                                           // successes recorded this run via [Context.RecordSuccess]; drained by the OnSuccess funnel
+	faults    []*PanicError                                      // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); drained by the OnPanic funnel
 }
 
 // newContext returns an empty [Context] with an initialized registry and no
@@ -227,9 +230,9 @@ func (rtx *Context) Exit(code int) {
 	}
 }
 
-// RecordErr records err as a failure of this run, to be reported once the
+// RecordError records err as a failure of this run, to be reported once the
 // lifecycle settles. It does NOT print and does NOT stop the lifecycle — a
-// handler accumulates one or more errors with RecordErr (it may call it any
+// handler accumulates one or more errors with RecordError (it may call it any
 // number of times, across any hook), then chooses HOW to stop independently:
 // [Context.SignalExit] for a graceful stop that still unwinds teardown, or
 // [Context.Exit] to skip teardown. Either way — and even if neither is called —
@@ -240,11 +243,11 @@ func (rtx *Context) Exit(code int) {
 //
 //	inputs, err := rotini.Collect[cmdgen.MycliInputs](rtx)
 //	if err != nil {
-//	    rtx.RecordErr(err)
+//	    rtx.RecordError(err)
 //	    rtx.SignalExit(rotini.ExitUsage) // graceful; or rtx.Exit(…) to skip teardown
 //	    return
 //	}
-func (rtx *Context) RecordErr(err error) {
+func (rtx *Context) RecordError(err error) {
 	if rtx == nil || err == nil {
 		return
 	}
@@ -253,7 +256,7 @@ func (rtx *Context) RecordErr(err error) {
 	rtx.recorded = append(rtx.recorded, err)
 }
 
-// Errors returns the errors recorded this run via [Context.RecordErr] (and the
+// Errors returns the errors recorded this run via [Context.RecordError] (and the
 // framework/panic errors rotini records the same way), in recording order. It
 // is how an OnError funnel drains and pretty-prints each error individually;
 // the funnel's err argument is their [errors.Join], so one [CategoryOf] /
@@ -271,6 +274,106 @@ func (rtx *Context) Errors() []error {
 	out := make([]error, len(rtx.recorded))
 	copy(out, rtx.recorded)
 	return out
+}
+
+// RecordWarning records warn as a non-fatal warning of this run — something the
+// end-user should know about that did NOT fail the command (a deprecation, a
+// fallback, a skipped item). Like [Context.RecordError] it neither prints nor
+// stops the lifecycle: it appends, and the program's OnWarning funnel
+// ([Program.WithOnWarningFn]) fires once at the end whenever any warning was
+// recorded, draining them via [Context.Warnings]. A warning is an error value
+// (so it can be typed and branched with errors.As, and secrets stay redacted),
+// but it never raises the exit code. A nil warn is ignored.
+func (rtx *Context) RecordWarning(warn error) {
+	if rtx == nil || warn == nil {
+		return
+	}
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	rtx.warnings = append(rtx.warnings, warn)
+}
+
+// RecordSuccess records msg as a success message of this run — what went right,
+// for the program's OnSuccess funnel ([Program.WithOnSuccessFn]) to present.
+// Like the other record calls it neither prints nor stops the lifecycle: it
+// appends, and OnSuccess fires once at the end whenever any success was
+// recorded, draining them via [Context.Successes]. Recording a success does not
+// by itself set the exit code (a clean run is already 0). An empty msg is
+// ignored.
+func (rtx *Context) RecordSuccess(msg string) {
+	if rtx == nil || msg == "" {
+		return
+	}
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	rtx.successes = append(rtx.successes, msg)
+}
+
+// Warnings returns the warnings recorded this run via [Context.RecordWarning],
+// in recording order — how an OnWarning funnel drains and prints each. The
+// returned slice is a copy; mutating it does not affect the Context.
+func (rtx *Context) Warnings() []error {
+	if rtx == nil {
+		return nil
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.warnings) == 0 {
+		return nil
+	}
+	out := make([]error, len(rtx.warnings))
+	copy(out, rtx.warnings)
+	return out
+}
+
+// Successes returns the success messages recorded this run via
+// [Context.RecordSuccess], in recording order — how an OnSuccess funnel drains
+// and prints each. The returned slice is a copy; mutating it does not affect the
+// Context.
+func (rtx *Context) Successes() []string {
+	if rtx == nil {
+		return nil
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.successes) == 0 {
+		return nil
+	}
+	out := make([]string, len(rtx.successes))
+	copy(out, rtx.successes)
+	return out
+}
+
+// Panics returns the recovered panics and rotini-detected faults captured this
+// run, in capture order — what an OnPanic funnel ([Program.WithOnPanicFn])
+// reports. Unlike errors/warnings/successes there is NO public record call: the
+// lifecycle captures a recovered panic (or routes a detected wiring/resolver
+// fault) here itself, and that capture is the funnel's signal. The returned
+// slice is a copy; mutating it does not affect the Context.
+func (rtx *Context) Panics() []*PanicError {
+	if rtx == nil {
+		return nil
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.faults) == 0 {
+		return nil
+	}
+	out := make([]*PanicError, len(rtx.faults))
+	copy(out, rtx.faults)
+	return out
+}
+
+// recordFault appends a recovered panic / rotini-detected fault to the private
+// fault channel (drained by the OnPanic funnel). It is unexported on purpose:
+// faults are the lifecycle's to capture, never the handler's to record.
+func (rtx *Context) recordFault(pe *PanicError) {
+	if rtx == nil || pe == nil {
+		return
+	}
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	rtx.faults = append(rtx.faults, pe)
 }
 
 // Get returns the service bound under key as T — the typed, comma-ok form of the

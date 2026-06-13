@@ -160,7 +160,7 @@ func (p *Program) Bind(key string, value any) *Program {
 // Three error classes flow into this one funnel, all via the same recorded list
 // ([Context.Errors]):
 //
-//   - Handler errors a handler chose to surface with [Context.RecordErr] — the
+//   - Handler errors a handler chose to surface with [Context.RecordError] — the
 //     ordinary path. A handler records one or more errors and stops with
 //     [Context.SignalExit] (graceful, teardown runs) or [Context.Exit] (skip
 //     teardown); the funnel fires after the lifecycle settles. Recording
@@ -379,7 +379,7 @@ func (p *Program) wiringFailure(ctx context.Context, rtx *Context, err error) (i
 	// Record it so OnError can drain rtx.Errors() uniformly on the framework
 	// paths too (resolve happens before any lifecycle, so this is the only
 	// recorded error). The err argument is the join, matching the dispatch path.
-	rtx.RecordErr(err)
+	rtx.RecordError(err)
 	joined := errors.Join(rtx.Errors()...)
 	rtx.onErrorFn(ctx, rtx, joined)
 	if rtx.exitCode == 0 {
@@ -480,7 +480,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 	steps := plan(chain, handlers)
 
-	// run wraps every hook so a panic is recovered and RECORDED (rtx.RecordErr)
+	// run wraps every hook so a panic is recovered and RECORDED (rtx.RecordError)
 	// rather than unwinding — this is what lets teardown still run and OnError
 	// fire exactly once, last. panicked tracks whether a panic stopped FORWARD
 	// progress; a panic in teardown is recorded too but does not re-trigger the
@@ -489,7 +489,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	run := func(hook func(context.Context, *Context)) {
 		defer func() {
 			if r := recover(); r != nil {
-				rtx.RecordErr(&PanicError{Value: r, Stack: debug.Stack()})
+				rtx.RecordError(&PanicError{Value: r, Stack: debug.Stack()})
 				panicked = true
 			}
 		}()
@@ -530,7 +530,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 
 	// OnError is the single error sink: it fires once, last (after teardown),
-	// whenever this run recorded ANY error — a handler's rtx.RecordErr, a
+	// whenever this run recorded ANY error — a handler's rtx.RecordError, a
 	// recovered panic, or a framework diagnostic. The err argument is their
 	// join, so one CategoryOf/Is/As call covers the set. A run that recorded
 	// errors never exits 0: floor to 1 even if the funnel forgot a code.

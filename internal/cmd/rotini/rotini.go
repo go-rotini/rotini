@@ -27,7 +27,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		// error to stderr and exits by category (a parse error → ExitUsage).
 		// Suggestions ("did you mean") are deliberately NOT here — that is the
 		// end-user's own OnError to add, against the bound Suggestor.
-		rtx.RecordErr(err)
+		rtx.RecordError(err)
 		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}

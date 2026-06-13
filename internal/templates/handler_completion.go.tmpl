@@ -19,7 +19,7 @@ var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[{{.RootCommandName}}CompletionInputs](rtx)
 	if err != nil {
-		rtx.RecordErr(err)
+		rtx.RecordError(err)
 		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
@@ -34,7 +34,7 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 
 	script, err := Completion(inputs.{{.RootCommandName}}Completion.Arguments.Shell)
 	if err != nil {
-		rtx.RecordErr(err)
+		rtx.RecordError(err)
 		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}

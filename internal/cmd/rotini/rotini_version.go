@@ -19,7 +19,7 @@ var _ rotini.CommandHandlers = (*rotiniVersionHandlers)(nil)
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniVersionInputs](rtx)
 	if err != nil {
-		rtx.RecordErr(err)
+		rtx.RecordError(err)
 		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}

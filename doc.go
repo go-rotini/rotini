@@ -56,7 +56,7 @@
 // # Errors
 //
 // One funnel reports every failure. A handler that hits a bad input does not
-// print — it RECORDS and stops: [Context.RecordErr] accumulates one or more
+// print — it RECORDS and stops: [Context.RecordError] accumulates one or more
 // errors (call it any number of times), then [Context.SignalExit] (stop, run
 // teardown) or [Context.Exit] (stop, skip teardown) sets the code. Framework
 // diagnostics — a resolver error, a [*WiringError], a [*RemoteError] — and a
@@ -70,7 +70,7 @@
 // present — [ExitInternal] (70) if any error is [CategoryInternal], else
 // [ExitUsage] (2) if any is [CategoryUsage], else 1 (a recorded run never exits
 // 0). A generated handler therefore carries ZERO error-presentation code: it
-// calls [Context.RecordErr] then [Context.SignalExit], and the runtime reports.
+// calls [Context.RecordError] then [Context.SignalExit], and the runtime reports.
 //
 // Every error class is both [errors.Is]-able against the [ErrUsage] / [ErrInternal]
 // sentinels (so [CategoryOf] classifies it) and [errors.As]-able to a typed value

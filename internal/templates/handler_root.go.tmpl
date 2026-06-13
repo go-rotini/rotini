@@ -23,7 +23,7 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		// (rotini's default prints it and exits by category). To report it your
 		// own way — a "did you mean" from the bound Suggestor, a help dump, a
 		// logger — set Program.WithOnErrorFn; nothing is printed here.
-		rtx.RecordErr(err)
+		rtx.RecordError(err)
 		rtx.SignalExit(rotini.ExitUsage)
 		return
 	}
