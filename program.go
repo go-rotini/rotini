@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -350,11 +351,16 @@ func internalUnlessTagged(err error) error {
 // floors the exit code to 1 (a wiring failure is always a failure, even when a
 // custom funnel forgets rtx.SignalExit).
 func (p *Program) wiringFailure(ctx context.Context, rtx *Context, err error) (int, error) {
-	rtx.errorFn(ctx, rtx, err)
+	// Record it so OnError can drain rtx.Errors() uniformly on the framework
+	// paths too (resolve happens before any lifecycle, so this is the only
+	// recorded error). The err argument is the join, matching the dispatch path.
+	rtx.RecordErr(err)
+	joined := errors.Join(rtx.Errors()...)
+	rtx.errorFn(ctx, rtx, joined)
 	if rtx.exitCode == 0 {
 		rtx.exitCode = 1
 	}
-	return rtx.exitCode, err
+	return rtx.exitCode, joined
 }
 
 // defaultErrorFn is the ErrorFn funnel used when the program supplies none: it
@@ -416,18 +422,17 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 	steps := plan(chain, handlers)
 
-	// failure is the first panic seen anywhere in the lifecycle. run wraps every
-	// hook so a panic is recovered (keeping only the first) rather than unwinding —
-	// this is what lets teardown still run and ErrorFn fire exactly once, last.
-	var failure error
+	// run wraps every hook so a panic is recovered and RECORDED (rtx.RecordErr)
+	// rather than unwinding — this is what lets teardown still run and OnError
+	// fire exactly once, last. panicked tracks whether a panic stopped FORWARD
+	// progress; a panic in teardown is recorded too but does not re-trigger the
+	// forward halt (the unwind runs to completion regardless).
+	panicked := false
 	run := func(hook func(context.Context, *Context)) {
 		defer func() {
-			r := recover()
-			if r == nil {
-				return
-			}
-			if failure == nil {
-				failure = &PanicError{Value: r, Stack: debug.Stack()}
+			if r := recover(); r != nil {
+				rtx.RecordErr(&PanicError{Value: r, Stack: debug.Stack()})
+				panicked = true
 			}
 		}()
 		hook(ctx, rtx)
@@ -441,7 +446,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		if trapped && !rtx.stopped && ctx.Err() != nil {
 			rtx.SignalExit(int(p.sigExit.Load()))
 		}
-		return rtx.stopped || failure != nil
+		return rtx.stopped || panicked
 	}
 
 	// Forward — every step's Do in plan order, halting on rtx.SignalExit/rtx.Exit
@@ -466,13 +471,18 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		}
 	}
 
-	// A panic is funneled to ErrorFn last, after teardown. The panic path is always
-	// a failure: if the funnel left the code at 0, floor it to 1.
-	if failure != nil {
-		rtx.errorFn(ctx, rtx, failure)
+	// OnError is the single error sink: it fires once, last (after teardown),
+	// whenever this run recorded ANY error — a handler's rtx.RecordErr, a
+	// recovered panic, or a framework diagnostic. The err argument is their
+	// join, so one CategoryOf/Is/As call covers the set. A run that recorded
+	// errors never exits 0: floor to 1 even if the funnel forgot a code.
+	recorded := rtx.Errors()
+	joined := errors.Join(recorded...)
+	if len(recorded) > 0 {
+		rtx.errorFn(ctx, rtx, joined)
 		if rtx.exitCode == 0 {
 			rtx.exitCode = 1
 		}
 	}
-	return rtx.exitCode, failure
+	return rtx.exitCode, joined
 }

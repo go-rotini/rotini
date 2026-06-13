@@ -76,6 +76,7 @@ type Context struct {
 	exitCode int                                                // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
 	stopped  bool                                               // an exit was requested; forward progress (setup/PreRun/Run) halts
 	exitNow  bool                                               // [Context.Exit] (hard) was called: skip remaining teardown too
+	recorded []error                                            // errors recorded this run via [Context.RecordErr] (plus framework/panic); drained by the OnError funnel
 }
 
 // newContext returns an empty [Context] with an initialized registry and no
@@ -224,6 +225,52 @@ func (rtx *Context) Exit(code int) {
 	if rtx.exitCode == 0 {
 		rtx.exitCode = code
 	}
+}
+
+// RecordErr records err as a failure of this run, to be reported once the
+// lifecycle settles. It does NOT print and does NOT stop the lifecycle — a
+// handler accumulates one or more errors with RecordErr (it may call it any
+// number of times, across any hook), then chooses HOW to stop independently:
+// [Context.SignalExit] for a graceful stop that still unwinds teardown, or
+// [Context.Exit] to skip teardown. Either way — and even if neither is called —
+// the program's OnError funnel ([Program.WithErrorFn]) fires once at the end
+// whenever any error was recorded, draining them via [Context.Errors]. A nil
+// err is ignored. rotini records framework diagnostics and recovered panics
+// here too, so OnError is the single sink for every error class:
+//
+//	inputs, err := rotini.Collect[cmdgen.MycliInputs](rtx)
+//	if err != nil {
+//	    rtx.RecordErr(err)
+//	    rtx.SignalExit(rotini.ExitUsage) // graceful; or rtx.Exit(…) to skip teardown
+//	    return
+//	}
+func (rtx *Context) RecordErr(err error) {
+	if rtx == nil || err == nil {
+		return
+	}
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	rtx.recorded = append(rtx.recorded, err)
+}
+
+// Errors returns the errors recorded this run via [Context.RecordErr] (and the
+// framework/panic errors rotini records the same way), in recording order. It
+// is how an OnError funnel drains and pretty-prints each error individually;
+// the funnel's err argument is their [errors.Join], so one [CategoryOf] /
+// errors.Is / errors.As call covers the whole set. The returned slice is a
+// copy — mutating it does not affect the Context.
+func (rtx *Context) Errors() []error {
+	if rtx == nil {
+		return nil
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.recorded) == 0 {
+		return nil
+	}
+	out := make([]error, len(rtx.recorded))
+	copy(out, rtx.recorded)
+	return out
 }
 
 // Get returns the service bound under key as T — the typed, comma-ok form of the
