@@ -5,8 +5,10 @@ import (
 {{- range .Imports}}
 	{{.}}
 {{- end}}
-{{- if .Features}}
+{{- if .EmbedImport}}
 	_ "embed"
+{{- end}}
+{{- if .Features}}
 	"fmt"
 	"strings"
 {{- end}}
@@ -96,8 +98,12 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 }
 {{range .Features}}
 {{range .Vars}}
+{{- if .Embed}}
 //go:embed {{.Embed}}
 var {{.Name}} string
+{{- else}}
+var {{.Name}} = {{.Literal}}
+{{- end}}
 {{end}}
 {{- if .PerShell}}
 // {{.Resolver}} returns the embedded {{.Noun}} script for shell, or an error when

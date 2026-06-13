@@ -31,12 +31,19 @@ generate:
   features:
     help:
       enabled: true
-      dir: internal/cmd/rotini/embed
-    man:
-      enabled: true
+      embed: false
       dir: internal/cmd/rotini/embed
     completion:
       enabled: true
+      embed: false
+      dir: internal/cmd/rotini/embed
+    man:
+      enabled: true
+      embed: true
+      dir: internal/cmd/rotini/embed
+    markdown:
+      enabled: false
+      embed: true
       dir: internal/cmd/rotini/embed
 `
 
@@ -358,7 +365,7 @@ func TestGeneratePrunesOrphanStubs(t *testing.T) {
 }
 
 // helpKeepConf enables help and keeps one rtg feature-dir file by package-relative path.
-const helpKeepConf = confSchemaHeader + "generate:\n  packages:\n    cmdgen:\n      keep:\n        - embed/help_legacy.txt\n  features:\n    help:\n      enabled: true\n"
+const helpKeepConf = confSchemaHeader + "generate:\n  packages:\n    cmdgen:\n      keep:\n        - embed/help_legacy.txt\n  features:\n    help:\n      enabled: true\n      embed: true\n      template: true\n"
 
 // TestGeneratePrunesOrphanHelp verifies rtg pruning (implicit/always-on): a help
 // .txt for a command no longer in the spec is removed on regenerate, while the
@@ -399,7 +406,7 @@ func TestGeneratePrunesOrphanHelp(t *testing.T) {
 }
 
 // completionConf enables only the completion feature.
-const completionConf = confSchemaHeader + "generate:\n  features:\n    completion:\n      enabled: true\n"
+const completionConf = confSchemaHeader + "generate:\n  features:\n    completion:\n      enabled: true\n      embed: true\n"
 
 // TestGenerateCompletionEnabled verifies the features group's exception: completion
 // emits per-shell embed vars + a shell-keyed resolver (not a command-path one),
@@ -785,7 +792,7 @@ const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotin
 	"            schema:\n" +
 	"              type: bool\n"
 
-const helpEnabledConf = confSchemaHeader + "generate:\n  features:\n    help:\n      enabled: true\n"
+const helpEnabledConf = confSchemaHeader + "generate:\n  features:\n    help:\n      enabled: true\n      embed: true\n      template: true\n"
 
 const placeholderSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
 	"command:\n" +
@@ -857,6 +864,93 @@ func TestGenerateEnvPrefix(t *testing.T) {
 	)
 }
 
+// TestGenerateEmbedAndTemplateModes pins the orthogonal embed × template knobs.
+// embed: var is //go:embed-backed + a file on disk (true) vs an inline string
+// literal + no file (false). template: the editable *.tmpl is seeded to dir
+// (true) vs not, rendering from rotini's built-in default (false). Four features
+// exercise four quadrants at once.
+func TestGenerateEmbedAndTemplateModes(t *testing.T) {
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n  name: mycli\n  summary: a tool\n  description: a demo\n"
+	// help: inline + no template | man: embed + no template
+	// markdown: embed + template | completion: inline
+	conf := confSchemaHeader + "generate:\n  features:\n" +
+		"    help:\n      enabled: true\n      embed: false\n      template: false\n" +
+		"    man:\n      enabled: true\n      embed: true\n      template: false\n" +
+		"    markdown:\n      enabled: true\n      embed: true\n      template: true\n" +
+		"    completion:\n      enabled: true\n      embed: false\n"
+
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), conf)
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	gen := readFileString(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"))
+	// embed:false → inline string vars (help, completion).
+	for _, want := range []string{"var HelpMycli = ", "var CompletionBash = "} {
+		if !strings.Contains(gen, want) {
+			t.Errorf("gen file missing inline var %q", want)
+		}
+	}
+	// embed:true → //go:embed-backed vars (man, markdown) + the embed import.
+	for _, want := range []string{"//go:embed embed/man_mycli.txt", "var ManMycli string", "//go:embed embed/markdown_mycli.md", `_ "embed"`} {
+		if !strings.Contains(gen, want) {
+			t.Errorf("gen file missing embed form %q", want)
+		}
+	}
+	// Inline features must NOT carry an embed directive for their pages.
+	if strings.Contains(gen, "//go:embed embed/help_mycli.txt") {
+		t.Error("help is embed:false but the gen file has its //go:embed directive")
+	}
+
+	embed := filepath.Join(tmp, "internal", "cmd", "mycli", "embed")
+	exists := func(name string) bool {
+		_, err := os.Stat(filepath.Join(embed, name))
+		return err == nil
+	}
+	// Output files: present only for embed:true features.
+	if exists("help_mycli.txt") || exists("completion_bash.txt") {
+		t.Error("inline feature wrote an output file (want none)")
+	}
+	if !exists("man_mycli.txt") || !exists("markdown_mycli.md") {
+		t.Error("embed feature missing its output file")
+	}
+	// Templates: seeded only for template:true (markdown); not for template:false.
+	if !exists("markdown.md.tmpl") {
+		t.Error("template:true markdown did not seed its template")
+	}
+	if exists("help.txt.tmpl") || exists("man.txt.tmpl") {
+		t.Error("template:false feature seeded a template (want none)")
+	}
+}
+
+// TestGenerateNoEmbedImportWhenAllInline confirms `import _ "embed"` is dropped
+// when no enabled feature uses //go:embed.
+func TestGenerateNoEmbedImportWhenAllInline(t *testing.T) {
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n  name: mycli\n  summary: a tool\n"
+	conf := confSchemaHeader + "generate:\n  features:\n    help:\n      enabled: true\n      embed: false\n"
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), conf)
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	gen := readFileString(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"))
+	if strings.Contains(gen, `_ "embed"`) {
+		t.Error("all features inline, but the gen file still imports embed")
+	}
+	if !strings.Contains(gen, "var HelpMycli = ") {
+		t.Error("inline help var missing")
+	}
+}
+
 // The markdown feature is the fourth doc feature: same render-or-verbatim
 // contract as help/man, .md files, Markdown<Prefix> vars + Markdown resolver,
 // editable markdown.md.tmpl seeded into the feature dir.
@@ -880,7 +974,7 @@ func TestGenerateMarkdownEnabled(t *testing.T) {
 		"      markdown: |\n" +
 		"        # custom page\n" +
 		"        byte-for-byte.\n"
-	conf := confSchemaHeader + "generate:\n  features:\n    markdown:\n      enabled: true\n"
+	conf := confSchemaHeader + "generate:\n  features:\n    markdown:\n      enabled: true\n      embed: true\n      template: true\n"
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
@@ -1134,7 +1228,7 @@ func TestGenerateHelpRegenerates(t *testing.T) {
 }
 
 // manConf enables man (but not help).
-const manConf = confSchemaHeader + "generate:\n  features:\n    man:\n      enabled: true\n"
+const manConf = confSchemaHeader + "generate:\n  features:\n    man:\n      enabled: true\n      embed: true\n      template: true\n"
 
 // TestGenerateManEnabled verifies the help pipeline generalizes: with man enabled,
 // the framework gains per-feature embed vars + alias-aware resolvers, the feature
@@ -1252,9 +1346,9 @@ func TestGenerateStripsStylesPerSurface(t *testing.T) {
 		"      man: \"\\e[1mMAN PAGE\\e[0m\"\n" +
 		"      markdown: \"# \\e[1mMD\\e[0m\"\n"
 	conf := confSchemaHeader + "generate:\n  features:\n" +
-		"    help:\n      enabled: true\n" +
-		"    man:\n      enabled: true\n" +
-		"    markdown:\n      enabled: true\n"
+		"    help:\n      enabled: true\n      embed: true\n      template: true\n" +
+		"    man:\n      enabled: true\n      embed: true\n      template: true\n" +
+		"    markdown:\n      enabled: true\n      embed: true\n      template: true\n"
 
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
@@ -2047,7 +2141,7 @@ func TestGenerateHelpComposition(t *testing.T) {
 			"  packages:\n" +
 			"    cmd: { package: cmd/" + dir + "/rth, file: handlers.go }\n" +
 			"    cmdgen: { package: cmd/" + dir + "/rtg, file: rotini.go }\n" +
-			"  features: { help: { enabled: true } }\n"
+			"  features: { help: { enabled: true, embed: true, template: true } }\n"
 	}
 	parentSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
 		"command:\n" +
@@ -2760,7 +2854,7 @@ func TestGenerateFeatureDirEqualsCmdgen(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
-		confSchemaHeader+"generate:\n  features:\n    help:\n      enabled: true\n      dir: internal/cmd/mycli\n")
+		confSchemaHeader+"generate:\n  features:\n    help:\n      enabled: true\n      embed: true\n      dir: internal/cmd/mycli\n")
 	t.Chdir(tmp)
 
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
@@ -2771,19 +2865,16 @@ func TestGenerateFeatureDirEqualsCmdgen(t *testing.T) {
 	mustNotContain(t, gen, "//go:embed ./")
 }
 
-func TestWriteCompletionFiles_errors(t *testing.T) {
-	if err := writeCompletionFiles("", "app", nil); err == nil {
-		t.Error("writeCompletionFiles(empty dir) = nil, want an error")
-	}
+func TestCompletionContents_unsupportedShell(t *testing.T) {
 	badShell := []helpNode{{name: "nushell", file: "completion_nushell.txt"}}
-	if err := writeCompletionFiles(t.TempDir(), "app", badShell); err == nil {
-		t.Error("writeCompletionFiles(unsupported shell) = nil, want an error")
+	if _, err := completionContents("app", badShell); err == nil {
+		t.Error("completionContents(unsupported shell) = nil, want an error")
 	}
 }
 
-func TestWriteFeatureFiles_emptyDir(t *testing.T) {
-	if err := writeFeatureFiles("", nil, helpFeatureDesc); err == nil {
-		t.Error("writeFeatureFiles(empty dir) = nil, want an error")
+func TestWriteFeatureOutputs_emptyDir(t *testing.T) {
+	if err := writeFeatureOutputs("", nil, nil, helpFeatureDesc); err == nil {
+		t.Error("writeFeatureOutputs(empty dir) = nil, want an error")
 	}
 }
 
@@ -2799,14 +2890,16 @@ func TestLoadFeatureTemplate_badUserTemplate(t *testing.T) {
 }
 
 // TestGenerateFeatureDirOutsideCmdgen confirms a feature dir that does not
-// resolve under the cmdgen package is rejected — //go:embed could not reach it.
+// resolve under the cmdgen package is rejected IN EMBED MODE — //go:embed could
+// not reach it. (Inline features have no such constraint; this conf sets
+// embed: true to exercise the check.)
 func TestGenerateFeatureDirOutsideCmdgen(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
-		confSchemaHeader+"generate:\n  features:\n    help:\n      enabled: true\n      dir: docs/help\n")
+		confSchemaHeader+"generate:\n  features:\n    help:\n      enabled: true\n      embed: true\n      dir: docs/help\n")
 	t.Chdir(tmp)
 
 	err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil)

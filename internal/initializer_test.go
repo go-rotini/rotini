@@ -117,13 +117,16 @@ func TestInitialize_with(t *testing.T) {
 	}
 
 	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
-	// The framework serves all four features…
+	// The framework serves all four features. The seed conf template uses
+	// embed:false for help+completion (inline string vars) and embed:true for
+	// man+markdown (//go:embed-backed vars) — so the var forms differ by mode.
 	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
-		"var HelpMycli string",
+		"var HelpMycli =", // inline (help embed:false)
+		"func Help(path ...string) (string, error)",
 		"func Man(path ...string) (string, error)",
 		"func Markdown(path ...string) (string, error)",
 		"func Completion(shell string) (string, error)",
-		"var CompletionZsh string")
+		"var CompletionZsh =") // inline (completion embed:false)
 	// …the wired handlers read theirs…
 	mustContain(t, filepath.Join(genDir, "mycli.go"),
 		"case flags.Help:", "case flags.Version:", "HelpMycli", "v.VersionSemantic")

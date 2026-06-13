@@ -13,12 +13,19 @@ generate:
   features:
     help:
       enabled: true
-      dir: internal/cmd/rotini/embed
-    man:
-      enabled: true
+      embed: false
       dir: internal/cmd/rotini/embed
     completion:
       enabled: true
+      embed: false
+      dir: internal/cmd/rotini/embed
+    man:
+      enabled: true
+      embed: true
+      dir: internal/cmd/rotini/embed
+    markdown:
+      enabled: false
+      embed: true
       dir: internal/cmd/rotini/embed
 validate:
   fail: collect

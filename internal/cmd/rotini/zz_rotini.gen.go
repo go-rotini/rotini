@@ -289,26 +289,19 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 		Bind(rotini.KeyBindMeta, BindMeta)
 }
 
-//go:embed embed/help_rotini.txt
-var HelpRotini string
+var HelpRotini = "\x1b[1mThe rotini cli framework companion cli.\x1b[0m\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n         [-v | --version] [-h | --help]\n\nCommands:\n  initialize;init    scaffold a cli program\n  generate;gen       generate a cli program\n  validate;val       validate a spec file\n  help               print help\n  version            print version\n  completion         print a shell completion script\n\nFlags:\n  --no-styles     disable output styles\n  -v,--version    print version\n  -h,--help       print help\n\nEnvironment:\n  ROTINI_NO_STYLES    disable output styles\n  CI                  is cli environment\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
-//go:embed embed/help_rotini_initialize.txt
-var HelpRotiniInitialize string
+var HelpRotiniInitialize = "Initialize a new rotini cli program spec file.\n\nUsage:\n  rotini initialize [name] [flags]\n\nArguments:\n  [name]    the root command name written to the created spec file (expected binary name)\n\nFlags:\n  --format string    the created rotini spec file format (defaults to the module conf's initialize.format, else yaml) [yaml|json|jsonc|toml]\n  --force            force re-initialization if files exist that init would overwrite\n  --with []string    wire optional setup into the new CLI (feature toggles, command definitions, wired handlers; 'all' for everything) [all|help|man|completion|markdown|version]\n  -h,--help          print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --with completion --with version\n  rotini init mycli --with all\n  rotini init mycli --force\n  rotini init -i\n\nUse \"rotini help <command>\" for more information about a command."
 
-//go:embed embed/help_rotini_generate.txt
-var HelpRotiniGenerate string
+var HelpRotiniGenerate = "Generate a cli program from a rotini spec file.\n\nUsage:\n  rotini generate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default .rotini.spec.yaml)\n\nFlags:\n  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)\n  --watch,-w            watch a rotini spec file for changes and re-generate\n  -h,--help             print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.json --watch\n\nUse \"rotini help <command>\" for more information about a command."
 
-//go:embed embed/help_rotini_validate.txt
-var HelpRotiniValidate string
+var HelpRotiniValidate = "Validate a rotini spec file for correctness.\n\nUsage:\n  rotini validate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default .rotini.spec.yaml)\n\nFlags:\n  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)\n  --fail string         failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]\n  --watch,-w            watch a rotini spec file for changes and re-generate\n  -h,--help             print help\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.yaml\n\nUse \"rotini help <command>\" for more information about a command."
 
-//go:embed embed/help_rotini_help.txt
-var HelpRotiniHelp string
+var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...] [flags]\n\nArguments:\n  [command...]    name of the command to print help for\n\nFlags:\n  -h,--help    print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
 
-//go:embed embed/help_rotini_version.txt
-var HelpRotiniVersion string
+var HelpRotiniVersion = "Print the rotini cli version.\n\nUsage:\n  rotini version [flags]\n\nFlags:\n  -h,--help    print help\n\nExamples:\n  rotini version\n\nUse \"rotini help <command>\" for more information about a command."
 
-//go:embed embed/help_rotini_completion.txt
-var HelpRotiniCompletion string
+var HelpRotiniCompletion = "Print the completion script for a shell; load it with your shell's source/eval idiom.\n\nUsage:\n  rotini completion <shell> [flags]\n\nArguments:\n  <shell>    the target shell [bash|zsh|fish|powershell]\n\nFlags:\n  -h,--help    print help\n\nExamples:\n  rotini completion zsh\n  source <(rotini completion bash)\n\nUse \"rotini help <command>\" for more information about a command."
 
 // Help returns the generated help text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
@@ -379,17 +372,13 @@ func Man(path ...string) (string, error) {
 	}
 }
 
-//go:embed embed/completion_bash.txt
-var CompletionBash string
+var CompletionBash = "# bash completion for rotini\n# Candidates arrive as \"name<TAB>description\"; bash cannot render descriptions,\n# so everything from the first tab is stripped.\n_rotini_complete() {\n    local args line IFS=$'\\n'\n    args=(\"${COMP_WORDS[@]:1:$COMP_CWORD}\")\n    COMPREPLY=()\n    for line in $(rotini __complete \"${args[@]}\" 2>/dev/null); do\n        COMPREPLY+=(\"${line%%$'\\t'*}\")\n    done\n}\ncomplete -o default -F _rotini_complete rotini\n"
 
-//go:embed embed/completion_zsh.txt
-var CompletionZsh string
+var CompletionZsh = "#compdef rotini\n# Candidates arrive as \"name<TAB>description\"; zsh renders the description\n# beside the name via _describe (colons in either part are escaped).\n_rotini() {\n    local -a lines pairs\n    local line name desc\n    lines=(${(f)\"$(rotini __complete ${words[2,$CURRENT]} 2>/dev/null)\"})\n    for line in $lines; do\n        if [[ $line == *$'\\t'* ]]; then\n            name=${line%%$'\\t'*}\n            desc=${line#*$'\\t'}\n            pairs+=(\"${name//:/\\\\:}:${desc//:/\\\\:}\")\n        else\n            pairs+=(\"${line//:/\\\\:}\")\n        fi\n    done\n    _describe 'rotini' pairs\n}\ncompdef _rotini rotini\n"
 
-//go:embed embed/completion_fish.txt
-var CompletionFish string
+var CompletionFish = "# fish completion for rotini\nfunction __rotini_complete\n    set -l tokens (commandline -opc) (commandline -ct)\n    rotini __complete $tokens[2..-1] 2>/dev/null\nend\n\nfunction __rotini_has_results\n    set -g __rotini_results (__rotini_complete)\n    test (count $__rotini_results) -gt 0\nend\n\n# Offer the binary's candidates when it has any; otherwise fall back to fish's\n# file completion (the binary returns nothing for path-valued flags and\n# arguments, exactly so the shell takes over). Candidates arrive as\n# \"name<TAB>description\" — fish renders that shape natively.\ncomplete -c rotini -f -n '__rotini_has_results' -a '$__rotini_results'\ncomplete -c rotini -F -n 'not __rotini_has_results'\n"
 
-//go:embed embed/completion_powershell.txt
-var CompletionPowershell string
+var CompletionPowershell = "# PowerShell completion for rotini\nRegister-ArgumentCompleter -Native -CommandName rotini -ScriptBlock {\n    param($wordToComplete, $commandAst, $cursorPosition)\n    $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })\n    if ($wordToComplete -eq '') { $tokens += '' }\n    rotini __complete @tokens 2>$null | ForEach-Object {\n        # Candidates arrive as \"name<TAB>description\"; the description becomes\n        # the CompletionResult tooltip.\n        $parts = $_ -split \"`t\", 2\n        $text = $parts[0]\n        $tip = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { $text }\n        [System.Management.Automation.CompletionResult]::new($text, $text, 'ParameterValue', $tip)\n    }\n}\n"
 
 // Completion returns the embedded completion script for shell, or an error when
 // shell is not one rotini generated a script for.

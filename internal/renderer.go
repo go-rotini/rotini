@@ -335,8 +335,9 @@ type templateInputBlock struct {
 // templateFeatureVar / templateFeatureCase / templateFeature are the data the
 // rotini template ranges over to emit a feature's embed vars and resolver.
 type templateFeatureVar struct {
-	Name  string // Go var name, e.g. "HelpRotiniGenerate"
-	Embed string // //go:embed path, e.g. "help/rotini_generate.txt"
+	Name    string // Go var name, e.g. "HelpRotiniGenerate"
+	Embed   string // //go:embed path (embed mode), e.g. "help/rotini_generate.txt"; "" in inline mode
+	Literal string // Go string literal of the content (inline mode), e.g. `"Usage:\n…"`; "" in embed mode
 }
 
 type templateFeatureCase struct {
@@ -361,6 +362,7 @@ type templateRotiniData struct {
 	OutputTypes string // pre-rendered output type declarations; "" when none
 	BindMeta    string // pre-rendered bind metadata; "" when none
 	Features    []templateFeature
+	EmbedImport bool // emit `import _ "embed"` — only when some feature uses //go:embed
 }
 
 func renderRotiniFile(data templateRotiniData) ([]byte, error) {

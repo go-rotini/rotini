@@ -157,15 +157,35 @@ func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error 
 			nodes = flattenFeature(gp, f.desc)
 		}
 		absDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.Dir))
-		embedRel, err := filepath.Rel(lay.frameworkDir, absDir)
+
+		// The //go:embed path only matters in embed mode, and ONLY then must the
+		// dir resolve under the cmdgen package (embed can't reach outside it). An
+		// inline feature writes no embedded file, so its dir is unconstrained.
+		embedRel := ""
+		if f.cfg.Embed {
+			rel, err := filepath.Rel(lay.frameworkDir, absDir)
+			if err != nil {
+				return fmt.Errorf("feature %s dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.Dir, err)
+			}
+			if strings.HasPrefix(rel, "..") {
+				return fmt.Errorf("generate.features.%s.dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.Dir, filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package))
+			}
+			embedRel = filepath.ToSlash(rel)
+		}
+
+		var contents []string
+		var err error
+		if f.desc.perShell {
+			contents, err = completionContents(gp.rootName, nodes)
+		} else {
+			contents, err = docFeatureContents(absDir, nodes, f.desc, f.cfg.Template)
+		}
 		if err != nil {
-			return fmt.Errorf("feature %s dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.Dir, err)
+			return err
 		}
-		if strings.HasPrefix(embedRel, "..") {
-			return fmt.Errorf("generate.features.%s.dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.Dir, filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package))
-		}
-		frameworks = append(frameworks, buildFeatureFramework(nodes, filepath.ToSlash(embedRel), f.desc))
-		outputs = append(outputs, featureOutput{desc: f.desc, absDir: absDir, nodes: nodes})
+
+		frameworks = append(frameworks, buildFeatureFramework(nodes, embedRel, f.desc, f.cfg.Embed, contents))
+		outputs = append(outputs, featureOutput{desc: f.desc, absDir: absDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
 	}
 
 	// Render the framework (cmdgen) and the handler rollup (cmd). When cmd and
@@ -198,13 +218,12 @@ func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error 
 	}
 
 	for _, o := range outputs {
-		if o.desc.perShell {
-			if err := writeCompletionFiles(o.absDir, gp.rootName, o.nodes); err != nil {
-				return err
-			}
+		// Inline features write no output files — their content is in the .go.
+		// (pruneCligen removes any stale files left from a previous embed:true.)
+		if !o.embed {
 			continue
 		}
-		if err := writeFeatureFiles(o.absDir, o.nodes, o.desc); err != nil {
+		if err := writeFeatureOutputs(o.absDir, o.nodes, o.contents, o.desc); err != nil {
 			return err
 		}
 	}
@@ -235,9 +254,11 @@ type confFeature struct {
 // featureOutput is one enabled feature's resolved absolute output dir +
 // per-command nodes, used for writing and pruning its output dir.
 type featureOutput struct {
-	desc   docFeature
-	absDir string
-	nodes  []helpNode
+	desc     docFeature
+	absDir   string
+	nodes    []helpNode
+	contents []string // final per-node content (parallel to nodes), rendered/verbatim/stripped
+	embed    bool     // true: write contents to files (//go:embed); false: inline in the .go, write no output files
 }
 
 // featureConfigs pairs every doc feature with its conf entry (nil when unset).
@@ -1051,7 +1072,22 @@ func renderFrameworkFile(gp *genProgram, lay layout, features []templateFeature)
 		OutputTypes: outputTypes,
 		BindMeta:    renderBindMeta(gp),
 		Features:    features,
+		EmbedImport: anyEmbed(features),
 	})
+}
+
+// anyEmbed reports whether any feature emits a //go:embed-backed var (so the
+// generated file must import the embed package). Inline-only features need no
+// embed import.
+func anyEmbed(features []templateFeature) bool {
+	for _, f := range features {
+		for _, v := range f.Vars {
+			if v.Embed != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // writeHandlerStubs creates a per-command handler stub for the root command and
@@ -1235,10 +1271,15 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 		keep[filepath.ToSlash(k)] = true
 	}
 	for _, o := range outputs {
-		// The current command set's pages and the editable template are protected.
+		// The editable template is always protected (it is the author's content,
+		// never pruned even when template:false leaves it inert). The current
+		// command set's output pages are protected only in embed mode — an inline
+		// feature writes none, so any on-disk pages are stale and get pruned.
 		protected := map[string]bool{o.desc.tmplFile: true}
-		for _, n := range o.nodes {
-			protected[n.file] = true
+		if o.embed {
+			for _, n := range o.nodes {
+				protected[n.file] = true
+			}
 		}
 
 		entries, err := os.ReadDir(o.absDir)
@@ -2405,20 +2446,29 @@ func permute(chain [][]string) []string {
 
 // buildFeatureFramework turns a feature's nodes into the embed vars + resolver
 // cases the framework template emits (one resolver per feature).
-func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) templateFeature {
+func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature, embed bool, contents []string) templateFeature {
 	h := templateFeature{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
-	for _, hn := range nodes {
+	for i, hn := range nodes {
 		name := feat.varPrefix + hn.prefix
-		// A "." dir (the feature dir IS the cmdgen package dir) embeds the bare
-		// file name — "./x" is not a valid //go:embed pattern.
-		embedPath := hn.file
-		if dir != "" && dir != "." {
-			embedPath = dir + "/" + hn.file
+		v := templateFeatureVar{Name: name}
+		if embed {
+			// A "." dir (the feature dir IS the cmdgen package dir) embeds the bare
+			// file name — "./x" is not a valid //go:embed pattern.
+			embedPath := hn.file
+			if dir != "" && dir != "." {
+				embedPath = dir + "/" + hn.file
+			}
+			v.Embed = embedPath
+		} else {
+			// Inline: the content rides as a Go string literal in the .go — no
+			// file, no //go:embed. strconv.Quote handles backticks (markdown) and
+			// ANSI/ESC bytes (styled help) that a raw-string literal could not.
+			v.Literal = strconv.Quote(contents[i])
 		}
-		h.Vars = append(h.Vars, templateFeatureVar{Name: name, Embed: embedPath})
+		h.Vars = append(h.Vars, v)
 		quoted := make([]string, len(hn.paths))
-		for i, p := range hn.paths {
-			quoted[i] = strconv.Quote(p)
+		for j, p := range hn.paths {
+			quoted[j] = strconv.Quote(p)
 		}
 		h.Cases = append(h.Cases, templateFeatureCase{PathsLiteral: strings.Join(quoted, ", "), Var: name})
 	}
@@ -2432,14 +2482,7 @@ func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature) templa
 // file is rotini-managed — (re)written every pass, skipped when already identical —
 // like rotini.go and handlers.go. The template is loaded (seeding the editable
 // default when missing) only when at least one command renders.
-func writeFeatureFiles(featDir string, nodes []helpNode, feat docFeature) error {
-	if featDir == "" {
-		return fmt.Errorf("generate.features.%s.dir must not be empty", feat.name)
-	}
-	if err := os.MkdirAll(featDir, 0o755); err != nil {
-		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
-	}
-
+func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedTemplate bool) ([]string, error) {
 	renders := false
 	for _, hn := range nodes {
 		if hn.verbatim == "" {
@@ -2450,30 +2493,69 @@ func writeFeatureFiles(featDir string, nodes []helpNode, feat docFeature) error 
 
 	var tmpl *template.Template
 	if renders {
-		t, err := loadFeatureTemplate(featDir, feat)
-		if err != nil {
-			return err
+		var err error
+		if seedTemplate {
+			// template:true — seed the editable default to disk (when missing) and
+			// render from it, so the author can customize.
+			if err = os.MkdirAll(featDir, 0o755); err != nil {
+				return nil, fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
+			}
+			tmpl, err = loadFeatureTemplate(featDir, feat)
+		} else {
+			// template:false — render from rotini's built-in default in memory; no
+			// editable template is written.
+			tmpl, err = parseDocTemplate(feat.tmplFile, feat.embedded)
 		}
-		tmpl = t
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	for _, hn := range nodes {
-		path := filepath.Join(featDir, hn.file)
+	contents := make([]string, len(nodes))
+	for i, hn := range nodes {
 		if hn.verbatim != "" {
-			// Verbatim: write exactly what the spec supplied — byte-for-byte, no
-			// trailing-newline normalization (the author controls it via YAML).
-			// A strip feature (man/markdown) still removes any ANSI: a verbatim
-			// page is no more a terminal surface than a rendered one.
-			if err := writeIfChanged(path, stripForFeature(feat, hn.verbatim)); err != nil {
-				return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
-			}
+			// Verbatim: exactly what the spec supplied — byte-for-byte (the author
+			// controls trailing newlines via YAML). A strip feature (man/markdown)
+			// still removes any ANSI: a verbatim page is no more a terminal surface
+			// than a rendered one.
+			contents[i] = stripForFeature(feat, hn.verbatim)
 			continue
 		}
 		rendered, err := renderDocText(tmpl, hn.data)
 		if err != nil {
-			return fmt.Errorf("render %s for %q: %w", feat.name, hn.name, err)
+			return nil, fmt.Errorf("render %s for %q: %w", feat.name, hn.name, err)
 		}
-		if err := writeIfChanged(path, stripForFeature(feat, rendered)); err != nil {
+		contents[i] = stripForFeature(feat, rendered)
+	}
+	return contents, nil
+}
+
+// completionContents computes each shell's completion script (no template, no
+// ANSI strip — a script is not a styled surface), parallel to nodes.
+func completionContents(prog string, nodes []helpNode) ([]string, error) {
+	contents := make([]string, len(nodes))
+	for i, n := range nodes {
+		script, err := completionScript(prog, n.name)
+		if err != nil {
+			return nil, fmt.Errorf("generate %s completion: %w", n.name, err)
+		}
+		contents[i] = script
+	}
+	return contents, nil
+}
+
+// writeFeatureOutputs writes each node's precomputed content to its file under
+// featDir — used ONLY in embed mode (//go:embed). Inline features write no
+// output files: their content lives in the generated .go as a string literal.
+func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, feat docFeature) error {
+	if featDir == "" {
+		return fmt.Errorf("generate.features.%s.dir must not be empty", feat.name)
+	}
+	if err := os.MkdirAll(featDir, 0o755); err != nil {
+		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
+	}
+	for i, hn := range nodes {
+		if err := writeIfChanged(filepath.Join(featDir, hn.file), contents[i]); err != nil {
 			return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
 		}
 	}
