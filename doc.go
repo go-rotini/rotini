@@ -4,17 +4,20 @@
 // everything beyond dispatch is an explicit, opt-in service.
 //
 // The package rests on four pillars, and this tour reads in their order:
-// declare → generate → run → opt in. A complete, buildable program lives in
-// examples/ ; the .docs reference files in the repository show every spec and
-// conf key with commentary.
+// declare → generate → run → opt in. The companion CLI (cmd/rotini, built
+// with rotini itself) is the worked example; the .docs reference files in
+// the repository show every spec and conf key with commentary.
 //
 // # Declare
 //
 // A CLI is a .rotini.spec.yaml (or json/jsonc/toml) document: the command
-// tree, every input — flags, positional arguments, environment variables,
-// config-file values, a stdin payload — plus help/man/markdown doc-fields,
-// shell completion, and plugin dispatch, all as data. `rotini validate` is
-// the gate: the JSON Schema rejects what it can express, rotini-specific
+// tree, every input channel — argv flags and positional arguments, the
+// flag value sentinels (from: file's @path, from: stdin's -), environment
+// variables (explicit, derived under env_prefix, or nested families) and
+// flags' env fallbacks, configuration files (fixed, walked-up, xdg, or
+// config_source-supplied), a typed stdin payload, and declared defaults —
+// plus help/man/markdown doc-fields, shell completion, and plugin dispatch,
+// all as data. `rotini validate` is the gate: the JSON Schema rejects what it can express, rotini-specific
 // lint rules reject the rest, and problems name the source line
 // (file:line:col for yaml/json/jsonc). Nothing schema-accepted is silently
 // ignored — a key either has a consumer or validation rejects it.
@@ -24,10 +27,11 @@
 // `rotini generate` compiles the spec into a framework file (the [Definition]
 // literal, typed per-command input structs, embedded help/man/markdown pages
 // and completion scripts) plus one editable handler stub per command —
-// created once, then owned by you. `rotini init` scaffolds a new CLI with a
-// wired root/help/version experience; `rotini init --wire completion` (or
-// man, markdown) additionally enables that feature and seeds its serving
-// command and handler.
+// created once, then owned by you. `rotini init` scaffolds a new CLI as a
+// minimal skeleton — everything is opt-in: `--with help` seeds the -h flags,
+// help command, and wired handlers; `--with version`, `--with completion`,
+// `--with man`, `--with markdown` (or `--with all`) each wire their feature,
+// commands, and handlers the same way.
 //
 // # The slim runtime
 //
