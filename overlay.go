@@ -19,7 +19,6 @@ package rotini
 //	if err := report.Validate(); err != nil { /* handler owns it */ }
 
 import (
-	"fmt"
 	"reflect"
 	"sort"
 	"strings"
@@ -473,7 +472,7 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 	}
 	envReg, err := recon.New(recon.WithSources(envSources(v, b.envPrefix)...))
 	if err != nil {
-		return nil, nil, fmt.Errorf("rotini: env registry: %w", err)
+		return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 	}
 	defer envReg.Close()
 
@@ -481,7 +480,7 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 	// same source order reconcileFlags gives them.
 	flagReg, err := recon.New(recon.WithSource(flagEnvSource(b.envPrefix)))
 	if err != nil {
-		return nil, nil, fmt.Errorf("rotini: env registry: %w", err)
+		return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 	}
 	defer flagReg.Close()
 
@@ -527,7 +526,7 @@ func channelLayer(v reflect.Value, chain []ResolvedCommand, layerName, structNam
 		cs := ci.FieldByName(structName)
 		if cs.IsValid() && cs.Kind() == reflect.Struct {
 			if err := reg.Bind(cs.Addr().Interface()); err != nil {
-				bindErr = fmt.Errorf("rotini: bind %s: %w", strings.ToLower(structName), err)
+				bindErr = reconBind(channelForStruct(structName), err)
 				return
 			}
 			if err := validateChannelStruct(cs, reg, cfg); err != nil {

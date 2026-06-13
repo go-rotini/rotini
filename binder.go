@@ -128,7 +128,7 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 	//    input's explicit `variable` (else recon's SNAKE_UPPER).
 	envReg, err := recon.New(recon.WithSources(envSources(v, b.envPrefix)...))
 	if err != nil {
-		return fmt.Errorf("rotini: env registry: %w", err)
+		return internalBind(channelEnv, "", "could not build the environment registry", err)
 	}
 	defer envReg.Close()
 
@@ -181,21 +181,21 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 
 	data, err := readStdin(rtx.Stdin)
 	if err != nil {
-		return fmt.Errorf("rotini: read stdin: %w", err)
+		return internalBind(channelStdin, "", "could not read stdin", err)
 	}
 	if len(data) == 0 {
 		if required {
-			return fmt.Errorf("rotini: required stdin payload is empty — pipe a %s document", format)
+			return usageBind(channelStdin, "", fmt.Sprintf("required stdin payload is empty — pipe a %s document", format), nil)
 		}
 		return nil // nothing piped → leave Stdin nil
 	}
 	codec, ok := recon.DefaultCodecs().ByName(format)
 	if !ok {
-		return fmt.Errorf("rotini: unsupported stdin format %q", format)
+		return internalBind(channelStdin, "", fmt.Sprintf("unsupported stdin format %q", format), nil)
 	}
 	m, err := codec.Decode(data)
 	if err != nil {
-		return fmt.Errorf("rotini: decode stdin (%s): %w", format, err)
+		return usageBind(channelStdin, "", fmt.Sprintf("could not decode stdin as %s", format), err)
 	}
 
 	// Validate the decoded payload against the command's stdin schema (when one was
@@ -203,22 +203,22 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 	if js := b.stdinSchemas[sf.Type().Elem().Name()]; js != "" {
 		validator, err := recon.NewJSONSchemaValidator([]byte(js))
 		if err != nil {
-			return fmt.Errorf("rotini: stdin schema: %w", err)
+			return internalBind(channelStdin, "", "invalid stdin schema", err)
 		}
 		if err := validator.Validate(m); err != nil {
-			return fmt.Errorf("rotini: invalid stdin payload: %w", err)
+			return reconBind(channelStdin, err)
 		}
 	}
 
 	reg, err := recon.New(recon.WithSource(recon.NewMapSource("stdin", m)))
 	if err != nil {
-		return fmt.Errorf("rotini: stdin registry: %w", err)
+		return internalBind(channelStdin, "", "could not build the stdin registry", err)
 	}
 	defer reg.Close()
 
 	ptr := reflect.New(sf.Type().Elem()) // *<Prefix>Stdin
 	if err := reg.Bind(ptr.Interface()); err != nil {
-		return fmt.Errorf("rotini: bind stdin: %w", err)
+		return reconBind(channelStdin, err)
 	}
 	sf.Set(ptr)
 	return nil
@@ -273,7 +273,7 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 	srcs = append(srcs, files...)
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
-		return fmt.Errorf("rotini: flag registry: %w", err)
+		return internalBind(channelFlag, "", "could not build the flag-fallback registry", err)
 	}
 	defer reg.Close()
 
@@ -290,7 +290,7 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 			}
 			val, found, err := reg.Get(key)
 			if err != nil {
-				return fmt.Errorf("rotini: reconcile flag %q: %w", key, err)
+				return reconBind(channelFlag, err)
 			}
 			if !found {
 				continue
@@ -463,7 +463,7 @@ func (b *Binder) configRegistry(overrides map[string]string) (*recon.Registry, e
 	}
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
-		return nil, fmt.Errorf("rotini: config registry: %w", err)
+		return nil, internalBind(channelConfig, "", "could not build the configuration registry", err)
 	}
 	return reg, nil
 }
@@ -503,12 +503,12 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		}
 		reg, err := recon.New(recon.WithSource(src))
 		if err != nil {
-			return nil, fmt.Errorf("rotini: config registry %q: %w", name, err)
+			return nil, internalBind(channelConfig, name, fmt.Sprintf("could not build the registry for configuration file %q", name), err)
 		}
 		c.perFile[name] = reg
 		return reg, nil
 	}
-	return nil, fmt.Errorf("rotini: config input pinned to unknown configuration file %q", name)
+	return nil, internalBind(channelConfig, name, fmt.Sprintf("input pinned to unknown configuration file %q", name), nil)
 }
 
 // Close closes the merged registry and every per-file registry built so far.
@@ -543,7 +543,7 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 		}
 		tmp := reflect.New(reflect.StructOf(fields))
 		if err := reg.Bind(tmp.Interface()); err != nil {
-			return fmt.Errorf("rotini: bind config (file %q): %w", file, err)
+			return reconBind(channelConfig, err)
 		}
 		for i, j := range idxs {
 			cs.Field(j).Set(tmp.Elem().Field(i))
@@ -599,7 +599,7 @@ func (b *Binder) fileSource(f ConfigFile, overrides map[string]string) (recon.So
 	case f.Discover != nil:
 		dirs, err := discoverDirs(f.Discover)
 		if err != nil {
-			return nil, fmt.Errorf("rotini: config source %q: %w", f.Name, err)
+			return nil, internalBind(channelConfig, f.Name, fmt.Sprintf("could not resolve the search path for configuration file %q", f.Name), err)
 		}
 		path = f.Discover.File
 		opts = append(opts, recon.WithOptional(true), recon.WithSearchPaths(dirs...))
@@ -609,7 +609,9 @@ func (b *Binder) fileSource(f ConfigFile, overrides map[string]string) (recon.So
 	}
 	src, err := recon.NewFileSource(path, opts...)
 	if err != nil {
-		return nil, fmt.Errorf("rotini: config source %q (%s): %w", f.Name, path, err)
+		// The file's content or path is the user's to fix (a config_source
+		// override that points at a malformed/unreadable file surfaces here).
+		return nil, usageBind(channelConfig, f.Name, fmt.Sprintf("could not open configuration file %q (%s)", f.Name, path), err)
 	}
 	if err := validateConfigFile(f, src); err != nil {
 		return nil, err
@@ -639,22 +641,24 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 		if os.IsNotExist(err) {
 			return nil // absent: vacuous
 		}
-		return fmt.Errorf("rotini: config %q (%s): %w", f.Name, path, err)
+		// A present-but-unreadable file the user controls (permissions, etc.).
+		return usageBind(channelConfig, f.Name, fmt.Sprintf("could not read configuration file %q (%s)", f.Name, path), err)
 	}
 	codec, ok := recon.DefaultCodecs().ByName(fs.Format())
 	if !ok {
-		return fmt.Errorf("rotini: config %q (%s): unsupported format %q", f.Name, path, fs.Format())
+		return internalBind(channelConfig, f.Name, fmt.Sprintf("unsupported format %q for configuration file %q", fs.Format(), f.Name), nil)
 	}
 	m, err := codec.Decode(data)
 	if err != nil {
-		return fmt.Errorf("rotini: config %q (%s): %w", f.Name, path, err)
+		return usageBind(channelConfig, f.Name, fmt.Sprintf("configuration file %q (%s) is not valid %s", f.Name, path, fs.Format()), err)
 	}
 	validator, err := recon.NewJSONSchemaValidator([]byte(f.Schema))
 	if err != nil {
-		return fmt.Errorf("rotini: config %q schema: %w", f.Name, err)
+		return internalBind(channelConfig, f.Name, fmt.Sprintf("invalid schema for configuration file %q", f.Name), err)
 	}
 	if err := validator.Validate(m); err != nil {
-		return fmt.Errorf("rotini: invalid config %q (%s): %w", f.Name, path, err)
+		return usageBind(channelConfig, f.Name,
+			fmt.Sprintf("configuration file %q (%s) is invalid: %s", f.Name, path, schemaDetail(err)), err)
 	}
 	return nil
 }
@@ -807,8 +811,9 @@ func fillEnvNested(env reflect.Value) (map[string]bool, error) {
 		fam := envFamily(base, sep)
 		if len(fam) == 0 {
 			if opt == "required" {
-				return filled, fmt.Errorf("rotini: required env input %q is not set — set %s%s* variables",
-					et.Field(j).Tag.Get("rotini"), base, sep)
+				name := et.Field(j).Tag.Get("rotini")
+				return filled, usageBind(channelEnv, name,
+					fmt.Sprintf("environment input %q is required — set %s%s* variables", name, base, sep), nil)
 			}
 			continue
 		}
@@ -898,14 +903,14 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs) error {
 			switch t.Field(j).Name {
 			case "Env":
 				if err := envReg.Bind(ci.Field(j).Addr().Interface()); err != nil {
-					return fmt.Errorf("rotini: bind env: %w", err)
+					return reconBind(channelEnv, err)
 				}
 				if _, err := fillEnvNested(ci.Field(j)); err != nil {
 					return err
 				}
 			case "Config":
 				if err := cfg.merged.Bind(ci.Field(j).Addr().Interface()); err != nil {
-					return fmt.Errorf("rotini: bind config: %w", err)
+					return reconBind(channelConfig, err)
 				}
 				if err := bindPinnedConfig(ci.Field(j), cfg); err != nil {
 					return err
@@ -974,7 +979,11 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) e
 		}
 		val, found, err := fieldReg.Get(key)
 		if err != nil {
-			return fmt.Errorf("rotini: read %q: %w", key, err)
+			channel := channelEnv
+			if cfg != nil {
+				channel = channelConfig
+			}
+			return reconBind(channel, err)
 		}
 		if !found {
 			continue // only provided values are constraint-checked

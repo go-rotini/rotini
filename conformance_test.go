@@ -641,6 +641,18 @@ func conformanceCases() []inputCase {
 				if !strings.Contains(err.Error(), "broken.yaml") {
 					t.Errorf("err = %v, want the offending file named", err)
 				}
+				// EH4: a malformed file the user supplied is a typed, usage-class
+				// *BindError that never leaks recon's parser text.
+				var be *BindError
+				if !errors.As(err, &be) || be.Channel != "config" {
+					t.Errorf("err = %v, want a config *BindError", err)
+				}
+				if CategoryOf(err) != CategoryUsage {
+					t.Errorf("CategoryOf = %v, want usage for a malformed config file", CategoryOf(err))
+				}
+				if strings.Contains(err.Error(), "recon") {
+					t.Errorf("err = %q, leaks recon text", err.Error())
+				}
 			}},
 		{id: "CFG-05", args: []string{"deploy"},
 			files: map[string]string{
