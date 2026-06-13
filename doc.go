@@ -53,6 +53,48 @@
 // the generated shell scripts call, and os.Exit as the default exit action
 // (capture it with [Program.WithExit]).
 //
+// # Errors
+//
+// One funnel reports every failure. A handler that hits a bad input does not
+// print — it RECORDS and stops: [Context.RecordErr] accumulates one or more
+// errors (call it any number of times), then [Context.SignalExit] (stop, run
+// teardown) or [Context.Exit] (stop, skip teardown) sets the code. Framework
+// diagnostics — a resolver error, a [*WiringError], a [*RemoteError] — and a
+// recovered panic (a [*PanicError] carrying the stack) record the same way.
+// After the lifecycle settles, the OnError funnel fires EXACTLY ONCE when
+// anything was recorded — never on a clean run — with err = [errors.Join] of the
+// recorded set; drain them individually with [Context.Errors].
+//
+// The default funnel (no [Program.WithOnErrorFn] set) prints one clean line per
+// error to stderr (program-name prefixed) and exits by the most severe category
+// present — [ExitInternal] (70) if any error is [CategoryInternal], else
+// [ExitUsage] (2) if any is [CategoryUsage], else 1 (a recorded run never exits
+// 0). A generated handler therefore carries ZERO error-presentation code: it
+// calls [Context.RecordErr] then [Context.SignalExit], and the runtime reports.
+//
+// Every error class is both [errors.Is]-able against the [ErrUsage] / [ErrInternal]
+// sentinels (so [CategoryOf] classifies it) and [errors.As]-able to a typed value
+// with structured fields — and rotini's own messages are non-leaky: no recon/
+// decode/OS internals, no secret values:
+//
+//   - [*ParseError] — the argv channel (unknown flag, missing value, enum or
+//     constraint violation, bad arity). [ParseError.Kind] ([ParseKind]) branches
+//     the failure without matching the message; Token + Candidates are the raw
+//     material a Suggestor turns into "did you mean".
+//   - [*BindError] — the env / config / stdin / flag-fallback channels: Channel +
+//     Input + a clean message, the recon Cause still reachable via errors.As.
+//   - [*RemoteError] — a plugin dispatch (binary-not-found / timeout / spawn,
+//     by [RemoteErrorKind]); a timeout is [CategoryNone] but still As-able.
+//   - [*WiringError] — a [Definition] vs. handlers mismatch (always internal);
+//     [*ServiceError] — a missing bound service ([MustGet] panics it); and the
+//     [*PanicError] above.
+//
+// rotini ships no opinions on top: no "did you mean", no help dump on error. A
+// program that wants either writes ONE [Program.WithOnErrorFn] that drains
+// [Context.Errors] and presents them its own way — applying the bound [Suggestor]
+// to a [*ParseError]'s Token, rendering help for [ParseError.Command], logging,
+// redacting. Suggestion is the program's call, never the framework's (Pillar 1).
+//
 // # Opt-in services
 //
 // Everything else is a value a handler fetches from the registry —

@@ -77,8 +77,10 @@ func NewBinder(meta BindMeta) *Binder {
 // and a leaf command's typed stdin payload. Required/enum/constraint validation of
 // the argv channel runs once over the fully-reconciled values — so a required flag is
 // satisfiable from env or config, not only from argv, and an env/config-supplied value
-// is enum-checked. It returns the first error (a usage error from parsing/validation,
-// or a recon bind/validation error for env/config/stdin).
+// is enum-checked. It returns the first error: a [*ParseError] from the argv channel
+// (parsing/validation), or a [*BindError] from the env/config/stdin channels — both
+// categorized ([CategoryOf]) and non-leaky, with the underlying recon cause reachable
+// via errors.As.
 func (b *Binder) Bind(rtx *Context, out any) error {
 	if b == nil {
 		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil binder"}
