@@ -44,56 +44,77 @@
 // program's streams (Stdin/Stdout/Stderr — configurable via
 // [Program.WithStdin] and friends, so handlers test cleanly), and the
 // service registry. Exits are deliberate ([Context.SignalExit],
-// [Context.Exit]); framework failures and recovered panics funnel — exactly
-// once, with the panic's stack riding a [*PanicError] — into
-// [Program.WithOnErrorFn], where [CategoryOf] maps them onto conventional
-// codes ([ExitUsage], [ExitInternal]). The runtime's only built-in
+// [Context.Exit]); a recorded error, a recovered panic, or a rotini-detected
+// fault is reported once, after teardown, through the outcome funnels (see
+// Outcomes below), which map it onto a conventional code ([ExitUsage],
+// [ExitInternal]). The runtime's only built-in
 // behaviors, documented as the exceptions they are: a default SIGINT/SIGTERM
 // trap (suppressed by [Program.WithContext]), the hidden __complete entry
 // the generated shell scripts call, and os.Exit as the default exit action
 // (capture it with [Program.WithExit]).
 //
-// # Errors
+// # Outcomes
 //
-// One funnel reports every failure. A handler that hits a bad input does not
-// print — it RECORDS and stops: [Context.RecordError] accumulates one or more
-// errors (call it any number of times), then [Context.SignalExit] (stop, run
-// teardown) or [Context.Exit] (stop, skip teardown) sets the code. Framework
-// diagnostics — a resolver error, a [*WiringError], a [*RemoteError] — and a
-// recovered panic (a [*PanicError] carrying the stack) record the same way.
-// After the lifecycle settles, the OnError funnel fires EXACTLY ONCE when
-// anything was recorded — never on a clean run — with err = [errors.Join] of the
-// recorded set; drain them individually with [Context.Errors].
+// A run reports through FOUR outcome funnels, each fed by its own channel, each
+// fired once after the lifecycle settles, each with a sane default. A handler
+// does not print — it RECORDS, and the runtime reports:
 //
-// The default funnel (no [Program.WithOnErrorFn] set) prints one clean line per
-// error to stderr (program-name prefixed) and exits by the most severe category
-// present — [ExitInternal] (70) if any error is [CategoryInternal], else
-// [ExitUsage] (2) if any is [CategoryUsage], else 1 (a recorded run never exits
-// 0). A generated handler therefore carries ZERO error-presentation code: it
-// calls [Context.RecordError] then [Context.SignalExit], and the runtime reports.
+//   - [Context.RecordError] (an error) reaches [Program.WithOnErrorFn] — the
+//     end-user's own failures: a bad input, a domain error.
+//   - [Context.RecordWarning] (an error) reaches [Program.WithOnWarningFn] —
+//     non-fatal: a deprecation, a fallback. Never changes the exit code.
+//   - [Context.RecordSuccess] (a message) reaches [Program.WithOnSuccessFn] —
+//     what went right.
+//   - A recovered panic, or a rotini-DETECTED fault (a [*WiringError] from a
+//     [Definition] vs. handlers mismatch, a resolver fault, a [MustGet] on a
+//     missing service), reaches [Program.WithOnPanicFn] — rotini's "this should
+//     never have happened". There is NO record call: the lifecycle captures it
+//     and that capture is the signal; drain the set with [Context.Panics].
 //
-// Every error class is both [errors.Is]-able against the [ErrUsage] / [ErrInternal]
-// sentinels (so [CategoryOf] classifies it) and [errors.As]-able to a typed value
-// with structured fields — and rotini's own messages are non-leaky: no recon/
-// decode/OS internals, no secret values:
+// Recording is non-halting — a handler records any number of times across any
+// hook, then stops independently with [Context.SignalExit] (graceful, teardown
+// runs) or [Context.Exit] (skip teardown), or simply returns. Each funnel fires
+// only when its channel is non-empty, in the order warning, success, error,
+// panic; a run that records nothing and never faults fires none of them (a
+// silent success). The opt-in model holds: an outcome is reported only because
+// the handler chose to record it (panic excepted — it is the runtime's final
+// fallback so a recovered panic still prints clean, never a raw stack).
 //
-//   - [*ParseError] — the argv channel (unknown flag, missing value, enum or
-//     constraint violation, bad arity). [ParseError.Kind] ([ParseKind]) branches
-//     the failure without matching the message; Token + Candidates are the raw
-//     material a Suggestor turns into "did you mean".
-//   - [*BindError] — the env / config / stdin / flag-fallback channels: Channel +
-//     Input + a clean message, the recon Cause still reachable via errors.As.
-//   - [*RemoteError] — a plugin dispatch (binary-not-found / timeout / spawn,
-//     by [RemoteErrorKind]); a timeout is [CategoryNone] but still As-able.
-//   - [*WiringError] — a [Definition] vs. handlers mismatch (always internal);
-//     [*ServiceError] — a missing bound service ([MustGet] panics it); and the
-//     [*PanicError] above.
+// Exit code: a handler's (or a custom funnel's) explicit [Context.SignalExit] or
+// [Context.Exit] wins (first non-zero). Otherwise it is the most severe outcome
+// — a panic or fault is [ExitInternal] (70, never masked by a lower code), a
+// recorded error is its category (internal 70, usage 2, else 1); success and
+// warning never raise or lower it.
+//
+// The defaults print one clean program-name-prefixed line per item — successes
+// to stdout, warnings and errors and faults to stderr — and a [*PanicError]'s
+// stack rides along for an errors.As but is never printed. So a generated
+// handler carries ZERO reporting code: it records and stops, and the runtime
+// reports.
+//
+// Every error and fault class is both [errors.Is]-able against the [ErrUsage] /
+// [ErrInternal] sentinels (so [CategoryOf] classifies it) and [errors.As]-able
+// to a typed value with structured fields — and rotini's own messages are
+// non-leaky (no recon/decode/OS internals, no secret values):
+//
+//   - [*ParseError] — the argv channel (unknown flag, bad value/enum/arity).
+//     [ParseError.Kind] ([ParseKind]) branches it without matching the message;
+//     Token + Candidates are the raw material a Suggestor turns into "did you
+//     mean". Reaches OnError.
+//   - [*BindError] — the env / config / stdin / flag-fallback channels: carries
+//     the Channel, the Input, and a clean message, with the recon Cause
+//     reachable via errors.As. Reaches OnError.
+//   - [*RemoteError] — a plugin dispatch (binary-not-found / timeout / spawn, by
+//     [RemoteErrorKind]). Recorded as an error, so it reaches OnError: a missing
+//     plugin is the consumer's environment, not the engineer's fault.
+//   - [*WiringError] (a [Definition] vs. handlers mismatch), [*ServiceError] (a
+//     [MustGet] miss), and [*PanicError] (any recovered panic) reach OnPanic.
 //
 // rotini ships no opinions on top: no "did you mean", no help dump on error. A
-// program that wants either writes ONE [Program.WithOnErrorFn] that drains
-// [Context.Errors] and presents them its own way — applying the bound [Suggestor]
-// to a [*ParseError]'s Token, rendering help for [ParseError.Command], logging,
-// redacting. Suggestion is the program's call, never the framework's (Pillar 1).
+// program that wants either writes its own funnel — e.g. a [Program.WithOnErrorFn]
+// that drains [Context.Errors] and applies the bound [Suggestor] to a
+// [*ParseError] Token, renders help for [ParseError.Command], logs, or redacts.
+// Suggestion is the program's call, never the framework's (Pillar 1).
 //
 // # Opt-in services
 //
