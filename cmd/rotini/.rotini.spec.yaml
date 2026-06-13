@@ -15,6 +15,12 @@ command:
   footer: Use "rotini help <command>" for more information about a command.
   inputs:
     flags:
+      - name: no_styles
+        summary: disable output styles
+        identifiers:
+          - --no-styles
+        schema:
+          type: bool
       - name: version
         summary: print version
         identifiers:
@@ -29,6 +35,17 @@ command:
           - --help
         schema:
           type: bool
+    env:
+      - name: no_styles
+        summary: disable output styles
+        schema:
+          type: bool
+          variable: ROTINI_NO_STYLES
+      - name: ci
+        summary: is cli environment
+        schema:
+          type: bool
+          variable: CI
   commands:
     - name: initialize
       aliases:

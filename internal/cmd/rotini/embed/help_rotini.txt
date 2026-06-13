@@ -16,8 +16,13 @@ Commands:
   completion         print a shell completion script
 
 Flags:
+  --no-styles     disable output styles
   -v,--version    print version
   -h,--help       print help
+
+Environment:
+  ROTINI_NO_STYLES    disable output styles
+  CI                  is cli environment
 
 Examples:
   rotini init mycli

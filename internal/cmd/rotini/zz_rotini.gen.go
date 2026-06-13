@@ -66,6 +66,7 @@ var definition = rotini.Definition{
 	Name:    "rotini",
 	Handler: "Rotini",
 	Flags: []rotini.FlagDef{
+		{Name: "no_styles", Identifiers: []string{"--no-styles"}, Summary: "disable output styles", Type: "bool"},
 		{Name: "version", Identifiers: []string{"-v", "--version"}, Summary: "print version", Type: "bool"},
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 	},
@@ -152,15 +153,22 @@ var definition = rotini.Definition{
 }
 
 type RotiniFlags struct {
-	Version bool `rotini:"version"`
-	Help    bool `rotini:"help"`
+	NoStyles bool `rotini:"no_styles"`
+	Version  bool `rotini:"version"`
+	Help     bool `rotini:"help"`
 }
 
 type RotiniArguments struct{}
 
+type RotiniEnv struct {
+	NoStyles bool `rotini:"no_styles" recon:"no_styles" env:"ROTINI_NO_STYLES"`
+	Ci       bool `rotini:"ci" recon:"ci" env:"CI"`
+}
+
 type RotiniCommandInputs struct {
 	Flags     RotiniFlags
 	Arguments RotiniArguments
+	Env       RotiniEnv
 }
 
 type RotiniInputs struct {

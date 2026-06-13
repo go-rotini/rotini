@@ -20,8 +20,13 @@ COMMANDS
     completion         print a shell completion script
 
 OPTIONS
+    --no-styles     disable output styles
     -v,--version    print version
     -h,--help       print help
+
+ENVIRONMENT
+    ROTINI_NO_STYLES    disable output styles
+    CI                  is cli environment
 
 EXAMPLES
     rotini init mycli
