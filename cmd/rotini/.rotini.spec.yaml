@@ -12,7 +12,7 @@ command:
   footer: Use "rotini help <command>" for more information about a command.
   inputs:
     flags:
-      - name: no_styles
+      - name: nostyles
         summary: disable output styles
         identifiers:
           - --no-styles
@@ -33,7 +33,7 @@ command:
         schema:
           type: bool
     env:
-      - name: no_styles
+      - name: nostyles
         summary: disable output styles
         schema:
           type: bool

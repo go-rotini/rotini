@@ -39,7 +39,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		// --no-styles flag can speak for no-styles here.
 		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", msg)
 		fmt.Fprintln(rtx.Stdout, rotini.StripStyles(HelpRotini, func() bool {
-			return inputs.Rotini.Flags.NoStyles
+			return inputs.Rotini.Flags.Nostyles
 		}))
 		rtx.SignalExit(rotini.ExitUsage) // bad input → the conventional usage exit code
 		return
@@ -50,7 +50,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	// Strip the help page's spec-authored styling when any no-styles signal is
 	// set: the --no-styles flag, $ROTINI_NO_STYLES, or a CI environment ($CI).
-	noStyles := func() bool { return flags.NoStyles || env.NoStyles || env.Ci }
+	noStyles := func() bool { return flags.Nostyles || env.Nostyles || env.Ci }
 
 	switch {
 	case flags.Help:
