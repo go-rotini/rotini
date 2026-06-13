@@ -633,11 +633,11 @@ func stdinLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 // preconditions Parser.parseBind enforces.
 func layerChain(rtx *Context) ([]ResolvedCommand, error) {
 	if rtx == nil {
-		return nil, &ParseError{Msg: "rotini: parse on nil context"}
+		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
 	}
 	chain := rtx.Chain()
 	if len(chain) == 0 {
-		return nil, &ParseError{Msg: "rotini: no command resolved for this context"}
+		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}
 	return chain, nil
 }

@@ -47,22 +47,83 @@ type scopeInputs struct {
 	args  []string
 }
 
+// ParseKind classifies a [ParseError] by what went wrong, so a funnel can
+// branch on the failure WITHOUT matching the human message — the message is
+// presentation, the kind is data. Most kinds are the end-user's to fix (a typo,
+// a bad value); [ParseKindInternal] is a misuse of the parser API itself (a nil
+// parser/context or a bad out argument) — still surfaced as a usage-shaped
+// [*ParseError] for uniformity, but the author's bug.
+type ParseKind int
+
+const (
+	// ParseKindUnspecified is the zero value: a [ParseError] whose construction
+	// site did not classify it (a hand-built error, or a path predating EH5).
+	ParseKindUnspecified         ParseKind = iota
+	ParseKindUnknownFlag                   // an argv token looked like a flag no command on the chain declares
+	ParseKindUnknownCommand                // a stray positional on a branch-only command (a mistyped sub-command)
+	ParseKindNeedsValue                    // a value-taking flag was given no value
+	ParseKindInvalidValue                  // a value could not be coerced/resolved (bad type, unreadable @file, malformed map, value on a no-value flag)
+	ParseKindEnumViolation                 // a value was not one of a declared enum's members
+	ParseKindConstraintViolation           // a declared bound or flag-group/dependency rule was violated
+	ParseKindMissingRequired               // a required flag or argument was absent
+	ParseKindNoArguments                   // a positional was given to a command that accepts none
+	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
+	ParseKindInternal                      // a parser API misuse: nil parser/context, or a bad out argument
+)
+
+// String renders the kind as a short, stable label (for logs and tests).
+func (k ParseKind) String() string {
+	switch k {
+	case ParseKindUnknownFlag:
+		return "unknown-flag"
+	case ParseKindUnknownCommand:
+		return "unknown-command"
+	case ParseKindNeedsValue:
+		return "needs-value"
+	case ParseKindInvalidValue:
+		return "invalid-value"
+	case ParseKindEnumViolation:
+		return "enum-violation"
+	case ParseKindConstraintViolation:
+		return "constraint-violation"
+	case ParseKindMissingRequired:
+		return "missing-required"
+	case ParseKindNoArguments:
+		return "no-arguments"
+	case ParseKindTooManyArguments:
+		return "too-many-arguments"
+	case ParseKindInternal:
+		return "internal"
+	default:
+		return "unspecified"
+	}
+}
+
 // ParseError is a parse-time failure caused by bad input. It is data, not
 // presentation: the message carries no opinions (no suggestions, no usage
 // dump), and the structured fields let a handler compose its own response —
-// pair Token with Candidates and a bound [Suggestor] for "did you mean", or
-// render help for Command. Handlers conventionally map it to exit code 2 (the
-// usual CLI usage-error code). It unwraps to [ErrUsage], so CategoryOf
-// classifies it as CategoryUsage; retrieve the fields with errors.As:
+// switch on [ParseError.Kind] to branch, pair Token with Candidates and a bound
+// [Suggestor] for "did you mean", or render help for Command. Handlers
+// conventionally map it to exit code 2 (the usual CLI usage-error code). It
+// unwraps to [ErrUsage], so CategoryOf classifies it as CategoryUsage; retrieve
+// the fields with errors.As:
 //
-//	var ue *rotini.ParseError
-//	if errors.As(err, &ue) { /* ue.Token, ue.Candidates, … */ }
+//	var pe *rotini.ParseError
+//	if errors.As(err, &pe) {
+//	    switch pe.Kind {
+//	    case rotini.ParseKindUnknownFlag, rotini.ParseKindUnknownCommand:
+//	        // pe.Token + pe.Candidates feed a Suggestor's "did you mean"
+//	    case rotini.ParseKindMissingRequired:
+//	        // prompt, or point at the help for pe.Command
+//	    }
+//	}
 type ParseError struct {
-	Msg        string   // the human-readable failure, opinion-free
-	Command    string   // the command in whose scope parsing failed ("" when not command-scoped)
-	Flag       string   // the flag involved, by the identifier or label used ("" when not flag-related)
-	Token      string   // the offending argv token or value ("" when none)
-	Candidates []string // the vocabulary Token failed against — sibling commands, declared flags, enum members (nil when none applies)
+	Kind       ParseKind // what went wrong, for branching without matching Msg (zero = ParseKindUnspecified)
+	Msg        string    // the human-readable failure, opinion-free
+	Command    string    // the command in whose scope parsing failed ("" when not command-scoped)
+	Flag       string    // the flag involved, by the identifier or label used ("" when not flag-related)
+	Token      string    // the offending argv token or value ("" when none)
+	Candidates []string  // the vocabulary Token failed against — sibling commands, declared flags, enum members (nil when none applies)
 }
 
 func (e *ParseError) Error() string { return e.Msg }
@@ -176,18 +237,18 @@ func (p *Parser) Deprecations(rtx *Context) []Deprecation {
 // argv). It returns the store and the resolved chain for that deferred validation.
 func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedCommand, error) {
 	if p == nil {
-		return nil, nil, &ParseError{Msg: "rotini: nil parser"}
+		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil parser"}
 	}
 	if rtx == nil {
-		return nil, nil, &ParseError{Msg: "rotini: parse on nil context"}
+		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
 	}
 	rv := reflect.ValueOf(out)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
-		return nil, nil, &ParseError{Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
+		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
 	}
 	chain := rtx.Chain()
 	if len(chain) == 0 {
-		return nil, nil, &ParseError{Msg: "rotini: no command resolved for this context"}
+		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}
 	store, err := parseInto(chain, rtx.Args, rtx.Stdin)
 	if err != nil {
@@ -284,6 +345,7 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 					continue
 				}
 				return nil, &ParseError{
+					Kind:       ParseKindUnknownFlag,
 					Msg:        fmt.Sprintf("unknown flag %q", name),
 					Flag:       name,
 					Token:      name,
@@ -294,7 +356,7 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 			switch {
 			case fdef.Type == "count":
 				if hasInline {
-					return nil, &ParseError{Msg: fmt.Sprintf("flag %q counts occurrences and takes no value", name), Flag: name}
+					return nil, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("flag %q counts occurrences and takes no value", name), Flag: name}
 				}
 				value = "1" // each occurrence appends one marker; the binder tallies them
 			case fdef.Type == "bool":
@@ -307,7 +369,7 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 			default:
 				i++
 				if i >= len(argv) {
-					return nil, &ParseError{Msg: fmt.Sprintf("flag %q needs a value", name)}
+					return nil, &ParseError{Kind: ParseKindNeedsValue, Msg: fmt.Sprintf("flag %q needs a value", name), Flag: name}
 				}
 				value = argv[i]
 			}
@@ -348,6 +410,7 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 	if len(leaf.Commands) > 0 && len(leaf.Arguments) == 0 && len(si.args) > 0 {
 		tok := si.args[0]
 		return &ParseError{
+			Kind:       ParseKindUnknownCommand,
 			Msg:        fmt.Sprintf("unknown command %q for %q", tok, leaf.Name),
 			Command:    leaf.Name,
 			Token:      tok,
@@ -366,6 +429,7 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 			for _, v := range vals {
 				if len(fd.Enum) > 0 && !slices.Contains(fd.Enum, v) {
 					return &ParseError{
+						Kind:       ParseKindEnumViolation,
 						Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), flagLabel(fd), strings.Join(fd.Enum, ", ")),
 						Flag:       flagLabel(fd),
 						Token:      redactValue(v, fd.Secret),
@@ -373,7 +437,7 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 					}
 				}
 				if isMapType(fd.Type) && !strings.Contains(v, "=") {
-					return &ParseError{Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", flagLabel(fd), redactValue(v, fd.Secret))}
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", flagLabel(fd), redactValue(v, fd.Secret)), Flag: flagLabel(fd)}
 				}
 			}
 			if err := checkConstraints(flagLabel(fd), fd.Type, fd.Constraints, vals, fd.Secret); err != nil {
@@ -387,9 +451,9 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 	// stray positional was handled above as a mistyped sub-command.)
 	if n := len(leaf.Arguments); !hasVariadicArg(leaf.Arguments) && len(si.args) > n {
 		if n == 0 {
-			return &ParseError{Msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args))}
+			return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args)), Command: leaf.Name}
 		}
-		return &ParseError{Msg: fmt.Sprintf("%q accepts at most %d %s (got %d)", leaf.Name, n, plural("argument", n), len(si.args))}
+		return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("%q accepts at most %d %s (got %d)", leaf.Name, n, plural("argument", n), len(si.args)), Command: leaf.Name}
 	}
 
 	for i, ad := range leaf.Arguments {
@@ -407,6 +471,7 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 		for _, v := range vals {
 			if len(ad.Enum) > 0 && !slices.Contains(ad.Enum, v) {
 				return &ParseError{
+					Kind:       ParseKindEnumViolation,
 					Msg:        fmt.Sprintf("invalid value %q for <%s> (one of: %s)", redactValue(v, ad.Secret), ad.Name, strings.Join(ad.Enum, ", ")),
 					Token:      redactValue(v, ad.Secret),
 					Candidates: ad.Enum,
@@ -446,9 +511,9 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 	if isArrayType(typ) || isMapType(typ) {
 		switch n := len(values); {
 		case c.MinItems > 0 && n < c.MinItems:
-			return &ParseError{Msg: fmt.Sprintf("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)}
+			return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)}
 		case c.MaxItems > 0 && n > c.MaxItems:
-			return &ParseError{Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)}
+			return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)}
 		}
 	}
 	elem := constraintElemType(typ)
@@ -460,19 +525,19 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 				continue // not range-checkable; coerce already tolerates malformed input
 			}
 			if c.Minimum != nil && n < *c.Minimum {
-				return &ParseError{Msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(*c.Minimum), redactValue(v, secret))}
+				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(*c.Minimum), redactValue(v, secret))}
 			}
 			if c.Maximum != nil && n > *c.Maximum {
-				return &ParseError{Msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(*c.Maximum), redactValue(v, secret))}
+				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(*c.Maximum), redactValue(v, secret))}
 			}
 			if c.ExclusiveMinimum != nil && n <= *c.ExclusiveMinimum {
-				return &ParseError{Msg: fmt.Sprintf("%s must be > %s (got %s)", label, formatNum(*c.ExclusiveMinimum), redactValue(v, secret))}
+				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be > %s (got %s)", label, formatNum(*c.ExclusiveMinimum), redactValue(v, secret))}
 			}
 			if c.ExclusiveMaximum != nil && n >= *c.ExclusiveMaximum {
-				return &ParseError{Msg: fmt.Sprintf("%s must be < %s (got %s)", label, formatNum(*c.ExclusiveMaximum), redactValue(v, secret))}
+				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be < %s (got %s)", label, formatNum(*c.ExclusiveMaximum), redactValue(v, secret))}
 			}
 			if c.MultipleOf != nil && !isMultipleOf(n, *c.MultipleOf) {
-				return &ParseError{Msg: fmt.Sprintf("%s must be a multiple of %s (got %s)", label, formatNum(*c.MultipleOf), redactValue(v, secret))}
+				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be a multiple of %s (got %s)", label, formatNum(*c.MultipleOf), redactValue(v, secret))}
 			}
 		case elem == "string":
 			ln := utf8.RuneCountInString(v)
@@ -481,13 +546,13 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 				gotLen = "[redacted]"
 			}
 			if c.MinLength > 0 && ln < c.MinLength {
-				return &ParseError{Msg: fmt.Sprintf("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)}
+				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)}
 			} else if c.MaxLength > 0 && ln > c.MaxLength {
-				return &ParseError{Msg: fmt.Sprintf("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)}
+				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)}
 			}
 			if c.Pattern != "" {
 				if ok, err := regexp.MatchString(c.Pattern, v); err == nil && !ok {
-					return &ParseError{Msg: fmt.Sprintf("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))}
+					return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))}
 				}
 			}
 		}
@@ -577,7 +642,7 @@ func validateFlagDependencies(chain []ResolvedCommand, store *parsedInputs) erro
 				if len(missing) > 1 {
 					noun, verb = "flags", "are"
 				}
-				return &ParseError{Msg: fmt.Sprintf("%s %s %s required when %s is set", noun, joinAnd(missing), verb, whenLabel)}
+				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s %s %s required when %s is set", noun, joinAnd(missing), verb, whenLabel)}
 			}
 		}
 	}
@@ -589,22 +654,22 @@ func checkFlagGroup(kind FlagGroupKind, set, all []string) error {
 	switch kind {
 	case FlagGroupMutuallyExclusive:
 		if len(set) > 1 {
-			return &ParseError{Msg: "flags " + joinAnd(set) + " are mutually exclusive"}
+			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "flags " + joinAnd(set) + " are mutually exclusive"}
 		}
 	case FlagGroupRequiredTogether:
 		if n := len(set); n > 0 && n < len(all) {
-			return &ParseError{Msg: "flags " + strings.Join(all, ", ") + " must be used together"}
+			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "flags " + strings.Join(all, ", ") + " must be used together"}
 		}
 	case FlagGroupOneOf:
 		switch {
 		case len(set) == 0:
-			return &ParseError{Msg: "exactly one of " + strings.Join(all, ", ") + " is required"}
+			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "exactly one of " + strings.Join(all, ", ") + " is required"}
 		case len(set) > 1:
-			return &ParseError{Msg: "flags " + joinAnd(set) + " are mutually exclusive"}
+			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "flags " + joinAnd(set) + " are mutually exclusive"}
 		}
 	case FlagGroupAtLeastOne:
 		if len(set) == 0 {
-			return &ParseError{Msg: "at least one of " + strings.Join(all, ", ") + " is required"}
+			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "at least one of " + strings.Join(all, ", ") + " is required"}
 		}
 	}
 	return nil
@@ -703,7 +768,7 @@ func requiredErrors(chain []ResolvedCommand, store *parsedInputs) error {
 		}
 	}
 	if len(missing) > 0 {
-		return &ParseError{Msg: "missing required " + plural("input", len(missing)) + ": " + strings.Join(missing, ", ")}
+		return &ParseError{Kind: ParseKindMissingRequired, Msg: "missing required " + plural("input", len(missing)) + ": " + strings.Join(missing, ", ")}
 	}
 	return nil
 }
@@ -737,6 +802,7 @@ func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error)
 		data, err := os.ReadFile(value[1:])
 		if err != nil {
 			return "", &ParseError{
+				Kind: ParseKindInvalidValue,
 				Msg:  fmt.Sprintf("%s: cannot read %q: %v", flagLabel(fd), value, err),
 				Flag: flagLabel(fd), Token: value,
 			}
@@ -745,10 +811,11 @@ func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error)
 	case value == "-" && slices.Contains(fd.From, "stdin"):
 		data, err := readStdin(stdin)
 		if err != nil {
-			return "", &ParseError{Msg: fmt.Sprintf("%s: read stdin: %v", flagLabel(fd), err), Flag: flagLabel(fd)}
+			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: read stdin: %v", flagLabel(fd), err), Flag: flagLabel(fd)}
 		}
 		if len(data) == 0 {
 			return "", &ParseError{
+				Kind: ParseKindInvalidValue,
 				Msg:  fmt.Sprintf("%s: stdin is empty — %q asks for a piped value", flagLabel(fd), "-"),
 				Flag: flagLabel(fd),
 			}
@@ -777,7 +844,7 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
 		if !ok {
-			return 0, &ParseError{Msg: fmt.Sprintf("unknown flag %q", short)}
+			return 0, &ParseError{Kind: ParseKindUnknownFlag, Msg: fmt.Sprintf("unknown flag %q", short), Flag: short, Token: short}
 		}
 		if fdef.Type == "bool" || fdef.Type == "count" {
 			v := "true"
@@ -797,14 +864,14 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 			return 0, addFlag(idx, fdef, inline)
 		default:
 			if i+1 >= len(argv) {
-				return 0, &ParseError{Msg: fmt.Sprintf("flag %q needs a value", short)}
+				return 0, &ParseError{Kind: ParseKindNeedsValue, Msg: fmt.Sprintf("flag %q needs a value", short), Flag: short}
 			}
 			return 1, addFlag(idx, fdef, argv[i+1])
 		}
 	}
 	// Every flag in the cluster was boolean; a trailing "=value" has nothing to bind.
 	if hasInline {
-		return 0, &ParseError{Msg: fmt.Sprintf("flag %q does not take a value", "-"+body)}
+		return 0, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("flag %q does not take a value", "-"+body), Flag: "-" + body}
 	}
 	return 0, nil
 }
@@ -922,7 +989,7 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 			switch {
 			case def.DottedKeys:
 				if err := coerceMapDotted(v.Field(i), raw); err != nil {
-					return &ParseError{Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err), Flag: labelForFlag(defs, name)}
 				}
 				continue
 			case def.Type == "count":
@@ -934,7 +1001,7 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 			}
 		}
 		if err := coerce(v.Field(i), raw); err != nil {
-			return &ParseError{Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err)}
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err), Flag: labelForFlag(defs, name)}
 		}
 	}
 	return nil
@@ -965,14 +1032,14 @@ func bindArgs(v reflect.Value, args []string) error {
 		label := "<" + t.Field(i).Tag.Get("rotini") + ">"
 		if f.Kind() == reflect.Slice { // a slice argument is variadic, whatever its element type
 			if err := coerce(f, args[min(idx, len(args)):]); err != nil {
-				return &ParseError{Msg: fmt.Sprintf("%s: %v", label, err)}
+				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", label, err)}
 			}
 			idx = len(args)
 			continue
 		}
 		if idx < len(args) {
 			if err := coerce(f, args[idx:idx+1]); err != nil {
-				return &ParseError{Msg: fmt.Sprintf("%s: %v", label, err)}
+				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", label, err)}
 			}
 			idx++
 		}
