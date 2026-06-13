@@ -14,20 +14,24 @@ generate:
     help:
       enabled: {{if .WithHelp}}true{{else}}false{{end}}
       embed: false
-      dir: internal/cmd/{{.Package}}/embed
+      embed_dir: internal/cmd/{{.Package}}/renders
+      template_dir: internal/cmd/{{.Package}}/templates
     completion:
       enabled: {{if .WithCompletion}}true{{else}}false{{end}}
       embed: false
-      dir: internal/cmd/{{.Package}}/embed
+      embed_dir: internal/cmd/{{.Package}}/renders
+      template_dir: internal/cmd/{{.Package}}/templates
     man:
       enabled: {{if .WithMan}}true{{else}}false{{end}}
       embed: true
+      embed_dir: internal/cmd/{{.Package}}/renders
       template: true
-      dir: internal/cmd/{{.Package}}/embed
+      template_dir: internal/cmd/{{.Package}}/templates
     markdown:
       enabled: {{if .WithMarkdown}}true{{else}}false{{end}}
       embed: true
+      embed_dir: internal/cmd/{{.Package}}/renders
       template: true
-      dir: internal/cmd/{{.Package}}/embed
+      template_dir: internal/cmd/{{.Package}}/templates
 validate:
   fail: collect

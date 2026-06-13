@@ -280,11 +280,13 @@ func lintEntrypoint(conf *Conf) []error {
 	return problems
 }
 
-// lintFeatureDirs rejects an enabled feature whose explicit dir cannot resolve
-// under an explicitly-set cmdgen package — //go:embed could never reach it, so
-// generate would fail; validate is the gate. When either side is unset the
-// defaults guarantee nesting (the default dir is <cmdgen>/embed), so there is
-// nothing to check — generate's resolution backstops the remaining cases.
+// lintFeatureDirs rejects an enabled, EMBEDDING feature whose explicit
+// embed_dir cannot resolve under an explicitly-set cmdgen package — //go:embed
+// could never reach it, so generate would fail; validate is the gate. Only
+// embed mode (embed: true) is checked: an inline feature writes no embedded
+// file, and template_dir is never embedded (unconstrained). When either side
+// is unset the defaults guarantee nesting (the default embed_dir is
+// <cmdgen>/renders), so there is nothing to check.
 func lintFeatureDirs(conf *Conf) []error {
 	if conf.Generate == nil || conf.Generate.Features == nil ||
 		conf.Generate.Packages == nil || conf.Generate.Packages.Cmdgen == nil ||
@@ -295,20 +297,21 @@ func lintFeatureDirs(conf *Conf) []error {
 	feats := conf.Generate.Features
 	var problems []error
 	check := func(name string, f *Feature) {
-		if f == nil || !f.Enabled || f.Dir == "" {
+		if f == nil || !f.Enabled || !f.Embed || f.EmbedDir == "" {
 			return
 		}
-		dir := path.Clean(filepath.ToSlash(f.Dir))
+		dir := path.Clean(filepath.ToSlash(f.EmbedDir))
 		if dir != cmdgen && !strings.HasPrefix(dir, cmdgen+"/") {
 			problems = append(problems, &problem{
 				kind: "conf",
-				loc:  "generate.features." + name + ".dir",
-				msg:  fmt.Sprintf("%q must resolve under the cmdgen package %q so //go:embed can reach it", f.Dir, cmdgen),
+				loc:  "generate.features." + name + ".embed_dir",
+				msg:  fmt.Sprintf("%q must resolve under the cmdgen package %q so //go:embed can reach it", f.EmbedDir, cmdgen),
 			})
 		}
 	}
 	check("help", feats.Help)
 	check("man", feats.Man)
+	check("markdown", feats.Markdown)
 	check("completion", feats.Completion)
 	return problems
 }

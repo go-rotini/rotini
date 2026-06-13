@@ -1064,7 +1064,7 @@ func TestValidate_featureDirLint(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			conf := writeTemp(t, "conf.yaml", validConfHeader+
 				"generate:\n  packages:\n    cmdgen:\n      package: internal/cmd/demo\n"+
-				"  features:\n    help:\n      enabled: true\n      dir: "+tc.dir+"\n")
+				"  features:\n    help:\n      enabled: true\n      embed: true\n      embed_dir: "+tc.dir+"\n")
 			err := validateOnce(spec, conf, "", "")
 			if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "must resolve under the cmdgen package")) {
 				t.Errorf("validate(dir=%q) = %v, want a feature-dir lint", tc.dir, err)
@@ -1077,7 +1077,7 @@ func TestValidate_featureDirLint(t *testing.T) {
 
 	// Disabled features and unset cmdgen packages are not checked.
 	lax := writeTemp(t, "lax.yaml", validConfHeader+
-		"generate:\n  features:\n    help:\n      enabled: true\n      dir: docs/help\n")
+		"generate:\n  features:\n    help:\n      enabled: true\n      embed: true\n      embed_dir: docs/help\n")
 	if err := validateOnce(spec, lax, "", ""); err != nil {
 		t.Errorf("validate(dir without explicit cmdgen) = %v, want nil (generate backstops)", err)
 	}

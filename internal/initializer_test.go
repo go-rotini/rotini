@@ -61,7 +61,7 @@ func TestInitialize_scaffolds(t *testing.T) {
 		"package: cmd/mycli", "package: internal/cmd/mycli",
 		"file: main.go", "file: zz_rotini.gen.go",
 		"help:\n      enabled: false",
-		"dir: internal/cmd/mycli/embed")
+		"embed_dir: internal/cmd/mycli/renders")
 
 	// The init-style generate ran: framework + rollup, a PLAIN STUB root
 	// handler (nothing wired → nothing special), and the entrypoint main.go.
@@ -140,7 +140,7 @@ func TestInitialize_with(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(genDir, "mycli_man.go")); !os.IsNotExist(err) {
 		t.Errorf("mycli_man.go should not exist (stat err = %v)", err)
 	}
-	if _, err := os.Stat(filepath.Join(genDir, "embed", "markdown_mycli.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(genDir, "renders", "markdown_mycli.md")); err != nil {
 		t.Errorf("markdown feature output missing: %v", err)
 	}
 

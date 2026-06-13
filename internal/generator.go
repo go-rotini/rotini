@@ -156,19 +156,21 @@ func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error 
 		} else {
 			nodes = flattenFeature(gp, f.desc)
 		}
-		absDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.Dir))
+		absEmbedDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.EmbedDir))
+		absTemplateDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.TemplateDir))
 
 		// The //go:embed path only matters in embed mode, and ONLY then must the
-		// dir resolve under the cmdgen package (embed can't reach outside it). An
-		// inline feature writes no embedded file, so its dir is unconstrained.
+		// embed_dir resolve under the cmdgen package (embed can't reach outside
+		// it). An inline feature writes no embedded file, so embed_dir is
+		// unconstrained; template_dir is never embedded, so it always is.
 		embedRel := ""
 		if f.cfg.Embed {
-			rel, err := filepath.Rel(lay.frameworkDir, absDir)
+			rel, err := filepath.Rel(lay.frameworkDir, absEmbedDir)
 			if err != nil {
-				return fmt.Errorf("feature %s dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.Dir, err)
+				return fmt.Errorf("feature %s embed_dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
 			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.Dir, filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package))
+				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package))
 			}
 			embedRel = filepath.ToSlash(rel)
 		}
@@ -178,14 +180,14 @@ func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error 
 		if f.desc.perShell {
 			contents, err = completionContents(gp.rootName, nodes)
 		} else {
-			contents, err = docFeatureContents(absDir, nodes, f.desc, f.cfg.Template)
+			contents, err = docFeatureContents(absTemplateDir, nodes, f.desc, f.cfg.Template)
 		}
 		if err != nil {
 			return err
 		}
 
 		frameworks = append(frameworks, buildFeatureFramework(nodes, embedRel, f.desc, f.cfg.Embed, contents))
-		outputs = append(outputs, featureOutput{desc: f.desc, absDir: absDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
+		outputs = append(outputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
 	}
 
 	// Render the framework (cmdgen) and the handler rollup (cmd). When cmd and
@@ -223,7 +225,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error 
 		if !o.embed {
 			continue
 		}
-		if err := writeFeatureOutputs(o.absDir, o.nodes, o.contents, o.desc); err != nil {
+		if err := writeFeatureOutputs(o.absEmbedDir, o.nodes, o.contents, o.desc); err != nil {
 			return err
 		}
 	}
@@ -254,11 +256,11 @@ type confFeature struct {
 // featureOutput is one enabled feature's resolved absolute output dir +
 // per-command nodes, used for writing and pruning its output dir.
 type featureOutput struct {
-	desc     docFeature
-	absDir   string
-	nodes    []helpNode
-	contents []string // final per-node content (parallel to nodes), rendered/verbatim/stripped
-	embed    bool     // true: write contents to files (//go:embed); false: inline in the .go, write no output files
+	desc        docFeature
+	absEmbedDir string // where rendered output files are written (embed mode)
+	nodes       []helpNode
+	contents    []string // final per-node content (parallel to nodes), rendered/verbatim/stripped
+	embed       bool     // true: write contents to files (//go:embed); false: inline in the .go, write no output files
 }
 
 // featureConfigs pairs every doc feature with its conf entry (nil when unset).
@@ -1275,19 +1277,24 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 		// never pruned even when template:false leaves it inert). The current
 		// command set's output pages are protected only in embed mode — an inline
 		// feature writes none, so any on-disk pages are stale and get pruned.
-		protected := map[string]bool{o.desc.tmplFile: true}
+		// Pruning scans the embed_dir for stale OUTPUT files. The editable
+		// template lives in template_dir (a different tree) and is rotini's only
+		// managed file there, so it is never a prune candidate. The current
+		// command set's output files are protected only in embed mode — inline
+		// features write none, so any on-disk pages are stale and get pruned.
+		protected := map[string]bool{}
 		if o.embed {
 			for _, n := range o.nodes {
 				protected[n.file] = true
 			}
 		}
 
-		entries, err := os.ReadDir(o.absDir)
+		entries, err := os.ReadDir(o.absEmbedDir)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return fmt.Errorf("read %s dir %s: %w", o.desc.name, o.absDir, err)
+			return fmt.Errorf("read %s embed_dir %s: %w", o.desc.name, o.absEmbedDir, err)
 		}
 		for _, e := range entries {
 			name := e.Name()
@@ -1302,13 +1309,13 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 			}
 			// keep entries are package-relative (to the cmdgen package).
 			rel := name
-			if r, err := filepath.Rel(lay.frameworkDir, filepath.Join(o.absDir, name)); err == nil {
+			if r, err := filepath.Rel(lay.frameworkDir, filepath.Join(o.absEmbedDir, name)); err == nil {
 				rel = filepath.ToSlash(r)
 			}
 			if keep[rel] {
 				continue
 			}
-			if err := os.Remove(filepath.Join(o.absDir, name)); err != nil {
+			if err := os.Remove(filepath.Join(o.absEmbedDir, name)); err != nil {
 				return fmt.Errorf("prune %s: %w", rel, err)
 			}
 		}
@@ -1395,15 +1402,22 @@ func applyConfDefaults(conf *Conf, rootName string) {
 			p.File = defaultFile
 		}
 	}
-	// Each present feature defaults its output dir to the SHARED
-	// "<cmdgen-package>/embed" (module-relative), which always resolves under the
-	// cmdgen package so //go:embed can reach it. Co-located features cannot
-	// collide: every feature's files carry a feature-unique suffix/prefix (see
+	// Each present feature defaults its two dirs from the cmdgen package
+	// (module-relative): rendered OUTPUT files to "<cmdgen-package>/renders"
+	// (always under cmdgen so //go:embed can reach them in embed mode), and the
+	// editable TEMPLATE to "<cmdgen-package>/templates". Co-located features
+	// cannot collide: each carries a feature-unique suffix/prefix (see
 	// docFeature) and pruning is scoped to them.
 	cmdgenDir := filepath.ToSlash(pkgs.Cmdgen.Package)
 	for _, f := range featureConfigs(conf) {
-		if f.cfg != nil && f.cfg.Dir == "" {
-			f.cfg.Dir = cmdgenDir + "/embed"
+		if f.cfg == nil {
+			continue
+		}
+		if f.cfg.EmbedDir == "" {
+			f.cfg.EmbedDir = cmdgenDir + "/renders"
+		}
+		if f.cfg.TemplateDir == "" {
+			f.cfg.TemplateDir = cmdgenDir + "/templates"
 		}
 	}
 }

@@ -277,23 +277,8 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 		filepath.Join(tmp, "internal/cmd/rotini/zz_rotini.gen.go"),
 		filepath.Join(repoRoot, "internal/cmd/rotini/zz_rotini.gen.go"))
 
-	// The companion's generated help feature files are reproduced byte-for-byte
-	// (only help is enabled in the committed companion conf).
-	featRel := "internal/cmd/rotini/embed"
-	entries, err := os.ReadDir(filepath.Join(repoRoot, featRel))
-	if err != nil {
-		t.Fatalf("read companion help dir: %v", err)
-	}
-	for _, e := range entries {
-		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		got := readFileString(t, filepath.Join(tmp, featRel, e.Name()))
-		want := readFileString(t, filepath.Join(repoRoot, featRel, e.Name()))
-		if got != want {
-			t.Errorf("companion help/%s not reproduced via processor:\n--- generated ---\n%s\n--- committed ---\n%s", e.Name(), got, want)
-		}
-	}
+	// The companion's features are all inline (no feature files on disk) — the
+	// dogfooded output lives in the gen file, compared byte-for-byte above.
 }
 
 // TestProcessorInitialize confirms the Processor's initialize scaffolds the seed

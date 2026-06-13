@@ -130,7 +130,7 @@
     "FeaturesConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle (enabled), the var-sourcing strategy (embed: //go:embed a file vs an inline string literal), whether the editable rendering template is seeded (template), a rotini-managed output dir, a per-command verbatim spec escape, and a '<Prefix>' var + resolver in the cmdgen file. In embed mode each enabled feature's 'dir' must resolve under the cmdgen package (//go:embed cannot reach outside it); inline features have no such constraint. All features default to ONE shared '<cmdgen-package>/embed' dir — output files never collide: help pages are 'help_*.txt', man pages 'man_*.txt', markdown 'markdown_*.md', completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.",
+      "description": "Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle (enabled), the var-sourcing strategy (embed: //go:embed a file in embed_dir vs an inline string literal), whether the editable rendering template is seeded (template, into template_dir), and a '<Prefix>' var + resolver in the cmdgen file. In embed mode embed_dir must resolve under the cmdgen package (//go:embed cannot reach outside it); inline features and template_dir have no such constraint. The two dirs default from the cmdgen package — embed_dir to '<cmdgen-package>/renders', template_dir to '<cmdgen-package>/templates'. Output files never collide: help pages are 'help_*.txt', man pages 'man_*.txt', markdown 'markdown_*.md', completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.",
       "properties": {
         "help": {
           "$ref": "#/definitions/Feature",
@@ -165,15 +165,20 @@
           "default": false,
           "description": "How this feature's generated content is sourced into the cmdgen Go file. true: the rendered content is written to a file under 'dir' and the Go var is backed by a //go:embed directive. false (the default): no output file is written — the Go var is a hardcoded string literal holding the content inline, so the generated .go is self-contained. Var names and the resolver are identical either way."
         },
+        "embed_dir": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_./-]*$",
+          "description": "Directory (relative to the module root) where this feature's rendered OUTPUT files (help_*.txt / man_*.txt / markdown_*.md / completion_<shell>.txt) are written in embed mode (embed: true) and sourced via //go:embed — so in embed mode it MUST resolve under the cmdgen package (//go:embed cannot reach outside it). In inline mode (embed: false) no output files are written and this is unused. Defaults to '<cmdgen-package>/renders'."
+        },
         "template": {
           "type": "boolean",
           "default": false,
           "description": "Whether the editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded into 'dir' for customization. true: the template is seeded when missing and pages render from it. false (the default): no template is seeded and pages render from rotini's built-in default. Ignored for completion (which has no template). A template you have already edited is never pruned — flipping this to false leaves it in place but inert."
         },
-        "dir": {
+        "template_dir": {
           "type": "string",
-          "description": "Path (relative to the module root) of the directory where this feature's rotini-managed output files and editable template live. In embed mode (embed: true) the rendered pages are written here and referenced by //go:embed, so the dir MUST resolve under the cmdgen package; in inline mode (embed: false) no output files are written (the content lives in the .go) and only the editable template, when template: true, is placed here. Defaults to the shared '<cmdgen-package>/embed' — feature-unique file-name prefixes (help_ / man_ / completion_) keep co-located features collision-free and grouped.",
-          "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_./-]*$"
+          "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_./-]*$",
+          "description": "Directory (relative to the module root) where this feature's editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded when template: true. Templates are never //go:embed'd, so this is unconstrained — it may resolve anywhere. Ignored for completion (no template) and in template:false mode. Defaults to '<cmdgen-package>/templates'."
         }
       }
     }
