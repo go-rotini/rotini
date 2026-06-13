@@ -44,7 +44,7 @@ func TestRun_recordedErrorsFireOnError(t *testing.T) {
 	exec := func(onRun func(rtx *Context)) (log []string, code int, funneled error, drained []error, fired bool) {
 		h := &testHandlers{log: &log, onRun: onRun}
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithErrorFn(func(_ context.Context, rtx *Context, err error) {
+		p.WithOnErrorFn(func(_ context.Context, rtx *Context, err error) {
 			fired, funneled, drained = true, err, rtx.Errors()
 		})
 		code, _ = p.run(p.args)

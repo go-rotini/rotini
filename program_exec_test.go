@@ -24,7 +24,7 @@ func TestProgram_WithExit_capturesCode(t *testing.T) {
 }
 
 // TestProgram_WithStderr_capturesDiagnostics proves WithStderr redirects the runtime's
-// own diagnostics: a panicking hook is funneled to the default ErrorFn, which writes to
+// own diagnostics: a panicking hook is funneled to the default OnError, which writes to
 // the program's stderr and exits 1.
 func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	var code int

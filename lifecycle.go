@@ -22,7 +22,7 @@ import "context"
 // and runs to completion — a panic or SignalExit inside teardown neither
 // aborts the rest nor displaces the first failure/exit code; only a hard
 // [Context.Exit] skips what remains. A panic anywhere is recovered and routed
-// once, after all teardown, to the ErrorFn funnel (exit floored
+// once, after all teardown, to the OnError funnel (exit floored
 // to 1). A custom lifecycle changes only the *plan* — which hooks, in what
 // pairing and order; the halting, balanced-unwind, panic-funnel, and
 // exit-code semantics above are rotini's and not overridable.
@@ -45,7 +45,7 @@ type Resolution struct {
 }
 
 // Resolver is the resolve phase: argv against the Definition, deciding what
-// this invocation targets. An error is routed through the ErrorFn
+// this invocation targets. An error is routed through the OnError
 // funnel and fails the run (exit floored to 1). See [DefaultResolver].
 type Resolver func(def Definition, argv []string) (Resolution, error)
 

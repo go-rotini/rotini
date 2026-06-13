@@ -95,7 +95,7 @@ func ExampleSuggestor_Suggest() {
 
 // The registry: anything bound on the Program (or Context) is fetched typed.
 // Get reports absence; MustGet panics — and that panic reaches the
-// Program.WithErrorFn funnel as a *PanicError, teardown already done.
+// Program.WithOnErrorFn funnel as a *PanicError, teardown already done.
 func ExampleMustGet() {
 	type apiClient struct{ baseURL string }
 
@@ -114,7 +114,7 @@ func ExampleMustGet() {
 }
 
 // The category taxonomy: tag errors at the source, map them to conventional
-// exit codes in one switch — typically inside Program.WithErrorFn.
+// exit codes in one switch — typically inside Program.WithOnErrorFn.
 func ExampleCategoryOf() {
 	classify := func(err error) int {
 		switch CategoryOf(err) {

@@ -46,7 +46,7 @@
 // service registry. Exits are deliberate ([Context.SignalExit],
 // [Context.Exit]); framework failures and recovered panics funnel — exactly
 // once, with the panic's stack riding a [*PanicError] — into
-// [Program.WithErrorFn], where [CategoryOf] maps them onto conventional
+// [Program.WithOnErrorFn], where [CategoryOf] maps them onto conventional
 // codes ([ExitUsage], [ExitInternal]). The runtime's only built-in
 // behaviors, documented as the exceptions they are: a default SIGINT/SIGTERM
 // trap (suppressed by [Program.WithContext]), the hidden __complete entry

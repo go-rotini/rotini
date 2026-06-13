@@ -111,11 +111,11 @@ func TestWithResolver_error(t *testing.T) {
 // The pre-classified diagnostics make the documented one-switch funnel work:
 // a custom funnel maps CategoryInternal to ExitInternal with no taxonomy
 // re-derivation of its own.
-func TestWithErrorFn_categorySwitch(t *testing.T) {
+func TestWithOnErrorFn_categorySwitch(t *testing.T) {
 	def := Definition{Name: "app", Handler: "Nope"} // no such handler method: a wiring failure
 	p, _, _ := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.def = def
-	p.WithErrorFn(func(_ context.Context, rtx *Context, err error) {
+	p.WithOnErrorFn(func(_ context.Context, rtx *Context, err error) {
 		switch CategoryOf(err) {
 		case CategoryUsage:
 			rtx.SignalExit(ExitUsage)
@@ -251,7 +251,7 @@ func TestPanicError(t *testing.T) {
 		t.Helper()
 		var got error
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithErrorFn(func(_ context.Context, rtx *Context, err error) { got = err })
+		p.WithOnErrorFn(func(_ context.Context, rtx *Context, err error) { got = err })
 		if code, _ := p.run(p.args); code != 1 {
 			t.Fatalf("run() = %d, want the panic path's floored 1", code)
 		}

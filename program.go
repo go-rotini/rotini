@@ -38,7 +38,7 @@ type Program struct {
 	def       Definition
 	handlers  any
 	rtx       *Context                                           // pre-seeded registry; user Bind calls land here
-	errorFn   func(ctx context.Context, rtx *Context, err error) // funnel for framework diagnostics + recovered panics; nil → defaultErrorFn
+	onErrorFn func(ctx context.Context, rtx *Context, err error) // funnel for framework diagnostics + recovered panics; nil → defaultOnError
 	resolver  Resolver                                           // resolve phase override; nil → DefaultResolver
 	lifecycle Lifecycle                                          // run-phase plan override; nil → DefaultLifecycle
 	stdin     io.Reader
@@ -89,7 +89,7 @@ func (p *Program) WithStdout(w io.Writer) *Program {
 }
 
 // WithStderr overrides the program's standard-error stream (defaults to os.Stderr) — the
-// destination for the runtime's own diagnostics (dispatch errors, the default ErrorFn). A
+// destination for the runtime's own diagnostics (dispatch errors, the default OnError). A
 // nil writer is ignored. It returns the receiver to chain.
 func (p *Program) WithStderr(w io.Writer) *Program {
 	if w != nil {
@@ -119,7 +119,7 @@ func (p *Program) WithArgs(args []string) *Program {
 }
 
 // WithContext sets the base [context.Context] threaded to every lifecycle hook (and to
-// the ErrorFn funnel and any remote sub-command exec), so a caller — a server, a test,
+// the OnError funnel and any remote sub-command exec), so a caller — a server, a test,
 // a parent process — can cancel or time-bound the whole run. A nil context is ignored. A
 // handler observes cancellation by selecting on its hook's ctx.Done(); cancellation is
 // cooperative (it cannot preempt a hook that ignores it), and teardown still runs.
@@ -136,7 +136,7 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 }
 
 // Bind registers a service on the program's registry under key, overwriting any
-// prior binding, and returns the receiver so it chains with [Program.WithErrorFn] and
+// prior binding, and returns the receiver so it chains with [Program.WithOnErrorFn] and
 // [program.WithArgs] before [program.Execute]. It is the dependency-injection
 // seam: bind a real implementation in production or a double in tests, with the
 // same handler code retrieving it via the typed [Get] / [MustGet]. Binding
@@ -146,47 +146,48 @@ func (p *Program) Bind(key string, value any) *Program {
 	return p
 }
 
-// WithErrorFn sets the funnel for every framework-level failure: the runtime
-// calls fn(ctx, rtx, err), and fn decides the exit code by calling rtx.SignalExit. It is
-// the single place to classify (errors.Is/errors.As, [CategoryOf]), log (file,
-// error-tracking service), and print errors in the CLI's own style. With no funnel set,
-// the default prints the error to stderr and exits 1 (and both paths below floor a 0 to
-// 1, so a funnel that forgets rtx.SignalExit still fails). It returns the receiver so it
-// chains with [Program.Bind].
+// WithOnErrorFn sets the program's OnError funnel: the SINGLE place an
+// invocation's errors are reported. The runtime calls fn(ctx, rtx, err) once,
+// at most once per run, whenever the run recorded ANY error — and fn decides
+// the exit code (rtx.SignalExit), classifies (errors.Is/errors.As,
+// [CategoryOf]), logs, and prints in the CLI's own style. With no funnel set,
+// the default prints each recorded error to stderr and exits 1. It returns the
+// receiver so it chains with [Program.Bind].
 //
-// The funnel fires at most once per run, for one of two classes — and they reach it at
-// OPPOSITE ends of the lifecycle:
+// Three error classes flow into this one funnel, all via the same recorded list
+// ([Context.Errors]):
 //
-//   - Framework diagnostics, BEFORE any hook has run: a custom resolver's error (or an
-//     empty chain), a Definition↔handlers wiring mismatch, and a remote dispatch that
-//     cannot be carried out (binary not found, timeout, spawn failure — a plugin's own
-//     non-zero exit is NOT routed; it already spoke for itself). No setup has happened
-//     and no teardown will follow. These arrive pre-classified for [CategoryOf]:
-//     wiring-class failures are [CategoryInternal] (a resolver error keeps its own
-//     category when it tagged one), a DISCOVERED plugin whose binary cannot be found is
-//     the user's typo and is [CategoryUsage], and a declared remote's timeout is
-//     deliberately [CategoryNone] — operational, neither party's to fix. A funnel can
-//     therefore apply the conventional mapping ([ExitUsage], [ExitInternal]) with one
-//     switch.
-//   - A recovered panic from any hook (e.g. the [MustGet] on a missing service), AFTER
-//     all teardown has unwound: forward progress halts at the panic, every begun step's
-//     teardown still runs, and only then is the first panic (later ones are dropped)
-//     reported here, last — always as a [*PanicError] carrying the goroutine stack from
-//     the recovery point. Error() is the panicked value alone (the default funnel stays
-//     one-line); a funnel that wants the stack reaches it with errors.As. Unwrap exposes
-//     a panicked error value, so sentinels and [CategoryOf] tags survive the wrapping.
+//   - Handler errors a handler chose to surface with [Context.RecordErr] — the
+//     ordinary path. A handler records one or more errors and stops with
+//     [Context.SignalExit] (graceful, teardown runs) or [Context.Exit] (skip
+//     teardown); the funnel fires after the lifecycle settles. Recording
+//     without an explicit exit still fires it.
+//   - Framework diagnostics, BEFORE any hook has run: a custom resolver's error
+//     (or an empty chain), a Definition↔handlers wiring mismatch, a remote
+//     dispatch that cannot be carried out (binary not found, timeout, spawn
+//     failure — a plugin's own non-zero exit is NOT routed; it already spoke
+//     for itself). Pre-classified for [CategoryOf]: wiring-class is
+//     [CategoryInternal] (a resolver error keeps its own tag), a DISCOVERED
+//     plugin's missing binary is the user's typo and [CategoryUsage], a
+//     declared remote's timeout is deliberately [CategoryNone].
+//   - A recovered panic from any hook (e.g. [MustGet] on a missing service),
+//     AFTER teardown unwinds — recorded as a [*PanicError] carrying the
+//     goroutine stack (errors.As reaches it; Unwrap preserves the panicked
+//     error's sentinels and [CategoryOf] tag).
 //
-// A funnel therefore must not assume handler-initialized state — on the diagnostic paths
-// nothing has run. Deliberate exits ([Context.SignalExit]/[Context.Exit]) are not
-// failures and are never routed here. A hard Exit does not bypass the funnel, though: a
-// panic already recovered is still reported after the (skipped) teardown.
-func (p *Program) WithErrorFn(fn func(ctx context.Context, rtx *Context, err error)) *Program {
-	p.errorFn = fn
+// The err argument is the [errors.Join] of every recorded error, so one
+// [CategoryOf] / errors.Is / errors.As call covers the whole set; fn can also
+// drain [Context.Errors] to format each individually. A run that recorded any
+// error never exits 0 — the code floors to 1 even if fn forgets rtx.SignalExit.
+// A clean run (nothing recorded) never invokes fn. fn must not assume
+// handler-initialized state — on the framework paths nothing has run.
+func (p *Program) WithOnErrorFn(fn func(ctx context.Context, rtx *Context, err error)) *Program {
+	p.onErrorFn = fn
 	return p
 }
 
 // PanicError is how a panic recovered from a lifecycle hook reaches the
-// [Program.WithErrorFn] funnel: Value is the value passed to panic, Stack is the
+// [Program.WithOnErrorFn] funnel: Value is the value passed to panic, Stack is the
 // goroutine stack captured at the recovery point (runtime/debug.Stack) — the
 // information the recover would otherwise discard. Error renders Value alone, so
 // default output stays one line; a funnel that wants the stack asks with errors.As.
@@ -211,7 +212,7 @@ func (e *PanicError) Unwrap() error {
 // later see). Wrap [DefaultResolver] rather than re-deriving it: a resolver
 // that rewrites tokens (an alias, a shorthand expansion) rewrites argv, hands
 // it to the default, and returns the result — routing and parsing then agree.
-// A resolver error is routed through the ErrorFn funnel and fails the
+// A resolver error is routed through the OnError funnel and fails the
 // run. The hidden __complete protocol intercept runs before resolution, and
 // completion candidates walk the Definition — a resolver-only alias is
 // dispatchable but not completable (declare real aliases in the spec for
@@ -313,9 +314,9 @@ func (p *Program) run(argv []string) (int, error) {
 	rtx.Stdin = p.stdin
 	rtx.Stdout = p.stdout
 	rtx.Stderr = p.stderr
-	rtx.errorFn = p.errorFn
-	if rtx.errorFn == nil {
-		rtx.errorFn = p.defaultErrorFn
+	rtx.onErrorFn = p.onErrorFn
+	if rtx.onErrorFn == nil {
+		rtx.onErrorFn = p.defaultOnError
 	}
 
 	res, err := resolve(p.def, argv)
@@ -356,17 +357,22 @@ func (p *Program) wiringFailure(ctx context.Context, rtx *Context, err error) (i
 	// recorded error). The err argument is the join, matching the dispatch path.
 	rtx.RecordErr(err)
 	joined := errors.Join(rtx.Errors()...)
-	rtx.errorFn(ctx, rtx, joined)
+	rtx.onErrorFn(ctx, rtx, joined)
 	if rtx.exitCode == 0 {
 		rtx.exitCode = 1
 	}
 	return rtx.exitCode, joined
 }
 
-// defaultErrorFn is the ErrorFn funnel used when the program supplies none: it
-// prints the error to stderr and fails with exit code 1.
-func (p *Program) defaultErrorFn(_ context.Context, rtx *Context, err error) {
-	fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, err)
+// defaultOnError is the OnError funnel used when the program supplies none: it
+// prints each recorded error to stderr (program-name prefixed) and fails with
+// exit code 1. EH3 will upgrade it to classify via [CategoryOf] and map the
+// exit code; for now it is the thin baseline a program overrides with
+// [Program.WithOnErrorFn].
+func (p *Program) defaultOnError(_ context.Context, rtx *Context, _ error) {
+	for _, e := range rtx.Errors() {
+		fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, e)
+	}
 	rtx.SignalExit(1)
 }
 
@@ -386,7 +392,7 @@ func (p *Program) defaultErrorFn(_ context.Context, rtx *Context, err error) {
 // rtx.SignalExit is a clean stop that still runs teardown; rtx.Exit is a hard stop that
 // skips it. A panic anywhere (e.g. the [MustGet] on a missing service) is recovered, does
 // not abort the remaining teardown, and is routed once — after all teardown — to the
-// ErrorFn funnel, last.
+// OnError funnel, last.
 //
 // When trapped is set (the caller supplied no context, so rotini installed the default
 // signal trap), a canceled run context is converted into a lifecycle [Context.SignalExit]
@@ -398,7 +404,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
 		// A wiring failure (generated Definition and handler set out of sync) is
-		// routed through the ErrorFn funnel — the single sink for every
+		// routed through the OnError funnel — the single sink for every
 		// framework diagnostic — so a custom funnel sees it too; the default
 		// funnel prints it to stderr and exits 1.
 		m := hv.MethodByName(f.Handler)
@@ -479,7 +485,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	recorded := rtx.Errors()
 	joined := errors.Join(recorded...)
 	if len(recorded) > 0 {
-		rtx.errorFn(ctx, rtx, joined)
+		rtx.onErrorFn(ctx, rtx, joined)
 		if rtx.exitCode == 0 {
 			rtx.exitCode = 1
 		}

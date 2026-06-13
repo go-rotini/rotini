@@ -32,7 +32,7 @@ type RemoteDispatch struct {
 // through, honoring the run context (so a signal/cancellation kills the subprocess)
 // and any timeout, and returning the plugin's exit code. rotini-authored
 // diagnostics (binary not found, timeout, spawn failure) are routed through
-// the ErrorFn funnel — the single sink for every framework
+// the OnError funnel — the single sink for every framework
 // diagnostic — with the exit floored to 1; the plugin's own non-zero exit
 // passes through untouched (the plugin already spoke for itself).
 func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatch) (int, error) {
