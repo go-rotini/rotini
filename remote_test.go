@@ -60,8 +60,10 @@ func TestRun_remoteNotFound(t *testing.T) {
 
 	p, _, errb := remoteProgram(def, []string{"missing"})
 	code, err := p.run(p.args)
-	if code != 1 {
-		t.Errorf("missing remote exit = %d, want 1", code)
+	// A DECLARED remote whose binary is missing is internal, so the default
+	// OnError exits ExitInternal (EH3 maps category → code).
+	if code != ExitInternal {
+		t.Errorf("missing remote exit = %d, want %d", code, ExitInternal)
 	}
 	if !strings.Contains(errb.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", errb)
@@ -131,8 +133,10 @@ func TestRun_discoveryMissing(t *testing.T) {
 
 	p, _, errb := remoteProgram(def, []string{"no-such-plugin-xyz"})
 	code, err := p.run(p.args)
-	if code != 1 {
-		t.Errorf("missing discovered plugin exit = %d, want 1", code)
+	// A DISCOVERED token resolving to no binary is the user's typo (usage), so
+	// the default OnError exits ExitUsage (EH3 maps category → code).
+	if code != ExitUsage {
+		t.Errorf("missing discovered plugin exit = %d, want %d", code, ExitUsage)
 	}
 	if !strings.Contains(errb.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", errb)

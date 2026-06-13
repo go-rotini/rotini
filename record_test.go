@@ -117,3 +117,67 @@ func TestRun_recordedErrorsFireOnError(t *testing.T) {
 		}
 	})
 }
+
+// TestDefaultExitCode pins EH3's exit mapping: the most severe category present
+// wins — internal outranks usage outranks an unclassified failure — and an
+// unclassified set still floors to 1 (never 0).
+func TestDefaultExitCode(t *testing.T) {
+	usage := UsageError(errors.New("u"))
+	internal := InternalError(errors.New("i"))
+	none := errors.New("n")
+	cases := []struct {
+		name string
+		errs []error
+		want int
+	}{
+		{"unclassified only", []error{none}, 1},
+		{"usage only", []error{usage}, ExitUsage},
+		{"internal only", []error{internal}, ExitInternal},
+		{"usage then internal", []error{usage, internal}, ExitInternal},
+		{"internal then usage", []error{internal, usage}, ExitInternal},
+		{"none alongside usage", []error{none, usage}, ExitUsage},
+		{"none alongside internal", []error{none, internal}, ExitInternal},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := defaultExitCode(tc.errs); got != tc.want {
+				t.Errorf("defaultExitCode(%v) = %d, want %d", tc.errs, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRun_defaultOnError_classifiesAndPrints is EH3's end-to-end golden: with no
+// custom funnel, the default drains rtx.Errors(), prints one program-name-
+// prefixed line per error to stderr, and exits by the most severe category.
+func TestRun_defaultOnError_classifiesAndPrints(t *testing.T) {
+	cases := []struct {
+		name   string
+		record []error
+		want   int
+		stderr string // exact stderr (the format golden); program name is "app"
+	}{
+		{"usage", []error{UsageError(errors.New("bad flag"))}, ExitUsage, "app: bad flag\n"},
+		{"internal", []error{InternalError(errors.New("broken wiring"))}, ExitInternal, "app: broken wiring\n"},
+		{"unclassified", []error{errors.New("mystery")}, 1, "app: mystery\n"},
+		{"mixed: internal outranks usage", []error{UsageError(errors.New("bad flag")), InternalError(errors.New("bug"))}, ExitInternal, "app: bad flag\napp: bug\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recs := tc.record
+			h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+				for _, e := range recs {
+					rtx.RecordErr(e)
+				}
+			}}
+			p, _, errb := newTestProgram(h, []string{"run"}) // no WithOnErrorFn → default
+			code, _ := p.run(p.args)
+			if code != tc.want {
+				t.Errorf("code = %d, want %d", code, tc.want)
+			}
+			if got := errb.String(); got != tc.stderr {
+				t.Errorf("stderr = %q, want %q", got, tc.stderr)
+			}
+		})
+	}
+}

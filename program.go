@@ -151,8 +151,11 @@ func (p *Program) Bind(key string, value any) *Program {
 // at most once per run, whenever the run recorded ANY error — and fn decides
 // the exit code (rtx.SignalExit), classifies (errors.Is/errors.As,
 // [CategoryOf]), logs, and prints in the CLI's own style. With no funnel set,
-// the default prints each recorded error to stderr and exits 1. It returns the
-// receiver so it chains with [Program.Bind].
+// the default prints one clean line per recorded error to stderr (program-name
+// prefixed) and exits by the most severe category present — [ExitInternal]
+// (70) if any error is [CategoryInternal], else [ExitUsage] (2) if any is
+// [CategoryUsage], else 1. It returns the receiver so it chains with
+// [Program.Bind].
 //
 // Three error classes flow into this one funnel, all via the same recorded list
 // ([Context.Errors]):
@@ -365,15 +368,37 @@ func (p *Program) wiringFailure(ctx context.Context, rtx *Context, err error) (i
 }
 
 // defaultOnError is the OnError funnel used when the program supplies none: it
-// prints each recorded error to stderr (program-name prefixed) and fails with
-// exit code 1. EH3 will upgrade it to classify via [CategoryOf] and map the
-// exit code; for now it is the thin baseline a program overrides with
-// [Program.WithOnErrorFn].
+// prints one clean line per recorded error to stderr (program-name prefixed)
+// and exits by the most severe category present (see [defaultExitCode]). Each
+// rotini error type renders a single non-leaky line — a [*PanicError] prints
+// its value, never the stack — so the default needs no per-type formatting; a
+// CLI that wants richer reporting (or the Suggestor's "did you mean") supplies
+// its own via [Program.WithOnErrorFn].
 func (p *Program) defaultOnError(_ context.Context, rtx *Context, _ error) {
-	for _, e := range rtx.Errors() {
+	errs := rtx.Errors()
+	for _, e := range errs {
 		fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, e)
 	}
-	rtx.SignalExit(1)
+	rtx.SignalExit(defaultExitCode(errs))
+}
+
+// defaultExitCode maps a recorded error set onto the conventional exit code the
+// default OnError uses: the most severe category present wins. Any
+// [CategoryInternal] error yields [ExitInternal] (a program bug outranks bad
+// input), else any [CategoryUsage] yields [ExitUsage], else 1 — an
+// unclassified failure is still a failure (edge 3: a recorded run never exits
+// 0). It is only ever called with a non-empty set.
+func defaultExitCode(errs []error) int {
+	code := 1
+	for _, e := range errs {
+		switch CategoryOf(e) {
+		case CategoryInternal:
+			return ExitInternal
+		case CategoryUsage:
+			code = ExitUsage
+		}
+	}
+	return code
 }
 
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the

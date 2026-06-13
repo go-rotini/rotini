@@ -84,8 +84,10 @@ func TestWithResolver_error(t *testing.T) {
 		return Resolution{}, errors.New("routing table on fire")
 	})
 	code, err := p.run(p.args)
-	if code != 1 || err == nil {
-		t.Errorf("run() = (%d, %v), want (1, the resolver error)", code, err)
+	// An untagged resolver error is wiring-class (internal), so the default
+	// OnError exits ExitInternal (EH3 maps category → code).
+	if code != ExitInternal || err == nil {
+		t.Errorf("run() = (%d, %v), want (%d, the resolver error)", code, err, ExitInternal)
 	}
 	if !strings.Contains(errb.String(), "routing table on fire") {
 		t.Errorf("stderr = %q, want the resolver error via the funnel", errb)
@@ -134,8 +136,9 @@ func TestWithOnErrorFn_categorySwitch(t *testing.T) {
 func TestWithResolver_emptyChain(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.WithResolver(func(Definition, []string) (Resolution, error) { return Resolution{}, nil })
-	if code, err := p.run(p.args); code != 1 || err == nil {
-		t.Errorf("run() = (%d, %v), want (1, an empty-chain error)", code, err)
+	// An empty chain is a resolver bug (internal) → default exits ExitInternal.
+	if code, err := p.run(p.args); code != ExitInternal || err == nil {
+		t.Errorf("run() = (%d, %v), want (%d, an empty-chain error)", code, err, ExitInternal)
 	}
 	if !strings.Contains(errb.String(), "empty chain") {
 		t.Errorf("stderr = %q, want the empty-chain diagnostic", errb)
@@ -149,8 +152,10 @@ func TestWithResolver_customRemote(t *testing.T) {
 	p.WithResolver(func(Definition, []string) (Resolution, error) {
 		return Resolution{Remote: &RemoteDispatch{Def: RemoteDef{Name: "ghost", Binary: "rotini-test-no-such-binary"}}}, nil
 	})
-	if code, _ := p.run(p.args); code != 1 {
-		t.Errorf("run() = %d, want 1 for an unresolvable remote binary", code)
+	// Not flagged Discovered → a declared remote → missing binary is internal,
+	// so the default OnError exits ExitInternal (EH3 maps category → code).
+	if code, _ := p.run(p.args); code != ExitInternal {
+		t.Errorf("run() = %d, want %d for an unresolvable remote binary", code, ExitInternal)
 	}
 	if errb.Len() == 0 {
 		t.Error("stderr empty, want the remote resolution error")
