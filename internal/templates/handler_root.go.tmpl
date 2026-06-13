@@ -20,9 +20,6 @@ var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[{{.RootCommandName}}Inputs](rtx)
 	if err != nil {
-		// Parse failures are data: the ParseError carries the offending token and
-		// its vocabulary, and the bound Suggestor (see main.go) turns them into a
-		// suggestion. Remove the bind — or this block — to opt out.
 		msg := err.Error()
 		var parseErr *rotini.ParseError
 		if errors.As(err, &parseErr) && parseErr.Token != "" {
@@ -36,7 +33,7 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 {{- if .HasHelp}}
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
 {{- end}}
-		rtx.SignalExit(rotini.ExitUsage) // bad input → the conventional usage exit code
+		rtx.SignalExit(1)
 		return
 	}
 

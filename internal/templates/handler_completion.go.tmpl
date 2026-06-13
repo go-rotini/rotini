@@ -35,8 +35,6 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 {{- end}}
 
-	// The shell arg is enum-constrained in the spec, so an unsupported shell
-	// never reaches here — Parse already rejected it.
 	script, err := Completion(inputs.{{.RootCommandName}}Completion.Arguments.Shell)
 	if err != nil {
 		fmt.Fprintln(rtx.Stderr, "Error:", err)
@@ -44,6 +42,6 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	// The `source <({{.Package}} completion zsh)` idiom: the script, stdout, nothing else.
+	// source <({{.Package}} completion zsh)
 	fmt.Fprintln(rtx.Stdout, script)
 }
