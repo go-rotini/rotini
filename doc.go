@@ -60,17 +60,21 @@
 // [KeyBinder], [KeySuggestor], [KeyVersioner] conventions naming the usual
 // suspects:
 //
-//   - [Parser] parses and validates the argv channel against the resolved
-//     chain — GNU/POSIX grammar (clustering, --, =, count flags, passthrough),
-//     typed coercion, enum and constraint checks — into the generated input
-//     struct, failing with a data-shaped [*ParseError].
-//   - [Binder] reconciles every declared channel — argv, environment, config
-//     files ([BindMeta], with discovery, schema gates, and provenance-aware
-//     precedence), and the stdin payload — into the same struct.
-//   - The overlay surface (ParseArgv / ParseEnv / ParseFiles / ParseStdin,
-//     [OverlayInputs], [OverlayInputsP]) acquires channels one at a time for
-//     programs that want custom precedence, with a [Report] answering "where
-//     did this value come from" per field.
+//   - [Collect] is the 95% handler's whole input story: every declared
+//     channel reconciled and validated in one line —
+//     inputs, err := rotini.Collect[cmdgen.DeployInputs](rtx) — and
+//     [CollectP] adds the provenance [Report] ("where did this value come
+//     from", per field). Both ride the [BindMeta] the generated NewProgram
+//     binds under [KeyBindMeta].
+//   - [Parser] parses and validates the argv channel ALONE against the
+//     resolved chain — GNU/POSIX grammar (clustering, --, =, count flags,
+//     passthrough), typed coercion, enum and constraint checks — failing
+//     with a data-shaped [*ParseError]; [Binder] is Collect's engine, for
+//     callers who want to hold the meta explicitly.
+//   - The per-channel surface ([ParseArgv] / [ParseEnv] / [ParseFiles] /
+//     [ParseStdin] / [Defaults], composed by [OverlayInputs] or
+//     [OverlayInputsP]) acquires channels one at a time for programs that
+//     want custom precedence, with the same [Report].
 //   - [Suggestor] turns a [ParseError]'s unknown token and candidate
 //     vocabulary into "did you mean" suggestions; [Versioner] resolves one
 //     version string whether the binary was built with -ldflags or installed

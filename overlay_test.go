@@ -47,6 +47,68 @@ func ovDef() Definition {
 
 // ovLayers acquires the four standard layers in conventional precedence order
 // (defaults < files < env < argv), failing the test on any acquisition error.
+// TestCollect pins the one-liner (ergonomics E4): every channel reconciled in
+// one call, equivalent to Binder.Bind AND to CollectP's overlaid layers; the
+// P variant adds the provenance Report (closing the E2 audit's finding 3 —
+// one-call and where-did-this-come-from compose now).
+func TestCollect(t *testing.T) {
+	cfg := writeConfig(t, "api:\n  endpoint: from-file\n  token: from-file-token\n")
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	t.Setenv("REGION", "from-env")
+
+	newRtx := func() *Context {
+		rtx := NewContextFor(tbDef(), []string{"--verbose"})
+		rtx.Bind(KeyBindMeta, meta)
+		return rtx
+	}
+
+	got, err := Collect[tbInputs](newRtx())
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if !got.App.Flags.Verbose || got.App.Env.Region != "from-env" || got.App.Config.Endpoint != "from-file" {
+		t.Errorf("Collect = %+v, want argv+env+file values reconciled", got.App)
+	}
+
+	// Equivalence 1: Collect == Binder.Bind.
+	var bound tbInputs
+	if err := NewBinder(meta).Bind(newRtx(), &bound); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if !reflect.DeepEqual(got, bound) {
+		t.Errorf("Collect != Bind:\n collect=%+v\n bind=%+v", got, bound)
+	}
+
+	// Equivalence 2: Collect == CollectP's merged value — plus the Report.
+	merged, report, err := CollectP[tbInputs](newRtx())
+	if err != nil {
+		t.Fatalf("CollectP: %v", err)
+	}
+	if !reflect.DeepEqual(got, merged) {
+		t.Errorf("Collect != CollectP:\n collect=%+v\n collectP=%+v", got, merged)
+	}
+	if win, ok := report.Winner("App.Env.Region"); !ok || win.Layer != "env" || win.Raw != "from-env" {
+		t.Errorf("Winner(Region) = %+v ok=%v, want env/from-env", win, ok)
+	}
+	if win, ok := report.Winner("App.Config.Endpoint"); !ok || win.Layer != "files" {
+		t.Errorf("Winner(Endpoint) = %+v ok=%v, want the files layer", win, ok)
+	}
+
+	// Validation parity: a required config value missing errors in BOTH forms.
+	bare := writeConfig(t, "api:\n  endpoint: only\n") // api.token (required) absent
+	bareMeta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: bare, Format: "yaml"}}}
+	rtx := NewContextFor(tbDef(), nil)
+	rtx.Bind(KeyBindMeta, bareMeta)
+	if _, err := Collect[tbInputs](rtx); err == nil {
+		t.Error("Collect with missing required config = nil error, want loud")
+	}
+	rtx2 := NewContextFor(tbDef(), nil)
+	rtx2.Bind(KeyBindMeta, bareMeta)
+	if _, _, err := CollectP[tbInputs](rtx2); err == nil {
+		t.Error("CollectP with missing required config = nil error, want loud")
+	}
+}
+
 func ovLayers(t *testing.T, rtx *Context, meta BindMeta) []Layer[ovInputs] {
 	t.Helper()
 	rtx.Bind(KeyBindMeta, meta) // the channel functions derive their meta from the Context

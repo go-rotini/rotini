@@ -71,6 +71,60 @@ type layerCore struct {
 	argDefaults map[int]string // the defaults layer's per-index argument defaults (sparse)
 }
 
+// ── the one-liner ────────────────────────────────────────────────────────────
+
+// Collect is the 95% handler's entire input story: every declared channel —
+// argv, environment, configuration files (declared AND custom BindMeta
+// sources), the stdin payload, defaults — acquired, reconciled in the standard
+// precedence (defaults < files < env < argv), and validated, in one call:
+//
+//	inputs, err := rotini.Collect[cmdgen.MycliDeployInputs](rtx)
+//
+// Configuration comes from the Context's bound [BindMeta] ([KeyBindMeta] —
+// the generated NewProgram binds it; a CLI with nothing to declare needs
+// nothing). It is [Binder.Bind] under the hood; errors are the same
+// data-shaped [*ParseError]s. When the answer to "where did this value come
+// from" matters, use [CollectP].
+func Collect[T any](rtx *Context) (T, error) {
+	var t T
+	err := binderFor(rtx).Bind(rtx, &t)
+	return t, err
+}
+
+// CollectP is [Collect] with provenance: the same reconciled, validated
+// inputs plus the [Report] that answers Winner/History per field. It rides
+// the per-channel layer machinery ([Defaults], [ParseFiles], [ParseEnv],
+// [ParseArgv], [ParseStdin]) overlaid in the standard precedence — the same
+// values Collect produces (pinned by test), at the cost of acquiring each
+// channel separately. Validation failures return the merged inputs AND the
+// report alongside the error, so a funnel can still say which layer supplied
+// the offending value.
+func CollectP[T any](rtx *Context) (T, Report, error) {
+	var zero T
+	defaults, err := Defaults[T](rtx)
+	if err != nil {
+		return zero, Report{}, err
+	}
+	files, err := ParseFiles[T](rtx)
+	if err != nil {
+		return zero, Report{}, err
+	}
+	env, err := ParseEnv[T](rtx)
+	if err != nil {
+		return zero, Report{}, err
+	}
+	argv, err := ParseArgv[T](rtx)
+	if err != nil {
+		return zero, Report{}, err
+	}
+	stdin, err := ParseStdin[T](rtx)
+	if err != nil {
+		return zero, Report{}, err
+	}
+	merged, report := OverlayInputsP(defaults, files, env, argv, stdin)
+	return merged, report, report.Validate()
+}
+
 // ── channel acquisition ──────────────────────────────────────────────────────
 
 // ParseArgv parses the command line only — flags and positionals across the

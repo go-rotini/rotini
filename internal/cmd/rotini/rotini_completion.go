@@ -17,10 +17,8 @@ type rotiniCompletionHandlers struct {
 var _ rotini.CommandHandlers = (*rotiniCompletionHandlers)(nil)
 
 func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-
-	var inputs RotiniCompletionInputs
-	if err := parser.Parse(rtx, &inputs); err != nil {
+	inputs, err := rotini.Collect[RotiniCompletionInputs](rtx)
+	if err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
 		fmt.Fprintln(rtx.Stdout, HelpRotiniCompletion)
 		rtx.SignalExit(rotini.ExitUsage)

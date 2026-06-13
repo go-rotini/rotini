@@ -17,10 +17,8 @@ type rotiniHelpHandlers struct {
 var _ rotini.CommandHandlers = (*rotiniHelpHandlers)(nil)
 
 func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-
-	var inputs RotiniHelpInputs
-	if err := parser.Parse(rtx, &inputs); err != nil {
+	inputs, err := rotini.Collect[RotiniHelpInputs](rtx)
+	if err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
 		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
 		rtx.SignalExit(1)

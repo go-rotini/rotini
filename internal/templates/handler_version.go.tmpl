@@ -17,10 +17,8 @@ type {{.HandlersType}} struct{
 var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-
-	var inputs {{.RootCommandName}}VersionInputs
-	if err := parser.Parse(rtx, &inputs); err != nil {
+	inputs, err := rotini.Collect[{{.RootCommandName}}VersionInputs](rtx)
+	if err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %v\n\n", err)
 {{- if .HasHelp}}
 		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})

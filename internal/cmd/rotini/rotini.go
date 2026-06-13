@@ -18,14 +18,11 @@ type rotiniHandlers struct {
 var _ rotini.CommandHandlers = (*rotiniHandlers)(nil)
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	// Bind, not Parse: the env channel (RotiniEnv — $ROTINI_NO_STYLES) is the
-	// Binder's job. One Bind fills argv flags AND env values; BindMeta is the
-	// generated descriptor (emitted unconditionally — empty here, since rotini
-	// declares no configuration_files).
-	binder := rotini.NewBinder(BindMeta)
-
-	var inputs RotiniInputs
-	if err := binder.Bind(rtx, &inputs); err != nil {
+	// Collect, not Parse: one call reconciles every declared channel — the
+	// argv flags AND the env channel ($ROTINI_NO_STYLES) — against the
+	// generated BindMeta the program bound at NewProgram time.
+	inputs, err := rotini.Collect[RotiniInputs](rtx)
+	if err != nil {
 		// Parse failures are data: the ParseError carries the offending token and
 		// its vocabulary, and the bound Suggestor (see main.go) turns them into a
 		// suggestion. Remove the bind — or this block — to opt out.

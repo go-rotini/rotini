@@ -18,10 +18,8 @@ type {{.HandlersType}} struct{
 var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-
-	var inputs {{.RootCommandName}}Inputs
-	if err := parser.Parse(rtx, &inputs); err != nil {
+	inputs, err := rotini.Collect[{{.RootCommandName}}Inputs](rtx)
+	if err != nil {
 		// Parse failures are data: the ParseError carries the offending token and
 		// its vocabulary, and the bound Suggestor (see main.go) turns them into a
 		// suggestion. Remove the bind — or this block — to opt out.
