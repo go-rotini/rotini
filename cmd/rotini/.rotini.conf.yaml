@@ -20,12 +20,12 @@ generate:
       embed: false
       dir: internal/cmd/rotini/embed
     man:
-      enabled: true
-      embed: true
+      enabled: false
+      embed: false
       dir: internal/cmd/rotini/embed
     markdown:
       enabled: false
-      embed: true
+      embed: false
       dir: internal/cmd/rotini/embed
 validate:
   fail: collect
