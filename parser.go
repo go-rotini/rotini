@@ -840,7 +840,7 @@ func isShortCluster(name string) bool {
 // inline "=value", then the next argv token — whichever is present. It returns how
 // many extra argv tokens it consumed (0 or 1).
 func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value string) error) (int, error) {
-	for k := 0; k < len(body); k++ {
+	for k := range len(body) {
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
 		if !ok {
@@ -880,12 +880,10 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 // include name, returning its definition and the chain index of the command that
 // owns it.
 func findFlagIndex(chain []ResolvedCommand, name string) (FlagDef, int, bool) {
-	for i := len(chain) - 1; i >= 0; i-- {
-		for _, f := range chain[i].Flags {
-			for _, id := range f.Identifiers {
-				if id == name {
-					return f, i, true
-				}
+	for i, v := range slices.Backward(chain) {
+		for _, f := range v.Flags {
+			if slices.Contains(f.Identifiers, name) {
+				return f, i, true
 			}
 		}
 	}
@@ -916,8 +914,8 @@ func childCommandNames(cur ResolvedCommand) []string {
 // [ParseError]'s Candidates.
 func chainFlagIdentifiers(chain []ResolvedCommand) []string {
 	var ids []string
-	for i := len(chain) - 1; i >= 0; i-- {
-		for _, f := range chain[i].Flags {
+	for _, v := range slices.Backward(chain) {
+		for _, f := range v.Flags {
 			if !f.Hidden {
 				ids = append(ids, f.Identifiers...)
 			}
@@ -1048,8 +1046,8 @@ func bindArgs(v reflect.Value, args []string) error {
 }
 
 var (
-	durationType        = reflect.TypeOf(time.Duration(0))
-	textUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+	durationType        = reflect.TypeFor[time.Duration]()
+	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 )
 
 // coerce sets f from the raw string value(s), returning an error when a value cannot be
@@ -1166,7 +1164,7 @@ func notValid(value, typeName string) error {
 // them; an empty path segment ("a..b", ".a", "a.") is an error.
 func coerceMapDotted(f reflect.Value, raw []string) error {
 	m := map[string]any{}
-	if !reflect.TypeOf(m).AssignableTo(f.Type()) {
+	if !reflect.TypeFor[map[string]any]().AssignableTo(f.Type()) {
 		return fmt.Errorf("dotted keys need a map[string]any flag, not %s", f.Type())
 	}
 	for _, pair := range raw {

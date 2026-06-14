@@ -374,7 +374,7 @@ func (p *Program) run(argv []string) (int, error) {
 	}
 	if len(res.Chain) == 0 {
 		// An empty chain is a resolver contract violation → OnPanic.
-		rtx.recordFault(asFault(InternalError(fmt.Errorf("resolver returned an empty chain — the root frame is always resolvable"))))
+		rtx.recordFault(asFault(InternalError(errors.New("resolver returned an empty chain — the root frame is always resolvable"))))
 		return p.settle(ctx, rtx)
 	}
 

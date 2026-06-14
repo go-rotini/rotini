@@ -23,7 +23,7 @@ linters:
     - arangolint
     - gosmopolitan
 
-    # Too opinionated for a filesystem-helpers library
+    # Too opinionated for a declarative CLI framework + code generator
     - exhaustruct
     - varnamelen
     - wsl_v5
@@ -47,6 +47,17 @@ linters:
     - forbidigo
     - exhaustive
     - recvcheck
+    # A CLI framework's diagnostics echo the user's input ("unknown flag %q",
+    # "invalid name %q", "cyclic $ref"): they are terminal, human-facing messages,
+    # not sentinels callers errors.Is against. The runtime taxonomy that DOES need
+    # matching is already typed (ParseError/BindError with Kind enums + CategoryOf),
+    # so blanket-wrapping every contextual message as a static sentinel is pure noise.
+    - err113
+    # The spec<->Go type machinery (parser dispatch, reflection binding, codegen)
+    # repeats Go type-name tokens by its nature — "string" alone appears 70 times
+    # as a switch case. Hoisting "string"/"float64"/"[]string"/"count" into consts
+    # hurts readability rather than helping it.
+    - goconst
 
   settings:
     cyclop:
@@ -66,10 +77,6 @@ linters:
     nestif:
       min-complexity: 10
 
-    goconst:
-      min-len: 5
-      min-occurrences: 5
-
     gocritic:
       enabled-tags:
         - diagnostic
@@ -80,6 +87,7 @@ linters:
         - hugeParam
         - rangeValCopy
         - unnamedResult
+        - importShadow # `path string` params intentionally shadow the path package
 
     revive:
       rules:
@@ -106,13 +114,17 @@ linters:
       check-type-assertions: false
       check-blank: true
 
-    # The fs package's purpose is variable-driven file access; G304 (potential
-    # file inclusion) and G115 (integer overflow) noise don't pay back in
-    # actionable findings here.
+    # rotini reads user-named spec/config files (G304) and writes generated Go
+    # source + the project tree it scaffolds. Generated files are meant to be
+    # readable/committable, so the codegen deliberately uses conventional 0755
+    # dirs / 0644 files (G301/G306) rather than gosec's hardened 0750/0600. G115
+    # (integer overflow) finds nothing actionable here.
     gosec:
       excludes:
         - G304
         - G115
+        - G301
+        - G306
 
     nakedret:
       max-func-lines: 10
@@ -189,11 +201,20 @@ linters:
           - staticcheck
           - tagalign
           - errchkjson
+          - thelper       # table-driven check closures take *testing.T but aren't helpers
+          - errname       # test-local sentinels (acmeBinErr) don't need errXxx naming
+          - usetesting    # os.MkdirTemp/os.Setenv in fixtures predate t.TempDir/t.Setenv
+          - mirror        # strings.Contains on []byte in assertions is fine
+          - ineffassign   # throwaway assignments in test scaffolding
+          - wastedassign  # ditto — reassigned scratch vars in test scaffolding
+          - dupword       # repeated words in fixture data ("scan\tscan things") are intentional
+          - govet         # "cannot inline" noise on generic test helpers
 
-      # The parser-engine files in rtk/ have unavoidable complexity (declared-
-      # type dispatch, recursive command-tree walking) and produce dynamic
-      # errors carrying the user's input by their very nature.
-      - path: rtk/(coerce|flags|parser|args|stdin)\.go
+      # The argv parser, multi-source binder, and à-la-carte overlay do declared-
+      # type dispatch and reflection-driven struct walking; the code generator and
+      # JSONC position scanner walk recursive trees. Complexity/nesting warnings on
+      # these are inherent to what they do, not actionable.
+      - path: (parser|binder|overlay|completion)\.go
         linters:
           - cyclop
           - gocognit
@@ -201,7 +222,57 @@ linters:
           - funlen
           - maintidx
           - nestif
-          - err113
+
+      - path: internal/(generator|position)\.go
+        linters:
+          - cyclop
+          - gocognit
+          - gocyclo
+          - funlen
+          - maintidx
+          - nestif
+
+      # parser.go: Deprecation is a deliberate public type name (not an error
+      # sentinel), and the declared-type coercion does a checked single assertion.
+      - path: parser\.go
+        linters:
+          - errname
+          - forcetypeassert
+          - nilnil
+
+      # binder.go reads os.Stdin/Stat (stdlib errors surface as channel errors,
+      # not wrapped) and intentionally ignores best-effort writes/reseeks.
+      - path: binder\.go
+        linters:
+          - wrapcheck
+          - errcheck
+          - gosec
+          - unparam
+          - prealloc
+
+      # overlay.go ignores best-effort field copies into a sparse layer.
+      - path: overlay\.go
+        linters:
+          - errcheck
+
+      # types.go: FlagDef/ArgDef embed Constraints last by design (bounds read as
+      # a trailing group), and Ptr carries the Go 1.25 //go:fix inline directive
+      # that the linter doesn't yet recognize.
+      - path: types\.go
+        linters:
+          - embeddedstructfieldcheck
+          - gocheckcompilerdirectives
+
+      # The generated companion (entrypoint + per-command handlers) intentionally
+      # ignores Program.Execute (it owns process exit) and shares handler scaffolding
+      # across commands, so cmd/ and the generated handler package opt out of
+      # caller-side error checks and duplicate-block detection.
+      - path: cmd/
+        linters:
+          - wrapcheck
+          - errcheck
+          - gosec
+          - dupl
 
 issues:
   max-issues-per-linter: 0

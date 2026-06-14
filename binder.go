@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -326,8 +327,8 @@ func recordFlag(store *parsedInputs, idx int, name, value string) {
 // (i.e. there is at least one env/config fallback flag to reconcile). When false, the
 // binder skips building a registry entirely.
 func hasReconFlags(v reflect.Value) bool {
-	for i := range v.NumField() {
-		flags := commandFlags(v.Field(i))
+	for _, field := range v.Fields() {
+		flags := commandFlags(field)
 		if !flags.IsValid() {
 			continue
 		}
@@ -404,8 +405,8 @@ func reconKey(tag string) string {
 	if tag == "" {
 		return ""
 	}
-	if i := strings.IndexByte(tag, ','); i >= 0 {
-		return tag[:i]
+	if before, _, ok := strings.Cut(tag, ","); ok {
+		return before
 	}
 	return tag
 }
@@ -443,13 +444,11 @@ func flagWasSet(argv, identifiers []string) bool {
 			continue
 		}
 		name := tok
-		if eq := strings.IndexByte(tok, '='); eq >= 0 {
-			name = tok[:eq]
+		if before, _, ok := strings.Cut(tok, "="); ok {
+			name = before
 		}
-		for _, id := range identifiers {
-			if id == name {
-				return true
-			}
+		if slices.Contains(identifiers, name) {
+			return true
 		}
 	}
 	return false
@@ -582,6 +581,7 @@ func (b *Binder) fileSources(overrides map[string]string) ([]recon.Source, error
 // (live watch) costs nothing here.
 type namedSource struct {
 	recon.Source
+
 	name string
 }
 
@@ -820,7 +820,7 @@ func fillEnvNested(env reflect.Value) (map[string]bool, error) {
 			continue
 		}
 		f := env.Field(j)
-		if f.CanSet() && reflect.TypeOf(fam).AssignableTo(f.Type()) {
+		if f.CanSet() && reflect.TypeFor[map[string]any]().AssignableTo(f.Type()) {
 			f.Set(reflect.ValueOf(fam))
 			filled[reconKey(et.Field(j).Tag.Get("recon"))] = true
 		}
@@ -854,8 +854,7 @@ func envExplicit(v reflect.Value) map[string]string {
 	if v.Kind() != reflect.Struct {
 		return m
 	}
-	for i := range v.NumField() {
-		ci := v.Field(i)
+	for _, ci := range v.Fields() {
 		if ci.Kind() != reflect.Struct {
 			continue
 		}
@@ -895,8 +894,7 @@ func fillChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
-	for i := range v.NumField() {
-		ci := v.Field(i)
+	for _, ci := range v.Fields() {
 		if ci.Kind() != reflect.Struct {
 			continue
 		}
@@ -931,8 +929,7 @@ func validateChannels(v reflect.Value, envReg *recon.Registry, cfg *cfgRegs) err
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
-	for i := range v.NumField() {
-		ci := v.Field(i)
+	for _, ci := range v.Fields() {
 		if ci.Kind() != reflect.Struct {
 			continue
 		}
@@ -1011,27 +1008,27 @@ func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 	has := false
 	if v := tag.Get("min"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.Minimum, has = Ptr(f), true
+			c.Minimum, has = new(f), true
 		}
 	}
 	if v := tag.Get("max"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.Maximum, has = Ptr(f), true
+			c.Maximum, has = new(f), true
 		}
 	}
 	if v := tag.Get("xmin"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.ExclusiveMinimum, has = Ptr(f), true
+			c.ExclusiveMinimum, has = new(f), true
 		}
 	}
 	if v := tag.Get("xmax"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.ExclusiveMaximum, has = Ptr(f), true
+			c.ExclusiveMaximum, has = new(f), true
 		}
 	}
 	if v := tag.Get("multipleof"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.MultipleOf, has = Ptr(f), true
+			c.MultipleOf, has = new(f), true
 		}
 	}
 	if v := tag.Get("minlen"); v != "" {

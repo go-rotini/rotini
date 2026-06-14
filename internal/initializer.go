@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -153,13 +154,7 @@ func (p *Processor) initialize(name, format string, force bool, with []string) e
 func withSet(with []string) (map[string]bool, error) {
 	set := map[string]bool{}
 	for _, w := range with {
-		ok := false
-		for _, v := range withFeatures {
-			if w == v {
-				ok = true
-				break
-			}
-		}
+		ok := slices.Contains(withFeatures, w)
 		if !ok {
 			return nil, fmt.Errorf("unknown --with value %q: must be one of %s", w, strings.Join(withFeatures, ", "))
 		}

@@ -134,7 +134,7 @@ func (s *session) generatePass() error {
 	return s.generate()
 }
 
-// ─── the run/watch engine ────────────────────────────────────────────────────
+// ─── the run/watch engine ────────────────────────────────────────────────────.
 
 // runOrWatch performs a single timed pass — returning the pass's error when it fails — or,
 // when watch is set, watches the spec and conf and re-runs the pass on each change until

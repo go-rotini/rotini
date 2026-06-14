@@ -118,8 +118,8 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 			return nil
 		}
 		var ids []string
-		for i := len(cc.chain) - 1; i >= 0; i-- {
-			for _, f := range cc.chain[i].Flags {
+		for _, v := range slices.Backward(cc.chain) {
+			for _, f := range v.Flags {
 				if !f.Hidden {
 					for _, id := range f.Identifiers {
 						ids = append(ids, withDescription(id, f.Summary))
@@ -476,8 +476,8 @@ func filterPrefix(candidates []string, prefix string) []string {
 		// A candidate may carry a "\t<description>" suffix (see withDescription);
 		// the prefix matches — and duplicates collapse — on the NAME part only.
 		name := c
-		if i := strings.IndexByte(c, '\t'); i >= 0 {
-			name = c[:i]
+		if before, _, ok := strings.Cut(c, "\t"); ok {
+			name = before
 		}
 		if name != "" && strings.HasPrefix(name, prefix) && !seen[name] {
 			seen[name] = true

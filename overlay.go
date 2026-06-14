@@ -20,7 +20,7 @@ package rotini
 
 import (
 	"reflect"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/go-rotini/recon"
@@ -70,7 +70,7 @@ type layerCore struct {
 	argDefaults map[int]string // the defaults layer's per-index argument defaults (sparse)
 }
 
-// ── the one-liner ────────────────────────────────────────────────────────────
+// ── the one-liner ────────────────────────────────────────────────────────────.
 
 // Collect is the 95% handler's entire input story: every declared channel —
 // argv, environment, configuration files (declared AND custom BindMeta
@@ -124,7 +124,7 @@ func CollectP[T any](rtx *Context) (T, Report, error) {
 	return merged, report, report.Validate()
 }
 
-// ── channel acquisition ──────────────────────────────────────────────────────
+// ── channel acquisition ──────────────────────────────────────────────────────.
 
 // ParseArgv parses the command line only — flags and positionals across the
 // resolved chain, exactly as supplied: no defaults, no env/config fallback, and
@@ -177,7 +177,7 @@ func Defaults[T any](rtx *Context) (Layer[T], error) {
 	return Layer[T]{Name: "defaults", Values: t, Set: set, core: core}, err
 }
 
-// ── overlay ──────────────────────────────────────────────────────────────────
+// ── overlay ──────────────────────────────────────────────────────────────────.
 
 // OverlayInputs merges layers into one inputs value. Slice order is precedence,
 // low → high: a field set by a later layer wins; a field no layer set stays the
@@ -215,7 +215,7 @@ func sortedPaths(p Presence) []FieldPath {
 	for k := range p {
 		out = append(out, k)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	slices.Sort(out)
 	return out
 }
 
@@ -223,7 +223,7 @@ func sortedPaths(p Presence) []FieldPath {
 // dst (same type). Unknown segments are skipped — a stale path in a hand-built
 // layer copies nothing rather than panicking.
 func copyFieldByPath(dst, src reflect.Value, path FieldPath) {
-	for _, seg := range strings.Split(string(path), ".") {
+	for seg := range strings.SplitSeq(string(path), ".") {
 		if dst.Kind() != reflect.Struct || src.Kind() != reflect.Struct {
 			return
 		}
@@ -237,7 +237,7 @@ func copyFieldByPath(dst, src reflect.Value, path FieldPath) {
 	}
 }
 
-// ── the report ───────────────────────────────────────────────────────────────
+// ── the report ───────────────────────────────────────────────────────────────.
 
 // Report is the merged provenance of one overlay: which layer won each field,
 // every layer that set it (low → high), and validation over the merged values.
@@ -351,7 +351,7 @@ func (p *parsedInputs) argvSetAt(idx int) map[string]bool {
 	return p.argvSet[idx]
 }
 
-// ── channel cores (shared, non-generic) ──────────────────────────────────────
+// ── channel cores (shared, non-generic) ──────────────────────────────────────.
 
 // argvLayer parses argv only (no defaults) into v and records presence.
 func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
@@ -627,7 +627,7 @@ func stdinLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 	return set, &layerCore{chain: chain}, nil
 }
 
-// ── shared walking helpers ───────────────────────────────────────────────────
+// ── shared walking helpers ───────────────────────────────────────────────────.
 
 // layerChain validates the context and returns its resolved chain — the same
 // preconditions Parser.parseBind enforces.

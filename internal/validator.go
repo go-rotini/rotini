@@ -31,7 +31,7 @@ func Validate(specPath, confPath string, watch bool, failMode, version string, o
 	return NewProcessor(version).Validate(specPath, confPath, watch, failMode, onValidate)
 }
 
-// ─── session + file validation ────────────────────────────────────────────────
+// ─── session + file validation ────────────────────────────────────────────────.
 
 // validate runs the validator phase over the loaded spec and conf (call load first):
 // each file validates itself. Problems are aggregated via errors.Join, or — in fast
@@ -149,7 +149,7 @@ func lintInitializeLocation(conf *Conf, confPath string) []error {
 	}}
 }
 
-// ─── schema validation + the $schema↔version guard ─────────────────────────────
+// ─── schema validation + the $schema↔version guard ─────────────────────────────.
 
 // problem is a single validation failure: the location of the offending value within
 // the document and a human-readable message, tagged by document kind ("spec"/"conf").
@@ -177,7 +177,8 @@ func locateProblems(problems []error, path string, locate sourceLocator) {
 		return
 	}
 	for _, e := range problems {
-		p, ok := e.(*problem)
+		p := &problem{}
+		ok := errors.As(e, &p)
 		if !ok || !strings.HasPrefix(p.loc, "/") {
 			continue
 		}
@@ -243,7 +244,7 @@ func checkSchemaVersion(kind, docSchema, version string) error {
 	return nil
 }
 
-// ─── the rotini-specific rules (what the JSON Schema can't express) ─────────────
+// ─── the rotini-specific rules (what the JSON Schema can't express) ─────────────.
 
 // confLints is the ordered set of conf rules run after the conf is schema-valid,
 // mirroring specLints. Like the spec rules, they reject configuration that would

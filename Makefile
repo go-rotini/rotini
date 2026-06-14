@@ -1,5 +1,6 @@
-# Fuzz targets discovered automatically — every FuzzXxx test under ./... runs
-# in test-fuzz when at least one matches.
+# Fuzz targets run one at a time (go test -fuzz takes a single package, so each
+# runs against the root package "." where the FuzzXxx tests live). List every
+# FuzzXxx here as it is added.
 FUZZ_TARGETS := FuzzParse
 
 .PHONY: all clean lint test test-acceptance test-bench \
@@ -37,7 +38,7 @@ test-conformance:
 test-fuzz:
 	@for target in $(FUZZ_TARGETS); do \
 		echo "→ $$target"; \
-		go test -fuzz="^$$target$$" -fuzztime=60s -run=^$$ ./... ; \
+		go test -fuzz="^$$target$$" -fuzztime=60s -run=^$$ . ; \
 	done
 
 test-mutation:

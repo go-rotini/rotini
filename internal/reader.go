@@ -147,7 +147,7 @@ func readConf(path string) (*Conf, error) {
 	return readFile[Conf](path)
 }
 
-// ─── discovery ───────────────────────────────────────────────────────────────
+// ─── discovery ───────────────────────────────────────────────────────────────.
 
 // errSpecPathRequired is reported when no spec-file path is supplied and none of the
 // fallback locations resolve to a spec.
@@ -232,7 +232,7 @@ func findModule() (root, name string, err error) {
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", "", fmt.Errorf("go.mod not found in any parent of working directory")
+			return "", "", errors.New("go.mod not found in any parent of working directory")
 		}
 		dir = parent
 	}

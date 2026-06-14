@@ -196,7 +196,9 @@ type Constraints struct {
 // Ptr returns a pointer to v — sugar for the presence-carrying [Constraints]
 // bounds in a hand-authored [Definition] (generated code uses it too):
 // Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0.
-func Ptr[T any](v T) *T { return &v }
+//
+//go:fix inline
+func Ptr[T any](v T) *T { return new(v) }
 
 // takesValue reports whether a flag consumes a value token: everything except
 // the presence flags — bool (value form is inline-only) and count (no value at

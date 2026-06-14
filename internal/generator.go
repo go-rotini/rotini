@@ -2,6 +2,7 @@ package internal
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The `rotini generate` workflow.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────.
 
 // GenerateFn is the signature of [Processor.Generate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
@@ -51,7 +52,7 @@ func (s *session) generateStyled(initStyle bool) error {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Code generation — the cli/cligen program (framework, rollup, stubs, literals).
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────.
 
 // Generated programs reference the rotini runtime package under this name in
 // rendered literals (the Definition, BindMeta, …); the templates hardcode the
@@ -1578,7 +1579,7 @@ func commandStubFilename(rootName, path, override string) string {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The resolved command tree — spec (+ $ref composition) → genProgram.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────.
 
 // genProgram is a parent spec resolved for code generation: its own command
 // tree (inline commands — emit types, stubs, and a rollup method that returns a
@@ -1665,7 +1666,7 @@ type composeCtx struct {
 func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgram, error) {
 	root := spec.Command
 	if root.Ref != "" || root.Name == "" {
-		return nil, fmt.Errorf("root command must have a name (the top-level \"command\" cannot use $ref)")
+		return nil, errors.New("root command must have a name (the top-level \"command\" cannot use $ref)")
 	}
 	gp := &genProgram{
 		rootName:        root.Name,
@@ -1733,7 +1734,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			continue
 		}
 		if c.Name == "" {
-			return nil, fmt.Errorf("command entry has neither a name nor a $ref")
+			return nil, errors.New("command entry has neither a name nor a $ref")
 		}
 
 		path := c.Name
@@ -1938,7 +1939,7 @@ func checkCollisions(nodes []rnode) error {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Doc features — help / man / completion page generation.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────.
 
 // helpTemplateName / manTemplateName are the editable, seed-once doc templates
 // living in the feature dir (the only user-owned files there). Pruning always
@@ -2102,29 +2103,6 @@ func completionNodes() []helpNode {
 		})
 	}
 	return out
-}
-
-// writeCompletionFiles writes one rotini-managed completion script per supported
-// shell under the completion dir, generated from the program name via
-// completionScript (the shared source of the bash/zsh/fish templates). Each
-// file is (re)written every pass, skipped when already identical.
-func writeCompletionFiles(cdir, prog string, nodes []helpNode) error {
-	if cdir == "" {
-		return fmt.Errorf("generate.features.completion.dir must not be empty")
-	}
-	if err := os.MkdirAll(cdir, 0o755); err != nil {
-		return fmt.Errorf("create completion dir %s: %w", cdir, err)
-	}
-	for _, n := range nodes {
-		script, err := completionScript(prog, n.name)
-		if err != nil {
-			return fmt.Errorf("generate %s completion: %w", n.name, err)
-		}
-		if err := writeIfChanged(filepath.Join(cdir, n.file), script); err != nil {
-			return fmt.Errorf("write completion %s: %w", n.file, err)
-		}
-	}
-	return nil
 }
 
 // resolveHeadings applies the section-heading defaults, overriding with any set
@@ -2625,7 +2603,7 @@ func loadFeatureTemplate(featDir string, feat docFeature) (*template.Template, e
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Output & stdin schema types.
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────.
 
 // outputRootSentinel is the throwaway root type GenerateGo always emits for the
 // assembled output-types document; it carries no data and is stripped, leaving
@@ -2880,7 +2858,7 @@ func stripGenerated(src, sentinel string) string {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shell completion scripts (bash / zsh / fish / powershell).
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────.
 
 // completionScript returns a shell completion script for prog (the installed
 // binary name) and shell. The script delegates to the binary's hidden completion
@@ -2902,7 +2880,7 @@ func completionScript(prog, shell string) (string, error) {
 	case "powershell":
 		tmpl = powershellCompletionTemplate
 	case "":
-		return "", fmt.Errorf("a shell is required (bash, zsh, fish, or powershell)")
+		return "", errors.New("a shell is required (bash, zsh, fish, or powershell)")
 	default:
 		return "", fmt.Errorf("unsupported shell %q (supported: bash, zsh, fish, powershell)", shell)
 	}

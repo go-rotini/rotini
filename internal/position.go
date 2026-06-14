@@ -54,7 +54,7 @@ func pointerSegments(pointer string) []string {
 	return segs
 }
 
-// ─── YAML ─────────────────────────────────────────────────────────────────────
+// ─── YAML ─────────────────────────────────────────────────────────────────────.
 
 // yamlLocator walks the yaml AST by pointer segments; the resolved node's own
 // position is returned (for a mapping value that is the value node, which for
@@ -98,7 +98,7 @@ func yamlLocator(data []byte) sourceLocator {
 	}
 }
 
-// ─── JSON / JSONC ─────────────────────────────────────────────────────────────
+// ─── JSON / JSONC ─────────────────────────────────────────────────────────────.
 
 // jsonLocator resolves a pointer to the byte offset where the target value
 // starts (a token walk over the raw bytes), then counts lines to it.
@@ -217,9 +217,10 @@ func blankJSONC(data []byte) []byte {
 	for i := 0; i < len(out); i++ {
 		c := out[i]
 		if inStr {
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == '"' {
+			case '"':
 				inStr = false
 			}
 			continue
@@ -254,9 +255,10 @@ func blankJSONC(data []byte) []byte {
 	for i := 0; i < len(out); i++ {
 		c := out[i]
 		if inStr {
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == '"' {
+			case '"':
 				inStr = false
 			}
 			continue

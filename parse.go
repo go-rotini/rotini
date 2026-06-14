@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -111,10 +112,8 @@ func findRemote(f ResolvedCommand, tok string) (RemoteDef, bool) {
 		if r.Name == tok {
 			return r, true
 		}
-		for _, a := range r.Aliases {
-			if a == tok {
-				return r, true
-			}
+		if slices.Contains(r.Aliases, tok) {
+			return r, true
 		}
 	}
 	return RemoteDef{}, false
@@ -136,8 +135,8 @@ func isFlag(tok string) bool {
 
 // splitFlag splits a flag token into its identifier and an inline "=value".
 func splitFlag(tok string) (name, value string, hasValue bool) {
-	if eq := strings.IndexByte(tok, '='); eq >= 0 {
-		return tok[:eq], tok[eq+1:], true
+	if before, after, ok := strings.Cut(tok, "="); ok {
+		return before, after, true
 	}
 	return tok, "", false
 }
@@ -145,12 +144,10 @@ func splitFlag(tok string) (name, value string, hasValue bool) {
 // findFlag searches the resolved chain leaf→root for a flag whose identifiers
 // include name, returning its definition and the owning command-name scope.
 func findFlag(chain []ResolvedCommand, name string) (FlagDef, string, bool) {
-	for i := len(chain) - 1; i >= 0; i-- {
-		for _, f := range chain[i].Flags {
-			for _, id := range f.Identifiers {
-				if id == name {
-					return f, chain[i].Name, true
-				}
+	for _, v := range slices.Backward(chain) {
+		for _, f := range v.Flags {
+			if slices.Contains(f.Identifiers, name) {
+				return f, v.Name, true
 			}
 		}
 	}
@@ -163,10 +160,8 @@ func findChild(f ResolvedCommand, tok string) (CommandDef, bool) {
 		if c.Name == tok {
 			return c, true
 		}
-		for _, a := range c.Aliases {
-			if a == tok {
-				return c, true
-			}
+		if slices.Contains(c.Aliases, tok) {
+			return c, true
 		}
 	}
 	return CommandDef{}, false

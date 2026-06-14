@@ -1057,13 +1057,13 @@ func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 		}
 	}
 
-	// app cmd1 cmd1 — descends the cmd1 branch; binds --m1 and --leaf1.
+	// app cmd1 — descends the cmd1 branch; binds --m1 and --leaf1.
 	var in1 cmd1Inputs
 	if err := NewParser().Parse(NewContextFor(def, []string{"cmd1", "cmd1", "--m1", "M1", "--leaf1", "L1"}), &in1); err != nil {
 		t.Fatalf("cmd1 cmd1: Parse: %v", err)
 	}
 	if in1.AppCmd1.Flags.M1 != "M1" || in1.AppCmd1Cmd1.Flags.Leaf1 != "L1" {
-		t.Errorf("cmd1 cmd1 bound wrong: %+v", in1)
+		t.Errorf("cmd1 bound wrong: %+v", in1)
 	}
 
 	// app cmd2 cmd1 — descends the cmd2 branch; binds --m2 and --leaf2, with no

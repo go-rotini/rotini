@@ -161,7 +161,7 @@ func (st Style) Sprintf(format string, a ...any) string {
 // sequences (ESC [ … final byte — SGR bold/italic/color among them) and OSC
 // sequences (ESC ] … terminated by BEL or ST — OSC-8 hyperlinks among them).
 // Stripping an OSC-8 hyperlink keeps its visible text and drops the link.
-var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
 // StripStyles removes all terminal styling — CSI and OSC escape sequences — from
 // text. It is the counterpart to [Styles] for text that arrives ALREADY styled:
