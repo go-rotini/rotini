@@ -1341,18 +1341,18 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 	frameworkQual := ""
 	if !samePackage {
 		frameworkImport = moduleName + "/" + cmdgenPkgDir
-		frameworkQual = filepath.Base(cmdgenPkgDir) + "."
+		frameworkQual = goPkgName(cmdgenPkgDir) + "."
 	}
 
 	lay := layout{
 		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdgenPkgDir)),
-		frameworkPkgName: filepath.Base(cmdgenPkgDir),
+		frameworkPkgName: goPkgName(cmdgenPkgDir),
 		frameworkFile:    cmdgen.File,
 		frameworkImport:  frameworkImport,
 		frameworkQual:    frameworkQual,
 
 		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
-		handlerPkgName: filepath.Base(cmdPkgDir),
+		handlerPkgName: goPkgName(cmdPkgDir),
 		handlerImport:  moduleName + "/" + cmdPkgDir,
 		rollupFile:     cmd.File,
 
@@ -1369,6 +1369,22 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 	}
 
 	return lay
+}
+
+// goPkgName derives the Go package NAME from a package directory path: its last
+// segment with every character that is not a valid Go identifier rune dropped.
+// A CLI name (and so its scaffold directory) may legitimately contain hyphens —
+// "agentic-cooking" — but a Go package name cannot, so the package is named
+// "agenticcooking". The import PATH keeps the original segment (import paths may
+// contain hyphens); only the package name (and its qualifier) is sanitized.
+func goPkgName(dir string) string {
+	var b strings.Builder
+	for _, r := range filepath.Base(dir) {
+		if r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // applyConfDefaults fills in the sane rotini conf defaults for any unset

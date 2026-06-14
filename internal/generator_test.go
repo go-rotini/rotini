@@ -2843,6 +2843,24 @@ func TestChildCliImport(t *testing.T) {
 	}
 }
 
+// TestGoPkgName: a hyphenated CLI name yields a valid (hyphen-free) Go package
+// name while the import PATH keeps the original segment. Regression for
+// `rotini init agentic-cooking` producing `package agentic-cooking` (invalid Go).
+func TestGoPkgName(t *testing.T) {
+	cases := map[string]string{
+		"cmd/agentic-cooking": "agenticcooking",
+		"internal/cmd/my-cli": "mycli",
+		"internal/cmd/mycli":  "mycli",
+		"a/b/foo_bar":         "foo_bar", // underscores are valid identifier runes — kept
+		"x/a-b-c":             "abc",
+	}
+	for in, want := range cases {
+		if got := goPkgName(in); got != want {
+			t.Errorf("goPkgName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // TestGenerateFeatureDirEqualsCmdgen covers the feature dir resolving to the
 // cmdgen package dir itself: the embed path must be the bare file name — a
 // "./file" pattern is invalid //go:embed syntax.
