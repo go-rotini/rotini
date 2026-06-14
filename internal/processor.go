@@ -47,8 +47,8 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode str
 	return p.run(specPath, confPath, failMode, watch, (*session).validatePass, onValidate)
 }
 
-// Initialize scaffolds a new rotini CLI named name: it writes and validates the
-// seed spec + conf only (no code generation — that is Generate's job).
+// Initialize scaffolds a new rotini CLI named name: it writes + validates the seed
+// spec + conf, then runs the standard generate to produce a ready-to-build CLI.
 // format selects the spec/conf serialization; force overwrites the create-once files.
 func (p *Processor) Initialize(name, format string, force bool) error {
 	return p.initialize(name, format, force)

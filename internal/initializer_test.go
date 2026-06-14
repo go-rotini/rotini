@@ -40,13 +40,13 @@ func initTestModule(t *testing.T) string {
 	return tmp
 }
 
-// TestInitialize_seedsOnly verifies the whole `rotini init` job: it writes ONLY
-// the seed spec and conf — no code generation. The seed is "batteries-declared":
-// the spec declares the help/version/completion commands + root -h/-v flags, and
-// the conf declares an entrypoint with the help/completion features enabled (man/
-// markdown off). NO generated files (entrypoint, handlers, codegen) are written —
-// that is `rotini generate`'s job.
-func TestInitialize_seedsOnly(t *testing.T) {
+// TestInitialize_scaffolds verifies the whole `rotini init` job: it writes the
+// batteries-declared seed spec + conf AND runs the standard generate, producing a
+// ready-to-build CLI. The spec declares the help/version/completion commands + root
+// -h/-v flags; the conf declares an entrypoint with help/completion enabled (man/
+// markdown off); and generate writes the entrypoint main.go (with its //go:generate
+// directive), the codegen file, and one EMPTY handler stub per command.
+func TestInitialize_scaffolds(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
@@ -68,36 +68,10 @@ func TestInitialize_seedsOnly(t *testing.T) {
 		"man:\n      enabled: false",
 		"embed_dir: internal/cmd/mycli/renders")
 
-	// Init does NOT generate: no entrypoint, no handlers, no codegen file.
-	for _, p := range []string{
-		filepath.Join(dir, "main.go"),
-		filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
-		filepath.Join(tmp, "internal", "cmd", "mycli", "mycli.go"),
-	} {
-		if _, err := os.Stat(p); !os.IsNotExist(err) {
-			t.Errorf("%s should NOT exist after init (init seeds only; stat err = %v)", p, err)
-		}
-	}
-}
-
-// TestInitialize_thenGenerate is the W5 acceptance: `rotini generate` run over
-// nothing but the two seed files produces a complete CLI — the entrypoint main.go,
-// the codegen file, and one EMPTY handler stub per command (root + help/version/
-// completion). The stubs carry no wiring; the author fills them.
-func TestInitialize_thenGenerate(t *testing.T) {
-	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false, ""); err != nil {
-		t.Fatalf("Initialize: %v", err)
-	}
-
-	specPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.spec.yaml")
-	confPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.conf.yaml")
-	if err := Generate(specPath, confPath, false, "", nil); err != nil {
-		t.Fatalf("Generate after init: %v", err)
-	}
-
-	// Entrypoint + codegen exist.
-	mustContain(t, filepath.Join(tmp, "cmd", "mycli", "main.go"), "Execute()")
+	// The first generate ran: entrypoint main.go (with its //go:generate directive,
+	// so future regens are `go generate ./...`) and the codegen file.
+	mustContain(t, filepath.Join(dir, "main.go"),
+		"//go:generate go tool rotini generate", "Execute()")
 	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
 	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
 		"package mycli", "var Program = NewProgram(&handlers{})")
@@ -110,22 +84,21 @@ func TestInitialize_thenGenerate(t *testing.T) {
 	}
 }
 
-// TestGenerate_preservesEditedHandlers confirms a re-run of `rotini generate`
-// never overwrites an existing handler file (create-once, like main.go) — only
-// the codegen file is rewritten.
-func TestGenerate_preservesEditedHandlers(t *testing.T) {
+// TestInitialize_preservesEditedHandlers confirms a re-run never overwrites an
+// existing handler file (create-once, like main.go) — only the codegen file is
+// rewritten. Init already generated the stubs, so a re-generate (or force re-init)
+// must leave hand edits intact.
+func TestInitialize_preservesEditedHandlers(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	specPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.spec.yaml")
-	confPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.conf.yaml")
-	if err := Generate(specPath, confPath, false, "", nil); err != nil {
-		t.Fatalf("Generate: %v", err)
-	}
 
 	stub := filepath.Join(tmp, "internal", "cmd", "mycli", "mycli.go")
 	writeTestFile(t, stub, "package mycli\n\n// EDITED BY USER\n")
+
+	specPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.spec.yaml")
+	confPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.conf.yaml")
 	if err := Generate(specPath, confPath, false, "", nil); err != nil {
 		t.Fatalf("re-generate: %v", err)
 	}

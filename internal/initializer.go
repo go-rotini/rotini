@@ -1,14 +1,16 @@
 package internal
 
 // This file owns the `rotini initialize` operation: scaffolding a new CLI's
-// seed spec and conf under <package>/<name>/ of the current module and
-// validating them. Init does NOT generate code — it only writes the two seed
-// files. The seed is "batteries-declared": the spec declares the
-// help/version/completion commands + root flags, and the conf declares an
-// entrypoint and enables the help/completion features. Running `rotini generate`
-// over the seed then creates the entrypoint, the empty handler stubs, and the
-// codegen files. rotini surfaces help/version/completion functionality, but the
-// author wires the stubs as they see fit.
+// seed spec and conf under <package>/<name>/ of the current module, validating
+// them, and running the standard generate over them. The seed is
+// "batteries-declared": the spec declares the help/version/completion commands +
+// root flags, and the conf declares an entrypoint and enables the help/completion
+// features. Init then runs the SAME generate as `rotini generate` (no special
+// init-style path): it writes the entrypoint main.go — which carries the
+// //go:generate directive, so every later regen is just `go generate ./...` — an
+// EMPTY handler stub per command, and the codegen files. rotini surfaces the
+// help/version/completion functionality, but the author wires the stubs as they
+// see fit.
 
 import (
 	"errors"
@@ -48,17 +50,17 @@ type InitializeFn = func(name, format string, force bool) error
 // Initialize scaffolds a new standalone rotini CLI named name: it writes the seed
 // .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the current
 // module (the package dir defaults to "cmd"; a module-root conf's `initialize`
-// block overrides it) and validates them. It does NOT generate code — run
-// `rotini generate` over the seed for that. format selects the serialization
-// (yaml, jsonc, json, or toml). The seeds are create-once: they are left untouched
-// unless force is set.
+// block overrides it), validates them, and runs the standard generate to produce
+// the entrypoint, empty handler stubs, and codegen files — a ready-to-build CLI.
+// format selects the serialization (yaml, jsonc, json, or toml). The seeds (and
+// the create-once main.go/stubs) are left untouched unless force is set.
 func Initialize(name, format string, force bool, version string) error {
 	return NewProcessor(version).Initialize(name, format, force)
 }
 
 // initialize renders and writes the default seed spec and conf for a new CLI
-// named name under <package>/<name>/ and validates them. It does not generate
-// code — that is `rotini generate`'s job.
+// named name under <package>/<name>/, validates them, and runs the standard
+// generate over them.
 func (p *Processor) initialize(name, format string, force bool) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
@@ -116,13 +118,19 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		return err
 	}
 
-	// Validate the seeds exactly as `rotini validate` would. Init stops here —
-	// `rotini generate` is what turns the seed into code.
+	// Validate the seeds, then run the standard generate over them — the exact
+	// same path `rotini generate` runs (no init-special-casing). This kickstarts
+	// the new CLI: it writes the entrypoint main.go (which carries the
+	// //go:generate directive, so every later regen is just `go generate ./...`),
+	// an empty handler stub per command, and the cmd/cmdgen codegen files.
 	s := newSession(specPath, confPath, p.version)
 	if err := s.load(); err != nil {
 		return err
 	}
-	return s.validate()
+	if err := s.validate(); err != nil {
+		return err
+	}
+	return s.generate()
 }
 
 // initDefaults holds the resolved `rotini init` defaults.

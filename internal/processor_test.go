@@ -282,8 +282,8 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 }
 
 // TestProcessorInitialize confirms the Processor's initialize scaffolds and
-// validates the seed spec + conf under cmd/<name>/ — and generates NOTHING
-// (code generation is Generate's job).
+// validates the seed spec + conf under cmd/<name>/ and runs the first generate
+// (entrypoint + codegen).
 func TestProcessorInitialize(t *testing.T) {
 	tmp := initTestModule(t)
 	p := NewProcessor("")
@@ -294,13 +294,9 @@ func TestProcessorInitialize(t *testing.T) {
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: internal/cmd/mycli")
-	// Init seeds only — no entrypoint, no codegen.
-	if _, err := os.Stat(filepath.Join(dir, "main.go")); !os.IsNotExist(err) {
-		t.Errorf("main.go should not exist after init (stat err = %v)", err)
-	}
-	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go")); !os.IsNotExist(err) {
-		t.Errorf("zz_rotini.gen.go should not exist after init (stat err = %v)", err)
-	}
+	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate go tool rotini generate")
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
+		"package mycli", "var Program = NewProgram(&handlers{})")
 }
 
 // TestProcessorValidatePass confirms the validate workflow composes load + validate,
