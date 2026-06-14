@@ -2,15 +2,13 @@ package internal
 
 // This file owns the `rotini initialize` operation: scaffolding a new CLI's
 // seed spec and conf under <package>/<name>/ of the current module, validating
-// them, and running the standard generate over them. The seed is
-// "batteries-declared": the spec declares the help/version/completion commands +
-// root flags, and the conf declares an entrypoint and enables the help/completion
-// features. Init then runs the SAME generate as `rotini generate` (no special
-// init-style path): it writes the entrypoint main.go — which carries the
-// //go:generate directive, so every later regen is just `go generate ./...` — an
-// EMPTY handler stub per command, and the codegen files. rotini surfaces the
-// help/version/completion functionality, but the author wires the stubs as they
-// see fit.
+// them, and running the standard generate over them. The seed is MINIMAL: a
+// root-only spec (no sub-commands or flags) and a conf declaring the entrypoint
+// + packages with every feature off. Init then runs the SAME generate as
+// `rotini generate` (no special init-style path): it writes the entrypoint
+// main.go — which carries the //go:generate directive, so every later regen is
+// just `go generate ./...` — the empty root handler stub, and the codegen files.
+// The author grows the spec/conf from there.
 
 import (
 	"errors"

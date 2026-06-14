@@ -41,11 +41,11 @@ func initTestModule(t *testing.T) string {
 }
 
 // TestInitialize_scaffolds verifies the whole `rotini init` job: it writes the
-// batteries-declared seed spec + conf AND runs the standard generate, producing a
-// ready-to-build CLI. The spec declares the help/version/completion commands + root
-// -h/-v flags; the conf declares an entrypoint with help/completion enabled (man/
-// markdown off); and generate writes the entrypoint main.go (with its //go:generate
-// directive), the codegen file, and one EMPTY handler stub per command.
+// MINIMAL seed spec + conf AND runs the standard generate, producing a ready-to-build
+// root-only CLI. The seed spec is just the root command (no sub-commands/flags); the
+// conf declares the entrypoint + packages with every feature off. Generate writes the
+// entrypoint main.go (with its //go:generate directive), the codegen file, and the
+// single EMPTY root handler stub — the author grows the spec from there.
 func TestInitialize_scaffolds(t *testing.T) {
 	tmp := initTestModule(t)
 	if err := Initialize("mycli", "yaml", false, ""); err != nil {
@@ -53,20 +53,16 @@ func TestInitialize_scaffolds(t *testing.T) {
 	}
 
 	dir := filepath.Join(tmp, "cmd", "mycli")
-	// Batteries-declared spec: root + help/version/completion commands and flags.
-	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"),
-		"name: mycli", "schema-spec.json", "commands:",
-		"name: help", "name: version", "name: completion", "name: shell",
-		"--help", "--version", "- bash", "- zsh", "- fish", "- powershell")
-	// Conf declares the entrypoint and enables help+completion (man/markdown off).
+	// Minimal spec: just the root command.
+	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli", "schema-spec.json")
+	mustNotContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "commands:", "name: help", "name: version")
+	// Conf declares the entrypoint + packages, every feature off.
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"),
 		"schema-conf.json",
 		"package: cmd/mycli", "package: internal/cmd/mycli",
 		"file: main.go", "file: zz_rotini.gen.go",
-		"help:\n      enabled: true",
-		"completion:\n      enabled: true",
-		"man:\n      enabled: false",
-		"embed_dir: internal/cmd/mycli/renders")
+		"help:\n      enabled: false",
+		"completion:\n      enabled: false")
 
 	// The first generate ran: entrypoint main.go (with its //go:generate directive,
 	// so future regens are `go generate ./...`) and the codegen file.
@@ -76,11 +72,15 @@ func TestInitialize_scaffolds(t *testing.T) {
 	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
 		"package mycli", "var Program = NewProgram(&handlers{})")
 
-	// Every command gets an EMPTY stub — no MustGet/parse/help wiring.
-	for _, f := range []string{"mycli.go", "mycli_help.go", "mycli_version.go", "mycli_completion.go"} {
-		path := filepath.Join(genDir, f)
-		mustContain(t, path, "rotini.CommandHandlers", "func (*", "Run(ctx context.Context")
-		mustNotContain(t, path, "MustGet", "Parse", "HelpMycli")
+	// The root command gets an EMPTY stub — no MustGet/parse wiring.
+	root := filepath.Join(genDir, "mycli.go")
+	mustContain(t, root, "rotini.CommandHandlers", "func (*", "Run(ctx context.Context")
+	mustNotContain(t, root, "MustGet", "Parse")
+	// No sub-command stubs (the minimal seed declares none).
+	for _, f := range []string{"mycli_help.go", "mycli_version.go", "mycli_completion.go"} {
+		if _, err := os.Stat(filepath.Join(genDir, f)); !os.IsNotExist(err) {
+			t.Errorf("%s should not exist for a minimal seed (stat err = %v)", f, err)
+		}
 	}
 }
 

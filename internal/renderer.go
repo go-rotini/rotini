@@ -126,10 +126,9 @@ func renderGoFile(name, text string, data any) ([]byte, error) {
 }
 
 // templateSeedData is the context for the spec and conf seed templates. The seed
-// is "batteries-declared": the spec always declares the help/version/completion
-// commands + root flags, and the conf always declares an entrypoint and enables
-// the help/completion features — `rotini generate` then emits empty stubs the
-// end-user wires (rotini surfaces the functionality; the wiring is the author's).
+// is MINIMAL: a root-only spec and a conf declaring the entrypoint + packages with
+// every feature off. `rotini init` runs the standard generate over it, producing a
+// ready-to-build root-only CLI the author grows from there.
 type templateSeedData struct {
 	Version string
 	Package string
