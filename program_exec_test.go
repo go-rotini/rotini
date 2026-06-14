@@ -8,24 +8,24 @@ import (
 
 // TestProgram_WithExit_capturesCode proves WithExit makes Execute hand the resolved code
 // to a callback instead of calling os.Exit, so Execute returns and a test can assert on
-// the code — here a handler's rtx.SignalExit(2).
+// the code — here a handler's rtx.SignalExit(1).
 func TestProgram_WithExit_capturesCode(t *testing.T) {
 	var code int
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.SignalExit(2) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.SignalExit(1) }}
 
 	NewProgram(testDef(), h).
 		WithArgs([]string{"run", "x"}).
 		WithExit(func(c int) { code = c }).
 		Execute()
 
-	if code != 2 {
-		t.Errorf("WithExit captured code = %d, want 2", code)
+	if code != 1 {
+		t.Errorf("WithExit captured code = %d, want 1", code)
 	}
 }
 
 // TestProgram_WithStderr_capturesDiagnostics proves WithStderr redirects the runtime's
 // own diagnostics: a panicking hook is funneled to the default OnPanic, which writes to
-// the program's stderr and exits ExitInternal.
+// the program's stderr and exits 70.
 func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	var code int
 	errb := &bytes.Buffer{}
@@ -37,8 +37,8 @@ func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 		WithExit(func(c int) { code = c }).
 		Execute()
 
-	if code != ExitInternal {
-		t.Errorf("panic exit code = %d, want %d", code, ExitInternal)
+	if code != 70 {
+		t.Errorf("panic exit code = %d, want %d", code, 70)
 	}
 	if !strings.Contains(errb.String(), "boom") {
 		t.Errorf("stderr = %q, want it to contain the panic message", errb.String())

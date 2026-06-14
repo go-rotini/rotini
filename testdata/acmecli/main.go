@@ -3,7 +3,7 @@
 // the only honest way to witness real exit codes, auto-detected pipes, the
 // no-pipe stdin sentinel, the __complete protocol, and signals). Its handlers
 // apply the recommended exit-code convention: usage errors map to
-// rotini.ExitUsage, everything else to 1.
+// 1, everything else to 1.
 package main
 
 import (
@@ -80,13 +80,10 @@ type noop struct{ base }
 
 func (noop) Run(context.Context, *rotini.Context) {}
 
-// fail reports err and exits by the recommended convention: usage → ExitUsage.
+// fail reports err to stderr and exits 1. rotini holds no exit-code constants; a
+// CLI picks whatever ints it wants.
 func fail(rtx *rotini.Context, err error) {
 	fmt.Fprintf(rtx.Stderr, "acme: %v\n", err)
-	if rotini.CategoryOf(err) == rotini.CategoryUsage {
-		rtx.SignalExit(rotini.ExitUsage)
-		return
-	}
 	rtx.SignalExit(1)
 }
 

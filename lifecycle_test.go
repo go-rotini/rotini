@@ -85,9 +85,9 @@ func TestWithResolver_error(t *testing.T) {
 	})
 	code, err := p.run(p.args)
 	// An untagged resolver error is wiring-class (internal), so the default
-	// OnError exits ExitInternal (EH3 maps category → code).
-	if code != ExitInternal || err == nil {
-		t.Errorf("run() = (%d, %v), want (%d, the resolver error)", code, err, ExitInternal)
+	// OnError exits 70 (EH3 maps category → code).
+	if code != 70 || err == nil {
+		t.Errorf("run() = (%d, %v), want (%d, the resolver error)", code, err, 70)
 	}
 	if !strings.Contains(errb.String(), "routing table on fire") {
 		t.Errorf("stderr = %q, want the resolver error via the funnel", errb)
@@ -111,10 +111,10 @@ func TestWithResolver_error(t *testing.T) {
 }
 
 // The pre-classified diagnostics make the documented one-switch funnel work:
-// a custom funnel maps CategoryInternal to ExitInternal with no taxonomy
+// a custom funnel maps CategoryInternal to 70 with no taxonomy
 // re-derivation of its own.
 func TestWithOnErrorFn_categorySwitch(t *testing.T) {
-	// A custom OnError maps CategoryInternal → ExitInternal in one switch over the
+	// A custom OnError maps CategoryInternal → 70 in one switch over the
 	// recorded errors, with no taxonomy re-derivation of its own.
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(InternalError(errors.New("boom")))
@@ -123,15 +123,15 @@ func TestWithOnErrorFn_categorySwitch(t *testing.T) {
 	p.WithOnErrorFn(func(_ context.Context, rtx *Context, errs []error) {
 		switch CategoryOf(errors.Join(errs...)) {
 		case CategoryUsage:
-			rtx.SignalExit(ExitUsage)
+			rtx.SignalExit(1)
 		case CategoryInternal:
-			rtx.SignalExit(ExitInternal)
+			rtx.SignalExit(70)
 		default:
 			rtx.SignalExit(1)
 		}
 	})
-	if code, _ := p.run(p.args); code != ExitInternal {
-		t.Errorf("run() = %d, want %d via the category switch", code, ExitInternal)
+	if code, _ := p.run(p.args); code != 70 {
+		t.Errorf("run() = %d, want %d via the category switch", code, 70)
 	}
 }
 
@@ -157,9 +157,9 @@ func TestRun_wiringError(t *testing.T) {
 func TestWithResolver_emptyChain(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.WithResolver(func(Definition, []string) (Resolution, error) { return Resolution{}, nil })
-	// An empty chain is a resolver bug (internal) → default exits ExitInternal.
-	if code, err := p.run(p.args); code != ExitInternal || err == nil {
-		t.Errorf("run() = (%d, %v), want (%d, an empty-chain error)", code, err, ExitInternal)
+	// An empty chain is a resolver bug (internal) → default exits 70.
+	if code, err := p.run(p.args); code != 70 || err == nil {
+		t.Errorf("run() = (%d, %v), want (%d, an empty-chain error)", code, err, 70)
 	}
 	if !strings.Contains(errb.String(), "empty chain") {
 		t.Errorf("stderr = %q, want the empty-chain diagnostic", errb)
@@ -174,9 +174,9 @@ func TestWithResolver_customRemote(t *testing.T) {
 		return Resolution{Remote: &RemoteDispatch{Def: RemoteDef{Name: "ghost", Binary: "rotini-test-no-such-binary"}}}, nil
 	})
 	// Not flagged Discovered → a declared remote → missing binary is internal,
-	// so the default OnError exits ExitInternal (EH3 maps category → code).
-	if code, _ := p.run(p.args); code != ExitInternal {
-		t.Errorf("run() = %d, want %d for an unresolvable remote binary", code, ExitInternal)
+	// so the default OnError exits 70 (EH3 maps category → code).
+	if code, _ := p.run(p.args); code != 70 {
+		t.Errorf("run() = %d, want %d for an unresolvable remote binary", code, 70)
 	}
 	if errb.Len() == 0 {
 		t.Error("stderr empty, want the remote resolution error")
@@ -231,8 +231,8 @@ func TestWithLifecycle_customPlanKeepsUnwindContract(t *testing.T) {
 	p, _, errb := newTestProgram(&haltHandlers{log: &log}, []string{"run"})
 	p.WithLifecycle(DefaultLifecycle) // explicitly seamed; the engine owns halting/unwind
 	code, err := p.run(p.args)
-	if code != ExitInternal || err == nil {
-		t.Fatalf("run() = (%d, %v), want (%d, the panic via OnPanic)", code, err, ExitInternal)
+	if code != 70 || err == nil {
+		t.Fatalf("run() = (%d, %v), want (%d, the panic via OnPanic)", code, err, 70)
 	}
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
@@ -278,8 +278,8 @@ func TestPanicError(t *testing.T) {
 		var got error
 		p, _, _ := newTestProgram(h, []string{"run"})
 		p.WithOnPanicFn(func(_ context.Context, _ *Context, panics []*PanicError) { got = panics[0] })
-		if code, _ := p.run(p.args); code != ExitInternal {
-			t.Fatalf("run() = %d, want the fault path's ExitInternal", code)
+		if code, _ := p.run(p.args); code != 70 {
+			t.Fatalf("run() = %d, want the fault path's 70", code)
 		}
 		return got
 	}

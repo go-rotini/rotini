@@ -144,7 +144,7 @@ func TestRun_recordedErrorsFireOnError(t *testing.T) {
 		log, code, funneled, drained, fired := exec(func(rtx *Context) {
 			rtx.RecordError(errA)
 			rtx.RecordError(errB)
-			rtx.SignalExit(ExitUsage)
+			rtx.SignalExit(1)
 		})
 		if !fired {
 			t.Fatal("OnError did not fire on recorded errors")
@@ -155,8 +155,8 @@ func TestRun_recordedErrorsFireOnError(t *testing.T) {
 		if !errors.Is(funneled, ErrUsage) {
 			t.Error("joined err lost errA's ErrUsage tag")
 		}
-		if code != ExitUsage {
-			t.Errorf("code = %d, want %d", code, ExitUsage)
+		if code != 1 {
+			t.Errorf("code = %d, want %d", code, 1)
 		}
 		if !contains(log, "run.PostRun") || !contains(log, "app.CascadingPostRun") {
 			t.Errorf("teardown did not run on graceful SignalExit: %v", log)
@@ -220,12 +220,12 @@ func TestDefaultExitCode(t *testing.T) {
 		want int
 	}{
 		{"unclassified only", []error{none}, 1},
-		{"usage only", []error{usage}, ExitUsage},
-		{"internal only", []error{internal}, ExitInternal},
-		{"usage then internal", []error{usage, internal}, ExitInternal},
-		{"internal then usage", []error{internal, usage}, ExitInternal},
-		{"none alongside usage", []error{none, usage}, ExitUsage},
-		{"none alongside internal", []error{none, internal}, ExitInternal},
+		{"usage only", []error{usage}, 1},
+		{"internal only", []error{internal}, 70},
+		{"usage then internal", []error{usage, internal}, 70},
+		{"internal then usage", []error{internal, usage}, 70},
+		{"none alongside usage", []error{none, usage}, 1},
+		{"none alongside internal", []error{none, internal}, 70},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -246,10 +246,10 @@ func TestRun_defaultOnError_classifiesAndPrints(t *testing.T) {
 		want   int
 		stderr string // exact stderr (the format golden); program name is "app"
 	}{
-		{"usage", []error{UsageError(errors.New("bad flag"))}, ExitUsage, "app: bad flag\n"},
-		{"internal", []error{InternalError(errors.New("broken wiring"))}, ExitInternal, "app: broken wiring\n"},
+		{"usage", []error{UsageError(errors.New("bad flag"))}, 1, "app: bad flag\n"},
+		{"internal", []error{InternalError(errors.New("broken wiring"))}, 70, "app: broken wiring\n"},
 		{"unclassified", []error{errors.New("mystery")}, 1, "app: mystery\n"},
-		{"mixed: internal outranks usage", []error{UsageError(errors.New("bad flag")), InternalError(errors.New("bug"))}, ExitInternal, "app: bad flag\napp: bug\n"},
+		{"mixed: internal outranks usage", []error{UsageError(errors.New("bad flag")), InternalError(errors.New("bug"))}, 70, "app: bad flag\napp: bug\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

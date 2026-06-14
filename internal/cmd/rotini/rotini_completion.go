@@ -20,7 +20,7 @@ func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniCompletionInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(2)
+		rtx.SignalExit(1)
 		return
 	}
 

@@ -26,7 +26,7 @@ func TestRotiniValidate(t *testing.T) {
 		},
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"validate", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: 2,
+			argv: []string{"validate", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: 1,
 		},
 		{
 			name: "success: header and the pass summary print",
@@ -47,11 +47,11 @@ func TestRotiniValidate(t *testing.T) {
 			})}},
 			// The per-pass callback error still prints inline; the final error is
 			// recorded and reported by the default OnError, exit code stands.
-			wantOut: "[12:00:00] 1ms", wantErr: "schema violation", wantCode: 2,
+			wantOut: "[12:00:00] 1ms", wantErr: "schema violation", wantCode: 1,
 		},
 		{
 			name: "real validate on a missing spec errors (integration)",
-			argv: []string{"validate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "rotini:", wantCode: 2,
+			argv: []string{"validate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "rotini:", wantCode: 1,
 		},
 	}
 	for _, tc := range cases {

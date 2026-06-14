@@ -20,7 +20,7 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[{{.RootCommandName}}VersionInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(rotini.ExitUsage)
+		rtx.SignalExit(1)
 		return
 	}
 {{- if .HasHelp}}

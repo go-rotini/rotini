@@ -158,10 +158,8 @@ func (p *Program) Bind(key string, value any) *Program {
 // accessor on rtx). fn decides the exit code (rtx.SignalExit), classifies each
 // (errors.Is/errors.As, [CategoryOf]), logs, and prints in the CLI's own style.
 // With no funnel set, the default prints one clean line per error to stderr
-// (program-name prefixed) and exits by the most severe category present —
-// [ExitInternal] (70) if any is [CategoryInternal], else [ExitUsage] (2) if any
-// is [CategoryUsage], else 1. It returns the receiver so it chains with
-// [Program.Bind].
+// (program-name prefixed) and exits 70 if any error is [CategoryInternal], else
+// 1. It returns the receiver so it chains with [Program.Bind].
 //
 // OnError is ONE of four outcome funnels. It is for the end-user's own errors
 // only — rotini's "this should never have happened" faults (a wiring mismatch,
@@ -207,9 +205,9 @@ func (p *Program) WithOnWarningFn(fn func(ctx context.Context, rtx *Context, war
 // is no public record call — the lifecycle captures the fault, and panics is the
 // captured set, in order (the only way fn sees them). With no funnel set, the
 // default prints one clean line per fault to stderr (the stack rides each
-// [*PanicError] for errors.As, never printed) and exits [ExitInternal] — a fault
-// is never masked to 0. A run with no fault never invokes fn. It returns the
-// receiver to chain.
+// [*PanicError] for errors.As, never printed) and exits 70 — a fault is never
+// masked to 0. A run with no fault never invokes fn. It returns the receiver to
+// chain.
 func (p *Program) WithOnPanicFn(fn func(ctx context.Context, rtx *Context, panics []*PanicError)) *Program {
 	p.onPanicFn = fn
 	return p
@@ -413,9 +411,9 @@ func asFault(err error) *PanicError { return &PanicError{Value: err} }
 //
 // Exit code: a handler's (or a custom funnel's) explicit rtx.SignalExit/rtx.Exit
 // wins (first non-zero, already in rtx.exitCode). Otherwise the default is the
-// most severe outcome — a recovered panic / detected fault is [ExitInternal],
-// a recorded error is its category ([ExitInternal]/[ExitUsage]/1); a fault is
-// never masked to 0. Success and warning never raise or lower the code.
+// most severe outcome — a recovered panic / detected fault is 70, a recorded
+// error is 70 (internal) or 1 (else); a fault is never masked to 0. Success and
+// warning never raise or lower the code.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	// Snapshot the private channels once; the records surface only here, as the
 	// slice each funnel receives — there is no public drainable accessor.
@@ -458,8 +456,8 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 		if len(errs) > 0 {
 			code = defaultExitCode(errs)
 		}
-		if len(faults) > 0 && ExitInternal > code {
-			code = ExitInternal
+		if len(faults) > 0 && 70 > code {
+			code = 70
 		}
 		rtx.exitCode = code
 	}
@@ -510,30 +508,26 @@ func (p *Program) defaultOnWarning(_ context.Context, _ *Context, warnings []err
 
 // defaultOnPanic prints one clean line per captured fault to stderr (the
 // [*PanicError]'s Value, never its Stack — that stays for an errors.As). The
-// exit is [settle]'s to set ([ExitInternal]); a fault is never masked to 0.
+// exit is [settle]'s to set (70); a fault is never masked to 0.
 func (p *Program) defaultOnPanic(_ context.Context, _ *Context, panics []*PanicError) {
 	for _, pe := range panics {
 		fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, pe)
 	}
 }
 
-// defaultExitCode maps a recorded error set onto the conventional exit code the
-// default OnError uses: the most severe category present wins. Any
-// [CategoryInternal] error yields [ExitInternal] (a program bug outranks bad
-// input), else any [CategoryUsage] yields [ExitUsage], else 1 — an
-// unclassified failure is still a failure (edge 3: a recorded run never exits
-// 0). It is only ever called with a non-empty set.
+// defaultExitCode maps a recorded error set onto the exit code the default
+// OnError uses: an internal error (a program bug) yields 70, anything else
+// yields 1 — an unclassified or usage failure is still a failure (a recorded
+// run never exits 0). It is only ever called with a non-empty set. rotini holds
+// no named exit-code constants; a program that wants other codes passes its own
+// ints via its funnel's rtx.SignalExit.
 func defaultExitCode(errs []error) int {
-	code := 1
 	for _, e := range errs {
-		switch CategoryOf(e) {
-		case CategoryInternal:
-			return ExitInternal
-		case CategoryUsage:
-			code = ExitUsage
+		if CategoryOf(e) == CategoryInternal {
+			return 70
 		}
 	}
-	return code
+	return 1
 }
 
 // dispatch resolves each command in the chain to its [CommandHandlers] (by the

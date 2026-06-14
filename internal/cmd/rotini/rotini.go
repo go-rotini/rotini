@@ -22,13 +22,13 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// generated BindMeta the program bound at NewProgram time.
 	inputs, err := rotini.Collect[RotiniInputs](rtx)
 	if err != nil {
-		// Record and stop: the program's OnError funnel reports it. With no
-		// custom WithOnErrorFn wired (see main.go), rotini's default prints the
-		// error to stderr and exits by category (a parse error → ExitUsage).
-		// Suggestions ("did you mean") are deliberately NOT here — that is the
-		// end-user's own OnError to add, against the bound Suggestor.
+		// Record and stop: the program's OnError funnel reports it. The handler
+		// signals exit 1; with no custom WithOnErrorFn wired (see main.go),
+		// rotini's default prints the error to stderr. Suggestions ("did you
+		// mean") are deliberately NOT here — that is the end-user's own OnError
+		// to add, against the bound Suggestor.
 		rtx.RecordError(err)
-		rtx.SignalExit(2)
+		rtx.SignalExit(1)
 		return
 	}
 

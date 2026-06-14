@@ -83,12 +83,12 @@ func acmeRun(t *testing.T, stdin string, args ...string) (stdout, stderr string,
 }
 
 // ARG-04: a missing required positional is a usage error — exit code 2 (the
-// recommended ErrUsage → ExitUsage convention, applied by the fixture's
+// recommended ErrUsage → 1 convention, applied by the fixture's
 // handler), with the error on stderr and NOTHING executed.
 func TestAcceptance_ARG_04_missingRequired(t *testing.T) {
 	stdout, stderr, code := acmeRun(t, "", "widget", "get")
-	if code != ExitUsage {
-		t.Errorf("exit = %d, want %d", code, ExitUsage)
+	if code != 1 {
+		t.Errorf("exit = %d, want %d", code, 1)
 	}
 	if !strings.Contains(stderr, "missing required") {
 		t.Errorf("stderr = %q, want the missing-required usage error", stderr)
@@ -115,8 +115,8 @@ func TestAcceptance_STDIN_02_autoDetectedPipe(t *testing.T) {
 // promptly, never hang. The test's own timeout is the no-hang assertion.
 func TestAcceptance_STDIN_07_dashWithoutPipe(t *testing.T) {
 	stdout, stderr, code := acmeRun(t, "", "apply", "-f", "-")
-	if code != ExitUsage {
-		t.Errorf("exit = %d, want %d", code, ExitUsage)
+	if code != 1 {
+		t.Errorf("exit = %d, want %d", code, 1)
 	}
 	if !strings.Contains(stderr, "stdin is empty") {
 		t.Errorf("stderr = %q, want the empty-stdin error", stderr)

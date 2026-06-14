@@ -119,9 +119,9 @@ func ExampleCategoryOf() {
 	classify := func(err error) int {
 		switch CategoryOf(err) {
 		case CategoryUsage:
-			return ExitUsage
+			return 1
 		case CategoryInternal:
-			return ExitInternal
+			return 70
 		default:
 			return 1
 		}
@@ -131,7 +131,7 @@ func ExampleCategoryOf() {
 	fmt.Println(classify(InternalError(errors.New("wiring mismatch"))))
 	fmt.Println(classify(errors.New("untagged")))
 	// Output:
-	// 2
+	// 1
 	// 70
 	// 1
 }

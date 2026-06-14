@@ -9,10 +9,10 @@ import "errors"
 // [CategoryUsage]); user code tags its domain errors with [UsageError] / [InternalError].
 //
 // rotini labels; the OnError funnel applies the mapping. rotini does not FORCE a
-// category onto an exit code (Pillar 1) — but its DEFAULT funnel applies the
-// conventional one (usage → [ExitUsage], internal → [ExitInternal], else 1; a
+// category onto an exit code (Pillar 1) and holds no named exit-code constants —
+// but its DEFAULT funnel applies a minimal one (internal → 70, else 1; a
 // recorded run never exits 0), and a program that sets [Program.WithOnErrorFn]
-// owns its codes.
+// passes whatever codes it wants via rtx.SignalExit.
 type Category int
 
 const (
@@ -60,7 +60,7 @@ var (
 //
 //	func onError(ctx context.Context, rtx *rotini.Context, err error) {
 //	    switch rotini.CategoryOf(err) {
-//	    case rotini.CategoryUsage:    fmt.Fprintln(rtx.Stderr, err); rtx.SignalExit(2)
+//	    case rotini.CategoryUsage:    fmt.Fprintln(rtx.Stderr, err); rtx.SignalExit(1)
 //	    case rotini.CategoryInternal: report(err); rtx.SignalExit(70)
 //	    default:                      fmt.Fprintln(rtx.Stderr, err); rtx.SignalExit(1)
 //	    }

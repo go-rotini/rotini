@@ -58,14 +58,14 @@ func TestRun_outcomeOrderAndCoexistence(t *testing.T) {
 	if want := []string{"warning", "success", "error"}; strings.Join(log, ",") != strings.Join(want, ",") {
 		t.Errorf("funnel order = %v, want %v", log, want)
 	}
-	if code != ExitUsage {
-		t.Errorf("code = %d, want %d (the error's category, success notwithstanding)", code, ExitUsage)
+	if code != 1 {
+		t.Errorf("code = %d, want %d (the error's category, success notwithstanding)", code, 1)
 	}
 }
 
 // TestRun_errorAndPanic_maxSeverityExit: a run that records a usage error AND
 // then panics fires BOTH OnError and OnPanic, and exits by max severity — the
-// panic's ExitInternal (70) is not masked by the error's ExitUsage (2) (D7).
+// panic's 70 (70) is not masked by the error's 1 (2) (D7).
 func TestRun_errorAndPanic_maxSeverityExit(t *testing.T) {
 	firedError, firedPanic := false, false
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -80,14 +80,14 @@ func TestRun_errorAndPanic_maxSeverityExit(t *testing.T) {
 	if !firedError || !firedPanic {
 		t.Errorf("fired OnError=%v OnPanic=%v, want both", firedError, firedPanic)
 	}
-	if code != ExitInternal {
-		t.Errorf("code = %d, want %d (panic severity not masked by the usage error)", code, ExitInternal)
+	if code != 70 {
+		t.Errorf("code = %d, want %d (panic severity not masked by the usage error)", code, 70)
 	}
 }
 
 // TestRun_wiringFaultRoutesToOnPanic: a Definition↔handlers mismatch is a
 // rotini-detected fault — it fires OnPanic (carrying the *WiringError), NOT
-// OnError, and exits ExitInternal.
+// OnError, and exits 70.
 func TestRun_wiringFaultRoutesToOnPanic(t *testing.T) {
 	var seen *PanicError
 	firedError := false
@@ -104,8 +104,8 @@ func TestRun_wiringFaultRoutesToOnPanic(t *testing.T) {
 	if !errors.As(seen, &we) || we.Handler != "Nope" {
 		t.Errorf("OnPanic saw %v, want a *WiringError naming Nope", seen)
 	}
-	if CategoryOf(err) != CategoryInternal || code != ExitInternal {
-		t.Errorf("(category, code) = (%v, %d), want (internal, %d)", CategoryOf(err), code, ExitInternal)
+	if CategoryOf(err) != CategoryInternal || code != 70 {
+		t.Errorf("(category, code) = (%v, %d), want (internal, %d)", CategoryOf(err), code, 70)
 	}
 }
 
@@ -124,8 +124,8 @@ func TestRun_resolverFaultRoutesToOnPanic(t *testing.T) {
 	if firedError || !firedPanic {
 		t.Errorf("fired OnError=%v OnPanic=%v, want only OnPanic for a resolver fault", firedError, firedPanic)
 	}
-	if code != ExitInternal {
-		t.Errorf("code = %d, want %d", code, ExitInternal)
+	if code != 70 {
+		t.Errorf("code = %d, want %d", code, 70)
 	}
 }
 

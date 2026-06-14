@@ -407,7 +407,7 @@ func conformanceCases() []inputCase {
 					t.Fatalf("err = %v, want an error naming the unknown flag", err)
 				}
 				if CategoryOf(err) != CategoryUsage {
-					t.Errorf("CategoryOf = %v, want usage (the funnel convention maps it to exit %d)", CategoryOf(err), ExitUsage)
+					t.Errorf("CategoryOf = %v, want usage (the funnel convention maps it to exit %d)", CategoryOf(err), 1)
 				}
 				var pe *ParseError
 				if !errors.As(err, &pe) || len(pe.Candidates) == 0 {

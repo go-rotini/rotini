@@ -249,7 +249,7 @@ func (rtx *Context) Exit(code int) {
 //	inputs, err := rotini.Collect[cmdgen.MycliInputs](rtx)
 //	if err != nil {
 //	    rtx.RecordError(err)
-//	    rtx.SignalExit(rotini.ExitUsage) // graceful; or rtx.Exit(…) to skip teardown
+//	    rtx.SignalExit(1) // graceful; or rtx.Exit(…) to skip teardown
 //	    return
 //	}
 func (rtx *Context) RecordError(err error) {

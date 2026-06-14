@@ -23,7 +23,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	var inputs RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(2)
+		rtx.SignalExit(1)
 		return
 	}
 
