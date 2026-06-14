@@ -84,10 +84,10 @@ func TestWithResolver_error(t *testing.T) {
 		return Resolution{}, errors.New("routing table on fire")
 	})
 	code, err := p.run(p.args)
-	// An untagged resolver error is wiring-class (internal), so the default
-	// OnError exits 70 (EH3 maps category → code).
-	if code != 70 || err == nil {
-		t.Errorf("run() = (%d, %v), want (%d, the resolver error)", code, err, 70)
+	// A resolver error is a resolution-phase fault routed to OnPanic; the default
+	// exits 1 (the returned err still carries the internal category).
+	if code != 1 || err == nil {
+		t.Errorf("run() = (%d, %v), want (1, the resolver error)", code, err)
 	}
 	if !strings.Contains(errb.String(), "routing table on fire") {
 		t.Errorf("stderr = %q, want the resolver error via the funnel", errb)
@@ -157,9 +157,9 @@ func TestRun_wiringError(t *testing.T) {
 func TestWithResolver_emptyChain(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.WithResolver(func(Definition, []string) (Resolution, error) { return Resolution{}, nil })
-	// An empty chain is a resolver bug (internal) → default exits 70.
-	if code, err := p.run(p.args); code != 70 || err == nil {
-		t.Errorf("run() = (%d, %v), want (%d, an empty-chain error)", code, err, 70)
+	// An empty chain is a resolver fault → OnPanic; the default exits 1.
+	if code, err := p.run(p.args); code != 1 || err == nil {
+		t.Errorf("run() = (%d, %v), want (1, an empty-chain error)", code, err)
 	}
 	if !strings.Contains(errb.String(), "empty chain") {
 		t.Errorf("stderr = %q, want the empty-chain diagnostic", errb)
@@ -173,10 +173,10 @@ func TestWithResolver_customRemote(t *testing.T) {
 	p.WithResolver(func(Definition, []string) (Resolution, error) {
 		return Resolution{Remote: &RemoteDispatch{Def: RemoteDef{Name: "ghost", Binary: "rotini-test-no-such-binary"}}}, nil
 	})
-	// Not flagged Discovered → a declared remote → missing binary is internal,
-	// so the default OnError exits 70 (EH3 maps category → code).
-	if code, _ := p.run(p.args); code != 70 {
-		t.Errorf("run() = %d, want %d for an unresolvable remote binary", code, 70)
+	// Not flagged Discovered → a declared remote → a missing binary is recorded
+	// as an error → OnError; the default exits 1.
+	if code, _ := p.run(p.args); code != 1 {
+		t.Errorf("run() = %d, want 1 for an unresolvable remote binary", code)
 	}
 	if errb.Len() == 0 {
 		t.Error("stderr empty, want the remote resolution error")
@@ -231,8 +231,8 @@ func TestWithLifecycle_customPlanKeepsUnwindContract(t *testing.T) {
 	p, _, errb := newTestProgram(&haltHandlers{log: &log}, []string{"run"})
 	p.WithLifecycle(DefaultLifecycle) // explicitly seamed; the engine owns halting/unwind
 	code, err := p.run(p.args)
-	if code != 70 || err == nil {
-		t.Fatalf("run() = (%d, %v), want (%d, the panic via OnPanic)", code, err, 70)
+	if code != 1 || err == nil {
+		t.Fatalf("run() = (%d, %v), want (1, the panic via OnPanic)", code, err)
 	}
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
@@ -278,8 +278,8 @@ func TestPanicError(t *testing.T) {
 		var got error
 		p, _, _ := newTestProgram(h, []string{"run"})
 		p.WithOnPanicFn(func(_ context.Context, _ *Context, panics []*PanicError) { got = panics[0] })
-		if code, _ := p.run(p.args); code != 70 {
-			t.Fatalf("run() = %d, want the fault path's 70", code)
+		if code, _ := p.run(p.args); code != 1 {
+			t.Fatalf("run() = %d, want the fault path's default 1", code)
 		}
 		return got
 	}

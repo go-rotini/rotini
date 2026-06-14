@@ -8,11 +8,11 @@ import "errors"
 // OWN errors (a missing service is [CategoryInternal]; a parse/bind failure is
 // [CategoryUsage]); user code tags its domain errors with [UsageError] / [InternalError].
 //
-// rotini labels; the OnError funnel applies the mapping. rotini does not FORCE a
-// category onto an exit code (Pillar 1) and holds no named exit-code constants —
-// but its DEFAULT funnel applies a minimal one (internal → 70, else 1; a
-// recorded run never exits 0), and a program that sets [Program.WithOnErrorFn]
-// passes whatever codes it wants via rtx.SignalExit.
+// rotini labels; a funnel decides what to do with the label. rotini holds no
+// named exit-code constants and forces no category→code mapping (Pillar 1): its
+// DEFAULT funnel exits 1 for any recorded error or fault (a recorded run never
+// exits 0). A program that wants to map categories to distinct codes does so in
+// its own [Program.WithOnErrorFn] via rtx.SignalExit.
 type Category int
 
 const (

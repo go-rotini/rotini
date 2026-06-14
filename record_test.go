@@ -207,39 +207,10 @@ func TestRun_recordedErrorsFireOnError(t *testing.T) {
 	})
 }
 
-// TestDefaultExitCode pins EH3's exit mapping: the most severe category present
-// wins — internal outranks usage outranks an unclassified failure — and an
-// unclassified set still floors to 1 (never 0).
-func TestDefaultExitCode(t *testing.T) {
-	usage := UsageError(errors.New("u"))
-	internal := InternalError(errors.New("i"))
-	none := errors.New("n")
-	cases := []struct {
-		name string
-		errs []error
-		want int
-	}{
-		{"unclassified only", []error{none}, 1},
-		{"usage only", []error{usage}, 1},
-		{"internal only", []error{internal}, 70},
-		{"usage then internal", []error{usage, internal}, 70},
-		{"internal then usage", []error{internal, usage}, 70},
-		{"none alongside usage", []error{none, usage}, 1},
-		{"none alongside internal", []error{none, internal}, 70},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := defaultExitCode(tc.errs); got != tc.want {
-				t.Errorf("defaultExitCode(%v) = %d, want %d", tc.errs, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestRun_defaultOnError_classifiesAndPrints is EH3's end-to-end golden: with no
-// custom funnel, the default drains rtx.copyErrors(), prints one program-name-
-// prefixed line per error to stderr, and exits by the most severe category.
-func TestRun_defaultOnError_classifiesAndPrints(t *testing.T) {
+// TestRun_defaultOnError_prints is the end-to-end golden: with no custom funnel,
+// the default prints one program-name-prefixed line per recorded error to
+// stderr and exits 1 (rotini holds no exit-code constants — any error is 1).
+func TestRun_defaultOnError_prints(t *testing.T) {
 	cases := []struct {
 		name   string
 		record []error
@@ -247,9 +218,9 @@ func TestRun_defaultOnError_classifiesAndPrints(t *testing.T) {
 		stderr string // exact stderr (the format golden); program name is "app"
 	}{
 		{"usage", []error{UsageError(errors.New("bad flag"))}, 1, "app: bad flag\n"},
-		{"internal", []error{InternalError(errors.New("broken wiring"))}, 70, "app: broken wiring\n"},
+		{"internal", []error{InternalError(errors.New("broken wiring"))}, 1, "app: broken wiring\n"},
 		{"unclassified", []error{errors.New("mystery")}, 1, "app: mystery\n"},
-		{"mixed: internal outranks usage", []error{UsageError(errors.New("bad flag")), InternalError(errors.New("bug"))}, 70, "app: bad flag\napp: bug\n"},
+		{"multiple", []error{UsageError(errors.New("bad flag")), InternalError(errors.New("bug"))}, 1, "app: bad flag\napp: bug\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

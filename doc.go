@@ -46,8 +46,7 @@
 // service registry. Exits are deliberate ([Context.SignalExit],
 // [Context.Exit]); a recorded error, a recovered panic, or a rotini-detected
 // fault is reported once, after teardown, through the outcome funnels (see
-// Outcomes below), which map it onto a conventional code (70 for an internal
-// fault, else 1). The runtime's only built-in
+// Outcomes below), and exits 1 by default. The runtime's only built-in
 // behaviors, documented as the exceptions they are: a default SIGINT/SIGTERM
 // trap (suppressed by [Program.WithContext]), the hidden __complete entry
 // the generated shell scripts call, and os.Exit as the default exit action
@@ -81,10 +80,10 @@
 // fallback so a recovered panic still prints clean, never a raw stack).
 //
 // Exit code: a handler's (or a custom funnel's) explicit [Context.SignalExit] or
-// [Context.Exit] wins (first non-zero). Otherwise it is the most severe outcome
-// — a panic or fault is 70 (never masked by a lower code), a
-// recorded error is its category (internal 70, usage 2, else 1); success and
-// warning never raise or lower it.
+// [Context.Exit] wins (first non-zero). Otherwise any recorded error or fault
+// exits 1 (a recorded/faulted run never exits 0); success and warning never
+// change it. rotini holds no named exit-code constants — a CLI that wants other
+// codes (e.g. a category-based map) sets them in its funnels.
 //
 // The defaults print one clean program-name-prefixed line per item — successes
 // to stdout, warnings and errors and faults to stderr — and a [*PanicError]'s

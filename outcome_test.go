@@ -63,10 +63,9 @@ func TestRun_outcomeOrderAndCoexistence(t *testing.T) {
 	}
 }
 
-// TestRun_errorAndPanic_maxSeverityExit: a run that records a usage error AND
-// then panics fires BOTH OnError and OnPanic, and exits by max severity — the
-// panic's 70 (70) is not masked by the error's 1 (2) (D7).
-func TestRun_errorAndPanic_maxSeverityExit(t *testing.T) {
+// TestRun_errorAndPanic_bothFire: a run that records an error AND then panics
+// fires BOTH OnError and OnPanic, and exits 1 (the default for any error/fault).
+func TestRun_errorAndPanic_bothFire(t *testing.T) {
 	firedError, firedPanic := false, false
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(UsageError(errors.New("bad input")))
@@ -80,14 +79,14 @@ func TestRun_errorAndPanic_maxSeverityExit(t *testing.T) {
 	if !firedError || !firedPanic {
 		t.Errorf("fired OnError=%v OnPanic=%v, want both", firedError, firedPanic)
 	}
-	if code != 70 {
-		t.Errorf("code = %d, want %d (panic severity not masked by the usage error)", code, 70)
+	if code != 1 {
+		t.Errorf("code = %d, want 1 (any error or fault exits 1 by default)", code)
 	}
 }
 
 // TestRun_wiringFaultRoutesToOnPanic: a Definition↔handlers mismatch is a
 // rotini-detected fault — it fires OnPanic (carrying the *WiringError), NOT
-// OnError, and exits 70.
+// OnError, and exits 1.
 func TestRun_wiringFaultRoutesToOnPanic(t *testing.T) {
 	var seen *PanicError
 	firedError := false
@@ -104,8 +103,8 @@ func TestRun_wiringFaultRoutesToOnPanic(t *testing.T) {
 	if !errors.As(seen, &we) || we.Handler != "Nope" {
 		t.Errorf("OnPanic saw %v, want a *WiringError naming Nope", seen)
 	}
-	if CategoryOf(err) != CategoryInternal || code != 70 {
-		t.Errorf("(category, code) = (%v, %d), want (internal, %d)", CategoryOf(err), code, 70)
+	if CategoryOf(err) != CategoryInternal || code != 1 {
+		t.Errorf("(category, code) = (%v, %d), want (internal, %d)", CategoryOf(err), code, 1)
 	}
 }
 
@@ -124,8 +123,8 @@ func TestRun_resolverFaultRoutesToOnPanic(t *testing.T) {
 	if firedError || !firedPanic {
 		t.Errorf("fired OnError=%v OnPanic=%v, want only OnPanic for a resolver fault", firedError, firedPanic)
 	}
-	if code != 70 {
-		t.Errorf("code = %d, want %d", code, 70)
+	if code != 1 {
+		t.Errorf("code = %d, want %d", code, 1)
 	}
 }
 

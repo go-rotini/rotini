@@ -165,25 +165,25 @@ func TestRun_mustGetRoutesToOnPanic(t *testing.T) {
 
 func TestRun_onPanicFnWithoutExitStillFails(t *testing.T) {
 	// A funnel that classifies/logs but forgets to call rtx.Exit must not leak a
-	// success code out of a panic: settle floors the fault path to 70.
+	// success code out of a panic: settle floors the fault path to 1.
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic(&ServiceError{Key: "missing"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ []*PanicError) {}) // no rtx.Exit
-	if code, _ := p.run(p.args); code != 70 {
-		t.Errorf("run() = %d, want %d (a fault is never masked to 0)", code, 70)
+	if code, _ := p.run(p.args); code != 1 {
+		t.Errorf("run() = %d, want %d (a fault is never masked to 0)", code, 1)
 	}
 }
 
-func TestRun_defaultOnPanicPrintsAndExitsInternal(t *testing.T) {
+func TestRun_defaultOnPanicPrintsAndFails(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic("boom") // a non-error panic value is wrapped before the funnel
 	}}
 	p, _, errb := newTestProgram(h, []string{"run"})
 	code, err := p.run(p.args)
-	if code != 70 {
-		t.Fatalf("run() = %d, want %d (default OnPanic)", code, 70)
+	if code != 1 {
+		t.Fatalf("run() = %d, want %d (default OnPanic)", code, 1)
 	}
 	// A non-error panic value is wrapped and returned to the caller.
 	if err == nil || !strings.Contains(err.Error(), "boom") {
@@ -346,7 +346,7 @@ func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 		t.Errorf("run returned err = %v, want it to carry %q", err, "boom")
 	}
 	if code != 3 {
-		t.Errorf("code = %d, want 3 (the hard Exit's code, kept over the fault's 70)", code)
+		t.Errorf("code = %d, want 3 (the hard Exit's code, kept over the fault's 1)", code)
 	}
 }
 
@@ -424,7 +424,7 @@ func TestRun_panicRunsTeardownThenOnPanicLast(t *testing.T) {
 	}}, []string{"run"})
 	p.WithOnPanicFn(func(_ context.Context, rtx *Context, panics []*PanicError) {
 		log = append(log, "onPanicFn:"+panics[0].Error())
-		rtx.SignalExit(1)
+		rtx.SignalExit(5)
 	})
 	code, _ := p.run(p.args)
 	want := []string{
@@ -436,8 +436,8 @@ func TestRun_panicRunsTeardownThenOnPanicLast(t *testing.T) {
 	if !reflect.DeepEqual(log, want) {
 		t.Errorf("teardown-then-OnPanic order:\n got=%v\nwant=%v", log, want)
 	}
-	if code != 1 {
-		t.Errorf("code = %d, want 1 (OnPanic's explicit exit, kept over the 70 floor)", code)
+	if code != 5 {
+		t.Errorf("code = %d, want 5 (OnPanic's explicit exit, kept over the default 1 floor)", code)
 	}
 }
 

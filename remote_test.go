@@ -63,9 +63,9 @@ func TestRun_remoteNotFound(t *testing.T) {
 	p, _, errb := remoteProgram(def, []string{"missing"})
 	code, err := p.run(p.args)
 	// A DECLARED remote whose binary is missing is internal, so the default
-	// OnError exits 70 (EH3 maps category → code).
-	if code != 70 {
-		t.Errorf("missing remote exit = %d, want %d", code, 70)
+	// OnError exits 1 (EH3 maps category → code).
+	if code != 1 {
+		t.Errorf("missing remote exit = %d, want %d", code, 1)
 	}
 	if !strings.Contains(errb.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", errb)
@@ -163,7 +163,7 @@ func TestRun_discoveryMissing(t *testing.T) {
 
 // TestRun_remoteTimeout: a plugin that runs past its declared timeout is killed
 // and surfaced as a *RemoteError of kind timeout — deliberately CategoryNone
-// (operational), so the default OnError exits 1, not 70/2.
+// (operational). It is still a recorded error, so the default OnError exits 1.
 func TestRun_remoteTimeout(t *testing.T) {
 	writeFakeBinary(t, "app-slow", "#!/bin/sh\nsleep 5\n")
 	def := Definition{Name: "app", Handler: "App", RemoteCommands: []RemoteDef{
