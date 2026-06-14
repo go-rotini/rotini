@@ -4,7 +4,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/internal"
 )
 
@@ -23,7 +22,7 @@ func TestRotiniGenerate(t *testing.T) {
 	}{
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"generate", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: rotini.ExitUsage,
+			argv: []string{"generate", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: 2,
 		},
 		{
 			name: "help flag",
@@ -49,11 +48,11 @@ func TestRotiniGenerate(t *testing.T) {
 			// The per-file callback error still prints inline during the run; the
 			// final error is recorded and the default OnError reports it, so the
 			// usage exit code the handler signaled stands.
-			wantOut: "cmd/mycli/rtg/rotini.go", wantErr: "bad template", wantCode: rotini.ExitUsage,
+			wantOut: "cmd/mycli/rtg/rotini.go", wantErr: "bad template", wantCode: 2,
 		},
 		{
 			name: "real generate on a missing spec errors (integration)",
-			argv: []string{"generate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "rotini:", wantCode: rotini.ExitUsage,
+			argv: []string{"generate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "rotini:", wantCode: 2,
 		},
 	}
 	for _, tc := range cases {

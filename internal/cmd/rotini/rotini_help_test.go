@@ -2,8 +2,6 @@ package rotini
 
 import (
 	"testing"
-
-	"github.com/go-rotini/rotini"
 )
 
 // TestRotiniHelp covers the help command handler (rotini_help.go): rendering a command's
@@ -25,8 +23,8 @@ func TestRotiniHelp(t *testing.T) {
 	}{
 		{"prints help for a command", []string{"help", "generate"}, genHelp, "", 0},
 		{"help flag", []string{"help", "--help"}, HelpRotiniHelp, "", 0},
-		{"unknown command errors", []string{"help", "bogus"}, "", "rotini:", rotini.ExitUsage},
-		{"parse error on unknown flag", []string{"help", "--nope"}, "", `rotini: unknown flag "--nope"`, rotini.ExitUsage},
+		{"unknown command errors", []string{"help", "bogus"}, "", "rotini:", 2},
+		{"parse error on unknown flag", []string{"help", "--nope"}, "", `rotini: unknown flag "--nope"`, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

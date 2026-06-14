@@ -2,8 +2,6 @@ package rotini
 
 import (
 	"testing"
-
-	"github.com/go-rotini/rotini"
 )
 
 // TestRotiniVersion covers the version command handler (rotini_version.go): the success
@@ -19,7 +17,7 @@ func TestRotiniVersion(t *testing.T) {
 	}{
 		{"prints version", []string{"version"}, testVersion, "", 0},
 		{"help flag", []string{"version", "--help"}, HelpRotiniVersion, "", 0},
-		{"parse error on unknown flag", []string{"version", "--nope"}, "", `rotini: unknown flag "--nope"`, rotini.ExitUsage},
+		{"parse error on unknown flag", []string{"version", "--nope"}, "", `rotini: unknown flag "--nope"`, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

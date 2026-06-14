@@ -28,7 +28,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		// Suggestions ("did you mean") are deliberately NOT here — that is the
 		// end-user's own OnError to add, against the bound Suggestor.
 		rtx.RecordError(err)
-		rtx.SignalExit(rotini.ExitUsage)
+		rtx.SignalExit(2)
 		return
 	}
 
