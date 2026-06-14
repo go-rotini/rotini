@@ -6,18 +6,6 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-)
-
 func main() {
-	{{.PackageAlias}}.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
-		Bind(rotini.KeySuggestor, rotini.NewSuggestor()).
-		Bind(rotini.KeyVersioner, rotini.NewVersioner(version)).
-		Bind(rotini.KeyCommit, commit).
-		Bind(rotini.KeyDate, date).
-		Execute()
+	{{.PackageAlias}}.Program.Execute()
 }
