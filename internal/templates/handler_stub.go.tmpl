@@ -16,4 +16,6 @@ type {{.HandlersType}} struct{
 var _ rotini.CommandHandlers = (*{{.HandlersType}})(nil)
 
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stderr, "Error: not implemented")
+	rtx.Exit(1)
 }
