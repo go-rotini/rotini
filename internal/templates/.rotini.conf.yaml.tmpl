@@ -12,23 +12,23 @@ generate:
       file: zz_rotini.gen.go
   features:
     help:
-      enabled: {{if .WithHelp}}true{{else}}false{{end}}
+      enabled: true
       embed: false
       embed_dir: internal/cmd/{{.Package}}/renders
       template_dir: internal/cmd/{{.Package}}/templates
     completion:
-      enabled: {{if .WithCompletion}}true{{else}}false{{end}}
+      enabled: true
       embed: false
       embed_dir: internal/cmd/{{.Package}}/renders
       template_dir: internal/cmd/{{.Package}}/templates
     man:
-      enabled: {{if .WithMan}}true{{else}}false{{end}}
+      enabled: false
       embed: true
       embed_dir: internal/cmd/{{.Package}}/renders
       template: true
       template_dir: internal/cmd/{{.Package}}/templates
     markdown:
-      enabled: {{if .WithMarkdown}}true{{else}}false{{end}}
+      enabled: false
       embed: true
       embed_dir: internal/cmd/{{.Package}}/renders
       template: true

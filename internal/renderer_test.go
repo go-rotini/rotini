@@ -7,10 +7,10 @@ import (
 
 func TestSmokeRenderSeedFiles(t *testing.T) {
 	for _, format := range []fileFormat{formatYAML, formatJSON, formatJSONC, formatTOML} {
-		if _, err := renderSpecFile("v1.0.0", "app", format, nil); err != nil {
+		if _, err := renderSpecFile("v1.0.0", "app", format); err != nil {
 			t.Errorf("spec %s: %v", format, err)
 		}
-		if _, err := renderConfFile("v1.0.0", "app", format, nil); err != nil {
+		if _, err := renderConfFile("v1.0.0", "app", format); err != nil {
 			t.Errorf("conf %s: %v", format, err)
 		}
 	}
@@ -20,25 +20,9 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 	if _, err := renderMainFile("example.com/app/internal/cmd/app", "cli"); err != nil {
 		t.Errorf("main: %v", err)
 	}
+	// Every command — including help/version/completion — gets the same empty stub.
 	if _, err := renderHandlerStubFile("cli", "appSubHandlers"); err != nil {
 		t.Errorf("handler stub: %v", err)
-	}
-	if _, err := renderHandlerRootFile("cli", "appHandlers", "App", "HelpApp", true, true); err != nil {
-		t.Errorf("handler root: %v", err)
-	}
-	// The partially wired shapes render too (version-only root; help-less
-	// version handler).
-	if _, err := renderHandlerRootFile("cli", "appHandlers", "App", "HelpApp", false, true); err != nil {
-		t.Errorf("handler root (version only): %v", err)
-	}
-	if _, err := renderHandlerVersionFile("cli", "appVersionHandlers", "App", "HelpAppVersion", true); err != nil {
-		t.Errorf("handler version: %v", err)
-	}
-	if _, err := renderHandlerVersionFile("cli", "appVersionHandlers", "App", "HelpAppVersion", false); err != nil {
-		t.Errorf("handler version (no help): %v", err)
-	}
-	if _, err := renderHandlerHelpFile("cli", "appHelpHandlers", "App", "HelpAppHelp"); err != nil {
-		t.Errorf("handler help: %v", err)
 	}
 }
 

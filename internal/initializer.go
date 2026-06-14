@@ -1,16 +1,14 @@
 package internal
 
 // This file owns the `rotini initialize` operation: scaffolding a new CLI's
-// seed spec and conf under <package>/<name>/ of the current module, validating
-// them, then running one init-style generate pass over them. Init-style differs
-// from a normal generate in exactly one way: the missing handler files of
-// --with'd commands are seeded from the wired init templates instead of empty
-// stubs — see writeHandlerStubs. Everything is opt-in: a bare `rotini init`
-// seeds a minimal root (plain stub, no flags, no commands); `--with help`
-// brings -h/--help + the help command + the help feature, `--with version`
-// brings -v/--version + the version command, and so on. Every later
-// `rotini generate` is the normal process; to opt out of a wired handler,
-// delete the handler file and regenerate.
+// seed spec and conf under <package>/<name>/ of the current module and
+// validating them. Init does NOT generate code — it only writes the two seed
+// files. The seed is "batteries-declared": the spec declares the
+// help/version/completion commands + root flags, and the conf declares an
+// entrypoint and enables the help/completion features. Running `rotini generate`
+// over the seed then creates the entrypoint, the empty handler stubs, and the
+// codegen files. rotini surfaces help/version/completion functionality, but the
+// author wires the stubs as they see fit.
 
 import (
 	"errors"
@@ -18,7 +16,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 )
 
@@ -46,44 +43,28 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 // InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double (see [GenerateFn]).
-type InitializeFn = func(name, format string, force bool, with []string) error
+type InitializeFn = func(name, format string, force bool) error
 
-// withFeatures are the `rotini init --with` vocabulary. Everything is opt-in:
-// "help" enables the help feature AND seeds the -h/--help flags, the help
-// command, and their wired handlers; "version" seeds the root -v/--version
-// flag, the version command, and its wired handler; "completion" enables the
-// feature and seeds its serving command + wired handler; "man" and "markdown"
-// only flip their conf feature toggles — embeds + resolver, no command (a
-// man-printing command is unconventional; serve it from your own handler if
-// you want one, rotini's own CLI is the worked example). "all" expands to
-// everything. A bare init (no --with) seeds a minimal skeleton.
-var withFeatures = []string{"all", "help", "man", "completion", "markdown", "version"}
-
-// Initialize scaffolds a new standalone rotini CLI named name: the seed
-// .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the
-// current module (the package dir defaults to "cmd"; a module-root conf's
-// `initialize` block overrides it), validated and then generated init-style —
-// the entrypoint main.go plus, per --with value, the wired flags/commands/
-// handlers (see withFeatures). format selects the serialization (yaml, jsonc,
-// json, or toml). The seeds are create-once: they are left untouched unless
-// force is set.
-func Initialize(name, format string, force bool, version string, with []string) error {
-	return NewProcessor(version).Initialize(name, format, force, with)
+// Initialize scaffolds a new standalone rotini CLI named name: it writes the seed
+// .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the current
+// module (the package dir defaults to "cmd"; a module-root conf's `initialize`
+// block overrides it) and validates them. It does NOT generate code — run
+// `rotini generate` over the seed for that. format selects the serialization
+// (yaml, jsonc, json, or toml). The seeds are create-once: they are left untouched
+// unless force is set.
+func Initialize(name, format string, force bool, version string) error {
+	return NewProcessor(version).Initialize(name, format, force)
 }
 
 // initialize renders and writes the default seed spec and conf for a new CLI
-// named name under <package>/<name>/, validates them, and runs the init-style
-// generate pass over them.
-func (p *Processor) initialize(name, format string, force bool, with []string) error {
+// named name under <package>/<name>/ and validates them. It does not generate
+// code — that is `rotini generate`'s job.
+func (p *Processor) initialize(name, format string, force bool) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
 	}
 	if !cliNameRe.MatchString(name) {
 		return fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
-	}
-	selected, err := withSet(with)
-	if err != nil {
-		return err
 	}
 
 	moduleRoot, _, err := findModule()
@@ -120,14 +101,14 @@ func (p *Processor) initialize(name, format string, force bool, with []string) e
 	}
 
 	version := schemaURLVersion(p.version)
-	specBytes, err := renderSpecFile(version, name, f, selected)
+	specBytes, err := renderSpecFile(version, name, f)
 	if err != nil {
 		return err
 	}
 	if err := writeGeneratedFile(specPath, specBytes); err != nil {
 		return err
 	}
-	confBytes, err := renderConfFile(version, name, f, selected)
+	confBytes, err := renderConfFile(version, name, f)
 	if err != nil {
 		return err
 	}
@@ -135,38 +116,13 @@ func (p *Processor) initialize(name, format string, force bool, with []string) e
 		return err
 	}
 
-	// Validate the seeds exactly as `rotini validate` would, then run the one
-	// init-style generate pass (wired root/help/version handler seeds).
+	// Validate the seeds exactly as `rotini validate` would. Init stops here —
+	// `rotini generate` is what turns the seed into code.
 	s := newSession(specPath, confPath, p.version)
 	if err := s.load(); err != nil {
 		return err
 	}
-	if err := s.validate(); err != nil {
-		return err
-	}
-	return s.generateStyled(true)
-}
-
-// withSet validates `--with` values against the withFeatures vocabulary and
-// returns them as a set, with "all" expanded to every concrete value. The
-// rotini CLI's own enum already constrains the flag; this guards direct API
-// callers with the same loud rejection.
-func withSet(with []string) (map[string]bool, error) {
-	set := map[string]bool{}
-	for _, w := range with {
-		ok := slices.Contains(withFeatures, w)
-		if !ok {
-			return nil, fmt.Errorf("unknown --with value %q: must be one of %s", w, strings.Join(withFeatures, ", "))
-		}
-		if w == "all" {
-			for _, v := range withFeatures[1:] { // every concrete value
-				set[v] = true
-			}
-			continue
-		}
-		set[w] = true
-	}
-	return set, nil
+	return s.validate()
 }
 
 // initDefaults holds the resolved `rotini init` defaults.

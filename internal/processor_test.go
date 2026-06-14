@@ -281,22 +281,26 @@ func TestProcessorGenerate_matchesCompanion(t *testing.T) {
 	// dogfooded output lives in the gen file, compared byte-for-byte above.
 }
 
-// TestProcessorInitialize confirms the Processor's initialize scaffolds the seed
-// spec and conf under cmd/<name>/, validates them, and runs the init-style
-// generate (wired handlers + entrypoint).
+// TestProcessorInitialize confirms the Processor's initialize scaffolds and
+// validates the seed spec + conf under cmd/<name>/ — and generates NOTHING
+// (code generation is Generate's job).
 func TestProcessorInitialize(t *testing.T) {
 	tmp := initTestModule(t)
 	p := NewProcessor("")
 
-	if err := p.initialize("mycli", "yaml", false, nil); err != nil {
+	if err := p.initialize("mycli", "yaml", false); err != nil {
 		t.Fatalf("initialize: %v", err)
 	}
 	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: internal/cmd/mycli")
-	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate go tool rotini generate")
-	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
-		"package mycli", "var Program = NewProgram(&handlers{})")
+	// Init seeds only — no entrypoint, no codegen.
+	if _, err := os.Stat(filepath.Join(dir, "main.go")); !os.IsNotExist(err) {
+		t.Errorf("main.go should not exist after init (stat err = %v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go")); !os.IsNotExist(err) {
+		t.Errorf("zz_rotini.gen.go should not exist after init (stat err = %v)", err)
+	}
 }
 
 // TestProcessorValidatePass confirms the validate workflow composes load + validate,

@@ -38,16 +38,8 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 // built-in conf defaults, then emits the cmd and cmdgen packages plus the enabled doc
 // features.
 func (s *session) generate() error {
-	return s.generateStyled(false)
-}
-
-// generateStyled is generate with the stub style selected: initStyle seeds the
-// root/help/version handlers from the wired init templates instead of the empty
-// stub (see writeHandlerStubs). Only `rotini initialize` passes true — a normal
-// generate always seeds empty stubs.
-func (s *session) generateStyled(initStyle bool) error {
 	applyConfDefaults(s.conf.conf, s.spec.spec.Command.Name)
-	return generateAll(s.spec.spec, s.conf.conf, s.spec.path, initStyle)
+	return generateAll(s.spec.spec, s.conf.conf, s.spec.path)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -126,11 +118,11 @@ type layout struct {
 
 // generateAll runs a single generation pass: it resolves the spec (expanding
 // any composed $ref children), writes the framework file, creates missing
-// handler stubs (wired init-style stubs for root/help/version when initStyle is
-// set), writes the entrypoint main.go when the conf declares one, (re)writes
-// the handler rollup, and prunes orphaned stubs. specPath is needed to resolve
-// $ref paths relative to the spec.
-func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error {
+// handler stubs (an empty stub per command — the end-user wires them), writes
+// the entrypoint main.go when the conf declares one, (re)writes the handler
+// rollup, and prunes orphaned stubs. specPath is needed to resolve $ref paths
+// relative to the spec.
+func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	moduleRoot, moduleName, err := findModule()
 	if err != nil {
 		return err
@@ -230,7 +222,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string, initStyle bool) error 
 			return err
 		}
 	}
-	if err := writeHandlerStubs(gp, lay, initStyle); err != nil {
+	if err := writeHandlerStubs(gp, lay); err != nil {
 		return err
 	}
 	if err := writeEntrypoint(lay); err != nil {
@@ -1103,7 +1095,7 @@ func anyEmbed(features []templateFeature) bool {
 // empty stub, so a fresh CLI ships with working -h/--help, -v/--version, and
 // help/version commands. To opt out, delete those handler files and run a
 // normal `rotini generate` — the empty stubs are seeded in their place.
-func writeHandlerStubs(gp *genProgram, lay layout, initStyle bool) error {
+func writeHandlerStubs(gp *genProgram, lay layout) error {
 	for _, c := range gp.ownCommands() {
 		path := filepath.Join(lay.handlerDir, c.filename)
 		if _, err := os.Stat(path); err == nil {
@@ -1111,7 +1103,7 @@ func writeHandlerStubs(gp *genProgram, lay layout, initStyle bool) error {
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		content, err := renderHandlerSeed(gp, lay, c, initStyle)
+		content, err := renderHandlerStubFile(lay.handlerPkgName, c.handler)
 		if err != nil {
 			return err
 		}
@@ -1120,48 +1112,6 @@ func writeHandlerStubs(gp *genProgram, lay layout, initStyle bool) error {
 		}
 	}
 	return nil
-}
-
-// renderHandlerSeed renders the seed content for one command's handler file:
-// the empty stub, or — init-style only — the wired root/help/version/completion
-// handler matched by the command's type prefix. What the seed spec DECLARED is
-// the source of truth: a wired command exists only when its --with value asked
-// for it, and the root's help/version branches (plus any Help* embed
-// references) are emitted only when the root declares those flags — so a
-// partially wired seed (e.g. --with version without --with help) still
-// compiles. A root with neither flag gets the plain stub: nothing wired,
-// nothing special.
-func renderHandlerSeed(gp *genProgram, lay layout, c genCommand, initStyle bool) ([]byte, error) {
-	if initStyle {
-		hasHelp := hasInputFlag(gp.rootInputs, "help")
-		hasVersion := hasInputFlag(gp.rootInputs, "version")
-		switch c.prefix {
-		case gp.rootPascal:
-			if hasHelp || hasVersion {
-				return renderHandlerRootFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal, hasHelp, hasVersion)
-			}
-		case gp.rootPascal + "Help":
-			return renderHandlerHelpFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Help")
-		case gp.rootPascal + "Version":
-			return renderHandlerVersionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Version", hasHelp)
-		case gp.rootPascal + "Completion":
-			return renderHandlerCompletionFile(lay.handlerPkgName, c.handler, gp.rootPascal, "Help"+gp.rootPascal+"Completion", hasHelp)
-		}
-	}
-	return renderHandlerStubFile(lay.handlerPkgName, c.handler)
-}
-
-// hasInputFlag reports whether in declares a flag named name.
-func hasInputFlag(in *Inputs, name string) bool {
-	if in == nil {
-		return false
-	}
-	for _, f := range in.Flags {
-		if f.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint

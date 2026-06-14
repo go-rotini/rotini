@@ -72,7 +72,6 @@ var definition = rotini.Definition{
 			Flags: []rotini.FlagDef{
 				{Name: "format", Identifiers: []string{"--format"}, Summary: "the created rotini spec file format (defaults to the module conf's initialize.format, else yaml)", Type: "string", Enum: []string{"yaml", "json", "jsonc", "toml"}},
 				{Name: "force", Identifiers: []string{"--force"}, Summary: "force re-initialization if files exist that init would overwrite", Type: "bool"},
-				{Name: "with", Identifiers: []string{"--with"}, Summary: "wire optional setup into the new CLI (feature toggles, command definitions, wired handlers; 'all' for everything)", Type: "[]string", Enum: []string{"all", "help", "man", "completion", "markdown", "version"}},
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
@@ -216,10 +215,9 @@ type RotiniHelpInputs struct {
 }
 
 type RotiniInitializeFlags struct {
-	Format string   `rotini:"format"`
-	Force  bool     `rotini:"force"`
-	With   []string `rotini:"with"`
-	Help   bool     `rotini:"help"`
+	Format string `rotini:"format"`
+	Force  bool   `rotini:"force"`
+	Help   bool   `rotini:"help"`
 }
 
 type RotiniInitializeArguments struct {
@@ -290,7 +288,7 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 
 var HelpRotini = "\x1b[1mThe rotini cli framework companion cli.\x1b[0m\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n         [-v | --version] [-h | --help]\n\nCommands:\n  initialize;init    scaffold a cli program\n  generate;gen       generate a cli program\n  validate;val       validate a spec file\n  help               print help\n  version            print version\n  completion         print a shell completion script\n\nFlags:\n  --no-styles     disable output styles\n  -v,--version    print version\n  -h,--help       print help\n\nEnvironment:\n  ROTINI_NO_STYLES    disable output styles\n  CI                  is cli environment\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
-var HelpRotiniInitialize = "Initialize a new rotini cli program spec file.\n\nUsage:\n  rotini initialize [name] [flags]\n\nArguments:\n  [name]    the root command name written to the created spec file (expected binary name)\n\nFlags:\n  --format string    the created rotini spec file format (defaults to the module conf's initialize.format, else yaml) [yaml|json|jsonc|toml]\n  --force            force re-initialization if files exist that init would overwrite\n  --with []string    wire optional setup into the new CLI (feature toggles, command definitions, wired handlers; 'all' for everything) [all|help|man|completion|markdown|version]\n  -h,--help          print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --with completion --with version\n  rotini init mycli --with all\n  rotini init mycli --force\n  rotini init -i\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotiniInitialize = "Write a starter rotini spec and conf for a new CLI. Init does not generate code — run \"rotini generate\" over the seed for that.\n\nUsage:\n  rotini initialize [name] [flags]\n\nArguments:\n  [name]    the root command name written to the created spec file (expected binary name)\n\nFlags:\n  --format string    the created rotini spec file format (defaults to the module conf's initialize.format, else yaml) [yaml|json|jsonc|toml]\n  --force            force re-initialization if files exist that init would overwrite\n  -h,--help          print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniGenerate = "Generate a cli program from a rotini spec file.\n\nUsage:\n  rotini generate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default .rotini.spec.yaml)\n\nFlags:\n  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)\n  --watch,-w            watch a rotini spec file for changes and re-generate\n  -h,--help             print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.json --watch\n\nUse \"rotini help <command>\" for more information about a command."
 

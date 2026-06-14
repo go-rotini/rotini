@@ -48,14 +48,11 @@ command:
       aliases:
         - init
       summary: scaffold a cli program
-      description: Initialize a new rotini cli program spec file.
+      description: Write a starter rotini spec and conf for a new CLI. Init does not generate code — run "rotini generate" over the seed for that.
       examples:
         - rotini initialize mycli
         - rotini init mycli --format json
-        - rotini init mycli --with completion --with version
-        - rotini init mycli --with all
         - rotini init mycli --force
-        - rotini init -i
       footer: Use "rotini help <command>" for more information about a command.
       inputs:
         arguments:
@@ -81,19 +78,6 @@ command:
               - --force
             schema:
               type: bool
-          - name: with
-            summary: wire optional setup into the new CLI (feature toggles, command definitions, wired handlers; 'all' for everything)
-            identifiers:
-              - --with
-            schema:
-              type: "[]string"
-              enum:
-                - all
-                - help
-                - man
-                - completion
-                - markdown
-                - version
           - name: help
             summary: print help
             identifiers:

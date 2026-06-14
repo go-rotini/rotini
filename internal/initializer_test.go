@@ -16,7 +16,7 @@ func TestInitialize_confDefaults(t *testing.T) {
 			"initialize:\n  format: jsonc\n  package: tools\n")
 
 	// No explicit --format → conf's format (jsonc) and package (tools).
-	if err := Initialize("mycli", "", false, "", nil); err != nil {
+	if err := Initialize("mycli", "", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	dir := filepath.Join(tmp, "tools", "mycli")
@@ -24,7 +24,7 @@ func TestInitialize_confDefaults(t *testing.T) {
 	mustContain(t, filepath.Join(dir, ".rotini.conf.jsonc"), `"internal/cmd/mycli"`)
 
 	// An explicit --format overrides the conf default (still under the conf package).
-	if err := Initialize("other", "yaml", false, "", nil); err != nil {
+	if err := Initialize("other", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize (explicit format): %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(tmp, "tools", "other", ".rotini.spec.yaml")); err != nil {
@@ -40,179 +40,94 @@ func initTestModule(t *testing.T) string {
 	return tmp
 }
 
-// TestInitialize_scaffolds verifies the whole `rotini init` job for a BARE
-// init (no --with): everything is opt-in, so the seed spec is a minimal root
-// (no flags, no commands), the seed conf has every feature off, the root
-// handler is the plain stub, and the entrypoint main.go is written — a clean
-// skeleton ready for the user's own spec work.
-func TestInitialize_scaffolds(t *testing.T) {
+// TestInitialize_seedsOnly verifies the whole `rotini init` job: it writes ONLY
+// the seed spec and conf — no code generation. The seed is "batteries-declared":
+// the spec declares the help/version/completion commands + root -h/-v flags, and
+// the conf declares an entrypoint with the help/completion features enabled (man/
+// markdown off). NO generated files (entrypoint, handlers, codegen) are written —
+// that is `rotini generate`'s job.
+func TestInitialize_seedsOnly(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false, "", nil); err != nil {
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 
 	dir := filepath.Join(tmp, "cmd", "mycli")
+	// Batteries-declared spec: root + help/version/completion commands and flags.
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"),
-		"name: mycli", "schema-spec.json")
-	mustNotContain(t, filepath.Join(dir, ".rotini.spec.yaml"),
-		"--help", "--version", "name: help", "commands:")
+		"name: mycli", "schema-spec.json", "commands:",
+		"name: help", "name: version", "name: completion", "name: shell",
+		"--help", "--version", "- bash", "- zsh", "- fish", "- powershell")
+	// Conf declares the entrypoint and enables help+completion (man/markdown off).
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"),
 		"schema-conf.json",
 		"package: cmd/mycli", "package: internal/cmd/mycli",
 		"file: main.go", "file: zz_rotini.gen.go",
-		"help:\n      enabled: false",
+		"help:\n      enabled: true",
+		"completion:\n      enabled: true",
+		"man:\n      enabled: false",
 		"embed_dir: internal/cmd/mycli/renders")
 
-	// The init-style generate ran: framework + rollup, a PLAIN STUB root
-	// handler (nothing wired → nothing special), and the entrypoint main.go.
-	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
-	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
-		"package mycli", "type ProgramHandlers interface", "var definition",
-		"var Program = NewProgram(&handlers{})")
-	mustNotContain(t, filepath.Join(genDir, "zz_rotini.gen.go"), "var HelpMycli string")
-	mustContain(t, filepath.Join(genDir, "mycli.go"),
-		"type mycliHandlers struct {", "rotini.CommandHandlers")
-	mustNotContain(t, filepath.Join(genDir, "mycli.go"), "MustGet", "HelpMycli")
-	for _, f := range []string{"mycli_help.go", "mycli_version.go"} {
-		if _, err := os.Stat(filepath.Join(genDir, f)); !os.IsNotExist(err) {
-			t.Errorf("%s should not exist on a bare init (stat err = %v)", f, err)
+	// Init does NOT generate: no entrypoint, no handlers, no codegen file.
+	for _, p := range []string{
+		filepath.Join(dir, "main.go"),
+		filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
+		filepath.Join(tmp, "internal", "cmd", "mycli", "mycli.go"),
+	} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s should NOT exist after init (init seeds only; stat err = %v)", p, err)
 		}
-	}
-	// Entrypoint main.go written to the conf-declared entrypoint package.
-	mustContain(t, filepath.Join(dir, "main.go"),
-		"//go:generate go tool rotini generate",
-		`cli "example.com/myclis/internal/cmd/mycli"`,
-		`Bind(rotini.KeyParser, rotini.NewParser())`,
-		`Bind(rotini.KeyVersioner, rotini.NewVersioner(version))`,
-		"Execute()")
-}
-
-// TestInitialize_with covers `rotini init --with`: "help" seeds the -h flags,
-// the help command, the help feature, and the wired root/help handlers;
-// "version" seeds the root -v flag, the version command, and its wired
-// handler; "completion" seeds its command + handler; "man"/"markdown" only
-// flip conf feature toggles (no command); "all" expands to everything — and a
-// PARTIAL wiring (version without help) still generates compiling, help-less
-// handlers.
-func TestInitialize_with(t *testing.T) {
-	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false, "", []string{"all"}); err != nil {
-		t.Fatalf("Initialize(--with all): %v", err)
-	}
-
-	dir := filepath.Join(tmp, "cmd", "mycli")
-	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"),
-		"name: help", "--help", "--version",
-		"name: completion", "name: shell",
-		"    - name: version\n      summary: print version", // the COMMAND, not the root flag
-		"- bash", "- zsh", "- fish", "- powershell")
-	// man is feature-only: no command in the spec.
-	mustNotContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: man")
-	// Every wired feature toggled on in the conf.
-	conf := readFileString(t, filepath.Join(dir, ".rotini.conf.yaml"))
-	for _, feat := range []string{"help", "man", "completion", "markdown"} {
-		if !strings.Contains(conf, feat+":\n      enabled: true") {
-			t.Errorf("conf: feature %s not enabled:\n%s", feat, conf)
-		}
-	}
-
-	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
-	// The framework serves all four features. The seed conf template uses
-	// embed:false for help+completion (inline string vars) and embed:true for
-	// man+markdown (//go:embed-backed vars) — so the var forms differ by mode.
-	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
-		"var HelpMycli =", // inline (help embed:false)
-		"func Help(path ...string) (string, error)",
-		"func Man(path ...string) (string, error)",
-		"func Markdown(path ...string) (string, error)",
-		"func Completion(shell string) (string, error)",
-		"var CompletionZsh =") // inline (completion embed:false)
-	// …the wired handlers read theirs…
-	mustContain(t, filepath.Join(genDir, "mycli.go"),
-		"case flags.Help:", "case flags.Version:", "HelpMycli", "v.VersionSemantic")
-	mustContain(t, filepath.Join(genDir, "mycli_help.go"),
-		"Help(args.Commands...)", "HelpMycliHelp")
-	mustContain(t, filepath.Join(genDir, "mycli_completion.go"),
-		"Arguments.Shell)", "HelpMycliCompletion")
-	mustContain(t, filepath.Join(genDir, "mycli_version.go"),
-		"v.VersionSemantic", "HelpMycliVersion")
-	// …man has no handler file (feature-only), and markdown emitted its pages.
-	if _, err := os.Stat(filepath.Join(genDir, "mycli_man.go")); !os.IsNotExist(err) {
-		t.Errorf("mycli_man.go should not exist (stat err = %v)", err)
-	}
-	if _, err := os.Stat(filepath.Join(genDir, "renders", "markdown_mycli.md")); err != nil {
-		t.Errorf("markdown feature output missing: %v", err)
-	}
-
-	// Partial wiring: version WITHOUT help — the root handler gets the version
-	// branch but no help branch (and no Help* embed references anywhere), and
-	// the version command/handler carry no -h flag.
-	if err := Initialize("partial", "yaml", false, "", []string{"version"}); err != nil {
-		t.Fatalf("Initialize(--with version): %v", err)
-	}
-	pSpec := readFileString(t, filepath.Join(tmp, "cmd", "partial", ".rotini.spec.yaml"))
-	if strings.Contains(pSpec, "--help") || strings.Contains(pSpec, "name: help") {
-		t.Errorf("version-only seed spec carries help wiring:\n%s", pSpec)
-	}
-	pGen := filepath.Join(tmp, "internal", "cmd", "partial")
-	mustContain(t, filepath.Join(pGen, "partial.go"), "case flags.Version:")
-	mustNotContain(t, filepath.Join(pGen, "partial.go"), "flags.Help", "HelpPartial")
-	mustContain(t, filepath.Join(pGen, "partial_version.go"), "v.VersionSemantic")
-	mustNotContain(t, filepath.Join(pGen, "partial_version.go"), "Help")
-
-	// Unknown values are loud.
-	if err := Initialize("bad", "yaml", false, "", []string{"tui"}); err == nil || !strings.Contains(err.Error(), `unknown --with value "tui"`) {
-		t.Errorf("Initialize(--with tui) = %v, want the unknown-value rejection", err)
 	}
 }
 
-// TestInitialize_optOutWiredHandlers covers the documented opt-out: delete the
-// wired root/help/version handler files and run a normal `rotini generate` —
-// the empty handler stubs are seeded in their place (and main.go, a create-once
-// file, survives).
-func TestInitialize_optOutWiredHandlers(t *testing.T) {
+// TestInitialize_thenGenerate is the W5 acceptance: `rotini generate` run over
+// nothing but the two seed files produces a complete CLI — the entrypoint main.go,
+// the codegen file, and one EMPTY handler stub per command (root + help/version/
+// completion). The stubs carry no wiring; the author fills them.
+func TestInitialize_thenGenerate(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false, "", []string{"help"}); err != nil {
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
-	}
-
-	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
-	for _, f := range []string{"mycli.go", "mycli_help.go"} {
-		if err := os.Remove(filepath.Join(genDir, f)); err != nil {
-			t.Fatalf("remove wired handler %s: %v", f, err)
-		}
 	}
 
 	specPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.spec.yaml")
 	confPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.conf.yaml")
 	if err := Generate(specPath, confPath, false, "", nil); err != nil {
-		t.Fatalf("Generate after opt-out: %v", err)
+		t.Fatalf("Generate after init: %v", err)
 	}
 
-	// Empty stubs replace the wired handlers — no parsing, no help wiring.
-	for _, f := range []string{"mycli.go", "mycli_help.go"} {
+	// Entrypoint + codegen exist.
+	mustContain(t, filepath.Join(tmp, "cmd", "mycli", "main.go"), "Execute()")
+	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
+	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
+		"package mycli", "var Program = NewProgram(&handlers{})")
+
+	// Every command gets an EMPTY stub — no MustGet/parse/help wiring.
+	for _, f := range []string{"mycli.go", "mycli_help.go", "mycli_version.go", "mycli_completion.go"} {
 		path := filepath.Join(genDir, f)
-		mustContain(t, path, "rotini.CommandHandlers", "func (*")
-		mustNotContain(t, path, "MustGet", "HelpMycli")
-	}
-	if _, err := os.Stat(filepath.Join(tmp, "cmd", "mycli", "main.go")); err != nil {
-		t.Errorf("main.go should survive a regenerate: %v", err)
+		mustContain(t, path, "rotini.CommandHandlers", "func (*", "Run(ctx context.Context")
+		mustNotContain(t, path, "MustGet", "Parse", "HelpMycli")
 	}
 }
 
-// TestInitialize_preservesEditedHandlers confirms a force re-init never
-// overwrites existing handler files (they are create-once, like any stub) —
-// force applies only to the seed spec/conf.
-func TestInitialize_preservesEditedHandlers(t *testing.T) {
+// TestGenerate_preservesEditedHandlers confirms a re-run of `rotini generate`
+// never overwrites an existing handler file (create-once, like main.go) — only
+// the codegen file is rewritten.
+func TestGenerate_preservesEditedHandlers(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("mycli", "yaml", false, "", nil); err != nil {
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
+	specPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.spec.yaml")
+	confPath := filepath.Join(tmp, "cmd", "mycli", ".rotini.conf.yaml")
+	if err := Generate(specPath, confPath, false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
 	stub := filepath.Join(tmp, "internal", "cmd", "mycli", "mycli.go")
 	writeTestFile(t, stub, "package mycli\n\n// EDITED BY USER\n")
-
-	if err := Initialize("mycli", "yaml", true, "", nil); err != nil {
-		t.Fatalf("re-init with force: %v", err)
+	if err := Generate(specPath, confPath, false, "", nil); err != nil {
+		t.Fatalf("re-generate: %v", err)
 	}
 	mustContain(t, stub, "EDITED BY USER")
 }
@@ -224,14 +139,14 @@ func TestInitialize_preservesEditedHandlers(t *testing.T) {
 func TestInitialize_stampsSchemaRef(t *testing.T) {
 	tmp := initTestModule(t)
 
-	if err := Initialize("rel", "yaml", false, "1.4.0", nil); err != nil {
+	if err := Initialize("rel", "yaml", false, "1.4.0"); err != nil {
 		t.Fatalf("Initialize(ref=1.4.0): %v", err)
 	}
 	relDir := filepath.Join(tmp, "cmd", "rel")
 	mustContain(t, filepath.Join(relDir, ".rotini.spec.yaml"), "refs/tags/1.4.0/schema-spec.json")
 	mustContain(t, filepath.Join(relDir, ".rotini.conf.yaml"), "refs/tags/1.4.0/schema-conf.json")
 
-	if err := Initialize("dev", "yaml", false, "", nil); err != nil {
+	if err := Initialize("dev", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize(ref=\"\"): %v", err)
 	}
 	devDir := filepath.Join(tmp, "cmd", "dev")
@@ -241,21 +156,21 @@ func TestInitialize_stampsSchemaRef(t *testing.T) {
 
 func TestInitialize_noClobberThenForce(t *testing.T) {
 	initTestModule(t)
-	if err := Initialize("mycli", "yaml", false, "", nil); err != nil {
+	if err := Initialize("mycli", "yaml", false, ""); err != nil {
 		t.Fatalf("first Initialize: %v", err)
 	}
-	err := Initialize("mycli", "yaml", false, "", nil)
+	err := Initialize("mycli", "yaml", false, "")
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("re-init without force: got %v, want 'already exists'", err)
 	}
-	if err := Initialize("mycli", "yaml", true, "", nil); err != nil {
+	if err := Initialize("mycli", "yaml", true, ""); err != nil {
 		t.Fatalf("re-init with force: %v", err)
 	}
 }
 
 func TestInitialize_formatJSON(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("tool", "json", false, "", nil); err != nil {
+	if err := Initialize("tool", "json", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.spec.json"), `"name": "tool"`)
@@ -266,7 +181,7 @@ func TestInitialize_formatJSON(t *testing.T) {
 // transcoded to TOML (via yaml→json→toml).
 func TestInitialize_formatTOML(t *testing.T) {
 	tmp := initTestModule(t)
-	if err := Initialize("tool", "toml", false, "", nil); err != nil {
+	if err := Initialize("tool", "toml", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd", "tool", ".rotini.spec.toml"), `name = "tool"`)
@@ -275,16 +190,16 @@ func TestInitialize_formatTOML(t *testing.T) {
 
 func TestInitialize_errors(t *testing.T) {
 	initTestModule(t)
-	if err := Initialize("", "yaml", false, "", nil); err == nil {
+	if err := Initialize("", "yaml", false, ""); err == nil {
 		t.Error("empty name should error")
 	}
-	if err := Initialize("x", "xml", false, "", nil); err == nil {
+	if err := Initialize("x", "xml", false, ""); err == nil {
 		t.Error("unsupported format should error")
 	}
 	// The name becomes a directory, a Go package, and the root command — unsafe
 	// names are rejected before anything touches the filesystem.
 	for _, bad := range []string{"../evil", "a/b", "my cli", "9lives", ".hidden"} {
-		if err := Initialize(bad, "yaml", false, "", nil); err == nil || !strings.Contains(err.Error(), "invalid CLI name") {
+		if err := Initialize(bad, "yaml", false, ""); err == nil || !strings.Contains(err.Error(), "invalid CLI name") {
 			t.Errorf("Initialize(%q) = %v, want an invalid-name error", bad, err)
 		}
 	}
@@ -292,7 +207,7 @@ func TestInitialize_errors(t *testing.T) {
 
 func TestInitialize_outsideModule(t *testing.T) {
 	t.Chdir(t.TempDir()) // no go.mod up the tree
-	if err := Initialize("mycli", "yaml", false, "", nil); err == nil {
+	if err := Initialize("mycli", "yaml", false, ""); err == nil {
 		t.Error("Initialize outside a module should error")
 	}
 }
