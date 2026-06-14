@@ -37,13 +37,13 @@ type Program struct {
 	args        []string
 	def         Definition
 	handlers    any
-	rtx         *Context                                                // pre-seeded registry; user Bind calls land here
-	onErrorFn   func(ctx context.Context, rtx *Context, err error)      // OnError funnel (recorded errors); nil → defaultOnError
-	onSuccessFn func(ctx context.Context, rtx *Context)                 // OnSuccess funnel (recorded successes); nil → defaultOnSuccess
-	onWarningFn func(ctx context.Context, rtx *Context)                 // OnWarning funnel (recorded warnings); nil → defaultOnWarning
-	onPanicFn   func(ctx context.Context, rtx *Context, pe *PanicError) // OnPanic funnel (recovered panics + rotini-detected faults); nil → defaultOnPanic
-	resolver    Resolver                                                // resolve phase override; nil → DefaultResolver
-	lifecycle   Lifecycle                                               // run-phase plan override; nil → DefaultLifecycle
+	rtx         *Context                                                      // pre-seeded registry; user Bind calls land here
+	onErrorFn   func(ctx context.Context, rtx *Context, errs []error)         // OnError funnel (recorded errors); nil → defaultOnError
+	onSuccessFn func(ctx context.Context, rtx *Context, results []string)     // OnSuccess funnel (recorded successes); nil → defaultOnSuccess
+	onWarningFn func(ctx context.Context, rtx *Context, warnings []error)     // OnWarning funnel (recorded warnings); nil → defaultOnWarning
+	onPanicFn   func(ctx context.Context, rtx *Context, panics []*PanicError) // OnPanic funnel (recovered panics + rotini-detected faults); nil → defaultOnPanic
+	resolver    Resolver                                                      // resolve phase override; nil → DefaultResolver
+	lifecycle   Lifecycle                                                     // run-phase plan override; nil → DefaultLifecycle
 	stdin       io.Reader
 	stdout      io.Writer
 	stderr      io.Writer
@@ -150,68 +150,67 @@ func (p *Program) Bind(key string, value any) *Program {
 }
 
 // WithOnErrorFn sets the program's OnError funnel: where the END-USER's recorded
-// errors are reported. The runtime calls fn(ctx, rtx, err) once per run, after
+// errors are reported. The runtime calls fn(ctx, rtx, errs) once per run, after
 // the lifecycle settles, whenever a handler recorded ANY error with
 // [Context.RecordError] (a remote dispatch failure rotini records on the
-// handler's behalf reaches it too). fn decides the exit code (rtx.SignalExit),
-// classifies (errors.Is/errors.As, [CategoryOf]), logs, and prints in the CLI's
-// own style. With no funnel set, the default prints one clean line per recorded
-// error to stderr (program-name prefixed) and exits by the most severe category
-// present — [ExitInternal] (70) if any is [CategoryInternal], else [ExitUsage]
-// (2) if any is [CategoryUsage], else 1. It returns the receiver so it chains
-// with [Program.Bind].
+// handler's behalf reaches it too) — errs is the recorded set, in order. The
+// records are PRIVATE: errs is the only way fn sees them (there is no drainable
+// accessor on rtx). fn decides the exit code (rtx.SignalExit), classifies each
+// (errors.Is/errors.As, [CategoryOf]), logs, and prints in the CLI's own style.
+// With no funnel set, the default prints one clean line per error to stderr
+// (program-name prefixed) and exits by the most severe category present —
+// [ExitInternal] (70) if any is [CategoryInternal], else [ExitUsage] (2) if any
+// is [CategoryUsage], else 1. It returns the receiver so it chains with
+// [Program.Bind].
 //
 // OnError is ONE of four outcome funnels. It is for the end-user's own errors
 // only — rotini's "this should never have happened" faults (a wiring mismatch,
 // a resolver fault, a recovered panic, a [MustGet] on a missing service) go to
 // [Program.WithOnPanicFn] instead; recorded successes and warnings go to
-// [Program.WithOnSuccessFn] / [Program.WithOnWarningFn].
-//
-// The err argument is the [errors.Join] of every recorded error, so one
-// [CategoryOf] / errors.Is / errors.As call covers the whole set; fn can also
-// drain [Context.Errors] to format each individually. A run that recorded any
-// error never exits 0. A run with no recorded error never invokes fn.
-func (p *Program) WithOnErrorFn(fn func(ctx context.Context, rtx *Context, err error)) *Program {
+// [Program.WithOnSuccessFn] / [Program.WithOnWarningFn]. A run that recorded any
+// error never exits 0; a run with no recorded error never invokes fn.
+func (p *Program) WithOnErrorFn(fn func(ctx context.Context, rtx *Context, errs []error)) *Program {
 	p.onErrorFn = fn
 	return p
 }
 
 // WithOnSuccessFn sets the program's OnSuccess funnel: where a handler's
 // recorded successes ([Context.RecordSuccess]) are reported. The runtime calls
-// fn(ctx, rtx) once per run, after the lifecycle settles, whenever any success
-// was recorded — drain them with [Context.Successes]. With no funnel set, the
-// default prints each success line to stdout and does not change the exit code.
-// A run with no recorded success never invokes fn. It returns the receiver to
-// chain.
-func (p *Program) WithOnSuccessFn(fn func(ctx context.Context, rtx *Context)) *Program {
+// fn(ctx, rtx, results) once per run, after the lifecycle settles, whenever any
+// success was recorded — results is the recorded messages, in order (the only
+// way fn sees them; the records are private). With no funnel set, the default
+// prints each result to stdout and does not change the exit code. A run with no
+// recorded success never invokes fn. It returns the receiver to chain.
+func (p *Program) WithOnSuccessFn(fn func(ctx context.Context, rtx *Context, results []string)) *Program {
 	p.onSuccessFn = fn
 	return p
 }
 
 // WithOnWarningFn sets the program's OnWarning funnel: where a handler's
 // recorded non-fatal warnings ([Context.RecordWarning]) are reported. The
-// runtime calls fn(ctx, rtx) once per run, after the lifecycle settles, whenever
-// any warning was recorded — drain them with [Context.Warnings]. With no funnel
+// runtime calls fn(ctx, rtx, warnings) once per run, after the lifecycle
+// settles, whenever any warning was recorded — warnings is the recorded set, in
+// order (the only way fn sees them; the records are private). With no funnel
 // set, the default prints each warning to stderr and does NOT change the exit
 // code (warnings are non-fatal). A run with no recorded warning never invokes
 // fn. It returns the receiver to chain.
-func (p *Program) WithOnWarningFn(fn func(ctx context.Context, rtx *Context)) *Program {
+func (p *Program) WithOnWarningFn(fn func(ctx context.Context, rtx *Context, warnings []error)) *Program {
 	p.onWarningFn = fn
 	return p
 }
 
 // WithOnPanicFn sets the program's OnPanic funnel: rotini's "this should never
-// have happened" sink. The runtime calls fn(ctx, rtx, pe) once per run, after
-// the lifecycle settles, whenever a hook PANICKED and was recovered, or rotini
-// DETECTED an internal fault (a [*WiringError] from a Definition↔handlers
-// mismatch, a resolver fault, a [MustGet] on a missing service). There is no
-// public record call — the lifecycle captures the fault and that capture is the
-// signal; drain the full set with [Context.Panics] (pe is the first). With no
-// funnel set, the default prints one clean line per fault to stderr (the stack
-// rides the [*PanicError] for errors.As, never printed) and exits [ExitInternal]
-// — a fault is never masked to 0. A run with no fault never invokes fn. It
-// returns the receiver to chain.
-func (p *Program) WithOnPanicFn(fn func(ctx context.Context, rtx *Context, pe *PanicError)) *Program {
+// have happened" sink. The runtime calls fn(ctx, rtx, panics) once per run,
+// after the lifecycle settles, whenever a hook PANICKED and was recovered, or
+// rotini DETECTED an internal fault (a [*WiringError] from a Definition vs.
+// handlers mismatch, a resolver fault, a [MustGet] on a missing service). There
+// is no public record call — the lifecycle captures the fault, and panics is the
+// captured set, in order (the only way fn sees them). With no funnel set, the
+// default prints one clean line per fault to stderr (the stack rides each
+// [*PanicError] for errors.As, never printed) and exits [ExitInternal] — a fault
+// is never masked to 0. A run with no fault never invokes fn. It returns the
+// receiver to chain.
+func (p *Program) WithOnPanicFn(fn func(ctx context.Context, rtx *Context, panics []*PanicError)) *Program {
 	p.onPanicFn = fn
 	return p
 }
@@ -418,35 +417,40 @@ func asFault(err error) *PanicError { return &PanicError{Value: err} }
 // a recorded error is its category ([ExitInternal]/[ExitUsage]/1); a fault is
 // never masked to 0. Success and warning never raise or lower the code.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
-	if warnings := rtx.Warnings(); len(warnings) > 0 {
+	// Snapshot the private channels once; the records surface only here, as the
+	// slice each funnel receives — there is no public drainable accessor.
+	warnings := rtx.copyWarnings()
+	successes := rtx.copySuccesses()
+	errs := rtx.copyErrors()
+	faults := rtx.copyFaults()
+
+	if len(warnings) > 0 {
 		fn := p.onWarningFn
 		if fn == nil {
 			fn = p.defaultOnWarning
 		}
-		fn(ctx, rtx)
+		fn(ctx, rtx, warnings)
 	}
-	if successes := rtx.Successes(); len(successes) > 0 {
+	if len(successes) > 0 {
 		fn := p.onSuccessFn
 		if fn == nil {
 			fn = p.defaultOnSuccess
 		}
-		fn(ctx, rtx)
+		fn(ctx, rtx, successes)
 	}
-	errs := rtx.Errors()
 	if len(errs) > 0 {
 		fn := p.onErrorFn
 		if fn == nil {
 			fn = p.defaultOnError
 		}
-		fn(ctx, rtx, errors.Join(errs...))
+		fn(ctx, rtx, errs)
 	}
-	faults := rtx.Panics()
 	if len(faults) > 0 {
 		fn := p.onPanicFn
 		if fn == nil {
 			fn = p.defaultOnPanic
 		}
-		fn(ctx, rtx, faults[0])
+		fn(ctx, rtx, faults)
 	}
 
 	if rtx.exitCode == 0 {
@@ -482,24 +486,24 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 // The exit code is [settle]'s to set (by category). Each rotini error type
 // renders a single non-leaky line; a CLI that wants richer reporting supplies
 // its own via [Program.WithOnErrorFn].
-func (p *Program) defaultOnError(_ context.Context, rtx *Context, _ error) {
-	for _, e := range rtx.Errors() {
+func (p *Program) defaultOnError(_ context.Context, _ *Context, errs []error) {
+	for _, e := range errs {
 		fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, e)
 	}
 }
 
 // defaultOnSuccess prints each recorded success to stdout; the exit code is
 // unchanged (a clean run is already 0).
-func (p *Program) defaultOnSuccess(_ context.Context, rtx *Context) {
-	for _, s := range rtx.Successes() {
+func (p *Program) defaultOnSuccess(_ context.Context, _ *Context, results []string) {
+	for _, s := range results {
 		fmt.Fprintln(p.stdout, s)
 	}
 }
 
 // defaultOnWarning prints each recorded warning to stderr (program-name
 // prefixed); the exit code is unchanged (warnings are non-fatal).
-func (p *Program) defaultOnWarning(_ context.Context, rtx *Context) {
-	for _, w := range rtx.Warnings() {
+func (p *Program) defaultOnWarning(_ context.Context, _ *Context, warnings []error) {
+	for _, w := range warnings {
 		fmt.Fprintf(p.stderr, "%s: warning: %v\n", p.def.Name, w)
 	}
 }
@@ -507,8 +511,8 @@ func (p *Program) defaultOnWarning(_ context.Context, rtx *Context) {
 // defaultOnPanic prints one clean line per captured fault to stderr (the
 // [*PanicError]'s Value, never its Stack — that stays for an errors.As). The
 // exit is [settle]'s to set ([ExitInternal]); a fault is never masked to 0.
-func (p *Program) defaultOnPanic(_ context.Context, rtx *Context, _ *PanicError) {
-	for _, pe := range rtx.Panics() {
+func (p *Program) defaultOnPanic(_ context.Context, _ *Context, panics []*PanicError) {
+	for _, pe := range panics {
 		fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, pe)
 	}
 }

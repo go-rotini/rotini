@@ -114,11 +114,14 @@ func TestWithResolver_error(t *testing.T) {
 // a custom funnel maps CategoryInternal to ExitInternal with no taxonomy
 // re-derivation of its own.
 func TestWithOnErrorFn_categorySwitch(t *testing.T) {
-	def := Definition{Name: "app", Handler: "Nope"} // no such handler method: a wiring failure
-	p, _, _ := newTestProgram(&testHandlers{log: &[]string{}}, nil)
-	p.def = def
-	p.WithOnErrorFn(func(_ context.Context, rtx *Context, err error) {
-		switch CategoryOf(err) {
+	// A custom OnError maps CategoryInternal → ExitInternal in one switch over the
+	// recorded errors, with no taxonomy re-derivation of its own.
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		rtx.RecordError(InternalError(errors.New("boom")))
+	}}
+	p, _, _ := newTestProgram(h, []string{"run"})
+	p.WithOnErrorFn(func(_ context.Context, rtx *Context, errs []error) {
+		switch CategoryOf(errors.Join(errs...)) {
 		case CategoryUsage:
 			rtx.SignalExit(ExitUsage)
 		case CategoryInternal:
@@ -274,7 +277,7 @@ func TestPanicError(t *testing.T) {
 		t.Helper()
 		var got error
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithOnPanicFn(func(_ context.Context, rtx *Context, pe *PanicError) { got = pe })
+		p.WithOnPanicFn(func(_ context.Context, _ *Context, panics []*PanicError) { got = panics[0] })
 		if code, _ := p.run(p.args); code != ExitInternal {
 			t.Fatalf("run() = %d, want the fault path's ExitInternal", code)
 		}

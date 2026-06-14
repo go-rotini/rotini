@@ -50,9 +50,9 @@ func TestRun_outcomeOrderAndCoexistence(t *testing.T) {
 		rtx.RecordError(UsageError(errors.New("e"))) // usage → exit 2
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithOnWarningFn(func(_ context.Context, _ *Context) { log = append(log, "warning") })
-	p.WithOnSuccessFn(func(_ context.Context, _ *Context) { log = append(log, "success") })
-	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ error) { log = append(log, "error") })
+	p.WithOnWarningFn(func(_ context.Context, _ *Context, _ []error) { log = append(log, "warning") })
+	p.WithOnSuccessFn(func(_ context.Context, _ *Context, _ []string) { log = append(log, "success") })
+	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ []error) { log = append(log, "error") })
 
 	code, _ := p.run(p.args)
 	if want := []string{"warning", "success", "error"}; strings.Join(log, ",") != strings.Join(want, ",") {
@@ -73,8 +73,8 @@ func TestRun_errorAndPanic_maxSeverityExit(t *testing.T) {
 		panic("kaboom")
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ error) { firedError = true })
-	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ *PanicError) { firedPanic = true })
+	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ []error) { firedError = true })
+	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ []*PanicError) { firedPanic = true })
 
 	code, _ := p.run(p.args)
 	if !firedError || !firedPanic {
@@ -93,8 +93,8 @@ func TestRun_wiringFaultRoutesToOnPanic(t *testing.T) {
 	firedError := false
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
 	p.def = Definition{Name: "app", Handler: "Nope"} // no such handler method
-	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ error) { firedError = true })
-	p.WithOnPanicFn(func(_ context.Context, _ *Context, pe *PanicError) { seen = pe })
+	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ []error) { firedError = true })
+	p.WithOnPanicFn(func(_ context.Context, _ *Context, panics []*PanicError) { seen = panics[0] })
 
 	code, err := p.run(p.args)
 	if firedError {
@@ -117,8 +117,8 @@ func TestRun_resolverFaultRoutesToOnPanic(t *testing.T) {
 	p.WithResolver(func(Definition, []string) (Resolution, error) {
 		return Resolution{}, errors.New("routing table on fire")
 	})
-	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ error) { firedError = true })
-	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ *PanicError) { firedPanic = true })
+	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ []error) { firedError = true })
+	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ []*PanicError) { firedPanic = true })
 
 	code, _ := p.run(p.args)
 	if firedError || !firedPanic {
@@ -136,10 +136,10 @@ func TestRun_silentRun_firesNothing(t *testing.T) {
 	h := &testHandlers{log: new([]string)} // onRun nil → a clean run
 	p, _, _ := newTestProgram(h, []string{"run"})
 	mark := func() { fired = true }
-	p.WithOnSuccessFn(func(_ context.Context, _ *Context) { mark() })
-	p.WithOnWarningFn(func(_ context.Context, _ *Context) { mark() })
-	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ error) { mark() })
-	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ *PanicError) { mark() })
+	p.WithOnSuccessFn(func(_ context.Context, _ *Context, _ []string) { mark() })
+	p.WithOnWarningFn(func(_ context.Context, _ *Context, _ []error) { mark() })
+	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ []error) { mark() })
+	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ []*PanicError) { mark() })
 
 	code, err := p.run(p.args)
 	if fired {

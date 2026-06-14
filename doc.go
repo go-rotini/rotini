@@ -68,8 +68,8 @@
 //   - A recovered panic, or a rotini-DETECTED fault (a [*WiringError] from a
 //     [Definition] vs. handlers mismatch, a resolver fault, a [MustGet] on a
 //     missing service), reaches [Program.WithOnPanicFn] — rotini's "this should
-//     never have happened". There is NO record call: the lifecycle captures it
-//     and that capture is the signal; drain the set with [Context.Panics].
+//     never have happened". There is NO record call: the lifecycle captures it,
+//     and the funnel receives the captured faults as its slice argument.
 //
 // Recording is non-halting — a handler records any number of times across any
 // hook, then stops independently with [Context.SignalExit] (graceful, teardown
@@ -112,7 +112,7 @@
 //
 // rotini ships no opinions on top: no "did you mean", no help dump on error. A
 // program that wants either writes its own funnel — e.g. a [Program.WithOnErrorFn]
-// that drains [Context.Errors] and applies the bound [Suggestor] to a
+// that ranges its recorded errors and applies the bound [Suggestor] to a
 // [*ParseError] Token, renders help for [ParseError.Command], logs, or redacts.
 // Suggestion is the program's call, never the framework's (Pillar 1).
 //

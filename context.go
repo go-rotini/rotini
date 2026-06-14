@@ -237,7 +237,8 @@ func (rtx *Context) Exit(code int) {
 // that still unwinds teardown, or [Context.Exit] to skip teardown. Either way —
 // and even if neither is called — the program's OnError funnel
 // ([Program.WithOnErrorFn]) fires once at the end whenever any error was
-// recorded, draining them via [Context.Errors]. A nil err is ignored.
+// recorded — the runtime hands the funnel the recorded errors as a slice. A
+// nil err is ignored.
 //
 // This is the error channel of four outcome channels. Recovered panics and
 // rotini-detected faults (a wiring mismatch, a resolver fault, a [MustGet] on a
@@ -260,13 +261,11 @@ func (rtx *Context) RecordError(err error) {
 	rtx.recorded = append(rtx.recorded, err)
 }
 
-// Errors returns the errors recorded this run via [Context.RecordError] (and the
-// framework/panic errors rotini records the same way), in recording order. It
-// is how an OnError funnel drains and pretty-prints each error individually;
-// the funnel's err argument is their [errors.Join], so one [CategoryOf] /
-// errors.Is / errors.As call covers the whole set. The returned slice is a
-// copy — mutating it does not affect the Context.
-func (rtx *Context) Errors() []error {
+// copyErrors snapshots the errors recorded this run (via [Context.RecordError]),
+// in recording order, as a copy. It is unexported: the recorded errors are
+// PRIVATE — they surface only as the slice the runtime hands to the OnError
+// funnel ([Program.WithOnErrorFn]), never through a drainable accessor.
+func (rtx *Context) copyErrors() []error {
 	if rtx == nil {
 		return nil
 	}
@@ -285,9 +284,10 @@ func (rtx *Context) Errors() []error {
 // fallback, a skipped item). Like [Context.RecordError] it neither prints nor
 // stops the lifecycle: it appends, and the program's OnWarning funnel
 // ([Program.WithOnWarningFn]) fires once at the end whenever any warning was
-// recorded, draining them via [Context.Warnings]. A warning is an error value
-// (so it can be typed and branched with errors.As, and secrets stay redacted),
-// but it never raises the exit code. A nil warn is ignored.
+// recorded — the runtime hands the funnel the recorded warnings as a slice. A
+// warning is an error value (so it can be typed and branched with errors.As,
+// and secrets stay redacted), but it never raises the exit code. A nil warn is
+// ignored.
 func (rtx *Context) RecordWarning(warn error) {
 	if rtx == nil || warn == nil {
 		return
@@ -301,9 +301,9 @@ func (rtx *Context) RecordWarning(warn error) {
 // for the program's OnSuccess funnel ([Program.WithOnSuccessFn]) to present.
 // Like the other record calls it neither prints nor stops the lifecycle: it
 // appends, and OnSuccess fires once at the end whenever any success was
-// recorded, draining them via [Context.Successes]. Recording a success does not
-// by itself set the exit code (a clean run is already 0). An empty msg is
-// ignored.
+// recorded — the runtime hands the funnel the recorded messages as a slice.
+// Recording a success does not by itself set the exit code (a clean run is
+// already 0). An empty msg is ignored.
 func (rtx *Context) RecordSuccess(msg string) {
 	if rtx == nil || msg == "" {
 		return
@@ -313,10 +313,10 @@ func (rtx *Context) RecordSuccess(msg string) {
 	rtx.successes = append(rtx.successes, msg)
 }
 
-// Warnings returns the warnings recorded this run via [Context.RecordWarning],
-// in recording order — how an OnWarning funnel drains and prints each. The
-// returned slice is a copy; mutating it does not affect the Context.
-func (rtx *Context) Warnings() []error {
+// copyWarnings snapshots the warnings recorded this run (via
+// [Context.RecordWarning]), in recording order, as a copy. Unexported: warnings
+// are PRIVATE and surface only as the slice handed to the OnWarning funnel.
+func (rtx *Context) copyWarnings() []error {
 	if rtx == nil {
 		return nil
 	}
@@ -330,11 +330,11 @@ func (rtx *Context) Warnings() []error {
 	return out
 }
 
-// Successes returns the success messages recorded this run via
-// [Context.RecordSuccess], in recording order — how an OnSuccess funnel drains
-// and prints each. The returned slice is a copy; mutating it does not affect the
-// Context.
-func (rtx *Context) Successes() []string {
+// copySuccesses snapshots the success messages recorded this run (via
+// [Context.RecordSuccess]), in recording order, as a copy. Unexported:
+// successes are PRIVATE and surface only as the slice handed to the OnSuccess
+// funnel.
+func (rtx *Context) copySuccesses() []string {
 	if rtx == nil {
 		return nil
 	}
@@ -348,13 +348,11 @@ func (rtx *Context) Successes() []string {
 	return out
 }
 
-// Panics returns the recovered panics and rotini-detected faults captured this
-// run, in capture order — what an OnPanic funnel ([Program.WithOnPanicFn])
-// reports. Unlike errors/warnings/successes there is NO public record call: the
-// lifecycle captures a recovered panic (or routes a detected wiring/resolver
-// fault) here itself, and that capture is the funnel's signal. The returned
-// slice is a copy; mutating it does not affect the Context.
-func (rtx *Context) Panics() []*PanicError {
+// copyFaults snapshots the recovered panics + rotini-detected faults captured
+// this run, in capture order, as a copy. Unexported: faults are PRIVATE (there
+// is no public record call either — the lifecycle captures them) and surface
+// only as the slice handed to the OnPanic funnel ([Program.WithOnPanicFn]).
+func (rtx *Context) copyFaults() []*PanicError {
 	if rtx == nil {
 		return nil
 	}

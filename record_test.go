@@ -10,25 +10,25 @@ import (
 // order, nil is a no-op, and Errors returns a copy (not the live slice).
 func TestContext_RecordError_api(t *testing.T) {
 	rtx := NewContextFor(testDef(), nil)
-	if got := rtx.Errors(); got != nil {
+	if got := rtx.copyErrors(); got != nil {
 		t.Errorf("fresh Errors() = %v, want nil", got)
 	}
 	e1, e2 := errors.New("one"), errors.New("two")
 	rtx.RecordError(e1)
 	rtx.RecordError(nil) // no-op
 	rtx.RecordError(e2)
-	got := rtx.Errors()
+	got := rtx.copyErrors()
 	if len(got) != 2 || got[0] != e1 || got[1] != e2 {
 		t.Fatalf("Errors() = %v, want [one two] in order with nil skipped", got)
 	}
 	got[0] = errors.New("mutated")
-	if rtx.Errors()[0] != e1 {
+	if rtx.copyErrors()[0] != e1 {
 		t.Error("Errors() returned the live slice; want a copy")
 	}
 	// Nil receiver is safe.
 	var nilRtx *Context
 	nilRtx.RecordError(e1)
-	if nilRtx.Errors() != nil {
+	if nilRtx.copyErrors() != nil {
 		t.Error("nil Context Errors() should be nil")
 	}
 }
@@ -38,28 +38,28 @@ func TestContext_RecordError_api(t *testing.T) {
 // SEPARATE from errors.
 func TestContext_RecordWarning_api(t *testing.T) {
 	rtx := NewContextFor(testDef(), nil)
-	if got := rtx.Warnings(); got != nil {
+	if got := rtx.copyWarnings(); got != nil {
 		t.Errorf("fresh Warnings() = %v, want nil", got)
 	}
 	w1, w2 := errors.New("warn one"), errors.New("warn two")
 	rtx.RecordWarning(w1)
 	rtx.RecordWarning(nil) // no-op
 	rtx.RecordWarning(w2)
-	got := rtx.Warnings()
+	got := rtx.copyWarnings()
 	if len(got) != 2 || got[0] != w1 || got[1] != w2 {
 		t.Fatalf("Warnings() = %v, want [warn one, warn two] with nil skipped", got)
 	}
 	got[0] = errors.New("mutated")
-	if rtx.Warnings()[0] != w1 {
+	if rtx.copyWarnings()[0] != w1 {
 		t.Error("Warnings() returned the live slice; want a copy")
 	}
 	// Channels are independent: a warning is not an error.
-	if rtx.Errors() != nil {
-		t.Errorf("RecordWarning leaked into Errors() = %v", rtx.Errors())
+	if rtx.copyErrors() != nil {
+		t.Errorf("RecordWarning leaked into Errors() = %v", rtx.copyErrors())
 	}
 	var nilRtx *Context
 	nilRtx.RecordWarning(w1)
-	if nilRtx.Warnings() != nil {
+	if nilRtx.copyWarnings() != nil {
 		t.Error("nil Context Warnings() should be nil")
 	}
 }
@@ -68,26 +68,26 @@ func TestContext_RecordWarning_api(t *testing.T) {
 // string is the no-op (success carries a message).
 func TestContext_RecordSuccess_api(t *testing.T) {
 	rtx := NewContextFor(testDef(), nil)
-	if got := rtx.Successes(); got != nil {
+	if got := rtx.copySuccesses(); got != nil {
 		t.Errorf("fresh Successes() = %v, want nil", got)
 	}
 	rtx.RecordSuccess("done a")
 	rtx.RecordSuccess("") // no-op
 	rtx.RecordSuccess("done b")
-	got := rtx.Successes()
+	got := rtx.copySuccesses()
 	if len(got) != 2 || got[0] != "done a" || got[1] != "done b" {
 		t.Fatalf("Successes() = %v, want [done a, done b] with empty skipped", got)
 	}
 	got[0] = "mutated"
-	if rtx.Successes()[0] != "done a" {
+	if rtx.copySuccesses()[0] != "done a" {
 		t.Error("Successes() returned the live slice; want a copy")
 	}
-	if rtx.Errors() != nil || rtx.Warnings() != nil {
+	if rtx.copyErrors() != nil || rtx.copyWarnings() != nil {
 		t.Error("RecordSuccess leaked into Errors()/Warnings()")
 	}
 	var nilRtx *Context
 	nilRtx.RecordSuccess("x")
-	if nilRtx.Successes() != nil {
+	if nilRtx.copySuccesses() != nil {
 		t.Error("nil Context Successes() should be nil")
 	}
 }
@@ -97,27 +97,27 @@ func TestContext_RecordSuccess_api(t *testing.T) {
 // no-op; and faults are independent of the error channel.
 func TestContext_Panics_api(t *testing.T) {
 	rtx := NewContextFor(testDef(), nil)
-	if got := rtx.Panics(); got != nil {
+	if got := rtx.copyFaults(); got != nil {
 		t.Errorf("fresh Panics() = %v, want nil", got)
 	}
 	p1, p2 := &PanicError{Value: "boom"}, &PanicError{Value: errors.New("kaboom")}
 	rtx.recordFault(p1)
 	rtx.recordFault(nil) // no-op
 	rtx.recordFault(p2)
-	got := rtx.Panics()
+	got := rtx.copyFaults()
 	if len(got) != 2 || got[0] != p1 || got[1] != p2 {
 		t.Fatalf("Panics() = %v, want [p1 p2] with nil skipped", got)
 	}
 	got[0] = &PanicError{Value: "mutated"}
-	if rtx.Panics()[0] != p1 {
+	if rtx.copyFaults()[0] != p1 {
 		t.Error("Panics() returned the live slice; want a copy")
 	}
-	if rtx.Errors() != nil {
-		t.Errorf("recordFault leaked into Errors() = %v", rtx.Errors())
+	if rtx.copyErrors() != nil {
+		t.Errorf("recordFault leaked into Errors() = %v", rtx.copyErrors())
 	}
 	var nilRtx *Context
 	nilRtx.recordFault(p1)
-	if nilRtx.Panics() != nil {
+	if nilRtx.copyFaults() != nil {
 		t.Error("nil Context Panics() should be nil")
 	}
 }
@@ -133,8 +133,8 @@ func TestRun_recordedErrorsFireOnError(t *testing.T) {
 	exec := func(onRun func(rtx *Context)) (log []string, code int, funneled error, drained []error, fired bool) {
 		h := &testHandlers{log: &log, onRun: onRun}
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithOnErrorFn(func(_ context.Context, rtx *Context, err error) {
-			fired, funneled, drained = true, err, rtx.Errors()
+		p.WithOnErrorFn(func(_ context.Context, _ *Context, errs []error) {
+			fired, funneled, drained = true, errors.Join(errs...), errs
 		})
 		code, _ = p.run(p.args)
 		return
@@ -150,7 +150,7 @@ func TestRun_recordedErrorsFireOnError(t *testing.T) {
 			t.Fatal("OnError did not fire on recorded errors")
 		}
 		if len(drained) != 2 {
-			t.Errorf("rtx.Errors() drained %d, want 2", len(drained))
+			t.Errorf("rtx.copyErrors() drained %d, want 2", len(drained))
 		}
 		if !errors.Is(funneled, ErrUsage) {
 			t.Error("joined err lost errA's ErrUsage tag")
@@ -237,7 +237,7 @@ func TestDefaultExitCode(t *testing.T) {
 }
 
 // TestRun_defaultOnError_classifiesAndPrints is EH3's end-to-end golden: with no
-// custom funnel, the default drains rtx.Errors(), prints one program-name-
+// custom funnel, the default drains rtx.copyErrors(), prints one program-name-
 // prefixed line per error to stderr, and exits by the most severe category.
 func TestRun_defaultOnError_classifiesAndPrints(t *testing.T) {
 	cases := []struct {

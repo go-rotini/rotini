@@ -140,8 +140,8 @@ func TestRun_mustGetRoutesToOnPanic(t *testing.T) {
 		panic(&ServiceError{Key: "no-such-service"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithOnPanicFn(func(_ context.Context, rtx *Context, pe *PanicError) {
-		seen = pe
+	p.WithOnPanicFn(func(_ context.Context, rtx *Context, panics []*PanicError) {
+		seen = panics[0]
 		rtx.SignalExit(7)
 	})
 
@@ -170,7 +170,7 @@ func TestRun_onPanicFnWithoutExitStillFails(t *testing.T) {
 		panic(&ServiceError{Key: "missing"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ *PanicError) {}) // no rtx.Exit
+	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ []*PanicError) {}) // no rtx.Exit
 	if code, _ := p.run(p.args); code != ExitInternal {
 		t.Errorf("run() = %d, want %d (a fault is never masked to 0)", code, ExitInternal)
 	}
@@ -328,7 +328,7 @@ func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 	var log []string
 	var seen *PanicError
 	p, _, _ := newTestProgram(&panicThenHardExit{log: &log}, []string{"run"})
-	p.WithOnPanicFn(func(_ context.Context, _ *Context, pe *PanicError) { seen = pe })
+	p.WithOnPanicFn(func(_ context.Context, _ *Context, panics []*PanicError) { seen = panics[0] })
 
 	code, err := p.run(p.args)
 
@@ -422,8 +422,8 @@ func TestRun_panicRunsTeardownThenOnPanicLast(t *testing.T) {
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "Run", do: func(*Context) { panic("boom") }},
 	}}, []string{"run"})
-	p.WithOnPanicFn(func(_ context.Context, rtx *Context, pe *PanicError) {
-		log = append(log, "onPanicFn:"+pe.Error())
+	p.WithOnPanicFn(func(_ context.Context, rtx *Context, panics []*PanicError) {
+		log = append(log, "onPanicFn:"+panics[0].Error())
 		rtx.SignalExit(2)
 	})
 	code, _ := p.run(p.args)
@@ -449,7 +449,7 @@ func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 		"run": {at: "PostRun", do: func(*Context) { panic("teardown-boom") }},
 	}}, []string{"run"})
 	calls := 0
-	p.WithOnPanicFn(func(_ context.Context, rtx *Context, _ *PanicError) {
+	p.WithOnPanicFn(func(_ context.Context, rtx *Context, _ []*PanicError) {
 		calls++
 		rtx.SignalExit(1)
 	})
