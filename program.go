@@ -479,7 +479,7 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 // its own via [Program.WithOnErrorFn].
 func (p *Program) defaultOnError(_ context.Context, _ *Context, errs []error) {
 	for _, e := range errs {
-		fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, e)
+		fmt.Fprintf(p.stderr, "Error: %s\n", e.Error())
 	}
 }
 
@@ -495,7 +495,7 @@ func (p *Program) defaultOnSuccess(_ context.Context, _ *Context, results []stri
 // prefixed); the exit code is unchanged (warnings are non-fatal).
 func (p *Program) defaultOnWarning(_ context.Context, _ *Context, warnings []error) {
 	for _, w := range warnings {
-		fmt.Fprintf(p.stderr, "%s: warning: %v\n", p.def.Name, w)
+		fmt.Fprintf(p.stderr, "Warning: %s\n", w.Error())
 	}
 }
 
