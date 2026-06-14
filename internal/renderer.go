@@ -32,7 +32,7 @@ var (
 	templateConf string
 	//go:embed templates/main.go.tmpl
 	templateMain string
-	//go:embed templates/handler_stub.go.tmpl
+	//go:embed templates/handler.go.tmpl
 	templateHandlerStub string
 	//go:embed templates/handlers.go.tmpl
 	templateHandlers string
@@ -177,7 +177,7 @@ type templateHandlerData struct {
 }
 
 func renderHandlerStubFile(pkg, handlersType string) ([]byte, error) {
-	return renderGoFile("handler_stub", templateHandlerStub, templateHandlerData{
+	return renderGoFile("handler", templateHandlerStub, templateHandlerData{
 		Package:      pkg,
 		HandlersType: handlersType,
 	})
