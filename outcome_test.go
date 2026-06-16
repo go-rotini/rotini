@@ -40,26 +40,67 @@ func TestRun_recordWarning_firesOnWarning_nonFatal(t *testing.T) {
 }
 
 // TestRun_outcomeOrderAndCoexistence: a run that records a warning, a success,
-// AND an error fires all three funnels in order (Warning → Success → Error), and
-// the error's category drives the exit (D5/D6).
+// AND an error fires all three funnels in order (Warning → Success → Error); the
+// OnError funnel owns the exit code (here it chooses 1), and success/warning never
+// change it.
 func TestRun_outcomeOrderAndCoexistence(t *testing.T) {
 	var log []string
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordWarning(errors.New("w"))
 		rtx.RecordSuccess("s")
-		rtx.RecordError(UsageError(errors.New("e"))) // usage → exit 2
+		rtx.RecordError(UsageError(errors.New("e")))
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	p.WithOnWarningFn(func(_ context.Context, _ *Context, _ []error) { log = append(log, "warning") })
 	p.WithOnSuccessFn(func(_ context.Context, _ *Context, _ []string) { log = append(log, "success") })
-	p.WithOnErrorFn(func(_ context.Context, _ *Context, _ []error) { log = append(log, "error") })
+	p.WithOnErrorFn(func(_ context.Context, rtx *Context, _ []error) { log = append(log, "error"); rtx.SignalExit(1) })
 
 	code, _ := p.run(p.args)
 	if want := []string{"warning", "success", "error"}; strings.Join(log, ",") != strings.Join(want, ",") {
 		t.Errorf("funnel order = %v, want %v", log, want)
 	}
 	if code != 1 {
-		t.Errorf("code = %d, want %d (the error's category, success notwithstanding)", code, 1)
+		t.Errorf("code = %d, want %d (the OnError funnel chose it; success/warning never change it)", code, 1)
+	}
+}
+
+// TestRun_errorFloor_isDefaultFunnelsNotRuntime pins the hybrid exit-code floor for
+// the ERROR channel: the DEFAULT OnError floors a recorded error to 1 (it calls
+// rtx.SignalExit(1)), but a CUSTOM OnError OWNS the code — one that omits SignalExit
+// exits 0 on the same recorded error, and one that sets a code gets exactly that.
+func TestRun_errorFloor_isDefaultFunnelsNotRuntime(t *testing.T) {
+	rec := func(rtx *Context) { rtx.RecordError(errors.New("boom")) }
+
+	// Default OnError → floors to 1 (the default funnel owns the floor now).
+	pd, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
+	if code, _ := pd.run(pd.args); code != 1 {
+		t.Errorf("default OnError: code = %d, want 1 (default funnel floors)", code)
+	}
+
+	// Custom OnError that omits SignalExit → exits 0 (the gap this change closes).
+	pc, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
+	pc.WithOnErrorFn(func(_ context.Context, _ *Context, _ []error) {}) // reports nothing, sets no code
+	if code, _ := pc.run(pc.args); code != 0 {
+		t.Errorf("custom OnError without SignalExit: code = %d, want 0 (custom funnel owns the code)", code)
+	}
+
+	// Custom OnError that DOES SignalExit → that code wins.
+	ps, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
+	ps.WithOnErrorFn(func(_ context.Context, rtx *Context, _ []error) { rtx.SignalExit(7) })
+	if code, _ := ps.run(ps.args); code != 7 {
+		t.Errorf("custom OnError with SignalExit(7): code = %d, want 7", code)
+	}
+}
+
+// TestRun_faultFloor_isRuntimeNotFunnel pins the other half of the hybrid: the FAULT
+// floor is NON-overridable. A custom OnPanic that omits SignalExit STILL exits
+// non-zero — a recovered panic / detected fault is the runtime's to floor, never the
+// funnel's to mask to 0.
+func TestRun_faultFloor_isRuntimeNotFunnel(t *testing.T) {
+	p, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: func(_ *Context) { panic("kaboom") }}, []string{"run"})
+	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ []*PanicError) {}) // reports nothing, sets no code
+	if code, _ := p.run(p.args); code == 0 {
+		t.Error("custom OnPanic without SignalExit exited 0; a fault must stay non-zero (runtime floor)")
 	}
 }
 

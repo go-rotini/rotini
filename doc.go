@@ -74,7 +74,7 @@
 // Recording is non-halting — a handler records any number of times across any
 // hook, then stops independently with [Context.SignalExit] (graceful, teardown
 // runs) or [Context.Exit] (skip teardown), or simply returns. Each funnel fires
-// only when its channel is non-empty, in the order warning, success, error,
+// only when its channel is non-empty, in the fixed order warning, success, error,
 // panic; a run that records nothing and never faults fires none of them (a
 // silent success). The opt-in model holds: an outcome is reported only because
 // the handler chose to record it (panic excepted — it is the runtime's final
@@ -89,16 +89,22 @@
 // forward=true runs teardown THEN re-panics; recover=false with forward=false
 // panics immediately, with the original stack.
 //
-// Exit code: a handler's (or a custom funnel's) explicit [Context.SignalExit] or
-// [Context.Exit] wins (first non-zero). Otherwise any recorded error or fault
-// exits 1 (a recorded/faulted run never exits 0); success and warning never
-// change it. rotini holds no named exit-code constants — a CLI that wants other
-// codes (e.g. a category-based map) sets them in its funnels.
+// Exit code: a handler's (or a funnel's) explicit [Context.SignalExit] or
+// [Context.Exit] wins (first non-zero). The two floors differ by owner. The ERROR
+// floor belongs to the DEFAULT OnError funnel — it calls [Context.SignalExit](1),
+// so a recorded error exits 1 by default, but a CUSTOM [Program.WithOnErrorFn] that
+// omits SignalExit may legitimately exit 0 (the end-user's own error channel is the
+// end-user's policy). The FAULT floor belongs to the RUNTIME and is not overridable:
+// a recovered panic or a rotini-detected fault always exits non-zero, never the
+// funnel's to mask to 0. Success and warning never change the code. rotini holds no
+// named exit-code constants — a CLI that wants other codes (e.g. a category-based
+// map) sets them in its funnels.
 //
-// The defaults print one clean program-name-prefixed line per item — successes
-// to stdout, warnings and errors and faults to stderr — and a [*PanicError]'s
-// stack rides along for an errors.As but is never printed. So a generated
-// handler carries ZERO reporting code: it records and stops, and the runtime
+// The defaults print one clean severity-labeled line per item — successes to
+// stdout, warnings ("Warning:"), errors ("Error:") and faults ("Fatal Error:") to
+// stderr — and a [*PanicError]'s stack rides along for an errors.As but is never
+// printed. So a generated handler carries ZERO reporting code: it records and
+// stops, and the runtime
 // reports.
 //
 // Every error and fault class is both [errors.Is]-able against the [ErrUsage] /

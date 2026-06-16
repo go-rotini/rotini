@@ -582,11 +582,15 @@ func asFault(err error) *PanicError { return &PanicError{Value: err} }
 // code. It is shared by the dispatch tail and the resolve/wiring/remote early
 // returns, so every run path reports through the same funnels.
 //
-// Exit code: a handler's (or a custom funnel's) explicit rtx.SignalExit/rtx.Exit
-// wins (first non-zero, already in rtx.exitCode). Otherwise any recorded error
-// or captured fault exits 1 — a run that recorded an error or faulted never
-// exits 0. Success and warning never change the code. rotini holds no named
-// exit-code constants; a CLI that wants other codes sets them in its funnels.
+// Exit code: a handler's (or a funnel's) explicit rtx.SignalExit/rtx.Exit wins
+// (first non-zero, already in rtx.exitCode). The two floors differ by owner: the
+// ERROR floor is the default OnError funnel's (defaultOnError calls SignalExit(1),
+// so a CUSTOM OnError can omit it and exit 0 on a recorded error — the end-user's
+// channel), while the FAULT floor is the runtime's and stays here — a captured
+// fault (a recovered panic, a wiring/resolver/MustGet fault) always exits non-zero
+// and is never the funnel's to mask to 0. Success and warning never change the
+// code. rotini holds no named exit-code constants; a CLI that wants other codes
+// sets them in its funnels.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	// Snapshot the private channels once; the records surface only here, as the
 	// slice each funnel receives — there is no public drainable accessor.
@@ -624,7 +628,12 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 		fn(ctx, rtx, faults)
 	}
 
-	if rtx.exitCode == 0 && (len(errs) > 0 || len(faults) > 0) {
+	// The FAULT floor stays here, in the runtime: a recovered panic or rotini-detected
+	// fault is never the funnel's to mask to 0 (a crash exits non-zero, period). The ERROR
+	// floor, by contrast, is owned by defaultOnError (which calls rtx.SignalExit(1)), so a
+	// CUSTOM OnError that omits SignalExit may legitimately exit 0 on a recorded error — the
+	// end-user's own error channel, the end-user's call.
+	if rtx.exitCode == 0 && len(faults) > 0 {
 		rtx.exitCode = 1
 	}
 	return rtx.exitCode, joinOutcome(errs, faults)
@@ -646,14 +655,19 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 }
 
 // defaultOnError is the OnError funnel used when the program supplies none: it
-// prints one clean line per recorded error to stderr (program-name prefixed).
-// The exit code is [settle]'s to set (1). Each rotini error type
-// renders a single non-leaky line; a CLI that wants richer reporting supplies
-// its own via [Program.WithOnErrorFn].
-func (p *Program) defaultOnError(_ context.Context, _ *Context, errs []error) {
+// prints one clean line per recorded error to stderr (each labeled "Error:") and
+// then OWNS the error floor — it calls rtx.SignalExit(1), so a recorded error exits
+// non-zero by default. Because the floor lives HERE (not in [settle]), a CUSTOM
+// [Program.WithOnErrorFn] that omits SignalExit may exit 0 on a recorded error: the
+// end-user's error channel is the end-user's policy. (Faults stay non-maskable — see
+// [Program.WithOnPanicFn]/[settle].) Each rotini error type renders a single
+// non-leaky line; a CLI that wants richer reporting or a different code supplies its
+// own funnel.
+func (p *Program) defaultOnError(_ context.Context, rtx *Context, errs []error) {
 	for _, e := range errs {
 		fmt.Fprintf(p.stderr, "Error: %s\n", e.Error())
 	}
+	rtx.SignalExit(1)
 }
 
 // defaultOnSuccess prints each recorded success to stdout; the exit code is

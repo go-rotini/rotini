@@ -122,10 +122,12 @@ func TestContext_Panics_api(t *testing.T) {
 	}
 }
 
-// TestRun_recordedErrorsFireOnError pins EH1's firing contract and the three
-// locked edges: OnError fires iff ≥1 error was recorded (edge 1); record-
-// without-exit still fires it (edge 2); recorded errors floor a 0 code to 1
-// (edge 3); and the SignalExit/Exit choice still governs teardown.
+// TestRun_recordedErrorsFireOnError pins EH1's firing contract and the locked
+// edges, with a CUSTOM OnError funnel: OnError fires iff ≥1 error was recorded
+// (edge 1); record-without-exit still fires it (edge 2); a custom funnel OWNS the
+// exit code — the error floor is the DEFAULT funnel's, so a custom funnel that omits
+// SignalExit exits 0 (edge 3, post-hybrid); and the SignalExit/Exit choice still
+// governs teardown.
 func TestRun_recordedErrorsFireOnError(t *testing.T) {
 	errA := UsageError(errors.New("bad flag")) // carries ErrUsage through the join
 	errB := errors.New("also bad")
@@ -179,15 +181,15 @@ func TestRun_recordedErrorsFireOnError(t *testing.T) {
 		}
 	})
 
-	t.Run("record without exit: still fires, code floored to 1 (edges 2,3)", func(t *testing.T) {
+	t.Run("record without exit + custom funnel: fires, code stays 0 (custom funnel owns it — edges 2,3)", func(t *testing.T) {
 		log, code, _, _, fired := exec(func(rtx *Context) {
-			rtx.RecordError(errB) // no SignalExit/Exit
+			rtx.RecordError(errB) // no SignalExit/Exit; the custom OnError (in exec) sets no code either
 		})
 		if !fired {
 			t.Fatal("OnError did not fire on record-without-exit (edge 2)")
 		}
-		if code != 1 {
-			t.Errorf("code = %d, want 1 (floored — edge 3)", code)
+		if code != 0 {
+			t.Errorf("code = %d, want 0 — the error floor is the DEFAULT OnError's; a custom funnel that omits SignalExit exits 0 (edge 3)", code)
 		}
 		if !contains(log, "run.PostRun") {
 			t.Errorf("teardown should run when no exit was called: %v", log)
