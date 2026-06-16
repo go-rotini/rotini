@@ -57,7 +57,8 @@ func newSigProgram(h sigRec) *Program {
 // The default signal handler (installed because no WithContext is supplied) must, on the
 // first signal, cancel the run context AND halt the lifecycle like rtx.Exit: a cooperative
 // handler observes the cancellation and returns, every begun teardown hook still runs, and
-// the run exits with the conventional signal code (130 here, since SIGUSR1 is not SIGTERM).
+// the run exits with the conventional signal code (128+signum — for the benign SIGUSR1
+// stand-in that is its own number, not 130).
 func TestDefaultSignals_gracefulShutdownRunsTeardown(t *testing.T) {
 	defer swapTrapSignals(syscall.SIGUSR1)()
 
@@ -73,8 +74,8 @@ func TestDefaultSignals_gracefulShutdownRunsTeardown(t *testing.T) {
 
 	code, _ := newSigProgram(h).run(nil)
 
-	if code != 130 {
-		t.Errorf("exit code = %d, want 130 (graceful signal shutdown)", code)
+	if want := 128 + int(syscall.SIGUSR1); code != want {
+		t.Errorf("exit code = %d, want %d (128+signum graceful signal shutdown)", code, want)
 	}
 	for _, hook := range []string{"Run", "PostRun", "CascadingPostRun"} {
 		if !contains(log, hook) {
@@ -144,4 +145,120 @@ func TestDefaultSignals_withContextOptsOut(t *testing.T) {
 
 	newSigProgram(h).WithContext(context.Background()).run(nil)
 	<-delivered
+}
+
+// WithoutSignalHandling suppresses the trap WITHOUT surrendering the context: rotini still
+// owns a cancelable run context (no WithContext here), but installs no signal.Notify, so a
+// trapped signal does not cancel the run.
+func TestWithoutSignalHandling_suppressesTrap(t *testing.T) {
+	defer swapTrapSignals(syscall.SIGUSR1)()
+	// Ignore SIGUSR1 at the OS level so the self-kill is a no-op rather than terminating the
+	// process (default SIGUSR1 disposition is terminate, and rotini installs no handler here).
+	signal.Ignore(syscall.SIGUSR1)
+	defer signal.Reset(syscall.SIGUSR1)
+
+	delivered := make(chan struct{})
+	h := sigRec{log: &[]string{}, fire: func(ctx context.Context) {
+		_ = syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
+		select {
+		case <-ctx.Done():
+			t.Error("WithoutSignalHandling must install no trap, yet the run context was canceled")
+		case <-time.After(150 * time.Millisecond):
+			// expected: no trap, so no cancellation
+		}
+		close(delivered)
+	}}
+
+	newSigProgram(h).WithoutSignalHandling().run(nil)
+	<-delivered
+}
+
+// WithSignals forces the trap on for a custom set (no swapTrapSignals — the set is explicit),
+// even though no WithContext was supplied. The graceful action and 128+signum exit hold.
+func TestWithSignals_trapsCustomSet(t *testing.T) {
+	var log []string
+	h := sigRec{log: &log, fire: func(ctx context.Context) {
+		_ = syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+			t.Error("WithSignals(SIGUSR1) did not trap the signal")
+		}
+	}}
+
+	code, _ := newSigProgram(h).WithSignals(syscall.SIGUSR1).run(nil)
+
+	if want := 128 + int(syscall.SIGUSR1); code != want {
+		t.Errorf("exit code = %d, want %d (128+signum)", code, want)
+	}
+	for _, hook := range []string{"Run", "PostRun", "CascadingPostRun"} {
+		if !contains(log, hook) {
+			t.Errorf("teardown hook %q did not run; log=%v", hook, log)
+		}
+	}
+}
+
+// WithSignals atop a WithContext context: rotini derives a cancelable CHILD of the caller's
+// context to drive the trap (the two axes are independent — a supplied context no longer
+// forces the trap off). The signal cancels the child, the lifecycle halts gracefully, and
+// teardown runs.
+func TestWithSignals_withContext_derivesChildAndTraps(t *testing.T) {
+	var log []string
+	h := sigRec{log: &log, fire: func(ctx context.Context) {
+		_ = syscall.Kill(syscall.Getpid(), syscall.SIGUSR1)
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+			t.Error("WithSignals atop WithContext did not trap (no child cancel drove the halt)")
+		}
+	}}
+
+	code, _ := newSigProgram(h).WithContext(context.Background()).WithSignals(syscall.SIGUSR1).run(nil)
+
+	if want := 128 + int(syscall.SIGUSR1); code != want {
+		t.Errorf("exit code = %d, want %d", code, want)
+	}
+	if !contains(log, "CascadingPostRun") {
+		t.Errorf("teardown did not run after a signal under WithContext+WithSignals; log=%v", log)
+	}
+}
+
+// The derived child stays a CHILD: canceling the caller's parent context still propagates
+// down and halts the run (parent→child cancellation), proving rotini never inverts the
+// hierarchy. No signal is raised here — only the parent cancel.
+func TestWithSignals_withContext_parentCancelStillHalts(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	var log []string
+	h := sigRec{log: &log, fire: func(ctx context.Context) {
+		cancel() // cancel the PARENT; must reach rotini's derived child
+		select {
+		case <-ctx.Done():
+		case <-time.After(2 * time.Second):
+			t.Error("canceling the parent context did not propagate to rotini's derived child")
+		}
+	}}
+
+	newSigProgram(h).WithContext(parent).WithSignals(syscall.SIGUSR1).run(nil)
+
+	if !contains(log, "CascadingPostRun") {
+		t.Errorf("teardown did not run after parent cancel; log=%v", log)
+	}
+}
+
+// signalExitCode maps any trapped signal to 128+signum (SIGINT→130, SIGTERM→143,
+// SIGHUP→129), not just the two defaults — the generalization WithSignals relies on.
+func TestSignalExitCode_mapping(t *testing.T) {
+	cases := []struct {
+		sig  syscall.Signal
+		want int
+	}{
+		{syscall.SIGINT, 130},
+		{syscall.SIGTERM, 143},
+		{syscall.SIGHUP, 129},
+	}
+	for _, tc := range cases {
+		if got := signalExitCode(tc.sig); got != tc.want {
+			t.Errorf("signalExitCode(%v) = %d, want %d", tc.sig, got, tc.want)
+		}
+	}
 }

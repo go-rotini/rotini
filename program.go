@@ -12,24 +12,39 @@ import (
 	"syscall"
 )
 
-// trapSignals are the OS signals rotini's default handler traps when the caller does
-// not supply its own context (see [Program.WithContext]). It is a package var, not a
-// constant, so a white-box test can swap in a benign signal. The default action on the
-// first signal is a graceful shutdown (cancel the run context + halt the lifecycle so
-// teardown runs); a second signal forces exit with forceExitCode.
+// trapSignals are the OS signals rotini's handler traps when signal handling is active —
+// by default whenever the caller supplies no context, and always under [Program.WithSignals]
+// (which may also override the set). It is a package var, not a constant, so a white-box
+// test can swap in a benign signal. The default action on the first signal is a graceful
+// shutdown (cancel the run context + halt the lifecycle so teardown runs); a second signal
+// forces exit with forceExitCode.
 var trapSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
 
 // forceExitCode is the status a second signal exits with (128 + SIGINT), the
 // conventional "interrupted" code.
 const forceExitCode = 130
 
-// signalExitCode maps a trapped signal to its conventional exit status (128 + signum).
+// signalExitCode maps a trapped signal to its conventional exit status, 128 + signum
+// (SIGINT→130, SIGTERM→143, SIGHUP→129, …). A signal carrying no numeric value falls back
+// to forceExitCode.
 func signalExitCode(s os.Signal) int {
-	if s == syscall.SIGTERM {
-		return 143 // 128 + 15
+	if sig, ok := s.(syscall.Signal); ok {
+		return 128 + int(sig)
 	}
-	return forceExitCode // 128 + 2 (SIGINT); also the default for any other trapped signal
+	return forceExitCode
 }
+
+// signalTrapMode resolves whether rotini installs its signal trap, decoupling that choice
+// from context ownership. The zero value is signalAuto — trap iff the caller supplied no
+// context (the historical behavior). [Program.WithoutSignalHandling] forces it off;
+// [Program.WithSignals] forces it on (with a custom signal set).
+type signalTrapMode int
+
+const (
+	signalAuto signalTrapMode = iota // trap iff no WithContext (default)
+	signalOff                        // WithoutSignalHandling(): never trap
+	signalOn                         // WithSignals(...): always trap
+)
 
 // ExitCode returns a context-cancellation cause that tells rotini which process
 // exit code to use when that cancellation halts the run. Pass it to the cancel
@@ -93,6 +108,11 @@ type Program struct {
 	// panicRecover: when true (default), a hook panic is recovered and routed to OnPanic; when
 	// false, hooks run unguarded so a panic propagates raw.
 	panicRecover bool
+	// signalMode resolves whether the SIGINT/SIGTERM trap is installed, INDEPENDENTLY of
+	// whether rotini owns the context (signalAuto = trap iff no WithContext). signalSet is the
+	// signals trapped when on; empty falls back to trapSignals.
+	signalMode signalTrapMode
+	signalSet  []os.Signal
 }
 
 // NewProgram wires a generated program's command tree (the rtg [Definition]) and
@@ -218,13 +238,50 @@ func (p *Program) WithArgs(args []string) *Program {
 // `MustGet[context.CancelCauseFunc](rtx, "cancel")(rotini.ExitCode(3))` — or, to stop without
 // canceling the context (leaving it live for teardown), use [Context.SignalExit]/[Context.Exit].
 //
-// Supplying a context also opts OUT of rotini's default signal handling: the caller is
-// declaring that it owns the run's lifecycle (including any Interrupt/SIGTERM trapping it
-// wants, e.g. via [signal.NotifyContext] on the context it passes). With no WithContext,
-// rotini installs its default trap — see [Program.Execute].
+// By default, supplying a context also opts OUT of rotini's signal trap (the caller owns
+// signal handling — e.g. via [signal.NotifyContext] on the context it passes, the
+// recommended path for graceful user-owned shutdown, since the caller then holds the cancel
+// that halts the run). This is the AUTO policy, not a hard coupling: [Program.WithSignals]
+// re-enables the trap on top of a supplied context (rotini derives a cancelable child to
+// drive it), and [Program.WithoutSignalHandling] suppresses the trap without a context. With
+// no WithContext, rotini installs its default trap — see [Program.Execute].
 func (p *Program) WithContext(ctx context.Context) *Program {
 	if ctx != nil {
 		p.ctx = ctx
+	}
+	return p
+}
+
+// WithoutSignalHandling suppresses rotini's default SIGINT/SIGTERM trap WITHOUT requiring
+// the caller to surrender the context: rotini still owns a cancelable run context, but
+// installs no signal.Notify, so the program's own signal handling (in main or a handler) is
+// the only one. It is the seam for "I own signals" in the default (rotini-owned-context)
+// mode — note Go's signal.Notify is ADDITIVE, so without this opt-out a caller's own handler
+// would merely STACK with rotini's (both fire, racing to exit), not replace it.
+//
+// Caveat: in this mode rotini owns the context and exposes no cancel, so a signal handler set
+// up here has no rotini-provided way to halt the run GRACEFULLY (it would os.Exit itself,
+// skipping teardown). For graceful user-owned shutdown prefer [Program.WithContext] with
+// [signal.NotifyContext], so the caller holds the cancel that halts the run. It returns the
+// receiver to chain.
+func (p *Program) WithoutSignalHandling() *Program {
+	p.signalMode = signalOff
+	return p
+}
+
+// WithSignals installs rotini's graceful trap for the given signals, INDEPENDENTLY of
+// whether the caller supplied a context — it forces the trap on (the default set is
+// os.Interrupt + syscall.SIGTERM; pass others, e.g. syscall.SIGHUP, to trap them too). When
+// a [Program.WithContext] context is also supplied, rotini derives a cancelable CHILD of it
+// to drive the trap — the caller's context, deadline, and values still flow through, and
+// rotini never cancels the caller's own context (only its child). The action is fixed: the
+// first signal cancels the run context for a graceful halt (teardown runs, exit 128+signum),
+// a second forces exit. An empty signal list is ignored (use [Program.WithoutSignalHandling]
+// to opt out). It returns the receiver to chain.
+func (p *Program) WithSignals(sigs ...os.Signal) *Program {
+	if len(sigs) > 0 {
+		p.signalMode = signalOn
+		p.signalSet = sigs
 	}
 	return p
 }
@@ -381,13 +438,15 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 // code via the program's exit action ([os.Exit] by default; override with
 // [Program.WithExit] to capture the code or embed without terminating).
 //
-// Unless the caller supplied its own context ([Program.WithContext]), Execute installs
-// rotini's default signal handling: the first os.Interrupt or syscall.SIGTERM cancels the
-// run context AND halts the lifecycle like [Context.SignalExit] — forward progress stops and
-// every begun teardown hook still runs — exiting 130 (SIGINT) or 143 (SIGTERM). A second
-// signal forces exit immediately (code 130), skipping any remaining teardown, so a handler
-// stuck ignoring the context can always be interrupted. A caller that wants different
-// behavior supplies its own context and traps signals there.
+// By default (no [Program.WithContext]) Execute installs rotini's signal trap: the first
+// os.Interrupt or syscall.SIGTERM cancels the run context AND halts the lifecycle like
+// [Context.SignalExit] — forward progress stops and every begun teardown hook still runs —
+// exiting 128+signum (130 for SIGINT, 143 for SIGTERM). A second signal forces exit
+// immediately (code 130), skipping any remaining teardown, so a handler stuck ignoring the
+// context can always be interrupted. The trap is independently controllable:
+// [Program.WithoutSignalHandling] suppresses it (rotini still owns the context),
+// [Program.WithSignals] forces it on with a custom signal set (even atop a supplied
+// context), and [Program.WithContext] alone defers signal handling to the caller.
 func (p *Program) Execute() error {
 	code, err := p.run(p.args)
 	p.exit(code)
@@ -409,20 +468,43 @@ func (p *Program) run(argv []string) (int, error) {
 		return 0, nil
 	}
 
-	// The effective run context. When the caller supplied none (no WithContext), rotini owns
-	// it: a cancelable context whose cancellation — by the default signal trap — drives graceful
-	// shutdown. When the caller supplied a context, it is used as-is and rotini installs no trap:
-	// the caller owns cancellation and signal handling (cancel it with [ExitCode] for a code). A
-	// canceled run context halts the lifecycle either way — see [Program.dispatch].
+	// The effective run context, and whether rotini traps signals — two INDEPENDENT axes (see
+	// [Program.WithSignals] / [Program.WithoutSignalHandling]). rotini's working context is
+	// always a CHILD it can cancel when it must drive the trap: derived from the caller's
+	// context when one was supplied, else from context.Background(). In pure pass-through mode
+	// (a WithContext context, no trap) the caller's context is used as-is, so handlers see
+	// exactly what was passed; rotini still halts on its cancellation by observing ctx.Err().
+	// A canceled run context halts the lifecycle either way — see [Program.dispatch].
 	ctx := p.ctx
-	trapped := ctx == nil
-	if trapped {
-		var cancel context.CancelCauseFunc
-		ctx, cancel = context.WithCancelCause(context.Background())
-		defer cancel(nil)
+	trap := ctx == nil // signalAuto: trap iff the caller supplied no context
+	switch p.signalMode {
+	case signalOff:
+		trap = false
+	case signalOn:
+		trap = true
+	}
 
+	// Derive a cancelable child only when rotini needs to be the canceler (the trap) or when
+	// it owns the context outright (no WithContext); otherwise the caller's context passes
+	// through untouched.
+	var cancel context.CancelCauseFunc
+	switch {
+	case ctx == nil:
+		ctx, cancel = context.WithCancelCause(context.Background())
+	case trap:
+		ctx, cancel = context.WithCancelCause(ctx)
+	}
+	if cancel != nil {
+		defer cancel(nil)
+	}
+
+	if trap {
+		sigs := p.signalSet
+		if len(sigs) == 0 {
+			sigs = trapSignals
+		}
 		sigCh := make(chan os.Signal, 2)
-		signal.Notify(sigCh, trapSignals...)
+		signal.Notify(sigCh, sigs...)
 		defer signal.Stop(sigCh)
 
 		done := make(chan struct{})

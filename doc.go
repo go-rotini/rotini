@@ -48,8 +48,9 @@
 // fault is reported once, after teardown, through the outcome funnels (see
 // Outcomes below), and exits 1 by default. The runtime's only built-in
 // behaviors, documented as the exceptions they are: a default SIGINT/SIGTERM
-// trap (suppressed by [Program.WithContext]), the hidden __complete entry
-// the generated shell scripts call, and os.Exit as the default exit action
+// trap (controllable via [Program.WithoutSignalHandling] / [Program.WithSignals],
+// or deferred to the caller by [Program.WithContext]), the hidden __complete
+// entry the generated shell scripts call, and os.Exit as the default exit action
 // (capture it with [Program.WithExit]).
 //
 // # Outcomes
