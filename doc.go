@@ -79,6 +79,15 @@
 // the handler chose to record it (panic excepted — it is the runtime's final
 // fallback so a recovered panic still prints clean, never a raw stack).
 //
+// Two orthogonal knobs tune the panic path; a CLI keeps both defaults.
+// [Program.WithPanicForward] (default true) decides whether teardown runs after a
+// hook panics — true unwinds every begun hook's teardown (cleanup on failure, like
+// a `defer`), false hard-stops. [Program.WithPanicRecover] (default true) decides
+// where the panic lands — true funnels it to OnPanic so consumers never see a raw
+// stack, false re-raises it raw to the caller. They compose: recover=false with
+// forward=true runs teardown THEN re-panics; recover=false with forward=false
+// panics immediately, with the original stack.
+//
 // Exit code: a handler's (or a custom funnel's) explicit [Context.SignalExit] or
 // [Context.Exit] wins (first non-zero). Otherwise any recorded error or fault
 // exits 1 (a recorded/faulted run never exits 0); success and warning never
