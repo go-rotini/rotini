@@ -3,6 +3,8 @@ package rotini
 import (
 	"bytes"
 	"context"
+	"errors"
+	"slices"
 	"testing"
 )
 
@@ -52,5 +54,95 @@ func TestProgram_WithContext_nilIgnored(t *testing.T) {
 	p.WithContext(nil)
 	if p.ctx != nil {
 		t.Error("WithContext(nil) should be a no-op, leaving the default (nil) context")
+	}
+}
+
+// lifeRec records the order of lifecycle hooks and can run a side effect (e.g.
+// cancel the context) inside CascadingPreRun.
+type lifeRec struct {
+	order             *[]string
+	onCascadingPreRun func()
+}
+
+func (h lifeRec) CascadingPreRun(context.Context, *Context) {
+	*h.order = append(*h.order, "CascadingPreRun")
+	if h.onCascadingPreRun != nil {
+		h.onCascadingPreRun()
+	}
+}
+func (h lifeRec) PreRun(context.Context, *Context)  { *h.order = append(*h.order, "PreRun") }
+func (h lifeRec) Run(context.Context, *Context)     { *h.order = append(*h.order, "Run") }
+func (h lifeRec) PostRun(context.Context, *Context) { *h.order = append(*h.order, "PostRun") }
+func (h lifeRec) CascadingPostRun(context.Context, *Context) {
+	*h.order = append(*h.order, "CascadingPostRun")
+}
+
+type lifeAgg struct{ h lifeRec }
+
+func (a lifeAgg) Main() CommandHandlers { return a.h }
+
+func newLifeProgram(h lifeRec) *Program {
+	p := NewProgram(Definition{Name: "app", Handler: "Main"}, lifeAgg{h})
+	p.stdout, p.stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	return p
+}
+
+// A non-canceled WithContext context runs the full lifecycle (regression guard
+// for the symmetric-halt change).
+func TestProgram_WithContext_noCancelRunsFullLifecycle(t *testing.T) {
+	var order []string
+	p := newLifeProgram(lifeRec{order: &order}).WithContext(context.Background())
+	if code, _ := p.run(nil); code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	want := []string{"CascadingPreRun", "PreRun", "Run", "PostRun", "CascadingPostRun"}
+	if !slices.Equal(order, want) {
+		t.Errorf("hook order = %v, want %v", order, want)
+	}
+}
+
+// Canceling a caller-owned context mid-lifecycle halts forward progress (no
+// further setup/PreRun/Run starts) but still runs teardown, and the ExitCode
+// cause sets the process exit code.
+func TestProgram_WithContext_cancelHaltsForwardRunsTeardown(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	var order []string
+	h := lifeRec{order: &order, onCascadingPreRun: func() { cancel(ExitCode(3)) }}
+	code, err := newLifeProgram(h).WithContext(ctx).run(nil)
+	if err != nil {
+		t.Fatalf("run err = %v, want nil (cancel is a clean stop, not an error)", err)
+	}
+	if code != 3 {
+		t.Errorf("exit code = %d, want 3 (from the ExitCode cancellation cause)", code)
+	}
+	want := []string{"CascadingPreRun", "CascadingPostRun"}
+	if !slices.Equal(order, want) {
+		t.Errorf("hook order = %v, want %v (forward halted, teardown ran)", order, want)
+	}
+}
+
+// Canceling without an ExitCode cause halts cleanly and exits 0 (the code falls
+// through to the normal resolution).
+func TestProgram_WithContext_cancelWithoutCodeExitsZero(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	var order []string
+	h := lifeRec{order: &order, onCascadingPreRun: cancel}
+	code, _ := newLifeProgram(h).WithContext(ctx).run(nil)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 (plain cancel, no ExitCode cause)", code)
+	}
+	want := []string{"CascadingPreRun", "CascadingPostRun"}
+	if !slices.Equal(order, want) {
+		t.Errorf("hook order = %v, want %v", order, want)
+	}
+}
+
+// ExitCode's cause is matchable via context.Cause for callers/loggers.
+func TestExitCode_isCancelCause(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(ExitCode(7))
+	var ec exitCodeError
+	if !errors.As(context.Cause(ctx), &ec) || ec.code != 7 {
+		t.Errorf("context.Cause = %v, want an ExitCode(7) cause", context.Cause(ctx))
 	}
 }
