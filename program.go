@@ -90,9 +90,9 @@ type Program struct {
 	// panicForward: when true (default), a recovered panic halts forward progress but lets
 	// teardown still run; when false, a recovered panic hard-stops, skipping remaining teardown.
 	panicForward bool
-	// noPanicRecover: when true, hooks run unguarded — a panic propagates raw instead of being
-	// recovered and routed to OnPanic. Default false (recover).
-	noPanicRecover bool
+	// panicRecover: when true (default), a hook panic is recovered and routed to OnPanic; when
+	// false, hooks run unguarded so a panic propagates raw.
+	panicRecover bool
 }
 
 // NewProgram wires a generated program's command tree (the rtg [Definition]) and
@@ -111,6 +111,7 @@ func NewProgram(def Definition, handlers any) *Program {
 		stderr:       os.Stderr,
 		exit:         os.Exit,
 		panicForward: true,
+		panicRecover: true,
 	}
 }
 
@@ -171,22 +172,22 @@ func (p *Program) WithExit(fn func(int)) *Program {
 // fault) and running more hook code risks cascading failures. Either way the panic is
 // recovered (never a raw crash) and the exit code is never masked to 0. It returns the
 // receiver to chain.
-func (p *Program) WithPanicForward(forward bool) *Program {
-	p.panicForward = forward
+func (p *Program) WithPanicForward(enabled bool) *Program {
+	p.panicForward = enabled
 	return p
 }
 
-// WithoutPanicRecover disables rotini's panic recovery: lifecycle hooks run unguarded, so a
-// panic propagates raw — the original stack to stderr, exit 2, no teardown, and NO OnPanic
-// funnel. By default rotini recovers every hook panic and routes it to [Program.WithOnPanicFn]
-// so consumers of the built CLI never see a raw stack dump; this opt-out removes that safety
-// net. Use it only when you want plain-Go panic behavior — e.g. embedding rotini under your own
-// top-level recover, a crash reporter, or debugging. It supersedes [Program.WithPanicForward]
-// (no recovery means no teardown decision to make) and the OnPanic funnel (which never fires).
-// Note: rotini can only recover panics in the hook goroutine anyway — a panic in a goroutine a
-// handler spawned crashes regardless. It returns the receiver to chain.
-func (p *Program) WithoutPanicRecover() *Program {
-	p.noPanicRecover = true
+// WithPanicRecover controls rotini's panic recovery. The default is true: every lifecycle hook
+// panic is recovered and routed to [Program.WithOnPanicFn], so consumers of the built CLI never
+// see a raw stack dump. Pass false to run hooks UNGUARDED — a panic then propagates raw: the
+// original stack to stderr, exit 2, no teardown, and no OnPanic funnel. Disable it only when you
+// want plain-Go panic behavior — embedding rotini under your own top-level recover, a crash
+// reporter, or debugging. false supersedes [Program.WithPanicForward] (no recovery means no
+// teardown decision to make) and the OnPanic funnel (which never fires). Note: rotini can only
+// recover panics in the hook goroutine anyway — a panic in a goroutine a handler spawned crashes
+// regardless. It returns the receiver to chain.
+func (p *Program) WithPanicRecover(enabled bool) *Program {
+	p.panicRecover = enabled
 	return p
 }
 
@@ -661,12 +662,12 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	// a panic stopped FORWARD progress; a panic in teardown is captured too but
 	// does not re-trigger the forward halt (the unwind runs to completion).
 	//
-	// [Program.WithoutPanicRecover] disables this: the hook runs unguarded, so a panic
+	// [Program.WithPanicRecover](false) disables this: the hook runs unguarded, so a panic
 	// propagates raw (original stack, exit 2, no teardown, no OnPanic) — the caller opted out
 	// of rotini's safety net.
 	panicked := false
 	run := func(hook func(context.Context, *Context)) {
-		if p.noPanicRecover {
+		if !p.panicRecover {
 			hook(ctx, rtx)
 			return
 		}
