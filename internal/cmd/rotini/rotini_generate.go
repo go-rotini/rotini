@@ -35,7 +35,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
+	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", args.SpecFilePath, flags.ConfFilePath)
 
 	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
 	rtx.BindIfAbsent("generate", internal.NewProcessor(v.VersionSemantic).Generate)
