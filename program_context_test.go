@@ -183,3 +183,30 @@ func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
 		t.Errorf("hook order = %v, want %v", order, want)
 	}
 }
+
+// By default (WithPanicForward true), a recovered panic halts forward progress but
+// teardown for the begun setup hook still runs; the fault exits non-zero.
+func TestProgram_panic_default_runsTeardown(t *testing.T) {
+	var order []string
+	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
+	code, _ := newLifeProgram(h).run(nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 (panic → fault)", code)
+	}
+	if want := []string{"CascadingPreRun", "CascadingPostRun"}; !slices.Equal(order, want) {
+		t.Errorf("hook order = %v, want %v (teardown runs on panic by default)", order, want)
+	}
+}
+
+// WithPanicForward(false) makes a recovered panic a hard stop: remaining teardown is skipped.
+func TestProgram_panic_withPanicForwardFalse_skipsTeardown(t *testing.T) {
+	var order []string
+	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
+	code, _ := newLifeProgram(h).WithPanicForward(false).run(nil)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1 (panic → fault)", code)
+	}
+	if want := []string{"CascadingPreRun"}; !slices.Equal(order, want) {
+		t.Errorf("hook order = %v, want %v (teardown skipped on panic)", order, want)
+	}
+}

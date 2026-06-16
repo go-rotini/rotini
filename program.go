@@ -87,6 +87,9 @@ type Program struct {
 	stdout      io.Writer
 	stderr      io.Writer
 	exit        func(int) // terminal action for Execute; defaults to os.Exit
+	// panicForward: when true (default), a recovered panic halts forward progress but lets
+	// teardown still run; when false, a recovered panic hard-stops, skipping remaining teardown.
+	panicForward bool
 }
 
 // NewProgram wires a generated program's command tree (the rtg [Definition]) and
@@ -96,14 +99,15 @@ type Program struct {
 // execution time, via the Handler names recorded in def.
 func NewProgram(def Definition, handlers any) *Program {
 	return &Program{
-		args:     os.Args[1:],
-		def:      def,
-		handlers: handlers,
-		rtx:      newContext(),
-		stdin:    os.Stdin,
-		stdout:   os.Stdout,
-		stderr:   os.Stderr,
-		exit:     os.Exit,
+		args:         os.Args[1:],
+		def:          def,
+		handlers:     handlers,
+		rtx:          newContext(),
+		stdin:        os.Stdin,
+		stdout:       os.Stdout,
+		stderr:       os.Stderr,
+		exit:         os.Exit,
+		panicForward: true,
 	}
 }
 
@@ -148,6 +152,24 @@ func (p *Program) WithExit(fn func(int)) *Program {
 	if fn != nil {
 		p.exit = fn
 	}
+	return p
+}
+
+// WithPanicForward controls what a recovered panic does to the rest of the lifecycle.
+// The default is true: a panic in a hook halts forward progress (no further setup/PreRun/
+// Run) but every begun setup hook's teardown (PostRun/CascadingPostRun) still runs — cleanup
+// on failure, mirroring how `defer`s run during a panic unwind — and the panic is reported to
+// [Program.WithOnPanicFn] last. Pass false to make a recovered panic a HARD STOP: remaining
+// teardown is SKIPPED (as a hard [Context.Exit] would) and the run goes straight to the
+// OnPanic funnel and exits.
+//
+// Keep the default when teardown must release resources / roll back regardless of a panic;
+// pass false when a panic means the program is too broken to clean up safely (e.g. a wiring
+// fault) and running more hook code risks cascading failures. Either way the panic is
+// recovered (never a raw crash) and the exit code is never masked to 0. It returns the
+// receiver to chain.
+func (p *Program) WithPanicForward(forward bool) *Program {
+	p.panicForward = forward
 	return p
 }
 
@@ -566,13 +588,14 @@ func (p *Program) defaultOnPanic(_ context.Context, _ *Context, panics []*PanicE
 //     rtx.SignalExit/rtx.Exit or panics (or a trapped signal cancels ctx).
 //   - Unwind: the Undo of every step whose Do BEGAN, in reverse, to
 //     completion — a panic or rtx.SignalExit inside an Undo neither aborts the
-//     rest nor displaces the first failure or exit code; only a hard rtx.Exit
-//     skips what remains.
+//     rest nor displaces the first failure or exit code; a hard rtx.Exit skips
+//     what remains, and so does a panic when [Program.WithPanicForward] is false.
 //
 // rtx.SignalExit is a clean stop that still runs teardown; rtx.Exit is a hard stop that
 // skips it. A panic anywhere (e.g. the [MustGet] on a missing service) is recovered as a
-// fault, does not abort the remaining teardown, and is routed once — after all teardown —
-// to the OnPanic funnel, last.
+// fault and routed once — after teardown — to the OnPanic funnel, last. By default it does
+// not abort the remaining teardown (cleanup still runs); [Program.WithPanicForward](false)
+// makes a panic a hard stop that skips the rest of teardown.
 //
 // A canceled run context — by the caller of a WithContext context (directly or via a bound
 // cancel a handler calls) or by the default signal trap — is converted into a lifecycle
@@ -657,9 +680,10 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 
 	// Unwind, reverse — every begun step's Undo, to completion — unless a hard
-	// [Context.Exit] asked to stop now, which skips any teardown still pending
-	// (including one requested from within a teardown hook).
-	for i := began - 1; i >= 0 && !rtx.exitNow; i-- {
+	// [Context.Exit] asked to stop now (skipping any teardown still pending), or a panic
+	// occurred and [Program.WithPanicForward] is false (a hard stop on panic). Both guards are
+	// re-checked per step, so an Exit or panic from within a teardown hook stops the rest too.
+	for i := began - 1; i >= 0 && !rtx.exitNow && (p.panicForward || !panicked); i-- {
 		if steps[i].Undo != nil {
 			run(steps[i].Undo)
 		}
