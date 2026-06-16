@@ -34,7 +34,7 @@ func TestRun_recordWarning_firesOnWarning_nonFatal(t *testing.T) {
 	if code != 0 || err != nil {
 		t.Fatalf("run() = (%d, %v), want (0, nil) — a warning is non-fatal", code, err)
 	}
-	if !strings.Contains(errb.String(), "warning") || !strings.Contains(errb.String(), "--old is deprecated") {
+	if !strings.Contains(errb.String(), "Warning") || !strings.Contains(errb.String(), "--old is deprecated") {
 		t.Errorf("stderr = %q, want the warning", errb)
 	}
 }

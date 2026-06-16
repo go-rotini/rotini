@@ -74,7 +74,7 @@ func check(t *testing.T, gotOut, gotErr string, gotCode int, wantOut, wantErr st
 
 // TestRotini covers the root command handler (rotini.go): the --help and --version flags,
 // the no-flags default (help + exit 1), and parse errors. The handler now records the
-// parse error and stops; rotini's default OnError prints "rotini: <err>" to stderr and
+// parse error and stops; rotini's default OnError prints "Error: <err>" to stderr and
 // exits by category (no help dump, and — per the opt-in rules — no "did you mean").
 func TestRotini(t *testing.T) {
 	cases := []struct {
@@ -86,8 +86,8 @@ func TestRotini(t *testing.T) {
 		{"help flag", []string{"--help"}, HelpRotini, "", 0},
 		{"version flag", []string{"--version"}, testVersion, "", 0},
 		{"no args prints help and fails", []string{}, HelpRotini, "", 1},
-		{"parse error on unknown flag", []string{"--nope"}, "", `rotini: unknown flag "--nope"`, 1},
-		{"mistyped command, no auto-suggestion", []string{"generte"}, "", `rotini: unknown command "generte"`, 1},
+		{"parse error on unknown flag", []string{"--nope"}, "", `Error: unknown flag "--nope"`, 1},
+		{"mistyped command, no auto-suggestion", []string{"generte"}, "", `Error: unknown command "generte"`, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

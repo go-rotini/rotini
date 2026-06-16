@@ -595,7 +595,7 @@ func (p *Program) defaultOnWarning(_ context.Context, _ *Context, warnings []err
 // exit is [settle]'s to set (1); a fault is never masked to 0.
 func (p *Program) defaultOnPanic(_ context.Context, _ *Context, panics []*PanicError) {
 	for _, pe := range panics {
-		fmt.Fprintf(p.stderr, "%s: %v\n", p.def.Name, pe)
+		fmt.Fprintf(p.stderr, "Fatal Error: %v\n", pe)
 	}
 }
 

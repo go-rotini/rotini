@@ -22,7 +22,7 @@ func TestRotiniGenerate(t *testing.T) {
 	}{
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"generate", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: 1,
+			argv: []string{"generate", "--nope"}, wantOut: "", wantErr: `Error: unknown flag "--nope"`, wantCode: 1,
 		},
 		{
 			name: "help flag",
@@ -52,7 +52,7 @@ func TestRotiniGenerate(t *testing.T) {
 		},
 		{
 			name: "real generate on a missing spec errors (integration)",
-			argv: []string{"generate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "rotini:", wantCode: 1,
+			argv: []string{"generate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "Error:", wantCode: 1,
 		},
 	}
 	for _, tc := range cases {

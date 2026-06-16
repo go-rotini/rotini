@@ -27,7 +27,7 @@ func TestRotiniInitialize(t *testing.T) {
 		},
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"init", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: 1,
+			argv: []string{"init", "--nope"}, wantOut: "", wantErr: `Error: unknown flag "--nope"`, wantCode: 1,
 		},
 		{
 			name: "missing name argument (guarded before any work)",
@@ -48,7 +48,7 @@ func TestRotiniInitialize(t *testing.T) {
 		{
 			name:  "real initialize outside a module errors (integration)",
 			setup: func(t *testing.T) { t.Chdir(t.TempDir()) }, // no go.mod → module resolution fails
-			argv:  []string{"init", "mycli"}, wantErr: "rotini:", wantCode: 1,
+			argv:  []string{"init", "mycli"}, wantErr: "Error:", wantCode: 1,
 		},
 	}
 	for _, tc := range cases {

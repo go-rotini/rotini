@@ -215,12 +215,12 @@ func TestRun_defaultOnError_prints(t *testing.T) {
 		name   string
 		record []error
 		want   int
-		stderr string // exact stderr (the format golden); program name is "app"
+		stderr string // exact stderr (the format golden): the default OnError labels each line "Error:"
 	}{
-		{"usage", []error{UsageError(errors.New("bad flag"))}, 1, "app: bad flag\n"},
-		{"internal", []error{InternalError(errors.New("broken wiring"))}, 1, "app: broken wiring\n"},
-		{"unclassified", []error{errors.New("mystery")}, 1, "app: mystery\n"},
-		{"multiple", []error{UsageError(errors.New("bad flag")), InternalError(errors.New("bug"))}, 1, "app: bad flag\napp: bug\n"},
+		{"usage", []error{UsageError(errors.New("bad flag"))}, 1, "Error: bad flag\n"},
+		{"internal", []error{InternalError(errors.New("broken wiring"))}, 1, "Error: broken wiring\n"},
+		{"unclassified", []error{errors.New("mystery")}, 1, "Error: mystery\n"},
+		{"multiple", []error{UsageError(errors.New("bad flag")), InternalError(errors.New("bug"))}, 1, "Error: bad flag\nError: bug\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

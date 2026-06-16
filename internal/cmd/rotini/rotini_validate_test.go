@@ -26,7 +26,7 @@ func TestRotiniValidate(t *testing.T) {
 		},
 		{
 			name: "parse error on unknown flag",
-			argv: []string{"validate", "--nope"}, wantOut: "", wantErr: `rotini: unknown flag "--nope"`, wantCode: 1,
+			argv: []string{"validate", "--nope"}, wantOut: "", wantErr: `Error: unknown flag "--nope"`, wantCode: 1,
 		},
 		{
 			name: "success: header and the pass summary print",
@@ -51,7 +51,7 @@ func TestRotiniValidate(t *testing.T) {
 		},
 		{
 			name: "real validate on a missing spec errors (integration)",
-			argv: []string{"validate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "rotini:", wantCode: 1,
+			argv: []string{"validate", "/no/such/spec.yaml"}, wantOut: "spec: /no/such/spec.yaml", wantErr: "Error:", wantCode: 1,
 		},
 	}
 	for _, tc := range cases {

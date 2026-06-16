@@ -6,7 +6,7 @@ import (
 
 // TestRotiniVersion covers the version command handler (rotini_version.go): the success
 // path (prints the version) and the --help flag (unchanged), plus a parse error — which
-// now records the error and stops, so rotini's default OnError prints "rotini: <err>" to
+// now records the error and stops, so rotini's default OnError prints "Error: <err>" to
 // stderr (no help dump) and exits 1.
 func TestRotiniVersion(t *testing.T) {
 	cases := []struct {
@@ -17,7 +17,7 @@ func TestRotiniVersion(t *testing.T) {
 	}{
 		{"prints version", []string{"version"}, testVersion, "", 0},
 		{"help flag", []string{"version", "--help"}, HelpRotiniVersion, "", 0},
-		{"parse error on unknown flag", []string{"version", "--nope"}, "", `rotini: unknown flag "--nope"`, 1},
+		{"parse error on unknown flag", []string{"version", "--nope"}, "", `Error: unknown flag "--nope"`, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
