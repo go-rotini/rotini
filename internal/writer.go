@@ -7,10 +7,8 @@ package internal
 // Reading inputs lives in reader.go.
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/go-rotini/fs"
@@ -63,10 +61,7 @@ func writeConf(path string, c *Conf) error {
 // already-identical file is left untouched, keeping mtimes (and the watchers
 // and build caches keyed on them) stable across no-op regenerations.
 func writeGeneratedFile(path string, content []byte) error {
-	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, content) {
-		return nil
-	}
-	if err := fs.WriteFile(path, content, fs.WithMkdirAll(true), fs.WithAtomic(true)); err != nil {
+	if _, err := fs.WriteIfChanged(path, content, fs.WithMkdirAll(true), fs.WithAtomic(true)); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil
@@ -85,8 +80,8 @@ func writeFileBytes(path, content string) error {
 // writeIfChanged writes content only when it differs from the file on disk,
 // keeping mtimes (and watch loops) stable.
 func writeIfChanged(path, content string) error {
-	if existing, err := os.ReadFile(path); err == nil && string(existing) == content {
-		return nil
+	if _, err := fs.WriteIfChanged(path, []byte(content), fs.WithMkdirAll(true), fs.WithAtomic(true)); err != nil {
+		return fmt.Errorf("write %s: %w", filepath.Base(path), err)
 	}
-	return writeFileBytes(path, content)
+	return nil
 }

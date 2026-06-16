@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/go-rotini/fs"
 	"github.com/go-rotini/recon"
 )
 
@@ -731,55 +732,31 @@ func discoverDirs(d *DiscoverDef) ([]string, error) {
 			dir = parent
 		}
 	case "xdg":
-		root := os.Getenv("XDG_CONFIG_HOME")
-		if root == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return nil, fmt.Errorf("xdg discovery: %w", err)
-			}
-			root = filepath.Join(home, ".config")
+		// fs.XDGConfigDir is XDG-literal on every platform ($XDG_CONFIG_HOME
+		// else ~/.config/<app>) — matching this branch's prior behavior.
+		dir, err := fs.XDGConfigDir(d.App)
+		if err != nil {
+			return nil, fmt.Errorf("xdg discovery: %w", err)
 		}
-		return []string{filepath.Join(root, d.App)}, nil
+		return []string{dir}, nil
 	default:
 		return nil, fmt.Errorf("unknown discover strategy %q", d.Strategy)
 	}
 }
 
 // envSources builds the env channel's recon sources for one inputs value: the
-// process environment honoring explicit `variable:` mappings — in BOTH
-// directions. The forward transform (key → variable) alone is not enough:
-// recon's registry resolves through a snapshot keyed by the names its source
-// ENUMERATES, and the default enumeration parses variable names by the
-// SNAKE_UPPER convention — an explicitly-named variable (WIDGET_TOKEN for key
-// "token") would land at the wrong path and the input would bind only when a
-// convention-named variable happened to exist as an anchor. The key parser
-// here maps explicit variables back to their declared keys, so an
-// explicit-only variable resolves on its own. (Nested env families — envnest
-// — are not registry data at all: recon resolves leaf keys only, so
-// fillEnvNested sets those fields directly.)
+// process environment, with per-input explicit `variable:` names pinned in BOTH
+// directions via recon.WithEnvVars (the forward key→variable projection and the
+// inverse variable→key parser its enumeration needs), and the optional env
+// prefix scoping the convention-named rest. (Nested env families — envnest —
+// are not registry data: recon resolves leaf keys only, so fillEnvNested sets
+// those fields directly.)
 func envSources(v reflect.Value, envPrefix string) []recon.Source {
-	explicit := envExplicit(v)
-	inverse := make(map[string]string, len(explicit)) // VARIABLE → key
-	for key, variable := range explicit {
-		inverse[variable] = key
+	opts := []recon.EnvOption{recon.WithEnvVars(envExplicit(v))}
+	if envPrefix != "" {
+		opts = append(opts, recon.WithEnvPrefix(envPrefix+"_"))
 	}
-	parser := func(name string) recon.Path {
-		if key, ok := inverse[name]; ok {
-			return recon.ParsePath(key)
-		}
-		if envPrefix != "" {
-			rest, ok := strings.CutPrefix(name, envPrefix+"_")
-			if !ok {
-				return recon.Path{} // empty Path skips: a prefix SCOPES the derived namespace
-			}
-			name = rest
-		}
-		// recon's default projection: every underscore is a separator.
-		return recon.MakePath(strings.Split(strings.ToLower(name), "_")...)
-	}
-	return []recon.Source{recon.NewOSEnvSource(
-		recon.WithEnvTransform(envTransform(explicit, envPrefix)),
-		recon.WithEnvKeyParser(parser))}
+	return []recon.Source{recon.NewOSEnvSource(opts...)}
 }
 
 // flagEnvSource is the env source flags' fallbacks read: the plain SNAKE_UPPER
@@ -871,20 +848,6 @@ func envExplicit(v reflect.Value) map[string]string {
 		}
 	}
 	return m
-}
-
-// envTransform maps a recon key to its environment variable: an explicit `variable`
-// when the input declared one, else recon's snake-upper projection.
-func envTransform(explicit map[string]string, envPrefix string) recon.KeyTransform {
-	return func(p recon.Path) string {
-		if v, ok := explicit[p.String()]; ok {
-			return v // explicit variable: exempt from env_prefix
-		}
-		if envPrefix != "" {
-			return recon.SnakeUpperPrefixTransform(envPrefix + "_")(p)
-		}
-		return recon.SnakeUpperTransform(p)
-	}
 }
 
 // fillChannels walks a <Cmd>Inputs struct (one field per command on the resolved

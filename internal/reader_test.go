@@ -121,37 +121,31 @@ func TestBytesToJSON(t *testing.T) {
 	}
 }
 
-// TestGetFallbackPaths locks the discovery locations and their precedence order.
-func TestGetFallbackPaths(t *testing.T) {
-	got := getFallbackPaths("/proj", fileTypeSpec)
-	want := []string{
-		filepath.Join("/proj", ".rotini.spec.yml"),
-		filepath.Join("/proj", ".rotini.spec.yaml"),
-		filepath.Join("/proj", ".rotini.spec.toml"),
-		filepath.Join("/proj", ".rotini.spec.json"),
-		filepath.Join("/proj", ".rotini.spec.jsonc"),
-	}
-	if len(got) != len(want) {
-		t.Fatalf("got %d paths, want %d: %v", len(got), len(want), got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("paths[%d] = %q, want %q", i, got[i], want[i])
-		}
-	}
-}
-
-func TestFirstExisting(t *testing.T) {
+// TestDiscoverFile locks rotini's .rotini.<type>.<ext> discovery naming and the
+// extension precedence (first existing wins). The underlying extension-fallback
+// search lives in go-rotini/fs (tested there); this pins the rotini-specific
+// stem + the spec/conf distinction.
+func TestDiscoverFile(t *testing.T) {
 	dir := t.TempDir()
-	second := filepath.Join(dir, "b")
-	if err := os.WriteFile(second, []byte("x"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".rotini.spec.toml"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := firstExisting([]string{filepath.Join(dir, "a"), second}); got != second {
-		t.Errorf("firstExisting = %q, want %q", got, second)
+	got, ok := discoverFile(dir, fileTypeSpec)
+	if !ok || got != filepath.Join(dir, ".rotini.spec.toml") {
+		t.Fatalf("discoverFile(spec) = %q, %v; want the .rotini.spec.toml path", got, ok)
 	}
-	if got := firstExisting([]string{filepath.Join(dir, "a")}); got != "" {
-		t.Errorf("firstExisting(no match) = %q, want empty", got)
+
+	// Precedence is yml > yaml > toml > json > jsonc, so a .yaml wins over .toml.
+	if err := os.WriteFile(filepath.Join(dir, ".rotini.spec.yaml"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := discoverFile(dir, fileTypeSpec); got != filepath.Join(dir, ".rotini.spec.yaml") {
+		t.Errorf("discoverFile precedence = %q, want the .rotini.spec.yaml", got)
+	}
+
+	// A conf lookup in the same dir finds nothing (only spec files present).
+	if _, ok := discoverFile(dir, fileTypeConf); ok {
+		t.Error("discoverFile(conf) matched unexpectedly")
 	}
 }
 

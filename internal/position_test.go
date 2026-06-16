@@ -75,11 +75,21 @@ func TestSourceLocator_jsonc(t *testing.T) {
 	}
 }
 
-// TOML carries no positions — the locator is nil and problems degrade to
-// pointer-only (the documented contract).
-func TestSourceLocator_tomlDegrades(t *testing.T) {
-	if locate := newSourceLocator(formatTOML, []byte("a = 1\n")); locate != nil {
-		t.Error("TOML locator should be nil (pointer-only degrade)")
+// TOML positions are now supported via toml.PathPointer over the parsed AST:
+// simple key paths resolve to their source line. (Indexing across
+// [[array-of-tables]] entries is a documented toml limitation, exercised by the
+// end-to-end TOML case below, which still degrades to pointer-only.)
+func TestSourceLocator_toml(t *testing.T) {
+	src := []byte("name = \"web\"\n\n[server]\nhost = \"h\"\n")
+	locate := newSourceLocator(formatTOML, src)
+	if locate == nil {
+		t.Fatal("TOML locator should be non-nil (positions now supported)")
+	}
+	if _, _, ok := locate("/name"); !ok {
+		t.Error("locate(/name) did not resolve")
+	}
+	if line, _, ok := locate("/server/host"); !ok || line != 4 {
+		t.Errorf("locate(/server/host) line=%d ok=%v, want line 4", line, ok)
 	}
 }
 
@@ -116,7 +126,10 @@ func TestValidate_sourcePositions(t *testing.T) {
 		}
 	})
 
-	t.Run("toml degrades to pointer-only", func(t *testing.T) {
+	t.Run("toml array-of-tables pointer degrades to pointer-only", func(t *testing.T) {
+		// TOML positions resolve for simple key paths, but a pointer indexing
+		// across [[array-of-tables]] entries (flags/0) can't resolve — a
+		// documented toml.PathPointer limitation — so it degrades gracefully.
 		spec := "\"$schema\" = \"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\"\n" +
 			"[command]\nname = \"app\"\n[[command.inputs.flags]]\nname = \"port\"\n" +
 			"[command.inputs.flags.schema]\ntype = \"int\"\nmultipleOf = -2\n"

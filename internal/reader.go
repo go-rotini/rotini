@@ -157,24 +157,11 @@ var errSpecPathRequired = errors.New("spec file path is required")
 // .rotini.<type>.<ext> that exists wins.
 var fallbackExtensions = []string{"yml", "yaml", "toml", "json", "jsonc"}
 
-// getFallbackPaths returns the default discovery locations for a spec or conf file
-// within dir, in extension-precedence order.
-func getFallbackPaths(dir string, fileType fileType) []string {
-	paths := make([]string, len(fallbackExtensions))
-	for i, ext := range fallbackExtensions {
-		paths[i] = filepath.Join(dir, fmt.Sprintf(".rotini.%s.%s", fileType, ext))
-	}
-	return paths
-}
-
-// firstExisting returns the first path in paths that exists on disk, or "" if none do.
-func firstExisting(paths []string) string {
-	for _, path := range paths {
-		if _, err := os.Stat(path); err == nil {
-			return path
-		}
-	}
-	return ""
+// discoverFile returns the first existing .rotini.<fileType>.<ext> in dir, in
+// fallbackExtensions precedence, or ("", false) when none exist. The
+// extension-fallback search is delegated to go-rotini/fs.
+func discoverFile(dir string, ft fileType) (string, bool) {
+	return fs.FindWithExtensions(dir, ".rotini."+string(ft), fallbackExtensions)
 }
 
 // resolveSpecPath resolves the spec file path: the given path when set, otherwise the
@@ -188,7 +175,8 @@ func resolveSpecPath(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("get working directory: %w", err)
 	}
-	return firstExisting(getFallbackPaths(cwd, fileTypeSpec)), nil
+	found, _ := discoverFile(cwd, fileTypeSpec)
+	return found, nil
 }
 
 // resolveConfBesideSpec resolves the conf file path: the given path when set,
@@ -198,7 +186,8 @@ func resolveConfBesideSpec(specPath, confPath string) string {
 	if confPath != "" {
 		return confPath
 	}
-	return firstExisting(getFallbackPaths(filepath.Dir(specPath), fileTypeConf))
+	found, _ := discoverFile(filepath.Dir(specPath), fileTypeConf)
+	return found
 }
 
 // discoverConf returns the first .rotini.conf.* file that exists in dir, or an
@@ -206,8 +195,8 @@ func resolveConfBesideSpec(specPath, confPath string) string {
 // its callers expect a conf to be present (a module-root conf, a composed
 // child's conf).
 func discoverConf(dir string) (string, error) {
-	if path := firstExisting(getFallbackPaths(dir, fileTypeConf)); path != "" {
-		return path, nil
+	if found, ok := discoverFile(dir, fileTypeConf); ok {
+		return found, nil
 	}
 	return "", fmt.Errorf("no .rotini.%s.* file found in %s", fileTypeConf, dir)
 }
@@ -219,21 +208,24 @@ func findModule() (root, name string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("get working directory: %w", err)
 	}
-	for {
-		goMod := filepath.Join(dir, "go.mod")
-		if data, statErr := os.ReadFile(goMod); statErr == nil {
-			for line := range strings.SplitSeq(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				if after, ok := strings.CutPrefix(line, "module "); ok {
-					return dir, strings.TrimSpace(after), nil
-				}
-			}
-			return "", "", fmt.Errorf("no module path in %s", goMod)
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", "", errors.New("go.mod not found in any parent of working directory")
-		}
-		dir = parent
+	// fs.FindUp walks up to the nearest go.mod; the high ancestor bound keeps
+	// the original unbounded-to-root reach (fs defaults to 32).
+	goMod, ok, err := fs.FindUp("go.mod", dir, fs.WithMaxAncestors(256))
+	if err != nil {
+		return "", "", fmt.Errorf("find go.mod: %w", err)
 	}
+	if !ok {
+		return "", "", errors.New("go.mod not found in any parent of working directory")
+	}
+	data, err := os.ReadFile(goMod)
+	if err != nil {
+		return "", "", fmt.Errorf("read %s: %w", goMod, err)
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if after, ok := strings.CutPrefix(line, "module "); ok {
+			return filepath.Dir(goMod), strings.TrimSpace(after), nil
+		}
+	}
+	return "", "", fmt.Errorf("no module path in %s", goMod)
 }
