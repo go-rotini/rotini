@@ -211,9 +211,9 @@ func TestProgram_panic_withPanicForwardFalse_skipsTeardown(t *testing.T) {
 	}
 }
 
-// WithPanicRecover(false) disables recovery: a hook panic propagates raw (no recover,
-// no teardown, no OnPanic). The closure recovers it so the test process survives.
-func TestProgram_withPanicRecoverFalse_propagates(t *testing.T) {
+// WithPanicRecover(false) with the default PanicForward(true): teardown still runs, THEN the
+// panic is re-raised raw. The closure recovers it so the test process survives.
+func TestProgram_withPanicRecoverFalse_forwardTrue_teardownThenRepanic(t *testing.T) {
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
 	recovered := func() (r any) {
@@ -222,9 +222,27 @@ func TestProgram_withPanicRecoverFalse_propagates(t *testing.T) {
 		return nil
 	}()
 	if recovered != "boom" {
+		t.Errorf("recovered %v, want the re-raised panic %q", recovered, "boom")
+	}
+	if want := []string{"CascadingPreRun", "CascadingPostRun"}; !slices.Equal(order, want) {
+		t.Errorf("hook order = %v, want %v (teardown ran, then re-panic)", order, want)
+	}
+}
+
+// WithPanicRecover(false) + WithPanicForward(false): "panic now" — the panic propagates
+// immediately, skipping teardown.
+func TestProgram_withPanicRecoverFalse_forwardFalse_panicsNow(t *testing.T) {
+	var order []string
+	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
+	recovered := func() (r any) {
+		defer func() { r = recover() }()
+		newLifeProgram(h).WithPanicRecover(false).WithPanicForward(false).run(nil)
+		return nil
+	}()
+	if recovered != "boom" {
 		t.Errorf("recovered %v, want the propagated panic %q", recovered, "boom")
 	}
 	if want := []string{"CascadingPreRun"}; !slices.Equal(order, want) {
-		t.Errorf("hook order = %v, want %v (panic propagated; no teardown)", order, want)
+		t.Errorf("hook order = %v, want %v (panic now; no teardown)", order, want)
 	}
 }

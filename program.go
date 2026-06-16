@@ -159,33 +159,36 @@ func (p *Program) WithExit(fn func(int)) *Program {
 	return p
 }
 
-// WithPanicForward controls what a recovered panic does to the rest of the lifecycle.
-// The default is true: a panic in a hook halts forward progress (no further setup/PreRun/
-// Run) but every begun setup hook's teardown (PostRun/CascadingPostRun) still runs — cleanup
-// on failure, mirroring how `defer`s run during a panic unwind — and the panic is reported to
-// [Program.WithOnPanicFn] last. Pass false to make a recovered panic a HARD STOP: remaining
-// teardown is SKIPPED (as a hard [Context.Exit] would) and the run goes straight to the
-// OnPanic funnel and exits.
+// WithPanicForward controls whether teardown runs when a hook panics. The default is true: a
+// panic in a hook halts forward progress (no further setup/PreRun/Run) but every begun setup
+// hook's teardown (PostRun/CascadingPostRun) still runs — cleanup on failure, mirroring how
+// `defer`s run during a panic unwind. Pass false for a HARD STOP: remaining teardown is SKIPPED
+// (as a hard [Context.Exit] would).
 //
-// Keep the default when teardown must release resources / roll back regardless of a panic;
-// pass false when a panic means the program is too broken to clean up safely (e.g. a wiring
-// fault) and running more hook code risks cascading failures. Either way the panic is
-// recovered (never a raw crash) and the exit code is never masked to 0. It returns the
-// receiver to chain.
+// Where the panic ultimately goes — the [Program.WithOnPanicFn] funnel (the default) or raw to
+// the caller — is the separate [Program.WithPanicRecover] knob; the two compose. Keep forward on
+// when teardown must release resources / roll back regardless of a panic; turn it off when a
+// panic means the program is too broken to clean up safely (e.g. a wiring fault). The exit code
+// is never masked to 0. It returns the receiver to chain.
 func (p *Program) WithPanicForward(enabled bool) *Program {
 	p.panicForward = enabled
 	return p
 }
 
-// WithPanicRecover controls rotini's panic recovery. The default is true: every lifecycle hook
+// WithPanicRecover controls where a hook panic ultimately goes. The default is true: every hook
 // panic is recovered and routed to [Program.WithOnPanicFn], so consumers of the built CLI never
-// see a raw stack dump. Pass false to run hooks UNGUARDED — a panic then propagates raw: the
-// original stack to stderr, exit 2, no teardown, and no OnPanic funnel. Disable it only when you
-// want plain-Go panic behavior — embedding rotini under your own top-level recover, a crash
-// reporter, or debugging. false supersedes [Program.WithPanicForward] (no recovery means no
-// teardown decision to make) and the OnPanic funnel (which never fires). Note: rotini can only
-// recover panics in the hook goroutine anyway — a panic in a goroutine a handler spawned crashes
-// regardless. It returns the receiver to chain.
+// see a raw stack dump. Pass false to re-raise the panic RAW to the caller instead of funneling
+// it — the original value crashes the process (exit 2, no OnPanic), plain-Go behavior, for e.g.
+// embedding rotini under your own top-level recover, a crash reporter, or debugging.
+//
+// It composes with [Program.WithPanicForward], which still decides teardown:
+//   - recover=false, forward=true  → teardown runs, THEN the panic is re-raised (its stack roots
+//     at the re-raise, not the original site).
+//   - recover=false, forward=false → "panic now": the hook runs unguarded, so the panic
+//     propagates immediately with its ORIGINAL stack, skipping teardown.
+//
+// Note: rotini can only recover panics in the hook goroutine — a panic in a goroutine a handler
+// spawned crashes regardless. It returns the receiver to chain.
 func (p *Program) WithPanicRecover(enabled bool) *Program {
 	p.panicRecover = enabled
 	return p
@@ -656,25 +659,30 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 	steps := plan(chain, handlers)
 
-	// run wraps every hook so a panic is recovered and CAPTURED as a fault
-	// (rtx.recordFault) rather than unwinding — this is what lets teardown still
-	// run and the OnPanic funnel fire exactly once, last. panicked tracks whether
-	// a panic stopped FORWARD progress; a panic in teardown is captured too but
-	// does not re-trigger the forward halt (the unwind runs to completion).
-	//
-	// [Program.WithPanicRecover](false) disables this: the hook runs unguarded, so a panic
-	// propagates raw (original stack, exit 2, no teardown, no OnPanic) — the caller opted out
-	// of rotini's safety net.
+	// run wraps every hook so a panic is RECOVERED and the lifecycle stays in control — teardown
+	// can still run and the panic is dealt with once, last. Two independent knobs decide the rest:
+	//   - [Program.WithPanicForward] (default true): does begun-step teardown run after a panic?
+	//   - [Program.WithPanicRecover] (default true): is the panic funneled to OnPanic (true), or
+	//     re-panicked raw to the caller after the lifecycle settles (false)?
+	// The one combination rotini does NOT recover is recover=false AND forward=false — "panic now":
+	// the hook runs unguarded so the panic propagates immediately with its original stack, skipping
+	// teardown. panicked records that a panic stopped forward progress; panicValue holds the first
+	// panic when it will be re-panicked (recover=false, forward=true) instead of funneled.
 	panicked := false
+	var panicValue any
 	run := func(hook func(context.Context, *Context)) {
-		if !p.panicRecover {
-			hook(ctx, rtx)
+		if !p.panicRecover && !p.panicForward {
+			hook(ctx, rtx) // panic now: unguarded, original stack, no teardown
 			return
 		}
 		defer func() {
 			if r := recover(); r != nil {
-				rtx.recordFault(&PanicError{Value: r, Stack: debug.Stack()})
 				panicked = true
+				if p.panicRecover {
+					rtx.recordFault(&PanicError{Value: r, Stack: debug.Stack()})
+				} else if panicValue == nil {
+					panicValue = r // re-panicked after teardown
+				}
 			}
 		}()
 		hook(ctx, rtx)
@@ -713,6 +721,12 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		if steps[i].Undo != nil {
 			run(steps[i].Undo)
 		}
+	}
+
+	// Recovery off (recover=false, forward=true): the panic was caught only so teardown could
+	// run; surface it raw now — after teardown — instead of funneling it to OnPanic.
+	if panicked && !p.panicRecover {
+		panic(panicValue)
 	}
 
 	// settle fires whatever outcome channels this run populated (warnings,
