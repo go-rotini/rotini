@@ -210,3 +210,21 @@ func TestProgram_panic_withPanicForwardFalse_skipsTeardown(t *testing.T) {
 		t.Errorf("hook order = %v, want %v (teardown skipped on panic)", order, want)
 	}
 }
+
+// WithoutPanicRecover disables recovery: a hook panic propagates raw (no recover,
+// no teardown, no OnPanic). The closure recovers it so the test process survives.
+func TestProgram_withoutPanicRecover_propagates(t *testing.T) {
+	var order []string
+	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
+	recovered := func() (r any) {
+		defer func() { r = recover() }()
+		newLifeProgram(h).WithoutPanicRecover().run(nil)
+		return nil
+	}()
+	if recovered != "boom" {
+		t.Errorf("recovered %v, want the propagated panic %q", recovered, "boom")
+	}
+	if want := []string{"CascadingPreRun"}; !slices.Equal(order, want) {
+		t.Errorf("hook order = %v, want %v (panic propagated; no teardown)", order, want)
+	}
+}
