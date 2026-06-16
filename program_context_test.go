@@ -147,48 +147,39 @@ func TestExitCode_isCancelCause(t *testing.T) {
 	}
 }
 
-// A handler cancels the run directly via rtx.Cancel — no WithContext, no bound
-// cancel func — halting forward progress, running teardown, exiting with the
-// ExitCode cause's code, and canceling the ctx the handler holds (so downstream
-// work stops too).
-func TestProgram_rtxCancel_haltsAndCancelsCtx(t *testing.T) {
+// The recommended way for a handler to cancel the run: the caller binds its own
+// cancel func; the handler retrieves it via MustGet and calls it. A plain cancel
+// halts forward progress, runs teardown, and exits 0.
+func TestProgram_handlerCancelsViaBoundCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	var order []string
-	h := lifeRec{
-		order: &order,
-		onCascadingPreRun: func(ctx context.Context, rtx *Context) {
-			rtx.Cancel(ExitCode(3))
-			// The ctx the handler holds is canceled immediately (downstream stops).
-			if ctx.Err() == nil {
-				t.Error("rtx.Cancel did not cancel the ctx passed to the handler")
-			}
-		},
-	}
-	// No WithContext: rotini owns the context (default signal-trap mode).
-	code, err := newLifeProgram(h).run(nil)
+	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
+		MustGet[context.CancelFunc](rtx, "cancel")()
+	}}
+	code, err := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).run(nil)
 	if err != nil {
 		t.Fatalf("run err = %v, want nil", err)
 	}
-	if code != 3 {
-		t.Errorf("exit code = %d, want 3 (rtx.Cancel(ExitCode(3)))", code)
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0 (plain bound cancel)", code)
 	}
 	if want := []string{"CascadingPreRun", "CascadingPostRun"}; !slices.Equal(order, want) {
 		t.Errorf("hook order = %v, want %v (forward halted, teardown ran)", order, want)
 	}
 }
 
-// rtx.Cancel(nil) halts cleanly and exits 0.
-func TestProgram_rtxCancel_nilCauseExitsZero(t *testing.T) {
+// Binding a WithCancelCause cancel lets a handler choose the exit code with ExitCode.
+func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(context.Background())
 	var order []string
-	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) { rtx.Cancel(nil) }}
-	if code, _ := newLifeProgram(h).run(nil); code != 0 {
-		t.Errorf("exit code = %d, want 0 (rtx.Cancel(nil))", code)
+	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
+		MustGet[context.CancelCauseFunc](rtx, "cancel")(ExitCode(3))
+	}}
+	code, _ := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).run(nil)
+	if code != 3 {
+		t.Errorf("exit code = %d, want 3 (bound cancel with ExitCode(3))", code)
 	}
 	if want := []string{"CascadingPreRun", "CascadingPostRun"}; !slices.Equal(order, want) {
 		t.Errorf("hook order = %v, want %v", order, want)
 	}
-}
-
-// rtx.Cancel is a no-op on a standalone Context with no run attached.
-func TestContext_Cancel_noopWithoutRun(t *testing.T) {
-	(&Context{}).Cancel(ExitCode(1)) // must not panic
 }
