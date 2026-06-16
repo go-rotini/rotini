@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -71,14 +72,15 @@ type Context struct {
 	Args []string
 
 	services  map[string]any
-	chain     []ResolvedCommand // resolved command path, root → leaf
-	exitCode  int               // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
-	stopped   bool              // an exit was requested; forward progress (setup/PreRun/Run) halts
-	exitNow   bool              // [Context.Exit] (hard) was called: skip remaining teardown too
-	recorded  []error           // errors recorded this run via [Context.RecordError]; drained by the OnError funnel
-	warnings  []error           // warnings recorded this run via [Context.RecordWarning]; drained by the OnWarning funnel
-	successes []string          // successes recorded this run via [Context.RecordSuccess]; drained by the OnSuccess funnel
-	faults    []*PanicError     // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); drained by the OnPanic funnel
+	chain     []ResolvedCommand       // resolved command path, root → leaf
+	exitCode  int                     // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
+	stopped   bool                    // an exit was requested; forward progress (setup/PreRun/Run) halts
+	exitNow   bool                    // [Context.Exit] (hard) was called: skip remaining teardown too
+	cancel    context.CancelCauseFunc // cancels the run context; set by run(), invoked by [Context.Cancel] and the default signal trap
+	recorded  []error                 // errors recorded this run via [Context.RecordError]; drained by the OnError funnel
+	warnings  []error                 // warnings recorded this run via [Context.RecordWarning]; drained by the OnWarning funnel
+	successes []string                // successes recorded this run via [Context.RecordSuccess]; drained by the OnSuccess funnel
+	faults    []*PanicError           // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); drained by the OnPanic funnel
 }
 
 // newContext returns an empty [Context] with an initialized registry and no
@@ -227,6 +229,23 @@ func (rtx *Context) Exit(code int) {
 	if rtx.exitCode == 0 {
 		rtx.exitCode = code
 	}
+}
+
+// Cancel cancels the run's context — closing ctx.Done() for every lifecycle hook
+// and any work derived from the ctx a handler holds — and halts the lifecycle's
+// forward progress. Pass [ExitCode](code) to choose the process exit code, or nil
+// for a clean stop (the code then falls through to the normal resolution).
+//
+// Unlike [Context.SignalExit] / [Context.Exit], which stop the lifecycle while
+// leaving the context live (so teardown can still do work), Cancel propagates
+// real cancellation: teardown still runs, but with a canceled context. Reach for
+// it when in-flight work sharing the context must also stop. It is a no-op on a
+// standalone Context with no run attached.
+func (rtx *Context) Cancel(cause error) {
+	if rtx == nil || rtx.cancel == nil {
+		return
+	}
+	rtx.cancel(cause)
 }
 
 // RecordError records err as one of THIS run's errors — the end-user's own

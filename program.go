@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"reflect"
 	"runtime/debug"
-	"sync/atomic"
 	"syscall"
 )
 
@@ -33,23 +32,24 @@ func signalExitCode(s os.Signal) int {
 }
 
 // ExitCode returns a context-cancellation cause that tells rotini which process
-// exit code to use when that cancellation halts the run. Pass it to a context's
-// cancel-cause function (Go 1.21+):
+// exit code to use when that cancellation halts the run. Pass it to [Context.Cancel]
+// from a handler, or to a context's cancel-cause function (Go 1.21+) from outside:
 //
-//	ctx, cancel := context.WithCancelCause(parent)
+//	rtx.Cancel(rotini.ExitCode(3))                  // from a handler — exits 3
+//
+//	ctx, cancel := context.WithCancelCause(parent)  // from outside the run
 //	prog.WithContext(ctx)
-//	// ... later, from anywhere holding cancel:
-//	cancel(rotini.ExitCode(3)) // halts the lifecycle; the process exits 3
+//	cancel(rotini.ExitCode(3))                      // exits 3
 //
 // It also composes with timeouts, e.g. exit 124 on a deadline:
 //
 //	ctx, cancel := context.WithTimeoutCause(parent, 5*time.Second, rotini.ExitCode(124))
 //
-// Canceling a [Program.WithContext] context WITHOUT an ExitCode cause (a plain
-// cancel or deadline) still halts cleanly, with the code falling through to the
-// normal resolution (0 unless a handler recorded an error or fault). Cancellation
-// is cooperative — it never preempts a running hook — and teardown always runs.
-// See [Program.WithContext].
+// Canceling WITHOUT an ExitCode cause (a plain cancel or deadline) still halts
+// cleanly, with the code falling through to the normal resolution (0 unless a
+// handler recorded an error or fault). Cancellation is cooperative — it never
+// preempts a running hook — and teardown always runs. See [Context.Cancel] and
+// [Program.WithContext].
 func ExitCode(code int) error { return exitCodeError{code: code} }
 
 // exitCodeError carries a process exit code as a context-cancellation cause.
@@ -60,15 +60,10 @@ func (e exitCodeError) Error() string {
 }
 
 // canceledExitCode resolves the exit code recorded when a canceled run context
-// halts the lifecycle. A trapped (rotini-owned) context was canceled by the
-// default signal trap, so the conventional 128+signum code applies. A
-// caller-supplied context ([Program.WithContext]) uses the code carried by its
-// cancellation cause (see [ExitCode]), or 0 — a clean stop that defers to the
-// normal exit-code resolution — when no code was attached.
-func canceledExitCode(ctx context.Context, trapped bool, signalCode int32) int {
-	if trapped {
-		return int(signalCode)
-	}
+// halts the lifecycle: the code carried by the cancellation cause — both
+// [Context.Cancel] and the default signal trap attach one via [ExitCode] — or 0
+// (a clean stop that defers to the normal exit-code resolution) when none was.
+func canceledExitCode(ctx context.Context) int {
 	var ec exitCodeError
 	if errors.As(context.Cause(ctx), &ec) {
 		return ec.code
@@ -91,8 +86,7 @@ type Program struct {
 	stdin       io.Reader
 	stdout      io.Writer
 	stderr      io.Writer
-	exit        func(int)    // terminal action for Execute; defaults to os.Exit
-	sigExit     atomic.Int32 // exit code a trapped signal requests; read by dispatch when the run context is canceled
+	exit        func(int) // terminal action for Execute; defaults to os.Exit
 }
 
 // NewProgram wires a generated program's command tree (the rtg [Definition]) and
@@ -176,8 +170,10 @@ func (p *Program) WithArgs(args []string) *Program {
 // exit code to the cancellation with [ExitCode] — e.g. cancel(rotini.ExitCode(3)) via a
 // [context.WithCancelCause]/[context.WithTimeoutCause] function; without one, a canceled
 // run stops cleanly and the exit code falls through to the normal resolution (0 unless a
-// handler recorded an error). A handler that wants to stop the run itself uses
-// [Context.SignalExit]/[Context.Exit] directly rather than canceling the context.
+// handler recorded an error). A handler stops the run itself with [Context.SignalExit] /
+// [Context.Exit] (which leave the context live for teardown) or cancels it with
+// [Context.Cancel] (which also fires ctx.Done() for downstream work) — neither needs
+// WithContext, which is for an out-of-band canceler (a server, a parent, a timeout).
 //
 // Supplying a context also opts OUT of rotini's default signal handling: the caller is
 // declaring that it owns the run's lifecycle (including any Interrupt/SIGTERM trapping it
@@ -370,17 +366,20 @@ func (p *Program) run(argv []string) (int, error) {
 		return 0, nil
 	}
 
-	// The effective run context. When the caller supplied none (no WithContext), rotini
-	// owns it: a cancelable context whose cancellation, plus a default signal trap,
-	// drives graceful shutdown. When the caller supplied a context, it is used as-is and
-	// rotini installs no trap — the caller owns signal handling.
-	ctx := p.ctx
-	trapped := ctx == nil
+	// The effective run context. rotini always derives a cancelable context — from the
+	// caller's WithContext context when supplied, else context.Background() — so a handler can
+	// cancel the run via [Context.Cancel] and the cancellation halts the lifecycle. When the
+	// caller supplied no context, rotini also installs the default signal trap, which cancels on
+	// the first Interrupt/SIGTERM (carrying the conventional exit code as the cause). When the
+	// caller supplied a context, rotini installs no trap — the caller owns signal handling.
+	base := p.ctx
+	trapped := base == nil
+	if base == nil {
+		base = context.Background()
+	}
+	ctx, cancel := context.WithCancelCause(base)
+	defer cancel(nil)
 	if trapped {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithCancel(context.Background())
-		defer cancel()
-
 		sigCh := make(chan os.Signal, 2)
 		signal.Notify(sigCh, trapSignals...)
 		defer signal.Stop(sigCh)
@@ -389,9 +388,8 @@ func (p *Program) run(argv []string) (int, error) {
 		defer close(done)
 		go func() {
 			select {
-			case s := <-sigCh: // first signal → graceful: cancel ctx; dispatch then halts the lifecycle
-				p.sigExit.Store(int32(signalExitCode(s)))
-				cancel()
+			case s := <-sigCh: // first signal → graceful: cancel ctx with the signal's exit code; dispatch then halts the lifecycle
+				cancel(exitCodeError{code: signalExitCode(s)})
 			case <-done:
 				return
 			}
@@ -414,6 +412,7 @@ func (p *Program) run(argv []string) (int, error) {
 	rtx.Stdin = p.stdin
 	rtx.Stdout = p.stdout
 	rtx.Stderr = p.stderr
+	rtx.cancel = cancel // so a handler can cancel the run via rtx.Cancel
 
 	res, err := resolve(p.def, argv)
 	if err != nil {
@@ -435,7 +434,7 @@ func (p *Program) run(argv []string) (int, error) {
 		rtx.Args = res.Args
 	}
 	rtx.chain = res.Chain
-	return p.dispatch(ctx, res.Chain, rtx, trapped)
+	return p.dispatch(ctx, res.Chain, rtx)
 }
 
 // internalUnlessTagged tags err [CategoryInternal] unless its producer already
@@ -578,12 +577,12 @@ func (p *Program) defaultOnPanic(_ context.Context, _ *Context, panics []*PanicE
 // fault, does not abort the remaining teardown, and is routed once — after all teardown —
 // to the OnPanic funnel, last.
 //
-// When trapped is set (the caller supplied no context, so rotini installed the default
-// signal trap), a canceled run context is converted into a lifecycle [Context.SignalExit]
-// between forward hooks: forward progress stops, teardown still runs, and the exit code
-// is the conventional signal status. This conversion happens only on the dispatch
-// goroutine, so rtx state stays single-writer; the signal goroutine only cancels ctx.
-func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context, trapped bool) (int, error) {
+// A canceled run context — from [Context.Cancel], the caller of a WithContext context, or
+// the default signal trap — is converted into a lifecycle [Context.SignalExit] between
+// forward hooks: forward progress stops, teardown still runs, and the exit code is the
+// cancellation cause's ([ExitCode]) or 0. The conversion happens only on the dispatch
+// goroutine, so rtx state stays single-writer; the canceler only cancels ctx.
+func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (int, error) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]CommandHandlers, len(chain))
 	for i, f := range chain {
@@ -636,14 +635,13 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 
 	// halt reports whether forward progress should stop — after a hook called
-	// rtx.SignalExit/rtx.Exit or panicked, OR after the run context was canceled (by the
-	// default signal trap when rotini owns the context, or by the caller of a WithContext
-	// context). On cancellation it records the exit code via rtx.SignalExit — the signal's
-	// 128+signum when trapped, else the cancellation cause's code ([ExitCode]) or 0 — so the
+	// rtx.SignalExit/rtx.Exit or panicked, OR after the run context was canceled ([Context.Cancel],
+	// the caller of a WithContext context, or the default signal trap). On cancellation it records
+	// the exit code via rtx.SignalExit — the cancellation cause's code ([ExitCode]) or 0 — so the
 	// cancellation becomes a clean lifecycle stop that still runs teardown.
 	halt := func() bool {
 		if !rtx.stopped && ctx.Err() != nil {
-			rtx.SignalExit(canceledExitCode(ctx, trapped, p.sigExit.Load()))
+			rtx.SignalExit(canceledExitCode(ctx))
 		}
 		return rtx.stopped || panicked
 	}
