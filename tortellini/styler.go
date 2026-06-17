@@ -2,8 +2,6 @@ package tortellini
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -79,7 +77,7 @@ func NewStyler(options ...StylerOption) *Styler {
 //	styler.Style().Bold().ForegroundANSI(tortellini.Cyan).Sprint("ready")
 //
 // A nil Styler yields an unconditional [Style].
-func (s *Styler) Style() Style {
+func (s *Styler) NewStyle() Style {
 	if s == nil {
 		return Style{}
 	}
@@ -245,39 +243,6 @@ func (s Style) Sprint(text string) string {
 // Sprintf is [Style.Sprint] over a formatted string.
 func (s Style) Sprintf(format string, args ...any) string {
 	return s.Sprint(fmt.Sprintf(format, args...))
-}
-
-// Print writes the styled text to standard output (no trailing newline). The
-// Print/Fprint helpers ignore the write error — for terminal output that is
-// almost always the right default; use [Style.Sprint] with your own writer when
-// you need to handle it.
-func (s Style) Print(text string) {
-	_, _ = fmt.Fprint(os.Stdout, s.Sprint(text))
-}
-
-// Println writes the styled text to standard output, followed by a newline.
-func (s Style) Println(text string) {
-	_, _ = fmt.Fprintln(os.Stdout, s.Sprint(text))
-}
-
-// Printf writes the styled, formatted text to standard output.
-func (s Style) Printf(format string, args ...any) {
-	_, _ = fmt.Fprint(os.Stdout, s.Sprintf(format, args...))
-}
-
-// Fprint writes the styled text to w.
-func (s Style) Fprint(w io.Writer, text string) {
-	_, _ = fmt.Fprint(w, s.Sprint(text))
-}
-
-// Fprintln writes the styled text to w, followed by a newline.
-func (s Style) Fprintln(w io.Writer, text string) {
-	_, _ = fmt.Fprintln(w, s.Sprint(text))
-}
-
-// Fprintf writes the styled, formatted text to w.
-func (s Style) Fprintf(w io.Writer, format string, args ...any) {
-	_, _ = fmt.Fprint(w, s.Sprintf(format, args...))
 }
 
 // colorSGR maps a [ColorANSI] to its SGR parameter for the given base (30 foreground,
