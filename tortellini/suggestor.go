@@ -1,10 +1,18 @@
 package tortellini
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // KeySuggestor is the conventional registry key the generated main binds the
 // [Suggestor] under (and handlers retrieve it by).
 const KeySuggestor = "suggestor"
+
+// defaultMinScore is the cutoff a [Suggestor] keeps candidates at or above —
+// "comfortably similar" by the configured algorithm, strict enough to avoid
+// suggesting merely-adjacent words.
+const defaultMinScore = 0.6
 
 // Suggestor ranks "did you mean" candidates for a mistyped token. It is a
 // *service*, not framework behavior: rotini never suggests anything on its own —
@@ -25,51 +33,68 @@ const KeySuggestor = "suggestor"
 //		}
 //	}
 //
+// It is configured fluently and ranks by a pluggable algorithm normalized to a
+// similarity score (see [SuggestAlgo] / [Similarity]):
+//
+//	tortellini.NewSuggestor().
+//		WithAlgo(tortellini.SuggestAlgoJaroWinkler).
+//		WithMinScore(0.7).
+//		WithMaxResults(5).
+//		WithCaseFold()
+//
 // The Suggestor is a pure ranking function over the candidates it is handed —
 // it discovers nothing, prints nothing, and knows nothing about the command
 // tree. Candidates come from whatever vocabulary the caller has: a ParseError's
 // Candidates, sibling names off rtx.Chain(), enum members, or any []string.
 type Suggestor struct {
-	algo        SuggestAlgo
-	maxDistance int
-	maxResults  int
+	algo       SuggestAlgo
+	minScore   float64
+	maxResults int
+	caseFold   bool
+	normalizer func(string) string
 }
 
-// SuggestAlgo selects the string-distance algorithm a [Suggestor] ranks
-// candidates by — a small string enum so it reads clearly in code and config.
-// rotini defines the set; it is not user-extensible.
-type SuggestAlgo string
+// Match is a scored suggestion returned by [Suggestor.Matches]: the ORIGINAL
+// candidate Value (as passed in) and its similarity Score in [0,1] (1 = identical).
+type Match struct {
+	Value string
+	Score float64
+}
 
-const (
-	// SuggestAlgoLevenshtein ranks by Levenshtein (Wagner–Fischer) edit distance
-	// — the default. Insertions, deletions, and substitutions each cost one, so
-	// close typos rank nearest.
-	SuggestAlgoLevenshtein SuggestAlgo = "levenshtein"
-)
+// NewSuggestor returns a [Suggestor] ready to bind under a registry key
+// (conventionally [KeySuggestor]), ranking by [SuggestAlgoLevenshtein] with a
+// minimum score of 0.6 and at most 3 results. Tune any of it fluently:
+// NewSuggestor().WithAlgo(…).WithMinScore(…).WithMaxResults(…).WithCaseFold().
+func NewSuggestor() *Suggestor {
+	return &Suggestor{
+		algo:       SuggestAlgoLevenshtein,
+		minScore:   defaultMinScore,
+		maxResults: 3,
+	}
+}
 
-// WithAlgo selects the ranking algorithm and returns the receiver to chain. An
-// unrecognized algorithm is ignored (the current one stays). Default
+// WithAlgo selects the ranking algorithm (see [SuggestAlgo]) and returns the
+// receiver to chain. An unrecognized algorithm is ignored. Default
 // [SuggestAlgoLevenshtein].
 func (s *Suggestor) WithAlgo(algo SuggestAlgo) *Suggestor {
-	if algo == SuggestAlgoLevenshtein {
+	if algo.valid() {
 		s.algo = algo
 	}
 	return s
 }
 
-// WithMaxDistance sets the largest edit distance (Levenshtein) a candidate may
-// have from the input and still be suggested, and returns the receiver so it
-// chains: NewSuggestor().WithMaxDistance(3).WithMaxResults(5). Default 2 — close
-// typos only. A non-positive n is ignored (keeps the default).
-func (s *Suggestor) WithMaxDistance(n int) *Suggestor {
-	if n > 0 {
-		s.maxDistance = n
+// WithMinScore sets the smallest similarity score (in [0,1], 1 = identical) a
+// candidate may have and still be suggested, and returns the receiver to chain.
+// Default 0.6. A score outside [0,1] is ignored.
+func (s *Suggestor) WithMinScore(score float64) *Suggestor {
+	if score >= 0 && score <= 1 {
+		s.minScore = score
 	}
 	return s
 }
 
-// WithMaxResults caps how many suggestions [Suggestor.Suggest] returns, and
-// returns the receiver to chain. Default 3. A non-positive n is ignored.
+// WithMaxResults caps how many suggestions [Suggestor.Suggest] / [Suggestor.Matches]
+// return, and returns the receiver to chain. Default 3. A non-positive n is ignored.
 func (s *Suggestor) WithMaxResults(n int) *Suggestor {
 	if n > 0 {
 		s.maxResults = n
@@ -77,109 +102,130 @@ func (s *Suggestor) WithMaxResults(n int) *Suggestor {
 	return s
 }
 
-// NewSuggestor returns a [Suggestor] ready to bind under a registry key
-// (conventionally [KeySuggestor]), ranking by [SuggestAlgoLevenshtein] with the
-// default max edit distance (2) and result cap (3). Tune any of them fluently:
-// NewSuggestor().WithAlgo(…).WithMaxDistance(…).WithMaxResults(…).
-func NewSuggestor() *Suggestor {
-	return &Suggestor{
-		algo:        SuggestAlgoLevenshtein,
-		maxDistance: 2,
-		maxResults:  3,
-	}
+// WithCaseFold makes matching case-insensitive (input and candidates are lowered
+// before scoring), and returns the receiver to chain. Off by default.
+func (s *Suggestor) WithCaseFold() *Suggestor {
+	s.caseFold = true
+	return s
 }
 
-// Suggest returns the candidates closest to input, nearest first, keeping only
-// candidates within the configured edit distance and at most the configured
-// number of results. Distance ties prefer the candidate sharing the longer
-// common prefix with input (typing "ru" suggests "run" before the alias "r"),
-// then break lexicographically, so the result is deterministic. An exact match
-// means input wasn't mistyped: it returns nil, as it does for no input, no
-// candidates within range, or a nil receiver.
-func (s *Suggestor) Suggest(input string, candidates []string) []string {
-	if s == nil || input == "" {
+// WithNormalizer sets a preprocessing function applied to BOTH the input and each
+// candidate before scoring (e.g. trim, strip accents), and returns the receiver
+// to chain. It runs before case-folding. The original candidate strings are still
+// what [Suggestor.Suggest] / [Suggestor.Matches] return. A nil fn clears it.
+func (s *Suggestor) WithNormalizer(fn func(string) string) *Suggestor {
+	s.normalizer = fn
+	return s
+}
+
+// normalize applies the configured normalizer (if any) then case-folding (if on).
+func (s *Suggestor) normalize(str string) string {
+	if s.normalizer != nil {
+		str = s.normalizer(str)
+	}
+	if s.caseFold {
+		str = strings.ToLower(str)
+	}
+	return str
+}
+
+// Score returns the configured algorithm's similarity of a and b in [0,1] (1 =
+// identical), after applying the Suggestor's normalization. It scores a single
+// pair; [Suggestor.Suggest] / [Suggestor.Matches] rank a candidate set. A nil
+// receiver returns 0.
+func (s *Suggestor) Score(a, b string) float64 {
+	if s == nil {
+		return 0
+	}
+	return Similarity(s.normalize(a), s.normalize(b), s.algo)
+}
+
+// Matches ranks candidates by similarity to input, nearest first, keeping those
+// scoring at least the configured minimum (default 0.6) and at most the configured
+// number of results. Each [Match] carries the ORIGINAL candidate string and its
+// score. Distance ties (equal score) prefer the candidate sharing the longer
+// common prefix with input, then break lexicographically, so the result is
+// deterministic. Empty/duplicate candidates and an empty input yield no matches; a
+// nil receiver yields nil. Unlike [Suggestor.Suggest], Matches DOES include an
+// exact match (score 1).
+func (s *Suggestor) Matches(input string, candidates []string) []Match {
+	if s == nil {
+		return nil
+	}
+	ni := s.normalize(input)
+	if ni == "" {
 		return nil
 	}
 	type scored struct {
-		name   string
-		dist   int
+		value  string
+		score  float64
 		prefix int
 	}
 	var hits []scored
 	seen := map[string]bool{}
 	for _, c := range candidates {
-		if c == "" || seen[c] {
+		nc := s.normalize(c)
+		if nc == "" || seen[nc] {
 			continue
 		}
-		seen[c] = true
-		d := s.distance(input, c)
-		if d == 0 {
-			return nil // exact match: nothing to suggest
-		}
-		if d <= s.maxDistance {
-			hits = append(hits, scored{name: c, dist: d, prefix: commonPrefixLen(input, c)})
+		seen[nc] = true
+		if score := Similarity(ni, nc, s.algo); score >= s.minScore {
+			hits = append(hits, scored{value: c, score: score, prefix: commonPrefixLen(ni, nc)})
 		}
 	}
 	sort.Slice(hits, func(i, j int) bool {
-		if hits[i].dist != hits[j].dist {
-			return hits[i].dist < hits[j].dist
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
 		}
 		if hits[i].prefix != hits[j].prefix {
 			return hits[i].prefix > hits[j].prefix
 		}
-		return hits[i].name < hits[j].name
+		return hits[i].value < hits[j].value
 	})
-	if len(hits) == 0 {
-		return nil
-	}
 	if len(hits) > s.maxResults {
 		hits = hits[:s.maxResults]
 	}
-	out := make([]string, len(hits))
+	out := make([]Match, len(hits))
 	for i, h := range hits {
-		out[i] = h.name
+		out[i] = Match{Value: h.value, Score: h.score}
 	}
 	return out
 }
 
-// distance computes the configured algorithm's distance between a and b. The
-// enum is closed, so the default arm (Levenshtein) only guards a zero-value
-// receiver constructed outside NewSuggestor; new algorithms add a case here.
-func (s *Suggestor) distance(a, b string) int {
-	switch s.algo {
-	case SuggestAlgoLevenshtein:
-		return levenshtein(a, b)
-	default:
-		return levenshtein(a, b)
+// Suggest is the "did you mean" convenience over [Suggestor.Matches]: it returns
+// just the candidate strings, nearest first. But when input EXACTLY matches a
+// candidate (it wasn't mistyped) it returns nil — there is nothing to suggest. A
+// nil receiver or empty input also yields nil.
+func (s *Suggestor) Suggest(input string, candidates []string) []string {
+	if s == nil {
+		return nil
 	}
+	ni := s.normalize(input)
+	if ni == "" {
+		return nil
+	}
+	for _, c := range candidates {
+		if s.normalize(c) == ni { // exact match: input wasn't mistyped
+			return nil
+		}
+	}
+	matches := s.Matches(input, candidates)
+	if len(matches) == 0 {
+		return nil
+	}
+	out := make([]string, len(matches))
+	for i, m := range matches {
+		out[i] = m.Value
+	}
+	return out
 }
 
-// commonPrefixLen is the length of the longest common prefix of a and b.
+// commonPrefixLen is the length (in runes) of the longest common prefix of a and b.
 func commonPrefixLen(a, b string) int {
+	ra, rb := []rune(a), []rune(b)
 	n := 0
-	for n < len(a) && n < len(b) && a[n] == b[n] {
+	for n < len(ra) && n < len(rb) && ra[n] == rb[n] {
 		n++
 	}
 	return n
-}
-
-// levenshtein is the edit distance between a and b (Wagner–Fischer).
-func levenshtein(a, b string) int {
-	prev := make([]int, len(b)+1)
-	for j := range prev {
-		prev[j] = j
-	}
-	for i := 1; i <= len(a); i++ {
-		cur := make([]int, len(b)+1)
-		cur[0] = i
-		for j := 1; j <= len(b); j++ {
-			cost := 1
-			if a[i-1] == b[j-1] {
-				cost = 0
-			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
-		}
-		prev = cur
-	}
-	return prev[len(b)]
 }
