@@ -15,25 +15,25 @@ const KeyStyler = "styler"
 // ColorANSI is one of the sixteen standard ANSI palette colors (eight normal plus
 // eight bright), applied with [Style.ForegroundANSI] or [Style.BackgroundANSI].
 // For 24-bit truecolor, use [Style.ForegroundRGB] / [Style.BackgroundRGB].
-type ColorANSI int
+type ANSIColor int
 
 const (
-	Black ColorANSI = iota
-	Red
-	Green
-	Yellow
-	Blue
-	Magenta
-	Cyan
-	White
-	BrightBlack
-	BrightRed
-	BrightGreen
-	BrightYellow
-	BrightBlue
-	BrightMagenta
-	BrightCyan
-	BrightWhite
+	ANSIColorBlack ANSIColor = iota
+	ANSIColorRed
+	ANSIColorGreen
+	ANSIColorYellow
+	ANSIColorBlue
+	ANSIColorMagenta
+	ANSIColorCyan
+	ANSIColorWhite
+	ANSIColorBrightBlack
+	ANSIColorBrightRed
+	ANSIColorBrightGreen
+	ANSIColorBrightYellow
+	ANSIColorBrightBlue
+	ANSIColorBrightMagenta
+	ANSIColorBrightCyan
+	ANSIColorBrightWhite
 )
 
 // Styler is an opt-in text-styling service. It carries one piece of state — an
@@ -141,12 +141,12 @@ func (s Style) Strikethrough() Style {
 }
 
 // ForegroundANSI sets the text color from the 16-color ANSI palette.
-func (s Style) ForegroundANSI(color ColorANSI) Style {
+func (s Style) ForegroundANSI(color ANSIColor) Style {
 	return s.add(strconv.Itoa(colorSGR(color, 30)))
 }
 
 // BackgroundANSI sets the background color from the 16-color ANSI palette.
-func (s Style) BackgroundANSI(color ColorANSI) Style {
+func (s Style) BackgroundANSI(color ANSIColor) Style {
 	return s.add(strconv.Itoa(colorSGR(color, 40)))
 }
 
@@ -247,9 +247,9 @@ func (s Style) Sprintf(format string, args ...any) string {
 
 // colorSGR maps a [ColorANSI] to its SGR parameter for the given base (30 foreground,
 // 40 background): normal colors are base+color, bright colors base+60+offset.
-func colorSGR(color ColorANSI, base int) int {
-	if color >= BrightBlack {
-		return base + 60 + int(color) - int(BrightBlack)
+func colorSGR(color ANSIColor, base int) int {
+	if color >= ANSIColorBlack {
+		return base + 60 + int(color) - int(ANSIColorBrightBlack)
 	}
 	return base + int(color)
 }
