@@ -158,13 +158,14 @@
 //     version string whether the binary was built with -ldflags or installed
 //     by module path.
 //   - Text styling lives in the tortellini subpackage: a Style fluent builder
-//     for SGR styling, a Styler registry of named styles (render text by
-//     intent — "warning", "error"), and Strip to remove ANSI from already-
-//     styled text. A disabled Style adds nothing (passing text through); a
-//     disabled Styler strips, so a program-wide "no color" comes out clean.
-//     Whether to style is the program's call — rotini ships no terminal/
-//     NO_COLOR detection, and no tables/prompts/progress (the deleted UX layer
-//     stays deleted).
+//     for SGR styling (16/256/RGB/hex color, with opt-in Profile downsampling),
+//     a Styler registry of named styles (render text by intent — "warning",
+//     "error"), plus Strip, Hyperlink, Width, and opt-in DetectProfile /
+//     IsTerminal / EnvNoColor helpers. A disabled Style adds nothing (passing
+//     text through); a disabled Styler strips, so a program-wide "no color"
+//     comes out clean. Detection is opt-in — the program decides and feeds the
+//     result in; rotini auto-detects nothing, and there are no
+//     tables/prompts/progress (the deleted UX layer stays deleted).
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve
 //     and orchestration phases wholesale; [FlagValueCompleter] and
 //     [ArgValueCompleter] feed dynamic completion candidates.

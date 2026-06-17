@@ -42,7 +42,7 @@ func TestStyle_fluent(t *testing.T) {
 func TestStyle_merge(t *testing.T) {
 	base := NewStyle().Bold()
 	highlight := NewStyle().ForegroundANSI(ANSIColorRed).Underline()
-	if got, want := base.Merge(highlight).Sprint("x"), "\x1b[1;31;4mx\x1b[0m"; got != want {
+	if got, want := base.Merge(highlight).Sprint("x"), "\x1b[1;4;31mx\x1b[0m"; got != want {
 		t.Errorf("Merge = %q, want %q", got, want)
 	}
 }
@@ -75,7 +75,7 @@ func TestStyler_defineWritesThrough(t *testing.T) {
 	styler := NewStyler()
 	// Define returns a live pointer into the registry; chaining updates it in place.
 	styler.Define("warning").ForegroundHex("#fcba03").Bold()
-	if got, want := styler.Render("warning", "careful"), "\x1b[38;2;252;186;3;1mcareful\x1b[0m"; got != want {
+	if got, want := styler.Render("warning", "careful"), "\x1b[1;38;2;252;186;3mcareful\x1b[0m"; got != want {
 		t.Errorf("Render(warning) = %q, want %q", got, want)
 	}
 }

@@ -2,50 +2,37 @@ package tortellini
 
 import (
 	"fmt"
-	"regexp"
-	"strconv"
+	"io"
+	"os"
+	"slices"
 	"strings"
 )
 
 const KeyStyler = "styler"
 
-var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
-
-type ANSIColor int
-
-const (
-	ANSIColorBlack ANSIColor = iota
-	ANSIColorRed
-	ANSIColorGreen
-	ANSIColorYellow
-	ANSIColorBlue
-	ANSIColorMagenta
-	ANSIColorCyan
-	ANSIColorWhite
-	ANSIColorBrightBlack
-	ANSIColorBrightRed
-	ANSIColorBrightGreen
-	ANSIColorBrightYellow
-	ANSIColorBrightBlue
-	ANSIColorBrightMagenta
-	ANSIColorBrightCyan
-	ANSIColorBrightWhite
-)
+const reset = "\x1b[0m"
 
 type Styler struct {
 	enabled bool
+	profile Profile
 	styles  map[string]*Style
 }
 
 func NewStyler() *Styler {
 	return &Styler{
 		enabled: true,
+		profile: ProfileTrueColor,
 		styles:  map[string]*Style{},
 	}
 }
 
 func (s *Styler) SetEnabled(enabled bool) *Styler {
 	s.enabled = enabled
+	return s
+}
+
+func (s *Styler) SetProfile(profile Profile) *Styler {
+	s.profile = profile
 	return s
 }
 
@@ -78,20 +65,47 @@ func (s *Styler) Render(key, text string) string {
 	if !ok {
 		return text
 	}
-	return style.Sprint(text)
+	return style.renderAt(s.profile, text)
 }
 
 func (s *Styler) Renderf(key, format string, args ...any) string {
 	return s.Render(key, fmt.Sprintf(format, args...))
 }
 
+func (s *Styler) Print(key string, a ...any) {
+	_, _ = fmt.Fprint(os.Stdout, s.Render(key, fmt.Sprint(a...)))
+}
+
+func (s *Styler) Println(key string, a ...any) {
+	_, _ = fmt.Fprintln(os.Stdout, s.Render(key, fmt.Sprint(a...)))
+}
+
+func (s *Styler) Printf(key, format string, a ...any) {
+	_, _ = fmt.Fprint(os.Stdout, s.Renderf(key, format, a...))
+}
+
+func (s *Styler) Fprint(w io.Writer, key string, a ...any) {
+	_, _ = fmt.Fprint(w, s.Render(key, fmt.Sprint(a...)))
+}
+
+func (s *Styler) Fprintln(w io.Writer, key string, a ...any) {
+	_, _ = fmt.Fprintln(w, s.Render(key, fmt.Sprint(a...)))
+}
+
+func (s *Styler) Fprintf(w io.Writer, key, format string, a ...any) {
+	_, _ = fmt.Fprint(w, s.Renderf(key, format, a...))
+}
+
 type Style struct {
-	sgr     string
 	enabled bool
+	profile Profile
+	attrs   []string
+	fg      color
+	bg      color
 }
 
 func NewStyle() *Style {
-	return &Style{enabled: true}
+	return &Style{enabled: true, profile: ProfileTrueColor}
 }
 
 func (s *Style) SetEnabled(enabled bool) *Style {
@@ -99,141 +113,190 @@ func (s *Style) SetEnabled(enabled bool) *Style {
 	return s
 }
 
+func (s *Style) SetProfile(profile Profile) *Style {
+	s.profile = profile
+	return s
+}
+
 func (s *Style) Clone() *Style {
 	clone := *s
+	clone.attrs = slices.Clone(s.attrs)
 	return &clone
 }
 
 func (s *Style) Bold() *Style {
-	return s.add("1")
+	return s.addAttr("1")
 }
 
 func (s *Style) Faint() *Style {
-	return s.add("2")
+	return s.addAttr("2")
 }
 
 func (s *Style) Italic() *Style {
-	return s.add("3")
+	return s.addAttr("3")
 }
 
 func (s *Style) Underline() *Style {
-	return s.add("4")
+	return s.addAttr("4")
+}
+
+func (s *Style) DoubleUnderline() *Style {
+	return s.addAttr("21")
 }
 
 func (s *Style) Blink() *Style {
-	return s.add("5")
+	return s.addAttr("5")
 }
 
 func (s *Style) RapidBlink() *Style {
-	return s.add("6")
+	return s.addAttr("6")
 }
 
 func (s *Style) Reverse() *Style {
-	return s.add("7")
+	return s.addAttr("7")
 }
 
 func (s *Style) Conceal() *Style {
-	return s.add("8")
+	return s.addAttr("8")
 }
 
 func (s *Style) Strikethrough() *Style {
-	return s.add("9")
+	return s.addAttr("9")
 }
 
-func (s *Style) ForegroundANSI(color ANSIColor) *Style {
-	return s.add(strconv.Itoa(colorSGR(color, 30)))
+func (s *Style) Overline() *Style {
+	return s.addAttr("53")
 }
 
-func (s *Style) BackgroundANSI(color ANSIColor) *Style {
-	return s.add(strconv.Itoa(colorSGR(color, 40)))
+func (s *Style) ForegroundANSI(c ANSIColor) *Style {
+	s.fg = colorANSI(c)
+	return s
+}
+
+func (s *Style) BackgroundANSI(c ANSIColor) *Style {
+	s.bg = colorANSI(c)
+	return s
 }
 
 func (s *Style) ForegroundRGB(red, green, blue uint8) *Style {
-	return s.add(fmt.Sprintf("38;2;%d;%d;%d", red, green, blue))
+	s.fg = colorRGB{red, green, blue}
+	return s
 }
 
 func (s *Style) BackgroundRGB(red, green, blue uint8) *Style {
-	return s.add(fmt.Sprintf("48;2;%d;%d;%d", red, green, blue))
+	s.bg = colorRGB{red, green, blue}
+	return s
 }
 
 func (s *Style) Foreground256(code uint8) *Style {
-	return s.add("38;5;" + strconv.Itoa(int(code)))
+	s.fg = color256(code)
+	return s
 }
 
 func (s *Style) Background256(code uint8) *Style {
-	return s.add("48;5;" + strconv.Itoa(int(code)))
+	s.bg = color256(code)
+	return s
 }
 
 func (s *Style) ForegroundHex(hex string) *Style {
 	if red, green, blue, ok := parseHex(hex); ok {
-		return s.ForegroundRGB(red, green, blue)
+		s.fg = colorRGB{red, green, blue}
 	}
 	return s
 }
 
 func (s *Style) BackgroundHex(hex string) *Style {
 	if red, green, blue, ok := parseHex(hex); ok {
-		return s.BackgroundRGB(red, green, blue)
+		s.bg = colorRGB{red, green, blue}
 	}
 	return s
 }
 
 func (s *Style) Raw(sgr string) *Style {
-	return s.add(sgr)
+	if sgr != "" {
+		s.attrs = append(s.attrs, sgr)
+	}
+	return s
 }
 
 func (s *Style) Merge(other *Style) *Style {
-	if other != nil {
-		return s.add(other.sgr)
+	if other == nil {
+		return s
+	}
+	s.attrs = append(s.attrs, other.attrs...)
+	if other.fg != nil {
+		s.fg = other.fg
+	}
+	if other.bg != nil {
+		s.bg = other.bg
 	}
 	return s
 }
 
-func (s *Style) add(parameter string) *Style {
-	if parameter == "" {
-		return s
-	}
-	if s.sgr == "" {
-		s.sgr = parameter
-	} else {
-		s.sgr += ";" + parameter
-	}
+func (s *Style) addAttr(parameter string) *Style {
+	s.attrs = append(s.attrs, parameter)
 	return s
+}
+
+func (s *Style) sgrParams(profile Profile) string {
+	params := make([]string, 0, len(s.attrs)+2)
+	params = append(params, s.attrs...)
+	if s.fg != nil {
+		if p := s.fg.sgr(profile, false); p != "" {
+			params = append(params, p)
+		}
+	}
+	if s.bg != nil {
+		if p := s.bg.sgr(profile, true); p != "" {
+			params = append(params, p)
+		}
+	}
+	return strings.Join(params, ";")
+}
+
+func (s *Style) renderAt(profile Profile, text string) string {
+	if !s.enabled {
+		return text
+	}
+	params := s.sgrParams(profile)
+	if params == "" {
+		return text
+	}
+	open := "\x1b[" + params + "m"
+	if strings.Contains(text, reset) {
+		text = strings.ReplaceAll(text, reset, reset+open)
+	}
+	return open + text + reset
 }
 
 func (s *Style) Sprint(text string) string {
-	if !s.enabled || s.sgr == "" {
-		return text
-	}
-	return "\x1b[" + s.sgr + "m" + text + "\x1b[0m"
+	return s.renderAt(s.profile, text)
 }
 
 func (s *Style) Sprintf(format string, args ...any) string {
 	return s.Sprint(fmt.Sprintf(format, args...))
 }
 
-func colorSGR(color ANSIColor, base int) int {
-	if color >= ANSIColorBrightBlack {
-		return base + 60 + int(color) - int(ANSIColorBrightBlack)
-	}
-	return base + int(color)
+func (s *Style) Print(a ...any) {
+	_, _ = fmt.Fprint(os.Stdout, s.Sprint(fmt.Sprint(a...)))
 }
 
-func parseHex(hex string) (red, green, blue uint8, ok bool) {
-	hex = strings.TrimPrefix(hex, "#")
-	if len(hex) == 3 {
-		hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
-	}
-	if len(hex) != 6 {
-		return 0, 0, 0, false
-	}
-	value, err := strconv.ParseUint(hex, 16, 32)
-	if err != nil {
-		return 0, 0, 0, false
-	}
-	return uint8(value >> 16), uint8(value >> 8), uint8(value), true
+func (s *Style) Println(a ...any) {
+	_, _ = fmt.Fprintln(os.Stdout, s.Sprint(fmt.Sprint(a...)))
 }
 
-func Strip(text string) string {
-	return ansiSequences.ReplaceAllString(text, "")
+func (s *Style) Printf(format string, a ...any) {
+	_, _ = fmt.Fprint(os.Stdout, s.Sprintf(format, a...))
+}
+
+func (s *Style) Fprint(w io.Writer, a ...any) {
+	_, _ = fmt.Fprint(w, s.Sprint(fmt.Sprint(a...)))
+}
+
+func (s *Style) Fprintln(w io.Writer, a ...any) {
+	_, _ = fmt.Fprintln(w, s.Sprint(fmt.Sprint(a...)))
+}
+
+func (s *Style) Fprintf(w io.Writer, format string, a ...any) {
+	_, _ = fmt.Fprint(w, s.Sprintf(format, a...))
 }
