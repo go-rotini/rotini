@@ -102,35 +102,55 @@ type Style struct {
 }
 
 // Bold adds the bold attribute.
-func (s Style) Bold() Style { return s.add("1") }
+func (s Style) Bold() Style {
+	return s.add("1")
+}
 
 // Faint adds the faint (dim) attribute.
-func (s Style) Faint() Style { return s.add("2") }
+func (s Style) Faint() Style {
+	return s.add("2")
+}
 
 // Italic adds the italic attribute.
-func (s Style) Italic() Style { return s.add("3") }
+func (s Style) Italic() Style {
+	return s.add("3")
+}
 
 // Underline adds the underline attribute.
-func (s Style) Underline() Style { return s.add("4") }
+func (s Style) Underline() Style {
+	return s.add("4")
+}
 
 // Blink adds the blink attribute.
-func (s Style) Blink() Style { return s.add("5") }
+func (s Style) Blink() Style {
+	return s.add("5")
+}
 
 // Reverse adds the reverse-video (swap foreground/background) attribute.
-func (s Style) Reverse() Style { return s.add("7") }
+func (s Style) Reverse() Style {
+	return s.add("7")
+}
 
 // Conceal adds the conceal (hidden) attribute: the text occupies space but is not
 // displayed. Terminal support varies.
-func (s Style) Conceal() Style { return s.add("8") }
+func (s Style) Conceal() Style {
+	return s.add("8")
+}
 
 // Strikethrough adds the strikethrough attribute.
-func (s Style) Strikethrough() Style { return s.add("9") }
+func (s Style) Strikethrough() Style {
+	return s.add("9")
+}
 
 // ForegroundANSI sets the text color from the 16-color ANSI palette.
-func (s Style) ForegroundANSI(color ColorANSI) Style { return s.add(strconv.Itoa(colorSGR(color, 30))) }
+func (s Style) ForegroundANSI(color ColorANSI) Style {
+	return s.add(strconv.Itoa(colorSGR(color, 30)))
+}
 
 // BackgroundANSI sets the background color from the 16-color ANSI palette.
-func (s Style) BackgroundANSI(color ColorANSI) Style { return s.add(strconv.Itoa(colorSGR(color, 40))) }
+func (s Style) BackgroundANSI(color ColorANSI) Style {
+	return s.add(strconv.Itoa(colorSGR(color, 40)))
+}
 
 // ForegroundRGB sets a 24-bit "truecolor" foreground from red, green, and blue
 // components (0–255 each). Truecolor requires a capable terminal; elsewhere the
@@ -147,11 +167,15 @@ func (s Style) BackgroundRGB(red, green, blue uint8) Style {
 
 // Foreground256 sets the text color from the 256-color (8-bit) palette: 0–15 are
 // the [ColorANSI] colors, 16–231 a 6×6×6 color cube, and 232–255 a grayscale ramp.
-func (s Style) Foreground256(code uint8) Style { return s.add("38;5;" + strconv.Itoa(int(code))) }
+func (s Style) Foreground256(code uint8) Style {
+	return s.add("38;5;" + strconv.Itoa(int(code)))
+}
 
 // Background256 sets the background color from the 256-color (8-bit) palette. See
 // [Style.Foreground256].
-func (s Style) Background256(code uint8) Style { return s.add("48;5;" + strconv.Itoa(int(code))) }
+func (s Style) Background256(code uint8) Style {
+	return s.add("48;5;" + strconv.Itoa(int(code)))
+}
 
 // ForegroundHex sets a 24-bit truecolor foreground from a hex string — "#rrggbb"
 // or the short "#rgb" form, with or without the leading "#". An unparseable value
@@ -175,7 +199,9 @@ func (s Style) BackgroundHex(hex string) Style {
 // Raw appends a literal SGR parameter for something this package does not name —
 // a 256-color foreground ("38;5;208") or any valid SGR body. It is not validated.
 // For truecolor, prefer [Style.ForegroundRGB] / [Style.BackgroundRGB].
-func (s Style) Raw(sgr string) Style { return s.add(sgr) }
+func (s Style) Raw(sgr string) Style {
+	return s.add(sgr)
+}
 
 // When gates this Style: it applies its attributes only when condition returns
 // true (consulted per [Style.Sprint]), otherwise passing text through unchanged.
@@ -225,10 +251,14 @@ func (s Style) Sprintf(format string, args ...any) string {
 // Print/Fprint helpers ignore the write error — for terminal output that is
 // almost always the right default; use [Style.Sprint] with your own writer when
 // you need to handle it.
-func (s Style) Print(text string) { _, _ = fmt.Fprint(os.Stdout, s.Sprint(text)) }
+func (s Style) Print(text string) {
+	_, _ = fmt.Fprint(os.Stdout, s.Sprint(text))
+}
 
 // Println writes the styled text to standard output, followed by a newline.
-func (s Style) Println(text string) { _, _ = fmt.Fprintln(os.Stdout, s.Sprint(text)) }
+func (s Style) Println(text string) {
+	_, _ = fmt.Fprintln(os.Stdout, s.Sprint(text))
+}
 
 // Printf writes the styled, formatted text to standard output.
 func (s Style) Printf(format string, args ...any) {
@@ -236,10 +266,14 @@ func (s Style) Printf(format string, args ...any) {
 }
 
 // Fprint writes the styled text to w.
-func (s Style) Fprint(w io.Writer, text string) { _, _ = fmt.Fprint(w, s.Sprint(text)) }
+func (s Style) Fprint(w io.Writer, text string) {
+	_, _ = fmt.Fprint(w, s.Sprint(text))
+}
 
 // Fprintln writes the styled text to w, followed by a newline.
-func (s Style) Fprintln(w io.Writer, text string) { _, _ = fmt.Fprintln(w, s.Sprint(text)) }
+func (s Style) Fprintln(w io.Writer, text string) {
+	_, _ = fmt.Fprintln(w, s.Sprint(text))
+}
 
 // Fprintf writes the styled, formatted text to w.
 func (s Style) Fprintf(w io.Writer, format string, args ...any) {
