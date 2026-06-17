@@ -47,9 +47,15 @@ func TestStyle_merge(t *testing.T) {
 	}
 }
 
-func TestStyle_disabled(t *testing.T) {
-	if got := NewStyle(StyleOptions{Enabled: false}).Bold().ForegroundANSI(ANSIColorRed).Sprint("hi"); got != "hi" {
-		t.Errorf("disabled style = %q, want identity", got)
+func TestStyle_clone(t *testing.T) {
+	base := NewStyle().Bold()
+	heading := base.Clone().ForegroundANSI(ANSIColorCyan)
+	if got, want := heading.Sprint("x"), "\x1b[1;36mx\x1b[0m"; got != want {
+		t.Errorf("clone branch = %q, want %q", got, want)
+	}
+	// Cloning is non-destructive: the base is untouched.
+	if got, want := base.Sprint("x"), "\x1b[1mx\x1b[0m"; got != want {
+		t.Errorf("base mutated by a clone = %q, want %q", got, want)
 	}
 }
 
@@ -57,38 +63,46 @@ func TestStyler_set(t *testing.T) {
 	styler := NewStyler().
 		Set("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed)).
 		Set("hint", NewStyle().Faint())
-	if got, want := styler.Sprint("error", "boom"), "\x1b[1;31mboom\x1b[0m"; got != want {
+	if got, want := styler.Render("error", "boom"), "\x1b[1;31mboom\x1b[0m"; got != want {
 		t.Errorf("Render(error) = %q, want %q", got, want)
 	}
-	if got, want := styler.Sprint("hint", "psst"), "\x1b[2mpsst\x1b[0m"; got != want {
+	if got, want := styler.Render("hint", "psst"), "\x1b[2mpsst\x1b[0m"; got != want {
 		t.Errorf("Render(hint) = %q, want %q", got, want)
 	}
 }
 
-func TestStyler_newStyleWritesThrough(t *testing.T) {
+func TestStyler_defineWritesThrough(t *testing.T) {
 	styler := NewStyler()
-	// NewStyle returns a live pointer into the registry; chaining updates it in place.
-	styler.NewStyle("warning").ForegroundHex("#fcba03").Bold()
-	if got, want := styler.Sprint("warning", "careful"), "\x1b[38;2;252;186;3;1mcareful\x1b[0m"; got != want {
+	// Define returns a live pointer into the registry; chaining updates it in place.
+	styler.Define("warning").ForegroundHex("#fcba03").Bold()
+	if got, want := styler.Render("warning", "careful"), "\x1b[38;2;252;186;3;1mcareful\x1b[0m"; got != want {
 		t.Errorf("Render(warning) = %q, want %q", got, want)
 	}
 }
 
 func TestStyler_renderUnknownKey(t *testing.T) {
 	styler := NewStyler().Set("known", NewStyle().Bold())
-	if got := styler.Sprint("missing", "plain"); got != "plain" {
+	if got := styler.Render("missing", "plain"); got != "plain" {
 		t.Errorf("Render(missing) = %q, want unchanged", got)
 	}
 }
 
-func TestStyler_renderDisabled(t *testing.T) {
-	styler := NewStyler().Set("x", NewStyle(StyleOptions{Enabled: false}).Bold())
-	if got := styler.Sprint("x", "hi"); got != "hi" {
-		t.Errorf("Render(disabled) = %q, want identity", got)
+func TestStyler_setEnabled(t *testing.T) {
+	styler := NewStyler().Set("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
+
+	// Global switch off: nothing is styled, regardless of the registered style.
+	styler.SetEnabled(false)
+	if got := styler.Render("error", "boom"); got != "boom" {
+		t.Errorf("disabled Render = %q, want identity", got)
+	}
+	// Back on: styling resumes.
+	styler.SetEnabled(true)
+	if got, want := styler.Render("error", "boom"), "\x1b[1;31mboom\x1b[0m"; got != want {
+		t.Errorf("re-enabled Render = %q, want %q", got, want)
 	}
 }
 
-func TestStyler_getAndUnset(t *testing.T) {
+func TestStyler_getAndDelete(t *testing.T) {
 	styler := NewStyler().Set("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
 
 	style, ok := styler.Get("error")
@@ -99,9 +113,9 @@ func TestStyler_getAndUnset(t *testing.T) {
 		t.Errorf("got style = %q, want %q", got, want)
 	}
 
-	styler.Unset("error")
+	styler.Delete("error")
 	if _, ok := styler.Get("error"); ok {
-		t.Errorf("Get(error) after Unset ok = true, want false")
+		t.Errorf("Get(error) after Delete ok = true, want false")
 	}
 }
 
@@ -114,11 +128,11 @@ func ExampleStyle() {
 
 func ExampleStyler() {
 	styler := NewStyler()
-	styler.NewStyle("warning").ForegroundANSI(ANSIColorYellow)
+	styler.Define("warning").ForegroundANSI(ANSIColorYellow)
 	styler.Set("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
 
-	fmt.Printf("%q\n", styler.Sprint("warning", "disk almost full"))
-	fmt.Printf("%q\n", styler.Sprint("error", "out of memory"))
+	fmt.Printf("%q\n", styler.Render("warning", "disk almost full"))
+	fmt.Printf("%q\n", styler.Render("error", "out of memory"))
 	// Output:
 	// "\x1b[33mdisk almost full\x1b[0m"
 	// "\x1b[1;31mout of memory\x1b[0m"

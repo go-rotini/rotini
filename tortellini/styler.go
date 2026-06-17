@@ -31,29 +31,26 @@ const (
 )
 
 type Styler struct {
-	styles map[string]*Style
+	enabled bool
+	styles  map[string]*Style
 }
 
 func NewStyler() *Styler {
 	return &Styler{
-		styles: map[string]*Style{},
+		enabled: true,
+		styles:  map[string]*Style{},
 	}
 }
 
-func (s *Styler) NewStyle(key string) *Style {
+func (s *Styler) SetEnabled(enabled bool) *Styler {
+	s.enabled = enabled
+	return s
+}
+
+func (s *Styler) Define(key string) *Style {
 	style := NewStyle()
 	s.Set(key, style)
 	return style
-}
-
-func (s *Styler) Set(key string, style *Style) *Styler {
-	s.styles[key] = style
-	return s
-}
-
-func (s *Styler) Unset(key string) *Styler {
-	delete(s.styles, key)
-	return s
 }
 
 func (s *Styler) Get(key string) (*Style, bool) {
@@ -61,7 +58,20 @@ func (s *Styler) Get(key string) (*Style, bool) {
 	return style, ok
 }
 
-func (s *Styler) Sprint(key, text string) string {
+func (s *Styler) Set(key string, style *Style) *Styler {
+	s.styles[key] = style
+	return s
+}
+
+func (s *Styler) Delete(key string) *Styler {
+	delete(s.styles, key)
+	return s
+}
+
+func (s *Styler) Render(key, text string) string {
+	if !s.enabled {
+		return text
+	}
 	style, ok := s.styles[key]
 	if !ok {
 		return text
@@ -69,25 +79,21 @@ func (s *Styler) Sprint(key, text string) string {
 	return style.Sprint(text)
 }
 
-func (s *Styler) Sprintf(key, format string, args ...any) string {
-	return s.Sprint(key, fmt.Sprintf(format, args...))
+func (s *Styler) Renderf(key, format string, args ...any) string {
+	return s.Render(key, fmt.Sprintf(format, args...))
 }
 
 type Style struct {
-	sgr     string
-	enabled bool
+	sgr string
 }
 
-type StyleOptions struct {
-	Enabled bool
+func NewStyle() *Style {
+	return &Style{}
 }
 
-func NewStyle(opts ...StyleOptions) *Style {
-	s := &Style{enabled: true}
-	for _, opt := range opts {
-		s.enabled = opt.Enabled
-	}
-	return s
+func (s *Style) Clone() *Style {
+	clone := *s
+	return &clone
 }
 
 func (s *Style) Bold() *Style {
@@ -188,7 +194,7 @@ func (s *Style) add(parameter string) *Style {
 }
 
 func (s *Style) Sprint(text string) string {
-	if s.sgr == "" || !s.enabled {
+	if s.sgr == "" {
 		return text
 	}
 	return "\x1b[" + s.sgr + "m" + text + "\x1b[0m"
