@@ -24,20 +24,20 @@ const defaultMinScore = 0.6
 //	cmd.Program.Bind(tortellini.KeySuggestor, tortellini.NewSuggestor()).Execute()
 //
 //	// a handler, after a failed Parse
-//	var ue *rotini.ParseError
-//	if errors.As(err, &ue) && ue.Token != "" {
-//		if s, ok := rotini.Get[*tortellini.Suggestor](rtx, tortellini.KeySuggestor); ok {
-//			if hits := s.Suggest(ue.Token, ue.Candidates); len(hits) > 0 {
-//				fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
+//	var parseErr *rotini.ParseError
+//	if errors.As(err, &parseErr) && parseErr.Token != "" {
+//		if suggestor, ok := rotini.Get[*tortellini.Suggestor](rtx, tortellini.KeySuggestor); ok {
+//			if best, ok := suggestor.Closest(parseErr.Token, parseErr.Candidates); ok {
+//				fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
 //			}
 //		}
 //	}
 //
 // It is configured fluently and ranks by a pluggable algorithm normalized to a
-// similarity score (see [SuggestAlgo] / [Similarity]):
+// similarity score (see [SuggestAlgorithm] / [Similarity]):
 //
 //	tortellini.NewSuggestor().
-//		WithAlgo(tortellini.SuggestAlgoJaroWinkler).
+//		WithAlgorithm(tortellini.SuggestAlgorithmJaroWinkler).
 //		WithMinScore(0.7).
 //		WithMaxResults(5).
 //		WithCaseFold()
@@ -46,8 +46,12 @@ const defaultMinScore = 0.6
 // it discovers nothing, prints nothing, and knows nothing about the command
 // tree. Candidates come from whatever vocabulary the caller has: a ParseError's
 // Candidates, sibling names off rtx.Chain(), enum members, or any []string.
+//
+// A configured Suggestor is safe for concurrent use: [Suggestor.Suggest],
+// [Suggestor.Matches], [Suggestor.Closest], and [Suggestor.Score] do not mutate
+// it. Finish configuring (the With* methods) before sharing it across goroutines.
 type Suggestor struct {
-	algo       SuggestAlgo
+	algorithm  SuggestAlgorithm
 	minScore   float64
 	maxResults int
 	caseFold   bool
@@ -62,23 +66,23 @@ type Match struct {
 }
 
 // NewSuggestor returns a [Suggestor] ready to bind under a registry key
-// (conventionally [KeySuggestor]), ranking by [SuggestAlgoLevenshtein] with a
+// (conventionally [KeySuggestor]), ranking by [SuggestAlgorithmLevenshtein] with a
 // minimum score of 0.6 and at most 3 results. Tune any of it fluently:
-// NewSuggestor().WithAlgo(…).WithMinScore(…).WithMaxResults(…).WithCaseFold().
+// NewSuggestor().WithAlgorithm(…).WithMinScore(…).WithMaxResults(…).WithCaseFold().
 func NewSuggestor() *Suggestor {
 	return &Suggestor{
-		algo:       SuggestAlgoLevenshtein,
+		algorithm:  SuggestAlgorithmLevenshtein,
 		minScore:   defaultMinScore,
 		maxResults: 3,
 	}
 }
 
-// WithAlgo selects the ranking algorithm (see [SuggestAlgo]) and returns the
-// receiver to chain. An unrecognized algorithm is ignored. Default
-// [SuggestAlgoLevenshtein].
-func (s *Suggestor) WithAlgo(algo SuggestAlgo) *Suggestor {
-	if algo.valid() {
-		s.algo = algo
+// WithAlgorithm selects the ranking algorithm (see [SuggestAlgorithm]) and returns
+// the receiver to chain. An unrecognized algorithm is ignored. Default
+// [SuggestAlgorithmLevenshtein].
+func (s *Suggestor) WithAlgorithm(algorithm SuggestAlgorithm) *Suggestor {
+	if algorithm.Valid() {
+		s.algorithm = algorithm
 	}
 	return s
 }
@@ -112,21 +116,21 @@ func (s *Suggestor) WithCaseFold() *Suggestor {
 // WithNormalizer sets a preprocessing function applied to BOTH the input and each
 // candidate before scoring (e.g. trim, strip accents), and returns the receiver
 // to chain. It runs before case-folding. The original candidate strings are still
-// what [Suggestor.Suggest] / [Suggestor.Matches] return. A nil fn clears it.
-func (s *Suggestor) WithNormalizer(fn func(string) string) *Suggestor {
-	s.normalizer = fn
+// what [Suggestor.Suggest] / [Suggestor.Matches] return. A nil function clears it.
+func (s *Suggestor) WithNormalizer(normalizer func(string) string) *Suggestor {
+	s.normalizer = normalizer
 	return s
 }
 
 // normalize applies the configured normalizer (if any) then case-folding (if on).
-func (s *Suggestor) normalize(str string) string {
+func (s *Suggestor) normalize(text string) string {
 	if s.normalizer != nil {
-		str = s.normalizer(str)
+		text = s.normalizer(text)
 	}
 	if s.caseFold {
-		str = strings.ToLower(str)
+		text = strings.ToLower(text)
 	}
-	return str
+	return text
 }
 
 // Score returns the configured algorithm's similarity of a and b in [0,1] (1 =
@@ -137,59 +141,64 @@ func (s *Suggestor) Score(a, b string) float64 {
 	if s == nil {
 		return 0
 	}
-	return Similarity(s.normalize(a), s.normalize(b), s.algo)
+	return Similarity(s.normalize(a), s.normalize(b), s.algorithm)
 }
 
 // Matches ranks candidates by similarity to input, nearest first, keeping those
 // scoring at least the configured minimum (default 0.6) and at most the configured
 // number of results. Each [Match] carries the ORIGINAL candidate string and its
-// score. Distance ties (equal score) prefer the candidate sharing the longer
-// common prefix with input, then break lexicographically, so the result is
-// deterministic. Empty/duplicate candidates and an empty input yield no matches; a
-// nil receiver yields nil. Unlike [Suggestor.Suggest], Matches DOES include an
-// exact match (score 1).
+// score. Score ties prefer the candidate sharing the longer common prefix with
+// input, then break lexicographically, so the result is deterministic. An empty
+// input yields no matches; empty candidates are skipped and duplicates (after
+// normalization) collapse to the first occurrence; a nil receiver yields nil.
+// Unlike [Suggestor.Suggest], Matches DOES include an exact match (score 1).
 func (s *Suggestor) Matches(input string, candidates []string) []Match {
 	if s == nil {
 		return nil
 	}
-	ni := s.normalize(input)
-	if ni == "" {
+	normalizedInput := s.normalize(input)
+	if normalizedInput == "" {
 		return nil
 	}
-	type scored struct {
-		value  string
-		score  float64
-		prefix int
+	type scoredMatch struct {
+		value     string
+		score     float64
+		prefixLen int
 	}
-	var hits []scored
-	seen := map[string]bool{}
-	for _, c := range candidates {
-		nc := s.normalize(c)
-		if nc == "" || seen[nc] {
+	hits := make([]scoredMatch, 0, len(candidates))
+	seen := make(map[string]bool, len(candidates))
+	for _, candidate := range candidates {
+		normalizedCandidate := s.normalize(candidate)
+		if normalizedCandidate == "" || seen[normalizedCandidate] {
 			continue
 		}
-		seen[nc] = true
-		if score := Similarity(ni, nc, s.algo); score >= s.minScore {
-			hits = append(hits, scored{value: c, score: score, prefix: commonPrefixLen(ni, nc)})
+		seen[normalizedCandidate] = true
+		score := Similarity(normalizedInput, normalizedCandidate, s.algorithm)
+		if score >= s.minScore {
+			hits = append(hits, scoredMatch{
+				value:     candidate,
+				score:     score,
+				prefixLen: commonPrefixLength(normalizedInput, normalizedCandidate),
+			})
 		}
 	}
 	sort.Slice(hits, func(i, j int) bool {
 		if hits[i].score != hits[j].score {
 			return hits[i].score > hits[j].score
 		}
-		if hits[i].prefix != hits[j].prefix {
-			return hits[i].prefix > hits[j].prefix
+		if hits[i].prefixLen != hits[j].prefixLen {
+			return hits[i].prefixLen > hits[j].prefixLen
 		}
 		return hits[i].value < hits[j].value
 	})
-	if len(hits) > s.maxResults {
+	if s.maxResults > 0 && len(hits) > s.maxResults {
 		hits = hits[:s.maxResults]
 	}
-	out := make([]Match, len(hits))
-	for i, h := range hits {
-		out[i] = Match{Value: h.value, Score: h.score}
+	result := make([]Match, len(hits))
+	for i, hit := range hits {
+		result[i] = Match{Value: hit.value, Score: hit.score}
 	}
-	return out
+	return result
 }
 
 // Suggest is the "did you mean" convenience over [Suggestor.Matches]: it returns
@@ -200,34 +209,38 @@ func (s *Suggestor) Suggest(input string, candidates []string) []string {
 	if s == nil {
 		return nil
 	}
-	ni := s.normalize(input)
-	if ni == "" {
-		return nil
-	}
-	for _, c := range candidates {
-		if s.normalize(c) == ni { // exact match: input wasn't mistyped
-			return nil
-		}
-	}
 	matches := s.Matches(input, candidates)
-	if len(matches) == 0 {
+	// A (normalized) exact match scores exactly 1 and sorts first: the input was
+	// typed correctly, so there is nothing to suggest.
+	if len(matches) == 0 || matches[0].Score == 1 {
 		return nil
 	}
-	out := make([]string, len(matches))
-	for i, m := range matches {
-		out[i] = m.Value
+	result := make([]string, len(matches))
+	for i, match := range matches {
+		result[i] = match.Value
 	}
-	return out
+	return result
 }
 
-// commonPrefixLen is the length (in runes) of the longest common prefix of a and b.
-func commonPrefixLen(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	n := 0
-	for n < len(ra) && n < len(rb) && ra[n] == rb[n] {
-		n++
+// Closest returns the single best suggestion for input and whether one was found
+// — the ergonomic "did you mean X?" form of [Suggestor.Suggest]. Like Suggest, it
+// reports ok=false when input exactly matches a candidate or nothing clears the
+// minimum score.
+func (s *Suggestor) Closest(input string, candidates []string) (suggestion string, ok bool) {
+	if hits := s.Suggest(input, candidates); len(hits) > 0 {
+		return hits[0], true
 	}
-	return n
+	return "", false
+}
+
+// commonPrefixLength is the length (in runes) of the longest common prefix of a and b.
+func commonPrefixLength(a, b string) int {
+	aRunes, bRunes := []rune(a), []rune(b)
+	length := 0
+	for length < len(aRunes) && length < len(bRunes) && aRunes[length] == bRunes[length] {
+		length++
+	}
+	return length
 }
 
 // --- String metrics ---
@@ -235,276 +248,293 @@ func commonPrefixLen(a, b string) int {
 // A roster of nearness algorithms plus [Similarity], which normalizes any of them
 // to a [0,1] score (1 = identical). All are rune-based and usable standalone.
 
-// SuggestAlgo selects the string-distance algorithm a [Suggestor] (and
+// SuggestAlgorithm selects the string-distance algorithm a [Suggestor] (and
 // [Similarity]) ranks by — a small string enum so it reads clearly in code and
-// config. rotini defines the set; it is not user-extensible.
-type SuggestAlgo string
+// config. The package defines the set; it is not user-extensible.
+type SuggestAlgorithm string
 
 const (
-	// SuggestAlgoLevenshtein — Levenshtein (Wagner–Fischer) edit distance:
+	// SuggestAlgorithmLevenshtein — Levenshtein (Wagner–Fischer) edit distance:
 	// insertions, deletions, substitutions, each cost one. The default.
-	SuggestAlgoLevenshtein SuggestAlgo = "levenshtein"
-	// SuggestAlgoDamerauLevenshtein — true (unrestricted) Damerau–Levenshtein:
+	SuggestAlgorithmLevenshtein SuggestAlgorithm = "levenshtein"
+	// SuggestAlgorithmDamerauLevenshtein — true (unrestricted) Damerau–Levenshtein:
 	// Levenshtein plus transpositions of adjacent runes, allowing a substring to
 	// be edited more than once.
-	SuggestAlgoDamerauLevenshtein SuggestAlgo = "damerau-levenshtein"
-	// SuggestAlgoOSA — Optimal String Alignment (restricted Damerau–Levenshtein):
+	SuggestAlgorithmDamerauLevenshtein SuggestAlgorithm = "damerau-levenshtein"
+	// SuggestAlgorithmOptimalStringAlignment — restricted Damerau–Levenshtein:
 	// adds adjacent transpositions, but no substring is edited more than once.
-	SuggestAlgoOSA SuggestAlgo = "osa"
-	// SuggestAlgoHamming — positional substitutions; defined only for equal-length
-	// strings (unequal lengths score 0).
-	SuggestAlgoHamming SuggestAlgo = "hamming"
-	// SuggestAlgoLCS — longest common subsequence; the score is 2·LCS/(len a+len b).
-	SuggestAlgoLCS SuggestAlgo = "lcs"
-	// SuggestAlgoJaro — Jaro similarity, weighting matching runes and
+	SuggestAlgorithmOptimalStringAlignment SuggestAlgorithm = "optimal-string-alignment"
+	// SuggestAlgorithmHamming — positional substitutions; defined only for
+	// equal-length strings (unequal lengths score 0).
+	SuggestAlgorithmHamming SuggestAlgorithm = "hamming"
+	// SuggestAlgorithmLongestCommonSubsequence — longest common subsequence; the
+	// score is 2·LCS/(len a + len b).
+	SuggestAlgorithmLongestCommonSubsequence SuggestAlgorithm = "longest-common-subsequence"
+	// SuggestAlgorithmJaro — Jaro similarity, weighting matching runes and
 	// transpositions; good for short strings.
-	SuggestAlgoJaro SuggestAlgo = "jaro"
-	// SuggestAlgoJaroWinkler — Jaro plus a shared-prefix bonus; the classic
+	SuggestAlgorithmJaro SuggestAlgorithm = "jaro"
+	// SuggestAlgorithmJaroWinkler — Jaro plus a shared-prefix bonus; the classic
 	// "did you mean" metric for short, prefix-similar typos.
-	SuggestAlgoJaroWinkler SuggestAlgo = "jaro-winkler"
-	// SuggestAlgoSorensenDice — Sørensen–Dice coefficient over rune bigrams.
-	SuggestAlgoSorensenDice SuggestAlgo = "sorensen-dice"
-	// SuggestAlgoJaccard — Jaccard index over the set of rune bigrams.
-	SuggestAlgoJaccard SuggestAlgo = "jaccard"
+	SuggestAlgorithmJaroWinkler SuggestAlgorithm = "jaro-winkler"
+	// SuggestAlgorithmSorensenDice — Sørensen–Dice coefficient over rune bigrams.
+	SuggestAlgorithmSorensenDice SuggestAlgorithm = "sorensen-dice"
+	// SuggestAlgorithmJaccard — Jaccard index over the set of rune bigrams.
+	SuggestAlgorithmJaccard SuggestAlgorithm = "jaccard"
 )
 
-// valid reports whether a is a recognized SuggestAlgo. New algorithms add a case
-// here, a dispatch arm in [Similarity], and (if a metric) their own function.
-func (a SuggestAlgo) valid() bool {
+// Algorithms returns every supported [SuggestAlgorithm] in a stable order — for
+// enumerating the choices (config validation, a flag's enum, a UI list).
+func Algorithms() []SuggestAlgorithm {
+	return []SuggestAlgorithm{
+		SuggestAlgorithmLevenshtein,
+		SuggestAlgorithmDamerauLevenshtein,
+		SuggestAlgorithmOptimalStringAlignment,
+		SuggestAlgorithmHamming,
+		SuggestAlgorithmLongestCommonSubsequence,
+		SuggestAlgorithmJaro,
+		SuggestAlgorithmJaroWinkler,
+		SuggestAlgorithmSorensenDice,
+		SuggestAlgorithmJaccard,
+	}
+}
+
+// Valid reports whether a is a recognized [SuggestAlgorithm].
+func (a SuggestAlgorithm) Valid() bool {
 	switch a {
-	case SuggestAlgoLevenshtein, SuggestAlgoDamerauLevenshtein, SuggestAlgoOSA,
-		SuggestAlgoHamming, SuggestAlgoLCS, SuggestAlgoJaro, SuggestAlgoJaroWinkler,
-		SuggestAlgoSorensenDice, SuggestAlgoJaccard:
+	case SuggestAlgorithmLevenshtein, SuggestAlgorithmDamerauLevenshtein,
+		SuggestAlgorithmOptimalStringAlignment, SuggestAlgorithmHamming,
+		SuggestAlgorithmLongestCommonSubsequence, SuggestAlgorithmJaro,
+		SuggestAlgorithmJaroWinkler, SuggestAlgorithmSorensenDice, SuggestAlgorithmJaccard:
 		return true
 	default:
 		return false
 	}
 }
 
-// Similarity normalizes algo's metric for a and b to a score in [0,1], where 1
-// means identical and 0 means maximally dissimilar — so edit-distance and
-// similarity algorithms compare on one scale. An unrecognized algo falls back to
-// Levenshtein. It does no case-folding or normalization; a [Suggestor] applies
+// Similarity normalizes algorithm's metric for a and b to a score in [0,1], where
+// 1 means identical and 0 means maximally dissimilar — so edit-distance and
+// similarity algorithms compare on one scale. An unrecognized algorithm falls back
+// to Levenshtein. It does no case-folding or normalization; a [Suggestor] applies
 // those before calling it.
-func Similarity(a, b string, algo SuggestAlgo) float64 {
-	switch algo {
-	case SuggestAlgoDamerauLevenshtein:
+func Similarity(a, b string, algorithm SuggestAlgorithm) float64 {
+	switch algorithm {
+	case SuggestAlgorithmDamerauLevenshtein:
 		return editSimilarity(DamerauLevenshtein(a, b), a, b)
-	case SuggestAlgoOSA:
-		return editSimilarity(OSA(a, b), a, b)
-	case SuggestAlgoHamming:
-		d, ok := Hamming(a, b)
+	case SuggestAlgorithmOptimalStringAlignment:
+		return editSimilarity(OptimalStringAlignment(a, b), a, b)
+	case SuggestAlgorithmHamming:
+		distance, ok := Hamming(a, b)
 		if !ok {
 			return 0
 		}
-		return editSimilarityLen(d, runeLen(a))
-	case SuggestAlgoLCS:
-		la, lb := runeLen(a), runeLen(b)
-		if la+lb == 0 {
+		return editSimilarityLength(distance, runeLength(a))
+	case SuggestAlgorithmLongestCommonSubsequence:
+		lenA, lenB := runeLength(a), runeLength(b)
+		if lenA+lenB == 0 {
 			return 1
 		}
-		return 2 * float64(LCS(a, b)) / float64(la+lb)
-	case SuggestAlgoJaro:
+		return 2 * float64(LongestCommonSubsequence(a, b)) / float64(lenA+lenB)
+	case SuggestAlgorithmJaro:
 		return Jaro(a, b)
-	case SuggestAlgoJaroWinkler:
+	case SuggestAlgorithmJaroWinkler:
 		return JaroWinkler(a, b)
-	case SuggestAlgoSorensenDice:
+	case SuggestAlgorithmSorensenDice:
 		return SorensenDice(a, b)
-	case SuggestAlgoJaccard:
+	case SuggestAlgorithmJaccard:
 		return Jaccard(a, b)
-	default: // SuggestAlgoLevenshtein and any unknown algo
+	default: // SuggestAlgorithmLevenshtein and any unrecognized algorithm
 		return editSimilarity(Levenshtein(a, b), a, b)
 	}
 }
 
 // editSimilarity maps an edit distance to a [0,1] similarity, normalizing by the
 // longer of the two rune lengths.
-func editSimilarity(dist int, a, b string) float64 {
-	return editSimilarityLen(dist, max(runeLen(a), runeLen(b)))
+func editSimilarity(distance int, a, b string) float64 {
+	return editSimilarityLength(distance, max(runeLength(a), runeLength(b)))
 }
 
-func editSimilarityLen(dist, n int) float64 {
-	if n == 0 {
+func editSimilarityLength(distance, length int) float64 {
+	if length == 0 {
 		return 1
 	}
-	return 1 - float64(dist)/float64(n)
+	return 1 - float64(distance)/float64(length)
 }
 
-func runeLen(s string) int { return len([]rune(s)) }
+func runeLength(s string) int { return len([]rune(s)) }
 
 // Levenshtein returns the Levenshtein (Wagner–Fischer) edit distance between a
 // and b: the minimum number of single-rune insertions, deletions, and
 // substitutions to turn one into the other.
 func Levenshtein(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	if len(ra) == 0 {
-		return len(rb)
+	aRunes, bRunes := []rune(a), []rune(b)
+	if len(aRunes) == 0 {
+		return len(bRunes)
 	}
-	if len(rb) == 0 {
-		return len(ra)
+	if len(bRunes) == 0 {
+		return len(aRunes)
 	}
-	prev := make([]int, len(rb)+1)
-	for j := range prev {
-		prev[j] = j
+	previousRow := make([]int, len(bRunes)+1)
+	for j := range previousRow {
+		previousRow[j] = j
 	}
-	for i := 1; i <= len(ra); i++ {
-		cur := make([]int, len(rb)+1)
-		cur[0] = i
-		for j := 1; j <= len(rb); j++ {
+	for i := 1; i <= len(aRunes); i++ {
+		currentRow := make([]int, len(bRunes)+1)
+		currentRow[0] = i
+		for j := 1; j <= len(bRunes); j++ {
 			cost := 1
-			if ra[i-1] == rb[j-1] {
+			if aRunes[i-1] == bRunes[j-1] {
 				cost = 0
 			}
-			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			currentRow[j] = min(previousRow[j]+1, currentRow[j-1]+1, previousRow[j-1]+cost)
 		}
-		prev = cur
+		previousRow = currentRow
 	}
-	return prev[len(rb)]
+	return previousRow[len(bRunes)]
 }
 
-// OSA returns the Optimal String Alignment distance (restricted Damerau–
-// Levenshtein): Levenshtein plus transposition of two adjacent runes, with the
-// restriction that no substring is edited more than once.
-func OSA(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	la, lb := len(ra), len(rb)
-	if la == 0 {
-		return lb
+// OptimalStringAlignment returns the Optimal String Alignment distance (restricted
+// Damerau–Levenshtein): Levenshtein plus transposition of two adjacent runes, with
+// the restriction that no substring is edited more than once.
+func OptimalStringAlignment(a, b string) int {
+	aRunes, bRunes := []rune(a), []rune(b)
+	lenA, lenB := len(aRunes), len(bRunes)
+	if lenA == 0 {
+		return lenB
 	}
-	if lb == 0 {
-		return la
+	if lenB == 0 {
+		return lenA
 	}
-	d := make([][]int, la+1)
-	for i := range la + 1 {
-		d[i] = make([]int, lb+1)
-		d[i][0] = i
+	matrix := make([][]int, lenA+1)
+	for i := range lenA + 1 {
+		matrix[i] = make([]int, lenB+1)
+		matrix[i][0] = i
 	}
-	for j := range lb + 1 {
-		d[0][j] = j
+	for j := range lenB + 1 {
+		matrix[0][j] = j
 	}
-	for i := 1; i <= la; i++ {
-		for j := 1; j <= lb; j++ {
+	for i := 1; i <= lenA; i++ {
+		for j := 1; j <= lenB; j++ {
 			cost := 1
-			if ra[i-1] == rb[j-1] {
+			if aRunes[i-1] == bRunes[j-1] {
 				cost = 0
 			}
-			d[i][j] = min(d[i-1][j]+1, d[i][j-1]+1, d[i-1][j-1]+cost)
-			if i > 1 && j > 1 && ra[i-1] == rb[j-2] && ra[i-2] == rb[j-1] {
-				d[i][j] = min(d[i][j], d[i-2][j-2]+1)
+			matrix[i][j] = min(matrix[i-1][j]+1, matrix[i][j-1]+1, matrix[i-1][j-1]+cost)
+			if i > 1 && j > 1 && aRunes[i-1] == bRunes[j-2] && aRunes[i-2] == bRunes[j-1] {
+				matrix[i][j] = min(matrix[i][j], matrix[i-2][j-2]+1)
 			}
 		}
 	}
-	return d[la][lb]
+	return matrix[lenA][lenB]
 }
 
-// DamerauLevenshtein returns the true (unrestricted) Damerau–Levenshtein
-// distance: insertions, deletions, substitutions, and transpositions of adjacent
-// runes, allowing a substring to be edited more than once (so it can beat OSA,
-// e.g. "ca"→"abc" is 2, not 3).
+// DamerauLevenshtein returns the true (unrestricted) Damerau–Levenshtein distance:
+// insertions, deletions, substitutions, and transpositions of adjacent runes,
+// allowing a substring to be edited more than once (so it can beat
+// [OptimalStringAlignment], e.g. "ca"→"abc" is 2, not 3).
 func DamerauLevenshtein(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	la, lb := len(ra), len(rb)
-	if la == 0 {
-		return lb
+	aRunes, bRunes := []rune(a), []rune(b)
+	lenA, lenB := len(aRunes), len(bRunes)
+	if lenA == 0 {
+		return lenB
 	}
-	if lb == 0 {
-		return la
+	if lenB == 0 {
+		return lenA
 	}
-	maxDist := la + lb
-	h := make([][]int, la+2)
-	for i := range h {
-		h[i] = make([]int, lb+2)
+	maxDist := lenA + lenB
+	matrix := make([][]int, lenA+2)
+	for i := range matrix {
+		matrix[i] = make([]int, lenB+2)
 	}
-	h[0][0] = maxDist
-	for i := range la + 1 {
-		h[i+1][0] = maxDist
-		h[i+1][1] = i
+	matrix[0][0] = maxDist
+	for i := range lenA + 1 {
+		matrix[i+1][0] = maxDist
+		matrix[i+1][1] = i
 	}
-	for j := range lb + 1 {
-		h[0][j+1] = maxDist
-		h[1][j+1] = j
+	for j := range lenB + 1 {
+		matrix[0][j+1] = maxDist
+		matrix[1][j+1] = j
 	}
-	da := map[rune]int{}
-	for i := 1; i <= la; i++ {
-		db := 0
-		for j := 1; j <= lb; j++ {
-			k := da[rb[j-1]]
-			l := db
+	lastRow := map[rune]int{} // last row (1-indexed) at which each rune appeared in a
+	for i := 1; i <= lenA; i++ {
+		lastMatchCol := 0
+		for j := 1; j <= lenB; j++ {
+			matchRow := lastRow[bRunes[j-1]]
+			matchCol := lastMatchCol
 			cost := 1
-			if ra[i-1] == rb[j-1] {
+			if aRunes[i-1] == bRunes[j-1] {
 				cost = 0
-				db = j
+				lastMatchCol = j
 			}
-			h[i+1][j+1] = min(
-				h[i][j]+cost,              // substitution / match
-				h[i+1][j]+1,               // insertion
-				h[i][j+1]+1,               // deletion
-				h[k][l]+(i-k-1)+1+(j-l-1), // transposition
+			matrix[i+1][j+1] = min(
+				matrix[i][j]+cost, // substitution / match
+				matrix[i+1][j]+1,  // insertion
+				matrix[i][j+1]+1,  // deletion
+				matrix[matchRow][matchCol]+(i-matchRow-1)+1+(j-matchCol-1), // transposition
 			)
 		}
-		da[ra[i-1]] = i
+		lastRow[aRunes[i-1]] = i
 	}
-	return h[la+1][lb+1]
+	return matrix[lenA+1][lenB+1]
 }
 
-// Hamming returns the Hamming distance — the number of positions at which a and
-// b differ — and ok=false when the strings differ in rune length (Hamming is
-// defined only for equal-length strings).
-func Hamming(a, b string) (dist int, ok bool) {
-	ra, rb := []rune(a), []rune(b)
-	if len(ra) != len(rb) {
+// Hamming returns the Hamming distance — the number of positions at which a and b
+// differ — and ok=false when the strings differ in rune length (Hamming is defined
+// only for equal-length strings).
+func Hamming(a, b string) (distance int, ok bool) {
+	aRunes, bRunes := []rune(a), []rune(b)
+	if len(aRunes) != len(bRunes) {
 		return 0, false
 	}
-	for i := range ra {
-		if ra[i] != rb[i] {
-			dist++
+	for i := range aRunes {
+		if aRunes[i] != bRunes[i] {
+			distance++
 		}
 	}
-	return dist, true
+	return distance, true
 }
 
-// LCS returns the length of the longest common subsequence of a and b (runes in
-// order, not necessarily contiguous).
-func LCS(a, b string) int {
-	ra, rb := []rune(a), []rune(b)
-	la, lb := len(ra), len(rb)
-	if la == 0 || lb == 0 {
+// LongestCommonSubsequence returns the length of the longest common subsequence of
+// a and b (runes in order, not necessarily contiguous).
+func LongestCommonSubsequence(a, b string) int {
+	aRunes, bRunes := []rune(a), []rune(b)
+	lenA, lenB := len(aRunes), len(bRunes)
+	if lenA == 0 || lenB == 0 {
 		return 0
 	}
-	prev := make([]int, lb+1)
-	for i := 1; i <= la; i++ {
-		cur := make([]int, lb+1)
-		for j := 1; j <= lb; j++ {
-			if ra[i-1] == rb[j-1] {
-				cur[j] = prev[j-1] + 1
+	previousRow := make([]int, lenB+1)
+	for i := 1; i <= lenA; i++ {
+		currentRow := make([]int, lenB+1)
+		for j := 1; j <= lenB; j++ {
+			if aRunes[i-1] == bRunes[j-1] {
+				currentRow[j] = previousRow[j-1] + 1
 			} else {
-				cur[j] = max(prev[j], cur[j-1])
+				currentRow[j] = max(previousRow[j], currentRow[j-1])
 			}
 		}
-		prev = cur
+		previousRow = currentRow
 	}
-	return prev[lb]
+	return previousRow[lenB]
 }
 
 // Jaro returns the Jaro similarity of a and b in [0,1] (1 = identical).
 func Jaro(a, b string) float64 {
-	ra, rb := []rune(a), []rune(b)
-	la, lb := len(ra), len(rb)
-	if la == 0 && lb == 0 {
+	aRunes, bRunes := []rune(a), []rune(b)
+	lenA, lenB := len(aRunes), len(bRunes)
+	if lenA == 0 && lenB == 0 {
 		return 1
 	}
-	if la == 0 || lb == 0 {
+	if lenA == 0 || lenB == 0 {
 		return 0
 	}
-	matchDist := max(0, max(la, lb)/2-1)
-	aMatched := make([]bool, la)
-	bMatched := make([]bool, lb)
+	matchDistance := max(0, max(lenA, lenB)/2-1)
+	aMatched := make([]bool, lenA)
+	bMatched := make([]bool, lenB)
 	matches := 0
-	for i := range la {
-		start := max(0, i-matchDist)
-		end := min(lb, i+matchDist+1)
+	for i := range lenA {
+		start := max(0, i-matchDistance)
+		end := min(lenB, i+matchDistance+1)
 		for j := start; j < end; j++ {
-			if bMatched[j] || ra[i] != rb[j] {
+			if bMatched[j] || aRunes[i] != bRunes[j] {
 				continue
 			}
 			aMatched[i], bMatched[j] = true, true
@@ -516,98 +546,99 @@ func Jaro(a, b string) float64 {
 		return 0
 	}
 	transpositions := 0.0
-	k := 0
-	for i := range la {
+	bIndex := 0
+	for i := range lenA {
 		if !aMatched[i] {
 			continue
 		}
-		for !bMatched[k] {
-			k++
+		for !bMatched[bIndex] {
+			bIndex++
 		}
-		if ra[i] != rb[k] {
+		if aRunes[i] != bRunes[bIndex] {
 			transpositions++
 		}
-		k++
+		bIndex++
 	}
 	transpositions /= 2
-	m := float64(matches)
-	return (m/float64(la) + m/float64(lb) + (m-transpositions)/m) / 3
+	matchCount := float64(matches)
+	return (matchCount/float64(lenA) + matchCount/float64(lenB) + (matchCount-transpositions)/matchCount) / 3
 }
 
-// JaroWinkler returns the Jaro–Winkler similarity in [0,1]: Jaro plus a bonus
-// for a shared prefix (up to 4 runes), so prefix-similar typos rank higher.
+// JaroWinkler returns the Jaro–Winkler similarity in [0,1]: Jaro plus a bonus for
+// a shared prefix (up to 4 runes), so prefix-similar typos rank higher.
 func JaroWinkler(a, b string) float64 {
-	j := Jaro(a, b)
-	if j == 0 {
+	jaroScore := Jaro(a, b)
+	if jaroScore == 0 {
 		return 0
 	}
-	ra, rb := []rune(a), []rune(b)
-	prefix := 0
-	for prefix < len(ra) && prefix < len(rb) && prefix < 4 && ra[prefix] == rb[prefix] {
-		prefix++
+	aRunes, bRunes := []rune(a), []rune(b)
+	prefixLength := 0
+	for prefixLength < len(aRunes) && prefixLength < len(bRunes) && prefixLength < 4 && aRunes[prefixLength] == bRunes[prefixLength] {
+		prefixLength++
 	}
-	const scale = 0.1 // standard Winkler prefix scaling factor
-	return j + float64(prefix)*scale*(1-j)
+	const prefixScale = 0.1 // standard Winkler prefix scaling factor
+	return jaroScore + float64(prefixLength)*prefixScale*(1-jaroScore)
 }
 
 // SorensenDice returns the Sørensen–Dice coefficient over rune bigrams in [0,1].
-// It is weak on strings shorter than two runes (no bigrams).
+// It is weak on strings shorter than two runes (which have no bigrams).
 func SorensenDice(a, b string) float64 {
 	if a == b {
 		return 1
 	}
-	ba, bb := bigrams(a), bigrams(b)
-	if len(ba) == 0 || len(bb) == 0 {
+	aBigrams, bBigrams := bigrams(a), bigrams(b)
+	if len(aBigrams) == 0 || len(bBigrams) == 0 {
 		return 0
 	}
-	counts := map[string]int{}
-	for _, g := range ba {
-		counts[g]++
+	counts := make(map[string]int, len(aBigrams))
+	for _, gram := range aBigrams {
+		counts[gram]++
 	}
 	overlap := 0
-	for _, g := range bb {
-		if counts[g] > 0 {
-			counts[g]--
+	for _, gram := range bBigrams {
+		if counts[gram] > 0 {
+			counts[gram]--
 			overlap++
 		}
 	}
-	return 2 * float64(overlap) / float64(len(ba)+len(bb))
+	return 2 * float64(overlap) / float64(len(aBigrams)+len(bBigrams))
 }
 
-// Jaccard returns the Jaccard index over the SET of rune bigrams in [0,1].
+// Jaccard returns the Jaccard index over the SET of rune bigrams in [0,1]. It is
+// weak on strings shorter than two runes (which have no bigrams).
 func Jaccard(a, b string) float64 {
 	if a == b {
 		return 1
 	}
-	sa, sb := map[string]bool{}, map[string]bool{}
-	for _, g := range bigrams(a) {
-		sa[g] = true
+	aSet, bSet := map[string]bool{}, map[string]bool{}
+	for _, gram := range bigrams(a) {
+		aSet[gram] = true
 	}
-	for _, g := range bigrams(b) {
-		sb[g] = true
+	for _, gram := range bigrams(b) {
+		bSet[gram] = true
 	}
-	inter := 0
-	for g := range sa {
-		if sb[g] {
-			inter++
+	intersection := 0
+	for gram := range aSet {
+		if bSet[gram] {
+			intersection++
 		}
 	}
-	union := len(sa) + len(sb) - inter
+	union := len(aSet) + len(bSet) - intersection
 	if union == 0 {
 		return 0
 	}
-	return float64(inter) / float64(union)
+	return float64(intersection) / float64(union)
 }
 
 // bigrams returns the adjacent rune-pairs of s, in order (with repeats).
 func bigrams(s string) []string {
-	r := []rune(s)
-	if len(r) < 2 {
+	runes := []rune(s)
+	if len(runes) < 2 {
 		return nil
 	}
-	out := make([]string, 0, len(r)-1)
-	for i := 0; i+1 < len(r); i++ {
-		out = append(out, string(r[i:i+2]))
+	result := make([]string, 0, len(runes)-1)
+	for i := 0; i+1 < len(runes); i++ {
+		result = append(result, string(runes[i:i+2]))
 	}
-	return out
+	return result
 }
