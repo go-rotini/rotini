@@ -1,3 +1,23 @@
+// Package tortellini is a small, dependency-free fuzzy string-matching toolkit:
+// nine nearness algorithms (Levenshtein, Damerau–Levenshtein, Jaro–Winkler, and
+// more) behind one normalized [Similarity] score, plus a configurable [Suggestor]
+// that turns a mistyped token and a vocabulary of candidates into ranked
+// "did you mean" suggestions.
+//
+// It is framework-agnostic — useful in any Go program:
+//
+//	s := tortellini.NewSuggestor()
+//	if best, ok := s.Closest("comit", []string{"commit", "checkout", "clone"}); ok {
+//		fmt.Printf("did you mean %q?\n", best) // did you mean "commit"?
+//	}
+//
+// It also serves as the opt-in suggestion service for a rotini CLI: bind a
+// [Suggestor] under [KeySuggestor] and a handler retrieves it to suggest
+// corrections after a parse error.
+//
+// Each algorithm is exported standalone (e.g. [Levenshtein], [JaroWinkler]) and
+// [Similarity] scores any of them on a single [0,1] scale, so the package doubles
+// as a general string-metrics library.
 package tortellini
 
 import (
@@ -5,8 +25,9 @@ import (
 	"strings"
 )
 
-// KeySuggestor is the conventional registry key the generated main binds the
-// [Suggestor] under (and handlers retrieve it by).
+// KeySuggestor is the conventional key under which a [Suggestor] is registered in
+// a service registry — used, for example, by rotini, whose generated entrypoint
+// binds the Suggestor under this key and whose handlers retrieve it by it.
 const KeySuggestor = "suggestor"
 
 // defaultMinScore is the cutoff a [Suggestor] keeps candidates at or above —
@@ -14,38 +35,30 @@ const KeySuggestor = "suggestor"
 // suggesting merely-adjacent words.
 const defaultMinScore = 0.6
 
-// Suggestor ranks "did you mean" candidates for a mistyped token. It is a
-// *service*, not framework behavior: rotini never suggests anything on its own —
-// parse failures carry the offending token and its vocabulary as data (a
-// rotini.ParseError's Token / Candidates), and a handler that wants suggestions
-// binds a Suggestor and composes the two:
+// Suggestor turns a possibly-mistyped token and a list of candidate strings into
+// ranked "did you mean" suggestions. It is a pure ranking function — it discovers
+// nothing, prints nothing, and holds no state beyond its configuration. The
+// candidates come from whatever vocabulary the caller has: command names, enum
+// members, map keys, or any []string.
 //
-//	// main.go
-//	cmd.Program.Bind(tortellini.KeySuggestor, tortellini.NewSuggestor()).Execute()
+// Configure it fluently; it ranks by a pluggable algorithm normalized to a
+// similarity score (see [SuggestAlgorithm] and [Similarity]):
 //
-//	// a handler, after a failed Parse
-//	var parseErr *rotini.ParseError
-//	if errors.As(err, &parseErr) && parseErr.Token != "" {
-//		if suggestor, ok := rotini.Get[*tortellini.Suggestor](rtx, tortellini.KeySuggestor); ok {
-//			if best, ok := suggestor.Closest(parseErr.Token, parseErr.Candidates); ok {
-//				fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
-//			}
-//		}
-//	}
-//
-// It is configured fluently and ranks by a pluggable algorithm normalized to a
-// similarity score (see [SuggestAlgorithm] / [Similarity]):
-//
-//	tortellini.NewSuggestor().
+//	s := tortellini.NewSuggestor().
 //		WithAlgorithm(tortellini.SuggestAlgorithmJaroWinkler).
 //		WithMinScore(0.7).
 //		WithMaxResults(5).
 //		WithCaseFold()
+//	hits := s.Suggest("isntall", []string{"install", "uninstall", "list"}) // [install]
 //
-// The Suggestor is a pure ranking function over the candidates it is handed —
-// it discovers nothing, prints nothing, and knows nothing about the command
-// tree. Candidates come from whatever vocabulary the caller has: a ParseError's
-// Candidates, sibling names off rtx.Chain(), enum members, or any []string.
+// As a rotini opt-in service it is bound under [KeySuggestor] and consulted by a
+// handler after a parse failure — rotini itself suggests nothing; a
+// rotini.ParseError carries the offending Token and the valid Candidates:
+//
+//	suggestor := rotini.MustGet[*tortellini.Suggestor](rtx, tortellini.KeySuggestor)
+//	if best, ok := suggestor.Closest(parseErr.Token, parseErr.Candidates); ok {
+//		fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
+//	}
 //
 // A configured Suggestor is safe for concurrent use: [Suggestor.Suggest],
 // [Suggestor.Matches], [Suggestor.Closest], and [Suggestor.Score] do not mutate
@@ -58,8 +71,9 @@ type Suggestor struct {
 	normalizer func(string) string
 }
 
-// Match is a scored suggestion returned by [Suggestor.Matches]: the ORIGINAL
-// candidate Value (as passed in) and its similarity Score in [0,1] (1 = identical).
+// Match is a scored suggestion returned by [Suggestor.Matches]: the original
+// candidate Value (exactly as passed in) and its similarity Score in [0,1]
+// (1 = identical).
 type Match struct {
 	Value string
 	Score float64
@@ -113,10 +127,11 @@ func (s *Suggestor) WithCaseFold() *Suggestor {
 	return s
 }
 
-// WithNormalizer sets a preprocessing function applied to BOTH the input and each
-// candidate before scoring (e.g. trim, strip accents), and returns the receiver
-// to chain. It runs before case-folding. The original candidate strings are still
-// what [Suggestor.Suggest] / [Suggestor.Matches] return. A nil function clears it.
+// WithNormalizer sets a preprocessing function applied to both the input and each
+// candidate before scoring (e.g. trim whitespace, strip accents), and returns the
+// receiver to chain. It runs before case-folding. The original candidate strings
+// are still what [Suggestor.Suggest] / [Suggestor.Matches] return. A nil function
+// clears it.
 func (s *Suggestor) WithNormalizer(normalizer func(string) string) *Suggestor {
 	s.normalizer = normalizer
 	return s
