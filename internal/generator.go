@@ -14,7 +14,7 @@ import (
 	"unicode"
 
 	"github.com/go-rotini/jsonschema"
-	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/tortellini"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2523,12 +2523,12 @@ func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, fe
 // stripForFeature removes spec-authored ANSI styling from a feature's output
 // when the feature is not a terminal surface (man, markdown — E6-S1). Help
 // keeps its styling; this returns text unchanged for non-strip features. The
-// strip semantics are the runtime's, single-sourced via rotini.StripStyles.
+// strip semantics match the runtime's, via tortellini.StripStyles.
 func stripForFeature(feat docFeature, text string) string {
 	if !feat.strip {
 		return text
 	}
-	return rotini.StripStyles(text)
+	return tortellini.StripStyles(text)
 }
 
 // loadFeatureTemplate reads the feature dir's editable template, seeding it from

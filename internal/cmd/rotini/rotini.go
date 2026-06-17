@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/tortellini"
 )
 
 type rotiniHandlers struct {
@@ -41,7 +42,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	switch {
 	case flags.Help:
-		fmt.Fprintln(rtx.Stdout, rotini.StripStyles(HelpRotini, noStyles))
+		fmt.Fprintln(rtx.Stdout, tortellini.StripStyles(HelpRotini, noStyles))
 		rtx.SignalExit(0)
 		return
 	case flags.Version:
@@ -50,7 +51,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(0)
 		return
 	default:
-		fmt.Fprintln(rtx.Stdout, rotini.StripStyles(HelpRotini, noStyles))
+		fmt.Fprintln(rtx.Stdout, tortellini.StripStyles(HelpRotini, noStyles))
 		rtx.SignalExit(1)
 		return
 	}
