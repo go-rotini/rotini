@@ -157,9 +157,11 @@
 //     vocabulary into "did you mean" suggestions; [Versioner] resolves one
 //     version string whether the binary was built with -ldflags or installed
 //     by module path.
-//   - Text styling lives in the tortellini subpackage: a Styler / Style fluent
-//     builder for SGR styling, and StripStyles to remove styling from already-
-//     styled text (a help page's spec-authored ANSI). Whether to style is the
+//   - Text styling lives in the tortellini subpackage: a Style fluent builder
+//     for SGR styling, a Styler registry of named styles (render text by
+//     intent — "warning", "error"), and StripStyles to remove styling from
+//     already-styled text (a help page's spec-authored ANSI). Whether to style
+//     is the
 //     program's call — rotini ships no terminal/NO_COLOR detection, and no
 //     tables/prompts/progress (the deleted UX layer stays deleted).
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve

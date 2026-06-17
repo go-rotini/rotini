@@ -2,7 +2,6 @@ package tortellini
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -12,25 +11,24 @@ func TestStyle_fluent(t *testing.T) {
 		got  string
 		want string
 	}{
-		{"bold", Style{}.Bold().Sprint("hi"), "\x1b[1mhi\x1b[0m"},
-		{"bold+italic chain", Style{}.Bold().Italic().Sprint("hi"), "\x1b[1;3mhi\x1b[0m"},
-		{"foreground color", Style{}.ForegroundANSI(Red).Sprint("hi"), "\x1b[31mhi\x1b[0m"},
-		{"bold + foreground", Style{}.Bold().ForegroundANSI(Red).Sprint("hi"), "\x1b[1;31mhi\x1b[0m"},
-		{"background color", Style{}.BackgroundANSI(Blue).Sprint("hi"), "\x1b[44mhi\x1b[0m"},
-		{"bright fg + bright bg", Style{}.ForegroundANSI(BrightRed).BackgroundANSI(BrightWhite).Sprint("hi"), "\x1b[91;107mhi\x1b[0m"},
-		{"truecolor foreground", Style{}.ForegroundRGB(255, 128, 0).Sprint("hi"), "\x1b[38;2;255;128;0mhi\x1b[0m"},
-		{"truecolor background", Style{}.BackgroundRGB(0, 64, 128).Sprint("hi"), "\x1b[48;2;0;64;128mhi\x1b[0m"},
-		{"bold + truecolor fg", Style{}.Bold().ForegroundRGB(10, 20, 30).Sprint("hi"), "\x1b[1;38;2;10;20;30mhi\x1b[0m"},
-		{"conceal", Style{}.Conceal().Sprint("hi"), "\x1b[8mhi\x1b[0m"},
-		{"256-color foreground", Style{}.Foreground256(208).Sprint("hi"), "\x1b[38;5;208mhi\x1b[0m"},
-		{"256-color background", Style{}.Background256(17).Sprint("hi"), "\x1b[48;5;17mhi\x1b[0m"},
-		{"hex foreground", Style{}.ForegroundHex("#ff8000").Sprint("hi"), "\x1b[38;2;255;128;0mhi\x1b[0m"},
-		{"hex background short form", Style{}.BackgroundHex("#f80").Sprint("hi"), "\x1b[48;2;255;136;0mhi\x1b[0m"},
-		{"invalid hex is ignored", Style{}.ForegroundHex("nope").Sprint("hi"), "hi"},
-		{"raw escape hatch (256-color)", Style{}.Raw("38;5;208").Sprint("hi"), "\x1b[38;5;208mhi\x1b[0m"},
-		{"every text attribute", Style{}.Bold().Faint().Italic().Underline().Blink().Reverse().Strikethrough().Sprint("x"), "\x1b[1;2;3;4;5;7;9mx\x1b[0m"},
-		{"zero Style is identity", Style{}.Sprint("hi"), "hi"},
-		{"Sprintf formats then styles", Style{}.Italic().Sprintf("v%d", 2), "\x1b[3mv2\x1b[0m"},
+		{"bold", NewStyle().Bold().Sprint("hi"), "\x1b[1mhi\x1b[0m"},
+		{"bold+italic chain", NewStyle().Bold().Italic().Sprint("hi"), "\x1b[1;3mhi\x1b[0m"},
+		{"foreground color", NewStyle().ForegroundANSI(ANSIColorRed).Sprint("hi"), "\x1b[31mhi\x1b[0m"},
+		{"bold + foreground", NewStyle().Bold().ForegroundANSI(ANSIColorRed).Sprint("hi"), "\x1b[1;31mhi\x1b[0m"},
+		{"background color", NewStyle().BackgroundANSI(ANSIColorBlue).Sprint("hi"), "\x1b[44mhi\x1b[0m"},
+		{"bright fg + bright bg", NewStyle().ForegroundANSI(ANSIColorBrightRed).BackgroundANSI(ANSIColorBrightWhite).Sprint("hi"), "\x1b[91;107mhi\x1b[0m"},
+		{"truecolor foreground", NewStyle().ForegroundRGB(255, 128, 0).Sprint("hi"), "\x1b[38;2;255;128;0mhi\x1b[0m"},
+		{"truecolor background", NewStyle().BackgroundRGB(0, 64, 128).Sprint("hi"), "\x1b[48;2;0;64;128mhi\x1b[0m"},
+		{"bold + truecolor fg", NewStyle().Bold().ForegroundRGB(10, 20, 30).Sprint("hi"), "\x1b[1;38;2;10;20;30mhi\x1b[0m"},
+		{"256-color foreground", NewStyle().Foreground256(208).Sprint("hi"), "\x1b[38;5;208mhi\x1b[0m"},
+		{"256-color background", NewStyle().Background256(17).Sprint("hi"), "\x1b[48;5;17mhi\x1b[0m"},
+		{"hex foreground", NewStyle().ForegroundHex("#ff8000").Sprint("hi"), "\x1b[38;2;255;128;0mhi\x1b[0m"},
+		{"hex background short form", NewStyle().BackgroundHex("#f80").Sprint("hi"), "\x1b[48;2;255;136;0mhi\x1b[0m"},
+		{"invalid hex is ignored", NewStyle().ForegroundHex("nope").Sprint("hi"), "hi"},
+		{"raw escape hatch (256-color)", NewStyle().Raw("38;5;208").Sprint("hi"), "\x1b[38;5;208mhi\x1b[0m"},
+		{"every text attribute", NewStyle().Bold().Faint().Italic().Underline().Blink().RapidBlink().Reverse().Conceal().Strikethrough().Sprint("x"), "\x1b[1;2;3;4;5;6;7;8;9mx\x1b[0m"},
+		{"zero Style is identity", NewStyle().Sprint("hi"), "hi"},
+		{"Sprintf formats then styles", NewStyle().Italic().Sprintf("v%d", 2), "\x1b[3mv2\x1b[0m"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,93 +39,142 @@ func TestStyle_fluent(t *testing.T) {
 	}
 }
 
-func TestStyle_immutableBranching(t *testing.T) {
-	// Each method returns a new Style, so a base can be branched without bleed.
-	base := Style{}.Bold()
-	red := base.ForegroundANSI(Red)
-	blue := base.ForegroundANSI(Blue)
-	if got, want := red.Sprint("x"), "\x1b[1;31mx\x1b[0m"; got != want {
-		t.Errorf("red branch = %q, want %q", got, want)
-	}
-	if got, want := blue.Sprint("x"), "\x1b[1;34mx\x1b[0m"; got != want {
-		t.Errorf("blue branch = %q, want %q", got, want)
-	}
-	if got, want := base.Sprint("x"), "\x1b[1mx\x1b[0m"; got != want {
-		t.Errorf("base mutated by a branch = %q, want %q", got, want)
-	}
-}
-
 func TestStyle_merge(t *testing.T) {
-	base := Style{}.Bold()
-	highlight := Style{}.ForegroundANSI(Red).Underline()
+	base := NewStyle().Bold()
+	highlight := NewStyle().ForegroundANSI(ANSIColorRed).Underline()
 	if got, want := base.Merge(highlight).Sprint("x"), "\x1b[1;31;4mx\x1b[0m"; got != want {
 		t.Errorf("Merge = %q, want %q", got, want)
 	}
-	// Merging is non-destructive: the base is unchanged and reusable.
-	if got, want := base.Sprint("x"), "\x1b[1mx\x1b[0m"; got != want {
-		t.Errorf("base after Merge = %q, want %q", got, want)
+}
+
+func TestStyle_When(t *testing.T) {
+	if got := NewStyle().Bold().When(func() bool { return false }).Sprint("hi"); got != "hi" {
+		t.Errorf("When(false) = %q, want identity", got)
+	}
+	if got, want := NewStyle().Bold().When(func() bool { return true }).Sprint("hi"), "\x1b[1mhi\x1b[0m"; got != want {
+		t.Errorf("When(true) = %q, want %q", got, want)
 	}
 }
 
-func TestStyle_output(t *testing.T) {
-	var buf strings.Builder
-	Style{}.Bold().Fprintln(&buf, "hi")
-	if got, want := buf.String(), "\x1b[1mhi\x1b[0m\n"; got != want {
-		t.Errorf("Fprintln = %q, want %q", got, want)
+func TestStyle_nilSprint(t *testing.T) {
+	var s *Style
+	if got := s.Sprint("hi"); got != "hi" {
+		t.Errorf("nil Style.Sprint = %q, want identity", got)
 	}
-	buf.Reset()
-	Style{}.Italic().Fprintf(&buf, "v%d", 2)
-	if got, want := buf.String(), "\x1b[3mv2\x1b[0m"; got != want {
-		t.Errorf("Fprintf = %q, want %q", got, want)
+}
+
+func TestStyler_add(t *testing.T) {
+	styler := NewStyler().
+		Add("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed)).
+		Add("hint", NewStyle().Faint())
+	if got, want := styler.Render("error", "boom"), "\x1b[1;31mboom\x1b[0m"; got != want {
+		t.Errorf("Render(error) = %q, want %q", got, want)
+	}
+	if got, want := styler.Render("hint", "psst"), "\x1b[2mpsst\x1b[0m"; got != want {
+		t.Errorf("Render(hint) = %q, want %q", got, want)
+	}
+}
+
+func TestStyler_newWritesThrough(t *testing.T) {
+	styler := NewStyler()
+	// New returns a live pointer into the registry, so chaining updates it in place.
+	styler.New("warning").ForegroundHex("#fcba03").Bold()
+	if got, want := styler.Render("warning", "careful"), "\x1b[38;2;252;186;3;1mcareful\x1b[0m"; got != want {
+		t.Errorf("Render(warning) = %q, want %q", got, want)
+	}
+}
+
+func TestStyler_renderUnknownKey(t *testing.T) {
+	styler := NewStyler().Add("known", NewStyle().Bold())
+	if got := styler.Render("missing", "plain"); got != "plain" {
+		t.Errorf("Render(missing) = %q, want unchanged", got)
+	}
+}
+
+func TestStyler_getAndRemove(t *testing.T) {
+	styler := NewStyler().Add("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
+
+	style, ok := styler.Get("error")
+	if !ok {
+		t.Fatalf("Get(error) ok = false, want true")
+	}
+	if got, want := style.Sprint("x"), "\x1b[1;31mx\x1b[0m"; got != want {
+		t.Errorf("got style = %q, want %q", got, want)
+	}
+
+	styler.Remove("error")
+	if _, ok := styler.Get("error"); ok {
+		t.Errorf("Get(error) after Remove ok = true, want false")
 	}
 }
 
 func TestStyler_condition(t *testing.T) {
 	on := NewStyler(WithCondition(func() bool { return true }))
-	if got, want := on.Style().Bold().Sprint("hi"), "\x1b[1mhi\x1b[0m"; got != want {
+	on.Add("b", NewStyle().Bold())
+	if got, want := on.Render("b", "hi"), "\x1b[1mhi\x1b[0m"; got != want {
 		t.Errorf("condition true = %q, want %q", got, want)
 	}
+
 	off := NewStyler(WithCondition(func() bool { return false }))
-	if got := off.Style().Bold().ForegroundANSI(Red).Sprint("hi"); got != "hi" {
+	off.Add("b", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
+	if got := off.Render("b", "hi"); got != "hi" {
 		t.Errorf("condition false = %q, want identity", got)
 	}
-	// The condition is consulted per Sprint, so a runtime signal flips styling
-	// without rebuilding the Style.
+
+	// The condition is consulted per Render, so a runtime signal flips styling
+	// without re-registering.
 	enabled := true
 	dynamic := NewStyler(WithCondition(func() bool { return enabled }))
-	style := dynamic.Style().Bold()
-	if got := style.Sprint("a"); got != "\x1b[1ma\x1b[0m" {
+	dynamic.Add("b", NewStyle().Bold())
+	if got := dynamic.Render("b", "a"); got != "\x1b[1ma\x1b[0m" {
 		t.Errorf("dynamic on = %q, want styled", got)
 	}
 	enabled = false
-	if got := style.Sprint("a"); got != "a" {
+	if got := dynamic.Render("b", "a"); got != "a" {
 		t.Errorf("dynamic off = %q, want identity", got)
 	}
-}
 
-func TestStyle_When(t *testing.T) {
-	if got := (Style{}).Bold().When(func() bool { return false }).Sprint("hi"); got != "hi" {
-		t.Errorf("When(false) = %q, want identity", got)
-	}
-	if got, want := (Style{}).Bold().When(func() bool { return true }).Sprint("hi"), "\x1b[1mhi\x1b[0m"; got != want {
-		t.Errorf("When(true) = %q, want %q", got, want)
+	// A style minted by New inherits the condition, so styling it directly honors it.
+	gated := NewStyler(WithCondition(func() bool { return false }))
+	if got := gated.New("w").Bold().Sprint("hi"); got != "hi" {
+		t.Errorf("New direct Sprint under off condition = %q, want identity", got)
 	}
 }
 
 func TestStyler_nilReceiver(t *testing.T) {
 	var styler *Styler
-	if got, want := styler.Style().Bold().Sprint("hi"), "\x1b[1mhi\x1b[0m"; got != want {
-		t.Errorf("nil Styler.Style() = %q, want unconditional %q", got, want)
+	if got := styler.Render("anything", "hi"); got != "hi" {
+		t.Errorf("nil Styler.Render = %q, want identity", got)
 	}
+	if _, ok := styler.Get("anything"); ok {
+		t.Errorf("nil Styler.Get ok = true, want false")
+	}
+	// New/Add/Remove on a nil Styler do not panic.
+	_ = styler.New("x")
+	_ = styler.Add("x", NewStyle().Bold())
+	_ = styler.Remove("x")
 }
 
 func ExampleStyle() {
 	// Build a style fluently; whether to apply it is the program's call, gated
 	// here with When. With styling off the same Style passes text through.
 	noColor := true
-	emphasis := Style{}.Bold().ForegroundANSI(Cyan).When(func() bool { return !noColor })
+	emphasis := NewStyle().Bold().ForegroundANSI(ANSIColorCyan).When(func() bool { return !noColor })
 	fmt.Println(emphasis.Sprint("ready")) // gated off → no escapes
 	// Output: ready
+}
+
+func ExampleStyler() {
+	styler := NewStyler()
+	styler.New("warning").ForegroundANSI(ANSIColorYellow)
+	styler.Add("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
+
+	// %q makes the escape sequences visible; in a terminal these render as color.
+	fmt.Printf("%q\n", styler.Render("warning", "disk almost full"))
+	fmt.Printf("%q\n", styler.Render("error", "out of memory"))
+	// Output:
+	// "\x1b[33mdisk almost full\x1b[0m"
+	// "\x1b[1;31mout of memory\x1b[0m"
 }
 
 func TestStripStyles(t *testing.T) {
