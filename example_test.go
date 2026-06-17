@@ -1,7 +1,7 @@
 package rotini
 
 // Runnable godoc Examples for the opt-in services a handler reaches for most:
-// Parser, Binder, Suggestor, the registry (Get/MustGet), and the category
+// Parser, Binder, the registry (Get/MustGet), and the category
 // taxonomy. Each builds its own small Definition the way the generated
 // framework file would, so the snippets read like handler code.
 
@@ -83,14 +83,6 @@ func ExampleBinder_Bind() {
 	}
 	fmt.Println("port:", inputs.App.Flags.Port)
 	// Output: port: 9090
-}
-
-// Suggestor turns a ParseError's offending token and candidate vocabulary
-// into "did you mean" suggestions.
-func ExampleSuggestor_Suggest() {
-	s := NewSuggestor()
-	fmt.Println(s.Suggest("delpoy", []string{"deploy", "destroy", "version"}))
-	// Output: [deploy]
 }
 
 // The registry: anything bound on the Program (or Context) is fetched typed.

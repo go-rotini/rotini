@@ -127,7 +127,7 @@
 //
 // rotini ships no opinions on top: no "did you mean", no help dump on error. A
 // program that wants either writes its own funnel — e.g. a [Program.WithOnErrorFn]
-// that ranges its recorded errors and applies the bound [Suggestor] to a
+// that ranges its recorded errors and applies the bound tortellini.Suggestor to a
 // [*ParseError] Token, renders help for [ParseError.Command], logs, or redacts.
 // Suggestion is the program's call, never the framework's (Pillar 1).
 //
@@ -135,7 +135,7 @@
 //
 // Everything else is a value a handler fetches from the registry —
 // [Program.Bind] to provide, [Get] / [MustGet] to consume, with the [KeyParser],
-// [KeyBinder], [KeySuggestor], [KeyVersioner] conventions naming the usual
+// [KeyBinder], tortellini.KeySuggestor, [KeyVersioner] conventions naming the usual
 // suspects:
 //
 //   - [Collect] is the 95% handler's whole input story: every declared
@@ -153,7 +153,7 @@
 //     [ParseStdin] / [Defaults], composed by [OverlayInputs] or
 //     [OverlayInputsP]) acquires channels one at a time for programs that
 //     want custom precedence, with the same [Report].
-//   - [Suggestor] turns a [ParseError]'s unknown token and candidate
+//   - tortellini.Suggestor turns a [ParseError]'s unknown token and candidate
 //     vocabulary into "did you mean" suggestions; [Versioner] resolves one
 //     version string whether the binary was built with -ldflags or installed
 //     by module path.

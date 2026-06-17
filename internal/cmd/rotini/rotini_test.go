@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-rotini/rotini"
+	"github.com/go-rotini/rotini/tortellini"
 )
 
 // svc is a registry binding a test injects in addition to the always-present parser — used
@@ -41,7 +42,7 @@ func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string
 		WithStderr(&errb).
 		WithExit(func(c int) { code = c }).
 		Bind(rotini.KeyParser, rotini.NewParser()).
-		Bind(rotini.KeySuggestor, rotini.NewSuggestor()).
+		Bind(tortellini.KeySuggestor, tortellini.NewSuggestor()).
 		Bind(rotini.KeyVersioner, &rotini.Versioner{VersionSemantic: testVersion})
 	for _, b := range binds {
 		p.Bind(b.key, b.val)

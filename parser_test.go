@@ -133,10 +133,8 @@ func TestParse_unknownCommand(t *testing.T) {
 	if !slices.Contains(pe.Candidates, "run") {
 		t.Errorf("ParseError.Candidates = %v, want to contain \"run\"", pe.Candidates)
 	}
-	// The extracted Suggestor reproduces the old behavior from the data.
-	if hits := NewSuggestor().Suggest(pe.Token, pe.Candidates); len(hits) == 0 || hits[0] != "run" {
-		t.Errorf("Suggest(%q, %v) = %v, want [run ...]", pe.Token, pe.Candidates, hits)
-	}
+	// (The ParseError → Suggestor integration is exercised in package tortellini, which owns
+	// the Suggestor; here we only pin that the parser populates Token/Candidates.)
 }
 
 func TestParse_missingRequired(t *testing.T) {

@@ -1,4 +1,4 @@
-package rotini
+package tortellini
 
 import "sort"
 
@@ -8,17 +8,17 @@ const KeySuggestor = "suggestor"
 
 // Suggestor ranks "did you mean" candidates for a mistyped token. It is a
 // *service*, not framework behavior: rotini never suggests anything on its own —
-// parse failures carry the offending token and its vocabulary as data
-// ([ParseError.Token] / [ParseError.Candidates]), and a handler that wants
-// suggestions binds a Suggestor and composes the two:
+// parse failures carry the offending token and its vocabulary as data (a
+// rotini.ParseError's Token / Candidates), and a handler that wants suggestions
+// binds a Suggestor and composes the two:
 //
 //	// main.go
-//	cmd.Program.Bind(rotini.KeySuggestor, rotini.NewSuggestor()).Execute()
+//	cmd.Program.Bind(tortellini.KeySuggestor, tortellini.NewSuggestor()).Execute()
 //
 //	// a handler, after a failed Parse
 //	var ue *rotini.ParseError
 //	if errors.As(err, &ue) && ue.Token != "" {
-//		if s, ok := rotini.Get[*rotini.Suggestor](rtx, rotini.KeySuggestor); ok {
+//		if s, ok := rotini.Get[*tortellini.Suggestor](rtx, tortellini.KeySuggestor); ok {
 //			if hits := s.Suggest(ue.Token, ue.Candidates); len(hits) > 0 {
 //				fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
 //			}
