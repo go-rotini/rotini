@@ -61,7 +61,7 @@ func (s *Styler) Get(key string) (*Style, bool) {
 	return style, ok
 }
 
-func (s *Styler) Render(key, text string) string {
+func (s *Styler) Sprint(key, text string) string {
 	style, ok := s.styles[key]
 	if !ok {
 		return text
@@ -69,8 +69,8 @@ func (s *Styler) Render(key, text string) string {
 	return style.Sprint(text)
 }
 
-func (s *Styler) Renderf(key, format string, args ...any) string {
-	return s.Render(key, fmt.Sprintf(format, args...))
+func (s *Styler) Sprintf(key, format string, args ...any) string {
+	return s.Sprint(key, fmt.Sprintf(format, args...))
 }
 
 type Style struct {
