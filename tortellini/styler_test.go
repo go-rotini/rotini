@@ -138,48 +138,45 @@ func ExampleStyler() {
 	// "\x1b[1;31mout of memory\x1b[0m"
 }
 
+func TestStyle_disabledStrips(t *testing.T) {
+	// A disabled style removes any ANSI already in the text, so partially-styled
+	// input comes out clean — even attributes the style itself never set.
+	styled := "\x1b[1mbold\x1b[0m and \x1b[31mred\x1b[0m"
+	if got, want := NewStyle().Bold().SetEnabled(false).Sprint(styled), "bold and red"; got != want {
+		t.Errorf("disabled Sprint = %q, want %q", got, want)
+	}
+}
+
+func TestStyler_disabledStrips(t *testing.T) {
+	// The global switch off strips, regardless of the key (or whether it exists).
+	styler := NewStyler().Set("error", NewStyle().Bold())
+	styler.SetEnabled(false)
+	styled := "\x1b[1mloud\x1b[0m"
+	if got := styler.Render("error", styled); got != "loud" {
+		t.Errorf("disabled Render(known) = %q, want stripped", got)
+	}
+	if got := styler.Render("missing", styled); got != "loud" {
+		t.Errorf("disabled Render(missing) = %q, want stripped", got)
+	}
+}
+
 func TestStripStyles(t *testing.T) {
 	styled := "\x1b[1mbold\x1b[0m \x1b[3mitalic\x1b[23m \x1b[38;5;208mcolor\x1b[39m"
 	link := "see \x1b]8;;https://example.dev\x07example.dev\x1b]8;;\x07 docs"
 	linkST := "see \x1b]8;;https://example.dev\x1b\\example.dev\x1b]8;;\x1b\\ docs"
 
-	// No condition: always strips.
-	if got, want := StripStyles(styled), "bold italic color"; got != want {
-		t.Errorf("StripStyles(no condition) = %q, want %q", got, want)
+	if got, want := stripStyles(styled), "bold italic color"; got != want {
+		t.Errorf("stripStyles(CSI) = %q, want %q", got, want)
 	}
 	// Hyperlinks keep their visible text in both terminator forms.
-	if got, want := StripStyles(link), "see example.dev docs"; got != want {
-		t.Errorf("StripStyles(BEL link) = %q, want %q", got, want)
+	if got, want := stripStyles(link), "see example.dev docs"; got != want {
+		t.Errorf("stripStyles(BEL link) = %q, want %q", got, want)
 	}
-	if got, want := StripStyles(linkST), "see example.dev docs"; got != want {
-		t.Errorf("StripStyles(ST link) = %q, want %q", got, want)
+	if got, want := stripStyles(linkST), "see example.dev docs"; got != want {
+		t.Errorf("stripStyles(ST link) = %q, want %q", got, want)
 	}
 	// Plain text is untouched.
-	if got := StripStyles("plain"); got != "plain" {
-		t.Errorf("StripStyles(plain) = %q, want unchanged", got)
+	if got := stripStyles("plain"); got != "plain" {
+		t.Errorf("stripStyles(plain) = %q, want unchanged", got)
 	}
-
-	// Conditions: strip iff at least one returns true.
-	yes := func() bool { return true }
-	no := func() bool { return false }
-	if got := StripStyles(styled, no); got != styled {
-		t.Errorf("StripStyles(all false) = %q, want unchanged", got)
-	}
-	if got, want := StripStyles(styled, no, yes), "bold italic color"; got != want {
-		t.Errorf("StripStyles(any true) = %q, want %q", got, want)
-	}
-	// A nil condition is skipped, not panicked.
-	if got := StripStyles(styled, nil); got != styled {
-		t.Errorf("StripStyles(nil cond) = %q, want unchanged", got)
-	}
-}
-
-func ExampleStripStyles() {
-	help := "\x1b[1mNAME\x1b[0m\n    mycli - a demo"
-	noStyles := func() bool { return true } // e.g. a --no-styles flag
-
-	fmt.Println(StripStyles(help, noStyles))
-	// Output:
-	// NAME
-	//     mycli - a demo
 }

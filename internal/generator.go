@@ -2522,13 +2522,13 @@ func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, fe
 
 // stripForFeature removes spec-authored ANSI styling from a feature's output
 // when the feature is not a terminal surface (man, markdown — E6-S1). Help
-// keeps its styling; this returns text unchanged for non-strip features. The
-// strip semantics match the runtime's, via tortellini.StripStyles.
+// keeps its styling; this returns text unchanged for non-strip features. A
+// disabled tortellini.Style strips, matching the runtime's strip semantics.
 func stripForFeature(feat docFeature, text string) string {
 	if !feat.strip {
 		return text
 	}
-	return tortellini.StripStyles(text)
+	return tortellini.NewStyle().SetEnabled(false).Sprint(text)
 }
 
 // loadFeatureTemplate reads the feature dir's editable template, seeding it from

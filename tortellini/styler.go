@@ -9,6 +9,8 @@ import (
 
 const KeyStyler = "styler"
 
+var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+
 type ANSIColor int
 
 const (
@@ -70,7 +72,7 @@ func (s *Styler) Delete(key string) *Styler {
 
 func (s *Styler) Render(key, text string) string {
 	if !s.enabled {
-		return text
+		return ansiSequences.ReplaceAllString(text, "")
 	}
 	style, ok := s.styles[key]
 	if !ok {
@@ -84,11 +86,17 @@ func (s *Styler) Renderf(key, format string, args ...any) string {
 }
 
 type Style struct {
-	sgr string
+	sgr     string
+	enabled bool
 }
 
 func NewStyle() *Style {
-	return &Style{}
+	return &Style{enabled: true}
+}
+
+func (s *Style) SetEnabled(enabled bool) *Style {
+	s.enabled = enabled
+	return s
 }
 
 func (s *Style) Clone() *Style {
@@ -194,6 +202,9 @@ func (s *Style) add(parameter string) *Style {
 }
 
 func (s *Style) Sprint(text string) string {
+	if !s.enabled {
+		return ansiSequences.ReplaceAllString(text, "")
+	}
 	if s.sgr == "" {
 		return text
 	}
@@ -224,18 +235,4 @@ func parseHex(hex string) (red, green, blue uint8, ok bool) {
 		return 0, 0, 0, false
 	}
 	return uint8(value >> 16), uint8(value >> 8), uint8(value), true
-}
-
-var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
-
-func StripStyles(text string, conditions ...func() bool) string {
-	if len(conditions) == 0 {
-		return ansiSequences.ReplaceAllString(text, "")
-	}
-	for _, condition := range conditions {
-		if condition != nil && condition() {
-			return ansiSequences.ReplaceAllString(text, "")
-		}
-	}
-	return text
 }

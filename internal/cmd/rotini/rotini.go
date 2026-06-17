@@ -40,9 +40,13 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// set: the --no-styles flag, $ROTINI_NO_STYLES, or a CI environment ($CI).
 	noStyles := func() bool { return flags.Nostyles || env.Nostyles || env.Ci }
 
+	// A disabled Style strips the help page's spec-authored ANSI; an enabled one
+	// (no attributes of its own) passes it through untouched.
+	help := tortellini.NewStyle().SetEnabled(!noStyles()).Sprint(HelpRotini)
+
 	switch {
 	case flags.Help:
-		fmt.Fprintln(rtx.Stdout, tortellini.StripStyles(HelpRotini, noStyles))
+		fmt.Fprintln(rtx.Stdout, help)
 		rtx.SignalExit(0)
 		return
 	case flags.Version:
@@ -51,7 +55,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(0)
 		return
 	default:
-		fmt.Fprintln(rtx.Stdout, tortellini.StripStyles(HelpRotini, noStyles))
+		fmt.Fprintln(rtx.Stdout, help)
 		rtx.SignalExit(1)
 		return
 	}
