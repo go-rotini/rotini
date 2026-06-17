@@ -40,9 +40,12 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// set: the --no-styles flag, $ROTINI_NO_STYLES, or a CI environment ($CI).
 	noStyles := func() bool { return flags.Nostyles || env.Nostyles || env.Ci }
 
-	// A disabled Style strips the help page's spec-authored ANSI; an enabled one
-	// (no attributes of its own) passes it through untouched.
-	help := tortellini.NewStyle().SetEnabled(!noStyles()).Sprint(HelpRotini)
+	// Strip the help page's spec-authored ANSI when a no-styles signal is set;
+	// otherwise show it as authored.
+	help := HelpRotini
+	if noStyles() {
+		help = tortellini.Strip(HelpRotini)
+	}
 
 	switch {
 	case flags.Help:

@@ -138,17 +138,18 @@ func ExampleStyler() {
 	// "\x1b[1;31mout of memory\x1b[0m"
 }
 
-func TestStyle_disabledStrips(t *testing.T) {
-	// A disabled style removes any ANSI already in the text, so partially-styled
-	// input comes out clean — even attributes the style itself never set.
+func TestStyle_disabledPassesThrough(t *testing.T) {
+	// A disabled style adds nothing and leaves the text exactly as given — it does
+	// not strip ANSI already present (that is Strip's job, or the Styler's gate).
 	styled := "\x1b[1mbold\x1b[0m and \x1b[31mred\x1b[0m"
-	if got, want := NewStyle().Bold().SetEnabled(false).Sprint(styled), "bold and red"; got != want {
-		t.Errorf("disabled Sprint = %q, want %q", got, want)
+	if got := NewStyle().Bold().SetEnabled(false).Sprint(styled); got != styled {
+		t.Errorf("disabled Sprint = %q, want unchanged %q", got, styled)
 	}
 }
 
 func TestStyler_disabledStrips(t *testing.T) {
-	// The global switch off strips, regardless of the key (or whether it exists).
+	// The global switch off strips, regardless of the key (or whether it exists):
+	// the program said "no color", so any pre-styled text comes out clean.
 	styler := NewStyler().Set("error", NewStyle().Bold())
 	styler.SetEnabled(false)
 	styled := "\x1b[1mloud\x1b[0m"
@@ -160,23 +161,23 @@ func TestStyler_disabledStrips(t *testing.T) {
 	}
 }
 
-func TestStripStyles(t *testing.T) {
+func TestStrip(t *testing.T) {
 	styled := "\x1b[1mbold\x1b[0m \x1b[3mitalic\x1b[23m \x1b[38;5;208mcolor\x1b[39m"
 	link := "see \x1b]8;;https://example.dev\x07example.dev\x1b]8;;\x07 docs"
 	linkST := "see \x1b]8;;https://example.dev\x1b\\example.dev\x1b]8;;\x1b\\ docs"
 
-	if got, want := stripStyles(styled), "bold italic color"; got != want {
-		t.Errorf("stripStyles(CSI) = %q, want %q", got, want)
+	if got, want := Strip(styled), "bold italic color"; got != want {
+		t.Errorf("Strip(CSI) = %q, want %q", got, want)
 	}
 	// Hyperlinks keep their visible text in both terminator forms.
-	if got, want := stripStyles(link), "see example.dev docs"; got != want {
-		t.Errorf("stripStyles(BEL link) = %q, want %q", got, want)
+	if got, want := Strip(link), "see example.dev docs"; got != want {
+		t.Errorf("Strip(BEL link) = %q, want %q", got, want)
 	}
-	if got, want := stripStyles(linkST), "see example.dev docs"; got != want {
-		t.Errorf("stripStyles(ST link) = %q, want %q", got, want)
+	if got, want := Strip(linkST), "see example.dev docs"; got != want {
+		t.Errorf("Strip(ST link) = %q, want %q", got, want)
 	}
 	// Plain text is untouched.
-	if got := stripStyles("plain"); got != "plain" {
-		t.Errorf("stripStyles(plain) = %q, want unchanged", got)
+	if got := Strip("plain"); got != "plain" {
+		t.Errorf("Strip(plain) = %q, want unchanged", got)
 	}
 }

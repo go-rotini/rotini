@@ -11,6 +11,10 @@ const KeyStyler = "styler"
 
 var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
+func Strip(text string) string {
+	return ansiSequences.ReplaceAllString(text, "")
+}
+
 type ANSIColor int
 
 const (
@@ -72,7 +76,7 @@ func (s *Styler) Delete(key string) *Styler {
 
 func (s *Styler) Render(key, text string) string {
 	if !s.enabled {
-		return ansiSequences.ReplaceAllString(text, "")
+		return Strip(text)
 	}
 	style, ok := s.styles[key]
 	if !ok {
@@ -202,10 +206,7 @@ func (s *Style) add(parameter string) *Style {
 }
 
 func (s *Style) Sprint(text string) string {
-	if !s.enabled {
-		return ansiSequences.ReplaceAllString(text, "")
-	}
-	if s.sgr == "" {
+	if !s.enabled || s.sgr == "" {
 		return text
 	}
 	return "\x1b[" + s.sgr + "m" + text + "\x1b[0m"
