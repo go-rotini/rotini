@@ -2,8 +2,11 @@ package tortellini
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 // KeyStyler is the conventional key under which a [Styler] is registered in a
@@ -11,12 +14,13 @@ import (
 // it to style output. Styling is opt-in: nothing is styled unless a handler asks.
 const KeyStyler = "styler"
 
-// Color is one of the sixteen standard ANSI palette colors (eight normal plus
-// eight bright), applied with [Style.Foreground] or [Style.Background].
-type Color int
+// ColorANSI is one of the sixteen standard ANSI palette colors (eight normal plus
+// eight bright), applied with [Style.ForegroundANSI] or [Style.BackgroundANSI].
+// For 24-bit truecolor, use [Style.ForegroundRGB] / [Style.BackgroundRGB].
+type ColorANSI int
 
 const (
-	Black Color = iota
+	Black ColorANSI = iota
 	Red
 	Green
 	Yellow
@@ -43,8 +47,8 @@ const (
 // $CI, a --no-color flag, whether the writer is a terminal, or anything else).
 // With no condition a Styler always styles.
 //
-//	styler := tortellini.NewStyler(tortellini.WithCondition(func() bool { return !noColor }))
-//	fmt.Println(styler.Style().Bold().Foreground(tortellini.Red).Sprint("error"))
+//	styler := tortellini.NewStyler(tortellini.WithCondition(func() bool { return !noColorANSI }))
+//	fmt.Println(styler.Style().Bold().ForegroundANSI(tortellini.Red).Sprint("error"))
 type Styler struct {
 	enabled func() bool
 }
@@ -72,7 +76,7 @@ func NewStyler(options ...StylerOption) *Styler {
 
 // Style returns a fresh [Style] bound to the Styler's condition, ready to chain:
 //
-//	styler.Style().Bold().Foreground(tortellini.Cyan).Sprint("ready")
+//	styler.Style().Bold().ForegroundANSI(tortellini.Cyan).Sprint("ready")
 //
 // A nil Styler yields an unconditional [Style].
 func (s *Styler) Style() Style {
@@ -85,7 +89,7 @@ func (s *Styler) Style() Style {
 // Style is a fluent builder for an ANSI SGR styling sequence. Chain attribute
 // methods to compose it, then apply it with [Style.Sprint] / [Style.Sprintf]:
 //
-//	tortellini.Style{}.Bold().Italic().Foreground(tortellini.Red).Sprint("oops")
+//	tortellini.Style{}.Bold().Italic().ForegroundANSI(tortellini.Red).Sprint("oops")
 //
 // The zero Style applies nothing (its Sprint returns text unchanged), so it is a
 // safe no-op default. Style values are immutable — each method returns a new
@@ -115,18 +119,62 @@ func (s Style) Blink() Style { return s.add("5") }
 // Reverse adds the reverse-video (swap foreground/background) attribute.
 func (s Style) Reverse() Style { return s.add("7") }
 
+// Conceal adds the conceal (hidden) attribute: the text occupies space but is not
+// displayed. Terminal support varies.
+func (s Style) Conceal() Style { return s.add("8") }
+
 // Strikethrough adds the strikethrough attribute.
 func (s Style) Strikethrough() Style { return s.add("9") }
 
-// Foreground sets the text color.
-func (s Style) Foreground(color Color) Style { return s.add(strconv.Itoa(colorSGR(color, 30))) }
+// ForegroundANSI sets the text color from the 16-color ANSI palette.
+func (s Style) ForegroundANSI(color ColorANSI) Style { return s.add(strconv.Itoa(colorSGR(color, 30))) }
 
-// Background sets the background color.
-func (s Style) Background(color Color) Style { return s.add(strconv.Itoa(colorSGR(color, 40))) }
+// BackgroundANSI sets the background color from the 16-color ANSI palette.
+func (s Style) BackgroundANSI(color ColorANSI) Style { return s.add(strconv.Itoa(colorSGR(color, 40))) }
+
+// ForegroundRGB sets a 24-bit "truecolor" foreground from red, green, and blue
+// components (0–255 each). Truecolor requires a capable terminal; elsewhere the
+// sequence is typically ignored. For the 16-color palette use [Style.ForegroundANSI].
+func (s Style) ForegroundRGB(red, green, blue uint8) Style {
+	return s.add(fmt.Sprintf("38;2;%d;%d;%d", red, green, blue))
+}
+
+// BackgroundRGB sets a 24-bit "truecolor" background from red, green, and blue
+// components (0–255 each). See [Style.ForegroundRGB].
+func (s Style) BackgroundRGB(red, green, blue uint8) Style {
+	return s.add(fmt.Sprintf("48;2;%d;%d;%d", red, green, blue))
+}
+
+// Foreground256 sets the text color from the 256-color (8-bit) palette: 0–15 are
+// the [ColorANSI] colors, 16–231 a 6×6×6 color cube, and 232–255 a grayscale ramp.
+func (s Style) Foreground256(code uint8) Style { return s.add("38;5;" + strconv.Itoa(int(code))) }
+
+// Background256 sets the background color from the 256-color (8-bit) palette. See
+// [Style.Foreground256].
+func (s Style) Background256(code uint8) Style { return s.add("48;5;" + strconv.Itoa(int(code))) }
+
+// ForegroundHex sets a 24-bit truecolor foreground from a hex string — "#rrggbb"
+// or the short "#rgb" form, with or without the leading "#". An unparseable value
+// is ignored (no-op).
+func (s Style) ForegroundHex(hex string) Style {
+	if red, green, blue, ok := parseHex(hex); ok {
+		return s.ForegroundRGB(red, green, blue)
+	}
+	return s
+}
+
+// BackgroundHex sets a 24-bit truecolor background from a hex string. See
+// [Style.ForegroundHex].
+func (s Style) BackgroundHex(hex string) Style {
+	if red, green, blue, ok := parseHex(hex); ok {
+		return s.BackgroundRGB(red, green, blue)
+	}
+	return s
+}
 
 // Raw appends a literal SGR parameter for something this package does not name —
-// a 256-color foreground ("38;5;208"), a truecolor background ("48;2;255;128;0"),
-// or any valid SGR body. It is not validated.
+// a 256-color foreground ("38;5;208") or any valid SGR body. It is not validated.
+// For truecolor, prefer [Style.ForegroundRGB] / [Style.BackgroundRGB].
 func (s Style) Raw(sgr string) Style { return s.add(sgr) }
 
 // When gates this Style: it applies its attributes only when condition returns
@@ -136,6 +184,13 @@ func (s Style) Raw(sgr string) Style { return s.add(sgr) }
 func (s Style) When(condition func() bool) Style {
 	s.enabled = condition
 	return s
+}
+
+// Merge returns a Style combining this Style's attributes with other's (this
+// Style's applied first), keeping this Style's condition. Handy for layering a
+// shared base style with per-call additions: base.Merge(highlight).
+func (s Style) Merge(other Style) Style {
+	return s.add(other.sgr)
 }
 
 // add appends one SGR parameter, returning a new Style; an empty parameter is a
@@ -166,13 +221,55 @@ func (s Style) Sprintf(format string, args ...any) string {
 	return s.Sprint(fmt.Sprintf(format, args...))
 }
 
-// colorSGR maps a [Color] to its SGR parameter for the given base (30 foreground,
+// Print writes the styled text to standard output (no trailing newline). The
+// Print/Fprint helpers ignore the write error — for terminal output that is
+// almost always the right default; use [Style.Sprint] with your own writer when
+// you need to handle it.
+func (s Style) Print(text string) { _, _ = fmt.Fprint(os.Stdout, s.Sprint(text)) }
+
+// Println writes the styled text to standard output, followed by a newline.
+func (s Style) Println(text string) { _, _ = fmt.Fprintln(os.Stdout, s.Sprint(text)) }
+
+// Printf writes the styled, formatted text to standard output.
+func (s Style) Printf(format string, args ...any) {
+	_, _ = fmt.Fprint(os.Stdout, s.Sprintf(format, args...))
+}
+
+// Fprint writes the styled text to w.
+func (s Style) Fprint(w io.Writer, text string) { _, _ = fmt.Fprint(w, s.Sprint(text)) }
+
+// Fprintln writes the styled text to w, followed by a newline.
+func (s Style) Fprintln(w io.Writer, text string) { _, _ = fmt.Fprintln(w, s.Sprint(text)) }
+
+// Fprintf writes the styled, formatted text to w.
+func (s Style) Fprintf(w io.Writer, format string, args ...any) {
+	_, _ = fmt.Fprint(w, s.Sprintf(format, args...))
+}
+
+// colorSGR maps a [ColorANSI] to its SGR parameter for the given base (30 foreground,
 // 40 background): normal colors are base+color, bright colors base+60+offset.
-func colorSGR(color Color, base int) int {
+func colorSGR(color ColorANSI, base int) int {
 	if color >= BrightBlack {
 		return base + 60 + int(color) - int(BrightBlack)
 	}
 	return base + int(color)
+}
+
+// parseHex parses a "#rrggbb" or short "#rgb" hex color (with or without the
+// leading "#") into its red, green, and blue components.
+func parseHex(hex string) (red, green, blue uint8, ok bool) {
+	hex = strings.TrimPrefix(hex, "#")
+	if len(hex) == 3 { // short form: "f80" → "ff8800"
+		hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+	}
+	if len(hex) != 6 {
+		return 0, 0, 0, false
+	}
+	value, err := strconv.ParseUint(hex, 16, 32)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return uint8(value >> 16), uint8(value >> 8), uint8(value), true
 }
 
 // ansiSequences matches the terminal escape sequences styling introduces: CSI
