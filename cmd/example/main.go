@@ -10,11 +10,11 @@ func main() {
 	styler := tortellini.NewStyler()
 
 	// 1. Build a style in place; the chain writes through to the registry.
-	styler.New("warning").ForegroundHex("#fcba03").Bold()
+	styler.NewStyle("warning").ForegroundHex("#fcba03").Bold()
 
 	// 2. Add a style you built yourself.
-	styler.Add("error", tortellini.NewStyle().ForegroundHex("#ff3333").Bold())
-	styler.Add("panic", tortellini.NewStyle().ForegroundHex("#ff4dee").Blink())
+	styler.Set("error", tortellini.NewStyle().ForegroundHex("#ff3333").Bold())
+	styler.Set("panic", tortellini.NewStyle().ForegroundHex("#ff4dee").Blink())
 
 	fmt.Println(styler.Render("warning", "Warning: low disk space"))
 	fmt.Println(styler.Render("error", "Error: connection refused"))

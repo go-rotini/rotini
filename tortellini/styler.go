@@ -41,7 +41,7 @@ func NewStyler() *Styler {
 }
 
 func (s *Styler) NewStyle(key string) *Style {
-	style := NewStyle(key)
+	style := NewStyle()
 	s.Set(key, style)
 	return style
 }
@@ -66,12 +66,7 @@ func (s *Styler) Render(key, text string) string {
 	if !ok {
 		return text
 	}
-
-	if style.enabled {
-		return style.Sprint(text)
-	}
-
-	return text
+	return style.Sprint(text)
 }
 
 func (s *Styler) Renderf(key, format string, args ...any) string {
@@ -87,13 +82,11 @@ type StyleOptions struct {
 	Enabled bool
 }
 
-func NewStyle(key string, opts ...StyleOptions) *Style {
-	s := &Style{}
-
+func NewStyle(opts ...StyleOptions) *Style {
+	s := &Style{enabled: true}
 	for _, opt := range opts {
 		s.enabled = opt.Enabled
 	}
-
 	return s
 }
 
@@ -175,14 +168,6 @@ func (s *Style) Raw(sgr string) *Style {
 	return s.add(sgr)
 }
 
-func (s *Style) When(condition func() bool) *Style {
-	if s == nil {
-		return nil
-	}
-	s.enabled = condition
-	return s
-}
-
 func (s *Style) Merge(other *Style) *Style {
 	if other != nil {
 		return s.add(other.sgr)
@@ -191,7 +176,7 @@ func (s *Style) Merge(other *Style) *Style {
 }
 
 func (s *Style) add(parameter string) *Style {
-	if s == nil || parameter == "" {
+	if parameter == "" {
 		return s
 	}
 	if s.sgr == "" {
@@ -203,7 +188,7 @@ func (s *Style) add(parameter string) *Style {
 }
 
 func (s *Style) Sprint(text string) string {
-	if s == nil || s.sgr == "" || (s.enabled != nil && !s.enabled()) {
+	if s.sgr == "" || !s.enabled {
 		return text
 	}
 	return "\x1b[" + s.sgr + "m" + text + "\x1b[0m"

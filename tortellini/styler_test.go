@@ -27,7 +27,7 @@ func TestStyle_fluent(t *testing.T) {
 		{"invalid hex is ignored", NewStyle().ForegroundHex("nope").Sprint("hi"), "hi"},
 		{"raw escape hatch (256-color)", NewStyle().Raw("38;5;208").Sprint("hi"), "\x1b[38;5;208mhi\x1b[0m"},
 		{"every text attribute", NewStyle().Bold().Faint().Italic().Underline().Blink().RapidBlink().Reverse().Conceal().Strikethrough().Sprint("x"), "\x1b[1;2;3;4;5;6;7;8;9mx\x1b[0m"},
-		{"zero Style is identity", NewStyle().Sprint("hi"), "hi"},
+		{"no attributes is identity", NewStyle().Sprint("hi"), "hi"},
 		{"Sprintf formats then styles", NewStyle().Italic().Sprintf("v%d", 2), "\x1b[3mv2\x1b[0m"},
 	}
 	for _, tc := range cases {
@@ -47,26 +47,16 @@ func TestStyle_merge(t *testing.T) {
 	}
 }
 
-func TestStyle_When(t *testing.T) {
-	if got := NewStyle().Bold().When(func() bool { return false }).Sprint("hi"); got != "hi" {
-		t.Errorf("When(false) = %q, want identity", got)
-	}
-	if got, want := NewStyle().Bold().When(func() bool { return true }).Sprint("hi"), "\x1b[1mhi\x1b[0m"; got != want {
-		t.Errorf("When(true) = %q, want %q", got, want)
+func TestStyle_disabled(t *testing.T) {
+	if got := NewStyle(StyleOptions{Enabled: false}).Bold().ForegroundANSI(ANSIColorRed).Sprint("hi"); got != "hi" {
+		t.Errorf("disabled style = %q, want identity", got)
 	}
 }
 
-func TestStyle_nilSprint(t *testing.T) {
-	var s *Style
-	if got := s.Sprint("hi"); got != "hi" {
-		t.Errorf("nil Style.Sprint = %q, want identity", got)
-	}
-}
-
-func TestStyler_add(t *testing.T) {
+func TestStyler_set(t *testing.T) {
 	styler := NewStyler().
-		Add("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed)).
-		Add("hint", NewStyle().Faint())
+		Set("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed)).
+		Set("hint", NewStyle().Faint())
 	if got, want := styler.Render("error", "boom"), "\x1b[1;31mboom\x1b[0m"; got != want {
 		t.Errorf("Render(error) = %q, want %q", got, want)
 	}
@@ -75,24 +65,31 @@ func TestStyler_add(t *testing.T) {
 	}
 }
 
-func TestStyler_newWritesThrough(t *testing.T) {
+func TestStyler_newStyleWritesThrough(t *testing.T) {
 	styler := NewStyler()
-	// New returns a live pointer into the registry, so chaining updates it in place.
-	styler.New("warning").ForegroundHex("#fcba03").Bold()
+	// NewStyle returns a live pointer into the registry; chaining updates it in place.
+	styler.NewStyle("warning").ForegroundHex("#fcba03").Bold()
 	if got, want := styler.Render("warning", "careful"), "\x1b[38;2;252;186;3;1mcareful\x1b[0m"; got != want {
 		t.Errorf("Render(warning) = %q, want %q", got, want)
 	}
 }
 
 func TestStyler_renderUnknownKey(t *testing.T) {
-	styler := NewStyler().Add("known", NewStyle().Bold())
+	styler := NewStyler().Set("known", NewStyle().Bold())
 	if got := styler.Render("missing", "plain"); got != "plain" {
 		t.Errorf("Render(missing) = %q, want unchanged", got)
 	}
 }
 
-func TestStyler_getAndRemove(t *testing.T) {
-	styler := NewStyler().Add("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
+func TestStyler_renderDisabled(t *testing.T) {
+	styler := NewStyler().Set("x", NewStyle(StyleOptions{Enabled: false}).Bold())
+	if got := styler.Render("x", "hi"); got != "hi" {
+		t.Errorf("Render(disabled) = %q, want identity", got)
+	}
+}
+
+func TestStyler_getAndUnset(t *testing.T) {
+	styler := NewStyler().Set("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
 
 	style, ok := styler.Get("error")
 	if !ok {
@@ -102,74 +99,24 @@ func TestStyler_getAndRemove(t *testing.T) {
 		t.Errorf("got style = %q, want %q", got, want)
 	}
 
-	styler.Remove("error")
+	styler.Unset("error")
 	if _, ok := styler.Get("error"); ok {
-		t.Errorf("Get(error) after Remove ok = true, want false")
+		t.Errorf("Get(error) after Unset ok = true, want false")
 	}
-}
-
-func TestStyler_condition(t *testing.T) {
-	on := NewStyler(WithCondition(func() bool { return true }))
-	on.Add("b", NewStyle().Bold())
-	if got, want := on.Render("b", "hi"), "\x1b[1mhi\x1b[0m"; got != want {
-		t.Errorf("condition true = %q, want %q", got, want)
-	}
-
-	off := NewStyler(WithCondition(func() bool { return false }))
-	off.Add("b", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
-	if got := off.Render("b", "hi"); got != "hi" {
-		t.Errorf("condition false = %q, want identity", got)
-	}
-
-	// The condition is consulted per Render, so a runtime signal flips styling
-	// without re-registering.
-	enabled := true
-	dynamic := NewStyler(WithCondition(func() bool { return enabled }))
-	dynamic.Add("b", NewStyle().Bold())
-	if got := dynamic.Render("b", "a"); got != "\x1b[1ma\x1b[0m" {
-		t.Errorf("dynamic on = %q, want styled", got)
-	}
-	enabled = false
-	if got := dynamic.Render("b", "a"); got != "a" {
-		t.Errorf("dynamic off = %q, want identity", got)
-	}
-
-	// A style minted by New inherits the condition, so styling it directly honors it.
-	gated := NewStyler(WithCondition(func() bool { return false }))
-	if got := gated.New("w").Bold().Sprint("hi"); got != "hi" {
-		t.Errorf("New direct Sprint under off condition = %q, want identity", got)
-	}
-}
-
-func TestStyler_nilReceiver(t *testing.T) {
-	var styler *Styler
-	if got := styler.Render("anything", "hi"); got != "hi" {
-		t.Errorf("nil Styler.Render = %q, want identity", got)
-	}
-	if _, ok := styler.Get("anything"); ok {
-		t.Errorf("nil Styler.Get ok = true, want false")
-	}
-	// New/Add/Remove on a nil Styler do not panic.
-	_ = styler.New("x")
-	_ = styler.Add("x", NewStyle().Bold())
-	_ = styler.Remove("x")
 }
 
 func ExampleStyle() {
-	// Build a style fluently; whether to apply it is the program's call, gated
-	// here with When. With styling off the same Style passes text through.
-	noColor := true
-	emphasis := NewStyle().Bold().ForegroundANSI(ANSIColorCyan).When(func() bool { return !noColor })
-	fmt.Println(emphasis.Sprint("ready")) // gated off → no escapes
-	// Output: ready
+	s := NewStyle().Bold().ForegroundANSI(ANSIColorCyan)
+	// %q makes the escape sequences visible; in a terminal these render as color.
+	fmt.Printf("%q\n", s.Sprint("ready"))
+	// Output: "\x1b[1;36mready\x1b[0m"
 }
 
 func ExampleStyler() {
 	styler := NewStyler()
-	styler.New("warning").ForegroundANSI(ANSIColorYellow)
-	styler.Add("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
+	styler.NewStyle("warning").ForegroundANSI(ANSIColorYellow)
+	styler.Set("error", NewStyle().Bold().ForegroundANSI(ANSIColorRed))
 
-	// %q makes the escape sequences visible; in a terminal these render as color.
 	fmt.Printf("%q\n", styler.Render("warning", "disk almost full"))
 	fmt.Printf("%q\n", styler.Render("error", "out of memory"))
 	// Output:
