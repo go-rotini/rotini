@@ -37,7 +37,7 @@ func TestSuggest(t *testing.T) {
 func TestSuggest_tuning(t *testing.T) {
 	// A lower min-score admits farther candidates; a results cap trims the list.
 	// The With* tuners are chainable receiver methods.
-	wide := NewSuggestor().WithAlgo(SuggestAlgoLevenshtein).WithMinScore(0.2).WithMaxResults(2)
+	wide := NewSuggestor().WithAlgorithm(SuggestAlgorithmLevenshtein).WithMinScore(0.2).WithMaxResults(2)
 	got := wide.Suggest("dep", []string{"deploy", "delete", "describe", "drain"})
 	if len(got) != 2 {
 		t.Fatalf("Suggest with WithMaxResults(2) = %v, want 2 hits", got)
@@ -52,20 +52,20 @@ func TestSuggest_tuning(t *testing.T) {
 	}
 }
 
-func TestSuggest_algo(t *testing.T) {
-	if def := NewSuggestor(); def.algo != SuggestAlgoLevenshtein {
-		t.Errorf("default algo = %q, want %q", def.algo, SuggestAlgoLevenshtein)
+func TestSuggest_algorithm(t *testing.T) {
+	if def := NewSuggestor(); def.algorithm != SuggestAlgorithmLevenshtein {
+		t.Errorf("default algorithm = %q, want %q", def.algorithm, SuggestAlgorithmLevenshtein)
 	}
 	// A recognized algorithm is selected.
-	if s := NewSuggestor().WithAlgo(SuggestAlgoJaroWinkler); s.algo != SuggestAlgoJaroWinkler {
-		t.Errorf("WithAlgo(JaroWinkler) algo = %q, want it set", s.algo)
+	if s := NewSuggestor().WithAlgorithm(SuggestAlgorithmJaroWinkler); s.algorithm != SuggestAlgorithmJaroWinkler {
+		t.Errorf("WithAlgorithm(JaroWinkler) algorithm = %q, want it set", s.algorithm)
 	}
 	// An unrecognized algorithm is ignored — the current (default) one stays.
-	if s := NewSuggestor().WithAlgo("nonsense"); s.algo != SuggestAlgoLevenshtein {
-		t.Errorf("WithAlgo(unknown) set algo to %q, want it ignored", s.algo)
+	if s := NewSuggestor().WithAlgorithm("nonsense"); s.algorithm != SuggestAlgorithmLevenshtein {
+		t.Errorf("WithAlgorithm(unknown) set algorithm to %q, want it ignored", s.algorithm)
 	}
 	// Jaro-Winkler favors a shared-prefix typo end-to-end.
-	got := NewSuggestor().WithAlgo(SuggestAlgoJaroWinkler).Suggest("deploi", []string{"deploy", "delete"})
+	got := NewSuggestor().WithAlgorithm(SuggestAlgorithmJaroWinkler).Suggest("deploi", []string{"deploy", "delete"})
 	if len(got) == 0 || got[0] != "deploy" {
 		t.Errorf("JaroWinkler Suggest(deploi) = %v, want [deploy ...]", got)
 	}
@@ -83,6 +83,20 @@ func TestMatches_scored(t *testing.T) {
 	}
 	if got := NewSuggestor().Suggest("run", []string{"run", "ran"}); got != nil {
 		t.Errorf("Suggest with exact = %v, want nil", got)
+	}
+}
+
+func TestClosest(t *testing.T) {
+	if best, ok := NewSuggestor().Closest("generte", []string{"generate", "validate"}); !ok || best != "generate" {
+		t.Errorf("Closest(generte) = (%q, %v), want (generate, true)", best, ok)
+	}
+	// Exact match → nothing to suggest.
+	if best, ok := NewSuggestor().Closest("run", []string{"run", "ran"}); ok || best != "" {
+		t.Errorf("Closest with exact = (%q, %v), want (\"\", false)", best, ok)
+	}
+	// Nothing clears the cutoff.
+	if best, ok := NewSuggestor().Closest("zzzz", []string{"generate"}); ok || best != "" {
+		t.Errorf("Closest with no match = (%q, %v), want (\"\", false)", best, ok)
 	}
 }
 
@@ -116,10 +130,29 @@ func TestSuggest_nilReceiver(t *testing.T) {
 	if got := s.Matches("x", []string{"y"}); got != nil {
 		t.Errorf("nil Suggestor.Matches = %v, want nil", got)
 	}
+	if _, ok := s.Closest("x", []string{"y"}); ok {
+		t.Error("nil Suggestor.Closest reported ok=true, want false")
+	}
 	if got := s.Score("x", "y"); got != 0 {
 		t.Errorf("nil Suggestor.Score = %v, want 0", got)
 	}
 }
+
+func TestAlgorithms_validAndComplete(t *testing.T) {
+	all := Algorithms()
+	if len(all) != 9 {
+		t.Errorf("Algorithms() returned %d, want 9", len(all))
+	}
+	for _, algorithm := range all {
+		if !algorithm.Valid() {
+			t.Errorf("Algorithms() included an invalid algorithm %q", algorithm)
+		}
+	}
+	if SuggestAlgorithm("nope").Valid() {
+		t.Error("unknown algorithm reported Valid() = true")
+	}
+}
+
 func TestEditDistances(t *testing.T) {
 	cases := []struct {
 		name string
@@ -132,14 +165,14 @@ func TestEditDistances(t *testing.T) {
 		{"levenshtein identical", Levenshtein, "abc", "abc", 0},
 		{"levenshtein empty", Levenshtein, "", "abc", 3},
 		{"levenshtein transpose ab/ba", Levenshtein, "ab", "ba", 2},
-		{"osa transpose ab/ba", OSA, "ab", "ba", 1},
-		{"osa ca/abc", OSA, "ca", "abc", 3},
+		{"osa transpose ab/ba", OptimalStringAlignment, "ab", "ba", 1},
+		{"osa ca/abc", OptimalStringAlignment, "ca", "abc", 3},
 		{"damerau transpose ab/ba", DamerauLevenshtein, "ab", "ba", 1},
 		{"damerau ca/abc beats osa", DamerauLevenshtein, "ca", "abc", 2},
 		{"damerau identical", DamerauLevenshtein, "abc", "abc", 0},
-		{"lcs classic", LCS, "ABCBDAB", "BDCAB", 4},
-		{"lcs none", LCS, "abc", "def", 0},
-		{"lcs identical", LCS, "abc", "abc", 3},
+		{"lcs classic", LongestCommonSubsequence, "ABCBDAB", "BDCAB", 4},
+		{"lcs none", LongestCommonSubsequence, "abc", "def", 0},
+		{"lcs identical", LongestCommonSubsequence, "abc", "abc", 3},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -192,27 +225,21 @@ func TestSimilarityMetrics(t *testing.T) {
 	}
 }
 
-func TestSimilarity_normalizesAllAlgosToUnitInterval(t *testing.T) {
-	algos := []SuggestAlgo{
-		SuggestAlgoLevenshtein, SuggestAlgoDamerauLevenshtein, SuggestAlgoOSA,
-		SuggestAlgoHamming, SuggestAlgoLCS, SuggestAlgoJaro, SuggestAlgoJaroWinkler,
-		SuggestAlgoSorensenDice, SuggestAlgoJaccard,
-	}
-	for _, algo := range algos {
+func TestSimilarity_normalizesEveryAlgorithmToUnitInterval(t *testing.T) {
+	for _, algorithm := range Algorithms() {
 		// identical → 1
-		if got := Similarity("deploy", "deploy", algo); !approx(got, 1) {
-			t.Errorf("Similarity(identical, %s) = %.4f, want 1", algo, got)
+		if got := Similarity("deploy", "deploy", algorithm); !approx(got, 1) {
+			t.Errorf("Similarity(identical, %s) = %.4f, want 1", algorithm, got)
 		}
 		// a close typo scores high; an unrelated word scores low — across the board.
-		near := Similarity("deploy", "deplyo", algo) // adjacent transposition
-		far := Similarity("deploy", "xyzzy", algo)
+		near := Similarity("deploy", "deplyo", algorithm) // adjacent transposition
+		far := Similarity("deploy", "xyzzy", algorithm)
 		if near < far {
-			t.Errorf("%s: near typo (%.3f) scored below unrelated (%.3f)", algo, near, far)
+			t.Errorf("%s: near typo (%.3f) scored below unrelated (%.3f)", algorithm, near, far)
 		}
-		// stays in [0,1]
-		for _, v := range []float64{near, far} {
-			if v < 0 || v > 1 {
-				t.Errorf("%s: score %.3f out of [0,1]", algo, v)
+		for _, score := range []float64{near, far} {
+			if score < 0 || score > 1 {
+				t.Errorf("%s: score %.3f out of [0,1]", algorithm, score)
 			}
 		}
 	}
