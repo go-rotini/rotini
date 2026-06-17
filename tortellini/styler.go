@@ -11,10 +11,6 @@ const KeyStyler = "styler"
 
 var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
-func Strip(text string) string {
-	return ansiSequences.ReplaceAllString(text, "")
-}
-
 type ANSIColor int
 
 const (
@@ -236,4 +232,8 @@ func parseHex(hex string) (red, green, blue uint8, ok bool) {
 		return 0, 0, 0, false
 	}
 	return uint8(value >> 16), uint8(value >> 8), uint8(value), true
+}
+
+func Strip(text string) string {
+	return ansiSequences.ReplaceAllString(text, "")
 }
