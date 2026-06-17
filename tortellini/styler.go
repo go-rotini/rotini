@@ -31,74 +31,47 @@ const (
 )
 
 type Styler struct {
-	enabled func() bool
-	styles  map[string]*Style
+	styles map[string]*Style
 }
 
-type StylerOption func(*Styler)
-
-func WithCondition(condition func() bool) StylerOption {
-	return func(s *Styler) { s.enabled = condition }
+func NewStyler() *Styler {
+	return &Styler{
+		styles: map[string]*Style{},
+	}
 }
 
-func NewStyler(options ...StylerOption) *Styler {
-	styler := &Styler{styles: map[string]*Style{}}
-	for _, option := range options {
-		option(styler)
-	}
-	return styler
+func (s *Styler) NewStyle(key string) *Style {
+	style := NewStyle(key)
+	s.Set(key, style)
+	return style
 }
 
-func (s *Styler) Add(key string, style *Style) *Styler {
-	if s == nil {
-		return nil
-	}
-	if s.styles == nil {
-		s.styles = map[string]*Style{}
-	}
+func (s *Styler) Set(key string, style *Style) *Styler {
 	s.styles[key] = style
 	return s
 }
 
-func (s *Styler) New(key string) *Style {
-	if s == nil {
-		return &Style{}
-	}
-	if s.styles == nil {
-		s.styles = map[string]*Style{}
-	}
-	style := &Style{enabled: s.enabled}
-	s.styles[key] = style
-	return style
-}
-
-func (s *Styler) Remove(key string) *Styler {
-	if s != nil {
-		delete(s.styles, key)
-	}
+func (s *Styler) Unset(key string) *Styler {
+	delete(s.styles, key)
 	return s
 }
 
 func (s *Styler) Get(key string) (*Style, bool) {
-	if s == nil {
-		return nil, false
-	}
 	style, ok := s.styles[key]
 	return style, ok
 }
 
 func (s *Styler) Render(key, text string) string {
-	if s == nil {
-		return text
-	}
-	if s.enabled != nil && !s.enabled() {
-		return text
-	}
 	style, ok := s.styles[key]
 	if !ok {
 		return text
 	}
-	return style.Sprint(text)
+
+	if style.enabled {
+		return style.Sprint(text)
+	}
+
+	return text
 }
 
 func (s *Styler) Renderf(key, format string, args ...any) string {
@@ -107,11 +80,21 @@ func (s *Styler) Renderf(key, format string, args ...any) string {
 
 type Style struct {
 	sgr     string
-	enabled func() bool
+	enabled bool
 }
 
-func NewStyle() *Style {
-	return &Style{}
+type StyleOptions struct {
+	Enabled bool
+}
+
+func NewStyle(key string, opts ...StyleOptions) *Style {
+	s := &Style{}
+
+	for _, opt := range opts {
+		s.enabled = opt.Enabled
+	}
+
+	return s
 }
 
 func (s *Style) Bold() *Style {
