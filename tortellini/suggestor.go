@@ -30,41 +30,63 @@ const KeySuggestor = "suggestor"
 // tree. Candidates come from whatever vocabulary the caller has: a ParseError's
 // Candidates, sibling names off rtx.Chain(), enum members, or any []string.
 type Suggestor struct {
+	algo        SuggestAlgo
 	maxDistance int
 	maxResults  int
 }
 
-// SuggestorOption configures a [Suggestor].
-type SuggestorOption func(*Suggestor)
+// SuggestAlgo selects the string-distance algorithm a [Suggestor] ranks
+// candidates by — a small string enum so it reads clearly in code and config.
+// rotini defines the set; it is not user-extensible.
+type SuggestAlgo string
 
-// WithMaxDistance sets the largest edit distance (Levenshtein) a candidate may
-// have from the input and still be suggested. Default 2 — close typos only.
-func WithMaxDistance(n int) SuggestorOption {
-	return func(s *Suggestor) {
-		if n > 0 {
-			s.maxDistance = n
-		}
+const (
+	// SuggestAlgoLevenshtein ranks by Levenshtein (Wagner–Fischer) edit distance
+	// — the default. Insertions, deletions, and substitutions each cost one, so
+	// close typos rank nearest.
+	SuggestAlgoLevenshtein SuggestAlgo = "levenshtein"
+)
+
+// WithAlgo selects the ranking algorithm and returns the receiver to chain. An
+// unrecognized algorithm is ignored (the current one stays). Default
+// [SuggestAlgoLevenshtein].
+func (s *Suggestor) WithAlgo(algo SuggestAlgo) *Suggestor {
+	if algo == SuggestAlgoLevenshtein {
+		s.algo = algo
 	}
+	return s
 }
 
-// WithMaxResults caps how many suggestions [Suggestor.Suggest] returns.
-// Default 3.
-func WithMaxResults(n int) SuggestorOption {
-	return func(s *Suggestor) {
-		if n > 0 {
-			s.maxResults = n
-		}
+// WithMaxDistance sets the largest edit distance (Levenshtein) a candidate may
+// have from the input and still be suggested, and returns the receiver so it
+// chains: NewSuggestor().WithMaxDistance(3).WithMaxResults(5). Default 2 — close
+// typos only. A non-positive n is ignored (keeps the default).
+func (s *Suggestor) WithMaxDistance(n int) *Suggestor {
+	if n > 0 {
+		s.maxDistance = n
 	}
+	return s
+}
+
+// WithMaxResults caps how many suggestions [Suggestor.Suggest] returns, and
+// returns the receiver to chain. Default 3. A non-positive n is ignored.
+func (s *Suggestor) WithMaxResults(n int) *Suggestor {
+	if n > 0 {
+		s.maxResults = n
+	}
+	return s
 }
 
 // NewSuggestor returns a [Suggestor] ready to bind under a registry key
-// (conventionally [KeySuggestor]).
-func NewSuggestor(opts ...SuggestorOption) *Suggestor {
-	s := &Suggestor{maxDistance: 2, maxResults: 3}
-	for _, opt := range opts {
-		opt(s)
+// (conventionally [KeySuggestor]), ranking by [SuggestAlgoLevenshtein] with the
+// default max edit distance (2) and result cap (3). Tune any of them fluently:
+// NewSuggestor().WithAlgo(…).WithMaxDistance(…).WithMaxResults(…).
+func NewSuggestor() *Suggestor {
+	return &Suggestor{
+		algo:        SuggestAlgoLevenshtein,
+		maxDistance: 2,
+		maxResults:  3,
 	}
-	return s
 }
 
 // Suggest returns the candidates closest to input, nearest first, keeping only
@@ -90,7 +112,7 @@ func (s *Suggestor) Suggest(input string, candidates []string) []string {
 			continue
 		}
 		seen[c] = true
-		d := levenshtein(input, c)
+		d := s.distance(input, c)
 		if d == 0 {
 			return nil // exact match: nothing to suggest
 		}
@@ -118,6 +140,18 @@ func (s *Suggestor) Suggest(input string, candidates []string) []string {
 		out[i] = h.name
 	}
 	return out
+}
+
+// distance computes the configured algorithm's distance between a and b. The
+// enum is closed, so the default arm (Levenshtein) only guards a zero-value
+// receiver constructed outside NewSuggestor; new algorithms add a case here.
+func (s *Suggestor) distance(a, b string) int {
+	switch s.algo {
+	case SuggestAlgoLevenshtein:
+		return levenshtein(a, b)
+	default:
+		return levenshtein(a, b)
+	}
 }
 
 // commonPrefixLen is the length of the longest common prefix of a and b.

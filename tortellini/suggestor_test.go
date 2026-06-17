@@ -32,12 +32,13 @@ func TestSuggest(t *testing.T) {
 	}
 }
 
-func TestSuggest_options(t *testing.T) {
+func TestSuggest_tuning(t *testing.T) {
 	// A wider distance admits farther candidates; a results cap trims the list.
-	wide := NewSuggestor(WithMaxDistance(5), WithMaxResults(2))
+	// The With* tuners are chainable receiver methods.
+	wide := NewSuggestor().WithAlgo(SuggestAlgoLevenshtein).WithMaxDistance(5).WithMaxResults(2)
 	got := wide.Suggest("dep", []string{"deploy", "delete", "describe", "drain"})
 	if len(got) != 2 {
-		t.Fatalf("Suggest with MaxResults(2) = %v, want 2 hits", got)
+		t.Fatalf("Suggest with WithMaxResults(2) = %v, want 2 hits", got)
 	}
 
 	// The default distance (2) excludes what the wide one admitted.
@@ -45,9 +46,25 @@ func TestSuggest_options(t *testing.T) {
 		t.Errorf("default distance admitted %v, want nil", got)
 	}
 
-	// Non-positive option values are ignored, keeping the defaults.
-	if s := NewSuggestor(WithMaxDistance(0), WithMaxResults(-1)); s.maxDistance != 2 || s.maxResults != 3 {
-		t.Errorf("non-positive options changed defaults: %+v", s)
+	// Non-positive tuner values are ignored, keeping the defaults.
+	if s := NewSuggestor().WithMaxDistance(0).WithMaxResults(-1); s.maxDistance != 2 || s.maxResults != 3 {
+		t.Errorf("non-positive tuners changed defaults: %+v", s)
+	}
+}
+
+func TestSuggest_algo(t *testing.T) {
+	// NewSuggestor defaults to Levenshtein.
+	if def := NewSuggestor(); def.algo != SuggestAlgoLevenshtein {
+		t.Errorf("default algo = %q, want %q", def.algo, SuggestAlgoLevenshtein)
+	}
+	// Selecting the default explicitly is a no-op in behavior.
+	got := NewSuggestor().WithAlgo(SuggestAlgoLevenshtein).Suggest("generte", []string{"generate", "validate"})
+	if !reflect.DeepEqual(got, []string{"generate"}) {
+		t.Errorf("WithAlgo(Levenshtein).Suggest = %v, want [generate]", got)
+	}
+	// An unrecognized algorithm is ignored — the current (default) one stays.
+	if s := NewSuggestor().WithAlgo("nonsense"); s.algo != SuggestAlgoLevenshtein {
+		t.Errorf("WithAlgo(unknown) set algo to %q, want it ignored (%q)", s.algo, SuggestAlgoLevenshtein)
 	}
 }
 
