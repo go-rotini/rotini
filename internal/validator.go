@@ -512,16 +512,16 @@ func lintDottedKeys(spec *Spec) []error {
 	return problems
 }
 
-// lintConfigurationFiles enforces each configuration_files entry's location
+// lintConfigurationFiles enforces each config_files entry's location
 // contract: exactly one of path/discover, and the discover strategies' own
 // requirements (xdg needs app; walk-up has no app to ignore silently).
 func lintConfigurationFiles(spec *Spec) []error {
 	var problems []error
 	add := func(name, msg string) {
-		problems = append(problems, &problem{kind: "spec", loc: "configuration_files " + name, msg: msg})
+		problems = append(problems, &problem{kind: "spec", loc: "config_files " + name, msg: msg})
 	}
 	seen := map[string]bool{}
-	for _, cf := range spec.ConfigurationFiles {
+	for _, cf := range allConfigFiles(spec) {
 		if seen[cf.Name] {
 			add(cf.Name, "is declared twice — logical names identify entries (file: pins, config_source) and must be unique")
 		}
@@ -581,13 +581,13 @@ func lintEnvNesting(spec *Spec) []error {
 }
 
 // lintConfigSource enforces config_source's contract: flag/env inputs only,
-// string-typed, naming a declared configuration_files entry, with at most one
+// string-typed, naming a declared config_files entry, with at most one
 // flag and one env input claiming any entry (a second claim would silently
 // shadow the first).
 func lintConfigSource(spec *Spec) []error {
 	var problems []error
 	declared := map[string]bool{}
-	for _, cf := range spec.ConfigurationFiles {
+	for _, cf := range allConfigFiles(spec) {
 		declared[cf.Name] = true
 	}
 	claims := map[string]map[string]string{} // file → channel → claiming input
@@ -608,7 +608,7 @@ func lintConfigSource(spec *Spec) []error {
 			if !declared[target] {
 				problems = append(problems, &problem{
 					kind: "spec", loc: loc,
-					msg: fmt.Sprintf("%s %q names config_source %q, which is not a declared configuration_files entry", channel, name, target),
+					msg: fmt.Sprintf("%s %q names config_source %q, which is not a declared config_files entry", channel, name, target),
 				})
 				return
 			}
@@ -804,12 +804,12 @@ func lintPatternCompiles(spec *Spec) []error {
 }
 
 // lintConfigInputFiles enforces file:'s contract: config inputs only, naming a
-// declared configuration_files entry — the input's value is then read from
+// declared config_files entry — the input's value is then read from
 // that file ONLY (not the merged precedence chain), including its required.
 func lintConfigInputFiles(spec *Spec) []error {
 	var problems []error
 	declared := map[string]bool{}
-	for _, cf := range spec.ConfigurationFiles {
+	for _, cf := range allConfigFiles(spec) {
 		declared[cf.Name] = true
 	}
 	walkCommands(spec, func(c *Command, path string) {
@@ -828,7 +828,7 @@ func lintConfigInputFiles(spec *Spec) []error {
 			if !declared[schema.File] {
 				problems = append(problems, &problem{
 					kind: "spec", loc: loc,
-					msg: fmt.Sprintf("config %q pins file %q, which is not a declared configuration_files entry", name, schema.File),
+					msg: fmt.Sprintf("config %q pins file %q, which is not a declared config_files entry", name, schema.File),
 				})
 			}
 		})
@@ -964,6 +964,21 @@ func walkCommands(spec *Spec, visit func(c *Command, path string)) {
 		name = "(root)"
 	}
 	walk(&spec.Command, name)
+}
+
+// allConfigFiles gathers every command's config_files sources across the tree.
+// config_files moved from a document-level list onto each command's inputs
+// (per-command, cascading — see D-W3.1). Phase 1 flattens them so the global
+// BindMeta and the declared-name lints keep their existing behavior; Phase 2
+// scopes loading + name resolution to the invoked chain.
+func allConfigFiles(spec *Spec) []ConfigurationFile {
+	var out []ConfigurationFile
+	walkCommands(spec, func(c *Command, _ string) {
+		if c.Inputs != nil {
+			out = append(out, c.Inputs.ConfigFiles...)
+		}
+	})
+	return out
 }
 
 // flagNames returns the set of a command's declared flag names plus an ordered slice

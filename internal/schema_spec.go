@@ -6,10 +6,8 @@ package internal
 type Spec struct {
 	// URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.
 	Schema string `json:"$schema"`
-	// The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs, sub-commands, remote commands — live here; program-scoped concerns (configuration_files, schemas) live at the document level beside it.
+	// The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs (incl. per-command, cascading config_files sources), sub-commands, remote commands — live here; the remaining program-scoped concern (schemas) lives at the document level beside it.
 	Command Command `json:"command"`
-	// Config-file sources the program loads at startup (document-level). Per-command 'config' inputs bind typed values from these by name + key.
-	ConfigurationFiles []ConfigurationFile `json:"configuration_files,omitempty"`
 	// Document-level prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator).
 	EnvPrefix string `json:"env_prefix,omitempty"`
 	// Reusable named schema definitions (document-level). Referenced elsewhere via "$ref": "#/schemas/<Name>". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type that other packages may import (a cmd/cmdgen split makes them cross-package).
@@ -139,11 +137,11 @@ type ConfigInput struct {
 }
 
 type ConfigurationFile struct {
-	// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared configuration_files order remains precedence order.
+	// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared config_files order remains precedence order.
 	Discover *ConfigurationFileDiscover `json:"discover,omitempty"`
 	// Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) — declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
 	Format string `json:"format,omitempty"`
-	// Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique among the declared entries.
+	// Logical name for the config file (e.g. 'app-config'). It anchors per-input pins (schema 'file:') and config_source claims, so it must be unique within its chain (this command and its ancestors) — a name collision in scope is an error.
 	Name string `json:"name"`
 	// File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be set.
 	Path string `json:"path,omitempty"`
@@ -151,7 +149,7 @@ type ConfigurationFile struct {
 	Schema *Schema `json:"schema,omitempty"`
 }
 
-// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared configuration_files order remains precedence order.
+// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared config_files order remains precedence order.
 type ConfigurationFileDiscover struct {
 	// The application directory under the XDG config root (xdg strategy only, required there).
 	App string `json:"app,omitempty"`
@@ -239,13 +237,13 @@ type HelpHeadings struct {
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.
 type InputSchema struct {
 	BaseSchema
-	// Flag and env inputs only: names a configuration_files entry whose file PATH this input supplies — the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist — unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry.
+	// Flag and env inputs only: names a config_files entry whose file PATH this input supplies — the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist — unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry.
 	ConfigSource string `json:"config_source,omitempty"`
 	// Default value applied when the input is not provided
 	Default any `json:"default,omitempty"`
 	// Map-typed flags only, and only with 'any' values ('map'/'object' → map[string]any). When true, a '.'-separated key in a key=value pair assigns into nested maps, helm-style: --set image.tag=v2 → map[image][tag]=v2. Opt-in because '.' is a legal character in plain map keys — without it, --label a.b=c stores the literal key 'a.b'. Each assignment overwrites whatever is at its path (creating intermediate maps as needed), so later pairs win and --set a=1 --set a.b=2 leaves a nested map under 'a'. Declare 'properties' on the flag's schema to give shell completion the known key paths (offered up to the '=').
 	DottedKeys bool `json:"dotted_keys,omitempty"`
-	// Config inputs only: pins this input to ONE named configuration_files entry — the value (and its 'required') is read from that file ONLY, never from the merged precedence chain, so a key present in another file does not satisfy it. Omit to read through the declared precedence order (first file with the key wins).
+	// Config inputs only: pins this input to ONE named config_files entry — the value (and its 'required') is read from that file ONLY, never from the merged precedence chain, so a key present in another file does not satisfy it. Omit to read through the declared precedence order (first file with the key wins).
 	File string `json:"file,omitempty"`
 	// Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text is whitespace-trimmed, then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text (a structured stdin payload is the stdin: channel's job, not a flag's). Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only.
 	From []string `json:"from,omitempty"`
@@ -266,8 +264,10 @@ type InputSchema struct {
 type Inputs struct {
 	// Positional argument inputs for this command
 	Arguments []ArgumentInput `json:"arguments,omitempty"`
-	// Config-value inputs for this command, bound from a document-level configuration_files source by key.
+	// Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files).
 	Config []ConfigInput `json:"config,omitempty"`
+	// Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins.
+	ConfigFiles []ConfigurationFile `json:"config_files,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
 	// Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).

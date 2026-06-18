@@ -1628,7 +1628,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootDiscovery:   root.RemoteDiscovery,
 		rootPassthrough: root.Passthrough,
 		schemas:         spec.Schemas,
-		configFiles:     spec.ConfigurationFiles,
+		configFiles:     allConfigFiles(spec),
 		envPrefix:       spec.EnvPrefix,
 	}
 	gp.root = genCommand{

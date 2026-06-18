@@ -536,15 +536,16 @@ func TestGenerateConfigSchema(t *testing.T) {
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
 		"command:\n" +
 		"  name: app\n" +
-		"configuration_files:\n" +
-		"  - name: main\n" +
-		"    path: ~/.app.yaml\n" +
-		"    format: yaml\n" +
-		"    schema:\n" +
-		"      type: object\n" +
-		"      required: [server]\n" +
-		"      properties:\n" +
-		"        server: { $ref: \"#/schemas/Server\" }\n" +
+		"  inputs:\n" +
+		"    config_files:\n" +
+		"      - name: main\n" +
+		"        path: ~/.app.yaml\n" +
+		"        format: yaml\n" +
+		"        schema:\n" +
+		"          type: object\n" +
+		"          required: [server]\n" +
+		"          properties:\n" +
+		"            server: { $ref: \"#/schemas/Server\" }\n" +
 		"schemas:\n" +
 		"  Server:\n" +
 		"    type: object\n" +
@@ -704,10 +705,10 @@ func TestGenerateInputChannels(t *testing.T) {
 		"    stdin:\n" +
 		"      format: yaml\n" +
 		"      schema: { $ref: \"#/schemas/Manifest\" }\n" +
-		"configuration_files:\n" +
-		"  - name: app\n" +
-		"    path: ~/.config/widget.yaml\n" +
-		"    format: yaml\n" +
+		"    config_files:\n" +
+		"      - name: app\n" +
+		"        path: ~/.config/widget.yaml\n" +
+		"        format: yaml\n" +
 		"schemas:\n" +
 		"  Manifest:\n" +
 		"    type: object\n" +
@@ -2452,10 +2453,10 @@ const helpGoldenEnvConfigSpec = goldenSpecSchema +
       - name: timeout
         summary: request timeout
         schema: { type: int, default: 30 }
-configuration_files:
-  - name: app
-    path: ~/.app.yaml
-    format: yaml
+    config_files:
+      - name: app
+        path: ~/.app.yaml
+        format: yaml
 `
 
 // TestHelpGolden_EnvConfig locks the rendering of env-var and config inputs in the

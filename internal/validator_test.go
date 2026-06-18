@@ -505,7 +505,9 @@ func TestValidate_dottedKeys(t *testing.T) {
 
 func TestValidate_configurationFiles(t *testing.T) {
 	make_ := func(entry string) string {
-		return validSpecHeader + "command:\n  name: app\nconfiguration_files:\n" + entry
+		// entry is a 2-space-indented config_files list; nest it under command.inputs.config_files (+4 spaces).
+		nested := "    " + strings.ReplaceAll(strings.TrimRight(entry, "\n"), "\n", "\n    ") + "\n"
+		return validSpecHeader + "command:\n  name: app\n  inputs:\n    config_files:\n" + nested
 	}
 	// Valid shapes: a fixed path, a walk-up discover, an xdg discover.
 	valid := make_("" +
@@ -513,7 +515,7 @@ func TestValidate_configurationFiles(t *testing.T) {
 		"  - name: project\n    discover: { strategy: walk-up, file: .app.toml }\n" +
 		"  - name: user\n    discover: { strategy: xdg, app: acme, file: config.yaml }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
-		t.Errorf("Validate(valid configuration_files) = %v, want nil", err)
+		t.Errorf("Validate(valid config_files) = %v, want nil", err)
 	}
 
 	cases := []struct{ name, entry, want string }{
@@ -537,7 +539,7 @@ func TestValidate_configInputFile(t *testing.T) {
 	make_ := func(inputs string) string {
 		return validSpecHeader +
 			"command:\n  name: app\n  inputs:\n" + inputs +
-			"configuration_files:\n  - name: app\n    path: ~/.app.yaml\n"
+			"    config_files:\n      - name: app\n        path: ~/.app.yaml\n"
 	}
 	valid := make_("    config:\n      - name: endpoint\n        schema: { type: string, file: app, key: api.endpoint }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
@@ -545,7 +547,7 @@ func TestValidate_configInputFile(t *testing.T) {
 	}
 
 	unknown := make_("    config:\n      - name: endpoint\n        schema: { type: string, file: nope }\n")
-	if err := validateOnce(writeTemp(t, "spec.yaml", unknown), "", "", ""); err == nil || !strings.Contains(err.Error(), "not a declared configuration_files entry") {
+	if err := validateOnce(writeTemp(t, "spec.yaml", unknown), "", "", ""); err == nil || !strings.Contains(err.Error(), "not a declared config_files entry") {
 		t.Errorf("Validate(unknown pin) = %v, want a rejection", err)
 	}
 
@@ -554,8 +556,8 @@ func TestValidate_configInputFile(t *testing.T) {
 		t.Errorf("Validate(file on env) = %v, want a config-only rejection", err)
 	}
 
-	dupNames := validSpecHeader + "command:\n  name: app\n" +
-		"configuration_files:\n  - name: app\n    path: a.yaml\n  - name: app\n    path: b.yaml\n"
+	dupNames := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
+		"    config_files:\n      - name: app\n        path: a.yaml\n      - name: app\n        path: b.yaml\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", dupNames), "", "", ""); err == nil || !strings.Contains(err.Error(), "declared twice") {
 		t.Errorf("Validate(duplicate file names) = %v, want a uniqueness rejection", err)
 	}
@@ -589,7 +591,7 @@ func TestValidate_configSource(t *testing.T) {
 	make_ := func(inputs string) string {
 		return validSpecHeader +
 			"command:\n  name: app\n  inputs:\n" + inputs +
-			"configuration_files:\n  - name: app\n    path: ~/.app.yaml\n"
+			"    config_files:\n      - name: app\n        path: ~/.app.yaml\n"
 	}
 	valid := make_("" +
 		"    flags:\n      - name: config\n        schema: { type: string, config_source: app }\n" +
@@ -601,7 +603,7 @@ func TestValidate_configSource(t *testing.T) {
 	cases := []struct{ name, inputs, want string }{
 		{"unknown entry",
 			"    flags:\n      - name: c\n        schema: { type: string, config_source: nope }\n",
-			"not a declared configuration_files entry"},
+			"not a declared config_files entry"},
 		{"flag and env only",
 			"    config:\n      - name: c\n        schema: { type: string, config_source: app }\n",
 			"flag and env inputs only"},
