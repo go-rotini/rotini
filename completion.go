@@ -504,7 +504,7 @@ func withDescription(name, summary string) string {
 	if i := strings.IndexByte(summary, '\n'); i >= 0 {
 		summary = summary[:i]
 	}
-	summary = stripANSI(summary)
+	summary = Strip(summary)
 	if summary = strings.TrimSpace(summary); summary == "" {
 		return name
 	}

@@ -1,4 +1,4 @@
-package tortellini
+package rotini
 
 import (
 	"fmt"
