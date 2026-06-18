@@ -19,32 +19,25 @@ var (
 // service like the parser — the generated main constructs one with
 // [NewVersioner] and binds it under [KeyVersioner] for the version handler.
 type Versioner struct {
-	Version         string // the version as reported: module build info, else the ldflag value, else "0.0.0"
-	VersionSemantic string // the leading X.Y.Z of Version (any v prefix/suffix stripped); "0.0.0" when none parses
+	Version         string // the version as reported: the module's build info, else the ldflag value (i.e. the program's own version variable)
+	VersionSemantic string // the leading X.Y.Z of Version (any v prefix stripped); "0.0.0" when Version carries none, so it is always a valid semver
 }
 
 // NewVersioner resolves the program's version: the module's build info when it
-// carries a release version, else ldflagVersion (the -ldflags "-X main.version=…"
-// escape hatch for non-module builds), else "0.0.0".
+// carries a release version (a go install / go get -tool build), otherwise
+// ldflagVersion — the value baked in via -ldflags "-X main.version=…", or the
+// program's own default for that variable when no ldflag was applied. The
+// framework imposes no fallback of its own; the ultimate default is whatever the
+// program set its version variable to.
 func NewVersioner(ldflagVersion string) *Versioner {
-	v := &Versioner{}
-
-	info, ok := readBuildInfo()
-	switch {
-	case ok && info.Main.Version != "" && info.Main.Version != "(devel)":
-		v.Version = info.Main.Version
-	case ldflagVersion != "":
-		v.Version = ldflagVersion
-	default:
-		v.Version = "0.0.0"
+	version := ldflagVersion
+	if info, ok := readBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = info.Main.Version
 	}
 
-	s := semanticVersionRe.FindStringSubmatch(v.Version)
-	if s == nil {
-		v.VersionSemantic = "0.0.0"
-	} else {
-		v.VersionSemantic = s[1]
+	v := &Versioner{Version: version, VersionSemantic: "0.0.0"}
+	if match := semanticVersionRe.FindStringSubmatch(version); match != nil {
+		v.VersionSemantic = match[1]
 	}
-
 	return v
 }

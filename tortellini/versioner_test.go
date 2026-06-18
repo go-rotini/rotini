@@ -32,7 +32,7 @@ func TestNewVersioner(t *testing.T) {
 		{"module release version wins", "v1.2.3", true, "v9.9.9", "v1.2.3", "1.2.3"},
 		{"(devel) falls back to the ldflag", "(devel)", true, "v2.0.1", "v2.0.1", "2.0.1"},
 		{"no build info falls back to the ldflag", "", false, "3.4.5", "3.4.5", "3.4.5"},
-		{"nothing anywhere is 0.0.0", "(devel)", true, "", "0.0.0", "0.0.0"},
+		{"empty version still yields semantic 0.0.0", "(devel)", true, "", "", "0.0.0"},
 		{"prerelease keeps the leading X.Y.Z", "v1.2.3-rc.1", true, "", "v1.2.3-rc.1", "1.2.3"},
 		{"unparseable version yields semantic 0.0.0", "deadbeef", true, "", "deadbeef", "0.0.0"},
 	}
