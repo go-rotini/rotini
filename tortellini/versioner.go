@@ -5,18 +5,13 @@ import (
 	"runtime/debug"
 )
 
-var readBuildInfo = debug.ReadBuildInfo
-var semanticVersionRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)`)
-
-// KeyVersioner is the conventional registry key the generated main binds the
-// [Versioner] under (and the version handler retrieves it by). KeyCommit and
-// KeyDate carry the other two goreleaser-convention ldflag stamps — the
-// generated main binds them as plain strings for any handler that wants them;
-// no generated handler reads them.
 const (
 	KeyVersioner = "versioner"
-	KeyCommit    = "commit"
-	KeyDate      = "date"
+)
+
+var (
+	readBuildInfo     = debug.ReadBuildInfo
+	semanticVersionRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)`)
 )
 
 // Versioner carries the program's version in the two forms handlers print:
