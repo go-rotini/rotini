@@ -34,17 +34,19 @@ func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate f
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
 	}
-	return p.run(specPath, confPath, "", watch, (*session).generatePass, onGenerate)
+	return p.run(specPath, confPath, "", watch, (*session).generatePass, onGenerate, nil)
 }
 
 // Validate runs the validate workflow: load → validate, once or on every change (watch).
 // failMode is the --fail override ("fast"/"collect"; "" → the conf's validate.fail).
-// onValidate, which may be nil, receives a summary and each pass's error.
-func (p *Processor) Validate(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error)) error {
+// onValidate, which may be nil, receives a summary and each pass's error. onWarnings,
+// which may be nil, receives the pass's non-fatal warnings (the OnWarning funnel's feed):
+// it fires on every pass with warnings, whether or not the pass also has errors.
+func (p *Processor) Validate(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error {
 	if onValidate == nil {
 		onValidate = func(string, error) {}
 	}
-	return p.run(specPath, confPath, failMode, watch, (*session).validatePass, onValidate)
+	return p.run(specPath, confPath, failMode, watch, (*session).validatePass, onValidate, onWarnings)
 }
 
 // Initialize scaffolds a new rotini CLI named name: it writes + validates the seed
@@ -58,7 +60,7 @@ func (p *Processor) Initialize(name, format string, force bool) error {
 // then drives the shared run/watch engine: each pass builds a fresh session (re-reading
 // the files, so edits are picked up) and runs pass over it, stamped with a
 // "[HH:MM:SS] <took>" summary handed to onResult.
-func (p *Processor) run(specPath, confPath, failMode string, watch bool, pass func(*session) error, onResult func(result string, err error)) error {
+func (p *Processor) run(specPath, confPath, failMode string, watch bool, pass func(*session) error, onResult func(result string, err error), onWarnings func([]error)) error {
 	resolvedSpec, err := resolveSpecPath(specPath)
 	if err != nil {
 		return err
@@ -73,6 +75,11 @@ func (p *Processor) run(specPath, confPath, failMode string, watch bool, pass fu
 		s := newSession(resolvedSpec, resolvedConf, p.version)
 		s.failMode = failMode
 		err := pass(s)
+		// Surface warnings on every pass (success or failure) — independent of the
+		// pass/fail result onResult carries. nil when the workflow has no warnings (generate).
+		if onWarnings != nil && len(s.warnings) > 0 {
+			onWarnings(s.warnings)
+		}
 		return fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start))), err
 	}
 	return runOrWatch(resolvedSpec, resolvedConf, watch, timed, onResult)
@@ -89,6 +96,8 @@ type session struct {
 
 	spec *specLoader // loaded by load()
 	conf *confLoader // loaded by load()
+
+	warnings []error // non-fatal validation findings, collected by validate()
 }
 
 // newSession returns a session for the spec/conf at the given paths (either may be

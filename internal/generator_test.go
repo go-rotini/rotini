@@ -2929,7 +2929,7 @@ func TestGenerateFeatureDirOutsideCmdgen(t *testing.T) {
 // handlers may pass nil when they have no per-pass reporting).
 func TestProcessorValidate_nilCallback(t *testing.T) {
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
-	if err := NewProcessor("").Validate(spec, "", false, "", nil); err != nil {
+	if err := NewProcessor("").Validate(spec, "", false, "", nil, nil); err != nil {
 		t.Errorf("Validate(nil callback) = %v, want nil", err)
 	}
 }

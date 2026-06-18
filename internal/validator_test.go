@@ -563,6 +563,30 @@ func TestValidate_configInputFile(t *testing.T) {
 	}
 }
 
+// TestValidate_configFileDuplicateLocationWarns pins the severity split: two
+// config_files entries (distinct names) pointing at the SAME path in one command
+// is a WARNING, not an error — validation passes, and the finding lands on the
+// session's warnings (the OnWarning funnel's feed), not the returned error.
+func TestValidate_configFileDuplicateLocationWarns(t *testing.T) {
+	spec := validSpecHeader +
+		"command:\n  name: app\n  inputs:\n    config_files:\n" +
+		"      - name: a\n        path: ~/.app.yaml\n" +
+		"      - name: b\n        path: ~/.app.yaml\n"
+	s := newSession(writeTemp(t, "spec.yaml", spec), "", "")
+	if err := s.load(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := s.validate(); err != nil {
+		t.Errorf("validate = %v, want nil (a duplicate location is a warning, not an error)", err)
+	}
+	if len(s.warnings) != 1 {
+		t.Fatalf("warnings = %d, want exactly 1", len(s.warnings))
+	}
+	if !strings.Contains(s.warnings[0].Error(), "same file") {
+		t.Errorf("warning = %q, want it to mention the same-file shadow", s.warnings[0])
+	}
+}
+
 func TestValidate_envNesting(t *testing.T) {
 	make_ := func(inputs string) string {
 		return validSpecHeader + "command:\n  name: app\n  inputs:\n" + inputs

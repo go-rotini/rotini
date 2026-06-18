@@ -22,13 +22,13 @@ import (
 // ValidateFn is the signature of [Processor.Validate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double (see [GenerateFn]).
-type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error)) error
+type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error
 
 // Validate is a convenience over [Processor.Validate]: it builds a Processor for
 // version and runs the validate workflow. The companion handlers drive the Processor
 // directly; this serves internal callers (tests).
 func Validate(specPath, confPath string, watch bool, failMode, version string, onValidate func(result string, err error)) error {
-	return NewProcessor(version).Validate(specPath, confPath, watch, failMode, onValidate)
+	return NewProcessor(version).Validate(specPath, confPath, watch, failMode, onValidate, nil)
 }
 
 // ─── session + file validation ────────────────────────────────────────────────.
@@ -39,16 +39,19 @@ func Validate(specPath, confPath string, watch bool, failMode, version string, o
 func (s *session) validate() error {
 	fast := s.failFast()
 
-	problems := s.spec.validate()
-	if fast && len(problems) > 0 {
-		return problems[0]
+	specErrs, specWarns := splitProblems(s.spec.validate())
+	s.warnings = append(s.warnings, specWarns...)
+	if fast && len(specErrs) > 0 {
+		return specErrs[0]
 	}
 
-	problems = append(problems, s.conf.validate()...)
-	if fast && len(problems) > 0 {
-		return problems[0]
+	confErrs, confWarns := splitProblems(s.conf.validate())
+	s.warnings = append(s.warnings, confWarns...)
+	if fast && len(confErrs) > 0 {
+		return confErrs[0]
 	}
-	return errors.Join(problems...)
+
+	return errors.Join(append(specErrs, confErrs...)...)
 }
 
 // failFast reports whether validation should stop at the first problem. The --fail
@@ -151,13 +154,39 @@ func lintInitializeLocation(conf *Conf, confPath string) []error {
 
 // ─── schema validation + the $schema↔version guard ─────────────────────────────.
 
-// problem is a single validation failure: the location of the offending value within
-// the document and a human-readable message, tagged by document kind ("spec"/"conf").
+// severity classifies a validation problem. The zero value is an error (fails
+// validation); a warning is surfaced separately but does NOT fail. The validate
+// command routes the two to the OnError and OnWarning funnels respectively.
+type severity int
+
+const (
+	severityError   severity = iota // zero value — fails validation
+	severityWarning                 // advisory — surfaced, never fails
+)
+
+// problem is a single validation finding: the location of the offending value within
+// the document and a human-readable message, tagged by document kind ("spec"/"conf")
+// and severity (error by default; warning for non-fatal advisories).
 type problem struct {
 	kind string
 	loc  string
 	pos  string // "path:line:col" in the original source; "" degrades to loc-only
 	msg  string
+	sev  severity // zero value = error
+}
+
+// splitProblems separates a finding list into fatal errors and non-fatal
+// warnings by each finding's severity. A non-*problem error counts as an error.
+func splitProblems(problems []error) (errs, warns []error) {
+	for _, e := range problems {
+		var p *problem
+		if errors.As(e, &p) && p.sev == severityWarning {
+			warns = append(warns, e)
+			continue
+		}
+		errs = append(errs, e)
+	}
+	return errs, warns
 }
 
 func (e *problem) Error() string {
@@ -339,6 +368,7 @@ var specLints = []func(*Spec) []error{
 	lintDottedKeys,
 	lintFrom,
 	lintConfigurationFiles,
+	lintConfigFileDuplicateLocation,
 	lintConfigSource,
 	lintEnvNesting,
 	lintConfigInputFiles,
@@ -578,6 +608,52 @@ func lintEnvNesting(spec *Spec) []error {
 		})
 	})
 	return problems
+}
+
+// lintConfigFileDuplicateLocation WARNS (non-fatal) when a command declares two
+// config_files entries that resolve to the same physical file — a redundant
+// duplicate the later of which shadows the earlier under nearest-wins. Distinct
+// names pointing at one file is almost always a mistake. This is the
+// within-one-command case (no chain needed); the cross-LEVEL cascade form (a
+// child re-declaring an ancestor's file) lands with the chain walk in Phase 2.
+func lintConfigFileDuplicateLocation(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		if c.Inputs == nil {
+			return
+		}
+		seen := map[string]string{} // location key → first entry name that used it
+		for _, cf := range c.Inputs.ConfigFiles {
+			key := configFileLocationKey(cf)
+			if key == "" {
+				continue // no location: lintConfigurationFiles errors on that
+			}
+			if first, ok := seen[key]; ok {
+				problems = append(problems, &problem{
+					kind: "spec",
+					loc:  "command " + path,
+					sev:  severityWarning,
+					msg:  fmt.Sprintf("config_files %q and %q resolve to the same file — the later shadows the earlier (nearest-wins); declare it once", first, cf.Name),
+				})
+				continue
+			}
+			seen[key] = cf.Name
+		}
+	})
+	return problems
+}
+
+// configFileLocationKey is a stable identity for a config file's physical
+// location — its path, or its discover target (strategy|file|app) — used to spot
+// duplicate declarations. "" when neither is set (a separate rule errors on that).
+func configFileLocationKey(cf ConfigurationFile) string {
+	if cf.Path != "" {
+		return "path:" + cf.Path
+	}
+	if d := cf.Discover; d != nil {
+		return "discover:" + d.Strategy + "|" + d.File + "|" + d.App
+	}
+	return ""
 }
 
 // lintConfigSource enforces config_source's contract: flag/env inputs only,

@@ -352,12 +352,31 @@ func TestProcessorGeneratePass_valid(t *testing.T) {
 // TestProcessorValidate_routing confirms the non-watch path: a valid pass routes a
 // "[HH:MM:SS] <took>" summary to onResult and returns nil; a failing pass returns the
 // error and is NOT routed through onResult.
+// TestProcessorValidate_warningsSurfaceAndDontFail pins the end-to-end severity
+// split through Processor.Validate: a warning-only spec passes (Validate returns
+// nil) AND the onWarnings callback receives the finding for the OnWarning funnel.
+func TestProcessorValidate_warningsSurfaceAndDontFail(t *testing.T) {
+	spec := validSpecHeader +
+		"command:\n  name: app\n  inputs:\n    config_files:\n" +
+		"      - name: a\n        path: ~/.app.yaml\n" +
+		"      - name: b\n        path: ~/.app.yaml\n"
+	var warns []error
+	err := NewProcessor("").Validate(writeTemp(t, "spec.yaml", spec), "", false, "", nil,
+		func(w []error) { warns = append(warns, w...) })
+	if err != nil {
+		t.Errorf("Validate = %v, want nil (warnings never fail)", err)
+	}
+	if len(warns) != 1 {
+		t.Fatalf("onWarnings received %d, want 1", len(warns))
+	}
+}
+
 func TestProcessorValidate_routing(t *testing.T) {
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
 	var summary string
 	var cbErr error
 	calls := 0
-	if err := NewProcessor("").Validate(spec, "", false, "", func(s string, e error) { calls++; summary, cbErr = s, e }); err != nil {
+	if err := NewProcessor("").Validate(spec, "", false, "", func(s string, e error) { calls++; summary, cbErr = s, e }, nil); err != nil {
 		t.Fatalf("Validate(valid) = %v, want nil", err)
 	}
 	if calls != 1 || cbErr != nil || summary == "" {
@@ -366,7 +385,7 @@ func TestProcessorValidate_routing(t *testing.T) {
 
 	calls = 0
 	bad := writeTemp(t, "bad.yaml", validSpecHeader) // no command
-	if err := NewProcessor("").Validate(bad, "", false, "", func(string, error) { calls++ }); err == nil {
+	if err := NewProcessor("").Validate(bad, "", false, "", func(string, error) { calls++ }, nil); err == nil {
 		t.Error("Validate(invalid) = nil, want an error")
 	}
 	if calls != 0 {

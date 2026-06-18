@@ -31,7 +31,7 @@ func TestRotiniValidate(t *testing.T) {
 		{
 			name: "success: header and the pass summary print",
 			argv: []string{"validate"},
-			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
+			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), _ func([]error)) error {
 				cb("[12:00:00] 1ms", nil)
 				return nil
 			})}},
@@ -40,7 +40,7 @@ func TestRotiniValidate(t *testing.T) {
 		{
 			name: "per-pass callback error and a final error both surface",
 			argv: []string{"validate"},
-			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error)) error {
+			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), _ func([]error)) error {
 				cb("[12:00:00] 1ms", nil)              // a clean pass → stdout
 				cb("", errors.New("schema violation")) // a failing pass → stderr, inline, non-terminal
 				return errors.New("validation failed")
@@ -48,6 +48,17 @@ func TestRotiniValidate(t *testing.T) {
 			// The per-pass callback error still prints inline; the final error is
 			// recorded and reported by the default OnError, exit code stands.
 			wantOut: "[12:00:00] 1ms", wantErr: "schema violation", wantCode: 1,
+		},
+		{
+			name: "validator warnings route to the OnWarning funnel; the run still succeeds",
+			argv: []string{"validate"},
+			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), warn func([]error)) error {
+				warn([]error{errors.New("config_files shadow")}) // non-fatal → RecordWarning
+				cb("[12:00:00] 1ms", nil)
+				return nil
+			})}},
+			// RecordWarning → the default OnWarning prints "Warning: …" to stderr; exit stays 0.
+			wantOut: "[12:00:00] 1ms", wantErr: "Warning: config_files shadow", wantCode: 0,
 		},
 		{
 			name: "real validate on a missing spec errors (integration)",
