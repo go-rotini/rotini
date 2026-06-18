@@ -160,19 +160,19 @@ func TestEditDistances(t *testing.T) {
 		a, b string
 		want int
 	}{
-		{"levenshtein kitten/sitting", Levenshtein, "kitten", "sitting", 3},
-		{"levenshtein flaw/lawn", Levenshtein, "flaw", "lawn", 2},
-		{"levenshtein identical", Levenshtein, "abc", "abc", 0},
-		{"levenshtein empty", Levenshtein, "", "abc", 3},
-		{"levenshtein transpose ab/ba", Levenshtein, "ab", "ba", 2},
-		{"osa transpose ab/ba", OptimalStringAlignment, "ab", "ba", 1},
-		{"osa ca/abc", OptimalStringAlignment, "ca", "abc", 3},
-		{"damerau transpose ab/ba", DamerauLevenshtein, "ab", "ba", 1},
-		{"damerau ca/abc beats osa", DamerauLevenshtein, "ca", "abc", 2},
-		{"damerau identical", DamerauLevenshtein, "abc", "abc", 0},
-		{"lcs classic", LongestCommonSubsequence, "ABCBDAB", "BDCAB", 4},
-		{"lcs none", LongestCommonSubsequence, "abc", "def", 0},
-		{"lcs identical", LongestCommonSubsequence, "abc", "abc", 3},
+		{"levenshtein kitten/sitting", levenshtein, "kitten", "sitting", 3},
+		{"levenshtein flaw/lawn", levenshtein, "flaw", "lawn", 2},
+		{"levenshtein identical", levenshtein, "abc", "abc", 0},
+		{"levenshtein empty", levenshtein, "", "abc", 3},
+		{"levenshtein transpose ab/ba", levenshtein, "ab", "ba", 2},
+		{"osa transpose ab/ba", optimalStringAlignment, "ab", "ba", 1},
+		{"osa ca/abc", optimalStringAlignment, "ca", "abc", 3},
+		{"damerau transpose ab/ba", damerauLevenshtein, "ab", "ba", 1},
+		{"damerau ca/abc beats osa", damerauLevenshtein, "ca", "abc", 2},
+		{"damerau identical", damerauLevenshtein, "abc", "abc", 0},
+		{"lcs classic", longestCommonSubsequence, "ABCBDAB", "BDCAB", 4},
+		{"lcs none", longestCommonSubsequence, "abc", "def", 0},
+		{"lcs identical", longestCommonSubsequence, "abc", "abc", 3},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -184,13 +184,13 @@ func TestEditDistances(t *testing.T) {
 }
 
 func TestHamming(t *testing.T) {
-	if d, ok := Hamming("karolin", "kathrin"); !ok || d != 3 {
-		t.Errorf("Hamming(karolin,kathrin) = (%d,%v), want (3,true)", d, ok)
+	if d, ok := hamming("karolin", "kathrin"); !ok || d != 3 {
+		t.Errorf("hamming(karolin,kathrin) = (%d,%v), want (3,true)", d, ok)
 	}
-	if d, ok := Hamming("abc", "abd"); !ok || d != 1 {
-		t.Errorf("Hamming(abc,abd) = (%d,%v), want (1,true)", d, ok)
+	if d, ok := hamming("abc", "abd"); !ok || d != 1 {
+		t.Errorf("hamming(abc,abd) = (%d,%v), want (1,true)", d, ok)
 	}
-	if _, ok := Hamming("abc", "ab"); ok {
+	if _, ok := hamming("abc", "ab"); ok {
 		t.Error("Hamming on unequal lengths returned ok=true, want false")
 	}
 }
@@ -204,17 +204,17 @@ func TestSimilarityMetrics(t *testing.T) {
 		a, b string
 		want float64
 	}{
-		{"jaro MARTHA/MARHTA", Jaro, "MARTHA", "MARHTA", 0.9444},
-		{"jaro DIXON/DICKSONX", Jaro, "DIXON", "DICKSONX", 0.7667},
-		{"jaro identical", Jaro, "abc", "abc", 1},
-		{"jaro empty both", Jaro, "", "", 1},
-		{"jaro one empty", Jaro, "abc", "", 0},
-		{"jaro-winkler MARTHA/MARHTA", JaroWinkler, "MARTHA", "MARHTA", 0.9611},
-		{"jaro-winkler DIXON/DICKSONX", JaroWinkler, "DIXON", "DICKSONX", 0.8133},
-		{"dice night/nacht", SorensenDice, "night", "nacht", 0.25},
-		{"dice identical", SorensenDice, "abc", "abc", 1},
-		{"jaccard night/nacht", Jaccard, "night", "nacht", 0.1429},
-		{"jaccard identical", Jaccard, "abc", "abc", 1},
+		{"jaro MARTHA/MARHTA", jaro, "MARTHA", "MARHTA", 0.9444},
+		{"jaro DIXON/DICKSONX", jaro, "DIXON", "DICKSONX", 0.7667},
+		{"jaro identical", jaro, "abc", "abc", 1},
+		{"jaro empty both", jaro, "", "", 1},
+		{"jaro one empty", jaro, "abc", "", 0},
+		{"jaro-winkler MARTHA/MARHTA", jaroWinkler, "MARTHA", "MARHTA", 0.9611},
+		{"jaro-winkler DIXON/DICKSONX", jaroWinkler, "DIXON", "DICKSONX", 0.8133},
+		{"dice night/nacht", sorensenDice, "night", "nacht", 0.25},
+		{"dice identical", sorensenDice, "abc", "abc", 1},
+		{"jaccard night/nacht", jaccard, "night", "nacht", 0.1429},
+		{"jaccard identical", jaccard, "abc", "abc", 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -228,12 +228,12 @@ func TestSimilarityMetrics(t *testing.T) {
 func TestSimilarity_normalizesEveryAlgorithmToUnitInterval(t *testing.T) {
 	for _, algorithm := range Algorithms() {
 		// identical → 1
-		if got := Similarity("deploy", "deploy", algorithm); !approx(got, 1) {
-			t.Errorf("Similarity(identical, %s) = %.4f, want 1", algorithm, got)
+		if got := similarity("deploy", "deploy", algorithm); !approx(got, 1) {
+			t.Errorf("similarity(identical, %s) = %.4f, want 1", algorithm, got)
 		}
 		// a close typo scores high; an unrelated word scores low — across the board.
-		near := Similarity("deploy", "deplyo", algorithm) // adjacent transposition
-		far := Similarity("deploy", "xyzzy", algorithm)
+		near := similarity("deploy", "deplyo", algorithm) // adjacent transposition
+		far := similarity("deploy", "xyzzy", algorithm)
 		if near < far {
 			t.Errorf("%s: near typo (%.3f) scored below unrelated (%.3f)", algorithm, near, far)
 		}

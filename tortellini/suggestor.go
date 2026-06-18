@@ -1,23 +1,3 @@
-// Package tortellini is a small, dependency-free fuzzy string-matching toolkit:
-// nine nearness algorithms (Levenshtein, Damerau–Levenshtein, Jaro–Winkler, and
-// more) behind one normalized [Similarity] score, plus a configurable [Suggestor]
-// that turns a mistyped token and a vocabulary of candidates into ranked
-// "did you mean" suggestions.
-//
-// It is framework-agnostic — useful in any Go program:
-//
-//	s := tortellini.NewSuggestor()
-//	if best, ok := s.Closest("comit", []string{"commit", "checkout", "clone"}); ok {
-//		fmt.Printf("did you mean %q?\n", best) // did you mean "commit"?
-//	}
-//
-// It also serves as the opt-in suggestion service for a rotini CLI: bind a
-// [Suggestor] under [KeySuggestor] and a handler retrieves it to suggest
-// corrections after a parse error.
-//
-// Each algorithm is exported standalone (e.g. [Levenshtein], [JaroWinkler]) and
-// [Similarity] scores any of them on a single [0,1] scale, so the package doubles
-// as a general string-metrics library.
 package tortellini
 
 import (
@@ -42,7 +22,7 @@ const defaultMinScore = 0.6
 // members, map keys, or any []string.
 //
 // Configure it fluently; it ranks by a pluggable algorithm normalized to a
-// similarity score (see [SuggestAlgorithm] and [Similarity]):
+// similarity score (see [SuggestAlgorithm]):
 //
 //	s := tortellini.NewSuggestor().
 //		WithAlgorithm(tortellini.SuggestAlgorithmJaroWinkler).
@@ -156,7 +136,7 @@ func (s *Suggestor) Score(a, b string) float64 {
 	if s == nil {
 		return 0
 	}
-	return Similarity(s.normalize(a), s.normalize(b), s.algorithm)
+	return similarity(s.normalize(a), s.normalize(b), s.algorithm)
 }
 
 // Matches ranks candidates by similarity to input, nearest first, keeping those
@@ -188,7 +168,7 @@ func (s *Suggestor) Matches(input string, candidates []string) []Match {
 			continue
 		}
 		seen[normalizedCandidate] = true
-		score := Similarity(normalizedInput, normalizedCandidate, s.algorithm)
+		score := similarity(normalizedInput, normalizedCandidate, s.algorithm)
 		if score >= s.minScore {
 			hits = append(hits, scoredMatch{
 				value:     candidate,
@@ -260,12 +240,12 @@ func commonPrefixLength(a, b string) int {
 
 // --- String metrics ---
 //
-// A roster of nearness algorithms plus [Similarity], which normalizes any of them
-// to a [0,1] score (1 = identical). All are rune-based and usable standalone.
+// A roster of rune-based nearness algorithms, each normalized to a [0,1]
+// similarity score (1 = identical) that a [Suggestor] ranks by.
 
-// SuggestAlgorithm selects the string-distance algorithm a [Suggestor] (and
-// [Similarity]) ranks by — a small string enum so it reads clearly in code and
-// config. The package defines the set; it is not user-extensible.
+// SuggestAlgorithm selects the string-distance algorithm a [Suggestor] ranks by —
+// a small string enum so it reads clearly in code and config. The package defines
+// the set; it is not user-extensible.
 type SuggestAlgorithm string
 
 const (
@@ -326,19 +306,19 @@ func (a SuggestAlgorithm) Valid() bool {
 	}
 }
 
-// Similarity normalizes algorithm's metric for a and b to a score in [0,1], where
+// similarity normalizes algorithm's metric for a and b to a score in [0,1], where
 // 1 means identical and 0 means maximally dissimilar — so edit-distance and
 // similarity algorithms compare on one scale. An unrecognized algorithm falls back
 // to Levenshtein. It does no case-folding or normalization; a [Suggestor] applies
 // those before calling it.
-func Similarity(a, b string, algorithm SuggestAlgorithm) float64 {
+func similarity(a, b string, algorithm SuggestAlgorithm) float64 {
 	switch algorithm {
 	case SuggestAlgorithmDamerauLevenshtein:
-		return editSimilarity(DamerauLevenshtein(a, b), a, b)
+		return editSimilarity(damerauLevenshtein(a, b), a, b)
 	case SuggestAlgorithmOptimalStringAlignment:
-		return editSimilarity(OptimalStringAlignment(a, b), a, b)
+		return editSimilarity(optimalStringAlignment(a, b), a, b)
 	case SuggestAlgorithmHamming:
-		distance, ok := Hamming(a, b)
+		distance, ok := hamming(a, b)
 		if !ok {
 			return 0
 		}
@@ -348,17 +328,17 @@ func Similarity(a, b string, algorithm SuggestAlgorithm) float64 {
 		if lenA+lenB == 0 {
 			return 1
 		}
-		return 2 * float64(LongestCommonSubsequence(a, b)) / float64(lenA+lenB)
+		return 2 * float64(longestCommonSubsequence(a, b)) / float64(lenA+lenB)
 	case SuggestAlgorithmJaro:
-		return Jaro(a, b)
+		return jaro(a, b)
 	case SuggestAlgorithmJaroWinkler:
-		return JaroWinkler(a, b)
+		return jaroWinkler(a, b)
 	case SuggestAlgorithmSorensenDice:
-		return SorensenDice(a, b)
+		return sorensenDice(a, b)
 	case SuggestAlgorithmJaccard:
-		return Jaccard(a, b)
+		return jaccard(a, b)
 	default: // SuggestAlgorithmLevenshtein and any unrecognized algorithm
-		return editSimilarity(Levenshtein(a, b), a, b)
+		return editSimilarity(levenshtein(a, b), a, b)
 	}
 }
 
@@ -377,10 +357,10 @@ func editSimilarityLength(distance, length int) float64 {
 
 func runeLength(s string) int { return len([]rune(s)) }
 
-// Levenshtein returns the Levenshtein (Wagner–Fischer) edit distance between a
+// levenshtein returns the Levenshtein (Wagner–Fischer) edit distance between a
 // and b: the minimum number of single-rune insertions, deletions, and
 // substitutions to turn one into the other.
-func Levenshtein(a, b string) int {
+func levenshtein(a, b string) int {
 	aRunes, bRunes := []rune(a), []rune(b)
 	if len(aRunes) == 0 {
 		return len(bRunes)
@@ -407,10 +387,10 @@ func Levenshtein(a, b string) int {
 	return previousRow[len(bRunes)]
 }
 
-// OptimalStringAlignment returns the Optimal String Alignment distance (restricted
+// optimalStringAlignment returns the Optimal String Alignment distance (restricted
 // Damerau–Levenshtein): Levenshtein plus transposition of two adjacent runes, with
 // the restriction that no substring is edited more than once.
-func OptimalStringAlignment(a, b string) int {
+func optimalStringAlignment(a, b string) int {
 	aRunes, bRunes := []rune(a), []rune(b)
 	lenA, lenB := len(aRunes), len(bRunes)
 	if lenA == 0 {
@@ -442,11 +422,11 @@ func OptimalStringAlignment(a, b string) int {
 	return matrix[lenA][lenB]
 }
 
-// DamerauLevenshtein returns the true (unrestricted) Damerau–Levenshtein distance:
+// damerauLevenshtein returns the true (unrestricted) Damerau–Levenshtein distance:
 // insertions, deletions, substitutions, and transpositions of adjacent runes,
 // allowing a substring to be edited more than once (so it can beat
-// [OptimalStringAlignment], e.g. "ca"→"abc" is 2, not 3).
-func DamerauLevenshtein(a, b string) int {
+// optimal string alignment, e.g. "ca"→"abc" is 2, not 3).
+func damerauLevenshtein(a, b string) int {
 	aRunes, bRunes := []rune(a), []rune(b)
 	lenA, lenB := len(aRunes), len(bRunes)
 	if lenA == 0 {
@@ -492,10 +472,10 @@ func DamerauLevenshtein(a, b string) int {
 	return matrix[lenA+1][lenB+1]
 }
 
-// Hamming returns the Hamming distance — the number of positions at which a and b
+// hamming returns the Hamming distance — the number of positions at which a and b
 // differ — and ok=false when the strings differ in rune length (Hamming is defined
 // only for equal-length strings).
-func Hamming(a, b string) (distance int, ok bool) {
+func hamming(a, b string) (distance int, ok bool) {
 	aRunes, bRunes := []rune(a), []rune(b)
 	if len(aRunes) != len(bRunes) {
 		return 0, false
@@ -508,9 +488,9 @@ func Hamming(a, b string) (distance int, ok bool) {
 	return distance, true
 }
 
-// LongestCommonSubsequence returns the length of the longest common subsequence of
+// longestCommonSubsequence returns the length of the longest common subsequence of
 // a and b (runes in order, not necessarily contiguous).
-func LongestCommonSubsequence(a, b string) int {
+func longestCommonSubsequence(a, b string) int {
 	aRunes, bRunes := []rune(a), []rune(b)
 	lenA, lenB := len(aRunes), len(bRunes)
 	if lenA == 0 || lenB == 0 {
@@ -531,8 +511,8 @@ func LongestCommonSubsequence(a, b string) int {
 	return previousRow[lenB]
 }
 
-// Jaro returns the Jaro similarity of a and b in [0,1] (1 = identical).
-func Jaro(a, b string) float64 {
+// jaro returns the Jaro similarity of a and b in [0,1] (1 = identical).
+func jaro(a, b string) float64 {
 	aRunes, bRunes := []rune(a), []rune(b)
 	lenA, lenB := len(aRunes), len(bRunes)
 	if lenA == 0 && lenB == 0 {
@@ -579,10 +559,10 @@ func Jaro(a, b string) float64 {
 	return (matchCount/float64(lenA) + matchCount/float64(lenB) + (matchCount-transpositions)/matchCount) / 3
 }
 
-// JaroWinkler returns the Jaro–Winkler similarity in [0,1]: Jaro plus a bonus for
+// jaroWinkler returns the Jaro–Winkler similarity in [0,1]: Jaro plus a bonus for
 // a shared prefix (up to 4 runes), so prefix-similar typos rank higher.
-func JaroWinkler(a, b string) float64 {
-	jaroScore := Jaro(a, b)
+func jaroWinkler(a, b string) float64 {
+	jaroScore := jaro(a, b)
 	if jaroScore == 0 {
 		return 0
 	}
@@ -595,9 +575,9 @@ func JaroWinkler(a, b string) float64 {
 	return jaroScore + float64(prefixLength)*prefixScale*(1-jaroScore)
 }
 
-// SorensenDice returns the Sørensen–Dice coefficient over rune bigrams in [0,1].
+// sorensenDice returns the Sørensen–Dice coefficient over rune bigrams in [0,1].
 // It is weak on strings shorter than two runes (which have no bigrams).
-func SorensenDice(a, b string) float64 {
+func sorensenDice(a, b string) float64 {
 	if a == b {
 		return 1
 	}
@@ -619,9 +599,9 @@ func SorensenDice(a, b string) float64 {
 	return 2 * float64(overlap) / float64(len(aBigrams)+len(bBigrams))
 }
 
-// Jaccard returns the Jaccard index over the SET of rune bigrams in [0,1]. It is
+// jaccard returns the Jaccard index over the SET of rune bigrams in [0,1]. It is
 // weak on strings shorter than two runes (which have no bigrams).
-func Jaccard(a, b string) float64 {
+func jaccard(a, b string) float64 {
 	if a == b {
 		return 1
 	}

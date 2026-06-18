@@ -3,7 +3,6 @@ package tortellini
 import (
 	"fmt"
 	"io"
-	"os"
 	"slices"
 	"strings"
 )
@@ -70,18 +69,6 @@ func (s *Styler) Render(key, text string) string {
 
 func (s *Styler) Renderf(key, format string, args ...any) string {
 	return s.Render(key, fmt.Sprintf(format, args...))
-}
-
-func (s *Styler) Print(key string, a ...any) {
-	_, _ = fmt.Fprint(os.Stdout, s.Render(key, fmt.Sprint(a...)))
-}
-
-func (s *Styler) Println(key string, a ...any) {
-	_, _ = fmt.Fprintln(os.Stdout, s.Render(key, fmt.Sprint(a...)))
-}
-
-func (s *Styler) Printf(key, format string, a ...any) {
-	_, _ = fmt.Fprint(os.Stdout, s.Renderf(key, format, a...))
 }
 
 func (s *Styler) Fprint(w io.Writer, key string, a ...any) {
@@ -275,18 +262,6 @@ func (s *Style) Sprint(text string) string {
 
 func (s *Style) Sprintf(format string, args ...any) string {
 	return s.Sprint(fmt.Sprintf(format, args...))
-}
-
-func (s *Style) Print(a ...any) {
-	_, _ = fmt.Fprint(os.Stdout, s.Sprint(fmt.Sprint(a...)))
-}
-
-func (s *Style) Println(a ...any) {
-	_, _ = fmt.Fprintln(os.Stdout, s.Sprint(fmt.Sprint(a...)))
-}
-
-func (s *Style) Printf(format string, a ...any) {
-	_, _ = fmt.Fprint(os.Stdout, s.Sprintf(format, a...))
 }
 
 func (s *Style) Fprint(w io.Writer, a ...any) {
