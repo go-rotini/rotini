@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/tortellini"
 )
 
 type rotiniInitializeHandlers struct {
@@ -43,7 +44,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
+	v := rotini.MustGet[*tortellini.Versioner](rtx, tortellini.KeyVersioner)
 	rtx.BindIfAbsent("initialize", internal.NewProcessor(v.VersionSemantic).Initialize)
 	initialize := rotini.MustGet[internal.InitializeFn](rtx, "initialize")
 

@@ -43,7 +43,7 @@ func runRotini(t *testing.T, argv []string, binds ...svc) (stdout, stderr string
 		WithExit(func(c int) { code = c }).
 		Bind(rotini.KeyParser, rotini.NewParser()).
 		Bind(tortellini.KeySuggestor, tortellini.NewSuggestor()).
-		Bind(rotini.KeyVersioner, &rotini.Versioner{VersionSemantic: testVersion})
+		Bind(tortellini.KeyVersioner, &tortellini.Versioner{VersionSemantic: testVersion})
 	for _, b := range binds {
 		p.Bind(b.key, b.val)
 	}

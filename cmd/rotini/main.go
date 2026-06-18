@@ -17,6 +17,6 @@ func main() {
 	r.Program.
 		Bind(rotini.KeyParser, rotini.NewParser()).
 		Bind(tortellini.KeySuggestor, tortellini.NewSuggestor()).
-		Bind(rotini.KeyVersioner, rotini.NewVersioner(version)).
+		Bind(tortellini.KeyVersioner, tortellini.NewVersioner(version)).
 		Execute()
 }

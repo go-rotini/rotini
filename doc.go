@@ -135,8 +135,8 @@
 //
 // Everything else is a value a handler fetches from the registry —
 // [Program.Bind] to provide, [Get] / [MustGet] to consume, with the [KeyParser],
-// [KeyBinder], tortellini.KeySuggestor, [KeyVersioner] conventions naming the usual
-// suspects:
+// [KeyBinder], tortellini.KeySuggestor, tortellini.KeyVersioner conventions naming
+// the usual suspects:
 //
 //   - [Collect] is the 95% handler's whole input story: every declared
 //     channel reconciled and validated in one line —
@@ -154,8 +154,8 @@
 //     [OverlayInputsP]) acquires channels one at a time for programs that
 //     want custom precedence, with the same [Report].
 //   - tortellini.Suggestor turns a [ParseError]'s unknown token and candidate
-//     vocabulary into "did you mean" suggestions; [Versioner] resolves one
-//     version string whether the binary was built with -ldflags or installed
+//     vocabulary into "did you mean" suggestions; tortellini.Versioner resolves
+//     one version string whether the binary was built with -ldflags or installed
 //     by module path.
 //   - Text styling lives in the tortellini subpackage: a Style fluent builder
 //     for SGR styling (16/256/RGB/hex color, with opt-in Profile downsampling),

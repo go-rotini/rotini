@@ -53,7 +53,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(0)
 		return
 	case flags.Version:
-		v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
+		v := rotini.MustGet[*tortellini.Versioner](rtx, tortellini.KeyVersioner)
 		fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
 		rtx.SignalExit(0)
 		return
