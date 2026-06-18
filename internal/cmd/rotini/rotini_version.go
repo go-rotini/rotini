@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/tortellini"
 )
 
 type rotiniVersionHandlers struct {
@@ -32,6 +31,6 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	v := rotini.MustGet[*tortellini.Versioner](rtx, tortellini.KeyVersioner)
+	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
 	fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
 }

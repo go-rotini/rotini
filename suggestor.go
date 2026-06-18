@@ -24,8 +24,8 @@ const defaultMinScore = 0.6
 // Configure it fluently; it ranks by a pluggable algorithm normalized to a
 // similarity score (see [SuggestAlgorithm]):
 //
-//	s := tortellini.NewSuggestor().
-//		WithAlgorithm(tortellini.SuggestAlgorithmJaroWinkler).
+//	s := rotini.NewSuggestor().
+//		WithAlgorithm(rotini.SuggestAlgorithmJaroWinkler).
 //		WithMinScore(0.7).
 //		WithMaxResults(5).
 //		WithCaseFold()
@@ -35,7 +35,7 @@ const defaultMinScore = 0.6
 // handler after a parse failure — rotini itself suggests nothing; a
 // rotini.ParseError carries the offending Token and the valid Candidates:
 //
-//	suggestor := rotini.MustGet[*tortellini.Suggestor](rtx, tortellini.KeySuggestor)
+//	suggestor := rotini.MustGet[*rotini.Suggestor](rtx, rotini.KeySuggestor)
 //	if best, ok := suggestor.Closest(parseErr.Token, parseErr.Candidates); ok {
 //		fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
 //	}

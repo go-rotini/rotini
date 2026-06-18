@@ -133,8 +133,8 @@ func TestParse_unknownCommand(t *testing.T) {
 	if !slices.Contains(pe.Candidates, "run") {
 		t.Errorf("ParseError.Candidates = %v, want to contain \"run\"", pe.Candidates)
 	}
-	// (The ParseError → Suggestor integration is exercised in package tortellini, which owns
-	// the Suggestor; here we only pin that the parser populates Token/Candidates.)
+	// (The ParseError → Suggestor integration is exercised in the Suggestor tests; here we
+	// only pin that the parser populates Token/Candidates.)
 }
 
 func TestParse_missingRequired(t *testing.T) {

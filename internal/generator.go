@@ -14,7 +14,7 @@ import (
 	"unicode"
 
 	"github.com/go-rotini/jsonschema"
-	"github.com/go-rotini/rotini/tortellini"
+	"github.com/go-rotini/rotini"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2527,7 +2527,7 @@ func stripForFeature(feat docFeature, text string) string {
 	if !feat.strip {
 		return text
 	}
-	return tortellini.Strip(text)
+	return rotini.Strip(text)
 }
 
 // loadFeatureTemplate reads the feature dir's editable template, seeding it from

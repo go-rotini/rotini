@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/tortellini"
 )
 
 type rotiniHandlers struct {
@@ -44,7 +43,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// otherwise show it as authored.
 	help := HelpRotini
 	if noStyles() {
-		help = tortellini.Strip(HelpRotini)
+		help = rotini.Strip(HelpRotini)
 	}
 
 	switch {
@@ -53,7 +52,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(0)
 		return
 	case flags.Version:
-		v := rotini.MustGet[*tortellini.Versioner](rtx, tortellini.KeyVersioner)
+		v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
 		fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
 		rtx.SignalExit(0)
 		return

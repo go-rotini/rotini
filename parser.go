@@ -103,7 +103,7 @@ func (k ParseKind) String() string {
 // presentation: the message carries no opinions (no suggestions, no usage
 // dump), and the structured fields let a handler compose its own response —
 // switch on [ParseError.Kind] to branch, pair Token with Candidates and a bound
-// tortellini.Suggestor for "did you mean", or render help for Command. Handlers
+// [Suggestor] for "did you mean", or render help for Command. Handlers
 // conventionally map it to exit code 2 (the usual CLI usage-error code). It
 // unwraps to [ErrUsage], so CategoryOf classifies it as CategoryUsage; retrieve
 // the fields with errors.As:
@@ -406,7 +406,7 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 
 	// A stray positional on a command that branches but takes no arguments is a
 	// mistyped sub-command, not an argument. The error carries the sibling
-	// vocabulary so a handler (with a bound tortellini.Suggestor) can offer corrections.
+	// vocabulary so a handler (with a bound [Suggestor]) can offer corrections.
 	if len(leaf.Commands) > 0 && len(leaf.Arguments) == 0 && len(si.args) > 0 {
 		tok := si.args[0]
 		return &ParseError{

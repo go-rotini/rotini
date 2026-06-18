@@ -6,7 +6,6 @@ package main
 import (
 	"github.com/go-rotini/rotini"
 	r "github.com/go-rotini/rotini/internal/cmd/rotini"
-	"github.com/go-rotini/rotini/tortellini"
 )
 
 var (
@@ -16,7 +15,7 @@ var (
 func main() {
 	r.Program.
 		Bind(rotini.KeyParser, rotini.NewParser()).
-		Bind(tortellini.KeySuggestor, tortellini.NewSuggestor()).
-		Bind(tortellini.KeyVersioner, tortellini.NewVersioner(version)).
+		Bind(rotini.KeySuggestor, rotini.NewSuggestor()).
+		Bind(rotini.KeyVersioner, rotini.NewVersioner(version)).
 		Execute()
 }
