@@ -368,7 +368,7 @@ var specLints = []func(*Spec) []error{
 	lintDottedKeys,
 	lintFrom,
 	lintConfigurationFiles,
-	lintConfigFileDuplicateLocation,
+	lintConfigFilesScope,
 	lintConfigSource,
 	lintEnvNesting,
 	lintConfigInputFiles,
@@ -544,18 +544,14 @@ func lintDottedKeys(spec *Spec) []error {
 
 // lintConfigurationFiles enforces each config_files entry's location
 // contract: exactly one of path/discover, and the discover strategies' own
-// requirements (xdg needs app; walk-up has no app to ignore silently).
+// requirements (xdg needs app; walk-up has no app to ignore silently). Name
+// uniqueness is chain-scoped and lives in lintConfigFilesScope.
 func lintConfigurationFiles(spec *Spec) []error {
 	var problems []error
 	add := func(name, msg string) {
 		problems = append(problems, &problem{kind: "spec", loc: "config_files " + name, msg: msg})
 	}
-	seen := map[string]bool{}
 	for _, cf := range allConfigFiles(spec) {
-		if seen[cf.Name] {
-			add(cf.Name, "is declared twice — logical names identify entries (file: pins, config_source) and must be unique")
-		}
-		seen[cf.Name] = true
 		switch {
 		case cf.Path == "" && cf.Discover == nil:
 			add(cf.Name, "needs a location — set 'path' or 'discover'")
@@ -610,34 +606,92 @@ func lintEnvNesting(spec *Spec) []error {
 	return problems
 }
 
-// lintConfigFileDuplicateLocation WARNS (non-fatal) when a command declares two
-// config_files entries that resolve to the same physical file — a redundant
-// duplicate the later of which shadows the earlier under nearest-wins. Distinct
-// names pointing at one file is almost always a mistake. This is the
-// within-one-command case (no chain needed); the cross-LEVEL cascade form (a
-// child re-declaring an ancestor's file) lands with the chain walk in Phase 2.
-func lintConfigFileDuplicateLocation(spec *Spec) []error {
+// lintConfigFilesScope enforces the config_files name space and physical-file
+// uniqueness ALONG A CHAIN, matching the runtime cascade (D-W3.1). Logical names
+// are how file: pins and config_source target an entry, so a name must be unique
+// within the cascade reaching a command: declaring it twice on one command, or
+// re-declaring an ancestor's name, is an ERROR — the nearer would shadow the
+// farther under nearest-wins, leaving the pin/source ambiguous. Two entries that
+// resolve to the SAME physical file — within one command or across levels of the
+// chain — are a non-fatal WARNING: the nearer silently shadows the farther, so
+// declare the file once. Sibling chains are independent: reusing a name or file
+// on a different branch is fine.
+// ancestorConfigIndex summarizes the config_files an ancestor chain puts in scope:
+// each logical name → the ancestor label that declared it, and each physical
+// location key → a `"name" on label` description. Any match against these is a
+// violation, so first-seen wins (the nearest ancestor isn't special for blame).
+func ancestorConfigIndex(ancestors []*Command) (names, locs map[string]string) {
+	names, locs = map[string]string{}, map[string]string{}
+	for _, a := range ancestors {
+		if a.Inputs == nil {
+			continue
+		}
+		label := a.Name
+		if label == "" {
+			label = a.Ref
+		}
+		if label == "" {
+			label = "(root)"
+		}
+		for _, cf := range a.Inputs.ConfigFiles {
+			if _, ok := names[cf.Name]; !ok {
+				names[cf.Name] = label
+			}
+			if key := configFileLocationKey(cf); key != "" {
+				if _, ok := locs[key]; !ok {
+					locs[key] = fmt.Sprintf("%q on %s", cf.Name, label)
+				}
+			}
+		}
+	}
+	return names, locs
+}
+
+func lintConfigFilesScope(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
-		if c.Inputs == nil {
+	walkChains(spec, func(chain []*Command, path string) {
+		cmd := chain[len(chain)-1]
+		if cmd.Inputs == nil {
 			return
 		}
-		seen := map[string]string{} // location key → first entry name that used it
-		for _, cf := range c.Inputs.ConfigFiles {
+		loc := "command " + path
+		ancestorName, ancestorLoc := ancestorConfigIndex(chain[:len(chain)-1])
+		ownName := map[string]bool{}
+		ownLoc := map[string]string{} // location key → first own entry name
+		for _, cf := range cmd.Inputs.ConfigFiles {
+			switch {
+			case ownName[cf.Name]:
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("config_files %q is declared twice — logical names identify entries (file: pins, config_source) and must be unique", cf.Name),
+				})
+			case ancestorName[cf.Name] != "":
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc,
+					msg: fmt.Sprintf("config_files %q shadows the entry declared on ancestor %s — names cascade and must be unique along the chain (a file: pin or config_source would be ambiguous); rename one", cf.Name, ancestorName[cf.Name]),
+				})
+			}
+			ownName[cf.Name] = true
+
 			key := configFileLocationKey(cf)
 			if key == "" {
 				continue // no location: lintConfigurationFiles errors on that
 			}
-			if first, ok := seen[key]; ok {
+			switch {
+			case ownLoc[key] != "":
 				problems = append(problems, &problem{
-					kind: "spec",
-					loc:  "command " + path,
-					sev:  severityWarning,
-					msg:  fmt.Sprintf("config_files %q and %q resolve to the same file — the later shadows the earlier (nearest-wins); declare it once", first, cf.Name),
+					kind: "spec", loc: loc, sev: severityWarning,
+					msg: fmt.Sprintf("config_files %q and %q resolve to the same file — the later shadows the earlier (nearest-wins); declare it once", ownLoc[key], cf.Name),
 				})
-				continue
+			case ancestorLoc[key] != "":
+				problems = append(problems, &problem{
+					kind: "spec", loc: loc, sev: severityWarning,
+					msg: fmt.Sprintf("config_files %q resolves to the same file as %s — the nearer shadows it (nearest-wins); declare it once", cf.Name, ancestorLoc[key]),
+				})
 			}
-			seen[key] = cf.Name
+			if ownLoc[key] == "" {
+				ownLoc[key] = cf.Name
+			}
 		}
 	})
 	return problems
@@ -657,19 +711,37 @@ func configFileLocationKey(cf ConfigurationFile) string {
 }
 
 // lintConfigSource enforces config_source's contract: flag/env inputs only,
-// string-typed, naming a declared config_files entry, with at most one
-// flag and one env input claiming any entry (a second claim would silently
-// shadow the first).
+// string-typed, naming a config_files entry IN SCOPE (declared on the command or
+// an ancestor — config_files cascade, D-W3.1), with at most one flag and one env
+// input claiming any entry within a chain (a second claim would silently shadow
+// the first). Claiming inputs cascade too, so a claim conflict spans the chain:
+// an ancestor's flag and this command's flag both claiming one entry collide.
+// Sibling chains are independent (a name reused on a different branch is its own
+// entry), so claims are gathered per chain rather than globally.
 func lintConfigSource(spec *Spec) []error {
 	var problems []error
-	declared := map[string]bool{}
-	for _, cf := range allConfigFiles(spec) {
-		declared[cf.Name] = true
-	}
-	claims := map[string]map[string]string{} // file → channel → claiming input
-	walkCommands(spec, func(c *Command, path string) {
+	walkChains(spec, func(chain []*Command, path string) {
+		cmd := chain[len(chain)-1]
+		declared := chainConfigNames(chain)
 		loc := "command " + path
-		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+		claims := map[string]map[string]string{} // target → channel → claiming input
+		// Seed with the ancestors' claims (cascade), so this command's own claims
+		// collide with them. Each ancestor's internal conflicts are caught when
+		// that ancestor is itself visited, so only first-wins is recorded here.
+		for _, a := range chain[:len(chain)-1] {
+			eachInputSchema(a.Inputs, func(channel, name string, schema *InputSchema) {
+				if schema == nil || schema.ConfigSource == "" || (channel != "flag" && channel != "env") {
+					return
+				}
+				if claims[schema.ConfigSource] == nil {
+					claims[schema.ConfigSource] = map[string]string{}
+				}
+				if _, ok := claims[schema.ConfigSource][channel]; !ok {
+					claims[schema.ConfigSource][channel] = name
+				}
+			})
+		}
+		eachInputSchema(cmd.Inputs, func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.ConfigSource == "" {
 				return
 			}
@@ -684,7 +756,7 @@ func lintConfigSource(spec *Spec) []error {
 			if !declared[target] {
 				problems = append(problems, &problem{
 					kind: "spec", loc: loc,
-					msg: fmt.Sprintf("%s %q names config_source %q, which is not a declared config_files entry", channel, name, target),
+					msg: fmt.Sprintf("%s %q names config_source %q, which is not a config_files entry in scope (declared on this command or an ancestor)", channel, name, target),
 				})
 				return
 			}
@@ -880,17 +952,16 @@ func lintPatternCompiles(spec *Spec) []error {
 }
 
 // lintConfigInputFiles enforces file:'s contract: config inputs only, naming a
-// declared config_files entry — the input's value is then read from
-// that file ONLY (not the merged precedence chain), including its required.
+// config_files entry IN SCOPE — declared on the command or an ancestor, since
+// config_files cascade (D-W3.1). The input's value is then read from that file
+// ONLY (not the merged precedence chain), including its required.
 func lintConfigInputFiles(spec *Spec) []error {
 	var problems []error
-	declared := map[string]bool{}
-	for _, cf := range allConfigFiles(spec) {
-		declared[cf.Name] = true
-	}
-	walkCommands(spec, func(c *Command, path string) {
+	walkChains(spec, func(chain []*Command, path string) {
+		cmd := chain[len(chain)-1]
+		declared := chainConfigNames(chain)
 		loc := "command " + path
-		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(cmd.Inputs, func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.File == "" {
 				return
 			}
@@ -904,7 +975,7 @@ func lintConfigInputFiles(spec *Spec) []error {
 			if !declared[schema.File] {
 				problems = append(problems, &problem{
 					kind: "spec", loc: loc,
-					msg: fmt.Sprintf("config %q pins file %q, which is not a declared config_files entry", name, schema.File),
+					msg: fmt.Sprintf("config %q pins file %q, which is not a config_files entry in scope (declared on this command or an ancestor)", name, schema.File),
 				})
 			}
 		})
@@ -1055,6 +1126,47 @@ func allConfigFiles(spec *Spec) []ConfigurationFile {
 		}
 	})
 	return out
+}
+
+// walkChains visits every command paired with its ancestor chain (root → command,
+// the command last). It is the chain-aware counterpart of walkCommands, for rules
+// that must reason about what's in scope via the cascade (config_files, file: pins).
+func walkChains(spec *Spec, visit func(chain []*Command, path string)) {
+	var walk func(c *Command, ancestors []*Command, path string)
+	walk = func(c *Command, ancestors []*Command, path string) {
+		chain := make([]*Command, len(ancestors)+1) // fresh slice → no sibling clobber across recursion
+		copy(chain, ancestors)
+		chain[len(ancestors)] = c
+		visit(chain, path)
+		for i := range c.Commands {
+			child := &c.Commands[i]
+			seg := child.Name
+			if seg == "" {
+				seg = child.Ref
+			}
+			walk(child, chain, path+"/"+seg)
+		}
+	}
+	name := spec.Command.Name
+	if name == "" {
+		name = "(root)"
+	}
+	walk(&spec.Command, nil, name)
+}
+
+// chainConfigNames is the set of config_files logical names in scope for a chain —
+// every name declared on the command or any ancestor (the cascade's name space).
+func chainConfigNames(chain []*Command) map[string]bool {
+	names := map[string]bool{}
+	for _, c := range chain {
+		if c.Inputs == nil {
+			continue
+		}
+		for _, cf := range c.Inputs.ConfigFiles {
+			names[cf.Name] = true
+		}
+	}
+	return names
 }
 
 // flagNames returns the set of a command's declared flag names plus an ordered slice

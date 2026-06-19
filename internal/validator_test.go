@@ -547,7 +547,7 @@ func TestValidate_configInputFile(t *testing.T) {
 	}
 
 	unknown := make_("    config:\n      - name: endpoint\n        schema: { type: string, file: nope }\n")
-	if err := validateOnce(writeTemp(t, "spec.yaml", unknown), "", "", ""); err == nil || !strings.Contains(err.Error(), "not a declared config_files entry") {
+	if err := validateOnce(writeTemp(t, "spec.yaml", unknown), "", "", ""); err == nil || !strings.Contains(err.Error(), "not a config_files entry in scope") {
 		t.Errorf("Validate(unknown pin) = %v, want a rejection", err)
 	}
 
@@ -584,6 +584,61 @@ func TestValidate_configFileDuplicateLocationWarns(t *testing.T) {
 	}
 	if !strings.Contains(s.warnings[0].Error(), "same file") {
 		t.Errorf("warning = %q, want it to mention the same-file shadow", s.warnings[0])
+	}
+}
+
+// TestValidate_configFilesChainScope pins the chain-aware config_files rules
+// (D-W3.1): names cascade, so a child re-declaring an ancestor's name is an
+// ERROR, while a sibling on a different branch may freely reuse it; a file: pin
+// resolves up the chain (ancestor OK, sibling not); the same physical file across
+// levels is a WARNING.
+func TestValidate_configFilesChainScope(t *testing.T) {
+	// Two sibling branches each declaring a config_files entry named "cfg" — a
+	// reused name on independent chains is fine.
+	siblingReuse := validSpecHeader + "command:\n  name: app\n  commands:\n" +
+		"    - name: a\n      inputs:\n        config_files:\n          - name: cfg\n            path: a.yaml\n" +
+		"    - name: b\n      inputs:\n        config_files:\n          - name: cfg\n            path: b.yaml\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", siblingReuse), "", "", ""); err != nil {
+		t.Errorf("Validate(sibling name reuse) = %v, want nil (independent chains)", err)
+	}
+
+	// A child re-declaring the root's "app" entry shadows it along the chain.
+	shadow := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
+		"    config_files:\n      - name: app\n        path: ~/.app.yaml\n  commands:\n" +
+		"    - name: deploy\n      inputs:\n        config_files:\n          - name: app\n            path: ./deploy.yaml\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", shadow), "", "", ""); err == nil || !strings.Contains(err.Error(), "shadows the entry declared on ancestor") {
+		t.Errorf("Validate(child shadows ancestor name) = %v, want a shadow rejection", err)
+	}
+
+	// A child config input may pin an ANCESTOR's entry (it's in scope via cascade).
+	pinAncestor := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
+		"    config_files:\n      - name: app\n        path: ~/.app.yaml\n  commands:\n" +
+		"    - name: deploy\n      inputs:\n        config:\n          - name: x\n            schema: { type: string, file: app, key: a.b }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", pinAncestor), "", "", ""); err != nil {
+		t.Errorf("Validate(pin ancestor entry) = %v, want nil (cascade in scope)", err)
+	}
+
+	// But a sibling's entry is NOT in scope — branch b cannot pin branch a's "acfg".
+	pinSibling := validSpecHeader + "command:\n  name: app\n  commands:\n" +
+		"    - name: a\n      inputs:\n        config_files:\n          - name: acfg\n            path: a.yaml\n" +
+		"    - name: b\n      inputs:\n        config:\n          - name: x\n            schema: { type: string, file: acfg, key: a.b }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", pinSibling), "", "", ""); err == nil || !strings.Contains(err.Error(), "not a config_files entry in scope") {
+		t.Errorf("Validate(pin sibling entry) = %v, want an out-of-scope rejection", err)
+	}
+
+	// Same physical file declared at two levels of one chain is a WARNING.
+	crossLevelDup := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
+		"    config_files:\n      - name: app\n        path: ~/.shared.yaml\n  commands:\n" +
+		"    - name: deploy\n      inputs:\n        config_files:\n          - name: deploy\n            path: ~/.shared.yaml\n"
+	s := newSession(writeTemp(t, "spec.yaml", crossLevelDup), "", "")
+	if err := s.load(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := s.validate(); err != nil {
+		t.Errorf("validate(cross-level same file) = %v, want nil (it is a warning)", err)
+	}
+	if len(s.warnings) != 1 || !strings.Contains(s.warnings[0].Error(), "same file") {
+		t.Errorf("warnings = %v, want exactly one same-file shadow warning", s.warnings)
 	}
 }
 
@@ -627,7 +682,7 @@ func TestValidate_configSource(t *testing.T) {
 	cases := []struct{ name, inputs, want string }{
 		{"unknown entry",
 			"    flags:\n      - name: c\n        schema: { type: string, config_source: nope }\n",
-			"not a declared config_files entry"},
+			"not a config_files entry in scope"},
 		{"flag and env only",
 			"    config:\n      - name: c\n        schema: { type: string, config_source: app }\n",
 			"flag and env inputs only"},
@@ -646,6 +701,25 @@ func TestValidate_configSource(t *testing.T) {
 				t.Errorf("Validate = %v, want an error containing %q", err, c.want)
 			}
 		})
+	}
+
+	// config_source claims cascade: a child flag claiming the same entry as the
+	// root's flag collides along the chain (one flag per entry per chain).
+	chainConflict := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
+		"    config_files:\n      - name: app\n        path: ~/.app.yaml\n" +
+		"    flags:\n      - name: root_cfg\n        schema: { type: string, config_source: app }\n  commands:\n" +
+		"    - name: deploy\n      inputs:\n        flags:\n          - name: deploy_cfg\n            schema: { type: string, config_source: app }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", chainConflict), "", "", ""); err == nil || !strings.Contains(err.Error(), "already claimed") {
+		t.Errorf("Validate(cross-level claim conflict) = %v, want an already-claimed rejection", err)
+	}
+
+	// A SIBLING claiming the root entry is fine — its own chain has one claim.
+	siblingClaim := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
+		"    config_files:\n      - name: app\n        path: ~/.app.yaml\n  commands:\n" +
+		"    - name: a\n      inputs:\n        flags:\n          - name: a_cfg\n            schema: { type: string, config_source: app }\n" +
+		"    - name: b\n      inputs:\n        flags:\n          - name: b_cfg\n            schema: { type: string, config_source: app }\n"
+	if err := validateOnce(writeTemp(t, "spec.yaml", siblingClaim), "", "", ""); err != nil {
+		t.Errorf("Validate(sibling claims of ancestor entry) = %v, want nil (independent chains)", err)
 	}
 }
 
