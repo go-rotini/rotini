@@ -385,10 +385,10 @@ var specLints = []func(*Spec) []error{
 func lintRootCommand(spec *Spec) []error {
 	var problems []error
 	if spec.Ref != "" {
-		problems = append(problems, &problem{kind: "spec", loc: "command", msg: "the root command cannot use $ref — compose child specs as sub-commands instead"})
+		problems = append(problems, &problem{kind: "spec", loc: "(root)", msg: "the root command cannot use $ref — compose child specs as sub-commands instead"})
 	}
 	if spec.Name == "" {
-		problems = append(problems, &problem{kind: "spec", loc: "command", msg: "the root command must have a name (it is the binary name)"})
+		problems = append(problems, &problem{kind: "spec", loc: "(root)", msg: "the root command must have a name (it is the binary name)"})
 	}
 	return problems
 }
@@ -434,13 +434,13 @@ func lintRootAliases(spec *Spec) []error {
 	var problems []error
 	if len(spec.Aliases) > 0 {
 		problems = append(problems, &problem{
-			kind: "spec", loc: "command",
+			kind: "spec", loc: "(root)",
 			msg: "the root command cannot declare aliases — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
 		})
 	}
 	if len(spec.DeprecatedIdentifiers) > 0 {
 		problems = append(problems, &problem{
-			kind: "spec", loc: "command",
+			kind: "spec", loc: "(root)",
 			msg: "the root command cannot declare deprecated_identifiers — with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
 		})
 	}

@@ -73,7 +73,7 @@
             "type": "string",
             "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$"
           },
-          "description": "Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation."
+          "description": "Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rotini's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation."
         },
         "timeout": {
           "type": "string",
@@ -303,7 +303,7 @@
         "$ref": {
           "type": "string",
           "pattern": "^#/schemas/",
-          "description": "Reference to a named schema in the top-level schemas map (e.g. '#/schemas/MySchema'). Resolved at codegen time."
+          "description": "Reference to a named schema in the document-level \"schemas\" map (root only; e.g. '#/schemas/MySchema'). Resolved at codegen time."
         },
         "type": {
           "type": "string",
@@ -542,7 +542,7 @@
             "type": "string",
             "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$"
           },
-          "description": "CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rtk's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input"
+          "description": "CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input"
         }
       }
     },
