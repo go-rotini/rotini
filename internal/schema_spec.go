@@ -71,20 +71,34 @@ type Command struct {
 	Ref string `json:"$ref,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.
 	Aliases []string `json:"aliases,omitempty"`
+	// Positional argument inputs for this command
+	Arguments []ArgumentInput `json:"arguments,omitempty"`
 	// Sub-commands of this command (inline or composed via $ref).
 	Commands []Command `json:"commands,omitempty"`
+	// Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files).
+	Config []ConfigInput `json:"config,omitempty"`
+	// Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins.
+	ConfigFiles []ConfigurationFile `json:"config_files,omitempty"`
 	// Deprecation message; the command is annotated as deprecated in its parent's generated Commands list.
 	Deprecated string `json:"deprecated,omitempty"`
 	// Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rtk's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation.
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
 	// Long description block shown atop this command's generated help page. Ignored when 'help' (verbatim) is set.
 	Description string `json:"description,omitempty"`
+	// Environment-variable inputs for this command
+	Env []EnvInput `json:"env,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
 	Examples []string `json:"examples,omitempty"`
 	// Exit codes this command documents, rendered as an EXIT STATUS section in the man page. Data only: rotini sets no exit code itself (handlers own exits via rtx.Exit), so this section is whatever you declare. Ignored when 'man' (verbatim) is set.
 	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
 	// Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go'), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 	Filename string `json:"filename,omitempty"`
+	// Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).
+	FlagDependencies []FlagDependency `json:"flag_dependencies,omitempty"`
+	// Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).
+	FlagGroups []FlagGroup `json:"flag_groups,omitempty"`
+	// Flag inputs for this command
+	Flags []FlagInput `json:"flags,omitempty"`
 	// Text rendered at the bottom of the page. Ignored when 'help' is set.
 	Footer string `json:"footer,omitempty"`
 	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only.
@@ -97,8 +111,6 @@ type Command struct {
 	Help string `json:"help,omitempty"`
 	// When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line).
 	Hidden bool `json:"hidden,omitempty"`
-	// Typed inputs for this command: flags, arguments, config values, env variables, and stdin.
-	Inputs *Inputs `json:"inputs,omitempty"`
 	// Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template.
 	Man string `json:"man,omitempty"`
 	// Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it byte-for-byte; when unset, the page is rendered from the structured doc-fields through the markdown template.
@@ -115,6 +127,8 @@ type Command struct {
 	RemoteDiscovery *RemoteDiscovery `json:"remote_discovery,omitempty"`
 	// Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.
 	SeeAlso []string `json:"see_also,omitempty"`
+	// Declares expected stdin format and schema for this command
+	Stdin *StdinSpec `json:"stdin,omitempty"`
 	// Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page.
 	Summary string `json:"summary,omitempty"`
 	// Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
@@ -259,25 +273,6 @@ type InputSchema struct {
 	Secret bool `json:"secret,omitempty"`
 	// Environment variable name (env inputs only)
 	Variable string `json:"variable,omitempty"`
-}
-
-type Inputs struct {
-	// Positional argument inputs for this command
-	Arguments []ArgumentInput `json:"arguments,omitempty"`
-	// Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files).
-	Config []ConfigInput `json:"config,omitempty"`
-	// Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins.
-	ConfigFiles []ConfigurationFile `json:"config_files,omitempty"`
-	// Environment-variable inputs for this command
-	Env []EnvInput `json:"env,omitempty"`
-	// Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).
-	FlagDependencies []FlagDependency `json:"flag_dependencies,omitempty"`
-	// Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).
-	FlagGroups []FlagGroup `json:"flag_groups,omitempty"`
-	// Flag inputs for this command
-	Flags []FlagInput `json:"flags,omitempty"`
-	// Declares expected stdin format and schema for this command
-	Stdin *StdinSpec `json:"stdin,omitempty"`
 }
 
 type RemoteCommandSpec struct {

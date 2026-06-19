@@ -201,14 +201,13 @@ func TestProcessorValidate_ruleViolation(t *testing.T) {
 	spec := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: output\n" +
-		"        identifiers: [-o, --output]\n" +
-		"        schema: { type: string }\n" +
-		"      - name: organization\n" +
-		"        identifiers: [-o, --org]\n" +
-		"        schema: { type: string }\n"
+		"  flags:\n" +
+		"    - name: output\n" +
+		"      identifiers: [-o, --output]\n" +
+		"      schema: { type: string }\n" +
+		"    - name: organization\n" +
+		"      identifiers: [-o, --org]\n" +
+		"      schema: { type: string }\n"
 	err := loadAndValidate(t, writeTemp(t, "spec.yaml", spec), "", "")
 	if err == nil || !strings.Contains(err.Error(), `"-o"`) || !strings.Contains(err.Error(), "output") {
 		t.Errorf("validate(duplicate -o) = %v, want a duplicate-identifier rule violation", err)
@@ -357,9 +356,9 @@ func TestProcessorGeneratePass_valid(t *testing.T) {
 // nil) AND the onWarnings callback receives the finding for the OnWarning funnel.
 func TestProcessorValidate_warningsSurfaceAndDontFail(t *testing.T) {
 	spec := validSpecHeader +
-		"command:\n  name: app\n  inputs:\n    config_files:\n" +
-		"      - name: a\n        path: ~/.app.yaml\n" +
-		"      - name: b\n        path: ~/.app.yaml\n"
+		"command:\n  name: app\n  config_files:\n" +
+		"    - name: a\n      path: ~/.app.yaml\n" +
+		"    - name: b\n      path: ~/.app.yaml\n"
 	var warns []error
 	err := NewProcessor("").Validate(writeTemp(t, "spec.yaml", spec), "", false, "", nil,
 		func(w []error) { warns = append(warns, w...) })

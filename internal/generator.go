@@ -1630,10 +1630,10 @@ type scopedConfigFile struct {
 func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
 	var out []scopedConfigFile
 	walkCommands(spec, func(c *Command, path string) {
-		if c.Inputs == nil {
+		if c.inputs() == nil {
 			return
 		}
-		for _, cf := range c.Inputs.ConfigFiles {
+		for _, cf := range c.inputs().ConfigFiles {
 			out = append(out, scopedConfigFile{ConfigurationFile: cf, Scope: path})
 		}
 	})
@@ -1648,7 +1648,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 	gp := &genProgram{
 		rootName:        root.Name,
 		rootPascal:      toPascalCase(root.Name),
-		rootInputs:      root.Inputs,
+		rootInputs:      root.inputs(),
 		rootRemotes:     root.RemoteCommands,
 		rootHelp:        commandHelp(root),
 		rootOutput:      root.Output,
@@ -1662,12 +1662,12 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		prefix:      gp.rootPascal,
 		handler:     lowerFirst(gp.rootPascal) + "Handlers",
 		filename:    commandStubFilename(root.Name, "", root.Filename),
-		flags:       flagFields(root.Inputs),
-		args:        argFields(root.Inputs),
-		env:         envFields(root.Inputs, gp.envPrefix),
-		config:      configFields(root.Inputs),
-		stdinType:   stdinTypeExpr(gp.rootPascal, root.Inputs),
-		stdinFormat: stdinFormatExpr(root.Inputs),
+		flags:       flagFields(root.inputs()),
+		args:        argFields(root.inputs()),
+		env:         envFields(root.inputs(), gp.envPrefix),
+		config:      configFields(root.inputs()),
+		stdinType:   stdinTypeExpr(gp.rootPascal, root.inputs()),
+		stdinFormat: stdinFormatExpr(root.inputs()),
 		inputs:      []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
 	}
 
@@ -1732,12 +1732,12 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 				prefix:      prefix,
 				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
 				filename:    commandStubFilename(gp.rootName, path, c.Filename),
-				flags:       flagFields(c.Inputs),
-				args:        argFields(c.Inputs),
-				env:         envFields(c.Inputs, gp.envPrefix),
-				config:      configFields(c.Inputs),
-				stdinType:   stdinTypeExpr(prefix, c.Inputs),
-				stdinFormat: stdinFormatExpr(c.Inputs),
+				flags:       flagFields(c.inputs()),
+				args:        argFields(c.inputs()),
+				env:         envFields(c.inputs(), gp.envPrefix),
+				config:      configFields(c.inputs()),
+				stdinType:   stdinTypeExpr(prefix, c.inputs()),
+				stdinFormat: stdinFormatExpr(c.inputs()),
 				inputs:      inputsFields(gp.rootPascal, path),
 			})
 		}
@@ -1750,7 +1750,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			name:                  c.Name,
 			prefix:                prefix,
 			aliases:               c.Aliases,
-			inputs:                c.Inputs,
+			inputs:                c.inputs(),
 			help:                  commandHelp(c),
 			output:                c.Output,
 			discovery:             c.RemoteDiscovery,
@@ -1822,7 +1822,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.Inputs, help: commandHelp(childRoot), hidden: c.Hidden, group: c.Group, deprecated: c.Deprecated, deprecatedIdentifiers: c.DeprecatedIdentifiers, composed: true, children: children}, nil
+	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.inputs(), help: commandHelp(childRoot), hidden: c.Hidden, group: c.Group, deprecated: c.Deprecated, deprecatedIdentifiers: c.DeprecatedIdentifiers, composed: true, children: children}, nil
 }
 
 // composeNestedRef handles a `$ref` encountered *inside* an already-composed subtree

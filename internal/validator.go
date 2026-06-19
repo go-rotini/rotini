@@ -462,11 +462,11 @@ func lintSiblingCollisions(spec *Spec) []error {
 func lintDuplicateInputNames(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
-		if c.Inputs == nil {
+		if c.inputs() == nil {
 			return
 		}
 		seen := map[string]string{} // channel+name -> first declaration
-		eachInputSchema(c.Inputs, func(channel, name string, _ *InputSchema) {
+		eachInputSchema(c.inputs(), func(channel, name string, _ *InputSchema) {
 			if name == "" {
 				return // stdin has no logical name
 			}
@@ -491,11 +491,11 @@ func lintDuplicateInputNames(spec *Spec) []error {
 func lintVariadicArguments(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
-		if c.Inputs == nil {
+		if c.inputs() == nil {
 			return
 		}
-		for i, a := range c.Inputs.Arguments {
-			if i == len(c.Inputs.Arguments)-1 {
+		for i, a := range c.inputs().Arguments {
+			if i == len(c.inputs().Arguments)-1 {
 				break
 			}
 			if strings.HasPrefix(getSchemaType(a.Schema), "[]") {
@@ -517,7 +517,7 @@ func lintVariadicArguments(spec *Spec) []error {
 func lintDottedKeys(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
-		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || !schema.DottedKeys {
 				return
 			}
@@ -578,7 +578,7 @@ func lintEnvNesting(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
 		loc := "command " + path
-		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.Nesting == "" {
 				return
 			}
@@ -623,7 +623,7 @@ func lintEnvNesting(spec *Spec) []error {
 func ancestorConfigIndex(ancestors []*Command) (names, locs map[string]string) {
 	names, locs = map[string]string{}, map[string]string{}
 	for _, a := range ancestors {
-		if a.Inputs == nil {
+		if a.inputs() == nil {
 			continue
 		}
 		label := a.Name
@@ -633,7 +633,7 @@ func ancestorConfigIndex(ancestors []*Command) (names, locs map[string]string) {
 		if label == "" {
 			label = "(root)"
 		}
-		for _, cf := range a.Inputs.ConfigFiles {
+		for _, cf := range a.inputs().ConfigFiles {
 			if _, ok := names[cf.Name]; !ok {
 				names[cf.Name] = label
 			}
@@ -651,14 +651,14 @@ func lintConfigFilesScope(spec *Spec) []error {
 	var problems []error
 	walkChains(spec, func(chain []*Command, path string) {
 		cmd := chain[len(chain)-1]
-		if cmd.Inputs == nil {
+		if cmd.inputs() == nil {
 			return
 		}
 		loc := "command " + path
 		ancestorName, ancestorLoc := ancestorConfigIndex(chain[:len(chain)-1])
 		ownName := map[string]bool{}
 		ownLoc := map[string]string{} // location key → first own entry name
-		for _, cf := range cmd.Inputs.ConfigFiles {
+		for _, cf := range cmd.inputs().ConfigFiles {
 			switch {
 			case ownName[cf.Name]:
 				problems = append(problems, &problem{
@@ -729,7 +729,7 @@ func lintConfigSource(spec *Spec) []error {
 		// collide with them. Each ancestor's internal conflicts are caught when
 		// that ancestor is itself visited, so only first-wins is recorded here.
 		for _, a := range chain[:len(chain)-1] {
-			eachInputSchema(a.Inputs, func(channel, name string, schema *InputSchema) {
+			eachInputSchema(a.inputs(), func(channel, name string, schema *InputSchema) {
 				if schema == nil || schema.ConfigSource == "" || (channel != "flag" && channel != "env") {
 					return
 				}
@@ -741,7 +741,7 @@ func lintConfigSource(spec *Spec) []error {
 				}
 			})
 		}
-		eachInputSchema(cmd.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(cmd.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.ConfigSource == "" {
 				return
 			}
@@ -804,7 +804,7 @@ func lintConstraintApplicability(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
 		loc := "command " + path
-		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if channel == "stdin" || schema == nil {
 				return
 			}
@@ -852,7 +852,7 @@ func lintPassthrough(spec *Spec) []error {
 			problems = append(problems, &problem{kind: "spec", loc: "command " + path,
 				msg: "passthrough: " + msg})
 		}
-		if c.Inputs != nil && len(c.Inputs.Flags) > 0 {
+		if c.inputs() != nil && len(c.inputs().Flags) > 0 {
 			add("the command declares flags, but a passthrough command parses none — its tokens are raw positionals")
 		}
 		if len(c.Commands) > 0 {
@@ -862,8 +862,8 @@ func lintPassthrough(spec *Spec) []error {
 			add("the command declares remote commands/discovery, but a passthrough command never dispatches — the token is a raw positional")
 		}
 		args := []ArgumentInput{}
-		if c.Inputs != nil {
-			args = c.Inputs.Arguments
+		if c.inputs() != nil {
+			args = c.inputs().Arguments
 		}
 		if len(args) == 0 || getSchemaType(args[len(args)-1].Schema) != "[]string" {
 			add("declare a variadic []string as the last argument — the receiver of the raw tokens")
@@ -880,7 +880,7 @@ func lintPassthrough(spec *Spec) []error {
 func lintCountFlags(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
-		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.Type != "count" {
 				return
 			}
@@ -936,7 +936,7 @@ func lintCountFlags(spec *Spec) []error {
 func lintPatternCompiles(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
-		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if channel == "stdin" || schema == nil || schema.Pattern == "" {
 				return
 			}
@@ -961,7 +961,7 @@ func lintConfigInputFiles(spec *Spec) []error {
 		cmd := chain[len(chain)-1]
 		declared := chainConfigNames(chain)
 		loc := "command " + path
-		eachInputSchema(cmd.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(cmd.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.File == "" {
 				return
 			}
@@ -992,10 +992,10 @@ func lintFrom(spec *Spec) []error {
 	walkCommands(spec, func(c *Command, path string) {
 		loc := "command " + path
 		stdinClaim := "" // what already claimed this command's stdin
-		if c.Inputs != nil && c.Inputs.Stdin != nil {
+		if c.inputs() != nil && c.inputs().Stdin != nil {
 			stdinClaim = "the stdin: channel"
 		}
-		eachInputSchema(c.Inputs, func(channel, name string, schema *InputSchema) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || len(schema.From) == 0 {
 				return
 			}
@@ -1055,10 +1055,10 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 				subset(path, fmt.Sprintf("sub-command %q", child.Name), child.Aliases, child.DeprecatedIdentifiers, "aliases")
 			}
 		}
-		if c.Inputs == nil {
+		if c.inputs() == nil {
 			return
 		}
-		for _, f := range c.Inputs.Flags {
+		for _, f := range c.inputs().Flags {
 			if len(f.DeprecatedIdentifiers) > 0 {
 				subset(path, fmt.Sprintf("flag %q", f.Name), flagIdentifiers(f), f.DeprecatedIdentifiers, "identifiers")
 			}
@@ -1121,8 +1121,8 @@ func walkCommands(spec *Spec, visit func(c *Command, path string)) {
 func allConfigFiles(spec *Spec) []ConfigurationFile {
 	var out []ConfigurationFile
 	walkCommands(spec, func(c *Command, _ string) {
-		if c.Inputs != nil {
-			out = append(out, c.Inputs.ConfigFiles...)
+		if c.inputs() != nil {
+			out = append(out, c.inputs().ConfigFiles...)
 		}
 	})
 	return out
@@ -1159,10 +1159,10 @@ func walkChains(spec *Spec, visit func(chain []*Command, path string)) {
 func chainConfigNames(chain []*Command) map[string]bool {
 	names := map[string]bool{}
 	for _, c := range chain {
-		if c.Inputs == nil {
+		if c.inputs() == nil {
 			continue
 		}
-		for _, cf := range c.Inputs.ConfigFiles {
+		for _, cf := range c.inputs().ConfigFiles {
 			names[cf.Name] = true
 		}
 	}
@@ -1174,11 +1174,11 @@ func chainConfigNames(chain []*Command) map[string]bool {
 // and flag_dependencies rules.
 func flagNames(c *Command) (known map[string]bool, ordered []string) {
 	known = map[string]bool{}
-	if c.Inputs == nil {
+	if c.inputs() == nil {
 		return known, nil
 	}
-	ordered = make([]string, 0, len(c.Inputs.Flags))
-	for _, f := range c.Inputs.Flags {
+	ordered = make([]string, 0, len(c.inputs().Flags))
+	for _, f := range c.inputs().Flags {
 		known[f.Name] = true
 		ordered = append(ordered, f.Name)
 	}
@@ -1237,7 +1237,7 @@ func lintImportConsistency(spec *Spec) []error {
 		byType[typ][imp] = true
 	}
 	walkCommands(spec, func(c *Command, _ string) {
-		eachInputSchema(c.Inputs, func(_, _ string, s *InputSchema) {
+		eachInputSchema(c.inputs(), func(_, _ string, s *InputSchema) {
 			if s != nil {
 				walkSchemaImports(s.BaseSchema, record)
 			}
@@ -1296,11 +1296,11 @@ func lintLocalTimeout(spec *Spec) []error {
 func lintFlagGroups(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
-		if c.Inputs == nil || len(c.Inputs.FlagGroups) == 0 {
+		if c.inputs() == nil || len(c.inputs().FlagGroups) == 0 {
 			return
 		}
 		known, ordered := flagNames(c)
-		for _, g := range c.Inputs.FlagGroups {
+		for _, g := range c.inputs().FlagGroups {
 			for _, name := range g.Flags {
 				if !known[name] {
 					msg := fmt.Sprintf("flag_groups (%s) references unknown flag %q — it has no matching entry in this command's flags", g.Kind, name)
@@ -1318,7 +1318,7 @@ func lintFlagGroups(spec *Spec) []error {
 func lintFlagDependencies(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
-		if c.Inputs == nil || len(c.Inputs.FlagDependencies) == 0 {
+		if c.inputs() == nil || len(c.inputs().FlagDependencies) == 0 {
 			return
 		}
 		known, ordered := flagNames(c)
@@ -1326,7 +1326,7 @@ func lintFlagDependencies(spec *Spec) []error {
 			msg := fmt.Sprintf("flag_dependencies references unknown flag %q — it has no matching entry in this command's flags", name)
 			problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 		}
-		for _, dep := range c.Inputs.FlagDependencies {
+		for _, dep := range c.inputs().FlagDependencies {
 			if !known[dep.When] {
 				report(dep.When)
 			}
@@ -1348,11 +1348,11 @@ func lintFlagDependencies(spec *Spec) []error {
 func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
-		if c.Inputs == nil {
+		if c.inputs() == nil {
 			return
 		}
 		claimedBy := map[string]string{} // identifier -> the flag name that first claimed it
-		for _, f := range c.Inputs.Flags {
+		for _, f := range c.inputs().Flags {
 			// flagIdentifiers is the same derivation codegen emits into the
 			// Definition, so the lint catches exactly the collisions the parser
 			// would resolve silently — including derived ones ("dry_run" and
@@ -1404,7 +1404,7 @@ func lintSchemaRefs(spec *Spec) []error {
 		}
 	}
 	walkCommands(spec, func(c *Command, path string) {
-		eachInputSchema(c.Inputs, func(channel, name string, s *InputSchema) {
+		eachInputSchema(c.inputs(), func(channel, name string, s *InputSchema) {
 			if s == nil {
 				return
 			}

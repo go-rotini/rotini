@@ -162,12 +162,11 @@ func TestValidate_helpKeys(t *testing.T) {
 		"      summary: run it\n" +
 		"      hidden: true\n" +
 		"      deprecated: use start\n" +
-		"      inputs:\n" +
-		"        flags:\n" +
-		"          - name: force\n" +
-		"            summary: force it\n" +
-		"            hidden: true\n" +
-		"            deprecated: no longer needed\n"
+		"      flags:\n" +
+		"        - name: force\n" +
+		"          summary: force it\n" +
+		"          hidden: true\n" +
+		"          deprecated: no longer needed\n"
 	path := writeTemp(t, "spec.yaml", spec)
 	if err := validateOnce(path, "", "", ""); err != nil {
 		t.Errorf("Validate(spec with help keys) = %v, want nil", err)
@@ -199,18 +198,18 @@ func TestValidate_localTimeoutRejected(t *testing.T) {
 // accepted and silently ignored at parse time.
 func TestValidate_constraintApplicability(t *testing.T) {
 	make_ := func(flag string) string {
-		return validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" + flag
+		return validSpecHeader + "command:\n  name: app\n  flags:\n" + flag
 	}
 	cases := []struct{ name, flag, want string }{
-		{"bounds on string", "      - name: x\n        schema: { type: string, minimum: 1 }\n", "numeric types only"},
-		{"bounds on duration", "      - name: ttl\n        schema: { type: duration, maximum: 60 }\n", "duration bounds are not supported"},
-		{"bounds on imported type", "      - name: id\n        schema: { type: uuid.UUID, import: github.com/google/uuid, minimum: 1 }\n", "numeric types only"},
-		{"pattern on int", "      - name: n\n        schema: { type: int, pattern: \"^x\" }\n", "string types only"},
-		{"length on bool", "      - name: b\n        schema: { type: bool, minLength: 1 }\n", "string types only"},
-		{"items on scalar", "      - name: s\n        schema: { type: string, minItems: 2 }\n", "repeatable (array/map) types only"},
-		{"exclusive bound on string", "      - name: s\n        schema: { type: string, exclusiveMinimum: 0 }\n", "numeric types only"},
-		{"multipleOf on bool", "      - name: b\n        schema: { type: bool, multipleOf: 2 }\n", "numeric types only"},
-		{"exclusive bound on duration", "      - name: ttl\n        schema: { type: duration, exclusiveMaximum: 60 }\n", "duration bounds are not supported"},
+		{"bounds on string", "    - name: x\n      schema: { type: string, minimum: 1 }\n", "numeric types only"},
+		{"bounds on duration", "    - name: ttl\n      schema: { type: duration, maximum: 60 }\n", "duration bounds are not supported"},
+		{"bounds on imported type", "    - name: id\n      schema: { type: uuid.UUID, import: github.com/google/uuid, minimum: 1 }\n", "numeric types only"},
+		{"pattern on int", "    - name: n\n      schema: { type: int, pattern: \"^x\" }\n", "string types only"},
+		{"length on bool", "    - name: b\n      schema: { type: bool, minLength: 1 }\n", "string types only"},
+		{"items on scalar", "    - name: s\n      schema: { type: string, minItems: 2 }\n", "repeatable (array/map) types only"},
+		{"exclusive bound on string", "    - name: s\n      schema: { type: string, exclusiveMinimum: 0 }\n", "numeric types only"},
+		{"multipleOf on bool", "    - name: b\n      schema: { type: bool, multipleOf: 2 }\n", "numeric types only"},
+		{"exclusive bound on duration", "    - name: ttl\n      schema: { type: duration, exclusiveMaximum: 60 }\n", "duration bounds are not supported"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -223,13 +222,13 @@ func TestValidate_constraintApplicability(t *testing.T) {
 
 	// Applicable combinations pass: numeric bounds on uint, element bounds on
 	// []int, element pattern on []string, counts on arrays and maps.
-	valid := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
-		"      - name: workers\n        schema: { type: uint, minimum: 1, maximum: 64 }\n" +
-		"      - name: rate\n        schema: { type: float64, exclusiveMinimum: 0, exclusiveMaximum: 1 }\n" +
-		"      - name: step\n        schema: { type: int, multipleOf: 5 }\n" +
-		"      - name: port\n        schema: { type: array, items: { type: int }, minimum: 1, maxItems: 3 }\n" +
-		"      - name: tag\n        schema: { type: \"[]string\", pattern: \"^[a-z]+$\", minItems: 1 }\n" +
-		"      - name: label\n        schema: { type: map, maxItems: 5 }\n"
+	valid := validSpecHeader + "command:\n  name: app\n  flags:\n" +
+		"    - name: workers\n      schema: { type: uint, minimum: 1, maximum: 64 }\n" +
+		"    - name: rate\n      schema: { type: float64, exclusiveMinimum: 0, exclusiveMaximum: 1 }\n" +
+		"    - name: step\n      schema: { type: int, multipleOf: 5 }\n" +
+		"    - name: port\n      schema: { type: array, items: { type: int }, minimum: 1, maxItems: 3 }\n" +
+		"    - name: tag\n      schema: { type: \"[]string\", pattern: \"^[a-z]+$\", minItems: 1 }\n" +
+		"    - name: label\n      schema: { type: map, maxItems: 5 }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(applicable constraints) = %v, want nil", err)
 	}
@@ -241,17 +240,17 @@ func TestValidate_passthrough(t *testing.T) {
 	wrap := func(body string) string {
 		return validSpecHeader + "command:\n  name: app\n  commands:\n    - name: exec\n      passthrough: true\n" + body
 	}
-	recv := "      inputs:\n        arguments:\n          - name: cmdline\n            schema: { type: \"[]string\" }\n"
+	recv := "      arguments:\n        - name: cmdline\n          schema: { type: \"[]string\" }\n"
 	cases := []struct{ name, body, want string }{
 		{"flags rejected", recv + "      inputs2:\n", "declares flags"},
 		{"sub-commands rejected", recv + "      commands:\n        - name: sub\n", "never descends"},
 		{"missing receiver", "", "variadic []string"},
 		{"non-string receiver",
-			"      inputs:\n        arguments:\n          - name: ns\n            schema: { type: array, items: { type: int } }\n",
+			"      arguments:\n        - name: ns\n          schema: { type: array, items: { type: int } }\n",
 			"variadic []string"},
 	}
 	// fix the "flags rejected" body: a passthrough command with both a flag and the receiver
-	cases[0].body = "      inputs:\n        flags:\n          - name: x\n            schema: { type: string }\n        arguments:\n          - name: cmdline\n            schema: { type: \"[]string\" }\n"
+	cases[0].body = "      flags:\n        - name: x\n          schema: { type: string }\n      arguments:\n        - name: cmdline\n          schema: { type: \"[]string\" }\n"
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			err := validateOnce(writeTemp(t, "spec.yaml", wrap(c.body)), "", "", "")
@@ -262,7 +261,7 @@ func TestValidate_passthrough(t *testing.T) {
 	}
 
 	// The honest shape passes: a leading fixed argument plus the variadic receiver.
-	valid := wrap("      inputs:\n        arguments:\n          - name: program\n            schema: { type: string, required: true }\n          - name: cmdline\n            schema: { type: \"[]string\" }\n")
+	valid := wrap("      arguments:\n        - name: program\n          schema: { type: string, required: true }\n        - name: cmdline\n          schema: { type: \"[]string\" }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(passthrough with receiver) = %v, want nil", err)
 	}
@@ -273,27 +272,27 @@ func TestValidate_passthrough(t *testing.T) {
 func TestValidate_countFlags(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"count on env input",
-			"    env:\n      - name: depth\n        schema: { type: count }\n",
+			"  env:\n    - name: depth\n      schema: { type: count }\n",
 			"applies to flags only"},
 		{"count on argument",
-			"    arguments:\n      - name: depth\n        schema: { type: count }\n",
+			"  arguments:\n    - name: depth\n      schema: { type: count }\n",
 			"applies to flags only"},
 		{"default on count",
-			"    flags:\n      - name: v\n        schema: { type: count, default: 2 }\n",
+			"  flags:\n    - name: v\n      schema: { type: count, default: 2 }\n",
 			"do(es) not apply"},
 		{"enum on count",
-			"    flags:\n      - name: v\n        schema: { type: count, enum: [one, two] }\n",
+			"  flags:\n    - name: v\n      schema: { type: count, enum: [one, two] }\n",
 			"do(es) not apply"},
 		{"bounds on count",
-			"    flags:\n      - name: v\n        schema: { type: count, maximum: 3 }\n",
+			"  flags:\n    - name: v\n      schema: { type: count, maximum: 3 }\n",
 			"do(es) not apply"},
 		{"from on count",
-			"    flags:\n      - name: v\n        schema: { type: count, from: [stdin] }\n",
+			"  flags:\n    - name: v\n      schema: { type: count, from: [stdin] }\n",
 			"do(es) not apply"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			spec := validSpecHeader + "command:\n  name: app\n  inputs:\n" + c.body
+			spec := validSpecHeader + "command:\n  name: app\n" + c.body
 			err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Errorf("Validate = %v, want an error containing %q", err, c.want)
@@ -302,8 +301,8 @@ func TestValidate_countFlags(t *testing.T) {
 	}
 
 	// The plain shape passes: identifiers, summary, hidden, deprecated.
-	valid := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
-		"      - name: verbose\n        identifiers: [--verbose, -v]\n        summary: Crank it up.\n        schema: { type: count }\n"
+	valid := validSpecHeader + "command:\n  name: app\n  flags:\n" +
+		"    - name: verbose\n      identifiers: [--verbose, -v]\n      summary: Crank it up.\n      schema: { type: count }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(plain count flag) = %v, want nil", err)
 	}
@@ -312,14 +311,14 @@ func TestValidate_countFlags(t *testing.T) {
 // TestValidate_patternCompiles pins the R-detour rule: a typo'd pattern would
 // otherwise silently never enforce (the runtime tolerates a failed compile).
 func TestValidate_patternCompiles(t *testing.T) {
-	bad := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
-		"      - name: title\n        schema: { type: string, pattern: \"([unclosed\" }\n"
+	bad := validSpecHeader + "command:\n  name: app\n  flags:\n" +
+		"    - name: title\n      schema: { type: string, pattern: \"([unclosed\" }\n"
 	err := validateOnce(writeTemp(t, "spec.yaml", bad), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "does not compile") {
 		t.Errorf("Validate(bad pattern) = %v, want the compile rejection", err)
 	}
-	good := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n" +
-		"      - name: title\n        schema: { type: string, pattern: \"^[a-z]+$\" }\n"
+	good := validSpecHeader + "command:\n  name: app\n  flags:\n" +
+		"    - name: title\n      schema: { type: string, pattern: \"^[a-z]+$\" }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", good), "", "", ""); err != nil {
 		t.Errorf("Validate(good pattern) = %v, want nil", err)
 	}
@@ -335,11 +334,11 @@ func TestValidate_zeroBounds(t *testing.T) {
 	// pointers end to end, so an explicit zero bound is ACCEPTED and enforced —
 	// the old document-wide rejection is gone.
 	cases := []struct{ name, body string }{
-		{"flag minimum", "  inputs:\n    flags:\n      - name: port\n        schema: { type: int, minimum: 0, maximum: 10 }\n"},
-		{"flag maximum", "  inputs:\n    flags:\n      - name: delta\n        schema: { type: int, maximum: 0 }\n"},
+		{"flag minimum", "  flags:\n    - name: port\n      schema: { type: int, minimum: 0, maximum: 10 }\n"},
+		{"flag maximum", "  flags:\n    - name: delta\n      schema: { type: int, maximum: 0 }\n"},
 		{"named schema", "schemas:\n  Widget:\n    type: object\n    properties:\n      size: { type: integer, minimum: 0 }\n"},
-		{"stdin shape", "  inputs:\n    stdin:\n      schema:\n        type: object\n        properties:\n          port: { type: integer, minimum: 0 }\n"},
-		{"exclusive zero", "  inputs:\n    flags:\n      - name: rate\n        schema: { type: float64, exclusiveMinimum: 0 }\n"},
+		{"stdin shape", "  stdin:\n    schema:\n      type: object\n      properties:\n        port: { type: integer, minimum: 0 }\n"},
+		{"exclusive zero", "  flags:\n    - name: rate\n      schema: { type: float64, exclusiveMinimum: 0 }\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -468,10 +467,9 @@ func TestValidate_dottedKeys(t *testing.T) {
 	valid := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: set\n" +
-		"        schema: { type: map, dotted_keys: true }\n"
+		"  flags:\n" +
+		"    - name: set\n" +
+		"      schema: { type: map, dotted_keys: true }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(dotted_keys on a map flag) = %v, want nil", err)
 	}
@@ -480,10 +478,9 @@ func TestValidate_dottedKeys(t *testing.T) {
 	typed := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: set\n" +
-		"        schema: { type: \"map[string]string\", dotted_keys: true }\n"
+		"  flags:\n" +
+		"    - name: set\n" +
+		"      schema: { type: \"map[string]string\", dotted_keys: true }\n"
 	err := validateOnce(writeTemp(t, "spec.yaml", typed), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "dotted_keys") || !strings.Contains(err.Error(), "map[string]string") {
 		t.Errorf("Validate(dotted_keys on map[string]string) = %v, want a type rejection", err)
@@ -493,10 +490,9 @@ func TestValidate_dottedKeys(t *testing.T) {
 	onEnv := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    env:\n" +
-		"      - name: overrides\n" +
-		"        schema: { type: map, dotted_keys: true }\n"
+		"  env:\n" +
+		"    - name: overrides\n" +
+		"      schema: { type: map, dotted_keys: true }\n"
 	err = validateOnce(writeTemp(t, "spec.yaml", onEnv), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "flags only") {
 		t.Errorf("Validate(dotted_keys on env input) = %v, want a flags-only rejection", err)
@@ -505,9 +501,9 @@ func TestValidate_dottedKeys(t *testing.T) {
 
 func TestValidate_configurationFiles(t *testing.T) {
 	make_ := func(entry string) string {
-		// entry is a 2-space-indented config_files list; nest it under command.inputs.config_files (+4 spaces).
-		nested := "    " + strings.ReplaceAll(strings.TrimRight(entry, "\n"), "\n", "\n    ") + "\n"
-		return validSpecHeader + "command:\n  name: app\n  inputs:\n    config_files:\n" + nested
+		// entry is a 2-space-indented config_files list; nest it under command.config_files (+2 spaces).
+		nested := "  " + strings.ReplaceAll(strings.TrimRight(entry, "\n"), "\n", "\n  ") + "\n"
+		return validSpecHeader + "command:\n  name: app\n  config_files:\n" + nested
 	}
 	// Valid shapes: a fixed path, a walk-up discover, an xdg discover.
 	valid := make_("" +
@@ -538,26 +534,26 @@ func TestValidate_configurationFiles(t *testing.T) {
 func TestValidate_configInputFile(t *testing.T) {
 	make_ := func(inputs string) string {
 		return validSpecHeader +
-			"command:\n  name: app\n  inputs:\n" + inputs +
-			"    config_files:\n      - name: app\n        path: ~/.app.yaml\n"
+			"command:\n  name: app\n" + inputs +
+			"  config_files:\n    - name: app\n      path: ~/.app.yaml\n"
 	}
-	valid := make_("    config:\n      - name: endpoint\n        schema: { type: string, file: app, key: api.endpoint }\n")
+	valid := make_("  config:\n    - name: endpoint\n      schema: { type: string, file: app, key: api.endpoint }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(pinned config input) = %v, want nil", err)
 	}
 
-	unknown := make_("    config:\n      - name: endpoint\n        schema: { type: string, file: nope }\n")
+	unknown := make_("  config:\n    - name: endpoint\n      schema: { type: string, file: nope }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", unknown), "", "", ""); err == nil || !strings.Contains(err.Error(), "not a config_files entry in scope") {
 		t.Errorf("Validate(unknown pin) = %v, want a rejection", err)
 	}
 
-	wrongChannel := make_("    env:\n      - name: x\n        schema: { type: string, file: app }\n")
+	wrongChannel := make_("  env:\n    - name: x\n      schema: { type: string, file: app }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", wrongChannel), "", "", ""); err == nil || !strings.Contains(err.Error(), "config inputs only") {
 		t.Errorf("Validate(file on env) = %v, want a config-only rejection", err)
 	}
 
-	dupNames := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
-		"    config_files:\n      - name: app\n        path: a.yaml\n      - name: app\n        path: b.yaml\n"
+	dupNames := validSpecHeader + "command:\n  name: app\n" +
+		"  config_files:\n    - name: app\n      path: a.yaml\n    - name: app\n      path: b.yaml\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", dupNames), "", "", ""); err == nil || !strings.Contains(err.Error(), "declared twice") {
 		t.Errorf("Validate(duplicate file names) = %v, want a uniqueness rejection", err)
 	}
@@ -569,9 +565,9 @@ func TestValidate_configInputFile(t *testing.T) {
 // session's warnings (the OnWarning funnel's feed), not the returned error.
 func TestValidate_configFileDuplicateLocationWarns(t *testing.T) {
 	spec := validSpecHeader +
-		"command:\n  name: app\n  inputs:\n    config_files:\n" +
-		"      - name: a\n        path: ~/.app.yaml\n" +
-		"      - name: b\n        path: ~/.app.yaml\n"
+		"command:\n  name: app\n  config_files:\n" +
+		"    - name: a\n      path: ~/.app.yaml\n" +
+		"    - name: b\n      path: ~/.app.yaml\n"
 	s := newSession(writeTemp(t, "spec.yaml", spec), "", "")
 	if err := s.load(); err != nil {
 		t.Fatalf("load: %v", err)
@@ -596,40 +592,40 @@ func TestValidate_configFilesChainScope(t *testing.T) {
 	// Two sibling branches each declaring a config_files entry named "cfg" — a
 	// reused name on independent chains is fine.
 	siblingReuse := validSpecHeader + "command:\n  name: app\n  commands:\n" +
-		"    - name: a\n      inputs:\n        config_files:\n          - name: cfg\n            path: a.yaml\n" +
-		"    - name: b\n      inputs:\n        config_files:\n          - name: cfg\n            path: b.yaml\n"
+		"    - name: a\n      config_files:\n        - name: cfg\n          path: a.yaml\n" +
+		"    - name: b\n      config_files:\n        - name: cfg\n          path: b.yaml\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", siblingReuse), "", "", ""); err != nil {
 		t.Errorf("Validate(sibling name reuse) = %v, want nil (independent chains)", err)
 	}
 
 	// A child re-declaring the root's "app" entry shadows it along the chain.
-	shadow := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
-		"    config_files:\n      - name: app\n        path: ~/.app.yaml\n  commands:\n" +
-		"    - name: deploy\n      inputs:\n        config_files:\n          - name: app\n            path: ./deploy.yaml\n"
+	shadow := validSpecHeader + "command:\n  name: app\n" +
+		"  config_files:\n    - name: app\n      path: ~/.app.yaml\n  commands:\n" +
+		"    - name: deploy\n      config_files:\n        - name: app\n          path: ./deploy.yaml\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", shadow), "", "", ""); err == nil || !strings.Contains(err.Error(), "shadows the entry declared on ancestor") {
 		t.Errorf("Validate(child shadows ancestor name) = %v, want a shadow rejection", err)
 	}
 
 	// A child config input may pin an ANCESTOR's entry (it's in scope via cascade).
-	pinAncestor := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
-		"    config_files:\n      - name: app\n        path: ~/.app.yaml\n  commands:\n" +
-		"    - name: deploy\n      inputs:\n        config:\n          - name: x\n            schema: { type: string, file: app, key: a.b }\n"
+	pinAncestor := validSpecHeader + "command:\n  name: app\n" +
+		"  config_files:\n    - name: app\n      path: ~/.app.yaml\n  commands:\n" +
+		"    - name: deploy\n      config:\n        - name: x\n          schema: { type: string, file: app, key: a.b }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", pinAncestor), "", "", ""); err != nil {
 		t.Errorf("Validate(pin ancestor entry) = %v, want nil (cascade in scope)", err)
 	}
 
 	// But a sibling's entry is NOT in scope — branch b cannot pin branch a's "acfg".
 	pinSibling := validSpecHeader + "command:\n  name: app\n  commands:\n" +
-		"    - name: a\n      inputs:\n        config_files:\n          - name: acfg\n            path: a.yaml\n" +
-		"    - name: b\n      inputs:\n        config:\n          - name: x\n            schema: { type: string, file: acfg, key: a.b }\n"
+		"    - name: a\n      config_files:\n        - name: acfg\n          path: a.yaml\n" +
+		"    - name: b\n      config:\n        - name: x\n          schema: { type: string, file: acfg, key: a.b }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", pinSibling), "", "", ""); err == nil || !strings.Contains(err.Error(), "not a config_files entry in scope") {
 		t.Errorf("Validate(pin sibling entry) = %v, want an out-of-scope rejection", err)
 	}
 
 	// Same physical file declared at two levels of one chain is a WARNING.
-	crossLevelDup := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
-		"    config_files:\n      - name: app\n        path: ~/.shared.yaml\n  commands:\n" +
-		"    - name: deploy\n      inputs:\n        config_files:\n          - name: deploy\n            path: ~/.shared.yaml\n"
+	crossLevelDup := validSpecHeader + "command:\n  name: app\n" +
+		"  config_files:\n    - name: app\n      path: ~/.shared.yaml\n  commands:\n" +
+		"    - name: deploy\n      config_files:\n        - name: deploy\n          path: ~/.shared.yaml\n"
 	s := newSession(writeTemp(t, "spec.yaml", crossLevelDup), "", "")
 	if err := s.load(); err != nil {
 		t.Fatalf("load: %v", err)
@@ -644,17 +640,17 @@ func TestValidate_configFilesChainScope(t *testing.T) {
 
 func TestValidate_envNesting(t *testing.T) {
 	make_ := func(inputs string) string {
-		return validSpecHeader + "command:\n  name: app\n  inputs:\n" + inputs
+		return validSpecHeader + "command:\n  name: app\n" + inputs
 	}
-	valid := make_("    env:\n      - name: http\n        schema: { type: map, nesting: \"__\", variable: ACME_HTTP }\n")
+	valid := make_("  env:\n    - name: http\n      schema: { type: map, nesting: \"__\", variable: ACME_HTTP }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(nesting on map env input) = %v, want nil", err)
 	}
 
 	cases := []struct{ name, inputs, want string }{
-		{"env only", "    flags:\n      - name: x\n        schema: { type: map, nesting: \"__\" }\n", "env inputs only"},
-		{"map typed", "    env:\n      - name: x\n        schema: { type: string, nesting: \"__\" }\n", "map"},
-		{"no default", "    env:\n      - name: x\n        schema: { type: map, nesting: \"__\", default: y }\n", "no single default"},
+		{"env only", "  flags:\n    - name: x\n      schema: { type: map, nesting: \"__\" }\n", "env inputs only"},
+		{"map typed", "  env:\n    - name: x\n      schema: { type: string, nesting: \"__\" }\n", "map"},
+		{"no default", "  env:\n    - name: x\n      schema: { type: map, nesting: \"__\", default: y }\n", "no single default"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -669,29 +665,29 @@ func TestValidate_envNesting(t *testing.T) {
 func TestValidate_configSource(t *testing.T) {
 	make_ := func(inputs string) string {
 		return validSpecHeader +
-			"command:\n  name: app\n  inputs:\n" + inputs +
-			"    config_files:\n      - name: app\n        path: ~/.app.yaml\n"
+			"command:\n  name: app\n" + inputs +
+			"  config_files:\n    - name: app\n      path: ~/.app.yaml\n"
 	}
 	valid := make_("" +
-		"    flags:\n      - name: config\n        schema: { type: string, config_source: app }\n" +
-		"    env:\n      - name: config_path\n        schema: { type: string, config_source: app }\n")
+		"  flags:\n    - name: config\n      schema: { type: string, config_source: app }\n" +
+		"  env:\n    - name: config_path\n      schema: { type: string, config_source: app }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(config_source on flag+env) = %v, want nil", err)
 	}
 
 	cases := []struct{ name, inputs, want string }{
 		{"unknown entry",
-			"    flags:\n      - name: c\n        schema: { type: string, config_source: nope }\n",
+			"  flags:\n    - name: c\n      schema: { type: string, config_source: nope }\n",
 			"not a config_files entry in scope"},
 		{"flag and env only",
-			"    config:\n      - name: c\n        schema: { type: string, config_source: app }\n",
+			"  config:\n    - name: c\n      schema: { type: string, config_source: app }\n",
 			"flag and env inputs only"},
 		{"string typed",
-			"    flags:\n      - name: c\n        schema: { type: int, config_source: app }\n",
+			"  flags:\n    - name: c\n      schema: { type: int, config_source: app }\n",
 			"a file path is a string"},
 		{"one flag per entry",
-			"    flags:\n      - name: a\n        schema: { type: string, config_source: app }\n" +
-				"      - name: b\n        schema: { type: string, config_source: app }\n",
+			"  flags:\n    - name: a\n      schema: { type: string, config_source: app }\n" +
+				"    - name: b\n      schema: { type: string, config_source: app }\n",
 			"already claimed"},
 	}
 	for _, c := range cases {
@@ -705,19 +701,19 @@ func TestValidate_configSource(t *testing.T) {
 
 	// config_source claims cascade: a child flag claiming the same entry as the
 	// root's flag collides along the chain (one flag per entry per chain).
-	chainConflict := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
-		"    config_files:\n      - name: app\n        path: ~/.app.yaml\n" +
-		"    flags:\n      - name: root_cfg\n        schema: { type: string, config_source: app }\n  commands:\n" +
-		"    - name: deploy\n      inputs:\n        flags:\n          - name: deploy_cfg\n            schema: { type: string, config_source: app }\n"
+	chainConflict := validSpecHeader + "command:\n  name: app\n" +
+		"  config_files:\n    - name: app\n      path: ~/.app.yaml\n" +
+		"  flags:\n    - name: root_cfg\n      schema: { type: string, config_source: app }\n  commands:\n" +
+		"    - name: deploy\n      flags:\n        - name: deploy_cfg\n          schema: { type: string, config_source: app }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", chainConflict), "", "", ""); err == nil || !strings.Contains(err.Error(), "already claimed") {
 		t.Errorf("Validate(cross-level claim conflict) = %v, want an already-claimed rejection", err)
 	}
 
 	// A SIBLING claiming the root entry is fine — its own chain has one claim.
-	siblingClaim := validSpecHeader + "command:\n  name: app\n  inputs:\n" +
-		"    config_files:\n      - name: app\n        path: ~/.app.yaml\n  commands:\n" +
-		"    - name: a\n      inputs:\n        flags:\n          - name: a_cfg\n            schema: { type: string, config_source: app }\n" +
-		"    - name: b\n      inputs:\n        flags:\n          - name: b_cfg\n            schema: { type: string, config_source: app }\n"
+	siblingClaim := validSpecHeader + "command:\n  name: app\n" +
+		"  config_files:\n    - name: app\n      path: ~/.app.yaml\n  commands:\n" +
+		"    - name: a\n      flags:\n        - name: a_cfg\n          schema: { type: string, config_source: app }\n" +
+		"    - name: b\n      flags:\n        - name: b_cfg\n          schema: { type: string, config_source: app }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", siblingClaim), "", "", ""); err != nil {
 		t.Errorf("Validate(sibling claims of ancestor entry) = %v, want nil (independent chains)", err)
 	}
@@ -728,12 +724,11 @@ func TestValidate_from(t *testing.T) {
 	valid := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: token\n" +
-		"        schema: { type: string, from: [value, file] }\n" +
-		"      - name: payload\n" +
-		"        schema: { type: string, from: [stdin] }\n"
+		"  flags:\n" +
+		"    - name: token\n" +
+		"      schema: { type: string, from: [value, file] }\n" +
+		"    - name: payload\n" +
+		"      schema: { type: string, from: [stdin] }\n"
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(from on flags) = %v, want nil", err)
 	}
@@ -742,26 +737,26 @@ func TestValidate_from(t *testing.T) {
 		name, body, want string
 	}{
 		{"flags only",
-			"    env:\n      - name: token\n        schema: { type: string, from: [file] }\n",
+			"  env:\n    - name: token\n      schema: { type: string, from: [file] }\n",
 			"flags only"},
 		{"never bool",
-			"    flags:\n      - name: loud\n        schema: { type: bool, from: [file] }\n",
+			"  flags:\n    - name: loud\n      schema: { type: bool, from: [file] }\n",
 			"bool"},
 		{"stdin channel conflict",
-			"    flags:\n      - name: f\n        schema: { type: string, from: [stdin] }\n" +
-				"    stdin:\n      schema: { type: object }\n",
+			"  flags:\n    - name: f\n      schema: { type: string, from: [stdin] }\n" +
+				"  stdin:\n    schema: { type: object }\n",
 			"one consumer"},
 		{"two stdin flags conflict",
-			"    flags:\n      - name: a\n        schema: { type: string, from: [stdin] }\n" +
-				"      - name: b\n        schema: { type: string, from: [stdin] }\n",
+			"  flags:\n    - name: a\n      schema: { type: string, from: [stdin] }\n" +
+				"    - name: b\n      schema: { type: string, from: [stdin] }\n",
 			"one consumer"},
 		{"unknown mode rejected by the schema",
-			"    flags:\n      - name: t\n        schema: { type: string, from: [filesystem] }\n",
+			"  flags:\n    - name: t\n      schema: { type: string, from: [filesystem] }\n",
 			"not in enum"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			spec := validSpecHeader + "command:\n  name: app\n  inputs:\n" + c.body
+			spec := validSpecHeader + "command:\n  name: app\n" + c.body
 			err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Errorf("Validate = %v, want an error containing %q", err, c.want)
@@ -775,13 +770,12 @@ func TestValidate_flagGroupUnknownFlag(t *testing.T) {
 	spec := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: json\n" +
-		"        schema: { type: bool }\n" +
-		"    flag_groups:\n" +
-		"      - kind: mutually_exclusive\n" +
-		"        flags: [json, nope]\n"
+		"  flags:\n" +
+		"    - name: json\n" +
+		"      schema: { type: bool }\n" +
+		"  flag_groups:\n" +
+		"    - kind: mutually_exclusive\n" +
+		"      flags: [json, nope]\n"
 	path := writeTemp(t, "spec.yaml", spec)
 	err := validateOnce(path, "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "unknown flag") || !strings.Contains(err.Error(), "nope") {
@@ -795,10 +789,9 @@ func TestValidate_danglingSchemaRef(t *testing.T) {
 	spec := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    config:\n" +
-		"      - name: server\n" +
-		"        schema: { $ref: '#/schemas/Endpiont' }\n" +
+		"  config:\n" +
+		"    - name: server\n" +
+		"      schema: { $ref: '#/schemas/Endpiont' }\n" +
 		"schemas:\n" +
 		"  Endpoint:\n" +
 		"    type: object\n" +
@@ -813,10 +806,9 @@ func TestValidate_danglingSchemaRef(t *testing.T) {
 	ok := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    config:\n" +
-		"      - name: server\n" +
-		"        schema: { $ref: '#/schemas/Endpoint' }\n" +
+		"  config:\n" +
+		"    - name: server\n" +
+		"      schema: { $ref: '#/schemas/Endpoint' }\n" +
 		"schemas:\n" +
 		"  Endpoint:\n" +
 		"    type: object\n"
@@ -830,13 +822,12 @@ func TestValidate_flagGroupSuggestion(t *testing.T) {
 	spec := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: json\n" +
-		"        schema: { type: bool }\n" +
-		"    flag_groups:\n" +
-		"      - kind: mutually_exclusive\n" +
-		"        flags: [json, jsno]\n"
+		"  flags:\n" +
+		"    - name: json\n" +
+		"      schema: { type: bool }\n" +
+		"  flag_groups:\n" +
+		"    - kind: mutually_exclusive\n" +
+		"      flags: [json, jsno]\n"
 	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), `did you mean "json"`) {
 		t.Errorf("Validate(flag group typo) = %v, want a did-you-mean suggestion", err)
@@ -849,13 +840,12 @@ func TestValidate_flagDependencyUnknownFlag(t *testing.T) {
 	spec := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: tls\n" +
-		"        schema: { type: bool }\n" +
-		"    flag_dependencies:\n" +
-		"      - when: tls\n" +
-		"        requires: [cert]\n"
+		"  flags:\n" +
+		"    - name: tls\n" +
+		"      schema: { type: bool }\n" +
+		"  flag_dependencies:\n" +
+		"    - when: tls\n" +
+		"      requires: [cert]\n"
 	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), "unknown flag") || !strings.Contains(err.Error(), "cert") {
 		t.Errorf("Validate(flag dependency requiring unknown flag) = %v, want an unknown-flag error", err)
@@ -867,14 +857,13 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 	spec := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: output\n" +
-		"        identifiers: [-o, --output]\n" +
-		"        schema: { type: string }\n" +
-		"      - name: organization\n" +
-		"        identifiers: [-o, --org]\n" +
-		"        schema: { type: string }\n"
+		"  flags:\n" +
+		"    - name: output\n" +
+		"      identifiers: [-o, --output]\n" +
+		"      schema: { type: string }\n" +
+		"    - name: organization\n" +
+		"      identifiers: [-o, --org]\n" +
+		"      schema: { type: string }\n"
 	err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "", "")
 	if err == nil || !strings.Contains(err.Error(), `"-o"`) || !strings.Contains(err.Error(), "output") {
 		t.Errorf("Validate(duplicate -o) = %v, want a duplicate-identifier error naming -o and output", err)
@@ -885,12 +874,11 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 	mixed := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: dry_run\n" +
-		"        schema: { type: bool }\n" +
-		"      - name: dry-run\n" +
-		"        schema: { type: bool }\n"
+		"  flags:\n" +
+		"    - name: dry_run\n" +
+		"      schema: { type: bool }\n" +
+		"    - name: dry-run\n" +
+		"      schema: { type: bool }\n"
 	if err := validateOnce(writeTemp(t, "mixed.yaml", mixed), "", "", ""); err == nil || !strings.Contains(err.Error(), "--dry-run") {
 		t.Errorf("Validate(dry_run vs dry-run) = %v, want a --dry-run collision", err)
 	}
@@ -899,12 +887,11 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 	spec2 := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: out\n" +
-		"        schema: { type: string }\n" +
-		"      - name: out\n" +
-		"        schema: { type: bool }\n"
+		"  flags:\n" +
+		"    - name: out\n" +
+		"      schema: { type: string }\n" +
+		"    - name: out\n" +
+		"      schema: { type: bool }\n"
 	if err := validateOnce(writeTemp(t, "spec2.yaml", spec2), "", "", ""); err == nil || !strings.Contains(err.Error(), "--out") {
 		t.Errorf("Validate(derived --out collision) = %v, want a duplicate-identifier error", err)
 	}
@@ -913,14 +900,13 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 	ok := validSpecHeader +
 		"command:\n" +
 		"  name: app\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: output\n" +
-		"        identifiers: [-o, --output]\n" +
-		"        schema: { type: string }\n" +
-		"      - name: verbose\n" +
-		"        identifiers: [-v, --verbose]\n" +
-		"        schema: { type: bool }\n"
+		"  flags:\n" +
+		"    - name: output\n" +
+		"      identifiers: [-o, --output]\n" +
+		"      schema: { type: string }\n" +
+		"    - name: verbose\n" +
+		"      identifiers: [-v, --verbose]\n" +
+		"      schema: { type: bool }\n"
 	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
 		t.Errorf("Validate(distinct identifiers) = %v, want nil", err)
 	}
@@ -1037,14 +1023,13 @@ func TestValidate_importConsistency(t *testing.T) {
 	bad := validSpecHeader +
 		"command:\n" +
 		"  name: mycli\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: a\n" +
-		"        identifiers: [--a]\n" +
-		"        schema: { type: foo.Bar, import: github.com/x/foo }\n" +
-		"      - name: b\n" +
-		"        identifiers: [--b]\n" +
-		"        schema: { type: foo.Bar, import: github.com/y/foo }\n"
+		"  flags:\n" +
+		"    - name: a\n" +
+		"      identifiers: [--a]\n" +
+		"      schema: { type: foo.Bar, import: github.com/x/foo }\n" +
+		"    - name: b\n" +
+		"      identifiers: [--b]\n" +
+		"      schema: { type: foo.Bar, import: github.com/y/foo }\n"
 	err := validateOnce(writeTemp(t, "bad.yaml", bad), "", "collect", "")
 	if err == nil {
 		t.Fatal("expected an import-consistency error for one type with two imports")
@@ -1057,14 +1042,13 @@ func TestValidate_importConsistency(t *testing.T) {
 	ok := validSpecHeader +
 		"command:\n" +
 		"  name: mycli\n" +
-		"  inputs:\n" +
-		"    flags:\n" +
-		"      - name: a\n" +
-		"        identifiers: [--a]\n" +
-		"        schema: { type: foo.Bar, import: github.com/x/foo }\n" +
-		"      - name: b\n" +
-		"        identifiers: [--b]\n" +
-		"        schema: { type: foo.Bar, import: github.com/x/foo }\n"
+		"  flags:\n" +
+		"    - name: a\n" +
+		"      identifiers: [--a]\n" +
+		"      schema: { type: foo.Bar, import: github.com/x/foo }\n" +
+		"    - name: b\n" +
+		"      identifiers: [--b]\n" +
+		"      schema: { type: foo.Bar, import: github.com/x/foo }\n"
 	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "collect", ""); err != nil {
 		t.Errorf("consistent imports should validate, got: %v", err)
 	}
@@ -1194,10 +1178,10 @@ func TestValidate_newSpecLints(t *testing.T) {
 		{"root with $ref", "command:\n  $ref: ./other.yaml\n", "root command cannot use $ref"},
 		{"sibling alias collision", "command:\n  name: app\n  commands:\n    - name: build\n      aliases: [b]\n    - name: bundle\n      aliases: [b]\n", `"b" is claimed by both`},
 		{"remote shadowed by command", "command:\n  name: app\n  commands:\n    - name: plugin\n  remote_commands:\n    - name: plugin\n", `"plugin" is claimed by both`},
-		{"duplicate flag names", "command:\n  name: app\n  inputs:\n    flags:\n      - name: out\n        identifiers: [-o]\n        schema: { type: string }\n      - name: out\n        identifiers: [-O]\n        schema: { type: bool }\n", `flag "out" is declared twice`},
-		{"variadic not last", "command:\n  name: app\n  inputs:\n    arguments:\n      - name: files\n        schema: { type: array }\n      - name: dest\n        schema: { type: string }\n", `"files" is variadic but not last`},
+		{"duplicate flag names", "command:\n  name: app\n  flags:\n    - name: out\n      identifiers: [-o]\n      schema: { type: string }\n    - name: out\n      identifiers: [-O]\n      schema: { type: bool }\n", `flag "out" is declared twice`},
+		{"variadic not last", "command:\n  name: app\n  arguments:\n    - name: files\n      schema: { type: array }\n    - name: dest\n      schema: { type: string }\n", `"files" is variadic but not last`},
 		{"command deprecated_identifiers not an alias", "command:\n  name: app\n  commands:\n    - name: compile\n      aliases: [build]\n      deprecated_identifiers: [biuld]\n", "not one of its aliases"},
-		{"flag deprecated_identifiers not an identifier", "command:\n  name: app\n  inputs:\n    flags:\n      - name: config\n        identifiers: [--config]\n        deprecated_identifiers: [--conf]\n        schema: { type: string }\n", "not one of its identifiers"},
+		{"flag deprecated_identifiers not an identifier", "command:\n  name: app\n  flags:\n    - name: config\n      identifiers: [--config]\n      deprecated_identifiers: [--conf]\n      schema: { type: string }\n", "not one of its identifiers"},
 		// The duration SHAPE is schema-codified (R-detour); the lint still owns
 		// what the pattern can't say: a pattern-valid but non-positive duration.
 		{"remote timeout malformed (schema)", "command:\n  name: app\n  remote_commands:\n    - name: plugin\n      timeout: ten-seconds\n", "does not match pattern"},
@@ -1213,7 +1197,7 @@ func TestValidate_newSpecLints(t *testing.T) {
 	}
 
 	// The derived flag identifier satisfies the subset rule (no explicit identifiers).
-	ok := validSpecHeader + "command:\n  name: app\n  inputs:\n    flags:\n      - name: dry_run\n        deprecated_identifiers: [--dry-run]\n        schema: { type: bool }\n"
+	ok := validSpecHeader + "command:\n  name: app\n  flags:\n    - name: dry_run\n      deprecated_identifiers: [--dry-run]\n      schema: { type: bool }\n"
 	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
 		t.Errorf("validate(derived identifier subset) = %v, want nil", err)
 	}

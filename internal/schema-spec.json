@@ -82,9 +82,58 @@
           "description": "Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)",
           "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
         },
-        "inputs": {
-          "$ref": "#/definitions/Inputs",
-          "description": "Typed inputs for this command: flags, arguments, config values, env variables, and stdin."
+        "flags": {
+          "type": "array",
+          "description": "Flag inputs for this command",
+          "items": {
+            "$ref": "#/definitions/FlagInput"
+          }
+        },
+        "arguments": {
+          "type": "array",
+          "description": "Positional argument inputs for this command",
+          "items": {
+            "$ref": "#/definitions/ArgumentInput"
+          }
+        },
+        "config_files": {
+          "type": "array",
+          "description": "Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins.",
+          "items": {
+            "$ref": "#/definitions/ConfigurationFile"
+          }
+        },
+        "config": {
+          "type": "array",
+          "description": "Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files).",
+          "items": {
+            "$ref": "#/definitions/ConfigInput"
+          }
+        },
+        "env": {
+          "type": "array",
+          "description": "Environment-variable inputs for this command",
+          "items": {
+            "$ref": "#/definitions/EnvInput"
+          }
+        },
+        "stdin": {
+          "$ref": "#/definitions/StdinSpec",
+          "description": "Declares expected stdin format and schema for this command"
+        },
+        "flag_groups": {
+          "type": "array",
+          "description": "Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).",
+          "items": {
+            "$ref": "#/definitions/FlagGroup"
+          }
+        },
+        "flag_dependencies": {
+          "type": "array",
+          "description": "Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).",
+          "items": {
+            "$ref": "#/definitions/FlagDependency"
+          }
         },
         "summary": {
           "type": "string",
@@ -610,65 +659,6 @@
           ],
           "default": "json",
           "description": "Serialization the piped stdin payload is decoded from (into the generated <Prefix>Stdin type). Defaults to json."
-        }
-      }
-    },
-    "Inputs": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "flags": {
-          "type": "array",
-          "description": "Flag inputs for this command",
-          "items": {
-            "$ref": "#/definitions/FlagInput"
-          }
-        },
-        "arguments": {
-          "type": "array",
-          "description": "Positional argument inputs for this command",
-          "items": {
-            "$ref": "#/definitions/ArgumentInput"
-          }
-        },
-        "config_files": {
-          "type": "array",
-          "description": "Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins.",
-          "items": {
-            "$ref": "#/definitions/ConfigurationFile"
-          }
-        },
-        "config": {
-          "type": "array",
-          "description": "Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files).",
-          "items": {
-            "$ref": "#/definitions/ConfigInput"
-          }
-        },
-        "env": {
-          "type": "array",
-          "description": "Environment-variable inputs for this command",
-          "items": {
-            "$ref": "#/definitions/EnvInput"
-          }
-        },
-        "stdin": {
-          "$ref": "#/definitions/StdinSpec",
-          "description": "Declares expected stdin format and schema for this command"
-        },
-        "flag_groups": {
-          "type": "array",
-          "description": "Cross-flag presence rules validated at parse time (e.g. mutually exclusive output formats, a required-together credential pair).",
-          "items": {
-            "$ref": "#/definitions/FlagGroup"
-          }
-        },
-        "flag_dependencies": {
-          "type": "array",
-          "description": "Conditional cross-flag requirements validated at parse time: when one flag is set, others become required (e.g. when --tls is set, --cert and --key are required).",
-          "items": {
-            "$ref": "#/definitions/FlagDependency"
-          }
         }
       }
     },
