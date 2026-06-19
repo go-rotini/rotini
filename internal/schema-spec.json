@@ -1,42 +1,20 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Rotini Spec Schema",
-  "description": "Schema for a Rotini CLI definition spec file.",
+  "description": "Schema for a Rotini CLI definition spec file. The document IS the root command — commands all the way down: its keys are the root command's keys directly (name, doc-fields, flags/arguments/env/config/config_files/stdin, sub-commands, …), plus three document-level keys ($schema, env_prefix, schemas) that are valid only on the root.",
   "type": "object",
   "required": [
     "$schema",
-    "command"
+    "name"
   ],
-  "additionalProperties": false,
-  "properties": {
-    "$schema": {
-      "type": "string",
-      "description": "URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.",
-      "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-spec\\.json$"
-    },
-    "command": {
-      "$ref": "#/definitions/Command",
-      "description": "The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs (incl. per-command, cascading config_files sources), sub-commands, remote commands — live here; the remaining program-scoped concern (schemas) lives at the document level beside it."
-    },
-    "env_prefix": {
-      "type": "string",
-      "pattern": "^[A-Z][A-Z0-9_]*[A-Z0-9]$|^[A-Z]$",
-      "description": "Document-level prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator)."
-    },
-    "schemas": {
-      "type": "object",
-      "description": "Reusable named schema definitions (document-level). Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type that other packages may import (a cmd/cmdgen split makes them cross-package).",
-      "additionalProperties": {
-        "$ref": "#/definitions/Schema"
-      },
-      "propertyNames": {
-        "pattern": "^[A-Z][A-Za-z0-9_]*$"
-      }
+  "allOf": [
+    {
+      "$ref": "#/definitions/Command"
     }
-  },
+  ],
   "definitions": {
     "Command": {
-      "description": "A command node in the CLI command tree — the root command and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). When used as the root (the top-level 'command'), it must use 'name'.",
+      "description": "A command node in the CLI command tree — the root command (the document itself) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The three document-level keys ($schema, env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.",
       "type": "object",
       "anyOf": [
         {
@@ -52,6 +30,26 @@
       ],
       "additionalProperties": false,
       "properties": {
+        "$schema": {
+          "type": "string",
+          "description": "Document-level (root only): URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.",
+          "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-spec\\.json$"
+        },
+        "env_prefix": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]*[A-Z0-9]$|^[A-Z]$",
+          "description": "Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator)."
+        },
+        "schemas": {
+          "type": "object",
+          "description": "Document-level (root only): reusable named schema definitions. Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type that other packages may import (a cmd/cmdgen split makes them cross-package).",
+          "additionalProperties": {
+            "$ref": "#/definitions/Schema"
+          },
+          "propertyNames": {
+            "pattern": "^[A-Z][A-Za-z0-9_]*$"
+          }
+        },
         "name": {
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",

@@ -13,8 +13,8 @@ var supportedExts = []string{".yaml", ".yml", ".json", ".jsonc"}
 
 func TestSpecRoundTrip(t *testing.T) {
 	want := &Spec{
-		Schema: "https://example.com/spec.json",
 		Command: Command{
+			Schema:   "https://example.com/spec.json",
 			Name:     "demo",
 			Aliases:  []string{"d"},
 			Timeout:  "10s",

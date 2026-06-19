@@ -112,7 +112,7 @@ func TestGenerateDefaultLayout(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	// A spec with NO adjacent conf, so generation falls back to the defaults.
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: rotini\n  commands:\n    - name: generate\n")
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: rotini\ncommands:\n  - name: generate\n")
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
@@ -134,7 +134,7 @@ func TestGenerateEscapesReservedFilenames(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n  name: app\n  commands:\n    - name: test\n    - name: windows\n    - name: build\n")
+			"name: app\ncommands:\n  - name: test\n  - name: windows\n  - name: build\n")
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
@@ -169,7 +169,7 @@ func TestGenerateFilenameOverride(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n  name: app\n  commands:\n    - name: build\n      filename: build_handlers.go\n")
+			"name: app\ncommands:\n  - name: build\n    filename: build_handlers.go\n")
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
@@ -192,7 +192,7 @@ func TestGenerateTwoFilesOnePackage(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n  commands:\n    - name: build\n")
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: mycli\ncommands:\n  - name: build\n")
 	// Same package ("app"), distinct files → two files, one package.
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
 		confSchemaHeader+"generate:\n  packages:\n    cmd:\n      package: cmd/mycli/app\n      file: handlers.gen.go\n    cmdgen:\n      package: cmd/mycli/app\n      file: framework.gen.go\n")
@@ -239,7 +239,7 @@ func TestGenerateRejectsInvalidSpec(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n  name: mycli\n  flags:\n    - name: a\n      identifiers: [\"-x\"]\n    - name: b\n      identifiers: [\"-x\"]\n")
+			"name: mycli\nflags:\n  - name: a\n    identifiers: [\"-x\"]\n  - name: b\n    identifiers: [\"-x\"]\n")
 	t.Chdir(tmp)
 
 	err := Generate(".rotini.spec.yaml", "", false, "", nil)
@@ -260,7 +260,7 @@ func TestGenerateRejectsInvalidConf(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: mycli\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), "generate:\n  packages:\n    cmdgen:\n      file: rotini.go\n") // no $schema
 	t.Chdir(tmp)
 
@@ -284,7 +284,7 @@ func TestGenerateGuardsSchemaVersion(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: mycli\n")
 	t.Chdir(tmp)
 	gen := filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go")
 
@@ -311,7 +311,7 @@ func TestGenerateMissingConfPathUsesDefaults(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: mycli\n")
 	t.Chdir(tmp)
 
 	if err := Generate(".rotini.spec.yaml", "does-not-exist.conf.yaml", false, "", nil); err != nil {
@@ -898,7 +898,7 @@ func TestGenerateEnvPrefix(t *testing.T) {
 // exercise four quadrants at once.
 func TestGenerateEmbedAndTemplateModes(t *testing.T) {
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n  name: mycli\n  summary: a tool\n  description: a demo\n"
+		"name: mycli\nsummary: a tool\ndescription: a demo\n"
 	// help: inline + no template | man: embed + no template
 	// markdown: embed + template | completion: inline
 	conf := confSchemaHeader + "generate:\n  features:\n" +
@@ -963,7 +963,7 @@ func TestGenerateEmbedAndTemplateModes(t *testing.T) {
 // when no enabled feature uses //go:embed.
 func TestGenerateNoEmbedImportWhenAllInline(t *testing.T) {
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n  name: mycli\n  summary: a tool\n"
+		"name: mycli\nsummary: a tool\n"
 	conf := confSchemaHeader + "generate:\n  features:\n    help:\n      enabled: true\n      embed: false\n"
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
@@ -1663,17 +1663,16 @@ func TestRoundDuration(t *testing.T) {
 
 const (
 	childSpecYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: child
-  commands:
-    - name: greet
-      arguments:
-        - name: who
-          schema: { type: string }
-      flags:
-        - name: loud
-          identifiers: [--loud]
-          schema: { type: bool }
+name: child
+commands:
+  - name: greet
+    arguments:
+      - name: who
+        schema: { type: string }
+    flags:
+      - name: loud
+        identifiers: [--loud]
+        schema: { type: bool }
 `
 	childConfYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
@@ -1686,10 +1685,9 @@ generate:
       file: rotini.go
 `
 	parentSpecYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: parent
-  commands:
-    - $ref: ../child/.rotini.spec.yaml
+name: parent
+commands:
+  - $ref: ../child/.rotini.spec.yaml
 `
 	parentConfYAML = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
@@ -1755,11 +1753,10 @@ func TestGenerate_composeNameOverride(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.conf.yaml"), childConfYAML)
 	// The parent grafts the child under a different name via `name:` on the $ref.
 	parentSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: parent
-  commands:
-    - $ref: ../child/.rotini.spec.yaml
-      name: kid
+name: parent
+commands:
+  - $ref: ../child/.rotini.spec.yaml
+    name: kid
 `
 	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"), parentSpec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.conf.yaml"), parentConfYAML)
@@ -1796,25 +1793,22 @@ func TestGenerate_transitiveRef(t *testing.T) {
 	// grandchild (gc) has its own sub-command "ping"; child composes gc; parent
 	// composes child — so the parent reaches gc transitively, through child.
 	gcSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: gc
-  commands:
-    - name: ping
-      arguments:
-        - name: host
-          schema: { type: string }
+name: gc
+commands:
+  - name: ping
+    arguments:
+      - name: host
+        schema: { type: string }
 `
 	childSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: child
-  commands:
-    - $ref: ../gc/.rotini.spec.yaml
+name: child
+commands:
+  - $ref: ../gc/.rotini.spec.yaml
 `
 	parentSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: parent
-  commands:
-    - $ref: ../child/.rotini.spec.yaml
+name: parent
+commands:
+  - $ref: ../child/.rotini.spec.yaml
 `
 	for dir, spec := range map[string]string{"gc": gcSpec, "child": childSpec, "parent": parentSpec} {
 		writeTestFile(t, filepath.Join(tmp, "cmd/"+dir+"/.rotini.spec.yaml"), spec)
@@ -1861,10 +1855,9 @@ func TestGenerate_cyclicRefErrors(t *testing.T) {
 	tmp := initTestModule(t)
 	// A spec that composes itself — the simplest cycle.
 	selfRef := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: a
-  commands:
-    - $ref: ../a/.rotini.spec.yaml
+name: a
+commands:
+  - $ref: ../a/.rotini.spec.yaml
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 		"generate:\n  packages:\n    cmd:\n      package: cmd/a/rth\n    cmdgen:\n      package: cmd/a/rtg\n"
@@ -1880,18 +1873,17 @@ command:
 func TestGenerate_channelConstraintTags(t *testing.T) {
 	tmp := initTestModule(t)
 	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: app
-  env:
-    - name: port
-      schema: { type: int, minimum: 1, maximum: 65535 }
-    - name: region
-      schema: { type: string, minLength: 2, pattern: "^[a-z]+$" }
-    - name: tags
-      schema: { type: array, minItems: 1, maxItems: 3 }
-  config:
-    - name: name
-      schema: { type: string, key: app.name, maxLength: 5 }
+name: app
+env:
+  - name: port
+    schema: { type: int, minimum: 1, maximum: 65535 }
+  - name: region
+    schema: { type: string, minLength: 2, pattern: "^[a-z]+$" }
+  - name: tags
+    schema: { type: array, minItems: 1, maxItems: 3 }
+config:
+  - name: name
+    schema: { type: string, key: app.name, maxLength: 5 }
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 		"generate:\n  packages:\n    cmd:\n      package: cmd/app/rth\n    cmdgen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
@@ -1913,14 +1905,13 @@ command:
 func TestGenerate_stdinSchemaInBindMeta(t *testing.T) {
 	tmp := initTestModule(t)
 	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: app
-  stdin:
-    format: yaml
-    schema:
-      type: object
-      properties:
-        port: { type: integer, minimum: 1, maximum: 65535 }
+name: app
+stdin:
+  format: yaml
+  schema:
+    type: object
+    properties:
+      port: { type: integer, minimum: 1, maximum: 65535 }
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 		"generate:\n  packages:\n    cmd:\n      package: cmd/app/rth\n    cmdgen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
@@ -1947,13 +1938,12 @@ schemas:
     properties:
       host: { type: string }
       port: { type: integer }
-command:
-  name: app
-  config:
-    - name: server
-      schema:
-        $ref: "#/schemas/Endpoint"
-        key: server
+name: app
+config:
+  - name: server
+    schema:
+      $ref: "#/schemas/Endpoint"
+      key: server
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 		"generate:\n  packages:\n    cmd:\n      package: cmd/app/rth\n    cmdgen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
@@ -1975,12 +1965,11 @@ command:
 func TestGenerate_secretFlagDef(t *testing.T) {
 	tmp := initTestModule(t)
 	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: app
-  flags:
-    - name: token
-      identifiers: [--token]
-      schema: { type: string, secret: true }
+name: app
+flags:
+  - name: token
+    identifiers: [--token]
+    schema: { type: string, secret: true }
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 		"generate:\n  packages:\n    cmd:\n      package: cmd/app/rth\n    cmdgen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
@@ -1997,18 +1986,17 @@ command:
 func TestGenerate_flagGroupsInDefinition(t *testing.T) {
 	tmp := initTestModule(t)
 	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: app
-  flags:
-    - name: json
-      identifiers: [--json]
-      schema: { type: bool }
-    - name: yaml
-      identifiers: [--yaml]
-      schema: { type: bool }
-  flag_groups:
-    - kind: mutually_exclusive
-      flags: [json, yaml]
+name: app
+flags:
+  - name: json
+    identifiers: [--json]
+    schema: { type: bool }
+  - name: yaml
+    identifiers: [--yaml]
+    schema: { type: bool }
+flag_groups:
+  - kind: mutually_exclusive
+    flags: [json, yaml]
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 		"generate:\n  packages:\n    cmd:\n      package: cmd/app/rth\n    cmdgen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
@@ -2025,21 +2013,20 @@ command:
 func TestGenerate_flagDependenciesInDefinition(t *testing.T) {
 	tmp := initTestModule(t)
 	spec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
-command:
-  name: app
-  flags:
-    - name: tls
-      identifiers: [--tls]
-      schema: { type: bool }
-    - name: cert
-      identifiers: [--cert]
-      schema: { type: string }
-    - name: key
-      identifiers: [--key]
-      schema: { type: string }
-  flag_dependencies:
-    - when: tls
-      requires: [cert, key]
+name: app
+flags:
+  - name: tls
+    identifiers: [--tls]
+    schema: { type: bool }
+  - name: cert
+    identifiers: [--cert]
+    schema: { type: string }
+  - name: key
+    identifiers: [--key]
+    schema: { type: string }
+flag_dependencies:
+  - when: tls
+    requires: [cert, key]
 `
 	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 		"generate:\n  packages:\n    cmd:\n      package: cmd/app/rth\n    cmdgen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
@@ -2101,32 +2088,32 @@ func TestGenerateHelpHiddenDeprecated(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n"+
-			"  name: mycli\n"+
-			"  commands:\n"+
-			"    - name: secret\n"+
-			"      hidden: true\n"+
-			"      summary: a hidden command\n"+
-			"    - name: legacy\n"+
-			"      deprecated: use modern instead\n"+
-			"      summary: an old command\n"+
-			"    - name: run\n"+
-			"      summary: run it\n"+
-			"      arguments:\n"+
-			"        - name: target\n"+
-			"          summary: the target\n"+
-			"          deprecated: positional is going away\n"+
-			"          schema: { type: string, required: true }\n"+
-			"      flags:\n"+
-			"        - name: secretflag\n"+
-			"          summary: a hidden flag\n"+
-			"          hidden: true\n"+
-			"          identifiers: [--secret]\n"+
-			"          schema: { type: bool }\n"+
-			"        - name: verbose\n"+
-			"          summary: chatty output\n"+
-			"          identifiers: [-v]\n"+
-			"          schema: { type: bool }\n")
+			""+
+			"name: mycli\n"+
+			"commands:\n"+
+			"  - name: secret\n"+
+			"    hidden: true\n"+
+			"    summary: a hidden command\n"+
+			"  - name: legacy\n"+
+			"    deprecated: use modern instead\n"+
+			"    summary: an old command\n"+
+			"  - name: run\n"+
+			"    summary: run it\n"+
+			"    arguments:\n"+
+			"      - name: target\n"+
+			"        summary: the target\n"+
+			"        deprecated: positional is going away\n"+
+			"        schema: { type: string, required: true }\n"+
+			"    flags:\n"+
+			"      - name: secretflag\n"+
+			"        summary: a hidden flag\n"+
+			"        hidden: true\n"+
+			"        identifiers: [--secret]\n"+
+			"        schema: { type: bool }\n"+
+			"      - name: verbose\n"+
+			"        summary: chatty output\n"+
+			"        identifiers: [-v]\n"+
+			"        schema: { type: bool }\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 
 	t.Chdir(tmp)
@@ -2150,13 +2137,13 @@ func TestGenerateHelpComposition(t *testing.T) {
 	tmp := initTestModule(t)
 
 	childSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: child\n" +
-		"  summary: the child program\n" +
-		"  description: A composed child.\n" +
-		"  commands:\n" +
-		"    - name: greet\n" +
-		"      summary: say hello\n"
+		"" +
+		"name: child\n" +
+		"summary: the child program\n" +
+		"description: A composed child.\n" +
+		"commands:\n" +
+		"  - name: greet\n" +
+		"    summary: say hello\n"
 	helpConf := func(dir string) string {
 		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
 			"generate:\n" +
@@ -2166,10 +2153,10 @@ func TestGenerateHelpComposition(t *testing.T) {
 			"  features: { help: { enabled: true, embed: true, template: true } }\n"
 	}
 	parentSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: parent\n" +
-		"  commands:\n" +
-		"    - $ref: ../child/.rotini.spec.yaml\n"
+		"" +
+		"name: parent\n" +
+		"commands:\n" +
+		"  - $ref: ../child/.rotini.spec.yaml\n"
 
 	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.spec.yaml"), childSpec)
 	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.conf.yaml"), helpConf("child"))
@@ -2261,64 +2248,63 @@ func genHelp(t *testing.T, spec, preTmpl string) string {
 // required/optional/variadic args and flags with type/default/enum/required/
 // deprecated/hidden; a deprecated command; and a hidden command.
 const helpGoldenGeneratedSpec = goldenSpecSchema +
-	`command:
-  name: app
-  summary: the app
-  description: |
-    A demo application.
+	`name: app
+summary: the app
+description: |
+  A demo application.
 
-    A second paragraph.
-  usage: app <command> [flags]
-  header: '===== APP ====='
-  footer: Use "app help <command>" for details.
-  headings:
-    commands: Subcommands
-  examples:
-    - app build ./src
-  commands:
-    - name: build
-      aliases: [b, bld]
-      summary: build things
-      description: Build the project from sources.
-      examples:
-        - app build ./src
-        - app build ./src --force
-      arguments:
-        - name: target
-          summary: what to build
-          schema: { type: string, required: true }
-        - name: extra
-          summary: extra targets
-          schema: { type: array }
-      flags:
-        - name: output
-          summary: output directory
-          identifiers: [-o, --output]
-          schema: { type: string, default: ./dist }
-        - name: format
-          summary: archive format
-          identifiers: [--format]
-          schema: { type: string, enum: [tar, zip], default: tar }
-        - name: force
-          summary: overwrite existing output
-          identifiers: [-f, --force]
-          schema: { type: bool, required: true }
-        - name: legacy
-          summary: legacy flag
-          identifiers: [--legacy]
-          deprecated: use --modern
-          schema: { type: bool }
-        - name: secret
-          summary: hidden flag
-          identifiers: [--secret]
-          hidden: true
-          schema: { type: bool }
-    - name: oldcmd
-      summary: an old command
-      deprecated: use build instead
-    - name: secretcmd
-      summary: a hidden command
-      hidden: true
+  A second paragraph.
+usage: app <command> [flags]
+header: '===== APP ====='
+footer: Use "app help <command>" for details.
+headings:
+  commands: Subcommands
+examples:
+  - app build ./src
+commands:
+  - name: build
+    aliases: [b, bld]
+    summary: build things
+    description: Build the project from sources.
+    examples:
+      - app build ./src
+      - app build ./src --force
+    arguments:
+      - name: target
+        summary: what to build
+        schema: { type: string, required: true }
+      - name: extra
+        summary: extra targets
+        schema: { type: array }
+    flags:
+      - name: output
+        summary: output directory
+        identifiers: [-o, --output]
+        schema: { type: string, default: ./dist }
+      - name: format
+        summary: archive format
+        identifiers: [--format]
+        schema: { type: string, enum: [tar, zip], default: tar }
+      - name: force
+        summary: overwrite existing output
+        identifiers: [-f, --force]
+        schema: { type: bool, required: true }
+      - name: legacy
+        summary: legacy flag
+        identifiers: [--legacy]
+        deprecated: use --modern
+        schema: { type: bool }
+      - name: secret
+        summary: hidden flag
+        identifiers: [--secret]
+        hidden: true
+        schema: { type: bool }
+  - name: oldcmd
+    summary: an old command
+    deprecated: use build instead
+  - name: secretcmd
+    summary: a hidden command
+    hidden: true
 `
 
 // TestHelpGolden_Generated locks the default-template rendering across every
@@ -2332,18 +2318,17 @@ func TestHelpGolden_Generated(t *testing.T) {
 }
 
 const helpGoldenCustomSpec = goldenSpecSchema +
-	`command:
-  name: app
-  summary: my app
-  footer: bye now
-  commands:
-    - name: run
-      summary: run it
-      flags:
-        - name: verbose
-          summary: be loud
-          identifiers: [-v, --verbose]
-          schema: { type: bool }
+	`name: app
+summary: my app
+footer: bye now
+commands:
+  - name: run
+    summary: run it
+    flags:
+      - name: verbose
+        summary: be loud
+        identifiers: [-v, --verbose]
+        schema: { type: bool }
 `
 
 // helpGoldenCustomTmpl is a deliberately non-default template: it reorders/omits
@@ -2374,18 +2359,17 @@ func TestHelpGolden_CustomTemplate(t *testing.T) {
 }
 
 const helpGoldenVerbatimSpec = goldenSpecSchema +
-	`command:
-  name: app
-  help: |-
-    EXACT ROOT PAGE
-      indented line kept as-is
-    no trailing newline
-  commands:
-    - name: run
-      summary: run it
-      help: |
-        EXACT RUN PAGE
-        keeps its trailing newline
+	`name: app
+help: |-
+  EXACT ROOT PAGE
+    indented line kept as-is
+  no trailing newline
+commands:
+  - name: run
+    summary: run it
+    help: |
+      EXACT RUN PAGE
+      keeps its trailing newline
 `
 
 // TestHelpGolden_Verbatim proves an explicit command.help string is written
@@ -2405,36 +2389,35 @@ func TestHelpGolden_Verbatim(t *testing.T) {
 // non-cascading flag (--root-only), plus two children. 'run' uses the default
 // cascading heading; 'deploy' overrides it with a colon-free value.
 const helpGoldenCascadingSpec = goldenSpecSchema +
-	`command:
-  name: app
-  summary: the app
-  flags:
-    - name: verbose
-      summary: verbose logging
-      identifiers: [-v, --verbose]
-      cascading: true
-      schema: { type: bool }
-    - name: rootonly
-      summary: root-only flag
-      identifiers: [--root-only]
-      schema: { type: bool }
-  commands:
-    - name: run
-      summary: run it
-      flags:
-        - name: jobs
-          summary: parallelism
-          identifiers: [-j, --jobs]
-          schema: { type: int }
-    - name: deploy
-      summary: deploy it
-      headings:
-        cascading: Inherited Flags
-      flags:
-        - name: target
-          summary: where to deploy
-          identifiers: [--target]
-          schema: { type: string }
+	`name: app
+summary: the app
+flags:
+  - name: verbose
+    summary: verbose logging
+    identifiers: [-v, --verbose]
+    cascading: true
+    schema: { type: bool }
+  - name: rootonly
+    summary: root-only flag
+    identifiers: [--root-only]
+    schema: { type: bool }
+commands:
+  - name: run
+    summary: run it
+    flags:
+      - name: jobs
+        summary: parallelism
+        identifiers: [-j, --jobs]
+        schema: { type: int }
+  - name: deploy
+    summary: deploy it
+    headings:
+      cascading: Inherited Flags
+    flags:
+      - name: target
+        summary: where to deploy
+        identifiers: [--target]
+        schema: { type: string }
 `
 
 // TestHelpGolden_Cascading locks the cascading-flags reporting: a cascading flag
@@ -2453,27 +2436,26 @@ func TestHelpGolden_Cascading(t *testing.T) {
 // env input with an explicit variable and one whose variable is derived (snake-upper),
 // and config inputs with and without an explicit file/key location.
 const helpGoldenEnvConfigSpec = goldenSpecSchema +
-	`command:
-  name: app
-  summary: the app
-  env:
-    - name: token
-      summary: API auth token
-      schema: { type: string, required: true, variable: APP_TOKEN }
-    - name: maxRetries
-      summary: retry budget
-      schema: { type: int, default: 3 }
-  config:
-    - name: endpoint
-      summary: API endpoint
-      schema: { type: string, file: app, key: api.endpoint }
-    - name: timeout
-      summary: request timeout
-      schema: { type: int, default: 30 }
-  config_files:
-    - name: app
-      path: ~/.app.yaml
-      format: yaml
+	`name: app
+summary: the app
+env:
+  - name: token
+    summary: API auth token
+    schema: { type: string, required: true, variable: APP_TOKEN }
+  - name: maxRetries
+    summary: retry budget
+    schema: { type: int, default: 3 }
+config:
+  - name: endpoint
+    summary: API endpoint
+    schema: { type: string, file: app, key: api.endpoint }
+  - name: timeout
+    summary: request timeout
+    schema: { type: int, default: 30 }
+config_files:
+  - name: app
+    path: ~/.app.yaml
+    format: yaml
 `
 
 // TestHelpGolden_EnvConfig locks the rendering of env-var and config inputs in the
@@ -2487,21 +2469,20 @@ func TestHelpGolden_EnvConfig(t *testing.T) {
 // helpGoldenGroupsSpec exercises command grouping: an ungrouped command (default
 // heading), then two named groups, with groups appearing in first-declaration order.
 const helpGoldenGroupsSpec = goldenSpecSchema +
-	`command:
-  name: app
-  summary: the app
-  commands:
-    - name: version
-      summary: print the version
-    - name: get
-      summary: display a resource
-      group: Basic Commands
-    - name: apply
-      summary: apply a configuration
-      group: Basic Commands
-    - name: cluster-info
-      summary: show cluster endpoints
-      group: Cluster Management
+	`name: app
+summary: the app
+commands:
+  - name: version
+    summary: print the version
+  - name: get
+    summary: display a resource
+    group: Basic Commands
+  - name: apply
+    summary: apply a configuration
+    group: Basic Commands
+  - name: cluster-info
+    summary: show cluster endpoints
+    group: Cluster Management
 `
 
 // TestHelpGolden_CommandGroups locks command grouping: ungrouped commands fall under the
@@ -2886,7 +2867,7 @@ func TestGenerateFeatureDirEqualsCmdgen(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: mycli\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
 		confSchemaHeader+"generate:\n  features:\n    help:\n      enabled: true\n      embed: true\n      embed_dir: internal/cmd/mycli\n")
 	t.Chdir(tmp)
@@ -2931,7 +2912,7 @@ func TestGenerateFeatureDirOutsideCmdgen(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n")
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: mycli\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
 		confSchemaHeader+"generate:\n  features:\n    help:\n      enabled: true\n      embed: true\n      embed_dir: docs/help\n")
 	t.Chdir(tmp)
@@ -2945,7 +2926,7 @@ func TestGenerateFeatureDirOutsideCmdgen(t *testing.T) {
 // TestProcessorValidate_nilCallback confirms a nil onValidate is tolerated (the
 // handlers may pass nil when they have no per-pass reporting).
 func TestProcessorValidate_nilCallback(t *testing.T) {
-	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"name: demo\n")
 	if err := NewProcessor("").Validate(spec, "", false, "", nil, nil); err != nil {
 		t.Errorf("Validate(nil callback) = %v, want nil", err)
 	}
@@ -3018,24 +2999,24 @@ func TestGenerateHiddenInDefinition(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n"+
-			"  name: app\n"+
-			"  flags:\n"+
-			"    - name: secret\n"+
-			"      hidden: true\n"+
-			"      identifiers: [--secret]\n"+
-			"      schema: { type: bool }\n"+
-			"    - name: loud\n"+
-			"      identifiers: [--loud]\n"+
-			"      schema: { type: bool }\n"+
-			"  arguments:\n"+
-			"    - name: ghostarg\n"+
-			"      hidden: true\n"+
-			"      schema: { type: string }\n"+
-			"  commands:\n"+
-			"    - name: ghost\n"+
-			"      hidden: true\n"+
-			"    - name: run\n")
+			""+
+			"name: app\n"+
+			"flags:\n"+
+			"  - name: secret\n"+
+			"    hidden: true\n"+
+			"    identifiers: [--secret]\n"+
+			"    schema: { type: bool }\n"+
+			"  - name: loud\n"+
+			"    identifiers: [--loud]\n"+
+			"    schema: { type: bool }\n"+
+			"arguments:\n"+
+			"  - name: ghostarg\n"+
+			"    hidden: true\n"+
+			"    schema: { type: string }\n"+
+			"commands:\n"+
+			"  - name: ghost\n"+
+			"    hidden: true\n"+
+			"  - name: run\n")
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -3065,16 +3046,16 @@ func TestGenerateNestedRemoteCommands(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n"+
-			"  name: acme\n"+
-			"  commands:\n"+
-			"    - name: cluster\n"+
-			"      summary: manage clusters\n"+
-			"      remote_commands:\n"+
-			"        - name: scan\n"+
-			"          aliases: [sc]\n"+
-			"          summary: scan the cluster\n"+
-			"          timeout: 10s\n")
+			""+
+			"name: acme\n"+
+			"commands:\n"+
+			"  - name: cluster\n"+
+			"    summary: manage clusters\n"+
+			"    remote_commands:\n"+
+			"      - name: scan\n"+
+			"        aliases: [sc]\n"+
+			"        summary: scan the cluster\n"+
+			"        timeout: 10s\n")
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 	t.Chdir(tmp)
 
@@ -3102,11 +3083,11 @@ func TestGenerateStdinRequiredTag(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n"+
-			"  name: app\n"+
-			"  stdin:\n"+
-			"    format: yaml\n"+
-			"    schema: { type: object, required: true }\n")
+			""+
+			"name: app\n"+
+			"stdin:\n"+
+			"  format: yaml\n"+
+			"  schema: { type: object, required: true }\n")
 	t.Chdir(tmp)
 
 	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {

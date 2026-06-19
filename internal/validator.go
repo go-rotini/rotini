@@ -353,6 +353,7 @@ func lintFeatureDirs(conf *Conf) []error {
 var specLints = []func(*Spec) []error{
 	lintRootCommand,
 	lintRootAliases,
+	lintDocLevelKeys,
 	lintImportConsistency,
 	lintLocalTimeout,
 	lintFlagGroups,
@@ -389,6 +390,37 @@ func lintRootCommand(spec *Spec) []error {
 	if spec.Command.Name == "" {
 		problems = append(problems, &problem{kind: "spec", loc: "command", msg: "the root command must have a name (it is the binary name)"})
 	}
+	return problems
+}
+
+// lintDocLevelKeys rejects the three document-level keys — $schema, env_prefix,
+// schemas — on a NON-root command. The reshape (W3) merged the document and the
+// root command into one shape (commands all the way down), so the schema accepts
+// these keys on every Command node; they are meaningful only on the root (the
+// document), and codegen reads them only there. Declaring one deeper is a silent
+// no-op, so validate rejects it. The root (spec.Command itself) is exempt.
+func lintDocLevelKeys(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		if c == &spec.Command {
+			return // the root: these keys belong here
+		}
+		add := func(key string) {
+			problems = append(problems, &problem{
+				kind: "spec", loc: "command " + path,
+				msg: fmt.Sprintf("sets %s, a document-level key valid only on the root command — remove it (codegen reads it only at the root, so here it is silently ignored)", key),
+			})
+		}
+		if c.Schema != "" {
+			add("$schema")
+		}
+		if c.EnvPrefix != "" {
+			add("env_prefix")
+		}
+		if c.Schemas != nil {
+			add("schemas")
+		}
+	})
 	return problems
 }
 

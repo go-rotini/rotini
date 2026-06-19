@@ -38,7 +38,7 @@ func newTestSession(t *testing.T, specPath, confPath string) *session {
 func TestLoad_explicitSpec_confBesideSpec(t *testing.T) {
 	dir := t.TempDir()
 	specPath := filepath.Join(dir, "myspec.yaml")
-	mustWriteSpec(t, specPath, &Spec{Schema: "https://x/spec.json", Command: Command{Name: "demo"}})
+	mustWriteSpec(t, specPath, &Spec{Command: Command{Schema: "https://x/spec.json", Name: "demo"}})
 	confPath := filepath.Join(dir, ".rotini.conf.yaml")
 	mustWriteConf(t, confPath, &Conf{Schema: "https://x/conf.json"})
 
@@ -178,20 +178,21 @@ func loadAndValidate(t *testing.T, specPath, confPath, version string) error {
 // TestProcessorValidate_validSpecAndConf: a schema-valid spec and conf pass with no
 // problems.
 func TestProcessorValidate_validSpecAndConf(t *testing.T) {
-	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"name: demo\n")
 	conf := writeTemp(t, "conf.yaml", validConfHeader)
 	if err := loadAndValidate(t, spec, conf, ""); err != nil {
 		t.Errorf("validate(valid spec+conf) = %v, want nil", err)
 	}
 }
 
-// TestProcessorValidate_schemaViolation: a spec missing the required command is a
-// schema violation (caught on the raw instance).
+// TestProcessorValidate_schemaViolation: a spec missing the required root name is
+// a schema violation (caught on the raw instance). The document is the root
+// command, so 'name' is required at the top level (W3 reshape).
 func TestProcessorValidate_schemaViolation(t *testing.T) {
-	spec := writeTemp(t, "spec.yaml", validSpecHeader) // no command
+	spec := writeTemp(t, "spec.yaml", validSpecHeader) // no name
 	err := loadAndValidate(t, spec, "", "")
-	if err == nil || !strings.Contains(err.Error(), "command") {
-		t.Errorf("validate(missing command) = %v, want a schema error naming command", err)
+	if err == nil || !strings.Contains(err.Error(), "name") {
+		t.Errorf("validate(missing name) = %v, want a schema error naming name", err)
 	}
 }
 
@@ -199,15 +200,14 @@ func TestProcessorValidate_schemaViolation(t *testing.T) {
 // rotini-specific rule the JSON Schema can't express — caught by the lints.
 func TestProcessorValidate_ruleViolation(t *testing.T) {
 	spec := validSpecHeader +
-		"command:\n" +
-		"  name: app\n" +
-		"  flags:\n" +
-		"    - name: output\n" +
-		"      identifiers: [-o, --output]\n" +
-		"      schema: { type: string }\n" +
-		"    - name: organization\n" +
-		"      identifiers: [-o, --org]\n" +
-		"      schema: { type: string }\n"
+		"name: app\n" +
+		"flags:\n" +
+		"  - name: output\n" +
+		"    identifiers: [-o, --output]\n" +
+		"    schema: { type: string }\n" +
+		"  - name: organization\n" +
+		"    identifiers: [-o, --org]\n" +
+		"    schema: { type: string }\n"
 	err := loadAndValidate(t, writeTemp(t, "spec.yaml", spec), "", "")
 	if err == nil || !strings.Contains(err.Error(), `"-o"`) || !strings.Contains(err.Error(), "output") {
 		t.Errorf("validate(duplicate -o) = %v, want a duplicate-identifier rule violation", err)
@@ -217,7 +217,7 @@ func TestProcessorValidate_ruleViolation(t *testing.T) {
 // TestProcessorValidate_versionGuard: the $schema↔version guard fires through the
 // processor — a matching version passes, a mismatch is reported.
 func TestProcessorValidate_versionGuard(t *testing.T) {
-	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n") // tag 1.2.3
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"name: demo\n") // tag 1.2.3
 
 	if err := loadAndValidate(t, spec, "", "1.2.3"); err != nil {
 		t.Errorf("validate(matching 1.2.3) = %v, want nil", err)
@@ -301,7 +301,7 @@ func TestProcessorInitialize(t *testing.T) {
 // TestProcessorValidatePass confirms the validate workflow composes load + validate,
 // propagating a load failure.
 func TestProcessorValidatePass(t *testing.T) {
-	good := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+	good := writeTemp(t, "spec.yaml", validSpecHeader+"name: demo\n")
 	if err := newTestSession(t, good, "").validatePass(); err != nil {
 		t.Errorf("validatePass(valid) = %v, want nil", err)
 	}
@@ -337,7 +337,7 @@ func TestProcessorGeneratePass_valid(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		validSpecHeader+"command:\n  name: rotini\n  commands:\n    - name: generate\n")
+		validSpecHeader+"name: rotini\ncommands:\n  - name: generate\n")
 	t.Chdir(tmp)
 
 	p := newTestSession(t, ".rotini.spec.yaml", "")
@@ -356,9 +356,9 @@ func TestProcessorGeneratePass_valid(t *testing.T) {
 // nil) AND the onWarnings callback receives the finding for the OnWarning funnel.
 func TestProcessorValidate_warningsSurfaceAndDontFail(t *testing.T) {
 	spec := validSpecHeader +
-		"command:\n  name: app\n  config_files:\n" +
-		"    - name: a\n      path: ~/.app.yaml\n" +
-		"    - name: b\n      path: ~/.app.yaml\n"
+		"name: app\nconfig_files:\n" +
+		"  - name: a\n    path: ~/.app.yaml\n" +
+		"  - name: b\n    path: ~/.app.yaml\n"
 	var warns []error
 	err := NewProcessor("").Validate(writeTemp(t, "spec.yaml", spec), "", false, "", nil,
 		func(w []error) { warns = append(warns, w...) })
@@ -371,7 +371,7 @@ func TestProcessorValidate_warningsSurfaceAndDontFail(t *testing.T) {
 }
 
 func TestProcessorValidate_routing(t *testing.T) {
-	spec := writeTemp(t, "spec.yaml", validSpecHeader+"command:\n  name: demo\n")
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"name: demo\n")
 	var summary string
 	var cbErr error
 	calls := 0
@@ -399,7 +399,7 @@ func TestProcessorGenerate_workflow(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
-		validSpecHeader+"command:\n  name: rotini\n  commands:\n    - name: generate\n")
+		validSpecHeader+"name: rotini\ncommands:\n  - name: generate\n")
 	t.Chdir(tmp)
 
 	noop := func(string, error) {}

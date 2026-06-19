@@ -98,14 +98,14 @@ func TestSourceLocator_toml(t *testing.T) {
 // lint; a TOML spec reports the pointer only.
 func TestValidate_sourcePositions(t *testing.T) {
 	t.Run("schema violation, yaml", func(t *testing.T) {
-		spec := validSpecHeader + "command:\n  name: app\n  flags:\n" +
-			"    - name: x\n      schema: { type: string, enum: [1] }\n"
+		spec := validSpecHeader + "name: app\nflags:\n" +
+			"  - name: x\n    schema: { type: string, enum: [1] }\n"
 		path := writeTemp(t, "spec.yaml", spec)
 		err := validateOnce(path, "", "", "")
 		if err == nil {
 			t.Fatal("want a schema violation")
 		}
-		if want := path + ":6:38: /command/flags/0/schema/enum/0"; !strings.Contains(err.Error(), want) {
+		if want := path + ":5:36: /flags/0/schema/enum/0"; !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %v\nwant it to contain %q", err, want)
 		}
 	})
@@ -114,14 +114,14 @@ func TestValidate_sourcePositions(t *testing.T) {
 		// multipleOf must be strictly positive (the meta-schema's own
 		// exclusiveMinimum: 0): a negative lands a pointer-shaped problem on
 		// the exact value byte.
-		spec := validSpecHeader + "command:\n  name: app\n  flags:\n" +
-			"    - name: port\n      schema: { type: int, multipleOf: -2 }\n"
+		spec := validSpecHeader + "name: app\nflags:\n" +
+			"  - name: port\n    schema: { type: int, multipleOf: -2 }\n"
 		path := writeTemp(t, "spec.yaml", spec)
 		err := validateOnce(path, "", "", "")
 		if err == nil {
 			t.Fatal("want a schema violation")
 		}
-		if want := path + ":6:40: /command/flags/0/schema/multipleOf"; !strings.Contains(err.Error(), want) {
+		if want := path + ":5:38: /flags/0/schema/multipleOf"; !strings.Contains(err.Error(), want) {
 			t.Errorf("err = %v\nwant it to contain %q", err, want)
 		}
 	})
@@ -131,8 +131,8 @@ func TestValidate_sourcePositions(t *testing.T) {
 		// across [[array-of-tables]] entries (flags/0) can't resolve — a
 		// documented toml.PathPointer limitation — so it degrades gracefully.
 		spec := "\"$schema\" = \"https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\"\n" +
-			"[command]\nname = \"app\"\n[[command.flags]]\nname = \"port\"\n" +
-			"[command.flags.schema]\ntype = \"int\"\nmultipleOf = -2\n"
+			"name = \"app\"\n[[flags]]\nname = \"port\"\n" +
+			"[flags.schema]\ntype = \"int\"\nmultipleOf = -2\n"
 		path := writeTemp(t, "spec.toml", spec)
 		err := validateOnce(path, "", "", "")
 		if err == nil {
@@ -141,7 +141,7 @@ func TestValidate_sourcePositions(t *testing.T) {
 		if strings.Contains(err.Error(), filepath.Base(path)+":") {
 			t.Errorf("err = %v\nTOML should not claim a position", err)
 		}
-		if !strings.Contains(err.Error(), "/command/flags/0/schema/multipleOf") {
+		if !strings.Contains(err.Error(), "/flags/0/schema/multipleOf") {
 			t.Errorf("err = %v\nwant the pointer-only loc", err)
 		}
 	})

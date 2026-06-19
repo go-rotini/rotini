@@ -38,7 +38,7 @@ func TestCompileSchema_error(t *testing.T) {
 // TestNewSpecLoader covers the loader pairing: the compiled schema plus the
 // resolved path and decoded content of the user's spec.
 func TestNewSpecLoader(t *testing.T) {
-	path := writeTemp(t, "spec.yaml", "command:\n  name: demo\n")
+	path := writeTemp(t, "spec.yaml", "name: demo\n")
 	l, err := newSpecLoader(path, "1.0.0")
 	if err != nil {
 		t.Fatalf("newSpecLoader: %v", err)
@@ -54,7 +54,7 @@ func TestNewSpecLoader(t *testing.T) {
 	}
 
 	// An undecodable spec surfaces the read error.
-	bad := writeTemp(t, "bad.yaml", "command: [unclosed")
+	bad := writeTemp(t, "bad.yaml", "name: [unclosed")
 	if _, err := newSpecLoader(bad, ""); err == nil {
 		t.Error("newSpecLoader(bad yaml) = nil, want a decode error")
 	}
@@ -66,7 +66,7 @@ func TestNewConfLoader(t *testing.T) {
 	dir := t.TempDir()
 	specPath := filepath.Join(dir, ".rotini.spec.yaml")
 	confPath := filepath.Join(dir, ".rotini.conf.yaml")
-	writeTestFile(t, specPath, "command:\n  name: demo\n")
+	writeTestFile(t, specPath, "name: demo\n")
 	writeTestFile(t, confPath, "$schema: https://x/conf.json\n")
 
 	l, err := newConfLoader(specPath, "", "2.0.0")
@@ -96,7 +96,7 @@ func TestNewConfLoader(t *testing.T) {
 	// An undecodable conf surfaces the read error.
 	badDir := t.TempDir()
 	badSpec := filepath.Join(badDir, ".rotini.spec.yaml")
-	writeTestFile(t, badSpec, "command:\n  name: demo\n")
+	writeTestFile(t, badSpec, "name: demo\n")
 	writeTestFile(t, filepath.Join(badDir, ".rotini.conf.yaml"), "generate: [unclosed")
 	if _, err := newConfLoader(badSpec, "", ""); err == nil {
 		t.Error("newConfLoader(bad yaml) = nil, want a decode error")

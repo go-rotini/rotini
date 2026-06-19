@@ -2,16 +2,9 @@
 
 package internal
 
-// Schema for a Rotini CLI definition spec file.
+// Schema for a Rotini CLI definition spec file. The document IS the root command — commands all the way down: its keys are the root command's keys directly (name, doc-fields, flags/arguments/env/config/config_files/stdin, sub-commands, …), plus three document-level keys ($schema, env_prefix, schemas) that are valid only on the root.
 type Spec struct {
-	// URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.
-	Schema string `json:"$schema"`
-	// The CLI's root command. Same recursive Command shape as every sub-command (one type for the root and all sub-commands); the root must use 'name' (not '$ref'). Command-scoped concerns — doc-fields, inputs (incl. per-command, cascading config_files sources), sub-commands, remote commands — live here; the remaining program-scoped concern (schemas) lives at the document level beside it.
-	Command Command `json:"command"`
-	// Document-level prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator).
-	EnvPrefix string `json:"env_prefix,omitempty"`
-	// Reusable named schema definitions (document-level). Referenced elsewhere via "$ref": "#/schemas/<Name>". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type that other packages may import (a cmd/cmdgen split makes them cross-package).
-	Schemas map[string]Schema `json:"schemas,omitempty"`
+	Command
 }
 
 type ArgumentInput struct {
@@ -65,10 +58,12 @@ type BaseSchema struct {
 	Type string `json:"type,omitempty"`
 }
 
-// A command node in the CLI command tree — the root command and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). When used as the root (the top-level 'command'), it must use 'name'.
+// A command node in the CLI command tree — the root command (the document itself) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The three document-level keys ($schema, env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
 type Command struct {
 	// Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name. Not valid on the root command.
 	Ref string `json:"$ref,omitempty"`
+	// Document-level (root only): URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.
+	Schema string `json:"$schema,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.
 	Aliases []string `json:"aliases,omitempty"`
 	// Positional argument inputs for this command
@@ -87,6 +82,8 @@ type Command struct {
 	Description string `json:"description,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
+	// Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator).
+	EnvPrefix string `json:"env_prefix,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
 	Examples []string `json:"examples,omitempty"`
 	// Exit codes this command documents, rendered as an EXIT STATUS section in the man page. Data only: rotini sets no exit code itself (handlers own exits via rtx.Exit), so this section is whatever you declare. Ignored when 'man' (verbatim) is set.
@@ -125,6 +122,8 @@ type Command struct {
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery.
 	RemoteDiscovery *RemoteDiscovery `json:"remote_discovery,omitempty"`
+	// Document-level (root only): reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type that other packages may import (a cmd/cmdgen split makes them cross-package).
+	Schemas map[string]Schema `json:"schemas,omitempty"`
 	// Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.
 	SeeAlso []string `json:"see_also,omitempty"`
 	// Declares expected stdin format and schema for this command
