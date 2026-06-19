@@ -679,6 +679,49 @@ func TestGenerateRemoteDiscovery(t *testing.T) {
 // pure env/config inputs get their own <Prefix>Env/<Prefix>Config structs (env is NOT
 // folded into Flags), stdin gets a typed payload type + a *Stdin field, and
 // CommandInputs gains the new fields only when the channel is declared.
+// TestGenerate_configChannelCascades pins the per-scope Config channel + cascade
+// codegen (D-W3.1): config inputs at two levels each get their own <Scope>Config
+// struct, the BindMeta sources are scope-tagged, and the deeper command's Inputs
+// NESTS the root scope — so a deploy handler reaches inputs.Acme.Config.LogLevel
+// (the cascaded ancestor value) the same way it reaches ancestor flags/env.
+func TestGenerate_configChannelCascades(t *testing.T) {
+	tmp := t.TempDir()
+	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"command:\n  name: acme\n  inputs:\n" +
+		"    config_files:\n      - { name: app, path: ~/.acme.yaml }\n" +
+		"    config:\n      - { name: log_level, schema: { type: string, file: app, key: log.level } }\n" +
+		"  commands:\n    - name: deploy\n      inputs:\n" +
+		"        config_files:\n          - { name: targets, discover: { strategy: walk-up, file: .targets.yaml } }\n" +
+		"        config:\n          - { name: region, schema: { type: string, file: targets, key: aws.region } }\n"
+	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
+
+	t.Chdir(tmp)
+	if err := Generate(".rotini.spec.yaml", "", false, "", nil); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	gen := filepath.Join(tmp, "internal", "cmd", "acme", "zz_rotini.gen.go")
+	mustContain(t, gen,
+		"type AcmeConfig struct {", "LogLevel string", // root scope's config channel
+		"type AcmeDeployConfig struct {", "Region string", // deploy scope's own
+		"type AcmeDeployInputs struct {",        // deploy's nested inputs
+		`Scope: "acme"`, `Scope: "acme/deploy"`, // BindMeta sources scope-tagged for the cascade
+	)
+
+	// The deploy command's Inputs must nest the ROOT scope's CommandInputs, so a
+	// deploy handler can read the cascaded ancestor config value.
+	src, err := os.ReadFile(gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(string(src), "type AcmeDeployInputs struct {")
+	block := string(src)[start : start+strings.Index(string(src)[start:], "}")]
+	if !strings.Contains(block, "AcmeCommandInputs") {
+		t.Errorf("AcmeDeployInputs must nest the root AcmeCommandInputs:\n%s", block)
+	}
+}
+
 func TestGenerateInputChannels(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
