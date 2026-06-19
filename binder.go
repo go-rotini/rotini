@@ -136,7 +136,7 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 	}
 	defer envReg.Close()
 
-	cfgRegs, err := b.configRegs(overrides)
+	cfgRegs, err := b.configRegs(chain, overrides)
 	if err != nil {
 		return err
 	}
@@ -270,7 +270,7 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 	}
 	offset := len(chain) - v.NumField()
 	srcs := []recon.Source{recon.NewMapSource("flags", flagOverrides(v, chain, argv)), flagEnvSource(b.envPrefix)}
-	files, err := b.fileSources(overrides)
+	files, err := b.fileSources(b.chainConfigFiles(chain), overrides)
 	if err != nil {
 		return err
 	}
@@ -458,8 +458,8 @@ func flagWasSet(argv, identifiers []string) bool {
 // configRegistry builds a recon registry over the configuration_files (for the
 // pure Config channel), first (highest precedence) to last as declared.
 // overrides carries any config_source-supplied paths (see pathOverrides).
-func (b *Binder) configRegistry(overrides map[string]string) (*recon.Registry, error) {
-	srcs, err := b.fileSources(overrides)
+func (b *Binder) configRegistry(files []ConfigFile, overrides map[string]string) (*recon.Registry, error) {
+	srcs, err := b.fileSources(files, overrides)
 	if err != nil {
 		return nil, err
 	}
@@ -475,18 +475,53 @@ func (b *Binder) configRegistry(overrides map[string]string) (*recon.Registry, e
 // spec pins to one file (`file:` → the generated cfgfile tag).
 type cfgRegs struct {
 	binder    *Binder
+	files     []ConfigFile // sources in scope for the invoked chain, nearest-wins order
 	overrides map[string]string
 	merged    *recon.Registry
 	perFile   map[string]*recon.Registry
 }
 
-// configRegs builds the merged config registry and the lazy per-file cache.
-func (b *Binder) configRegs(overrides map[string]string) (*cfgRegs, error) {
-	merged, err := b.configRegistry(overrides)
+// configRegs builds the merged config registry and the lazy per-file cache over
+// the sources in scope for chain — the cascade (see [Binder.chainConfigFiles]).
+func (b *Binder) configRegs(chain []ResolvedCommand, overrides map[string]string) (*cfgRegs, error) {
+	files := b.chainConfigFiles(chain)
+	merged, err := b.configRegistry(files, overrides)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{binder: b, overrides: overrides, merged: merged, perFile: map[string]*recon.Registry{}}, nil
+	return &cfgRegs{binder: b, files: files, overrides: overrides, merged: merged, perFile: map[string]*recon.Registry{}}, nil
+}
+
+// chainConfigFiles returns the config_files in scope for the resolved chain — the
+// union along it (D-W3.1) — ordered NEAREST-WINS: the invoked (deepest) command's
+// sources first (highest precedence in the merged registry), then each ancestor up
+// to the root, preserving each command's own declared order. A source is in scope
+// when its Scope is one of the chain's command paths; off-branch sources are
+// excluded. An UNSCOPED source (Scope=="" — a manual/legacy global) is always in
+// scope, appended last (lowest precedence).
+func (b *Binder) chainConfigFiles(chain []ResolvedCommand) []ConfigFile {
+	paths := make([]string, len(chain))
+	for i := range chain {
+		if i == 0 {
+			paths[i] = chain[i].Name
+		} else {
+			paths[i] = paths[i-1] + "/" + chain[i].Name
+		}
+	}
+	var out []ConfigFile
+	for _, p := range slices.Backward(paths) { // leaf → root
+		for _, f := range b.configFiles {
+			if f.Scope == p {
+				out = append(out, f)
+			}
+		}
+	}
+	for _, f := range b.configFiles {
+		if f.Scope == "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // For returns the registry over ONLY the named configuration_files entry —
@@ -495,7 +530,7 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 	if reg, ok := c.perFile[name]; ok {
 		return reg, nil
 	}
-	for _, f := range c.binder.configFiles {
+	for _, f := range c.files {
 		if f.Name != name {
 			continue
 		}
@@ -562,9 +597,9 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 // NOT optional: the user explicitly asked for it, so a missing file errors.
 // Custom BindMeta.Sources follow the declared files — explicit files beat
 // ambient services (decided at ergonomics E1/E3-S4).
-func (b *Binder) fileSources(overrides map[string]string) ([]recon.Source, error) {
-	srcs := make([]recon.Source, 0, len(b.configFiles)+len(b.sources))
-	for _, f := range b.configFiles {
+func (b *Binder) fileSources(files []ConfigFile, overrides map[string]string) ([]recon.Source, error) {
+	srcs := make([]recon.Source, 0, len(files)+len(b.sources))
+	for _, f := range files {
 		src, err := b.fileSource(f, overrides)
 		if err != nil {
 			return nil, err
@@ -672,7 +707,7 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 // none of them supplies keeps its own path/discover (no map entry).
 func (b *Binder) pathOverrides(chain []ResolvedCommand, store *parsedInputs) map[string]string {
 	out := map[string]string{}
-	for _, f := range b.configFiles {
+	for _, f := range b.chainConfigFiles(chain) {
 		pf := f.PathFrom
 		if pf == nil {
 			continue

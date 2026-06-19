@@ -84,7 +84,7 @@ type RemoteDef struct {
 // that the dispatch-time Definition deliberately omits. The rtg package emits it as
 // `var BindMeta = rotini.BindMeta{…}`; main.go passes it to [NewBinder].
 type BindMeta struct {
-	ConfigFiles []ConfigFile // document-level configuration_files sources, in declared order
+	ConfigFiles []ConfigFile // per-command config_files sources, each tagged with its Scope; the binder scopes them to the invoked chain (cascade, nearest-wins)
 	// EnvPrefix scopes every DERIVED env-var name (the SNAKE_UPPER projections:
 	// plain env inputs without variable:, envnest bases, flags' env fallbacks)
 	// under "<EnvPrefix>_". Explicit variable: names are exempt, and with a
@@ -110,7 +110,13 @@ type BindMeta struct {
 // ConfigFile is one configuration-file source the binder reads (reconciled by recon).
 // Exactly one of Path and Discover locates the file (the spec enforces this).
 type ConfigFile struct {
-	Name     string       // logical name
+	Name string // logical name
+	// Scope is the command path ("root", "root/sub", …) this source is declared
+	// on. config_files cascade: a source is in scope for the invoked chain when
+	// its Scope is one of the chain's commands (D-W3.1). "" means UNSCOPED — in
+	// scope for every command (a manually-built BindMeta or a legacy global list);
+	// generated descriptors always set it.
+	Scope    string
 	Path     string       // fixed file path (may contain ~)
 	Format   string       // "json" | "yaml" | "toml"; "" lets the binder infer from the extension
 	Discover *DiscoverDef // run-time location strategy, instead of a fixed Path

@@ -996,3 +996,25 @@ func TestParseStdinTag(t *testing.T) {
 		}
 	}
 }
+
+// TestBinder_chainConfigFiles pins the cascade (D-W3.1): config_files in scope for
+// the invoked chain = the union along it, NEAREST-WINS (deepest command first), with
+// off-branch sources excluded and unscoped (Scope=="") sources always in scope, last.
+func TestBinder_chainConfigFiles(t *testing.T) {
+	b := &Binder{configFiles: []ConfigFile{
+		{Name: "rootA", Scope: "app"},
+		{Name: "rootB", Scope: "app"},
+		{Name: "deploy", Scope: "app/deploy"},
+		{Name: "aws", Scope: "app/deploy/aws"},
+		{Name: "sibling", Scope: "app/build"}, // off-branch — excluded
+		{Name: "global", Scope: ""},           // unscoped — always in scope, last
+	}}
+	chain := []ResolvedCommand{{Name: "app"}, {Name: "deploy"}, {Name: "aws"}}
+	var names []string
+	for _, f := range b.chainConfigFiles(chain) {
+		names = append(names, f.Name)
+	}
+	if got, want := strings.Join(names, ","), "aws,deploy,rootA,rootB,global"; got != want {
+		t.Errorf("chainConfigFiles = %q, want %q", got, want)
+	}
+}

@@ -617,6 +617,7 @@ func renderBindMeta(gp *genProgram) string {
 		b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
 		for _, f := range files {
 			b.WriteString("{Name: " + strconv.Quote(f.Name))
+			b.WriteString(", Scope: " + strconv.Quote(f.Scope))
 			if f.Path != "" {
 				b.WriteString(", Path: " + strconv.Quote(f.Path))
 			}
@@ -1545,7 +1546,7 @@ type genProgram struct {
 	rootDiscovery   *RemoteDiscovery    // root command's plugin discovery (nil = off)
 	rootPassthrough bool                // root command's passthrough (raw positionals)
 	schemas         map[string]Schema   // document-level named schemas (for output codegen)
-	configFiles     []ConfigurationFile // document-level config-file sources (for the binder)
+	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
 	envPrefix       string              // document-level env_prefix for DERIVED env-var names
 
 	root         genCommand               // the root command (own)
@@ -1613,6 +1614,32 @@ type composeCtx struct {
 
 // resolveTree resolves spec into a genProgram, loading any `$ref`'d child specs
 // (relative to specPath) and grafting them as composed subtrees.
+// scopedConfigFile is a config_files source paired with the command path it is
+// declared on — the Scope the binder matches against the resolved chain to honor
+// the cascade (D-W3.1). The path is name-joined ("root", "root/sub", …), the same
+// form Binder.chainConfigFiles computes from the chain.
+type scopedConfigFile struct {
+	ConfigurationFile
+
+	Scope string
+}
+
+// allScopedConfigFiles gathers every command's config_files across the tree,
+// tagging each with its command path. Replaces the Phase-1 flat allConfigFiles
+// for the descriptor: the binder needs the scope to chain-scope loading.
+func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
+	var out []scopedConfigFile
+	walkCommands(spec, func(c *Command, path string) {
+		if c.Inputs == nil {
+			return
+		}
+		for _, cf := range c.Inputs.ConfigFiles {
+			out = append(out, scopedConfigFile{ConfigurationFile: cf, Scope: path})
+		}
+	})
+	return out
+}
+
 func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgram, error) {
 	root := spec.Command
 	if root.Ref != "" || root.Name == "" {
@@ -1628,7 +1655,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		rootDiscovery:   root.RemoteDiscovery,
 		rootPassthrough: root.Passthrough,
 		schemas:         spec.Schemas,
-		configFiles:     allConfigFiles(spec),
+		configFiles:     allScopedConfigFiles(spec),
 		envPrefix:       spec.EnvPrefix,
 	}
 	gp.root = genCommand{

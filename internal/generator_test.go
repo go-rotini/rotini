@@ -558,7 +558,7 @@ func TestGenerateConfigSchema(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	mustContain(t, filepath.Join(tmp, "internal", "cmd", "app", "zz_rotini.gen.go"),
-		`{Name: "main", Path: "~/.app.yaml", Format: "yaml", Schema: `,
+		`{Name: "main", Scope: "app", Path: "~/.app.yaml", Format: "yaml", Schema: `,
 		`"required":["server"]`,
 		`"definitions"`, `"Server"`, // named schemas resolve inside the rendered schema
 	)
@@ -746,7 +746,7 @@ func TestGenerateInputChannels(t *testing.T) {
 		"`rotini:\"token\" recon:\"api.token,required,secret\"`",
 		// the BindMeta descriptor carries the config-file sources.
 		"var BindMeta = rotini.BindMeta{",
-		"{Name: \"app\", Path: \"~/.config/widget.yaml\", Format: \"yaml\"}",
+		"{Name: \"app\", Scope: \"widget\", Path: \"~/.config/widget.yaml\", Format: \"yaml\"}",
 	)
 	// env is NOT folded into the Flags struct (the channel break).
 	flags := readFileString(t, rotiniGo)

@@ -501,7 +501,7 @@ func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 	if store, err := parseInto(chain, rtx.Args, rtx.Stdin); err == nil {
 		overrides = b.pathOverrides(chain, store)
 	}
-	cfg, err := b.configRegs(overrides)
+	cfg, err := b.configRegs(chain, overrides)
 	if err != nil {
 		return nil, nil, err
 	}
