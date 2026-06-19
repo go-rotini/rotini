@@ -461,16 +461,15 @@ func TestGenerateOutputTypes(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: mycli\n" +
-		"  output:\n" +
-		"    type: object\n" +
-		"    properties:\n" +
-		"      count: { type: integer }\n" +
-		"      items: { type: array, items: { $ref: \"#/schemas/Widget\" } }\n" +
-		"  commands:\n" +
-		"    - name: get\n" +
-		"      output: { $ref: \"#/schemas/Widget\" }\n" +
+		"name: mycli\n" +
+		"output:\n" +
+		"  type: object\n" +
+		"  properties:\n" +
+		"    count: { type: integer }\n" +
+		"    items: { type: array, items: { $ref: \"#/schemas/Widget\" } }\n" +
+		"commands:\n" +
+		"  - name: get\n" +
+		"    output: { $ref: \"#/schemas/Widget\" }\n" +
 		"schemas:\n" +
 		"  Widget:\n" +
 		"    type: object\n" +
@@ -503,17 +502,16 @@ func TestGenerateDeprecated(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: app\n" +
-		"  commands:\n" +
-		"    - name: compile\n" +
-		"      aliases: [build]\n" +
-		"      deprecated_identifiers: [build]\n" +
-		"      flags:\n" +
-		"        - name: config\n" +
-		"          identifiers: [--config, --conf]\n" +
-		"          deprecated_identifiers: [--conf]\n" +
-		"          schema: { type: string }\n"
+		"name: app\n" +
+		"commands:\n" +
+		"  - name: compile\n" +
+		"    aliases: [build]\n" +
+		"    deprecated_identifiers: [build]\n" +
+		"    flags:\n" +
+		"      - name: config\n" +
+		"        identifiers: [--config, --conf]\n" +
+		"        deprecated_identifiers: [--conf]\n" +
+		"        schema: { type: string }\n"
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
@@ -533,17 +531,16 @@ func TestGenerateConfigSchema(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: app\n" +
-		"  config_files:\n" +
-		"    - name: main\n" +
-		"      path: ~/.app.yaml\n" +
-		"      format: yaml\n" +
-		"      schema:\n" +
-		"        type: object\n" +
-		"        required: [server]\n" +
-		"        properties:\n" +
-		"          server: { $ref: \"#/schemas/Server\" }\n" +
+		"name: app\n" +
+		"config_files:\n" +
+		"  - name: main\n" +
+		"    path: ~/.app.yaml\n" +
+		"    format: yaml\n" +
+		"    schema:\n" +
+		"      type: object\n" +
+		"      required: [server]\n" +
+		"      properties:\n" +
+		"        server: { $ref: \"#/schemas/Server\" }\n" +
 		"schemas:\n" +
 		"  Server:\n" +
 		"    type: object\n" +
@@ -566,15 +563,14 @@ func TestGenerateMapFlag(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: widget\n" +
-		"  flags:\n" +
-		"    - name: label\n" +
-		"      identifiers: [--label]\n" +
-		"      schema: { type: 'map[string]string' }\n" +
-		"    - name: meta\n" +
-		"      identifiers: [--meta]\n" +
-		"      schema: { type: map }\n" // the rotini alias → map[string]any
+		"name: widget\n" +
+		"flags:\n" +
+		"  - name: label\n" +
+		"    identifiers: [--label]\n" +
+		"    schema: { type: 'map[string]string' }\n" +
+		"  - name: meta\n" +
+		"    identifiers: [--meta]\n" +
+		"    schema: { type: map }\n" // the rotini alias → map[string]any
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
@@ -592,21 +588,20 @@ func TestGenerateInputImports(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: widget\n" +
-		"  flags:\n" +
-		"    - name: since\n" +
-		"      identifiers: [--since]\n" +
-		"      schema: { type: time.Time, import: time }\n" +
-		"    - name: ttl\n" +
-		"      identifiers: [--ttl]\n" +
-		"      schema: { type: duration }\n" + // rotini alias → auto "time", and dedupes with the above
-		"    - name: id\n" +
-		"      identifiers: [--id]\n" +
-		"      schema: { type: uuid.UUID, import: github.com/google/uuid }\n" +
-		"    - name: home\n" +
-		"      identifiers: [--home]\n" +
-		"      schema: { type: urlx.URL, import: urlx net/url }\n" // aliased import
+		"name: widget\n" +
+		"flags:\n" +
+		"  - name: since\n" +
+		"    identifiers: [--since]\n" +
+		"    schema: { type: time.Time, import: time }\n" +
+		"  - name: ttl\n" +
+		"    identifiers: [--ttl]\n" +
+		"    schema: { type: duration }\n" + // rotini alias → auto "time", and dedupes with the above
+		"  - name: id\n" +
+		"    identifiers: [--id]\n" +
+		"    schema: { type: uuid.UUID, import: github.com/google/uuid }\n" +
+		"  - name: home\n" +
+		"    identifiers: [--home]\n" +
+		"    schema: { type: urlx.URL, import: urlx net/url }\n" // aliased import
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
@@ -646,15 +641,14 @@ func TestGenerateRemoteDiscovery(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: acme\n" +
-		"  remote_discovery:\n" +
-		"    path: /opt/acme/plugins\n" +
-		"  commands:\n" +
-		"    - name: cluster\n" +
-		"      remote_discovery:\n" +
-		"        prefix: acme-plugin-\n" +
-		"        hidden: true\n"
+		"name: acme\n" +
+		"remote_discovery:\n" +
+		"  path: /opt/acme/plugins\n" +
+		"commands:\n" +
+		"  - name: cluster\n" +
+		"    remote_discovery:\n" +
+		"      prefix: acme-plugin-\n" +
+		"      hidden: true\n"
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
@@ -684,12 +678,12 @@ func TestGenerate_configChannelCascades(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n  name: acme\n" +
-		"  config_files:\n    - { name: app, path: ~/.acme.yaml }\n" +
-		"  config:\n    - { name: log_level, schema: { type: string, file: app, key: log.level } }\n" +
-		"  commands:\n    - name: deploy\n" +
-		"      config_files:\n        - { name: targets, discover: { strategy: walk-up, file: .targets.yaml } }\n" +
-		"      config:\n        - { name: region, schema: { type: string, file: targets, key: aws.region } }\n"
+		"name: acme\n" +
+		"config_files:\n  - { name: app, path: ~/.acme.yaml }\n" +
+		"config:\n  - { name: log_level, schema: { type: string, file: app, key: log.level } }\n" +
+		"commands:\n  - name: deploy\n" +
+		"    config_files:\n      - { name: targets, discover: { strategy: walk-up, file: .targets.yaml } }\n" +
+		"    config:\n      - { name: region, schema: { type: string, file: targets, key: aws.region } }\n"
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
 
 	t.Chdir(tmp)
@@ -722,31 +716,30 @@ func TestGenerateInputChannels(t *testing.T) {
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: widget\n" +
-		"  flags:\n" +
-		"    - name: color\n" +
-		"      identifiers: [--color]\n" +
-		"      schema: { type: string, key: create.color }\n" + // config-fallback flag
-		"    - name: quiet\n" +
-		"      identifiers: [--quiet]\n" +
-		"      schema: { type: bool }\n" + // argv-only flag (no recon tag)
+		"name: widget\n" +
+		"flags:\n" +
+		"  - name: color\n" +
+		"    identifiers: [--color]\n" +
+		"    schema: { type: string, key: create.color }\n" + // config-fallback flag
+		"  - name: quiet\n" +
+		"    identifiers: [--quiet]\n" +
+		"    schema: { type: bool }\n" + // argv-only flag (no recon tag)
 
-		"  env:\n" +
-		"    - name: region\n" +
-		"      schema: { type: string, variable: WIDGET_REGION }\n" +
-		"  config:\n" +
-		"    - name: endpoint\n" +
-		"      schema: { type: string, file: app, key: api.endpoint }\n" +
-		"    - name: token\n" +
-		"      schema: { type: string, key: api.token, secret: true, required: true }\n" +
-		"  stdin:\n" +
+		"env:\n" +
+		"  - name: region\n" +
+		"    schema: { type: string, variable: WIDGET_REGION }\n" +
+		"config:\n" +
+		"  - name: endpoint\n" +
+		"    schema: { type: string, file: app, key: api.endpoint }\n" +
+		"  - name: token\n" +
+		"    schema: { type: string, key: api.token, secret: true, required: true }\n" +
+		"stdin:\n" +
+		"  format: yaml\n" +
+		"  schema: { $ref: \"#/schemas/Manifest\" }\n" +
+		"config_files:\n" +
+		"  - name: app\n" +
+		"    path: ~/.config/widget.yaml\n" +
 		"    format: yaml\n" +
-		"    schema: { $ref: \"#/schemas/Manifest\" }\n" +
-		"  config_files:\n" +
-		"    - name: app\n" +
-		"      path: ~/.config/widget.yaml\n" +
-		"      format: yaml\n" +
 		"schemas:\n" +
 		"  Manifest:\n" +
 		"    type: object\n" +
@@ -799,72 +792,69 @@ func TestGenerateInputChannels(t *testing.T) {
 // a sub-command with a summary, a required argument, and a bool flag. Help fields
 // live directly on the command (flattened).
 const helpSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-	"command:\n" +
-	"  name: mycli\n" +
-	"  summary: my cli\n" +
-	"  description: A demo CLI.\n" +
-	"  footer: run 'mycli help <command>' for details\n" +
-	"  commands:\n" +
-	"    - name: build\n" +
-	"      aliases: [b]\n" +
-	"      summary: build the project\n" +
-	"      arguments:\n" +
-	"        - name: target\n" +
-	"          summary: thing to build\n" +
-	"          schema:\n" +
-	"            type: string\n" +
-	"            required: true\n" +
-	"      flags:\n" +
-	"        - name: verbose\n" +
-	"          summary: chattier output\n" +
-	"          identifiers: [-v, --verbose]\n" +
-	"          schema:\n" +
-	"            type: bool\n"
+	"name: mycli\n" +
+	"summary: my cli\n" +
+	"description: A demo CLI.\n" +
+	"footer: run 'mycli help <command>' for details\n" +
+	"commands:\n" +
+	"  - name: build\n" +
+	"    aliases: [b]\n" +
+	"    summary: build the project\n" +
+	"    arguments:\n" +
+	"      - name: target\n" +
+	"        summary: thing to build\n" +
+	"        schema:\n" +
+	"          type: string\n" +
+	"          required: true\n" +
+	"    flags:\n" +
+	"      - name: verbose\n" +
+	"        summary: chattier output\n" +
+	"        identifiers: [-v, --verbose]\n" +
+	"        schema:\n" +
+	"          type: bool\n"
 
 const helpEnabledConf = confSchemaHeader + "generate:\n  features:\n    help:\n      enabled: true\n      embed: true\n      template: true\n"
 
 const placeholderSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-	"command:\n" +
-	"  name: mycli\n" +
-	"  summary: my cli\n" +
-	"  commands:\n" +
-	"    - name: build\n" +
-	"      summary: build the project\n" +
-	"      arguments:\n" +
-	"        - name: target\n" +
-	"          summary: thing to build\n" +
-	"          schema:\n" +
-	"            type: string\n" +
-	"            required: true\n" +
-	"            placeholder: TARGET\n" +
-	"      flags:\n" +
-	"        - name: out\n" +
-	"          summary: write result here\n" +
-	"          identifiers: [-o, --out]\n" +
-	"          schema:\n" +
-	"            type: string\n" +
-	"            placeholder: <PATH>\n" +
-	"        - name: verbose\n" +
-	"          summary: chattier output\n" +
-	"          identifiers: [--verbose]\n" +
-	"          schema:\n" +
-	"            type: bool\n"
+	"name: mycli\n" +
+	"summary: my cli\n" +
+	"commands:\n" +
+	"  - name: build\n" +
+	"    summary: build the project\n" +
+	"    arguments:\n" +
+	"      - name: target\n" +
+	"        summary: thing to build\n" +
+	"        schema:\n" +
+	"          type: string\n" +
+	"          required: true\n" +
+	"          placeholder: TARGET\n" +
+	"    flags:\n" +
+	"      - name: out\n" +
+	"        summary: write result here\n" +
+	"        identifiers: [-o, --out]\n" +
+	"        schema:\n" +
+	"          type: string\n" +
+	"          placeholder: <PATH>\n" +
+	"      - name: verbose\n" +
+	"        summary: chattier output\n" +
+	"        identifiers: [--verbose]\n" +
+	"        schema:\n" +
+	"          type: bool\n"
 
 const envPrefixSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
 	"env_prefix: ACME\n" +
-	"command:\n" +
-	"  name: mycli\n" +
-	"  summary: my cli\n" +
-	"  env:\n" +
-	"    - name: home\n" +
-	"      summary: home override\n" +
-	"      schema: { type: string }\n" +
-	"    - name: region\n" +
-	"      summary: region override\n" +
-	"      schema: { type: string, variable: PLAIN_REGION }\n" +
-	"    - name: http\n" +
-	"      summary: http family\n" +
-	"      schema: { type: map, nesting: \"__\" }\n"
+	"name: mycli\n" +
+	"summary: my cli\n" +
+	"env:\n" +
+	"  - name: home\n" +
+	"    summary: home override\n" +
+	"    schema: { type: string }\n" +
+	"  - name: region\n" +
+	"    summary: region override\n" +
+	"    schema: { type: string, variable: PLAIN_REGION }\n" +
+	"  - name: http\n" +
+	"    summary: http family\n" +
+	"    schema: { type: map, nesting: \"__\" }\n"
 
 // env_prefix flows into every codegen artifact that names a DERIVED env var:
 // the BindMeta descriptor (the runtime's signal), the envnest tag's base, and
@@ -987,23 +977,22 @@ func TestGenerateNoEmbedImportWhenAllInline(t *testing.T) {
 // editable markdown.md.tmpl seeded into the feature dir.
 func TestGenerateMarkdownEnabled(t *testing.T) {
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: mycli\n" +
-		"  summary: my cli\n" +
-		"  description: A demo CLI.\n" +
-		"  commands:\n" +
-		"    - name: build\n" +
-		"      summary: build the project\n" +
-		"      flags:\n" +
-		"        - name: verbose\n" +
-		"          summary: chattier output\n" +
-		"          identifiers: [-v, --verbose]\n" +
-		"          schema: { type: bool }\n" +
-		"    - name: verbatim\n" +
-		"      summary: hand-written page\n" +
-		"      markdown: |\n" +
-		"        # custom page\n" +
-		"        byte-for-byte.\n"
+		"name: mycli\n" +
+		"summary: my cli\n" +
+		"description: A demo CLI.\n" +
+		"commands:\n" +
+		"  - name: build\n" +
+		"    summary: build the project\n" +
+		"    flags:\n" +
+		"      - name: verbose\n" +
+		"        summary: chattier output\n" +
+		"        identifiers: [-v, --verbose]\n" +
+		"        schema: { type: bool }\n" +
+		"  - name: verbatim\n" +
+		"    summary: hand-written page\n" +
+		"    markdown: |\n" +
+		"      # custom page\n" +
+		"      byte-for-byte.\n"
 	conf := confSchemaHeader + "generate:\n  features:\n    markdown:\n      enabled: true\n      embed: true\n      template: true\n"
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
@@ -1044,17 +1033,16 @@ func TestGenerateMarkdownEnabled(t *testing.T) {
 // signal that every token after the command is a raw positional.
 func TestGeneratePassthrough(t *testing.T) {
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: mycli\n" +
-		"  summary: my cli\n" +
-		"  commands:\n" +
-		"    - name: exec\n" +
-		"      summary: run a wrapped command\n" +
-		"      passthrough: true\n" +
-		"      arguments:\n" +
-		"        - name: cmdline\n" +
-		"          summary: the wrapped command line\n" +
-		"          schema: { type: \"[]string\" }\n"
+		"name: mycli\n" +
+		"summary: my cli\n" +
+		"commands:\n" +
+		"  - name: exec\n" +
+		"    summary: run a wrapped command\n" +
+		"    passthrough: true\n" +
+		"    arguments:\n" +
+		"      - name: cmdline\n" +
+		"        summary: the wrapped command line\n" +
+		"        schema: { type: \"[]string\" }\n"
 	tmp := t.TempDir()
 	writeTestFile(t, filepath.Join(tmp, "go.mod"), minimalGoMod)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"), spec)
@@ -1069,18 +1057,17 @@ func TestGeneratePassthrough(t *testing.T) {
 }
 
 const countSpecYAML = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-	"command:\n" +
-	"  name: mycli\n" +
-	"  summary: my cli\n" +
-	"  commands:\n" +
-	"    - name: build\n" +
-	"      summary: build the project\n" +
-	"      flags:\n" +
-	"        - name: verbose\n" +
-	"          summary: chattier output, per occurrence\n" +
-	"          identifiers: [-v, --verbose]\n" +
-	"          schema:\n" +
-	"            type: count\n"
+	"name: mycli\n" +
+	"summary: my cli\n" +
+	"commands:\n" +
+	"  - name: build\n" +
+	"    summary: build the project\n" +
+	"    flags:\n" +
+	"      - name: verbose\n" +
+	"        summary: chattier output, per occurrence\n" +
+	"        identifiers: [-v, --verbose]\n" +
+	"        schema:\n" +
+	"          type: count\n"
 
 // A count flag generates an int field, a Type:"count" FlagDef (the parser's
 // signal that occurrences increment and no value is consumed), and a help row
@@ -1307,11 +1294,10 @@ func TestGenerateManVerbatim(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manConf)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n"+
-			"  name: mycli\n"+
-			"  man: |-\n"+
-			"    MYCLI(1)\n"+
-			"    exact man page\n")
+			"name: mycli\n"+
+			"man: |-\n"+
+			"  MYCLI(1)\n"+
+			"  exact man page\n")
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
@@ -1335,15 +1321,14 @@ func TestGenerateManExitStatusAndSeeAlso(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), manConf)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n"+
-			"  name: mycli\n"+
-			"  summary: a tool\n"+
-			"  exit_status:\n"+
-			"    - { code: 0, summary: success }\n"+
-			"    - { code: 2, summary: a usage error }\n"+
-			"  see_also:\n"+
-			"    - mycli-build(1)\n"+
-			"    - https://example.com/docs\n")
+			"name: mycli\n"+
+			"summary: a tool\n"+
+			"exit_status:\n"+
+			"  - { code: 0, summary: success }\n"+
+			"  - { code: 2, summary: a usage error }\n"+
+			"see_also:\n"+
+			"  - mycli-build(1)\n"+
+			"  - https://example.com/docs\n")
 
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
@@ -1367,15 +1352,14 @@ func TestGenerateStripsStylesPerSurface(t *testing.T) {
 	// The spec carries ANSI two ways: a rendered field (the root description,
 	// YAML \e escape → ESC) and verbatim feature pages on a sub-command.
 	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"command:\n" +
-		"  name: mycli\n" +
-		"  summary: a tool\n" +
-		"  description: \"\\e[1mBold desc\\e[0m\"\n" +
-		"  commands:\n" +
-		"    - name: build\n" +
-		"      summary: build it\n" +
-		"      man: \"\\e[1mMAN PAGE\\e[0m\"\n" +
-		"      markdown: \"# \\e[1mMD\\e[0m\"\n"
+		"name: mycli\n" +
+		"summary: a tool\n" +
+		"description: \"\\e[1mBold desc\\e[0m\"\n" +
+		"commands:\n" +
+		"  - name: build\n" +
+		"    summary: build it\n" +
+		"    man: \"\\e[1mMAN PAGE\\e[0m\"\n" +
+		"    markdown: \"# \\e[1mMD\\e[0m\"\n"
 	conf := confSchemaHeader + "generate:\n  features:\n" +
 		"    help:\n      enabled: true\n      embed: true\n      template: true\n" +
 		"    man:\n      enabled: true\n      embed: true\n      template: true\n" +
@@ -1424,11 +1408,10 @@ func TestGenerateHelpVerbatim(t *testing.T) {
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"), helpEnabledConf)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.spec.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
-			"command:\n"+
-			"  name: mycli\n"+
-			"  help: |-\n"+ // strip: no trailing newline
-			"    my exact help page\n"+
-			"    line two\n")
+			"name: mycli\n"+
+			"help: |-\n"+ // strip: no trailing newline
+			"  my exact help page\n"+
+			"  line two\n")
 	t.Chdir(tmp)
 	if err := Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "", nil); err != nil {
 		t.Fatalf("Generate: %v", err)
@@ -1533,9 +1516,9 @@ func readFileString(t *testing.T, path string) string {
 // specWith builds a minimal mycli spec declaring the given top-level commands.
 func specWith(commands ...string) string {
 	var b strings.Builder
-	b.WriteString("$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\ncommand:\n  name: mycli\n  commands:\n")
+	b.WriteString("$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: mycli\ncommands:\n")
 	for _, c := range commands {
-		b.WriteString("    - name: " + c + "\n")
+		b.WriteString("  - name: " + c + "\n")
 	}
 	return b.String()
 }
@@ -2137,7 +2120,6 @@ func TestGenerateHelpComposition(t *testing.T) {
 	tmp := initTestModule(t)
 
 	childSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"" +
 		"name: child\n" +
 		"summary: the child program\n" +
 		"description: A composed child.\n" +
@@ -2153,7 +2135,6 @@ func TestGenerateHelpComposition(t *testing.T) {
 			"  features: { help: { enabled: true, embed: true, template: true } }\n"
 	}
 	parentSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
-		"" +
 		"name: parent\n" +
 		"commands:\n" +
 		"  - $ref: ../child/.rotini.spec.yaml\n"

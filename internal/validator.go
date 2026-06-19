@@ -384,10 +384,10 @@ var specLints = []func(*Spec) []error{
 // via $ref. Generate enforces the same rule — validate is the gate.
 func lintRootCommand(spec *Spec) []error {
 	var problems []error
-	if spec.Command.Ref != "" {
+	if spec.Ref != "" {
 		problems = append(problems, &problem{kind: "spec", loc: "command", msg: "the root command cannot use $ref — compose child specs as sub-commands instead"})
 	}
-	if spec.Command.Name == "" {
+	if spec.Name == "" {
 		problems = append(problems, &problem{kind: "spec", loc: "command", msg: "the root command must have a name (it is the binary name)"})
 	}
 	return problems
@@ -432,13 +432,13 @@ func lintDocLevelKeys(spec *Spec) []error {
 // opt-in feature — never implied by root aliases.)
 func lintRootAliases(spec *Spec) []error {
 	var problems []error
-	if len(spec.Command.Aliases) > 0 {
+	if len(spec.Aliases) > 0 {
 		problems = append(problems, &problem{
 			kind: "spec", loc: "command",
 			msg: "the root command cannot declare aliases — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
 		})
 	}
-	if len(spec.Command.DeprecatedIdentifiers) > 0 {
+	if len(spec.DeprecatedIdentifiers) > 0 {
 		problems = append(problems, &problem{
 			kind: "spec", loc: "command",
 			msg: "the root command cannot declare deprecated_identifiers — with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
@@ -1138,7 +1138,7 @@ func walkCommands(spec *Spec, visit func(c *Command, path string)) {
 			walk(child, path+"/"+seg)
 		}
 	}
-	name := spec.Command.Name
+	name := spec.Name
 	if name == "" {
 		name = "(root)"
 	}
@@ -1179,7 +1179,7 @@ func walkChains(spec *Spec, visit func(chain []*Command, path string)) {
 			walk(child, chain, path+"/"+seg)
 		}
 	}
-	name := spec.Command.Name
+	name := spec.Name
 	if name == "" {
 		name = "(root)"
 	}
@@ -1466,7 +1466,7 @@ func lintSchemaRefs(spec *Spec) []error {
 // break the build. Composed ($ref) commands generate no stub here and are skipped — the
 // walk mirrors the generator's own-command derivation so the two agree.
 func lintHandlerFilenames(spec *Spec) []error {
-	rootName := spec.Command.Name
+	rootName := spec.Name
 	var problems []error
 	byFile := map[string]string{} // stub file name -> the command path that first produced it
 	var walk func(c *Command, path, display string)

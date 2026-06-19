@@ -36,8 +36,8 @@ func TestDetectFileFormat(t *testing.T) {
 // IS the root command (no "command:" wrapper — W3 reshape).
 func TestReadSpec_formatsAndTags(t *testing.T) {
 	docs := map[string]string{
-		".yaml":  "$schema: https://x/spec.json\nname: demo\ncommands:\n  - name: sub\n",
-		".json":  `{"$schema":"https://x/spec.json","name":"demo","commands":[{"name":"sub"}]}`,
+		".yaml": "$schema: https://x/spec.json\nname: demo\ncommands:\n  - name: sub\n",
+		".json": `{"$schema":"https://x/spec.json","name":"demo","commands":[{"name":"sub"}]}`,
 		".jsonc": "{\n  // leading comment\n  \"$schema\": \"https://x/spec.json\",\n" +
 			"  \"name\": \"demo\", \"commands\": [{\"name\": \"sub\"}],\n}\n",
 	}

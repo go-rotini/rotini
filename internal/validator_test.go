@@ -123,13 +123,14 @@ func TestValidate_singlePassRouting(t *testing.T) {
 }
 
 func TestValidate_missingRequiredField(t *testing.T) {
-	// Required "command" is absent at the document level.
+	// The document IS the root command, so required "name" is absent at the
+	// document level (W3 reshape — there is no "command" wrapper).
 	path := writeTemp(t, "spec.yaml", validSpecHeader)
 	err := validateOnce(path, "", "", "")
 	if err == nil {
-		t.Fatal("expected error for spec missing required command")
+		t.Fatal("expected error for spec missing required name")
 	}
-	if !strings.Contains(err.Error(), "command") {
+	if !strings.Contains(err.Error(), "name") {
 		t.Errorf("error does not mention the missing field: %v", err)
 	}
 }
@@ -149,7 +150,6 @@ func TestValidate_helpKeys(t *testing.T) {
 	// Flattened help fields on the root and on a command, plus input summaries
 	// and hidden/deprecated, all validate.
 	spec := validSpecHeader +
-		"" +
 		"name: demo\n" +
 		"summary: a demo\n" +
 		"description: A demo CLI.\n" +
@@ -177,7 +177,6 @@ func TestValidate_localTimeoutRejected(t *testing.T) {
 	// timeout on a (local) sub-command is a remote-only concept — validation rejects
 	// it (and the walk reaches nested commands).
 	spec := validSpecHeader +
-		"" +
 		"name: demo\n" +
 		"commands:\n" +
 		"  - name: run\n" +
@@ -240,17 +239,17 @@ func TestValidate_passthrough(t *testing.T) {
 	wrap := func(body string) string {
 		return validSpecHeader + "name: app\ncommands:\n  - name: exec\n    passthrough: true\n" + body
 	}
-	recv := "      arguments:\n        - name: cmdline\n          schema: { type: \"[]string\" }\n"
+	recv := "    arguments:\n      - name: cmdline\n        schema: { type: \"[]string\" }\n"
 	cases := []struct{ name, body, want string }{
-		{"flags rejected", recv + "      inputs2:\n", "declares flags"},
-		{"sub-commands rejected", recv + "      commands:\n        - name: sub\n", "never descends"},
+		{"flags rejected", recv + "    inputs2:\n", "declares flags"},
+		{"sub-commands rejected", recv + "    commands:\n      - name: sub\n", "never descends"},
 		{"missing receiver", "", "variadic []string"},
 		{"non-string receiver",
-			"      arguments:\n        - name: ns\n          schema: { type: array, items: { type: int } }\n",
+			"    arguments:\n      - name: ns\n        schema: { type: array, items: { type: int } }\n",
 			"variadic []string"},
 	}
 	// fix the "flags rejected" body: a passthrough command with both a flag and the receiver
-	cases[0].body = "      flags:\n        - name: x\n          schema: { type: string }\n      arguments:\n        - name: cmdline\n          schema: { type: \"[]string\" }\n"
+	cases[0].body = "    flags:\n      - name: x\n        schema: { type: string }\n    arguments:\n      - name: cmdline\n        schema: { type: \"[]string\" }\n"
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			err := validateOnce(writeTemp(t, "spec.yaml", wrap(c.body)), "", "", "")
@@ -261,7 +260,7 @@ func TestValidate_passthrough(t *testing.T) {
 	}
 
 	// The honest shape passes: a leading fixed argument plus the variadic receiver.
-	valid := wrap("      arguments:\n        - name: program\n          schema: { type: string, required: true }\n        - name: cmdline\n          schema: { type: \"[]string\" }\n")
+	valid := wrap("    arguments:\n      - name: program\n        schema: { type: string, required: true }\n      - name: cmdline\n        schema: { type: \"[]string\" }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(passthrough with receiver) = %v, want nil", err)
 	}
@@ -272,22 +271,22 @@ func TestValidate_passthrough(t *testing.T) {
 func TestValidate_countFlags(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"count on env input",
-			"  env:\n    - name: depth\n      schema: { type: count }\n",
+			"env:\n  - name: depth\n    schema: { type: count }\n",
 			"applies to flags only"},
 		{"count on argument",
-			"  arguments:\n    - name: depth\n      schema: { type: count }\n",
+			"arguments:\n  - name: depth\n    schema: { type: count }\n",
 			"applies to flags only"},
 		{"default on count",
-			"  flags:\n    - name: v\n      schema: { type: count, default: 2 }\n",
+			"flags:\n  - name: v\n    schema: { type: count, default: 2 }\n",
 			"do(es) not apply"},
 		{"enum on count",
-			"  flags:\n    - name: v\n      schema: { type: count, enum: [one, two] }\n",
+			"flags:\n  - name: v\n    schema: { type: count, enum: [one, two] }\n",
 			"do(es) not apply"},
 		{"bounds on count",
-			"  flags:\n    - name: v\n      schema: { type: count, maximum: 3 }\n",
+			"flags:\n  - name: v\n    schema: { type: count, maximum: 3 }\n",
 			"do(es) not apply"},
 		{"from on count",
-			"  flags:\n    - name: v\n      schema: { type: count, from: [stdin] }\n",
+			"flags:\n  - name: v\n    schema: { type: count, from: [stdin] }\n",
 			"do(es) not apply"},
 	}
 	for _, c := range cases {
@@ -334,11 +333,11 @@ func TestValidate_zeroBounds(t *testing.T) {
 	// pointers end to end, so an explicit zero bound is ACCEPTED and enforced —
 	// the old document-wide rejection is gone.
 	cases := []struct{ name, body string }{
-		{"flag minimum", "  flags:\n    - name: port\n      schema: { type: int, minimum: 0, maximum: 10 }\n"},
-		{"flag maximum", "  flags:\n    - name: delta\n      schema: { type: int, maximum: 0 }\n"},
+		{"flag minimum", "flags:\n  - name: port\n    schema: { type: int, minimum: 0, maximum: 10 }\n"},
+		{"flag maximum", "flags:\n  - name: delta\n    schema: { type: int, maximum: 0 }\n"},
 		{"named schema", "schemas:\n  Widget:\n    type: object\n    properties:\n      size: { type: integer, minimum: 0 }\n"},
-		{"stdin shape", "  stdin:\n    schema:\n      type: object\n      properties:\n        port: { type: integer, minimum: 0 }\n"},
-		{"exclusive zero", "  flags:\n    - name: rate\n      schema: { type: float64, exclusiveMinimum: 0 }\n"},
+		{"stdin shape", "stdin:\n  schema:\n    type: object\n    properties:\n      port: { type: integer, minimum: 0 }\n"},
+		{"exclusive zero", "flags:\n  - name: rate\n    schema: { type: float64, exclusiveMinimum: 0 }\n"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -436,7 +435,6 @@ func TestValidate_rootAliases(t *testing.T) {
 // key is now rejected, never silently ignored.
 func TestValidate_remoteDescriptionRejected(t *testing.T) {
 	spec := validSpecHeader +
-		"" +
 		"name: demo\n" +
 		"remote_commands:\n" +
 		"  - name: plugin\n" +
@@ -451,7 +449,6 @@ func TestValidate_remoteDescriptionRejected(t *testing.T) {
 func TestValidate_remoteTimeoutAccepted(t *testing.T) {
 	// timeout on a remote_commands entry (host-side) is valid.
 	spec := validSpecHeader +
-		"" +
 		"name: demo\n" +
 		"remote_commands:\n" +
 		"  - name: plugin\n" +
@@ -465,7 +462,6 @@ func TestValidate_remoteTimeoutAccepted(t *testing.T) {
 func TestValidate_dottedKeys(t *testing.T) {
 	// dotted_keys on a map[string]any flag is the valid shape.
 	valid := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: set\n" +
@@ -476,7 +472,6 @@ func TestValidate_dottedKeys(t *testing.T) {
 
 	// A typed-value map has nowhere to hang a subtree.
 	typed := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: set\n" +
@@ -488,7 +483,6 @@ func TestValidate_dottedKeys(t *testing.T) {
 
 	// dotted assignment is command-line grammar: flags only.
 	onEnv := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"env:\n" +
 		"  - name: overrides\n" +
@@ -501,9 +495,9 @@ func TestValidate_dottedKeys(t *testing.T) {
 
 func TestValidate_configurationFiles(t *testing.T) {
 	make_ := func(entry string) string {
-		// entry is a 2-space-indented config_files list; nest it under command.config_files (+2 spaces).
-		nested := "  " + strings.ReplaceAll(strings.TrimRight(entry, "\n"), "\n", "\n  ") + "\n"
-		return validSpecHeader + "name: app\nconfig_files:\n" + nested
+		// entry is a 2-space-indented config_files list, sitting directly under the
+		// document-level config_files key.
+		return validSpecHeader + "name: app\nconfig_files:\n" + entry
 	}
 	// Valid shapes: a fixed path, a walk-up discover, an xdg discover.
 	valid := make_("" +
@@ -537,17 +531,17 @@ func TestValidate_configInputFile(t *testing.T) {
 			"name: app\n" + inputs +
 			"config_files:\n  - name: app\n    path: ~/.app.yaml\n"
 	}
-	valid := make_("  config:\n    - name: endpoint\n      schema: { type: string, file: app, key: api.endpoint }\n")
+	valid := make_("config:\n  - name: endpoint\n    schema: { type: string, file: app, key: api.endpoint }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(pinned config input) = %v, want nil", err)
 	}
 
-	unknown := make_("  config:\n    - name: endpoint\n      schema: { type: string, file: nope }\n")
+	unknown := make_("config:\n  - name: endpoint\n    schema: { type: string, file: nope }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", unknown), "", "", ""); err == nil || !strings.Contains(err.Error(), "not a config_files entry in scope") {
 		t.Errorf("Validate(unknown pin) = %v, want a rejection", err)
 	}
 
-	wrongChannel := make_("  env:\n    - name: x\n      schema: { type: string, file: app }\n")
+	wrongChannel := make_("env:\n  - name: x\n    schema: { type: string, file: app }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", wrongChannel), "", "", ""); err == nil || !strings.Contains(err.Error(), "config inputs only") {
 		t.Errorf("Validate(file on env) = %v, want a config-only rejection", err)
 	}
@@ -642,15 +636,15 @@ func TestValidate_envNesting(t *testing.T) {
 	make_ := func(inputs string) string {
 		return validSpecHeader + "name: app\n" + inputs
 	}
-	valid := make_("  env:\n    - name: http\n      schema: { type: map, nesting: \"__\", variable: ACME_HTTP }\n")
+	valid := make_("env:\n  - name: http\n    schema: { type: map, nesting: \"__\", variable: ACME_HTTP }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(nesting on map env input) = %v, want nil", err)
 	}
 
 	cases := []struct{ name, inputs, want string }{
-		{"env only", "  flags:\n    - name: x\n      schema: { type: map, nesting: \"__\" }\n", "env inputs only"},
-		{"map typed", "  env:\n    - name: x\n      schema: { type: string, nesting: \"__\" }\n", "map"},
-		{"no default", "  env:\n    - name: x\n      schema: { type: map, nesting: \"__\", default: y }\n", "no single default"},
+		{"env only", "flags:\n  - name: x\n    schema: { type: map, nesting: \"__\" }\n", "env inputs only"},
+		{"map typed", "env:\n  - name: x\n    schema: { type: string, nesting: \"__\" }\n", "map"},
+		{"no default", "env:\n  - name: x\n    schema: { type: map, nesting: \"__\", default: y }\n", "no single default"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -669,25 +663,25 @@ func TestValidate_configSource(t *testing.T) {
 			"config_files:\n  - name: app\n    path: ~/.app.yaml\n"
 	}
 	valid := make_("" +
-		"  flags:\n    - name: config\n      schema: { type: string, config_source: app }\n" +
-		"  env:\n    - name: config_path\n      schema: { type: string, config_source: app }\n")
+		"flags:\n  - name: config\n    schema: { type: string, config_source: app }\n" +
+		"env:\n  - name: config_path\n    schema: { type: string, config_source: app }\n")
 	if err := validateOnce(writeTemp(t, "spec.yaml", valid), "", "", ""); err != nil {
 		t.Errorf("Validate(config_source on flag+env) = %v, want nil", err)
 	}
 
 	cases := []struct{ name, inputs, want string }{
 		{"unknown entry",
-			"  flags:\n    - name: c\n      schema: { type: string, config_source: nope }\n",
+			"flags:\n  - name: c\n    schema: { type: string, config_source: nope }\n",
 			"not a config_files entry in scope"},
 		{"flag and env only",
-			"  config:\n    - name: c\n      schema: { type: string, config_source: app }\n",
+			"config:\n  - name: c\n    schema: { type: string, config_source: app }\n",
 			"flag and env inputs only"},
 		{"string typed",
-			"  flags:\n    - name: c\n      schema: { type: int, config_source: app }\n",
+			"flags:\n  - name: c\n    schema: { type: int, config_source: app }\n",
 			"a file path is a string"},
 		{"one flag per entry",
-			"  flags:\n    - name: a\n      schema: { type: string, config_source: app }\n" +
-				"    - name: b\n      schema: { type: string, config_source: app }\n",
+			"flags:\n  - name: a\n    schema: { type: string, config_source: app }\n" +
+				"  - name: b\n    schema: { type: string, config_source: app }\n",
 			"already claimed"},
 	}
 	for _, c := range cases {
@@ -722,7 +716,6 @@ func TestValidate_configSource(t *testing.T) {
 func TestValidate_from(t *testing.T) {
 	// from: on a string flag is the valid shape (file + stdin).
 	valid := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: token\n" +
@@ -737,21 +730,21 @@ func TestValidate_from(t *testing.T) {
 		name, body, want string
 	}{
 		{"flags only",
-			"  env:\n    - name: token\n      schema: { type: string, from: [file] }\n",
+			"env:\n  - name: token\n    schema: { type: string, from: [file] }\n",
 			"flags only"},
 		{"never bool",
-			"  flags:\n    - name: loud\n      schema: { type: bool, from: [file] }\n",
+			"flags:\n  - name: loud\n    schema: { type: bool, from: [file] }\n",
 			"bool"},
 		{"stdin channel conflict",
-			"  flags:\n    - name: f\n      schema: { type: string, from: [stdin] }\n" +
-				"  stdin:\n    schema: { type: object }\n",
+			"flags:\n  - name: f\n    schema: { type: string, from: [stdin] }\n" +
+				"stdin:\n  schema: { type: object }\n",
 			"one consumer"},
 		{"two stdin flags conflict",
-			"  flags:\n    - name: a\n      schema: { type: string, from: [stdin] }\n" +
-				"    - name: b\n      schema: { type: string, from: [stdin] }\n",
+			"flags:\n  - name: a\n    schema: { type: string, from: [stdin] }\n" +
+				"  - name: b\n    schema: { type: string, from: [stdin] }\n",
 			"one consumer"},
 		{"unknown mode rejected by the schema",
-			"  flags:\n    - name: t\n      schema: { type: string, from: [filesystem] }\n",
+			"flags:\n  - name: t\n    schema: { type: string, from: [filesystem] }\n",
 			"not in enum"},
 	}
 	for _, c := range cases {
@@ -768,7 +761,6 @@ func TestValidate_from(t *testing.T) {
 func TestValidate_flagGroupUnknownFlag(t *testing.T) {
 	// A flag_groups entry referencing a flag the command doesn't declare is rejected.
 	spec := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: json\n" +
@@ -787,7 +779,6 @@ func TestValidate_danglingSchemaRef(t *testing.T) {
 	// A $ref to a schema the document doesn't declare is rejected (it would otherwise be
 	// an "undefined type" compile error in the generated code), with a suggestion.
 	spec := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"config:\n" +
 		"  - name: server\n" +
@@ -804,7 +795,6 @@ func TestValidate_danglingSchemaRef(t *testing.T) {
 
 	// A valid $ref to a declared schema passes.
 	ok := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"config:\n" +
 		"  - name: server\n" +
@@ -820,7 +810,6 @@ func TestValidate_danglingSchemaRef(t *testing.T) {
 func TestValidate_flagGroupSuggestion(t *testing.T) {
 	// A flag_groups reference that's a near-typo of a real flag gets a "did you mean".
 	spec := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: json\n" +
@@ -838,7 +827,6 @@ func TestValidate_flagDependencyUnknownFlag(t *testing.T) {
 	// A flag_dependencies entry whose 'requires' names a flag the command doesn't
 	// declare is rejected (the 'when' flag is checked the same way).
 	spec := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: tls\n" +
@@ -855,7 +843,6 @@ func TestValidate_flagDependencyUnknownFlag(t *testing.T) {
 func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 	// Two flags claiming the same explicit identifier (-o) on one command is rejected.
 	spec := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: output\n" +
@@ -872,7 +859,6 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 	// Auto-derived collision across spellings: "dry_run" and "dry-run" both
 	// derive --dry-run (the lint shares codegen's exact derivation).
 	mixed := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: dry_run\n" +
@@ -885,7 +871,6 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 
 	// Auto-derived collision: two flags whose names both yield --out (no identifiers).
 	spec2 := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: out\n" +
@@ -898,7 +883,6 @@ func TestValidate_duplicateFlagIdentifier(t *testing.T) {
 
 	// Distinct identifiers validate cleanly.
 	ok := validSpecHeader +
-		"" +
 		"name: app\n" +
 		"flags:\n" +
 		"  - name: output\n" +
@@ -1021,7 +1005,6 @@ func TestValidate_failModeFromConf(t *testing.T) {
 func TestValidate_importConsistency(t *testing.T) {
 	// Same type `foo.Bar` declared with two different imports → a consistency error.
 	bad := validSpecHeader +
-		"" +
 		"name: mycli\n" +
 		"flags:\n" +
 		"  - name: a\n" +
@@ -1040,7 +1023,6 @@ func TestValidate_importConsistency(t *testing.T) {
 
 	// The same type with the SAME import everywhere is fine.
 	ok := validSpecHeader +
-		"" +
 		"name: mycli\n" +
 		"flags:\n" +
 		"  - name: a\n" +
@@ -1175,7 +1157,7 @@ func TestValidate_newSpecLints(t *testing.T) {
 	cases := []struct {
 		name, spec, want string
 	}{
-		{"root with $ref", "$ref: ./other.yaml\n", "root command cannot use $ref"},
+		{"root with $ref", "name: app\n$ref: ./other.yaml\n", "root command cannot use $ref"},
 		{"sibling alias collision", "name: app\ncommands:\n  - name: build\n    aliases: [b]\n  - name: bundle\n    aliases: [b]\n", `"b" is claimed by both`},
 		{"remote shadowed by command", "name: app\ncommands:\n  - name: plugin\nremote_commands:\n  - name: plugin\n", `"plugin" is claimed by both`},
 		{"duplicate flag names", "name: app\nflags:\n  - name: out\n    identifiers: [-o]\n    schema: { type: string }\n  - name: out\n    identifiers: [-O]\n    schema: { type: bool }\n", `flag "out" is declared twice`},
@@ -1200,5 +1182,33 @@ func TestValidate_newSpecLints(t *testing.T) {
 	ok := validSpecHeader + "name: app\nflags:\n  - name: dry_run\n    deprecated_identifiers: [--dry-run]\n    schema: { type: bool }\n"
 	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
 		t.Errorf("validate(derived identifier subset) = %v, want nil", err)
+	}
+}
+
+// TestValidate_docLevelKeysOnSubcommand pins lintDocLevelKeys: the three
+// document-level keys ($schema, env_prefix, schemas) are valid only on the root
+// command (the document). The merged shape (W3) accepts them structurally on
+// every command, so the lint rejects them on a sub-command; the root is exempt.
+func TestValidate_docLevelKeysOnSubcommand(t *testing.T) {
+	schemaURL := "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json"
+	cases := []struct{ name, sub string }{
+		{"$schema", "    $schema: " + schemaURL + "\n"},
+		{"env_prefix", "    env_prefix: ACME\n"},
+		{"schemas", "    schemas:\n      Foo: { type: string }\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := validSpecHeader + "name: app\ncommands:\n  - name: sub\n" + tc.sub
+			err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "collect", "")
+			if err == nil || !strings.Contains(err.Error(), "document-level key valid only on the root command") {
+				t.Errorf("validate(%s on sub) = %v, want a doc-level-key rejection", tc.name, err)
+			}
+		})
+	}
+
+	// The same keys on the ROOT are fine.
+	root := validSpecHeader + "name: app\nenv_prefix: ACME\nschemas:\n  Foo: { type: string }\n"
+	if err := validateOnce(writeTemp(t, "ok.yaml", root), "", "", ""); err != nil {
+		t.Errorf("validate(doc-level keys on root) = %v, want nil", err)
 	}
 }

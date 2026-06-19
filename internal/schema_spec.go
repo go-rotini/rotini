@@ -112,7 +112,7 @@ type Command struct {
 	Man string `json:"man,omitempty"`
 	// Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it byte-for-byte; when unset, the page is rendered from the structured doc-fields through the markdown template.
 	Markdown string `json:"markdown,omitempty"`
-	// Command name used in routing. As the root command (the top-level 'command') this is the binary name and must be set — the root cannot use '$ref'.
+	// Command name used in routing. As the root command (the document itself) this is the binary name and must be set — the root cannot use '$ref'.
 	Name string `json:"name,omitempty"`
 	// This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handlers have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract.
 	Output *Schema `json:"output,omitempty"`

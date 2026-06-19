@@ -53,7 +53,7 @@
         "name": {
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
-          "description": "Command name used in routing. As the root command (the top-level 'command') this is the binary name and must be set — the root cannot use '$ref'."
+          "description": "Command name used in routing. As the root command (the document itself) this is the binary name and must be set — the root cannot use '$ref'."
         },
         "$ref": {
           "type": "string",

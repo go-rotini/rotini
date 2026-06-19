@@ -38,7 +38,7 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 // built-in conf defaults, then emits the cmd and cmdgen packages plus the enabled doc
 // features.
 func (s *session) generate() error {
-	applyConfDefaults(s.conf.conf, s.spec.spec.Command.Name)
+	applyConfDefaults(s.conf.conf, s.spec.spec.Name)
 	return generateAll(s.spec.spec, s.conf.conf, s.spec.path)
 }
 
