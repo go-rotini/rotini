@@ -1673,13 +1673,14 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName, version string) (
 		inputs:      []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
 	}
 
-	specDir := filepath.Dir(specPath)
-	seen := map[string]bool{}
-	if abs, err := filepath.Abs(specPath); err == nil {
-		seen[filepath.Clean(abs)] = true
+	absSpec := specPath
+	if a, err := filepath.Abs(specPath); err == nil {
+		absSpec = filepath.Clean(a)
 	}
+	base := filepath.Dir(absSpec) // the entry spec is always local; its dir is the base for relative refs
+	seen := map[string]bool{absSpec: true}
 
-	tree, err := gp.walk(root.Commands, "", specDir, moduleRoot, moduleName, seen, composeCtx{})
+	tree, err := gp.walk(root.Commands, "", base, moduleRoot, moduleName, seen, composeCtx{})
 	if err != nil {
 		return nil, err
 	}
@@ -1690,7 +1691,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName, version string) (
 	return gp, nil
 }
 
-func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
 	out := make([]rnode, 0, len(cmds))
 	for _, c := range cmds {
 		if c.Ref != "" {
@@ -1698,14 +1699,14 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 				// Transitive $ref: the direct child already composed this grandchild
 				// and exposes handler methods for it, so graft its tree here and
 				// delegate to the child (no new import) — see composeNestedRef.
-				nodes, err := gp.composeNestedRef(c, parentPath, specDir, moduleRoot, moduleName, seen, ctx)
+				nodes, err := gp.composeNestedRef(c, parentPath, base, moduleRoot, moduleName, seen, ctx)
 				if err != nil {
 					return nil, err
 				}
 				out = append(out, nodes...)
 				continue
 			}
-			node, err := gp.composeRef(c, parentPath, specDir, moduleRoot, moduleName, seen)
+			node, err := gp.composeRef(c, parentPath, base, moduleRoot, moduleName, seen)
 			if err != nil {
 				return nil, err
 			}
@@ -1744,7 +1745,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 			})
 		}
 
-		children, err := gp.walk(c.Commands, path, specDir, moduleRoot, moduleName, seen, ctx)
+		children, err := gp.walk(c.Commands, path, base, moduleRoot, moduleName, seen, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1847,34 +1848,36 @@ func overlayCommand(child, parent Command) Command {
 // commands delegate to the child; the authored siblings are own/new compositions). The
 // delegation always targets the child's real handler methods. Transitive $refs (a
 // composed child that itself $refs) are handled by composeNestedRef during the walk.
-func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool) (rnode, error) {
-	childSpecPath := filepath.Clean(filepath.Join(specDir, filepath.FromSlash(c.Ref)))
-	abs := childSpecPath
-	if a, err := filepath.Abs(childSpecPath); err == nil {
-		abs = filepath.Clean(a)
+func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, moduleName string, seen map[string]bool) (rnode, error) {
+	locator, err := locateRef(base, c.Ref)
+	if err != nil {
+		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	if seen[abs] {
+	if seen[locator] {
 		return rnode{}, fmt.Errorf("cyclic $ref: %q", c.Ref)
 	}
-	seen[abs] = true
-	defer delete(seen, abs)
+	seen[locator] = true
+	defer delete(seen, locator)
 
-	childSpec, err := readSpec(childSpecPath)
+	rr, err := loadRef(locator, moduleName)
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
 	// Cross-tree $schema guard (W8/D-W8.7): every composed spec MUST declare a rotini
 	// $schema that exactly matches the running version, so the whole composed tree
 	// provably shares one version. (Skipped only when gp.version is unset, e.g. tests.)
-	if err := checkComposedSchemaVersion(c.Ref, childSpec.Schema, gp.version); err != nil {
+	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Schema, gp.version); err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	childRoot := childSpec.Command
+	childRoot := rr.spec.Command
 	if childRoot.Name == "" {
 		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
 	}
 
-	imp := childCliImport(childSpecPath, moduleName)
+	// The handler import comes from the child's OWN module (the consuming module for a
+	// local ref, the external module for a mod:// ref) so an external child's handlers
+	// import from where they actually live.
+	imp := childCliImport(rr.dir, rr.module)
 	childPascal := toPascalCase(childRoot.Name)
 	alias := identAlias(childRoot.Name)
 	gp.addImport(alias, imp)
@@ -1895,16 +1898,16 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	gp.composed = append(gp.composed, composedCmd{prefix: prefix, delegateAlias: alias, delegateMethod: childPascal})
 
 	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: childPascal, alias: alias}
-	children, err := gp.walk(childRoot.Commands, composeRootPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
+	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleRoot, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
 	}
 	// Merge the `commands:` the parent authored next to the `$ref` (the croot/c3 case):
-	// they are NOT the child's — they resolve against the PARENT spec dir and are own
+	// they are NOT the child's — they resolve against the PARENT base and are own
 	// commands / new compositions (the outer, non-composed context), grafted alongside
 	// the child's own subtree. A name/alias collision across the merged set is an error.
 	if len(c.Commands) > 0 {
-		authored, err := gp.walk(c.Commands, composeRootPath, specDir, moduleRoot, moduleName, seen, composeCtx{})
+		authored, err := gp.walk(c.Commands, composeRootPath, base, moduleRoot, moduleName, seen, composeCtx{})
 		if err != nil {
 			return rnode{}, err
 		}
@@ -1925,26 +1928,25 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 // Parent overlay keys win, mirroring composeRef; any `commands:` authored next to the
 // nested `$ref` are merged additively (they resolve against the spec that holds the
 // nested ref and delegate to the same direct child, which already composed them).
-func (gp *genProgram) composeNestedRef(c Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
-	childSpecPath := filepath.Clean(filepath.Join(specDir, filepath.FromSlash(c.Ref)))
-	abs := childSpecPath
-	if a, err := filepath.Abs(childSpecPath); err == nil {
-		abs = filepath.Clean(a)
-	}
-	if seen[abs] {
-		return nil, fmt.Errorf("cyclic $ref: %q", c.Ref)
-	}
-	seen[abs] = true
-	defer delete(seen, abs)
-
-	gcSpec, err := readSpec(childSpecPath)
+func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+	locator, err := locateRef(base, c.Ref)
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	if err := checkComposedSchemaVersion(c.Ref, gcSpec.Schema, gp.version); err != nil {
+	if seen[locator] {
+		return nil, fmt.Errorf("cyclic $ref: %q", c.Ref)
+	}
+	seen[locator] = true
+	defer delete(seen, locator)
+
+	rr, err := loadRef(locator, moduleName)
+	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	gc := gcSpec.Command
+	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Schema, gp.version); err != nil {
+		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
+	}
+	gc := rr.spec.Command
 	if gc.Name == "" {
 		return nil, fmt.Errorf("composed spec %q has no name", c.Ref)
 	}
@@ -1956,19 +1958,19 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, specDir, moduleRoo
 	synth := overlayCommand(gc, c)
 	synth.Ref = ""
 	synth.Commands = gc.Commands // overlayCommand left Commands == gc's; siblings merge below
-	nodes, err := gp.walk([]Command{synth}, parentPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
+	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleRoot, moduleName, seen, ctx)
 	if err != nil {
 		return nil, err
 	}
 	// Merge `commands:` authored next to the nested `$ref`. Unlike the grandchild's own
-	// subtree, these resolve against THIS spec's dir (specDir) and delegate to the same
-	// direct child (the current composed ctx). Graft them as children of the grandchild.
+	// subtree, these resolve against THIS spec's base and delegate to the same direct
+	// child (the current composed ctx). Graft them as children of the grandchild.
 	if len(c.Commands) > 0 && len(nodes) == 1 {
 		siblingParent := synth.Name
 		if parentPath != "" {
 			siblingParent = parentPath + "_" + synth.Name
 		}
-		authored, err := gp.walk(c.Commands, siblingParent, specDir, moduleRoot, moduleName, seen, ctx)
+		authored, err := gp.walk(c.Commands, siblingParent, base, moduleRoot, moduleName, seen, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -1989,20 +1991,20 @@ func (gp *genProgram) addImport(alias, path string) {
 	gp.childImports = append(gp.childImports, templateHandlersImport{Alias: alias, Path: path})
 }
 
-// childCliImport resolves the import path of a composed child's cmd package —
-// the handler package that exposes Handlers() — reading the child's conf when
-// present and falling back to the default internal/cmd/<child> convention (named
-// after the child's source directory).
-func childCliImport(childSpecPath, moduleName string) string {
-	childDir := filepath.Dir(childSpecPath)
+// childCliImport resolves the import path of a composed child's cmd package — the
+// handler package that exposes Handlers() — within the module the child belongs to
+// (the consuming module for a local ref, the external module for a mod:// ref). It
+// reads the child's conf (in childDir) for the cmd package, falling back to the default
+// internal/cmd/<child> convention (named after the child's directory).
+func childCliImport(childDir, module string) string {
 	if confPath, err := discoverConf(childDir); err == nil {
 		cc, err := readConf(confPath)
 		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
 			cc.Generate.Packages.Cmd != nil && cc.Generate.Packages.Cmd.Package != "" {
-			return moduleName + "/" + filepath.ToSlash(cc.Generate.Packages.Cmd.Package)
+			return module + "/" + filepath.ToSlash(cc.Generate.Packages.Cmd.Package)
 		}
 	}
-	return moduleName + "/internal/cmd/" + filepath.Base(childDir)
+	return module + "/internal/cmd/" + filepath.Base(childDir)
 }
 
 // identAlias derives a valid, reasonably unique Go import alias from a command

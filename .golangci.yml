@@ -118,13 +118,18 @@ linters:
     # source + the project tree it scaffolds. Generated files are meant to be
     # readable/committable, so the codegen deliberately uses conventional 0755
     # dirs / 0644 files (G301/G306) rather than gosec's hardened 0750/0600. G115
-    # (integer overflow) finds nothing actionable here.
+    # (integer overflow) finds nothing actionable here. G204 (subprocess from
+    # non-constant args) is intentional and core: rotini dispatches remote-binary
+    # sub-commands (remote.go) and resolves external `$ref` specs through the Go
+    # toolchain (`go mod download`, refresolve.go) — both shell out to a known
+    # program with declared, non-shell args by design.
     gosec:
       excludes:
         - G304
         - G115
         - G301
         - G306
+        - G204
 
     nakedret:
       max-func-lines: 10

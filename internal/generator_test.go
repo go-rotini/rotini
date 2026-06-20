@@ -1967,6 +1967,63 @@ commands:
 	}
 }
 
+// TestGenerate_modRefCompose pins external `mod://` composition (W8/D-W8.4a): a parent
+// composes a spec from another Go module, resolved through the module cache (stubbed
+// here). The tree composes AND the handler delegation imports from the EXTERNAL module's
+// cli package — the cross-module wiring that makes an external `$ref` executable.
+func TestGenerate_modRefCompose(t *testing.T) {
+	tmp := initTestModule(t) // module example.com/myclis, chdir'd
+	conf := func(dir string) string {
+		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+			"generate:\n  packages:\n    cmd:\n      package: cmd/" + dir + "/rth\n      file: handlers.go\n" +
+			"    cmdgen:\n      package: cmd/" + dir + "/rtg\n      file: rotini.go\n"
+	}
+
+	// The "external module" stands in for what `go mod download` would extract into the
+	// module cache: a generated rotini cli with its spec + conf.
+	ext := t.TempDir()
+	writeTestFile(t, filepath.Join(ext, "deploy", ".rotini.spec.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"+
+			"name: deploy\ncommands:\n  - name: up\n    arguments:\n      - name: target\n        schema: { type: string }\n")
+	writeTestFile(t, filepath.Join(ext, "deploy", ".rotini.conf.yaml"),
+		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n"+
+			"generate:\n  packages:\n    cmd:\n      package: deploy/rth\n      file: handlers.go\n")
+	orig := moduleDirFunc
+	moduleDirFunc = func(module, version string) (string, error) {
+		if module == "ext.com/clis" && version == "v1.0.0" {
+			return ext, nil
+		}
+		return "", fmt.Errorf("unexpected module %s@%s", module, version)
+	}
+	defer func() { moduleDirFunc = orig }()
+
+	parentSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+name: app
+commands:
+  - $ref: mod://ext.com/clis@v1.0.0/deploy/.rotini.spec.yaml
+`
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), parentSpec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf("app"))
+
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "0.0.0", nil); err != nil {
+		t.Fatalf("generate (mod:// compose): %v", err)
+	}
+
+	// The external "deploy" subtree is composed into app's framework + Definition.
+	rtg := filepath.Join(tmp, "cmd/app/rtg/rotini.go")
+	mustContain(t, rtg,
+		"AppDeploy() rotini.CommandHandlers", `Name: "deploy"`,
+		"AppDeployUp() rotini.CommandHandlers", `Name: "up"`,
+		`{Name: "target", Type: "string"}`,
+	)
+	// The rollup delegates to the EXTERNAL module's cli package (not the consumer's).
+	mustContain(t, filepath.Join(tmp, "cmd/app/rth/handlers.go"),
+		`"ext.com/clis/deploy/rth"`,
+		"Handlers().Deploy()",
+		"Handlers().DeployUp()",
+	)
+}
+
 func TestGenerate_cyclicRefErrors(t *testing.T) {
 	tmp := initTestModule(t)
 	// A spec that composes itself — the simplest cycle.
@@ -2929,21 +2986,20 @@ func TestChildCliImport(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, ".rotini.conf.yaml"),
 		"generate:\n  packages:\n    cmd:\n      package: custom/handlers\n")
-	specPath := filepath.Join(dir, ".rotini.spec.yaml")
-	if got := childCliImport(specPath, "example.com/mod"); got != "example.com/mod/custom/handlers" {
+	if got := childCliImport(dir, "example.com/mod"); got != "example.com/mod/custom/handlers" {
 		t.Errorf("childCliImport(with conf) = %q", got)
 	}
 
 	// A conf without a cmd package falls through to the convention.
 	dir2 := t.TempDir()
 	writeTestFile(t, filepath.Join(dir2, ".rotini.conf.yaml"), "validate:\n  fail: collect\n")
-	if got := childCliImport(filepath.Join(dir2, ".rotini.spec.yaml"), "example.com/mod"); got != "example.com/mod/internal/cmd/"+filepath.Base(dir2) {
+	if got := childCliImport(dir2, "example.com/mod"); got != "example.com/mod/internal/cmd/"+filepath.Base(dir2) {
 		t.Errorf("childCliImport(conf without cmd) = %q", got)
 	}
 
 	// No conf at all also falls through.
 	dir3 := t.TempDir()
-	if got := childCliImport(filepath.Join(dir3, ".rotini.spec.yaml"), "example.com/mod"); got != "example.com/mod/internal/cmd/"+filepath.Base(dir3) {
+	if got := childCliImport(dir3, "example.com/mod"); got != "example.com/mod/internal/cmd/"+filepath.Base(dir3) {
 		t.Errorf("childCliImport(no conf) = %q", got)
 	}
 
@@ -2951,7 +3007,7 @@ func TestChildCliImport(t *testing.T) {
 	dir4 := t.TempDir()
 	writeTestFile(t, filepath.Join(dir4, ".rotini.conf.toml"),
 		"[generate.packages.cmd]\npackage = \"toml/handlers\"\n")
-	if got := childCliImport(filepath.Join(dir4, ".rotini.spec.yaml"), "example.com/mod"); got != "example.com/mod/toml/handlers" {
+	if got := childCliImport(dir4, "example.com/mod"); got != "example.com/mod/toml/handlers" {
 		t.Errorf("childCliImport(toml conf) = %q", got)
 	}
 }
