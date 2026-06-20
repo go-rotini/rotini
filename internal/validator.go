@@ -472,6 +472,7 @@ var specLints = []func(*Spec) []error{
 	lintRootAliases,
 	lintDocLevelKeys,
 	lintRefNodeKeys,
+	lintHandlerSource,
 	lintImportConsistency,
 	lintLocalTimeout,
 	lintFlagGroups,
@@ -598,6 +599,25 @@ func lintRefNodeKeys(spec *Spec) []error {
 		}
 		if c.Passthrough {
 			reject("passthrough")
+		}
+	})
+	return problems
+}
+
+// lintHandlerSource enforces where a `handler:` (W9 package-import passthrough) may
+// appear: today only on a `$ref` node, where it supplies the handlers a composed
+// external spec can't provide itself (required for a git/raw `$ref`, an override for
+// local/mod://). On a non-`$ref` command it has no consumer yet (inline-command
+// passthrough is unwired), so — per the no-silently-ignored-key invariant — it is
+// rejected rather than dropped.
+func lintHandlerSource(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		if c.Handler != nil && c.Ref == "" {
+			problems = append(problems, &problem{
+				kind: "spec", loc: "command " + path,
+				msg: "sets handler: but is not a $ref node — handler: is currently supported only on a $ref node (to source a composed external spec's handlers); inline-command passthrough is not yet wired",
+			})
 		}
 	})
 	return problems

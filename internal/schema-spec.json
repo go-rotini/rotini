@@ -233,6 +233,31 @@
         "markdown": {
           "type": "string",
           "description": "Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it byte-for-byte; when unset, the page is rendered from the structured doc-fields through the markdown template."
+        },
+        "handler": {
+          "$ref": "#/definitions/HandlerSource",
+          "description": "Source this command's handlers from an external Go PACKAGE instead of a generated stub (W9 handler-code composition). Currently valid on a '$ref' node only: it supplies the handlers a composed external spec can't provide itself — REQUIRED for a git/raw '$ref' (a fetched spec is not an importable Go package), and an override for a local/mod:// '$ref' (use this package's handlers instead of the auto-derived child cli). The package must export a constructor '<convention>() rotini.CommandHandlers' per command in the subtree (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates to it like an own composed command. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package."
+        }
+      }
+    },
+    "HandlerSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "import",
+        "convention"
+      ],
+      "description": "Where a command's handlers come from when they are not a generated stub: a Go package (handler-code passthrough). The package's typed inputs live with it; this spec contributes only the command tree.",
+      "properties": {
+        "import": {
+          "type": "string",
+          "description": "Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deploycli github.com/acme/clis/deploy/rth'); deduped with other imports. A bare path derives its alias from the last segment. Codegen calls '<alias>.<convention>()'.",
+          "pattern": "^[^\\s]+( [^\\s]+)?$"
+        },
+        "convention": {
+          "type": "string",
+          "description": "Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.CommandHandlers. PascalCase Go-exportable identifier.",
+          "pattern": "^[A-Z][A-Za-z0-9_]*$"
         }
       }
     },

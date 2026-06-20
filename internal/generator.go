@@ -1154,6 +1154,7 @@ func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
 		methods = append(methods, templateHandlersMethod{
 			Method:         c.prefix,
 			Composed:       true,
+			Passthrough:    c.passthrough,
 			DelegateAlias:  c.delegateAlias,
 			DelegateMethod: c.delegateMethod,
 		})
@@ -1422,6 +1423,17 @@ func builtinImport(rotiniType string) string {
 	return ""
 }
 
+// parseAliasPath splits the `alias path` external-Go-binding form (shared by an input
+// type's `import:` and a command's `handler.import` — D-W9.5) into its alias and path;
+// a bare path derives its alias from the last segment.
+func parseAliasPath(imp string) (alias, importPath string) {
+	imp = strings.TrimSpace(imp)
+	if a, p, ok := strings.Cut(imp, " "); ok {
+		return strings.TrimSpace(a), strings.TrimSpace(p)
+	}
+	return identAlias(filepath.Base(imp)), imp
+}
+
 // renderImports turns a set of spec `import:` values into sorted Go import specs:
 // a plain path becomes "path"; the aliased form "alias path" becomes alias "path".
 func renderImports(set map[string]bool) []string {
@@ -1598,19 +1610,23 @@ type rnode struct {
 }
 
 // composedCmd is a command supplied by a composed child: the parent's rollup
-// method (prefix) delegates to delegateAlias.delegateMethod().
+// method (prefix) delegates to delegateAlias.delegateMethod(). When passthrough is
+// set (W9 handler-code composition), the call is alias.method() — the package exports
+// the constructor directly; otherwise it is alias.Handlers().method() (a generated cli).
 type composedCmd struct {
 	prefix         string
 	delegateAlias  string
 	delegateMethod string
+	passthrough    bool
 }
 
 // composeCtx threads composition state down a composed subtree.
 type composeCtx struct {
 	composed    bool
 	rootPath    string // underscore path of the composed subtree's root in the parent
-	childPascal string // PascalCase of the composed child's own root name
-	alias       string // import alias of the composed child's cli package
+	childPascal string // root method name the subtree delegates under (child's name, or the handler convention)
+	alias       string // import alias of the handler package (composed child cli, or a W9 passthrough package)
+	passthrough bool   // delegate via alias.method() (W9 passthrough) instead of alias.Handlers().method()
 }
 
 // resolveTree resolves spec into a genProgram, loading any `$ref`'d child specs
@@ -1729,6 +1745,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleRoot, moduleN
 				prefix:         prefix,
 				delegateAlias:  ctx.alias,
 				delegateMethod: ctx.childPascal + toPascalCase(rel),
+				passthrough:    ctx.passthrough,
 			})
 		} else {
 			gp.own = append(gp.own, genCommand{
@@ -1869,30 +1886,34 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Schema, gp.version); err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	// An external git/raw spec is not a Go package, so its handlers can't be imported +
-	// delegated like a local or mod:// child's — that wiring is the W9 package-import
-	// passthrough. The lock/cache resolution exists (loadRef above), but composing one
-	// into generated code is gated until W9 supplies the handler source.
-	if isExternalLocator(locator) {
-		return rnode{}, fmt.Errorf("compose %q: external git/raw $ref composition is not yet supported — it needs a handler source (the W9 passthrough); use a local or mod:// $ref", c.Ref)
-	}
 	childRoot := rr.spec.Command
 	if childRoot.Name == "" {
 		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
 	}
 
-	// The handler import comes from the child's OWN module (the consuming module for a
-	// local ref, the external module for a mod:// ref) so an external child's handlers
-	// import from where they actually live.
-	imp := childCliImport(rr.dir, rr.module)
-	childPascal := toPascalCase(childRoot.Name)
-	alias := identAlias(childRoot.Name)
-	gp.addImport(alias, imp)
+	// Resolve the handler source for the composed subtree (W9). An explicit `handler:`
+	// (the package-import passthrough) wins: handlers come from the declared package via
+	// alias.<Convention>(). Otherwise a local/mod:// child auto-delegates to its own
+	// generated cli (alias.Handlers().<Name>()). A git/raw spec is not a Go package, so
+	// without a `handler:` there is nothing to delegate to — that is an error.
+	var alias, delegateRoot string
+	var passthrough bool
+	switch {
+	case c.Handler != nil:
+		a, p := parseAliasPath(c.Handler.Import)
+		alias, delegateRoot, passthrough = a, c.Handler.Convention, true
+		gp.addImport(a, p)
+	case isExternalLocator(locator):
+		return rnode{}, fmt.Errorf("compose %q: an external git/raw $ref needs a `handler:` — a fetched spec is not an importable Go package, so declare handler.import + handler.convention to source its handlers", c.Ref)
+	default:
+		alias = identAlias(childRoot.Name)
+		delegateRoot = toPascalCase(childRoot.Name)
+		gp.addImport(alias, childCliImport(rr.dir, rr.module))
+	}
 
 	// Overlay the parent's $ref-node keys onto the child (parent wins when present).
 	// The grafted command is named after the child's root unless the ref overrides it;
-	// the override changes only the parent-side name/path/method, never the delegation
-	// target (which is always the child's real handler).
+	// the override changes only the parent-side name/path, never the delegation target.
 	merged := overlayCommand(childRoot, c)
 	graftName := merged.Name
 	composeRootPath := graftName
@@ -1901,10 +1922,9 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	}
 	prefix := gp.rootPascal + toPascalCase(composeRootPath)
 
-	// The composed subtree root delegates to the child's own root handler.
-	gp.composed = append(gp.composed, composedCmd{prefix: prefix, delegateAlias: alias, delegateMethod: childPascal})
+	gp.composed = append(gp.composed, composedCmd{prefix: prefix, delegateAlias: alias, delegateMethod: delegateRoot, passthrough: passthrough})
 
-	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: childPascal, alias: alias}
+	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough}
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleRoot, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err

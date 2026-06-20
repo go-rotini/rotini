@@ -23,7 +23,9 @@ func Handlers() {{.FrameworkQual}}ProgramHandlers {
 {{- range .Methods}}
 
 func (*handlers) {{.Method}}() rotini.CommandHandlers {
-{{- if .Composed}}
+{{- if .Passthrough}}
+	return {{.DelegateAlias}}.{{.DelegateMethod}}()
+{{- else if .Composed}}
 	return {{.DelegateAlias}}.Handlers().{{.DelegateMethod}}()
 {{- else}}
 	return &{{.HandlerType}}{}

@@ -196,9 +196,10 @@ type templateHandlersImport struct {
 type templateHandlersMethod struct {
 	Method         string
 	Composed       bool
+	Passthrough    bool   // W9: delegate via alias.method() instead of alias.Handlers().method()
 	HandlerType    string // own commands: the local handler struct name
 	DelegateAlias  string // composed commands: the child import alias
-	DelegateMethod string // composed commands: the child's ProgramHandlers method
+	DelegateMethod string // composed commands: the child's ProgramHandlers method (or W9 convention)
 }
 
 type templateHandlersData struct {

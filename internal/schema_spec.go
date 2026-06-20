@@ -100,6 +100,8 @@ type Command struct {
 	Footer string `json:"footer,omitempty"`
 	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only.
 	Group string `json:"group,omitempty"`
+	// Source this command's handlers from an external Go PACKAGE instead of a generated stub (W9 handler-code composition). Currently valid on a '$ref' node only: it supplies the handlers a composed external spec can't provide itself — REQUIRED for a git/raw '$ref' (a fetched spec is not an importable Go package), and an override for a local/mod:// '$ref' (use this package's handlers instead of the auto-derived child cli). The package must export a constructor '<convention>() rotini.CommandHandlers' per command in the subtree (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates to it like an own composed command. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package.
+	Handler *HandlerSource `json:"handler,omitempty"`
 	// Text rendered above the description block. Ignored when 'help' is set.
 	Header string `json:"header,omitempty"`
 	// Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set.
@@ -225,6 +227,14 @@ type FlagInput struct {
 	Schema *InputSchema `json:"schema,omitempty"`
 	// Short one-liner shown next to this flag in the Flags section of generated help.
 	Summary string `json:"summary,omitempty"`
+}
+
+// Where a command's handlers come from when they are not a generated stub: a Go package (handler-code passthrough). The package's typed inputs live with it; this spec contributes only the command tree.
+type HandlerSource struct {
+	// Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.CommandHandlers. PascalCase Go-exportable identifier.
+	Convention string `json:"convention"`
+	// Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deploycli github.com/acme/clis/deploy/rth'); deduped with other imports. A bare path derives its alias from the last segment. Codegen calls '<alias>.<convention>()'.
+	Import string `json:"import"`
 }
 
 // Section heading overrides for generated help pages.
