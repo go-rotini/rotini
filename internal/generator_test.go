@@ -2024,6 +2024,43 @@ commands:
 	)
 }
 
+// TestGenerate_gitRefLockedThenGated pins the D-W8.4b read path + the W8/W9 boundary:
+// a locked+cached git:: spec resolves hermetically (lock lookup + hash verify), but
+// composing it into generated code is gated until W9 supplies the handler source; an
+// UNLOCKED git:: ref instead points the author at `rotini mod`.
+func TestGenerate_gitRefLockedThenGated(t *testing.T) {
+	tmp := initTestModule(t) // module root = tmp, chdir'd
+	locator := "git::https://github.com/acme/clis@v1/deploy/.rotini.spec.yaml"
+	childSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\nname: deploy\n"
+	h := hashBytes([]byte(childSpec))
+
+	parentSpec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"name: app\ncommands:\n  - $ref: \"" + locator + "\"\n"
+	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+		"generate:\n  packages:\n    cmd:\n      package: cmd/app/rth\n      file: handlers.go\n" +
+		"    cmdgen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), parentSpec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
+
+	// Unlocked → the actionable "run rotini mod" guidance.
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "0.0.0", nil); err == nil ||
+		!strings.Contains(err.Error(), "run `rotini mod`") {
+		t.Fatalf("generate(unlocked git:: ref) = %v, want a run-rotini-mod error", err)
+	}
+
+	// Pin + cache it (as `rotini mod` will) → resolution succeeds, then the W9 gate fires.
+	if err := writeLockfile(tmp, map[string]lockEntry{locator: {revision: "abc", hash: h, format: formatYAML, schema: "0.0.0"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cacheWrite(tmp, h, []byte(childSpec)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "0.0.0", nil); err == nil ||
+		!strings.Contains(err.Error(), "not yet supported") {
+		t.Fatalf("generate(locked git:: ref) = %v, want the W9-gated error", err)
+	}
+}
+
 func TestGenerate_cyclicRefErrors(t *testing.T) {
 	tmp := initTestModule(t)
 	// A spec that composes itself — the simplest cycle.

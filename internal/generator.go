@@ -1859,7 +1859,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	seen[locator] = true
 	defer delete(seen, locator)
 
-	rr, err := loadRef(locator, moduleName)
+	rr, err := loadRef(locator, moduleName, moduleRoot)
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
@@ -1868,6 +1868,13 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	// provably shares one version. (Skipped only when gp.version is unset, e.g. tests.)
 	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Schema, gp.version); err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
+	}
+	// An external git/raw spec is not a Go package, so its handlers can't be imported +
+	// delegated like a local or mod:// child's — that wiring is the W9 package-import
+	// passthrough. The lock/cache resolution exists (loadRef above), but composing one
+	// into generated code is gated until W9 supplies the handler source.
+	if isExternalLocator(locator) {
+		return rnode{}, fmt.Errorf("compose %q: external git/raw $ref composition is not yet supported — it needs a handler source (the W9 passthrough); use a local or mod:// $ref", c.Ref)
 	}
 	childRoot := rr.spec.Command
 	if childRoot.Name == "" {
@@ -1939,12 +1946,15 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleRoot, 
 	seen[locator] = true
 	defer delete(seen, locator)
 
-	rr, err := loadRef(locator, moduleName)
+	rr, err := loadRef(locator, moduleName, moduleRoot)
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
 	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Schema, gp.version); err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
+	}
+	if isExternalLocator(locator) {
+		return nil, fmt.Errorf("compose %q: external git/raw $ref composition is not yet supported — it needs a handler source (the W9 passthrough); use a local or mod:// $ref", c.Ref)
 	}
 	gc := rr.spec.Command
 	if gc.Name == "" {
