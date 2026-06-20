@@ -122,7 +122,9 @@ linters:
     # non-constant args) is intentional and core: rotini dispatches remote-binary
     # sub-commands (remote.go) and resolves external `$ref` specs through the Go
     # toolchain (`go mod download`, refresolve.go) — both shell out to a known
-    # program with declared, non-shell args by design.
+    # program with declared, non-shell args by design. G107 (request to a variable
+    # URL) is likewise intentional: `rotini mod` fetches raw-URL `$ref` specs the
+    # author declared (modfetch.go), pinning each to a content hash in the lock.
     gosec:
       excludes:
         - G304
@@ -130,6 +132,7 @@ linters:
         - G301
         - G306
         - G204
+        - G107
 
     nakedret:
       max-func-lines: 10

@@ -78,8 +78,15 @@ func readLockfile(moduleRoot string) (map[string]lockEntry, error) {
 }
 
 // writeLockfile writes ref→entry deterministically (sorted by ref) so the file is
-// review- and merge-friendly.
+// review- and merge-friendly. An empty set prunes any existing lock rather than
+// leaving a header-only file (no external refs → no lock, like go.sum).
 func writeLockfile(moduleRoot string, entries map[string]lockEntry) error {
+	if len(entries) == 0 {
+		if err := os.Remove(lockfilePath(moduleRoot)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s: %w", lockfileName, err)
+		}
+		return nil
+	}
 	refs := make([]string, 0, len(entries))
 	for ref := range entries {
 		refs = append(refs, ref)

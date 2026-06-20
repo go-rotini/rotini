@@ -167,6 +167,27 @@ commands:
           - --help
         schema:
           type: bool
+  - name: mod
+    summary: fetch and pin external spec refs
+    description: Fetch every external (git/raw) spec referenced by $ref and pin each to an immutable revision and content hash, writing the .rotini.lock and content-addressed cache. Run this whenever an external $ref is added or its target moves; generate and validate then read the lock and cache without touching the network.
+    examples:
+      - rotini mod
+      - rotini mod ./path/to/.rotini.spec.yaml
+    footer: Use "rotini help <command>" for more information about a command.
+    arguments:
+      - name: spec_file_path
+        summary: path to the spec file
+        schema:
+          type: string
+          default: .rotini.spec.yaml
+    flags:
+      - name: help
+        summary: print help
+        identifiers:
+          - -h
+          - --help
+        schema:
+          type: bool
   - name: help
     summary: print help
     description: Print help for a specific command.
