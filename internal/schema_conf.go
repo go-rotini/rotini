@@ -14,17 +14,17 @@ type Conf struct {
 	Validate *ValidateConfig `json:"validate,omitempty"`
 }
 
-// A rendered/derived codegen feature: a toggle plus the output directory (under the cmdgen package) where its files live and are embedded.
+// A rendered/derived codegen feature: a toggle (enabled) plus two orthogonal sourcing knobs — embed (//go:embed a rendered file in 'embed_dir' vs an inline string literal) and template (seed the editable rendering template into 'template_dir' vs render from the built-in).
 type Feature struct {
-	// How this feature's generated content is sourced into the cmdgen Go file. true: the rendered content is written to a file under 'dir' and the Go var is backed by a //go:embed directive. false (the default): no output file is written — the Go var is a hardcoded string literal holding the content inline, so the generated .go is self-contained. Var names and the resolver are identical either way.
+	// How this feature's generated content is sourced into the cmdgen Go file. true: the rendered content is written to a file under 'embed_dir' and the Go var is backed by a //go:embed directive. false (the default): no output file is written — the Go var is a hardcoded string literal holding the content inline, so the generated .go is self-contained. Var names and the resolver are identical either way.
 	Embed bool `json:"embed,omitempty"`
-	// Directory (relative to the module root) where this feature's rendered OUTPUT files (help_*.txt / man_*.txt / markdown_*.md / completion_<shell>.txt) are written in embed mode (embed: true) and sourced via //go:embed — so in embed mode it MUST resolve under the cmdgen package (//go:embed cannot reach outside it). In inline mode (embed: false) no output files are written and this is unused. Defaults to '<cmdgen-package>/renders'.
+	// Directory (relative to the module root) where this feature's rendered OUTPUT files (help_*.txt / man_*.txt / markdown_*.md / completion_<shell>.txt) are written in embed mode (embed: true) and sourced via //go:embed — so in embed mode it MUST resolve under the cmdgen package (//go:embed cannot reach outside it). In inline mode (embed: false) no output files are written and this is unused — rotini validation WARNS (non-fatal) if you set it there. Defaults to '<cmdgen-package>/renders'.
 	EmbedDir string `json:"embed_dir,omitempty"`
 	// When true, rotini generates this feature's outputs into the cmdgen package and emits the embed vars + resolver. Opt-in only.
 	Enabled bool `json:"enabled,omitempty"`
-	// Whether the editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded into 'dir' for customization. true: the template is seeded when missing and pages render from it. false (the default): no template is seeded and pages render from rotini's built-in default. Ignored for completion (which has no template). A template you have already edited is never pruned — flipping this to false leaves it in place but inert.
+	// Whether the editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded into 'template_dir' for customization. true: the template is seeded when missing and pages render from it. false (the default): no template is seeded and pages render from rotini's built-in default. Has no effect on completion (which has no editable template) — rotini validation WARNS if you set it there. A template you have already edited is never pruned — flipping this to false leaves it in place but inert.
 	Template bool `json:"template,omitempty"`
-	// Directory (relative to the module root) where this feature's editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded when template: true. Templates are never //go:embed'd, so this is unconstrained — it may resolve anywhere. Ignored for completion (no template) and in template:false mode. Defaults to '<cmdgen-package>/templates'.
+	// Directory (relative to the module root) where this feature's editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded when template: true. Templates are never //go:embed'd, so this is unconstrained — it may resolve anywhere. Unused when no template is seeded (template: false, or completion which has none) — rotini validation WARNS (non-fatal) if you set it there. Defaults to '<cmdgen-package>/templates'.
 	TemplateDir string `json:"template_dir,omitempty"`
 }
 
@@ -42,7 +42,7 @@ type FeaturesConfig struct {
 
 // Controls `rotini generate`: where the generated code is written ('packages') and which derived doc/completion outputs are emitted ('features').
 type GenerateConfig struct {
-	// The derived codegen outputs (help/man/completion), each an opt-in toggle plus its rotini-managed embed directory.
+	// The derived codegen outputs (help/man/markdown/completion), each an opt-in toggle plus its rotini-managed embed/template directories.
 	Features *FeaturesConfig `json:"features,omitempty"`
 	// Where the generated code is written: the entrypoint main.go, the handler-logic package (cmd), and the generated-framework package (cmdgen).
 	Packages *PackagesConfig `json:"packages,omitempty"`
@@ -66,7 +66,7 @@ type PackageConfig struct {
 	Package string `json:"package,omitempty"`
 }
 
-// The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'entrypoint', when declared, is where generate writes the binary's main.go (create-once: never overwritten).
+// The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/markdown/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'entrypoint', when declared, is where generate writes the binary's main.go (create-once: never overwritten).
 type PackagesConfig struct {
 	// The handler-logic package: the per-command stubs and the rollup (handlers struct, Program, Handlers()).
 	Cmd *PackageConfig `json:"cmd,omitempty"`

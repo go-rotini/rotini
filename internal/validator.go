@@ -281,6 +281,7 @@ func checkSchemaVersion(kind, docSchema, version string) error {
 var confLints = []func(*Conf) []error{
 	lintEntrypoint,
 	lintFeatureDirs,
+	lintFeatureKnobs,
 }
 
 // lintEntrypoint rejects an entrypoint block whose pieces would be silently
@@ -343,6 +344,49 @@ func lintFeatureDirs(conf *Conf) []error {
 	check("man", feats.Man)
 	check("markdown", feats.Markdown)
 	check("completion", feats.Completion)
+	return problems
+}
+
+// lintFeatureKnobs WARNS (non-fatal) when an ENABLED feature sets a directory knob
+// its mode ignores — upholding rotini's no-silently-ignored-key principle without
+// failing the build, since the override is inert rather than broken: an `embed_dir`
+// without embed mode (inline content writes no embedded file), a `template_dir`
+// without seeding a template, and — for completion, which has no editable template —
+// `template`/`template_dir` at all. Disabled features are left alone (staged config).
+// Warnings route to the OnWarning funnel; validation still passes.
+func lintFeatureKnobs(conf *Conf) []error {
+	if conf.Generate == nil || conf.Generate.Features == nil {
+		return nil
+	}
+	var problems []error
+	warn := func(name, key, msg string) {
+		problems = append(problems, &problem{
+			kind: "conf", loc: "generate.features." + name + "." + key,
+			sev: severityWarning, msg: msg,
+		})
+	}
+	for _, cf := range featureConfigs(conf) {
+		f := cf.cfg
+		if f == nil || !f.Enabled {
+			continue
+		}
+		name := cf.desc.name
+		if f.EmbedDir != "" && !f.Embed {
+			warn(name, "embed_dir", "is set but embed is false — embed_dir is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")
+		}
+		if cf.desc.tmplFile == "" { // no editable template (completion)
+			if f.Template {
+				warn(name, "template", name+" has no editable template — 'template' has no effect here")
+			}
+			if f.TemplateDir != "" {
+				warn(name, "template_dir", name+" has no editable template — 'template_dir' has no effect here")
+			}
+			continue
+		}
+		if f.TemplateDir != "" && !f.Template {
+			warn(name, "template_dir", "is set but template is false — template_dir is used only when the editable template is seeded (template: true); it is otherwise ignored")
+		}
+	}
 	return problems
 }
 

@@ -1111,6 +1111,44 @@ func TestValidate_entrypointLints(t *testing.T) {
 	}
 }
 
+// TestValidate_featureKnobsWarn pins lintFeatureKnobs (W2): an enabled feature
+// setting a dir knob its mode ignores is a non-fatal WARNING (validation passes;
+// the finding lands on the session's warnings → the OnWarning funnel), not an error.
+func TestValidate_featureKnobsWarn(t *testing.T) {
+	spec := writeTemp(t, "spec.yaml", validSpecHeader+"name: demo\n")
+	check := func(t *testing.T, confBody, wantSubstr string, wantN int) {
+		t.Helper()
+		s := newSession(spec, writeTemp(t, "conf.yaml", validConfHeader+confBody), "")
+		if err := s.load(); err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		if err := s.validate(); err != nil {
+			t.Errorf("validate = %v, want nil (an inert knob warns, it does not fail)", err)
+		}
+		if len(s.warnings) != wantN {
+			t.Fatalf("warnings = %d, want %d: %v", len(s.warnings), wantN, s.warnings)
+		}
+		if wantN > 0 && !strings.Contains(s.warnings[0].Error(), wantSubstr) {
+			t.Errorf("warning = %q, want it to mention %q", s.warnings[0], wantSubstr)
+		}
+	}
+	t.Run("embed_dir without embed", func(t *testing.T) {
+		check(t, "generate:\n  features:\n    help:\n      enabled: true\n      embed: false\n      embed_dir: internal/cmd/demo/renders\n", "embed_dir", 1)
+	})
+	t.Run("template_dir without template", func(t *testing.T) {
+		check(t, "generate:\n  features:\n    help:\n      enabled: true\n      template: false\n      template_dir: internal/cmd/demo/templates\n", "template_dir", 1)
+	})
+	t.Run("completion template_dir (no template)", func(t *testing.T) {
+		check(t, "generate:\n  features:\n    completion:\n      enabled: true\n      template_dir: internal/cmd/demo/templates\n", "no editable template", 1)
+	})
+	t.Run("disabled feature is left alone", func(t *testing.T) {
+		check(t, "generate:\n  features:\n    help:\n      enabled: false\n      embed_dir: internal/cmd/demo/renders\n      template_dir: internal/cmd/demo/templates\n", "", 0)
+	})
+	t.Run("valid embed+template mode", func(t *testing.T) {
+		check(t, "generate:\n  packages:\n    cmdgen:\n      package: internal/cmd/demo\n  features:\n    man:\n      enabled: true\n      embed: true\n      embed_dir: internal/cmd/demo/renders\n      template: true\n      template_dir: internal/cmd/demo/templates\n", "", 0)
+	})
+}
+
 // TestValidate_featureDirLint: an enabled feature whose explicit dir cannot
 // nest under the explicit cmdgen package fails at validate time (generate would
 // reject it later — validate is the gate). Unset sides defer to the defaults.
