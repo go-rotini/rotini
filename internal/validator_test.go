@@ -1212,3 +1212,38 @@ func TestValidate_docLevelKeysOnSubcommand(t *testing.T) {
 		t.Errorf("validate(doc-level keys on root) = %v, want nil", err)
 	}
 }
+
+// TestValidate_refNodeRejectsHandlerCoupledKeys pins lintRefNodeKeys (W8 / D-W8.2):
+// a $ref node composes a child whose handler is built against ITS own inputs/output,
+// so handler-coupled keys on the $ref node are rejected (no silent ignore). Overlay
+// keys and an additive `commands:` sibling are allowed.
+func TestValidate_refNodeRejectsHandlerCoupledKeys(t *testing.T) {
+	cases := []struct{ name, node, key string }{
+		{"flags", "    flags:\n      - name: f\n        schema: { type: string }\n", "flags"},
+		{"arguments", "    arguments:\n      - name: a\n        schema: { type: string }\n", "arguments"},
+		{"env", "    env:\n      - name: e\n        schema: { type: string }\n", "env"},
+		{"config_files", "    config_files:\n      - { name: c, path: ~/.x }\n", "config_files"},
+		{"output", "    output: { type: string }\n", "output"},
+		{"stdin", "    stdin:\n      schema: { type: object }\n", "stdin"},
+		{"remote_discovery", "    remote_discovery:\n      path: /x\n", "remote_discovery"},
+		{"passthrough", "    passthrough: true\n", "passthrough"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := validSpecHeader + "name: app\ncommands:\n  - $ref: ./child.yaml\n    name: kid\n" + tc.node
+			err := validateOnce(writeTemp(t, "spec.yaml", spec), "", "collect", "")
+			if err == nil || !strings.Contains(err.Error(), tc.key) || !strings.Contains(err.Error(), "$ref node") {
+				t.Errorf("validate(%s on $ref node) = %v, want a $ref-node rejection naming %q", tc.name, err, tc.key)
+			}
+		})
+	}
+
+	// Overlay keys + an authored `commands:` sibling on a $ref node are ALLOWED (the
+	// inline sibling's own inputs are fine — they're on `local`, not the $ref node).
+	ok := validSpecHeader + "name: app\ncommands:\n  - $ref: ./child.yaml\n    name: kid\n" +
+		"    summary: my kid\n    group: g\n    commands:\n      - name: local\n" +
+		"        arguments:\n          - name: t\n            schema: { type: string }\n"
+	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
+		t.Errorf("validate(overlay keys + commands on $ref node) = %v, want nil", err)
+	}
+}

@@ -354,6 +354,7 @@ var specLints = []func(*Spec) []error{
 	lintRootCommand,
 	lintRootAliases,
 	lintDocLevelKeys,
+	lintRefNodeKeys,
 	lintImportConsistency,
 	lintLocalTimeout,
 	lintFlagGroups,
@@ -419,6 +420,67 @@ func lintDocLevelKeys(spec *Spec) []error {
 		}
 		if c.Schemas != nil {
 			add("schemas")
+		}
+	})
+	return problems
+}
+
+// lintRefNodeKeys enforces the $ref OVERLAY model's reject set (W8 / D-W8.2): a
+// `$ref` node composes a child command whose handler is generated against the CHILD's
+// own inputs/output, so the parent cannot overlay handler-coupled keys on the `$ref`
+// node — they would produce a parser/struct the delegated handler does not match. The
+// generator honors only the overlay keys (name/aliases/summary/description/help/group/
+// hidden/deprecated/…) and the additive `commands:`; every other key it cannot honor,
+// so — per rotini's no-silent-ignore invariant — validation rejects it here. (Declare
+// inputs/output/remotes in the child spec instead.)
+func lintRefNodeKeys(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		if c.Ref == "" {
+			return
+		}
+		loc := "command " + path
+		reject := func(key string) {
+			problems = append(problems, &problem{
+				kind: "spec", loc: loc,
+				msg: fmt.Sprintf("sets %q on a $ref node — a composed command delegates to the child's handler (built against the child's own inputs/output), so %q cannot be overlaid here; declare it in the child spec instead", key, key),
+			})
+		}
+		if len(c.Flags) > 0 {
+			reject("flags")
+		}
+		if len(c.Arguments) > 0 {
+			reject("arguments")
+		}
+		if len(c.Env) > 0 {
+			reject("env")
+		}
+		if len(c.Config) > 0 {
+			reject("config")
+		}
+		if len(c.ConfigFiles) > 0 {
+			reject("config_files")
+		}
+		if c.Stdin != nil {
+			reject("stdin")
+		}
+		if len(c.FlagGroups) > 0 {
+			reject("flag_groups")
+		}
+		if len(c.FlagDependencies) > 0 {
+			reject("flag_dependencies")
+		}
+		if c.Output != nil {
+			reject("output")
+		}
+		if len(c.RemoteCommands) > 0 {
+			reject("remote_commands")
+		}
+		if c.RemoteDiscovery != nil {
+			reject("remote_discovery")
+		}
+		if c.Passthrough {
+			reject("passthrough")
 		}
 	})
 	return problems

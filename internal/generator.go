@@ -39,7 +39,7 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 // features.
 func (s *session) generate() error {
 	applyConfDefaults(s.conf.conf, s.spec.spec.Name)
-	return generateAll(s.spec.spec, s.conf.conf, s.spec.path)
+	return generateAll(s.spec.spec, s.conf.conf, s.spec.path, s.version)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -122,13 +122,13 @@ type layout struct {
 // the entrypoint main.go when the conf declares one, (re)writes the handler
 // rollup, and prunes orphaned stubs. specPath is needed to resolve $ref paths
 // relative to the spec.
-func generateAll(spec *Spec, conf *Conf, specPath string) error {
+func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 	moduleRoot, moduleName, err := findModule()
 	if err != nil {
 		return err
 	}
 	lay := resolveLayout(conf, moduleRoot, moduleName)
-	gp, err := resolveTree(spec, specPath, moduleRoot, moduleName)
+	gp, err := resolveTree(spec, specPath, moduleRoot, moduleName, version)
 	if err != nil {
 		return err
 	}
@@ -1548,6 +1548,7 @@ type genProgram struct {
 	schemas         map[string]Schema   // document-level named schemas (for output codegen)
 	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
 	envPrefix       string              // document-level env_prefix for DERIVED env-var names
+	version         string              // running rotini version, for the cross-tree $schema guard on composed specs ("" → skipped)
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -1640,7 +1641,7 @@ func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
 	return out
 }
 
-func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgram, error) {
+func resolveTree(spec *Spec, specPath, moduleRoot, moduleName, version string) (*genProgram, error) {
 	root := spec.Command
 	if root.Ref != "" || root.Name == "" {
 		return nil, errors.New("root command must have a name (the top-level \"command\" cannot use $ref)")
@@ -1657,6 +1658,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName string) (*genProgr
 		schemas:         spec.Schemas,
 		configFiles:     allScopedConfigFiles(spec),
 		envPrefix:       spec.EnvPrefix,
+		version:         version,
 	}
 	gp.root = genCommand{
 		prefix:      gp.rootPascal,
@@ -1770,11 +1772,81 @@ func (gp *genProgram) walk(cmds []Command, parentPath, specDir, moduleRoot, modu
 	return out, nil
 }
 
+// overlayCommand applies the $ref OVERLAY model (D-W8.2): the `$ref`'d child command
+// is the base, and every identity/presentation key the parent author declared on the
+// `$ref` node wins over the child's when present (else the child's is kept). This is
+// how a parent consuming a child tailors its tree (rename, re-summarize, regroup,
+// hide, deprecate) without forking the child. NOT overlaid here: `commands` (merged
+// additively at the call site) and the handler-coupled keys (inputs/output/remote_*),
+// which a composed command cannot honor — validation rejects those on a `$ref` node.
+func overlayCommand(child, parent Command) Command {
+	m := child
+	if parent.Name != "" {
+		m.Name = parent.Name
+	}
+	if len(parent.Aliases) > 0 {
+		m.Aliases = parent.Aliases
+	}
+	if len(parent.DeprecatedIdentifiers) > 0 {
+		m.DeprecatedIdentifiers = parent.DeprecatedIdentifiers
+	}
+	if parent.Hidden {
+		m.Hidden = true
+	}
+	if parent.Group != "" {
+		m.Group = parent.Group
+	}
+	if parent.Deprecated != "" {
+		m.Deprecated = parent.Deprecated
+	}
+	if parent.Summary != "" {
+		m.Summary = parent.Summary
+	}
+	if parent.Description != "" {
+		m.Description = parent.Description
+	}
+	if parent.Usage != "" {
+		m.Usage = parent.Usage
+	}
+	if parent.Header != "" {
+		m.Header = parent.Header
+	}
+	if parent.Footer != "" {
+		m.Footer = parent.Footer
+	}
+	if parent.Headings != nil {
+		m.Headings = parent.Headings
+	}
+	if len(parent.Examples) > 0 {
+		m.Examples = parent.Examples
+	}
+	if len(parent.ExitStatus) > 0 {
+		m.ExitStatus = parent.ExitStatus
+	}
+	if len(parent.SeeAlso) > 0 {
+		m.SeeAlso = parent.SeeAlso
+	}
+	if parent.Help != "" {
+		m.Help = parent.Help
+	}
+	if parent.Man != "" {
+		m.Man = parent.Man
+	}
+	if parent.Markdown != "" {
+		m.Markdown = parent.Markdown
+	}
+	if parent.Filename != "" {
+		m.Filename = parent.Filename
+	}
+	return m
+}
+
 // composeRef loads a `$ref`'d child spec and grafts its command tree as a composed
-// subtree. The grafted command is named after the child's own root unless the ref
-// entry sets `name` to override it; the delegation still targets the child's real
-// handler methods either way. Transitive $refs (a composed child that itself $refs)
-// are handled by composeNestedRef during the walk.
+// subtree, applying the overlay model (parent keys on the `$ref` node win) and merging
+// any `commands:` the parent authored next to the `$ref` (additive — the child's own
+// commands delegate to the child; the authored siblings are own/new compositions). The
+// delegation always targets the child's real handler methods. Transitive $refs (a
+// composed child that itself $refs) are handled by composeNestedRef during the walk.
 func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool) (rnode, error) {
 	childSpecPath := filepath.Clean(filepath.Join(specDir, filepath.FromSlash(c.Ref)))
 	abs := childSpecPath
@@ -1791,6 +1863,12 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
+	// Cross-tree $schema guard (W8): every composed spec must target the running
+	// rotini version, so the whole composed tree shares one version. (Skipped when
+	// the version is unset or the $schema is not a recognized rotini URL.)
+	if err := checkSchemaVersion("spec", childSpec.Schema, gp.version); err != nil {
+		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
+	}
 	childRoot := childSpec.Command
 	if childRoot.Name == "" {
 		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
@@ -1801,13 +1879,12 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	alias := identAlias(childRoot.Name)
 	gp.addImport(alias, imp)
 
+	// Overlay the parent's $ref-node keys onto the child (parent wins when present).
 	// The grafted command is named after the child's root unless the ref overrides it;
 	// the override changes only the parent-side name/path/method, never the delegation
 	// target (which is always the child's real handler).
-	graftName := childRoot.Name
-	if c.Name != "" {
-		graftName = c.Name
-	}
+	merged := overlayCommand(childRoot, c)
+	graftName := merged.Name
 	composeRootPath := graftName
 	if parentPath != "" {
 		composeRootPath = parentPath + "_" + graftName
@@ -1822,7 +1899,21 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, err
 	}
-	return rnode{name: graftName, prefix: prefix, aliases: c.Aliases, inputs: childRoot.inputs(), help: commandHelp(childRoot), hidden: c.Hidden, group: c.Group, deprecated: c.Deprecated, deprecatedIdentifiers: c.DeprecatedIdentifiers, composed: true, children: children}, nil
+	// Merge the `commands:` the parent authored next to the `$ref` (the croot/c3 case):
+	// they are NOT the child's — they resolve against the PARENT spec dir and are own
+	// commands / new compositions (the outer, non-composed context), grafted alongside
+	// the child's own subtree. A name/alias collision across the merged set is an error.
+	if len(c.Commands) > 0 {
+		authored, err := gp.walk(c.Commands, composeRootPath, specDir, moduleRoot, moduleName, seen, composeCtx{})
+		if err != nil {
+			return rnode{}, err
+		}
+		children = append(children, authored...)
+		if err := checkCollisions(children); err != nil {
+			return rnode{}, err
+		}
+	}
+	return rnode{name: graftName, prefix: prefix, aliases: merged.Aliases, inputs: childRoot.inputs(), help: commandHelp(merged), hidden: merged.Hidden, group: merged.Group, deprecated: merged.Deprecated, deprecatedIdentifiers: merged.DeprecatedIdentifiers, composed: true, children: children}, nil
 }
 
 // composeNestedRef handles a `$ref` encountered *inside* an already-composed subtree
@@ -1831,7 +1922,9 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 // grandchild's cli — it grafts the grandchild's command tree here and lets the normal
 // composed-walk delegate each node to the direct child (delegateMethod =
 // ctx.childPascal + the node's relative path, which matches the child's method names).
-// Ref-side overrides (name/aliases/hidden/deprecated) win, mirroring composeRef.
+// Parent overlay keys win, mirroring composeRef; any `commands:` authored next to the
+// nested `$ref` are merged additively (they resolve against the spec that holds the
+// nested ref and delegate to the same direct child, which already composed them).
 func (gp *genProgram) composeNestedRef(c Command, parentPath, specDir, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
 	childSpecPath := filepath.Clean(filepath.Join(specDir, filepath.FromSlash(c.Ref)))
 	abs := childSpecPath
@@ -1848,23 +1941,43 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, specDir, moduleRoo
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
+	if err := checkSchemaVersion("spec", gcSpec.Schema, gp.version); err != nil {
+		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
+	}
 	gc := gcSpec.Command
 	if gc.Name == "" {
 		return nil, fmt.Errorf("composed spec %q has no name", c.Ref)
 	}
 
-	// Graft the grandchild as a named command in the current composed subtree: run it
-	// (and its descendants) through the normal walk so the standard composed
-	// delegation applies and the rnodes are marked composed (no types emitted here).
-	synth := gc
+	// Graft the grandchild as a named command in the current composed subtree: overlay
+	// the parent's $ref-node keys, then run it (and its descendants) through the normal
+	// walk so the standard composed delegation applies and the rnodes are marked composed
+	// (no types emitted here). Its own subtree resolves against the grandchild's dir.
+	synth := overlayCommand(gc, c)
 	synth.Ref = ""
-	if c.Name != "" {
-		synth.Name = c.Name
+	synth.Commands = gc.Commands // overlayCommand left Commands == gc's; siblings merge below
+	nodes, err := gp.walk([]Command{synth}, parentPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
+	if err != nil {
+		return nil, err
 	}
-	synth.Aliases = c.Aliases
-	synth.Hidden = c.Hidden
-	synth.Deprecated = c.Deprecated
-	return gp.walk([]Command{synth}, parentPath, filepath.Dir(childSpecPath), moduleRoot, moduleName, seen, ctx)
+	// Merge `commands:` authored next to the nested `$ref`. Unlike the grandchild's own
+	// subtree, these resolve against THIS spec's dir (specDir) and delegate to the same
+	// direct child (the current composed ctx). Graft them as children of the grandchild.
+	if len(c.Commands) > 0 && len(nodes) == 1 {
+		siblingParent := synth.Name
+		if parentPath != "" {
+			siblingParent = parentPath + "_" + synth.Name
+		}
+		authored, err := gp.walk(c.Commands, siblingParent, specDir, moduleRoot, moduleName, seen, ctx)
+		if err != nil {
+			return nil, err
+		}
+		nodes[0].children = append(nodes[0].children, authored...)
+		if err := checkCollisions(nodes[0].children); err != nil {
+			return nil, err
+		}
+	}
+	return nodes, nil
 }
 
 func (gp *genProgram) addImport(alias, path string) {

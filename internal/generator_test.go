@@ -1834,6 +1834,131 @@ commands:
 	mustNotContain(t, parentRollup, "example.com/myclis/cmd/gc/rth", "gccli")
 }
 
+// TestGenerate_refNodeSiblingCommands pins W8 Slice 1: commands authored ALONGSIDE
+// a $ref (the croot/c3 case) are composed, not silently dropped. A $ref node may
+// carry its own `commands:` — an inline sibling (→ own stub) and a sibling that is
+// itself a $ref (→ a new composition) — and both must graft onto the composed
+// subtree next to the child's own commands.
+func TestGenerate_refNodeSiblingCommands(t *testing.T) {
+	tmp := initTestModule(t)
+	conf := func(dir string) string {
+		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+			"generate:\n  packages:\n    cmd:\n      package: cmd/" + dir + "/rth\n      file: handlers.go\n" +
+			"    cmdgen:\n      package: cmd/" + dir + "/rtg\n      file: rotini.go\n"
+	}
+	// child (composed via $ref) has its own command "greet"; sub (composed as a
+	// SIBLING $ref authored on child's $ref node) has "ping"; "local" is an inline
+	// sibling authored on the same $ref node.
+	subSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+name: sub
+commands:
+  - name: ping
+    arguments:
+      - name: host
+        schema: { type: string }
+`
+	parentSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+name: parent
+commands:
+  - $ref: ../child/.rotini.spec.yaml
+    name: child
+    summary: parent's view of child
+    commands:
+      - name: local
+        arguments:
+          - name: target
+            schema: { type: string }
+      - $ref: ../sub/.rotini.spec.yaml
+        name: sub
+`
+	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.spec.yaml"), childSpecYAML)
+	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.conf.yaml"), conf("child"))
+	writeTestFile(t, filepath.Join(tmp, "cmd/sub/.rotini.spec.yaml"), subSpec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/sub/.rotini.conf.yaml"), conf("sub"))
+	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"), parentSpec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.conf.yaml"), conf("parent"))
+
+	for _, dir := range []string{"child", "sub", "parent"} {
+		if err := Generate("cmd/"+dir+"/.rotini.spec.yaml", "cmd/"+dir+"/.rotini.conf.yaml", false, "", nil); err != nil {
+			t.Fatalf("generate %s: %v", dir, err)
+		}
+	}
+
+	parentRtg := filepath.Join(tmp, "cmd/parent/rtg/rotini.go")
+	mustContain(t, parentRtg,
+		// the parent's summary OVERLAYS the child's own (D-W8.2)…
+		`Summary: "parent's view of child"`,
+		// the child's own command survives…
+		"ParentChildGreet() rotini.CommandHandlers", `Name: "greet"`,
+		// …the inline authored sibling is grafted (own command — its inputs ARE redeclared here)…
+		"ParentChildLocal() rotini.CommandHandlers", `Name: "local"`,
+		`{Name: "target", Type: "string"}`,
+		// …and the $ref authored sibling composes (its ping subcommand reached too).
+		"ParentChildSub() rotini.CommandHandlers", `Name: "sub"`,
+		"ParentChildSubPing() rotini.CommandHandlers", `Name: "ping"`,
+	)
+	// the inline sibling is an OWN command → it gets a parent stub file…
+	if _, err := os.Stat(filepath.Join(tmp, "cmd/parent/rth/parent_child_local.go")); err != nil {
+		t.Errorf("inline authored sibling should get an own stub: %v", err)
+	}
+	// …while the $ref sibling delegates to its own composed cli (imported).
+	parentRollup := filepath.Join(tmp, "cmd/parent/rth/handlers.go")
+	mustContain(t, parentRollup,
+		`subcli "example.com/myclis/cmd/sub/rth"`,
+		"return subcli.Handlers().Sub()",
+		"return subcli.Handlers().SubPing()",
+	)
+}
+
+// TestGenerate_composedSchemaVersionGuard pins the cross-tree $schema guard (W8): a
+// composed child whose $schema targets a different rotini version than the generating
+// binary is an error, so the whole composed tree shares one version. Matching versions
+// compose clean.
+func TestGenerate_composedSchemaVersionGuard(t *testing.T) {
+	tmp := initTestModule(t)
+	// Confs target the running version (1.2.3) so only the composed SPEC's $schema is
+	// under test (an unmatched conf $schema would trip the per-spec guard first).
+	conf := func(dir string) string {
+		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-conf.json\n" +
+			"generate:\n  packages:\n    cmd:\n      package: cmd/" + dir + "/rth\n      file: handlers.go\n" +
+			"    cmdgen:\n      package: cmd/" + dir + "/rtg\n      file: rotini.go\n"
+	}
+	childMismatch := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/9.9.9/schema-spec.json
+name: child
+commands:
+  - name: greet
+    arguments:
+      - name: who
+        schema: { type: string }
+`
+	parentSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json
+name: parent
+commands:
+  - $ref: ../child/.rotini.spec.yaml
+`
+	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.spec.yaml"), childMismatch)
+	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.conf.yaml"), conf("child"))
+	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"), parentSpec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.conf.yaml"), conf("parent"))
+
+	// Generate the parent at version 1.2.3: its own $schema matches, but composing the
+	// child (9.9.9) trips the cross-tree guard.
+	err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, "1.2.3", nil)
+	if err == nil || !strings.Contains(err.Error(), "schema version") {
+		t.Fatalf("generate(version-mismatched composed spec) = %v, want a $schema guard error", err)
+	}
+
+	// Align the child to the running version → composes clean.
+	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.spec.yaml"),
+		strings.Replace(childMismatch, "9.9.9", "1.2.3", 1))
+	if err := Generate("cmd/child/.rotini.spec.yaml", "cmd/child/.rotini.conf.yaml", false, "1.2.3", nil); err != nil {
+		t.Fatalf("generate child (matching) = %v", err)
+	}
+	if err := Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, "1.2.3", nil); err != nil {
+		t.Errorf("generate(matching versions) = %v, want nil", err)
+	}
+}
+
 func TestGenerate_cyclicRefErrors(t *testing.T) {
 	tmp := initTestModule(t)
 	// A spec that composes itself — the simplest cycle.

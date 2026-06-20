@@ -60,7 +60,7 @@ type BaseSchema struct {
 
 // A command node in the CLI command tree — the root command (the document itself) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The three document-level keys ($schema, env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
 type Command struct {
-	// Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name. Not valid on the root command.
+	// Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, header, footer, examples, help, headings, group, hidden, deprecated, deprecated_identifiers, filename) WIN over the child's when present — so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node — the composed command delegates to the child's handler, built against the child's own inputs/output — so rotini validation rejects them here (declare them in the child spec).
 	Ref string `json:"$ref,omitempty"`
 	// Document-level (root only): URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.
 	Schema string `json:"$schema,omitempty"`
@@ -68,7 +68,7 @@ type Command struct {
 	Aliases []string `json:"aliases,omitempty"`
 	// Positional argument inputs for this command
 	Arguments []ArgumentInput `json:"arguments,omitempty"`
-	// Sub-commands of this command (inline or composed via $ref).
+	// Sub-commands of this command (inline or composed via $ref). On a $ref node these are MERGED additively onto the composed child's own subtree (the overlay model — see '$ref'); a name/alias collision across the merged set is an error.
 	Commands []Command `json:"commands,omitempty"`
 	// Config-value inputs for this command, bound by key from an in-scope config_files source (declared on this command or any ancestor — see config_files).
 	Config []ConfigInput `json:"config,omitempty"`

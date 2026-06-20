@@ -57,7 +57,7 @@
         },
         "$ref": {
           "type": "string",
-          "description": "Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. When set, 'name' optionally overrides the grafted sub-command name. Not valid on the root command."
+          "description": "Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, header, footer, examples, help, headings, group, hidden, deprecated, deprecated_identifiers, filename) WIN over the child's when present — so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node — the composed command delegates to the child's handler, built against the child's own inputs/output — so rotini validation rejects them here (declare them in the child spec)."
         },
         "aliases": {
           "type": "array",
@@ -196,7 +196,7 @@
         },
         "commands": {
           "type": "array",
-          "description": "Sub-commands of this command (inline or composed via $ref).",
+          "description": "Sub-commands of this command (inline or composed via $ref). On a $ref node these are MERGED additively onto the composed child's own subtree (the overlay model — see '$ref'); a name/alias collision across the merged set is an error.",
           "items": {
             "$ref": "#/definitions/Command"
           }
