@@ -1285,3 +1285,53 @@ func TestValidate_refNodeRejectsHandlerCoupledKeys(t *testing.T) {
 		t.Errorf("validate(overlay keys + commands on $ref node) = %v, want nil", err)
 	}
 }
+
+// TestValidate_composedTreeDescend pins the deep $ref descend (W8/D-W8.3): `rotini
+// validate` follows refs, composes the whole tree, and catches problems that only
+// emerge once refs are followed — a collision ACROSS a composition boundary, a missing
+// ref — reusing generate's composer (no drift). Runs only when the spec lives inside
+// the CWD module; initTestModule chdir's into one.
+func TestValidate_composedTreeDescend(t *testing.T) {
+	tmp := initTestModule(t)
+	conf := func(dir string) string {
+		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+			"generate:\n  packages:\n    cmd:\n      package: cmd/" + dir + "/rth\n      file: handlers.go\n" +
+			"    cmdgen:\n      package: cmd/" + dir + "/rtg\n      file: rotini.go\n"
+	}
+	childSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+name: child
+commands:
+  - name: greet
+    arguments:
+      - name: who
+        schema: { type: string }
+`
+	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.spec.yaml"), childSpec)
+	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.conf.yaml"), conf("child"))
+	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.conf.yaml"), conf("parent"))
+	hdr := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n"
+
+	// The parent authors a sibling "greet" on the $ref node — it collides with the
+	// child's own "greet". Neither spec alone is invalid; only the composed tree is.
+	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"),
+		hdr+"name: parent\ncommands:\n  - $ref: ../child/.rotini.spec.yaml\n    name: child\n    commands:\n      - name: greet\n")
+	if err := validateOnce("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", "collect", ""); err == nil ||
+		!strings.Contains(err.Error(), `duplicate command name or alias "greet"`) {
+		t.Errorf("validate(cross-tree collision) = %v, want a composed-tree collision on greet", err)
+	}
+
+	// A missing $ref target is caught.
+	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"),
+		hdr+"name: parent\ncommands:\n  - $ref: ../nope/.rotini.spec.yaml\n")
+	if err := validateOnce("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", "collect", ""); err == nil ||
+		!strings.Contains(err.Error(), "compose") {
+		t.Errorf("validate(missing $ref) = %v, want a compose error", err)
+	}
+
+	// A clean composition validates.
+	writeTestFile(t, filepath.Join(tmp, "cmd/parent/.rotini.spec.yaml"),
+		hdr+"name: parent\ncommands:\n  - $ref: ../child/.rotini.spec.yaml\n    name: child\n")
+	if err := validateOnce("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", "collect", ""); err != nil {
+		t.Errorf("validate(clean composition) = %v, want nil", err)
+	}
+}

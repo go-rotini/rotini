@@ -83,7 +83,51 @@ func (l *specLoader) validate() []error {
 	if err := checkSchemaVersion("spec", l.spec.Schema, l.version); err != nil {
 		problems = append(problems, err)
 	}
+	problems = append(problems, validateComposedTree(l.spec, l.path, l.version)...)
 	return problems
+}
+
+// validateComposedTree is the deep `$ref` descend (W8/D-W8.3): when the spec composes
+// child specs, run the generator's own composer (resolveTree) over the WHOLE tree so
+// `rotini validate` catches problems that only emerge once refs are followed — name/
+// alias collisions across composition boundaries, cyclic or missing refs, and each
+// composed spec's $schema. It reuses generate's exact compose logic (no separate walk),
+// so validate and generate cannot drift. Best-effort: it needs a module (composed
+// commands resolve to import paths) and only matters when refs are present, so a
+// ref-less spec or a module-less context is skipped — leaving per-spec validation as-is.
+func validateComposedTree(spec *Spec, specPath, version string) []error {
+	if !specHasRefs(spec) {
+		return nil
+	}
+	root, name, err := findModule()
+	if err != nil {
+		return nil // no module: a composed CLI can't generate here anyway; not validate's error to raise
+	}
+	// The composer resolves refs + import paths relative to the CWD module; only run it
+	// when the spec actually lives inside that module (else CWD ≠ the spec's project and
+	// the relative refs/imports would be meaningless — leave it to a validate run from
+	// the right place).
+	absSpec, err1 := filepath.Abs(specPath)
+	absRoot, err2 := filepath.Abs(root)
+	if err1 != nil || err2 != nil ||
+		(absSpec != absRoot && !strings.HasPrefix(absSpec, absRoot+string(filepath.Separator))) {
+		return nil
+	}
+	if _, err := resolveTree(spec, specPath, root, name, version); err != nil {
+		return []error{&problem{kind: "spec", loc: "composition", msg: err.Error()}}
+	}
+	return nil
+}
+
+// specHasRefs reports whether any command in the tree composes a child spec via $ref.
+func specHasRefs(spec *Spec) bool {
+	found := false
+	walkCommands(spec, func(c *Command, _ string) {
+		if c.Ref != "" {
+			found = true
+		}
+	})
+	return found
 }
 
 // validate schema-validates the conf against its compiled schema on the raw JSON
@@ -268,6 +312,35 @@ func checkSchemaVersion(kind, docSchema, version string) error {
 			kind: kind,
 			loc:  "$schema",
 			msg:  fmt.Sprintf("targets schema version %s but this rotini is %s — update the $schema version (or your rotini install) so they match", docVer, want),
+		}
+	}
+	return nil
+}
+
+// checkComposedSchemaVersion is the STRICT cross-tree $schema guard for a COMPOSED
+// spec (W8/D-W8.7). Unlike the entry-spec guard ([checkSchemaVersion], which is
+// must-match-if-present), a composed spec MUST declare a rotini $schema that EXACTLY
+// matches the generating version: a missing or foreign $schema is an error, because a
+// composed tree must provably share one rotini version and you cannot confirm that
+// without it. Skipped only when the running version is unknown (version == "", e.g.
+// tests) — there is then nothing to match against. Errors carry the composed spec's
+// ref so the failure points at the right file.
+func checkComposedSchemaVersion(ref, docSchema, version string) error {
+	want := strings.TrimPrefix(version, "v")
+	if want == "" {
+		return nil
+	}
+	m := rotiniSchemaURLRe.FindStringSubmatch(docSchema)
+	if m == nil {
+		return &problem{
+			kind: "spec", loc: "$schema",
+			msg: fmt.Sprintf("composed spec %q must declare a rotini $schema targeting version %s — every spec in a composed tree must target this rotini version (got %q)", ref, want, docSchema),
+		}
+	}
+	if docVer := m[1]; docVer != want {
+		return &problem{
+			kind: "spec", loc: "$schema",
+			msg: fmt.Sprintf("composed spec %q targets schema version %s but this rotini is %s — every spec in a composed tree must target the same version", ref, docVer, want),
 		}
 	}
 	return nil

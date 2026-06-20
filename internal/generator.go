@@ -1863,10 +1863,10 @@ func (gp *genProgram) composeRef(c Command, parentPath, specDir, moduleRoot, mod
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	// Cross-tree $schema guard (W8): every composed spec must target the running
-	// rotini version, so the whole composed tree shares one version. (Skipped when
-	// the version is unset or the $schema is not a recognized rotini URL.)
-	if err := checkSchemaVersion("spec", childSpec.Schema, gp.version); err != nil {
+	// Cross-tree $schema guard (W8/D-W8.7): every composed spec MUST declare a rotini
+	// $schema that exactly matches the running version, so the whole composed tree
+	// provably shares one version. (Skipped only when gp.version is unset, e.g. tests.)
+	if err := checkComposedSchemaVersion(c.Ref, childSpec.Schema, gp.version); err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
 	childRoot := childSpec.Command
@@ -1941,7 +1941,7 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, specDir, moduleRoo
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	if err := checkSchemaVersion("spec", gcSpec.Schema, gp.version); err != nil {
+	if err := checkComposedSchemaVersion(c.Ref, gcSpec.Schema, gp.version); err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
 	gc := gcSpec.Command

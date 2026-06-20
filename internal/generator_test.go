@@ -1948,6 +1948,14 @@ commands:
 		t.Fatalf("generate(version-mismatched composed spec) = %v, want a $schema guard error", err)
 	}
 
+	// A composed spec with NO rotini $schema is rejected — mandatory (D-W8.7).
+	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.spec.yaml"),
+		"name: child\ncommands:\n  - name: greet\n    arguments:\n      - name: who\n        schema: { type: string }\n")
+	err = Generate("cmd/parent/.rotini.spec.yaml", "cmd/parent/.rotini.conf.yaml", false, "1.2.3", nil)
+	if err == nil || !strings.Contains(err.Error(), "must declare a rotini $schema") {
+		t.Fatalf("generate(composed spec without $schema) = %v, want a mandatory-$schema error", err)
+	}
+
 	// Align the child to the running version → composes clean.
 	writeTestFile(t, filepath.Join(tmp, "cmd/child/.rotini.spec.yaml"),
 		strings.Replace(childMismatch, "9.9.9", "1.2.3", 1))
