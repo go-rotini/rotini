@@ -166,3 +166,93 @@ func TestRemoteVerify_versionHandshake(t *testing.T) {
 		}
 	})
 }
+
+// The keyless signature rung (D-W9.10) verifies a sidecar bundle against an expected
+// identity before dispatch, via the wired verifier seam. It fails CLOSED: a valid bundle
+// proceeds; a verifier error, a missing bundle, or no wired verifier all abort with a typed
+// RemoteVerificationFailed before the binary runs.
+func TestRemoteVerify_signature(t *testing.T) {
+	const issuer, subject = "https://token.actions.githubusercontent.com", "https://github.com/acme/clis/.github/workflows/release.yml@refs/tags/v1"
+	sigDef := func() Definition {
+		return Definition{Name: "app", Handler: "App", RemoteCommands: []RemoteDef{
+			{Name: "ext", Binary: "app-ext", Verify: &RemoteVerify{Signature: &RemoteSignatureVerify{Issuer: issuer, Subject: subject}}},
+		}}
+	}
+	// writeBundle drops the sidecar bundle next to the fake binary.
+	writeBundle := func(t *testing.T, binPath string) {
+		t.Helper()
+		if err := os.WriteFile(binPath+keylessBundleSuffix, []byte(`{"fake":"bundle"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	useVerifier := func(t *testing.T, v keylessVerifier) {
+		t.Helper()
+		orig := verifyKeyless
+		verifyKeyless = v
+		t.Cleanup(func() { verifyKeyless = orig })
+	}
+
+	t.Run("valid bundle proceeds", func(t *testing.T) {
+		path := writeFakeBinaryPath(t, "app-ext", "#!/bin/sh\necho ran\nexit 0\n")
+		writeBundle(t, path)
+		var gotBundle, gotIssuer, gotSubject string
+		useVerifier(t, func(bin, bundle, iss, sub string) error {
+			gotBundle, gotIssuer, gotSubject = bundle, iss, sub
+			return nil
+		})
+		p, out, errb := remoteProgram(sigDef(), []string{"ext"})
+		if code, _ := p.run(p.args); code != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+		}
+		if strings.TrimSpace(out.String()) != "ran" {
+			t.Errorf("output = %q, want 'ran'", out)
+		}
+		if gotBundle != path+keylessBundleSuffix || gotIssuer != issuer || gotSubject != subject {
+			t.Errorf("verifier got bundle=%q issuer=%q subject=%q", gotBundle, gotIssuer, gotSubject)
+		}
+	})
+
+	t.Run("verifier rejection aborts", func(t *testing.T) {
+		path := writeFakeBinaryPath(t, "app-ext", "#!/bin/sh\necho ran\nexit 0\n")
+		writeBundle(t, path)
+		useVerifier(t, func(_, _, _, _ string) error { return errors.New("identity mismatch") })
+		assertSignatureAbort(t, sigDef(), "identity mismatch")
+	})
+
+	t.Run("missing bundle aborts", func(t *testing.T) {
+		writeFakeBinaryPath(t, "app-ext", "#!/bin/sh\necho ran\nexit 0\n") // no sidecar
+		useVerifier(t, func(_, _, _, _ string) error { return nil })
+		assertSignatureAbort(t, sigDef(), keylessBundleSuffix)
+	})
+
+	t.Run("no verifier wired fails closed", func(t *testing.T) {
+		path := writeFakeBinaryPath(t, "app-ext", "#!/bin/sh\necho ran\nexit 0\n")
+		writeBundle(t, path)
+		useVerifier(t, nil)
+		assertSignatureAbort(t, sigDef(), "no sigstore verifier is wired")
+	})
+}
+
+// assertSignatureAbort runs the "ext" remote and asserts dispatch aborted before the binary
+// ran with a typed RemoteVerificationFailed whose message contains want.
+func assertSignatureAbort(t *testing.T, def Definition, want string) {
+	t.Helper()
+	p, out, _ := remoteProgram(def, []string{"ext"})
+	code, err := p.run(p.args)
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	if strings.Contains(out.String(), "ran") {
+		t.Error("binary must NOT run when signature verification fails")
+	}
+	var re *RemoteError
+	if !errors.As(err, &re) || re.Kind != RemoteVerificationFailed {
+		t.Fatalf("err = %v, want *RemoteError verification-failed", err)
+	}
+	if CategoryOf(err) != CategoryInternal {
+		t.Errorf("category = %v, want internal", CategoryOf(err))
+	}
+	if !strings.Contains(re.Error(), want) {
+		t.Errorf("error %q does not contain %q", re.Error(), want)
+	}
+}

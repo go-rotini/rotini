@@ -749,7 +749,7 @@ func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 				fmt.Fprintf(b, ", Timeout: %d", int64(d))
 			}
 		}
-		if v := rc.Verify; v != nil && (v.Version || v.Sha256 != "") {
+		if v := rc.Verify; v != nil && (v.Version || v.Sha256 != "" || v.Signature != nil) {
 			b.WriteString(", Verify: &rotini.RemoteVerify{")
 			sep := ""
 			if v.Version {
@@ -758,6 +758,10 @@ func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 			}
 			if v.Sha256 != "" {
 				b.WriteString(sep + "SHA256: " + strconv.Quote(v.Sha256))
+				sep = ", "
+			}
+			if s := v.Signature; s != nil {
+				b.WriteString(sep + "Signature: &rotini.RemoteSignatureVerify{Issuer: " + strconv.Quote(s.Issuer) + ", Subject: " + strconv.Quote(s.Subject) + "}")
 			}
 			b.WriteString("}")
 		}

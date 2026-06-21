@@ -72,8 +72,9 @@
 //     (remote_commands / remote_discovery), not composed at codegen: the spec tree
 //     links the command and the runtime spawns the binary, reporting a dispatch
 //     failure as a [*RemoteError]. A remote may declare opt-in pre-dispatch trust
-//     ([RemoteVerify]: a same-major rotini version handshake and/or a pinned SHA-256) —
-//     verified before the binary runs, off by default.
+//     ([RemoteVerify]: a same-major rotini version handshake, a pinned SHA-256, and/or a
+//     keyless sigstore signature on a sidecar bundle verified against an expected signer
+//     identity) — all checked offline before the binary runs, off by default.
 //
 // A composed spec (modes 3–5) must declare a rotini $schema that exactly matches
 // the generating version. `rotini validate` follows refs and collision-checks the

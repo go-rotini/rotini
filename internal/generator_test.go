@@ -3073,6 +3073,18 @@ func TestRemoteDefsLiteral(t *testing.T) {
 	if strings.Contains(verified, `Name: "plain", Binary: "acme-plain", Verify`) {
 		t.Errorf("a remote without verify should emit no Verify field: %s", verified)
 	}
+
+	// Keyless signature rung (D-W9.10): a signature identity emits a nested Signature literal,
+	// composing with the other verify rungs.
+	signed := remoteDefsLiteral("acme", []RemoteCommandSpec{
+		{Name: "deploy", Verify: &RemoteVerifySpec{
+			Sha256:    "sha256:abc",
+			Signature: &RemoteSignatureSpec{Issuer: "https://oidc.example", Subject: "repo:acme/clis"},
+		}},
+	})
+	if want := `Verify: &rotini.RemoteVerify{SHA256: "sha256:abc", Signature: &rotini.RemoteSignatureVerify{Issuer: "https://oidc.example", Subject: "repo:acme/clis"}}`; !strings.Contains(signed, want) {
+		t.Errorf("remoteDefsLiteral missing %q in %s", want, signed)
+	}
 }
 
 func TestResolveHeadings(t *testing.T) {
