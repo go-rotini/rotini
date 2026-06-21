@@ -167,6 +167,48 @@ func TestRemoteVerify_versionHandshake(t *testing.T) {
 	})
 }
 
+// remote_discovery.verify.version runs the same-major handshake on EVERY discovered plugin
+// (D-W9.4): a cross-major discovered plugin aborts before running; a same-major one proceeds.
+func TestRemoteDiscoveryVerify_version(t *testing.T) {
+	orig := hostRotiniVersion
+	hostRotiniVersion = func() string { return "v1.5.0" }
+	t.Cleanup(func() { hostRotiniVersion = orig })
+
+	probe := func(remoteVer string) string {
+		return "#!/bin/sh\nif [ \"$1\" = \"" + rotiniVersionCommand + "\" ]; then echo \"rotini " + remoteVer + "\"; exit 0; fi\necho ran\n"
+	}
+	discDef := func() Definition {
+		return Definition{Name: "app", Handler: "App", Discovery: &RemoteDiscoveryDef{Prefix: "app-", Verify: &RemoteVerify{Version: true}}}
+	}
+
+	t.Run("cross-major discovered plugin aborts", func(t *testing.T) {
+		writeFakeBinaryPath(t, "app-foo", probe("v2.0.0"))
+		p, out, _ := remoteProgram(discDef(), []string{"foo"})
+		code, err := p.run(p.args)
+		if code != 1 {
+			t.Errorf("exit = %d, want 1", code)
+		}
+		if strings.Contains(out.String(), "ran") {
+			t.Error("discovered plugin must NOT run on a version mismatch")
+		}
+		var ve *CompositionVersionError
+		if !errors.As(err, &ve) || ve.Arm != CompositionBinaryArm {
+			t.Fatalf("err = %v, want a binary-arm *CompositionVersionError", err)
+		}
+	})
+
+	t.Run("same-major discovered plugin proceeds", func(t *testing.T) {
+		writeFakeBinaryPath(t, "app-foo", probe("v1.9.0"))
+		p, out, errb := remoteProgram(discDef(), []string{"foo"})
+		if code, _ := p.run(p.args); code != 0 {
+			t.Fatalf("exit = %d, want 0 (stderr: %s)", code, errb)
+		}
+		if strings.TrimSpace(out.String()) != "ran" {
+			t.Errorf("output = %q, want 'ran'", out)
+		}
+	})
+}
+
 // The keyless signature rung (D-W9.10) verifies a sidecar bundle against an expected
 // identity before dispatch, via the wired verifier seam. It fails CLOSED: a valid bundle
 // proceeds; a verifier error, a missing bundle, or no wired verifier all abort with a typed

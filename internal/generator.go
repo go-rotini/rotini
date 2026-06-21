@@ -710,6 +710,11 @@ func discoveryLiteral(host string, d *RemoteDiscovery) string {
 	if d.Hidden {
 		b.WriteString(", Hidden: true")
 	}
+	// Only the version handshake applies to open-ended discovery (lintRemoteDiscoveryVerify
+	// rejects sha256/signature here), so emit just that rung.
+	if v := d.Verify; v != nil && v.Version {
+		b.WriteString(", Verify: &" + rotiniPkgName + ".RemoteVerify{Version: true}")
+	}
 	b.WriteString("}")
 	return b.String()
 }

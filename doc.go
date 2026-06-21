@@ -74,7 +74,9 @@
 //     failure as a [*RemoteError]. A remote may declare opt-in pre-dispatch trust
 //     ([RemoteVerify]: a same-major rotini version handshake, a pinned SHA-256, and/or a
 //     keyless sigstore signature on a sidecar bundle verified against an expected signer
-//     identity) — all checked offline before the binary runs, off by default.
+//     identity) — all checked offline before the binary runs, off by default. Plugin
+//     discovery (remote_discovery) can apply the version handshake to every discovered
+//     plugin via its own verify.version (the only rung that fits open-ended discovery).
 //
 // A composed spec (modes 3–5) must declare a rotini $schema that exactly matches
 // the generating version. `rotini validate` follows refs and collision-checks the

@@ -504,6 +504,22 @@ func TestValidate_remoteTimeoutAccepted(t *testing.T) {
 	}
 }
 
+// remote_discovery.verify accepts version (the only rung that generalizes to open-ended
+// discovery) but rejects sha256/signature (they pin a specific binary/identity) — D-W9.4.
+func TestValidate_remoteDiscoveryVerify(t *testing.T) {
+	ok := validSpecHeader + "name: demo\nremote_discovery:\n  prefix: demo-\n  verify:\n    version: true\n"
+	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
+		t.Errorf("Validate(discovery verify.version) = %v, want nil", err)
+	}
+
+	bad := validSpecHeader + "name: demo\nremote_discovery:\n  prefix: demo-\n  verify:\n" +
+		"    sha256: \"sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"\n"
+	if err := validateOnce(writeTemp(t, "bad.yaml", bad), "", "collect", ""); err == nil ||
+		!strings.Contains(err.Error(), "verify.sha256 cannot apply to open-ended plugin discovery") {
+		t.Errorf("Validate(discovery verify.sha256) = %v, want a rejection", err)
+	}
+}
+
 func TestValidate_dottedKeys(t *testing.T) {
 	// dotted_keys on a map[string]any flag is the valid shape.
 	valid := validSpecHeader +

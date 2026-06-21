@@ -195,6 +195,10 @@ type RemoteDiscoveryDef struct {
 	Prefix string // executable-name prefix, e.g. "acme-"
 	Path   string // extra directory to scan, in addition to the host dir and PATH
 	Hidden bool   // dispatch discovered plugins but omit them from completion listings
+	// Verify is opt-in pre-dispatch trust applied to every discovered plugin (D-W9.4):
+	// only [RemoteVerify.Version] (the same-major handshake) applies to open-ended
+	// discovery, so it is the only field validation allows here. nil = none (the default).
+	Verify *RemoteVerify
 }
 
 // CommandDef describes one command node within a [Definition]. Handler is the

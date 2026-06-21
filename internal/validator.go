@@ -500,6 +500,7 @@ var specLints = []func(*Spec) []error{
 	lintVariadicArguments,
 	lintDeprecatedIdentifiers,
 	lintRemoteTimeouts,
+	lintRemoteDiscoveryVerify,
 	lintDottedKeys,
 	lintFrom,
 	lintConfigurationFiles,
@@ -1330,6 +1331,34 @@ func lintRemoteTimeouts(spec *Spec) []error {
 					msg:  fmt.Sprintf("remote_commands %q timeout %q is not a positive Go duration (e.g. \"10s\", \"1m30s\")", r.Name, r.Timeout),
 				})
 			}
+		}
+	})
+	return problems
+}
+
+// lintRemoteDiscoveryVerify enforces that a remote_discovery.verify declares only the
+// version handshake. Discovery is open-ended — it dispatches plugins not known ahead of
+// time — so a sha256 pin or a keyless signature identity (which fix a SPECIFIC binary)
+// cannot generalize to it; those belong on an explicit remote_commands[] entry. Per the
+// no-silently-ignored-key invariant, declaring them here is an error rather than a no-op.
+func lintRemoteDiscoveryVerify(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		d := c.RemoteDiscovery
+		if d == nil || d.Verify == nil {
+			return
+		}
+		reject := func(key string) {
+			problems = append(problems, &problem{
+				kind: "spec", loc: "command " + path,
+				msg: fmt.Sprintf("remote_discovery verify.%s cannot apply to open-ended plugin discovery — it pins a specific binary; only verify.version is honored here (declare %s on a remote_commands[] entry instead)", key, key),
+			})
+		}
+		if d.Verify.Sha256 != "" {
+			reject("sha256")
+		}
+		if d.Verify.Signature != nil {
+			reject("signature")
 		}
 	})
 	return problems

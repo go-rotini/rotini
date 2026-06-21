@@ -98,7 +98,7 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDisp
 		// dispatched to the sibling executable <prefix><token> (kubectl-plugin style).
 		// The binary is resolved (and any error reported) at exec time.
 		if d := cur.Discovery; d != nil {
-			rd := RemoteDef{Name: tok, Binary: d.Prefix + tok}
+			rd := RemoteDef{Name: tok, Binary: d.Prefix + tok, Verify: d.Verify}
 			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: d.Path, Discovered: true}
 		}
 		break // first positional argument; stop descending

@@ -644,6 +644,8 @@ func TestGenerateRemoteDiscovery(t *testing.T) {
 		"name: acme\n" +
 		"remote_discovery:\n" +
 		"  path: /opt/acme/plugins\n" +
+		"  verify:\n" +
+		"    version: true\n" +
 		"commands:\n" +
 		"  - name: cluster\n" +
 		"    remote_discovery:\n" +
@@ -660,6 +662,7 @@ func TestGenerateRemoteDiscovery(t *testing.T) {
 	mustContain(t, rotiniGo,
 		"RemoteDiscoveryDef{Prefix: \"acme-\"", // root: default prefix <host>-
 		"Path: \"/opt/acme/plugins\"",
+		"Verify: &rotini.RemoteVerify{Version: true}", // discovery-level version handshake
 		"RemoteDiscoveryDef{Prefix: \"acme-plugin-\"", // sub: explicit prefix
 		"Hidden: true",
 	)

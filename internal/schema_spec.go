@@ -305,6 +305,8 @@ type RemoteDiscovery struct {
 	Path string `json:"path,omitempty"`
 	// Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-').
 	Prefix string `json:"prefix,omitempty"`
+	// Opt-in pre-dispatch trust applied to EVERY discovered plugin (W9/D-W9.4). Only 'version' (the same-major '__rotini' handshake) applies to open-ended discovery; 'sha256'/'signature' pin a specific binary/identity and cannot generalize to plugins not known ahead of time, so they are rejected here by validation (declare those on an explicit remote_commands[] entry instead). A discovered non-rotini plugin that does not answer the handshake is skipped (best-effort).
+	Verify *RemoteVerifySpec `json:"verify,omitempty"`
 }
 
 // Expected keyless (sigstore) signer identity for a remote binary's sidecar bundle (W9/D-W9.10). Both are matched against the Fulcio certificate the bundle carries.
