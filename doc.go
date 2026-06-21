@@ -33,6 +33,43 @@
 // `--with man`, `--with markdown` (or `--with all`) each wire their feature,
 // commands, and handlers the same way.
 //
+// # Composition
+//
+// rotini is commands all the way down: a command is composable at any node, so a
+// CLI is assembled from specs the way its tree is assembled from commands. A
+// "$ref" pulls another spec in as a subcommand. Five modes span where a command's
+// spec and its handler code come from, from wholly-owned to wholly-remote:
+//
+//  1. Standalone — an own spec node with its own generated handler stub. The
+//     default; every leaf you write by hand.
+//  2. Local composition — a "$ref" to a sibling spec in the same module. The
+//     child's tree merges in (on an overlapping key the parent wins), and codegen
+//     auto-delegates each composed command to the child's generated package
+//     (childcli.Handlers().X()). Same-module only.
+//  3. Module composition — a "$ref" to mod://<module>@<version>/<path>, resolved
+//     through the Go module cache and pinned by go.sum. The child is another
+//     module's spec; its handlers auto-delegate from THAT module's generated
+//     package — composition across a module boundary with no extra wiring.
+//  4. External composition + passthrough — a "$ref" to a git::<url>@<ref> or a raw
+//     https:// spec. Such a spec is not a Go package, so `rotini mod` fetches it
+//     and pins it (the resolved revision + a content hash) into .rotini.lock and a
+//     content-addressed cache; codegen reads that hermetically, never the network.
+//     With no package to auto-delegate to, the node carries
+//     handler: { import: <alias path>, convention: <Name> } — the imported package
+//     exports <Convention>() rotini.CommandHandlers per command, and codegen
+//     delegates alias.<Convention>(). The same handler: also overrides the
+//     auto-delegation on a local or module "$ref".
+//  5. Remote command — a sibling binary <program>-<name>, dispatched at RUNTIME
+//     (remote_commands / remote_discovery), not composed at codegen: the spec tree
+//     links the command and the runtime spawns the binary, reporting a dispatch
+//     failure as a [*RemoteError].
+//
+// A composed spec (modes 2–4) must declare a rotini $schema that exactly matches
+// the generating version. `rotini validate` follows refs and collision-checks the
+// whole assembled tree, so a duplicate name, a cycle, or a missing ref is caught
+// before codegen — and `rotini mod` is the one command that touches the network,
+// keeping generate and validate hermetic.
+//
 // # The slim runtime
 //
 // The generated entrypoint builds a [Program] with [NewProgram] and calls
