@@ -30,5 +30,4 @@ func main() {
 	if err := os.WriteFile("keyless_trustedroot.json", data, 0o644); err != nil {
 		panic(err)
 	}
-	fmt.Printf("wrote keyless_trustedroot.json (%d bytes)\n", len(data))
 }
