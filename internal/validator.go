@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-rotini/jsonschema"
+	"github.com/go-rotini/rotini"
 )
 
 // This file owns the `rotini validate` operation end-to-end: the session/file-level
@@ -212,11 +213,12 @@ const (
 // the document and a human-readable message, tagged by document kind ("spec"/"conf")
 // and severity (error by default; warning for non-fatal advisories).
 type problem struct {
-	kind string
-	loc  string
-	pos  string // "path:line:col" in the original source; "" degrades to loc-only
-	msg  string
-	sev  severity // zero value = error
+	kind  string
+	loc   string
+	pos   string // "path:line:col" in the original source; "" degrades to loc-only
+	msg   string
+	sev   severity // zero value = error
+	cause error    // optional typed error this problem carries (e.g. *rotini.CompositionVersionError), reachable via errors.As
 }
 
 // splitProblems separates a finding list into fatal errors and non-fatal
@@ -239,6 +241,10 @@ func (e *problem) Error() string {
 	}
 	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
 }
+
+// Unwrap exposes an optional typed cause (e.g. a [rotini.CompositionVersionError]) so a
+// caller's errors.As/Is reaches it through the aggregated validation error.
+func (e *problem) Unwrap() error { return e.cause }
 
 // locateProblems back-fills source positions onto pointer-shaped problems: a
 // problem whose loc is a JSON-pointer instance location gains "path:line:col"
@@ -332,18 +338,27 @@ func checkComposedSchemaVersion(ref, docSchema, version string) error {
 	}
 	m := rotiniSchemaURLRe.FindStringSubmatch(docSchema)
 	if m == nil {
-		return &problem{
-			kind: "spec", loc: "$schema",
-			msg: fmt.Sprintf("composed spec %q must declare a rotini $schema targeting version %s — every spec in a composed tree must target this rotini version (got %q)", ref, want, docSchema),
-		}
+		msg := fmt.Sprintf("composed spec %q must declare a rotini $schema targeting version %s — every spec in a composed tree must target this rotini version (got %q)", ref, want, docSchema)
+		return composedVersionProblem(ref, want, "", msg)
 	}
 	if docVer := m[1]; docVer != want {
-		return &problem{
-			kind: "spec", loc: "$schema",
-			msg: fmt.Sprintf("composed spec %q targets schema version %s but this rotini is %s — every spec in a composed tree must target the same version", ref, docVer, want),
-		}
+		msg := fmt.Sprintf("composed spec %q targets schema version %s but this rotini is %s — every spec in a composed tree must target the same version", ref, docVer, want)
+		return composedVersionProblem(ref, want, docVer, msg)
 	}
 	return nil
+}
+
+// composedVersionProblem wraps the spec-arm $schema mismatch as a validation [problem]
+// that carries a typed [rotini.CompositionVersionError] (Arm = spec) — so the message
+// reports as before while a caller can errors.As to the shared composition-version type
+// (one type across the spec/package/binary arms; D-W9.4).
+func composedVersionProblem(ref, want, got, msg string) *problem {
+	return &problem{
+		kind: "spec", loc: "$schema", msg: msg,
+		cause: &rotini.CompositionVersionError{
+			Arm: rotini.CompositionSpecArm, Subject: ref, Want: want, Got: got, Msg: msg,
+		},
+	}
 }
 
 // ─── the rotini-specific rules (what the JSON Schema can't express) ─────────────.

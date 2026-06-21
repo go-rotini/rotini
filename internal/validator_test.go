@@ -1,11 +1,56 @@
 package internal
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/rotini"
 )
+
+// TestCheckComposedSchemaVersion_typedError pins the spec arm of D-W9.4: the composed-spec
+// $schema guard reports the same message AND carries a typed *rotini.CompositionVersionError
+// (Arm = spec) reachable via errors.As — the one composition-version type across all arms.
+func TestCheckComposedSchemaVersion_typedError(t *testing.T) {
+	const ver = "1.2.3"
+	cases := []struct {
+		name      string
+		docSchema string
+		wantGot   string
+	}{
+		{"mismatched", "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.0.0/schema-spec.json", "1.0.0"},
+		{"absent", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkComposedSchemaVersion("../child/.rotini.spec.yaml", tc.docSchema, ver)
+			if err == nil {
+				t.Fatal("want an error, got nil")
+			}
+			var ve *rotini.CompositionVersionError
+			if !errors.As(err, &ve) {
+				t.Fatalf("errors.As did not recover *CompositionVersionError from %T", err)
+			}
+			if ve.Arm != rotini.CompositionSpecArm {
+				t.Errorf("Arm = %q, want %q", ve.Arm, rotini.CompositionSpecArm)
+			}
+			if ve.Want != ver || ve.Got != tc.wantGot {
+				t.Errorf("Want/Got = %q/%q, want %q/%q", ve.Want, ve.Got, ver, tc.wantGot)
+			}
+			if !errors.Is(err, rotini.ErrInternal) {
+				t.Error("want errors.Is(err, rotini.ErrInternal)")
+			}
+		})
+	}
+
+	// A matching $schema is clean.
+	ok := "https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json"
+	if err := checkComposedSchemaVersion("x", ok, ver); err != nil {
+		t.Errorf("matching version = %v, want nil", err)
+	}
+}
 
 const (
 	validSpecHeader = "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/1.2.3/schema-spec.json\n"
