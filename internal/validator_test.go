@@ -1336,22 +1336,30 @@ func TestValidate_refNodeRejectsHandlerCoupledKeys(t *testing.T) {
 // emerge once refs are followed — a collision ACROSS a composition boundary, a missing
 // ref — reusing generate's composer (no drift). Runs only when the spec lives inside
 // the CWD module; initTestModule chdir's into one.
-// TestValidate_handlerSource pins lintHandlerSource (W9): `handler:` is allowed on a
-// $ref node (it sources a composed external spec's handlers) but rejected on a non-$ref
-// command (inline-command passthrough isn't wired yet — no silent ignore).
+// TestValidate_handlerSource pins lintHandlerSource (W9): `handler:` is allowed on any
+// sub-command — a $ref node (it sources a composed external spec's handlers) OR an
+// inline command (the own-types + delegated-handler hybrid, D-W9.7) — but rejected on the
+// ROOT command, where the generator builds the handler directly (no delegation seam, no
+// silent ignore).
 func TestValidate_handlerSource(t *testing.T) {
 	hdr := validSpecHeader + "name: app\ncommands:\n"
 	handler := "    handler: { import: pkg github.com/x/y/rth, convention: Deploy }\n"
 
-	bad := hdr + "  - name: deploy\n" + handler
-	if err := validateOnce(writeTemp(t, "spec.yaml", bad), "", "collect", ""); err == nil ||
-		!strings.Contains(err.Error(), "only on a $ref node") {
-		t.Errorf("validate(handler on inline command) = %v, want a placement rejection", err)
+	inline := hdr + "  - name: deploy\n" + handler
+	if err := validateOnce(writeTemp(t, "inline.yaml", inline), "", "", ""); err != nil {
+		t.Errorf("validate(handler on inline command) = %v, want nil", err)
 	}
 
 	ok := hdr + "  - $ref: ./child.yaml\n" + handler
 	if err := validateOnce(writeTemp(t, "ok.yaml", ok), "", "", ""); err != nil {
 		t.Errorf("validate(handler on $ref node) = %v, want nil", err)
+	}
+
+	root := validSpecHeader + "name: app\n" +
+		"handler: { import: pkg github.com/x/y/rth, convention: App }\n"
+	if err := validateOnce(writeTemp(t, "root.yaml", root), "", "collect", ""); err == nil ||
+		!strings.Contains(err.Error(), "on the root command") {
+		t.Errorf("validate(handler on root command) = %v, want a root placement rejection", err)
 	}
 }
 

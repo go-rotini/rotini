@@ -83,6 +83,14 @@ type genCommand struct {
 	stdinType   string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
 	stdinFormat string     // stdin decode format, e.g. "yaml"; "" when no stdin
 	inputs      []fieldDef // InputsFields for this command's <Prefix>Inputs
+
+	// Inline-command passthrough (W9 / D-W9.7): the command's structure + inputs are
+	// generated locally (this is still an own command), but its handler delegates to a
+	// package instead of a generated stub. When passthrough is set the rollup emits
+	// `return delegateAlias.delegateMethod()` and no stub file is seeded.
+	passthrough    bool
+	delegateAlias  string
+	delegateMethod string
 }
 
 // layout holds the resolved package locations and import paths for a single
@@ -1114,6 +1122,9 @@ func anyEmbed(features []templateFeature) bool {
 // normal `rotini generate` — the empty stubs are seeded in their place.
 func writeHandlerStubs(gp *genProgram, lay layout) error {
 	for _, c := range gp.ownCommands() {
+		if c.passthrough {
+			continue // inline-passthrough: the package owns the handler, no stub seeded
+		}
 		path := filepath.Join(lay.handlerDir, c.filename)
 		if _, err := os.Stat(path); err == nil {
 			continue
@@ -1164,6 +1175,17 @@ func writeEntrypoint(lay layout) error {
 func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
 	for _, c := range gp.ownCommands() {
+		if c.passthrough {
+			// Inline-command passthrough (D-W9.7): own command (types generated
+			// locally) whose handler delegates to a package instead of a stub.
+			methods = append(methods, templateHandlersMethod{
+				Method:         c.prefix,
+				Passthrough:    true,
+				DelegateAlias:  c.delegateAlias,
+				DelegateMethod: c.delegateMethod,
+			})
+			continue
+		}
 		methods = append(methods, templateHandlersMethod{Method: c.prefix, HandlerType: c.handler})
 	}
 	for _, c := range gp.composed {
@@ -1764,7 +1786,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleRoot, moduleN
 				passthrough:    ctx.passthrough,
 			})
 		} else {
-			gp.own = append(gp.own, genCommand{
+			gc := genCommand{
 				prefix:      prefix,
 				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
 				filename:    commandStubFilename(gp.rootName, path, c.Filename),
@@ -1775,7 +1797,21 @@ func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleRoot, moduleN
 				stdinType:   stdinTypeExpr(prefix, c.inputs()),
 				stdinFormat: stdinFormatExpr(c.inputs()),
 				inputs:      inputsFields(gp.rootPascal, path),
-			})
+			}
+			if c.Handler != nil {
+				// Inline-command passthrough (D-W9.7/.9): still an own command (inputs
+				// generated above), but the handler delegates to the package per-node —
+				// no subtree cascade, so a child without its own handler: still stubs.
+				// Clear the stub filename so a converted command's old stub is pruned
+				// (the package owns the handler now), matching inline→$ref conversion.
+				alias, importPath := parseAliasPath(c.Handler.Import)
+				gp.addImport(alias, importPath)
+				gc.passthrough = true
+				gc.delegateAlias = alias
+				gc.delegateMethod = c.Handler.Convention
+				gc.filename = ""
+			}
+			gp.own = append(gp.own, gc)
 		}
 
 		children, err := gp.walk(c.Commands, path, base, moduleRoot, moduleName, seen, ctx)

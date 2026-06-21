@@ -620,21 +620,21 @@ func lintRefNodeKeys(spec *Spec) []error {
 }
 
 // lintHandlerSource enforces where a `handler:` (W9 package-import passthrough) may
-// appear: today only on a `$ref` node, where it supplies the handlers a composed
-// external spec can't provide itself (required for a git/raw `$ref`, an override for
-// local/mod://). On a non-`$ref` command it has no consumer yet (inline-command
-// passthrough is unwired), so — per the no-silently-ignored-key invariant — it is
-// rejected rather than dropped.
+// appear. It is valid on any SUB-command: a `$ref` node (sourcing the handlers a
+// composed external spec can't provide — required for git/raw, an override for
+// local/mod://) OR an inline command (the own-types + delegated-handler hybrid where the
+// command's structure/inputs are generated locally but its handler delegates to the
+// package — D-W9.7). It is NOT valid on the ROOT command: the root is the binary itself
+// and the generator builds its handler directly, with no delegation seam — so, per the
+// no-silently-ignored-key invariant, reject it there rather than drop it.
 func lintHandlerSource(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
-		if c.Handler != nil && c.Ref == "" {
-			problems = append(problems, &problem{
-				kind: "spec", loc: "command " + path,
-				msg: "sets handler: but is not a $ref node — handler: is currently supported only on a $ref node (to source a composed external spec's handlers); inline-command passthrough is not yet wired",
-			})
-		}
-	})
+	if spec.Handler != nil {
+		problems = append(problems, &problem{
+			kind: "spec", loc: "(root)",
+			msg: "sets handler: on the root command — handler: passthrough is supported on sub-commands only (a $ref node or an inline command), not the root",
+		})
+	}
 	return problems
 }
 

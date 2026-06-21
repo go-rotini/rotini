@@ -37,20 +37,28 @@
 //
 // rotini is commands all the way down: a command is composable at any node, so a
 // CLI is assembled from specs the way its tree is assembled from commands. A
-// "$ref" pulls another spec in as a subcommand. Five modes span where a command's
+// "$ref" pulls another spec in as a subcommand. Six modes span where a command's
 // spec and its handler code come from, from wholly-owned to wholly-remote:
 //
 //  1. Standalone — an own spec node with its own generated handler stub. The
 //     default; every leaf you write by hand.
-//  2. Local composition — a "$ref" to a sibling spec in the same module. The
+//  2. Inline + passthrough — an own spec node whose structure and typed inputs are
+//     generated locally (exactly like Standalone), but whose handler CODE is sourced
+//     from a package via handler: { import: <alias path>, convention: <Name> }
+//     instead of a stub — the own-types + delegated-handler hybrid; codegen emits
+//     alias.<Convention>() and seeds no stub. Per-command: there is no subtree
+//     cascade, so an inline sub-command without its own handler: still gets a normal
+//     stub. It pairs with the conf cmd/cmdgen package split — an in-project handler
+//     package can import the generated cmdgen input types directly.
+//  3. Local composition — a "$ref" to a sibling spec in the same module. The
 //     child's tree merges in (on an overlapping key the parent wins), and codegen
 //     auto-delegates each composed command to the child's generated package
 //     (childcli.Handlers().X()). Same-module only.
-//  3. Module composition — a "$ref" to mod://<module>@<version>/<path>, resolved
+//  4. Module composition — a "$ref" to mod://<module>@<version>/<path>, resolved
 //     through the Go module cache and pinned by go.sum. The child is another
 //     module's spec; its handlers auto-delegate from THAT module's generated
 //     package — composition across a module boundary with no extra wiring.
-//  4. External composition + passthrough — a "$ref" to a git::<url>@<ref> or a raw
+//  5. External composition + passthrough — a "$ref" to a git::<url>@<ref> or a raw
 //     https:// spec. Such a spec is not a Go package, so `rotini mod` fetches it
 //     and pins it (the resolved revision + a content hash) into .rotini.lock and a
 //     content-addressed cache; codegen reads that hermetically, never the network.
@@ -58,15 +66,16 @@
 //     handler: { import: <alias path>, convention: <Name> } — the imported package
 //     exports <Convention>() rotini.CommandHandlers per command, and codegen
 //     delegates alias.<Convention>(). The same handler: also overrides the
-//     auto-delegation on a local or module "$ref".
-//  5. Remote command — a sibling binary <program>-<name>, dispatched at RUNTIME
+//     auto-delegation on a local or module "$ref" (see mode 2); it is valid on any
+//     sub-command, not the root.
+//  6. Remote command — a sibling binary <program>-<name>, dispatched at RUNTIME
 //     (remote_commands / remote_discovery), not composed at codegen: the spec tree
 //     links the command and the runtime spawns the binary, reporting a dispatch
 //     failure as a [*RemoteError]. A remote may declare opt-in pre-dispatch trust
 //     ([RemoteVerify]: a same-major rotini version handshake and/or a pinned SHA-256) —
 //     verified before the binary runs, off by default.
 //
-// A composed spec (modes 2–4) must declare a rotini $schema that exactly matches
+// A composed spec (modes 3–5) must declare a rotini $schema that exactly matches
 // the generating version. `rotini validate` follows refs and collision-checks the
 // whole assembled tree, so a duplicate name, a cycle, or a missing ref is caught
 // before codegen — and `rotini mod` is the one command that touches the network,

@@ -2084,6 +2084,55 @@ func TestGenerate_gitRefHandlerPassthrough(t *testing.T) {
 	mustNotContain(t, rollup, "deploycli.Handlers()")
 }
 
+// TestGenerate_inlineHandlerPassthrough pins inline-command passthrough (W9/D-W9.7/.9):
+// `handler:` on an inline (non-$ref) command. The command's structure + typed inputs are
+// still generated locally (own-types), but its handler delegates to the package via
+// alias.<Convention>() — and no stub file is seeded. Per-command, no cascade (D-W9.9): a
+// child WITHOUT its own `handler:` still gets a normal local stub.
+func TestGenerate_inlineHandlerPassthrough(t *testing.T) {
+	tmp := initTestModule(t) // module root = tmp, chdir'd
+	conf := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
+		"generate:\n  packages:\n    cmd:\n      package: cmd/app/rth\n      file: handlers.go\n" +
+		"    cmdgen:\n      package: cmd/app/rtg\n      file: rotini.go\n"
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.conf.yaml"), conf)
+	spec := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json\n" +
+		"name: app\ncommands:\n" +
+		"  - name: deploy\n" +
+		"    arguments:\n      - name: region\n        schema: { type: string }\n" +
+		"    handler: { import: deploycli github.com/acme/clis/deploy/rth, convention: Deploy }\n" +
+		"    commands:\n      - name: status\n" +
+		"        arguments:\n          - name: id\n            schema: { type: string }\n"
+	writeTestFile(t, filepath.Join(tmp, "cmd/app/.rotini.spec.yaml"), spec)
+
+	if err := Generate("cmd/app/.rotini.spec.yaml", "cmd/app/.rotini.conf.yaml", false, "0.0.0", nil); err != nil {
+		t.Fatalf("generate(inline handler passthrough) = %v, want nil", err)
+	}
+
+	// Own-types: the inline command's structure + inputs are generated locally despite
+	// the delegated handler (both deploy and its non-delegated child status).
+	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),
+		"AppDeploy() rotini.CommandHandlers", `Name: "deploy"`, `{Name: "region", Type: "string"}`,
+		"AppDeployStatus() rotini.CommandHandlers", `Name: "status"`, `{Name: "id", Type: "string"}`,
+	)
+
+	// Rollup: deploy delegates to the package; status (no handler:) keeps a local stub.
+	rollup := filepath.Join(tmp, "cmd/app/rth/handlers.go")
+	mustContain(t, rollup,
+		`deploycli "github.com/acme/clis/deploy/rth"`,
+		"return deploycli.Deploy()",
+		"return &appDeployStatusHandlers{}",
+	)
+	mustNotContain(t, rollup, "deploycli.Handlers()", "deploycli.DeployStatus()")
+
+	// No stub for the passthrough command; the local-stub child gets one.
+	if _, err := os.Stat(filepath.Join(tmp, "cmd/app/rth/app_deploy.go")); !os.IsNotExist(err) {
+		t.Errorf("passthrough command app_deploy.go = %v, want not-exist (package owns the handler)", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmp, "cmd/app/rth/app_deploy_status.go")); err != nil {
+		t.Errorf("local-stub child app_deploy_status.go = %v, want it to exist", err)
+	}
+}
+
 func TestGenerate_cyclicRefErrors(t *testing.T) {
 	tmp := initTestModule(t)
 	// A spec that composes itself — the simplest cycle.
