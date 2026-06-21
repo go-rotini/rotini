@@ -194,8 +194,7 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 			Msg: fmt.Sprintf("%s: timed out after %s", r.Def.Name, r.Def.Timeout),
 		})
 	default:
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
+		if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 			return ee.ExitCode(), err
 		}
 		return p.remoteFailure(ctx, rtx, &RemoteError{
@@ -263,12 +262,11 @@ const keylessBundleSuffix = ".sigstore.json"
 // describing the failure.
 type keylessVerifier func(binaryPath, bundlePath, issuer, subject string) error
 
-// verifyKeyless is the wired keyless verifier (D-W9.10): rotini VERIFIES, it never signs.
-// It is nil until a sigstore-backed verifier is registered — kept out of core so rotini's
-// dependency surface stays minimal (sigstore-go is a large graph). A declared signature
-// check with no verifier wired fails closed (see verifyRemoteSignature). Tests set it
-// directly; the external registration mechanism is wired with the verifier module (TBD).
-var verifyKeyless keylessVerifier
+// verifyKeyless is the keyless verifier the dispatch gate uses (D-W9.10): rotini VERIFIES,
+// it never signs. It defaults to the sigstore-backed implementation ([sigstoreVerifyKeyless]
+// in keyless.go); tests override it (and a nil value makes verifyRemoteSignature fail
+// closed, exercising the no-verifier path).
+var verifyKeyless keylessVerifier = sigstoreVerifyKeyless
 
 // verifyRemoteSignature checks a keyless signature on the resolved binary at path against
 // the expected identity (def.Verify.Signature is non-nil). It fails CLOSED: no wired

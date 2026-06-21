@@ -79,8 +79,7 @@ func (e exitCodeError) Error() string {
 // cancel (via [ExitCode]) or the default signal trap attach one — or 0 (a clean
 // stop that defers to the normal exit-code resolution) when none was.
 func canceledExitCode(ctx context.Context) int {
-	var ec exitCodeError
-	if errors.As(context.Cause(ctx), &ec) {
+	if ec, ok := errors.AsType[exitCodeError](context.Cause(ctx)); ok {
 		return ec.code
 	}
 	return 0

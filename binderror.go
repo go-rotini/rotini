@@ -145,8 +145,7 @@ func channelDesc(channel string) string {
 // secret — falling back to a generic phrase when the cause is some other error,
 // so the document-shape message never echoes raw recon text.
 func schemaDetail(err error) string {
-	var ve *recon.ValidationError
-	if errors.As(err, &ve) {
+	if ve, ok := errors.AsType[*recon.ValidationError](err); ok {
 		if ve.Path.String() != "" {
 			return fmt.Sprintf("%s: %s", ve.Path.String(), ve.Msg)
 		}
