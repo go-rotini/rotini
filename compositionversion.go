@@ -1,5 +1,14 @@
 package rotini
 
+import (
+	"runtime/debug"
+	"strings"
+)
+
+// rotiniModulePath is the import path of the rotini module, used to find rotini's own
+// version in a built binary's module graph (the binary arm's self-report).
+const rotiniModulePath = "github.com/go-rotini/rotini"
+
 // CompositionVersionArm identifies which composition surface a rotini-version mismatch
 // was found on — the three places a composed command tree can disagree about the rotini
 // version it targets. Each arm enforces its own policy (see [CompositionVersionError]).
@@ -44,3 +53,55 @@ func (e *CompositionVersionError) Error() string { return e.Msg }
 // [CategoryInternal] — a composition version mismatch is rotini's "this build can't be
 // trusted to compose", never the end-user's fault.
 func (e *CompositionVersionError) Unwrap() error { return ErrInternal }
+
+// majorVersion returns the leading numeric major of an "X.Y.Z" (or "vX.Y.Z") version, or
+// "" if it has no recognizable major segment.
+func majorVersion(version string) string {
+	major, _, _ := strings.Cut(strings.TrimPrefix(version, "v"), ".")
+	return major
+}
+
+// sameMajorVersion reports whether two versions share a major segment (the same-major
+// policy the package and binary arms enforce); two empty majors are not "same".
+func sameMajorVersion(a, b string) bool {
+	ma, mb := majorVersion(a), majorVersion(b)
+	return ma != "" && ma == mb
+}
+
+// hostRotiniVersion reports the running program's own rotini version for the binary-arm
+// handshake comparison — a package var so tests can pin a known host version (a `go test`
+// binary's build info reports no usable version).
+var hostRotiniVersion = rotiniLibraryVersion
+
+// rotiniLibraryVersion reports the version of the rotini module the running binary was
+// built against, read from its embedded build info — the binary arm's self-report (what
+// `<binary> __rotini` prints, and what the host compares). It returns "" when the version
+// is undeterminable: no build info, a local replace, or an untagged ("(devel)") build —
+// all of which the same-major check treats as "skip" (best-effort).
+func rotiniLibraryVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return ""
+	}
+	if info.Main.Path == rotiniModulePath {
+		return cleanModuleVersion(info.Main.Version) // a rotini-repo binary (e.g. cmd/rotini)
+	}
+	for _, dep := range info.Deps {
+		if dep.Path == rotiniModulePath {
+			if dep.Replace != nil {
+				return cleanModuleVersion(dep.Replace.Version)
+			}
+			return cleanModuleVersion(dep.Version)
+		}
+	}
+	return ""
+}
+
+// cleanModuleVersion normalizes a build-info module version to a comparable "vX.Y.Z" or
+// "" — an empty or untagged ("(devel)") build carries no usable version.
+func cleanModuleVersion(v string) string {
+	if v == "" || v == "(devel)" {
+		return ""
+	}
+	return v
+}

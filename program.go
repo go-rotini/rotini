@@ -468,6 +468,14 @@ func (p *Program) run(argv []string) (int, error) {
 		return 0, nil
 	}
 
+	// The hidden version handshake (binary arm of D-W9.4): a host that opted into a
+	// remote's RemoteVerify.Version probes this with `<binary> __rotini` to read the
+	// rotini version this program was built against. Always answerable, like __complete.
+	if len(argv) > 0 && argv[0] == rotiniVersionCommand {
+		fmt.Fprintln(p.stdout, rotiniVersionReport())
+		return 0, nil
+	}
+
 	// The effective run context, and whether rotini traps signals — two INDEPENDENT axes (see
 	// [Program.WithSignals] / [Program.WithoutSignalHandling]). rotini's working context is
 	// always a CHILD it can cancel when it must drive the trap: derived from the caller's

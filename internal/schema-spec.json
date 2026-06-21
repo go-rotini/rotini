@@ -768,6 +768,26 @@
           "type": "string",
           "description": "Host-side timeout for the remote binary execution. Uses Go duration format (e.g. \"10s\", \"1m30s\"). Empty or omitted means no timeout.",
           "pattern": "^([0-9]+(\\.[0-9]+)?(ns|us|µs|ms|s|m|h))+$"
+        },
+        "verify": {
+          "$ref": "#/definitions/RemoteVerifySpec",
+          "description": "Opt-in pre-dispatch trust for this remote's binary (W9). Verified once, before the binary runs; omitted verifies nothing and dispatch is unchanged."
+        }
+      }
+    },
+    "RemoteVerifySpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Opt-in trust checks a remote command declares for its dispatched binary (W9/D-W9.3/D-W9.4). Each field opts in to one rung of the shared trust ladder.",
+      "properties": {
+        "version": {
+          "type": "boolean",
+          "description": "Enable the same-major rotini version handshake: rotini runs '<binary> __rotini' and refuses to dispatch on a definite cross-major mismatch (an undeterminable remote version is skipped — best-effort)."
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Pin the dispatched binary's SHA-256 content hash ('sha256:<hex>' or a bare 64-char hex). rotini hashes the resolved binary and refuses to dispatch on a mismatch.",
+          "pattern": "^(sha256:)?[0-9a-fA-F]{64}$"
         }
       }
     },

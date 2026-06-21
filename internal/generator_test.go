@@ -3007,6 +3007,23 @@ func TestRemoteDefsLiteral(t *testing.T) {
 	if got := remoteDefsLiteral("acme", nil); got != "" {
 		t.Errorf("remoteDefsLiteral(none) = %q, want empty", got)
 	}
+
+	// Opt-in verify (W9): a version handshake and/or a pinned sha256 emit a Verify literal.
+	verified := remoteDefsLiteral("acme", []RemoteCommandSpec{
+		{Name: "deploy", Verify: &RemoteVerifySpec{Version: true, Sha256: "sha256:abc"}},
+		{Name: "plain"}, // no verify → no Verify field
+	})
+	for _, want := range []string{
+		`Verify: &rotini.RemoteVerify{Version: true, SHA256: "sha256:abc"}`,
+		`Name: "plain", Binary: "acme-plain"}`,
+	} {
+		if !strings.Contains(verified, want) {
+			t.Errorf("remoteDefsLiteral missing %q in %s", want, verified)
+		}
+	}
+	if strings.Contains(verified, `Name: "plain", Binary: "acme-plain", Verify`) {
+		t.Errorf("a remote without verify should emit no Verify field: %s", verified)
+	}
 }
 
 func TestResolveHeadings(t *testing.T) {
