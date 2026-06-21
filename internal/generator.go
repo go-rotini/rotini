@@ -127,6 +127,10 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 	if err != nil {
 		return err
 	}
+	// Package arm (D-W9.4): refuse to generate code against a cross-major rotini library.
+	if err := checkPackageVersion(moduleRoot, version); err != nil {
+		return err
+	}
 	lay := resolveLayout(conf, moduleRoot, moduleName)
 	gp, err := resolveTree(spec, specPath, moduleRoot, moduleName, version)
 	if err != nil {
