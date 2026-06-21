@@ -22,10 +22,10 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// generated BindMeta the program bound at NewProgram time.
 	inputs, err := rotini.Collect[RotiniInputs](rtx)
 	if err != nil {
-		// Record and stop: the program's OnError funnel reports it. The handler
-		// signals exit 1; with no custom WithOnErrorFn wired (see main.go),
+		// Record and stop: the program's funnel reports it. The handler
+		// signals exit 1; with no custom WithFunnel wired (see main.go),
 		// rotini's default prints the error to stderr. Suggestions ("did you
-		// mean") are deliberately NOT here — that is the end-user's own OnError
+		// mean") are deliberately NOT here — that is the end-user's own funnel
 		// to add, against the bound Suggestor.
 		rtx.RecordError(err)
 		rtx.SignalExit(1)

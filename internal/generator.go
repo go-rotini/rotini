@@ -1165,9 +1165,9 @@ func writeEntrypoint(lay layout) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
-	// The generated package is imported aliased as "cli" so the reference never
+	// The generated package is imported aliased as "cmd" so the reference never
 	// collides with the rotini runtime package (also named "rotini").
-	content, err := renderMainFile(lay.handlerImport, "cli")
+	content, err := renderMainFile(lay.handlerImport, "cmd")
 	if err != nil {
 		return err
 	}

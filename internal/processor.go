@@ -40,7 +40,7 @@ func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate f
 // Validate runs the validate workflow: load → validate, once or on every change (watch).
 // failMode is the --fail override ("fast"/"collect"; "" → the conf's validate.fail).
 // onValidate, which may be nil, receives a summary and each pass's error. onWarnings,
-// which may be nil, receives the pass's non-fatal warnings (the OnWarning funnel's feed):
+// which may be nil, receives the pass's non-fatal warnings (the funnel's feed):
 // it fires on every pass with warnings, whether or not the pass also has errors.
 func (p *Processor) Validate(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error {
 	if onValidate == nil {

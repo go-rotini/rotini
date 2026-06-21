@@ -201,7 +201,7 @@ func lintInitializeLocation(conf *Conf, confPath string) []error {
 
 // severity classifies a validation problem. The zero value is an error (fails
 // validation); a warning is surfaced separately but does NOT fail. The validate
-// command routes the two to the OnError and OnWarning funnels respectively.
+// command routes the two to the funnel (as its errors and warnings respectively).
 type severity int
 
 const (
@@ -441,7 +441,7 @@ func lintFeatureDirs(conf *Conf) []error {
 // without embed mode (inline content writes no embedded file), a `template_dir`
 // without seeding a template, and — for completion, which has no editable template —
 // `template`/`template_dir` at all. Disabled features are left alone (staged config).
-// Warnings route to the OnWarning funnel; validation still passes.
+// Warnings route to the funnel (as warnings); validation still passes.
 func lintFeatureKnobs(conf *Conf) []error {
 	if conf.Generate == nil || conf.Generate.Features == nil {
 		return nil

@@ -2,7 +2,7 @@ package rotini
 
 import "errors"
 
-// Category classifies an error by whose fault it is, so one OnError funnel can decide the
+// Category classifies an error by whose fault it is, so the funnel can decide the
 // exit code and message style from a single call to [CategoryOf] — rather than every CLI
 // re-deriving the taxonomy. rotini tags its
 // OWN errors (a missing service is [CategoryInternal]; a parse/bind failure is
@@ -12,7 +12,7 @@ import "errors"
 // named exit-code constants and forces no category→code mapping (Pillar 1): its
 // DEFAULT funnel exits 1 for any recorded error or fault (a recorded run never
 // exits 0). A program that wants to map categories to distinct codes does so in
-// its own [Program.WithOnErrorFn] via rtx.SignalExit.
+// its own [Program.WithFunnel] via rtx.Exit.
 type Category int
 
 const (

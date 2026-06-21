@@ -133,46 +133,46 @@ func TestRun_exitCodePropagates(t *testing.T) {
 	}
 }
 
-func TestRun_mustGetRoutesToOnPanic(t *testing.T) {
+func TestRun_mustGetRoutesToFunnelPanics(t *testing.T) {
 	var seen *PanicError
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		// What rotini.MustGet panics on a missing service; recovered → OnPanic.
+		// What rotini.MustGet panics on a missing service; recovered → the funnel's panics.
 		panic(&ServiceError{Key: "no-such-service"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithOnPanicFn(func(_ context.Context, rtx *Context, panics []*PanicError) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, panics []*PanicError) {
 		seen = panics[0]
-		rtx.SignalExit(7)
+		rtx.Exit(7)
 	})
 
 	code, err := p.run(p.args)
 	if code != 7 {
-		t.Fatalf("run() = %d, want 7 (OnPanic's exit code)", code)
+		t.Fatalf("run() = %d, want 7 (the funnel's exit code)", code)
 	}
 	// The recovered panic is also returned to the caller (the run err).
 	if !errors.Is(err, ErrServiceNotFound) {
 		t.Errorf("run returned err = %v, want it to wrap ErrServiceNotFound", err)
 	}
-	// OnPanic gets the *PanicError; its Value carries the panicked *ServiceError.
+	// The funnel gets the *PanicError; its Value carries the panicked *ServiceError.
 	if !errors.Is(seen, ErrServiceNotFound) {
-		t.Errorf("OnPanic got %v, want it to wrap ErrServiceNotFound", seen)
+		t.Errorf("funnel got %v, want it to wrap ErrServiceNotFound", seen)
 	}
 	var se *ServiceError
 	if !errors.As(seen, &se) || se.Key != "no-such-service" {
-		t.Errorf("OnPanic error did not carry the key: %v", seen)
+		t.Errorf("funnel error did not carry the key: %v", seen)
 	}
 }
 
-func TestRun_onPanicFnWithoutExitStillFails(t *testing.T) {
-	// A funnel that classifies/logs but forgets to call rtx.Exit must not leak a
-	// success code out of a panic: settle floors the fault path to 1.
+func TestRun_defaultFunnelFaultFloorsTo1(t *testing.T) {
+	// With the DEFAULT funnel (none wired), a recovered fault floors the exit to 1 — a
+	// panic never leaks a success code. (A CUSTOM funnel may mask it; see
+	// TestRun_faultExit_defaultFloorsButFunnelCanMask.)
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic(&ServiceError{Key: "missing"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithOnPanicFn(func(_ context.Context, _ *Context, _ []*PanicError) {}) // no rtx.Exit
 	if code, _ := p.run(p.args); code != 1 {
-		t.Errorf("run() = %d, want %d (a fault is never masked to 0)", code, 1)
+		t.Errorf("run() = %d, want 1 (the default funnel floors a fault)", code)
 	}
 }
 
@@ -320,15 +320,17 @@ func TestRun_hardExitInTeardownSkipsRemainingTeardown(t *testing.T) {
 	}
 }
 
-// A hard Exit skips remaining teardown but does NOT bypass the panic funnel: a
-// panic recovered before the Exit is still routed to WithOnErrorFn after the
-// (skipped) teardown. Run panics, then the leaf's PostRun hard-Exits — the trailing
+// A hard Exit skips remaining teardown but does NOT bypass the funnel: a panic
+// recovered before the Exit is still handed to the funnel after the (skipped)
+// teardown. Run panics, then the leaf's PostRun hard-Exits — the trailing
 // CascadingPostRuns are skipped, yet the funnel still fires with the panic.
 func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 	var log []string
 	var seen *PanicError
 	p, _, _ := newTestProgram(&panicThenHardExit{log: &log}, []string{"run"})
-	p.WithOnPanicFn(func(_ context.Context, _ *Context, panics []*PanicError) { seen = panics[0] })
+	p.WithFunnel(func(_ context.Context, _ *Context, _, _ []string, _, _ []error, panics []*PanicError) {
+		seen = panics[0]
+	})
 
 	code, err := p.run(p.args)
 
@@ -416,49 +418,49 @@ func TestRun_firstNonZeroExitWins(t *testing.T) {
 	}
 }
 
-// A panic runs all begun teardown first, then funnels to OnPanic last.
-func TestRun_panicRunsTeardownThenOnPanicLast(t *testing.T) {
+// A panic runs all begun teardown first, then funnels last.
+func TestRun_panicRunsTeardownThenFunnelLast(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "Run", do: func(*Context) { panic("boom") }},
 	}}, []string{"run"})
-	p.WithOnPanicFn(func(_ context.Context, rtx *Context, panics []*PanicError) {
-		log = append(log, "onPanicFn:"+panics[0].Error())
-		rtx.SignalExit(5)
+	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, panics []*PanicError) {
+		log = append(log, "funnel:"+panics[0].Error())
+		rtx.Exit(5)
 	})
 	code, _ := p.run(p.args)
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
 		"run.PreRun", "run.Run",
 		"run.PostRun", "run.CascadingPostRun", "app.CascadingPostRun",
-		"onPanicFn:boom",
+		"funnel:boom",
 	}
 	if !reflect.DeepEqual(log, want) {
-		t.Errorf("teardown-then-OnPanic order:\n got=%v\nwant=%v", log, want)
+		t.Errorf("teardown-then-funnel order:\n got=%v\nwant=%v", log, want)
 	}
 	if code != 5 {
-		t.Errorf("code = %d, want 5 (OnPanic's explicit exit, kept over the default 1 floor)", code)
+		t.Errorf("code = %d, want 5 (the funnel's explicit exit)", code)
 	}
 }
 
 // A panic inside a teardown hook is recovered: the remaining teardown still runs
-// and OnPanic is funneled exactly once.
+// and the funnel fires exactly once.
 func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "PostRun", do: func(*Context) { panic("teardown-boom") }},
 	}}, []string{"run"})
 	calls := 0
-	p.WithOnPanicFn(func(_ context.Context, rtx *Context, _ []*PanicError) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, _ []*PanicError) {
 		calls++
-		rtx.SignalExit(1)
+		rtx.Exit(1)
 	})
 	code, _ := p.run(p.args)
 	if !contains(log, "app.CascadingPostRun") {
 		t.Errorf("remaining teardown did not run after a teardown panic: %v", log)
 	}
 	if calls != 1 {
-		t.Errorf("OnPanic called %d times, want 1", calls)
+		t.Errorf("funnel called %d times, want 1", calls)
 	}
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)

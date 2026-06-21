@@ -113,21 +113,21 @@ func TestWithResolver_error(t *testing.T) {
 // The pre-classified diagnostics make the documented one-switch funnel work:
 // a custom funnel maps CategoryInternal to 70 with no taxonomy
 // re-derivation of its own.
-func TestWithOnErrorFn_categorySwitch(t *testing.T) {
-	// A custom OnError maps CategoryInternal → 70 in one switch over the
+func TestWithFunnel_categorySwitch(t *testing.T) {
+	// A custom funnel maps CategoryInternal → 70 in one switch over the
 	// recorded errors, with no taxonomy re-derivation of its own.
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(InternalError(errors.New("boom")))
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithOnErrorFn(func(_ context.Context, rtx *Context, errs []error) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, errs []error, _ []*PanicError) {
 		switch CategoryOf(errors.Join(errs...)) {
 		case CategoryUsage:
-			rtx.SignalExit(1)
+			rtx.Exit(1)
 		case CategoryInternal:
-			rtx.SignalExit(70)
+			rtx.Exit(70)
 		default:
-			rtx.SignalExit(1)
+			rtx.Exit(1)
 		}
 	})
 	if code, _ := p.run(p.args); code != 70 {
@@ -267,19 +267,22 @@ type panicRunHandler struct {
 
 func (h *panicRunHandler) Run(context.Context, *Context) { panic(h.val) }
 
-// A recovered panic reaches the OnPanic funnel as a *PanicError: the
+// A recovered panic reaches the funnel as a *PanicError in its panics slice: the
 // recovery-point stack rides along, Error() stays the panicked value alone (the
 // default funnel's one-line output is pinned by the unwind test above), and a
 // panicked error value keeps its sentinels and category tags through Unwrap.
 func TestPanicError(t *testing.T) {
-	// capture runs argv against handlers and returns what the OnPanic funnel was handed.
+	// capture runs argv against handlers and returns the *PanicError the funnel was handed.
 	capture := func(t *testing.T, h any) error {
 		t.Helper()
 		var got error
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithOnPanicFn(func(_ context.Context, _ *Context, panics []*PanicError) { got = panics[0] })
+		p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, panics []*PanicError) {
+			got = panics[0]
+			rtx.Exit(1)
+		})
 		if code, _ := p.run(p.args); code != 1 {
-			t.Fatalf("run() = %d, want the fault path's default 1", code)
+			t.Fatalf("run() = %d, want the funnel's exit 1", code)
 		}
 		return got
 	}

@@ -86,25 +86,22 @@ func canceledExitCode(ctx context.Context) int {
 }
 
 type Program struct {
-	ctx         context.Context
-	args        []string
-	def         Definition
-	handlers    any
-	rtx         *Context                                                      // pre-seeded registry; user Bind calls land here
-	onErrorFn   func(ctx context.Context, rtx *Context, errs []error)         // OnError funnel (recorded errors); nil → defaultOnError
-	onSuccessFn func(ctx context.Context, rtx *Context, results []string)     // OnSuccess funnel (recorded successes); nil → defaultOnSuccess
-	onWarningFn func(ctx context.Context, rtx *Context, warnings []error)     // OnWarning funnel (recorded warnings); nil → defaultOnWarning
-	onPanicFn   func(ctx context.Context, rtx *Context, panics []*PanicError) // OnPanic funnel (recovered panics + rotini-detected faults); nil → defaultOnPanic
-	resolver    Resolver                                                      // resolve phase override; nil → DefaultResolver
-	lifecycle   Lifecycle                                                     // run-phase plan override; nil → DefaultLifecycle
-	stdin       io.Reader
-	stdout      io.Writer
-	stderr      io.Writer
-	exit        func(int) // terminal action for Execute; defaults to os.Exit
+	ctx       context.Context
+	args      []string
+	def       Definition
+	handlers  any
+	rtx       *Context   // pre-seeded registry; user Bind calls land here
+	funnelFn  FunnelFunc // the one outcome funnel (all recorded channels); nil → defaultFunnel
+	resolver  Resolver   // resolve phase override; nil → DefaultResolver
+	lifecycle Lifecycle  // run-phase plan override; nil → DefaultLifecycle
+	stdin     io.Reader
+	stdout    io.Writer
+	stderr    io.Writer
+	exit      func(int) // terminal action for Execute; defaults to os.Exit
 	// panicForward: when true (default), a recovered panic halts forward progress but lets
 	// teardown still run; when false, a recovered panic hard-stops, skipping remaining teardown.
 	panicForward bool
-	// panicRecover: when true (default), a hook panic is recovered and routed to OnPanic; when
+	// panicRecover: when true (default), a hook panic is recovered and routed to the funnel; when
 	// false, hooks run unguarded so a panic propagates raw.
 	panicRecover bool
 	// signalMode resolves whether the SIGINT/SIGTERM trap is installed, INDEPENDENTLY of
@@ -157,7 +154,7 @@ func (p *Program) WithStdout(w io.Writer) *Program {
 }
 
 // WithStderr overrides the program's standard-error stream (defaults to os.Stderr) — the
-// destination for the runtime's own diagnostics (dispatch errors, the default OnError). A
+// destination for the runtime's own diagnostics (dispatch errors, the default funnel). A
 // nil writer is ignored. It returns the receiver to chain.
 func (p *Program) WithStderr(w io.Writer) *Program {
 	if w != nil {
@@ -184,7 +181,7 @@ func (p *Program) WithExit(fn func(int)) *Program {
 // `defer`s run during a panic unwind. Pass false for a HARD STOP: remaining teardown is SKIPPED
 // (as a hard [Context.Exit] would).
 //
-// Where the panic ultimately goes — the [Program.WithOnPanicFn] funnel (the default) or raw to
+// Where the panic ultimately goes — the funnel ([Program.WithFunnel], the default) or raw to
 // the caller — is the separate [Program.WithPanicRecover] knob; the two compose. Keep forward on
 // when teardown must release resources / roll back regardless of a panic; turn it off when a
 // panic means the program is too broken to clean up safely (e.g. a wiring fault). The exit code
@@ -195,9 +192,9 @@ func (p *Program) WithPanicForward(enabled bool) *Program {
 }
 
 // WithPanicRecover controls where a hook panic ultimately goes. The default is true: every hook
-// panic is recovered and routed to [Program.WithOnPanicFn], so consumers of the built CLI never
-// see a raw stack dump. Pass false to re-raise the panic RAW to the caller instead of funneling
-// it — the original value crashes the process (exit 2, no OnPanic), plain-Go behavior, for e.g.
+// panic is recovered and routed to the funnel ([Program.WithFunnel]), so consumers of the built
+// CLI never see a raw stack dump. Pass false to re-raise the panic RAW to the caller instead of
+// funneling it — the original value crashes the process (exit 2, unfunneled), plain-Go behavior, for e.g.
 // embedding rotini under your own top-level recover, a crash reporter, or debugging.
 //
 // It composes with [Program.WithPanicForward], which still decides teardown:
@@ -222,7 +219,7 @@ func (p *Program) WithArgs(args []string) *Program {
 }
 
 // WithContext sets the base [context.Context] threaded to every lifecycle hook (and to
-// the OnError funnel and any remote sub-command exec), so a caller — a server, a test,
+// the funnel and any remote sub-command exec), so a caller — a server, a test,
 // a parent process — can cancel or time-bound the whole run. A nil context is ignored.
 //
 // Cancellation is cooperative: it cannot preempt a hook that ignores it (a handler
@@ -286,7 +283,7 @@ func (p *Program) WithSignals(sigs ...os.Signal) *Program {
 }
 
 // Bind registers a service on the program's registry under key, overwriting any
-// prior binding, and returns the receiver so it chains with [Program.WithOnErrorFn] and
+// prior binding, and returns the receiver so it chains with [Program.WithFunnel] and
 // [program.WithArgs] before [program.Execute]. It is the dependency-injection
 // seam: bind a real implementation in production or a double in tests, with the
 // same handler code retrieving it via the typed [Get] / [MustGet]. Binding
@@ -296,72 +293,39 @@ func (p *Program) Bind(key string, value any) *Program {
 	return p
 }
 
-// WithOnErrorFn sets the program's OnError funnel: where the END-USER's recorded
-// errors are reported. The runtime calls fn(ctx, rtx, errs) once per run, after
-// the lifecycle settles, whenever a handler recorded ANY error with
-// [Context.RecordError] (a remote dispatch failure rotini records on the
-// handler's behalf reaches it too) — errs is the recorded set, in order. The
-// records are PRIVATE: errs is the only way fn sees them (there is no drainable
-// accessor on rtx). fn decides the exit code (rtx.SignalExit), classifies each
-// (errors.Is/errors.As, [CategoryOf]), logs, and prints in the CLI's own style.
-// With no funnel set, the default prints one clean line per error to stderr
-// (program-name prefixed) and exits 1. It returns the receiver so it chains with
-// [Program.Bind].
+// FunnelFunc is the program's single outcome funnel ([Program.WithFunnel]): the
+// runtime calls it once, after the lifecycle (teardown included) settles, with every
+// channel a run recorded — informational messages ([Context.RecordInfo]), successes
+// ([Context.RecordSuccess]), non-fatal warnings ([Context.RecordWarning]), the
+// end-user's errors ([Context.RecordError]), and the panics slice (recovered panics +
+// rotini-detected faults: a wiring mismatch, a resolver fault, a [MustGet] on a missing
+// service — never handler-recordable). Each slice is in recording order; all are
+// PRIVATE (the funnel's parameters are the only way they surface — there is no drainable
+// accessor on rtx). The funnel decides what to print and where, in what order, and the
+// final exit code: it is the LAST authority, so [Context.Exit] inside it OVERRIDES any
+// code the lifecycle set (see [Context.Exit]; [Context.SignalExit] is a no-op here).
+type FunnelFunc func(ctx context.Context, rtx *Context, infos []string, successes []string, warnings []error, errors []error, panics []*PanicError)
+
+// WithFunnel sets the program's outcome funnel — the single place a run's recorded
+// channels (infos / successes / warnings / errors / panics) are reported. The runtime
+// invokes it once per run, after the lifecycle settles, whenever ANY channel recorded
+// something (a clean run with nothing recorded never invokes it). It replaces the four
+// former per-channel funnels: one function receives everything at once, so a CLI controls
+// cross-channel logic, print ordering, and the exit code in one place — see [FunnelFunc].
 //
-// OnError is ONE of four outcome funnels. It is for the end-user's own errors
-// only — rotini's "this should never have happened" faults (a wiring mismatch,
-// a resolver fault, a recovered panic, a [MustGet] on a missing service) go to
-// [Program.WithOnPanicFn] instead; recorded successes and warnings go to
-// [Program.WithOnSuccessFn] / [Program.WithOnWarningFn]. A run that recorded any
-// error never exits 0; a run with no recorded error never invokes fn.
-func (p *Program) WithOnErrorFn(fn func(ctx context.Context, rtx *Context, errs []error)) *Program {
-	p.onErrorFn = fn
+// With no funnel set, the default ([Program.defaultFunnel]) prints in the order
+// info → warning → error → panic → success (infos/successes to stdout, the rest to
+// stderr) and applies the exit floor: a recorded error or a panic exits non-zero unless a
+// handler already set a deliberate code. A custom funnel owns the exit entirely (it may
+// even mask a panic to 0 via [Context.Exit]). It returns the receiver so it chains with
+// [Program.Bind].
+func (p *Program) WithFunnel(fn FunnelFunc) *Program {
+	p.funnelFn = fn
 	return p
 }
 
-// WithOnSuccessFn sets the program's OnSuccess funnel: where a handler's
-// recorded successes ([Context.RecordSuccess]) are reported. The runtime calls
-// fn(ctx, rtx, results) once per run, after the lifecycle settles, whenever any
-// success was recorded — results is the recorded messages, in order (the only
-// way fn sees them; the records are private). With no funnel set, the default
-// prints each result to stdout and does not change the exit code. A run with no
-// recorded success never invokes fn. It returns the receiver to chain.
-func (p *Program) WithOnSuccessFn(fn func(ctx context.Context, rtx *Context, results []string)) *Program {
-	p.onSuccessFn = fn
-	return p
-}
-
-// WithOnWarningFn sets the program's OnWarning funnel: where a handler's
-// recorded non-fatal warnings ([Context.RecordWarning]) are reported. The
-// runtime calls fn(ctx, rtx, warnings) once per run, after the lifecycle
-// settles, whenever any warning was recorded — warnings is the recorded set, in
-// order (the only way fn sees them; the records are private). With no funnel
-// set, the default prints each warning to stderr and does NOT change the exit
-// code (warnings are non-fatal). A run with no recorded warning never invokes
-// fn. It returns the receiver to chain.
-func (p *Program) WithOnWarningFn(fn func(ctx context.Context, rtx *Context, warnings []error)) *Program {
-	p.onWarningFn = fn
-	return p
-}
-
-// WithOnPanicFn sets the program's OnPanic funnel: rotini's "this should never
-// have happened" sink. The runtime calls fn(ctx, rtx, panics) once per run,
-// after the lifecycle settles, whenever a hook PANICKED and was recovered, or
-// rotini DETECTED an internal fault (a [*WiringError] from a Definition vs.
-// handlers mismatch, a resolver fault, a [MustGet] on a missing service). There
-// is no public record call — the lifecycle captures the fault, and panics is the
-// captured set, in order (the only way fn sees them). With no funnel set, the
-// default prints one clean line per fault to stderr (the stack rides each
-// [*PanicError] for errors.As, never printed) and exits 1 — a fault is never
-// masked to 0. A run with no fault never invokes fn. It returns the receiver to
-// chain.
-func (p *Program) WithOnPanicFn(fn func(ctx context.Context, rtx *Context, panics []*PanicError)) *Program {
-	p.onPanicFn = fn
-	return p
-}
-
-// PanicError is how a panic recovered from a lifecycle hook reaches the
-// [Program.WithOnErrorFn] funnel: Value is the value passed to panic, Stack is the
+// PanicError is how a panic recovered from a lifecycle hook reaches the funnel
+// ([Program.WithFunnel]) as a panics-slice element: Value is the value passed to panic, Stack is the
 // goroutine stack captured at the recovery point (runtime/debug.Stack) — the
 // information the recover would otherwise discard. Error renders Value alone, so
 // default output stays one line; a funnel that wants the stack asks with errors.As.
@@ -407,8 +371,8 @@ func (e *WiringError) Unwrap() error { return ErrInternal }
 // later see). Wrap [DefaultResolver] rather than re-deriving it: a resolver
 // that rewrites tokens (an alias, a shorthand expansion) rewrites argv, hands
 // it to the default, and returns the result — routing and parsing then agree.
-// A resolver error is a resolution-phase fault, routed through the OnPanic
-// funnel, and fails the run. The hidden __complete protocol intercept runs before resolution, and
+// A resolver error is a resolution-phase fault, routed through the funnel
+// (as a fault), and fails the run. The hidden __complete protocol intercept runs before resolution, and
 // completion candidates walk the Definition — a resolver-only alias is
 // dispatchable but not completable (declare real aliases in the spec for
 // that). A nil resolver is ignored. It returns the receiver to chain.
@@ -545,7 +509,7 @@ func (p *Program) run(argv []string) (int, error) {
 
 	res, err := resolve(p.def, argv)
 	if err != nil {
-		// A resolver fault is rotini's domain, not the end-user's → OnPanic.
+		// A resolver fault is rotini's domain, not the end-user's → the funnel (as a fault).
 		rtx.recordFault(asFault(internalUnlessTagged(fmt.Errorf("resolve: %w", err))))
 		return p.settle(ctx, rtx)
 	}
@@ -553,7 +517,7 @@ func (p *Program) run(argv []string) (int, error) {
 		return p.execRemote(ctx, rtx, res.Remote)
 	}
 	if len(res.Chain) == 0 {
-		// An empty chain is a resolver contract violation → OnPanic.
+		// An empty chain is a resolver contract violation → the funnel (as a fault).
 		rtx.recordFault(asFault(InternalError(errors.New("resolver returned an empty chain — the root frame is always resolvable"))))
 		return p.settle(ctx, rtx)
 	}
@@ -577,71 +541,43 @@ func internalUnlessTagged(err error) error {
 }
 
 // asFault wraps a rotini-detected fault error (a wiring mismatch, a resolver
-// fault) into a [*PanicError] so it rides the OnPanic channel uniformly with
+// fault) into a [*PanicError] so it rides the panics channel uniformly with
 // recovered panics. Value holds the error (errors.As/Is and [CategoryOf] see
 // through it); Stack is empty — this is a detected fault, not a real panic
 // (detect-and-route, no stack unwind).
 func asFault(err error) *PanicError { return &PanicError{Value: err} }
 
 // settle is the single run tail: after the lifecycle (or an early framework
-// fault) has populated the Context's outcome channels, it fires each non-empty
-// channel's funnel — Warning → Success → Error → Panic — and resolves the exit
-// code. It is shared by the dispatch tail and the resolve/wiring/remote early
-// returns, so every run path reports through the same funnels.
+// fault) has populated the Context's outcome channels, it hands them ALL to the one
+// funnel — the custom [Program.WithFunnel] or [Program.defaultFunnel] — and resolves
+// the exit code. It is shared by the dispatch tail and the resolve/wiring/remote early
+// returns, so every run path reports through the same funnel.
 //
-// Exit code: a handler's (or a funnel's) explicit rtx.SignalExit/rtx.Exit wins
-// (first non-zero, already in rtx.exitCode). The two floors differ by owner: the
-// ERROR floor is the default OnError funnel's (defaultOnError calls SignalExit(1),
-// so a CUSTOM OnError can omit it and exit 0 on a recorded error — the end-user's
-// channel), while the FAULT floor is the runtime's and stays here — a captured
-// fault (a recovered panic, a wiring/resolver/MustGet fault) always exits non-zero
-// and is never the funnel's to mask to 0. Success and warning never change the
-// code. rotini holds no named exit-code constants; a CLI that wants other codes
-// sets them in its funnels.
+// Exit code: a handler's explicit rtx.SignalExit/rtx.Exit carries into the funnel (first
+// non-zero, already in rtx.exitCode). The funnel is the FINAL authority — it runs in the
+// funnel stage where rtx.Exit OVERRIDES that code (a custom funnel may even exit 0 on a
+// panic). The exit floors live in defaultFunnel (a recorded error or a captured fault
+// exits non-zero unless a deliberate code is already set), so a custom funnel that wants
+// other behavior simply does not call into them. rotini holds no named exit-code
+// constants; a CLI that wants other codes sets them in its funnel.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	// Snapshot the private channels once; the records surface only here, as the
-	// slice each funnel receives — there is no public drainable accessor.
-	warnings := rtx.copyWarnings()
+	// slices the funnel receives — there is no public drainable accessor.
+	infos := rtx.copyInfos()
 	successes := rtx.copySuccesses()
+	warnings := rtx.copyWarnings()
 	errs := rtx.copyErrors()
 	faults := rtx.copyFaults()
 
-	if len(warnings) > 0 {
-		fn := p.onWarningFn
+	// A clean run that recorded nothing never invokes the funnel.
+	if len(infos)+len(successes)+len(warnings)+len(errs)+len(faults) > 0 {
+		fn := p.funnelFn
 		if fn == nil {
-			fn = p.defaultOnWarning
+			fn = p.defaultFunnel
 		}
-		fn(ctx, rtx, warnings)
-	}
-	if len(successes) > 0 {
-		fn := p.onSuccessFn
-		if fn == nil {
-			fn = p.defaultOnSuccess
-		}
-		fn(ctx, rtx, successes)
-	}
-	if len(errs) > 0 {
-		fn := p.onErrorFn
-		if fn == nil {
-			fn = p.defaultOnError
-		}
-		fn(ctx, rtx, errs)
-	}
-	if len(faults) > 0 {
-		fn := p.onPanicFn
-		if fn == nil {
-			fn = p.defaultOnPanic
-		}
-		fn(ctx, rtx, faults)
-	}
-
-	// The FAULT floor stays here, in the runtime: a recovered panic or rotini-detected
-	// fault is never the funnel's to mask to 0 (a crash exits non-zero, period). The ERROR
-	// floor, by contrast, is owned by defaultOnError (which calls rtx.SignalExit(1)), so a
-	// CUSTOM OnError that omits SignalExit may legitimately exit 0 on a recorded error — the
-	// end-user's own error channel, the end-user's call.
-	if rtx.exitCode == 0 && len(faults) > 0 {
-		rtx.exitCode = 1
+		rtx.funnelStage = true // rtx.Exit now overrides; rtx.SignalExit is a no-op
+		fn(ctx, rtx, infos, successes, warnings, errs, faults)
+		rtx.funnelStage = false
 	}
 	return rtx.exitCode, joinOutcome(errs, faults)
 }
@@ -661,44 +597,34 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 	return errors.Join(all...)
 }
 
-// defaultOnError is the OnError funnel used when the program supplies none: it
-// prints one clean line per recorded error to stderr (each labeled "Error:") and
-// then OWNS the error floor — it calls rtx.SignalExit(1), so a recorded error exits
-// non-zero by default. Because the floor lives HERE (not in [settle]), a CUSTOM
-// [Program.WithOnErrorFn] that omits SignalExit may exit 0 on a recorded error: the
-// end-user's error channel is the end-user's policy. (Faults stay non-maskable — see
-// [Program.WithOnPanicFn]/[settle].) Each rotini error type renders a single
-// non-leaky line; a CLI that wants richer reporting or a different code supplies its
-// own funnel.
-func (p *Program) defaultOnError(_ context.Context, rtx *Context, errs []error) {
-	for _, e := range errs {
-		fmt.Fprintf(p.stderr, "Error: %s\n", e.Error())
-	}
-	rtx.SignalExit(1)
-}
-
-// defaultOnSuccess prints each recorded success to stdout; the exit code is
-// unchanged (a clean run is already 0).
-func (p *Program) defaultOnSuccess(_ context.Context, _ *Context, results []string) {
-	for _, s := range results {
+// defaultFunnel is the outcome funnel used when the program supplies none. It prints
+// each channel in the order info → warning → error → panic → success — infos and
+// successes to stdout, warnings/errors/faults to stderr (each rotini error type renders a
+// single non-leaky line; a [*PanicError]'s Value is printed, never its Stack — that stays
+// for an errors.As). Then it applies the exit floor: a recorded error or a captured fault
+// exits non-zero (1) UNLESS a handler already set a deliberate code, which it never
+// downgrades. A CLI that wants richer reporting, a different order, or a different code
+// supplies its own [Program.WithFunnel].
+func (p *Program) defaultFunnel(_ context.Context, rtx *Context, infos, successes []string, warnings, errs []error, faults []*PanicError) {
+	for _, s := range infos {
 		fmt.Fprintln(p.stdout, s)
 	}
-}
-
-// defaultOnWarning prints each recorded warning to stderr (program-name
-// prefixed); the exit code is unchanged (warnings are non-fatal).
-func (p *Program) defaultOnWarning(_ context.Context, _ *Context, warnings []error) {
 	for _, w := range warnings {
 		fmt.Fprintf(p.stderr, "Warning: %s\n", w.Error())
 	}
-}
-
-// defaultOnPanic prints one clean line per captured fault to stderr (the
-// [*PanicError]'s Value, never its Stack — that stays for an errors.As). The
-// exit is [settle]'s to set (1); a fault is never masked to 0.
-func (p *Program) defaultOnPanic(_ context.Context, _ *Context, panics []*PanicError) {
-	for _, pe := range panics {
+	for _, e := range errs {
+		fmt.Fprintf(p.stderr, "Error: %s\n", e.Error())
+	}
+	for _, pe := range faults {
 		fmt.Fprintf(p.stderr, "Fatal Error: %v\n", pe)
+	}
+	for _, s := range successes {
+		fmt.Fprintln(p.stdout, s)
+	}
+	// Exit floor: an error or a fault is non-zero by default, but a deliberate handler
+	// exit (a non-zero rtx.exitCode set during the lifecycle) is never downgraded.
+	if rtx.exitCode == 0 && (len(errs) > 0 || len(faults) > 0) {
+		rtx.exitCode = 1
 	}
 }
 
@@ -717,7 +643,7 @@ func (p *Program) defaultOnPanic(_ context.Context, _ *Context, panics []*PanicE
 //
 // rtx.SignalExit is a clean stop that still runs teardown; rtx.Exit is a hard stop that
 // skips it. A panic anywhere (e.g. the [MustGet] on a missing service) is recovered as a
-// fault and routed once — after teardown — to the OnPanic funnel, last. By default it does
+// fault and routed once — after teardown — to the funnel, last. By default it does
 // not abort the remaining teardown (cleanup still runs); [Program.WithPanicForward](false)
 // makes a panic a hard stop that skips the rest of teardown.
 //
@@ -732,7 +658,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	for i, f := range chain {
 		// A wiring failure (generated Definition and handler set out of sync) is
 		// rotini's "this should never have happened" — a detected fault routed to
-		// the OnPanic funnel (detect-and-route, no literal panic).
+		// the funnel (detect-and-route, no literal panic).
 		m := hv.MethodByName(f.Handler)
 		if !m.IsValid() {
 			rtx.recordFault(asFault(&WiringError{
@@ -765,7 +691,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	// run wraps every hook so a panic is RECOVERED and the lifecycle stays in control — teardown
 	// can still run and the panic is dealt with once, last. Two independent knobs decide the rest:
 	//   - [Program.WithPanicForward] (default true): does begun-step teardown run after a panic?
-	//   - [Program.WithPanicRecover] (default true): is the panic funneled to OnPanic (true), or
+	//   - [Program.WithPanicRecover] (default true): is the panic funneled (true), or
 	//     re-panicked raw to the caller after the lifecycle settles (false)?
 	// The one combination rotini does NOT recover is recover=false AND forward=false — "panic now":
 	// the hook runs unguarded so the panic propagates immediately with its original stack, skipping
@@ -827,7 +753,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 
 	// Recovery off (recover=false, forward=true): the panic was caught only so teardown could
-	// run; surface it raw now — after teardown — instead of funneling it to OnPanic.
+	// run; surface it raw now — after teardown — instead of funneling it.
 	if panicked && !p.panicRecover {
 		panic(panicValue)
 	}

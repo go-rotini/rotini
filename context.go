@@ -10,7 +10,7 @@ import (
 
 // ErrServiceNotFound is the sentinel reported when a registry key is unbound — the
 // [MustGet] panics a [*ServiceError] wrapping it, which the runtime
-// recovers and routes to the OnPanic funnel (a missing service is rotini's
+// recovers and routes to the funnel (a missing service is rotini's
 // "should never happen", not the end-user's error). A funnel classifies it with errors.Is:
 //
 //	case errors.Is(err, rotini.ErrServiceNotFound):
@@ -70,15 +70,17 @@ type Context struct {
 	// the consequences.
 	Args []string
 
-	services  map[string]any
-	chain     []ResolvedCommand // resolved command path, root → leaf
-	exitCode  int               // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins)
-	stopped   bool              // an exit was requested; forward progress (setup/PreRun/Run) halts
-	exitNow   bool              // [Context.Exit] (hard) was called: skip remaining teardown too
-	recorded  []error           // errors recorded this run via [Context.RecordError]; drained by the OnError funnel
-	warnings  []error           // warnings recorded this run via [Context.RecordWarning]; drained by the OnWarning funnel
-	successes []string          // successes recorded this run via [Context.RecordSuccess]; drained by the OnSuccess funnel
-	faults    []*PanicError     // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); drained by the OnPanic funnel
+	services    map[string]any
+	chain       []ResolvedCommand // resolved command path, root → leaf
+	exitCode    int               // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins; the funnel overrides)
+	stopped     bool              // an exit was requested; forward progress (setup/PreRun/Run) halts
+	exitNow     bool              // [Context.Exit] (hard) was called: skip remaining teardown too
+	funnelStage bool              // the run has settled and the funnel is executing: [Context.Exit] now OVERRIDES the exit code (the funnel is the final authority); [Context.SignalExit] is a no-op
+	infos       []string          // informational messages recorded this run via [Context.RecordInfo]; handed to the funnel
+	recorded    []error           // errors recorded this run via [Context.RecordError]; handed to the funnel
+	warnings    []error           // warnings recorded this run via [Context.RecordWarning]; handed to the funnel
+	successes   []string          // successes recorded this run via [Context.RecordSuccess]; handed to the funnel
+	faults      []*PanicError     // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); handed to the funnel
 }
 
 // newContext returns an empty [Context] with an initialized registry and no
@@ -179,7 +181,7 @@ func (rtx *Context) Chain() []ResolvedCommand {
 //	}
 //
 // Value reports a miss as nil and never panics; prefer the typed [Get] (comma-ok)
-// or [MustGet] (panics → OnPanic funnel) for type-safe retrieval.
+// or [MustGet] (panics → the funnel) for type-safe retrieval.
 func (rtx *Context) Value(key string) any {
 	if rtx == nil {
 		return nil
@@ -194,12 +196,17 @@ func (rtx *Context) Value(key string) any {
 // Teardown is unaffected: every PostRun/CascadingPostRun whose paired setup hook
 // began still runs, in reverse, so cleanup is never skipped. The first non-zero
 // code wins, so a later SignalExit (e.g. from a teardown hook) cannot change the
-// verdict. SignalExit does not trigger OnError — it is a clean, deliberate stop,
+// verdict. SignalExit records no error — it is a clean, deliberate stop,
 // not an error. The process exits with the recorded code once the lifecycle,
 // teardown included, completes. For an abort that skips pending teardown, use
 // [Context.Exit].
+//
+// SignalExit is a NO-OP inside the funnel ([Program.WithFunnel]): the lifecycle and
+// its teardown have already run, so there is no forward progress to stop. To set the
+// exit code from the funnel, use [Context.Exit] (which the funnel is allowed to use to
+// override any code the lifecycle set).
 func (rtx *Context) SignalExit(code int) {
-	if rtx == nil {
+	if rtx == nil || rtx.funnelStage {
 		return
 	}
 	rtx.stopped = true
@@ -216,17 +223,58 @@ func (rtx *Context) SignalExit(code int) {
 // itself trigger the panic funnel — it is a deliberate stop, not an error.
 //
 // Exit skips teardown, not fault reporting: a panic already recovered before Exit
-// is still routed to [Program.WithOnPanicFn] (and the code is never masked to 0),
-// so Exit cannot silently swallow an in-flight panic.
+// is still captured and handed to the funnel ([Program.WithFunnel]), so a handler's
+// Exit cannot silently swallow an in-flight panic — though the FUNNEL itself, as the
+// final authority, may.
+//
+// Inside the funnel, Exit is the way to set the final exit code and OVERRIDES any code
+// the lifecycle set (the funnel is the last word — first-non-zero-wins no longer
+// applies). During the lifecycle it keeps first-non-zero-wins.
 func (rtx *Context) Exit(code int) {
 	if rtx == nil {
 		return
 	}
 	rtx.stopped = true
 	rtx.exitNow = true
+	if rtx.funnelStage {
+		rtx.exitCode = code // the funnel is the final authority — override any prior code
+		return
+	}
 	if rtx.exitCode == 0 {
 		rtx.exitCode = code
 	}
+}
+
+// RecordInfo records msg as an informational message of this run — neutral
+// output the end-user wants surfaced (progress, context, a note), distinct from a
+// success message only by intent. Like the other record calls it neither prints
+// nor stops the lifecycle: it appends, and the program's funnel
+// ([Program.WithFunnel]) receives the recorded infos as a slice once the run
+// settles. Recording an info never sets the exit code. An empty msg is ignored.
+func (rtx *Context) RecordInfo(msg string) {
+	if rtx == nil || msg == "" {
+		return
+	}
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	rtx.infos = append(rtx.infos, msg)
+}
+
+// copyInfos snapshots the informational messages recorded this run (via
+// [Context.RecordInfo]), in recording order, as a copy. Unexported: infos are
+// PRIVATE and surface only as the slice handed to the funnel.
+func (rtx *Context) copyInfos() []string {
+	if rtx == nil {
+		return nil
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.infos) == 0 {
+		return nil
+	}
+	out := make([]string, len(rtx.infos))
+	copy(out, rtx.infos)
+	return out
 }
 
 // RecordError records err as one of THIS run's errors — the end-user's own
@@ -235,16 +283,16 @@ func (rtx *Context) Exit(code int) {
 // RecordError (it may call it any number of times, across any hook), then
 // chooses HOW to stop independently: [Context.SignalExit] for a graceful stop
 // that still unwinds teardown, or [Context.Exit] to skip teardown. Either way —
-// and even if neither is called — the program's OnError funnel
-// ([Program.WithOnErrorFn]) fires once at the end whenever any error was
-// recorded — the runtime hands the funnel the recorded errors as a slice. A
-// nil err is ignored.
+// and even if neither is called — the program's funnel ([Program.WithFunnel])
+// receives the recorded errors as a slice once the run settles. A nil err is
+// ignored.
 //
-// This is the error channel of four outcome channels. Recovered panics and
-// rotini-detected faults (a wiring mismatch, a resolver fault, a [MustGet] on a
-// missing service) are NOT recorded here — the lifecycle captures them and the
-// OnPanic funnel reports them; recorded successes/warnings have their own
-// channels ([Context.RecordSuccess] / [Context.RecordWarning]).
+// This is the error channel of five outcome channels handed to the one funnel.
+// Recovered panics and rotini-detected faults (a wiring mismatch, a resolver
+// fault, a [MustGet] on a missing service) are NOT recorded here — the lifecycle
+// captures them as the funnel's panics slice; infos/successes/warnings have their
+// own channels ([Context.RecordInfo] / [Context.RecordSuccess] /
+// [Context.RecordWarning]).
 //
 //	inputs, err := rotini.Collect[cmdgen.MycliInputs](rtx)
 //	if err != nil {
@@ -263,8 +311,8 @@ func (rtx *Context) RecordError(err error) {
 
 // copyErrors snapshots the errors recorded this run (via [Context.RecordError]),
 // in recording order, as a copy. It is unexported: the recorded errors are
-// PRIVATE — they surface only as the slice the runtime hands to the OnError
-// funnel ([Program.WithOnErrorFn]), never through a drainable accessor.
+// PRIVATE — they surface only as the slice the runtime hands to the funnel
+// ([Program.WithFunnel]), never through a drainable accessor.
 func (rtx *Context) copyErrors() []error {
 	if rtx == nil {
 		return nil
@@ -282,12 +330,10 @@ func (rtx *Context) copyErrors() []error {
 // RecordWarning records warn as a non-fatal warning of this run — something the
 // end-user should know about that did NOT fail the command (a deprecation, a
 // fallback, a skipped item). Like [Context.RecordError] it neither prints nor
-// stops the lifecycle: it appends, and the program's OnWarning funnel
-// ([Program.WithOnWarningFn]) fires once at the end whenever any warning was
-// recorded — the runtime hands the funnel the recorded warnings as a slice. A
-// warning is an error value (so it can be typed and branched with errors.As,
-// and secrets stay redacted), but it never raises the exit code. A nil warn is
-// ignored.
+// stops the lifecycle: it appends, and the program's funnel ([Program.WithFunnel])
+// receives the recorded warnings as a slice once the run settles. A warning is an
+// error value (so it can be typed and branched with errors.As, and secrets stay
+// redacted), but it never raises the exit code. A nil warn is ignored.
 func (rtx *Context) RecordWarning(warn error) {
 	if rtx == nil || warn == nil {
 		return
@@ -298,10 +344,9 @@ func (rtx *Context) RecordWarning(warn error) {
 }
 
 // RecordSuccess records msg as a success message of this run — what went right,
-// for the program's OnSuccess funnel ([Program.WithOnSuccessFn]) to present.
-// Like the other record calls it neither prints nor stops the lifecycle: it
-// appends, and OnSuccess fires once at the end whenever any success was
-// recorded — the runtime hands the funnel the recorded messages as a slice.
+// for the program's funnel ([Program.WithFunnel]) to present. Like the other
+// record calls it neither prints nor stops the lifecycle: it appends, and the
+// funnel receives the recorded messages as a slice once the run settles.
 // Recording a success does not by itself set the exit code (a clean run is
 // already 0). An empty msg is ignored.
 func (rtx *Context) RecordSuccess(msg string) {
@@ -315,7 +360,7 @@ func (rtx *Context) RecordSuccess(msg string) {
 
 // copyWarnings snapshots the warnings recorded this run (via
 // [Context.RecordWarning]), in recording order, as a copy. Unexported: warnings
-// are PRIVATE and surface only as the slice handed to the OnWarning funnel.
+// are PRIVATE and surface only as the slice handed to the funnel.
 func (rtx *Context) copyWarnings() []error {
 	if rtx == nil {
 		return nil
@@ -332,8 +377,7 @@ func (rtx *Context) copyWarnings() []error {
 
 // copySuccesses snapshots the success messages recorded this run (via
 // [Context.RecordSuccess]), in recording order, as a copy. Unexported:
-// successes are PRIVATE and surface only as the slice handed to the OnSuccess
-// funnel.
+// successes are PRIVATE and surface only as the slice handed to the funnel.
 func (rtx *Context) copySuccesses() []string {
 	if rtx == nil {
 		return nil
@@ -351,7 +395,7 @@ func (rtx *Context) copySuccesses() []string {
 // copyFaults snapshots the recovered panics + rotini-detected faults captured
 // this run, in capture order, as a copy. Unexported: faults are PRIVATE (there
 // is no public record call either — the lifecycle captures them) and surface
-// only as the slice handed to the OnPanic funnel ([Program.WithOnPanicFn]).
+// only as the panics slice handed to the funnel ([Program.WithFunnel]).
 func (rtx *Context) copyFaults() []*PanicError {
 	if rtx == nil {
 		return nil
@@ -367,8 +411,8 @@ func (rtx *Context) copyFaults() []*PanicError {
 }
 
 // recordFault appends a recovered panic / rotini-detected fault to the private
-// fault channel (drained by the OnPanic funnel). It is unexported on purpose:
-// faults are the lifecycle's to capture, never the handler's to record.
+// fault channel (handed to the funnel as its panics slice). It is unexported on
+// purpose: faults are the lifecycle's to capture, never the handler's to record.
 func (rtx *Context) recordFault(pe *PanicError) {
 	if rtx == nil || pe == nil {
 		return
@@ -388,7 +432,7 @@ func (rtx *Context) recordFault(pe *PanicError) {
 //	}
 //
 // It never panics; use [MustGet] to route a missing/wrong-type service through the
-// OnPanic funnel instead of handling it inline.
+// funnel (as a fault) instead of handling it inline.
 func Get[T any](rtx *Context, key string) (T, bool) {
 	v, ok := rtx.Value(key).(T)
 	return v, ok
@@ -397,7 +441,7 @@ func Get[T any](rtx *Context, key string) (T, bool) {
 // MustGet returns the service bound under key as T, or panics with a
 // [*ServiceError] (unwrapping to [ErrServiceNotFound]) when it is absent or not a
 // T. The panic is intentional and recoverable: the runtime recovers it inside
-// dispatch and routes it through the program's OnPanic funnel — so a handler that
+// dispatch and routes it through the program's funnel — so a handler that
 // cannot run without a service reaches for MustGet instead of handling a miss
 // inline:
 //

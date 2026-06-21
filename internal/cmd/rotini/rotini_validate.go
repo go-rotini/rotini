@@ -54,7 +54,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 			}
 			fmt.Fprintln(rtx.Stdout, result)
 		},
-		// Validator warnings are non-fatal: record them so the OnWarning funnel
+		// Validator warnings are non-fatal: record them so the funnel
 		// reports them (the default prints "Warning: …"); they never fail the run.
 		func(warnings []error) {
 			for _, w := range warnings {

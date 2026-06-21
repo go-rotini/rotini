@@ -122,20 +122,19 @@ func TestContext_Panics_api(t *testing.T) {
 	}
 }
 
-// TestRun_recordedErrorsFireOnError pins EH1's firing contract and the locked
-// edges, with a CUSTOM OnError funnel: OnError fires iff ≥1 error was recorded
-// (edge 1); record-without-exit still fires it (edge 2); a custom funnel OWNS the
-// exit code — the error floor is the DEFAULT funnel's, so a custom funnel that omits
-// SignalExit exits 0 (edge 3, post-hybrid); and the SignalExit/Exit choice still
-// governs teardown.
-func TestRun_recordedErrorsFireOnError(t *testing.T) {
+// TestRun_recordedErrorsFireFunnel pins the firing contract and the locked edges, with
+// a CUSTOM funnel: it fires iff ≥1 channel recorded something (edge 1); record-without-exit
+// still fires it (edge 2); a custom funnel OWNS the exit code — the error floor is the
+// DEFAULT funnel's, so a custom funnel that sets no code exits 0 (edge 3); and the
+// SignalExit/Exit choice still governs teardown.
+func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 	errA := UsageError(errors.New("bad flag")) // carries ErrUsage through the join
 	errB := errors.New("also bad")
 
 	exec := func(onRun func(rtx *Context)) (log []string, code int, funneled error, drained []error, fired bool) {
 		h := &testHandlers{log: &log, onRun: onRun}
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithOnErrorFn(func(_ context.Context, _ *Context, errs []error) {
+		p.WithFunnel(func(_ context.Context, _ *Context, _, _ []string, _, errs []error, _ []*PanicError) {
 			fired, funneled, drained = true, errors.Join(errs...), errs
 		})
 		code, _ = p.run(p.args)
@@ -232,7 +231,7 @@ func TestRun_defaultOnError_prints(t *testing.T) {
 					rtx.RecordError(e)
 				}
 			}}
-			p, _, errb := newTestProgram(h, []string{"run"}) // no WithOnErrorFn → default
+			p, _, errb := newTestProgram(h, []string{"run"}) // no WithFunnel → default
 			code, _ := p.run(p.args)
 			if code != tc.want {
 				t.Errorf("code = %d, want %d", code, tc.want)
