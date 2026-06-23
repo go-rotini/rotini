@@ -237,7 +237,7 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 	if err := writeHandlerStubs(gp, lay); err != nil {
 		return err
 	}
-	if err := writeEntrypoint(lay); err != nil {
+	if err := writeEntrypoint(lay, string(detectFileFormat(specPath))); err != nil {
 		return err
 	}
 	// Pruning is implicit (always-on): drop orphaned cmd stubs and orphaned cmdgen
@@ -1154,8 +1154,9 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint
 // package — create-once: the file binds user-owned build metadata (version/
 // commit/date), so an existing main.go is never overwritten. A conf without an
-// entrypoint writes nothing.
-func writeEntrypoint(lay layout) error {
+// entrypoint writes nothing. extension is the spec/conf file extension (e.g.
+// "yaml") baked into the //go:generate directive so it points at the seeded files.
+func writeEntrypoint(lay layout, extension string) error {
 	if lay.entrypointDir == "" {
 		return nil
 	}
@@ -1167,7 +1168,7 @@ func writeEntrypoint(lay layout) error {
 	}
 	// The generated package is imported aliased as "cmd" so the reference never
 	// collides with the rotini runtime package (also named "rotini").
-	content, err := renderMainFile(lay.handlerImport, "cmd")
+	content, err := renderMainFile(lay.handlerImport, "cmd", extension)
 	if err != nil {
 		return err
 	}

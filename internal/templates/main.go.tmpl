@@ -1,4 +1,4 @@
-//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+//go:generate go tool rotini generate ./.rotini.spec.{{.Extension}} --config ./.rotini.conf.{{.Extension}}
 package main
 
 import (

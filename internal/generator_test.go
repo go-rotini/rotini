@@ -3284,17 +3284,19 @@ func TestWriteEntrypoint_createOnce(t *testing.T) {
 		entrypointDir:  dir,
 		entrypointFile: "main.go",
 	}
-	if err := writeEntrypoint(lay); err != nil {
+	if err := writeEntrypoint(lay, "jsonc"); err != nil {
 		t.Fatalf("writeEntrypoint: %v", err)
 	}
 	path := filepath.Join(dir, "main.go")
+	// The //go:generate directive points at the seeded spec/conf via the extension.
+	mustContain(t, path, "rotini generate ./.rotini.spec.jsonc --config ./.rotini.conf.jsonc")
 	writeTestFile(t, path, "package main // EDITED\n")
-	if err := writeEntrypoint(lay); err != nil {
+	if err := writeEntrypoint(lay, "jsonc"); err != nil {
 		t.Fatalf("writeEntrypoint (second): %v", err)
 	}
 	mustContain(t, path, "EDITED")
 
-	if err := writeEntrypoint(layout{}); err != nil {
+	if err := writeEntrypoint(layout{}, "yaml"); err != nil {
 		t.Errorf("writeEntrypoint(no entrypoint) = %v, want nil", err)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 1 {

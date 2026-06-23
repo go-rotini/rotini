@@ -17,7 +17,7 @@ func TestSmokeRenderSeedFiles(t *testing.T) {
 }
 
 func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
-	if _, err := renderMainFile("example.com/app/internal/cmd/app", "cli"); err != nil {
+	if _, err := renderMainFile("example.com/app/internal/cmd/app", "cli", "yaml"); err != nil {
 		t.Errorf("main: %v", err)
 	}
 	// Every command — including help/version/completion — gets the same empty stub.

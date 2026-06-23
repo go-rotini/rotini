@@ -159,12 +159,14 @@ func renderConfFile(version, pkg string, target fileFormat) ([]byte, error) {
 type templateMainData struct {
 	Package      string
 	PackageAlias string
+	Extension    string // spec/conf file extension for the //go:generate directive, e.g. "yaml"
 }
 
-func renderMainFile(pkg, pkgAlias string) ([]byte, error) {
+func renderMainFile(pkg, pkgAlias, extension string) ([]byte, error) {
 	return renderGoFile("main", templateMain, templateMainData{
 		Package:      pkg,
 		PackageAlias: pkgAlias,
+		Extension:    extension,
 	})
 }
 
