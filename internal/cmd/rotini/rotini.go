@@ -17,33 +17,20 @@ type rotiniHandlers struct {
 }
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	// Collect, not Parse: one call reconciles every declared channel — the
-	// argv flags AND the env channel ($ROTINI_NO_STYLES, $CI) — against the
-	// generated BindMeta the program bound at NewProgram time.
 	inputs, err := rotini.Collect[RotiniInputs](rtx)
-	if err != nil {
-		// Record and stop: the program's funnel reports it. The handler
-		// signals exit 1; with no custom WithFunnel wired (see main.go),
-		// rotini's default prints the error to stderr. Suggestions ("did you
-		// mean") are deliberately NOT here — that is the end-user's own funnel
-		// to add, against the bound Suggestor.
-		rtx.RecordError(err)
-		rtx.SignalExit(1)
-		return
-	}
-
 	flags := inputs.Rotini.Flags
 	env := inputs.Rotini.Env
 
-	// Strip the help page's spec-authored styling when any no-styles signal is
-	// set: the --no-styles flag, $ROTINI_NO_STYLES, or a CI environment ($CI).
-	noStyles := func() bool { return flags.Nostyles || env.Nostyles || env.Ci }
-
-	// Strip the help page's spec-authored ANSI when a no-styles signal is set;
-	// otherwise show it as authored.
 	help := HelpRotini
-	if noStyles() {
+	if flags.Nostyles || env.Nostyles || env.Ci {
 		help = rotini.Strip(HelpRotini)
+	}
+
+	if err != nil {
+		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", err.Error())
+		fmt.Fprintln(rtx.Stdout, help)
+		rtx.SignalExit(1)
+		return
 	}
 
 	switch {
