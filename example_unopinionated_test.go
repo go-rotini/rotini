@@ -14,7 +14,7 @@ import (
 )
 
 // unopinionatedCmd overrides only Run; the four embeddable no-op Default* hooks satisfy
-// the rest of [CommandHandlers]. Run reads the raw argv from [Context.Args], consults the
+// the rest of [Handlers]. Run reads the raw argv from [Context.Args], consults the
 // resolved frame's declared flags via [Context.Chain] (spec-aware without a parser), reads
 // an env var with the standard library (env is NOT runtime-mediated — only the streams
 // are), writes through [Context.Stdout] so the program's streams stay injectable, and
@@ -64,7 +64,7 @@ func (unopinionatedCmd) Run(_ context.Context, rtx *Context) {
 // unopinionatedApp is the aggregate handler set NewProgram resolves "Main" against.
 type unopinionatedApp struct{}
 
-func (unopinionatedApp) Main() CommandHandlers { return unopinionatedCmd{} }
+func (unopinionatedApp) Main() Handlers { return unopinionatedCmd{} }
 
 // Example_unopinionated drives the bare program end-to-end through the real Program
 // surface — WithArgs feeds argv, WithExit captures the code without os.Exit, and the

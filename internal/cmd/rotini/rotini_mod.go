@@ -8,14 +8,14 @@ import (
 	"github.com/go-rotini/rotini/internal"
 )
 
+var _ rotini.Handlers = (*rotiniModHandlers)(nil)
+
 type rotiniModHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
 }
-
-var _ rotini.CommandHandlers = (*rotiniModHandlers)(nil)
 
 func (*rotiniModHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniModInputs](rtx)

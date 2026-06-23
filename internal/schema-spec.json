@@ -3,10 +3,7 @@
   "title": "Rotini Spec Schema",
   "description": "Schema for a Rotini CLI definition spec file. The document IS the root command — commands all the way down: its keys are the root command's keys directly (name, doc-fields, flags/arguments/env/config/config_files/stdin, sub-commands, …), plus three document-level keys ($schema, env_prefix, schemas) that are valid only on the root.",
   "type": "object",
-  "required": [
-    "$schema",
-    "name"
-  ],
+  "required": ["$schema", "name"],
   "allOf": [
     {
       "$ref": "#/definitions/Command"
@@ -18,14 +15,10 @@
       "type": "object",
       "anyOf": [
         {
-          "required": [
-            "name"
-          ]
+          "required": ["name"]
         },
         {
-          "required": [
-            "$ref"
-          ]
+          "required": ["$ref"]
         }
       ],
       "additionalProperties": false,
@@ -236,17 +229,14 @@
         },
         "handler": {
           "$ref": "#/definitions/HandlerSource",
-          "description": "Source this command's handlers from an external Go PACKAGE instead of a generated stub (W9 handler-code composition). Valid on any SUB-command, not the root. On a '$ref' node it supplies the handlers a composed external spec can't provide itself — REQUIRED for a git/raw '$ref' (a fetched spec is not an importable Go package), and an override for a local/mod:// '$ref' (use this package's handlers instead of the auto-derived child cli). On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.CommandHandlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package."
+          "description": "Source this command's handlers from an external Go PACKAGE instead of a generated stub (W9 handler-code composition). Valid on any SUB-command, not the root. On a '$ref' node it supplies the handlers a composed external spec can't provide itself — REQUIRED for a git/raw '$ref' (a fetched spec is not an importable Go package), and an override for a local/mod:// '$ref' (use this package's handlers instead of the auto-derived child cli). On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package."
         }
       }
     },
     "HandlerSource": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "import",
-        "convention"
-      ],
+      "required": ["import", "convention"],
       "description": "Where a command's handlers come from when they are not a generated stub: a Go package (handler-code passthrough). The package's typed inputs live with it; this spec contributes only the command tree.",
       "properties": {
         "import": {
@@ -256,7 +246,7 @@
         },
         "convention": {
           "type": "string",
-          "description": "Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.CommandHandlers. PascalCase Go-exportable identifier.",
+          "description": "Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.Handlers. PascalCase Go-exportable identifier.",
           "pattern": "^[A-Z][A-Za-z0-9_]*$"
         }
       }
@@ -361,38 +351,23 @@
           "description": "Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match."
         },
         "minimum": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "description": "Minimum allowed value (inclusive). Numeric-family types only (int/uint/float variants and the integer/number aliases) — rejected on any other type, where it would be silently ignored; for a repeatable numeric input the bound applies to each ELEMENT. Duration/time bounds are rejected (validate in the handler, or wrap the value in a TextUnmarshaler type). minimum: 0 is a real, enforced bound (use uint when you want the type system to carry non-negativity instead)."
         },
         "maximum": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "description": "Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere); maximum: 0 is a real, enforced bound."
         },
         "exclusiveMinimum": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "description": "Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere). exclusiveMinimum: 0 expresses \"positive\" exactly."
         },
         "exclusiveMaximum": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "description": "Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'."
         },
         "multipleOf": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "exclusiveMinimum": 0,
           "description": "The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numeric-family types only, per-element for arrays; must be strictly positive."
         },
@@ -495,11 +470,7 @@
               "type": "array",
               "items": {
                 "type": "string",
-                "enum": [
-                  "value",
-                  "file",
-                  "stdin"
-                ]
+                "enum": ["value", "file", "stdin"]
               },
               "description": "Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text is whitespace-trimmed, then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text (a structured stdin payload is the stdin: channel's job, not a flag's). Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only."
             },
@@ -524,9 +495,7 @@
     },
     "FlagInput": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -577,9 +546,7 @@
     },
     "ArgumentInput": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -608,9 +575,7 @@
     },
     "ConfigInput": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -639,9 +604,7 @@
     },
     "EnvInput": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -678,12 +641,7 @@
         },
         "format": {
           "type": "string",
-          "enum": [
-            "json",
-            "yaml",
-            "jsonc",
-            "toml"
-          ],
+          "enum": ["json", "yaml", "jsonc", "toml"],
           "default": "json",
           "description": "Serialization the piped stdin payload is decoded from (into the generated <Prefix>Stdin type). Defaults to json."
         }
@@ -691,10 +649,7 @@
     },
     "FlagDependency": {
       "type": "object",
-      "required": [
-        "when",
-        "requires"
-      ],
+      "required": ["when", "requires"],
       "additionalProperties": false,
       "description": "A conditional requirement: when the 'when' flag is explicitly set on the command line, every flag in 'requires' must also be set. Both reference flag logical names; 'set' means explicitly provided (a default or env/config fallback does not count).",
       "properties": {
@@ -716,10 +671,7 @@
     },
     "FlagGroup": {
       "type": "object",
-      "required": [
-        "kind",
-        "flags"
-      ],
+      "required": ["kind", "flags"],
       "additionalProperties": false,
       "description": "A constraint on which of this command's flags may (or must) be set together. 'flags' references flag logical names; 'set' means explicitly provided on the command line (a default or env/config fallback does not count).",
       "properties": {
@@ -746,9 +698,7 @@
     },
     "RemoteCommandSpec": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -802,10 +752,7 @@
     "RemoteSignatureSpec": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "issuer",
-        "subject"
-      ],
+      "required": ["issuer", "subject"],
       "description": "Expected keyless (sigstore) signer identity for a remote binary's sidecar bundle (W9/D-W9.10). Both are matched against the Fulcio certificate the bundle carries.",
       "properties": {
         "issuer": {
@@ -820,9 +767,7 @@
     },
     "ConfigurationFile": {
       "type": "object",
-      "required": [
-        "name"
-      ],
+      "required": ["name"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -837,13 +782,7 @@
         },
         "format": {
           "type": "string",
-          "enum": [
-            "json",
-            "yaml",
-            "toml",
-            "jsonc",
-            "dotenv"
-          ],
+          "enum": ["json", "yaml", "toml", "jsonc", "dotenv"],
           "description": "Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) — declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path."
         },
         "schema": {
@@ -853,18 +792,12 @@
         "discover": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "strategy",
-            "file"
-          ],
+          "required": ["strategy", "file"],
           "description": "Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared config_files order remains precedence order.",
           "properties": {
             "strategy": {
               "type": "string",
-              "enum": [
-                "walk-up",
-                "xdg"
-              ],
+              "enum": ["walk-up", "xdg"],
               "description": "'walk-up': search from the working directory upward to the filesystem root (project-local config, git-style). 'xdg': search $XDG_CONFIG_HOME/<app> (default ~/.config/<app>), the conventional per-user location."
             },
             "file": {
@@ -883,9 +816,7 @@
     },
     "ExitStatusEntry": {
       "type": "object",
-      "required": [
-        "code"
-      ],
+      "required": ["code"],
       "additionalProperties": false,
       "properties": {
         "code": {

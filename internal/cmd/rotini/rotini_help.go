@@ -7,14 +7,14 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
+var _ rotini.Handlers = (*rotiniHelpHandlers)(nil)
+
 type rotiniHelpHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
 }
-
-var _ rotini.CommandHandlers = (*rotiniHelpHandlers)(nil)
 
 func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniHelpInputs](rtx)

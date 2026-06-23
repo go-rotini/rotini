@@ -64,7 +64,7 @@
 //     content-addressed cache; codegen reads that hermetically, never the network.
 //     With no package to auto-delegate to, the node carries
 //     handler: { import: <alias path>, convention: <Name> } — the imported package
-//     exports <Convention>() rotini.CommandHandlers per command, and codegen
+//     exports <Convention>() rotini.Handlers per command, and codegen
 //     delegates alias.<Convention>(). The same handler: also overrides the
 //     auto-delegation on a local or module "$ref" (see mode 2); it is valid on any
 //     sub-command, not the root.
@@ -88,7 +88,7 @@
 //
 // The generated entrypoint builds a [Program] with [NewProgram] and calls
 // [Program.Execute]: resolve the invoked command from argv, run its
-// lifecycle hooks ([CommandHandlers] — CascadingPreRun/PreRun/Run/PostRun/
+// lifecycle hooks ([Handlers] — CascadingPreRun/PreRun/Run/PostRun/
 // CascadingPostRun, halting on a panic or a deliberate exit while every
 // begun teardown still runs), and exit. Each invocation carries a [Context]:
 // the argv ([Context.Args]), the resolved chain ([Context.Chain]), the

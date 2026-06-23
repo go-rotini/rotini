@@ -74,7 +74,7 @@ func TestInitialize_scaffolds(t *testing.T) {
 
 	// The root command gets an EMPTY stub — no MustGet/parse wiring.
 	root := filepath.Join(genDir, "mycli.go")
-	mustContain(t, root, "rotini.CommandHandlers", "func (*", "Run(ctx context.Context")
+	mustContain(t, root, "rotini.Handlers", "func (*", "Run(ctx context.Context")
 	mustNotContain(t, root, "MustGet", "Parse")
 	// No sub-command stubs (the minimal seed declares none).
 	for _, f := range []string{"mycli_help.go", "mycli_version.go", "mycli_completion.go"} {

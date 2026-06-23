@@ -7,14 +7,14 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
+var _ rotini.Handlers = (*rotiniCompletionHandlers)(nil)
+
 type rotiniCompletionHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
 }
-
-var _ rotini.CommandHandlers = (*rotiniCompletionHandlers)(nil)
 
 func (*rotiniCompletionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniCompletionInputs](rtx)

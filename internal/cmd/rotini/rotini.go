@@ -7,14 +7,14 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
+var _ rotini.Handlers = (*rotiniHandlers)(nil)
+
 type rotiniHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
 }
-
-var _ rotini.CommandHandlers = (*rotiniHandlers)(nil)
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// Collect, not Parse: one call reconciles every declared channel — the

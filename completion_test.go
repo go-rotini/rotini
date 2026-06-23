@@ -353,8 +353,8 @@ func TestComplete_noAutoHelpFlag(t *testing.T) {
 // FlagValueCompleter opt-in path.
 type dynCompletionHandlers struct{}
 
-func (dynCompletionHandlers) App() CommandHandlers      { return dynStub{} }
-func (dynCompletionHandlers) AppBuild() CommandHandlers { return dynBuildHandler{} }
+func (dynCompletionHandlers) App() Handlers      { return dynStub{} }
+func (dynCompletionHandlers) AppBuild() Handlers { return dynBuildHandler{} }
 
 type dynStub struct {
 	DefaultCascadingPreRun
@@ -428,8 +428,8 @@ func TestComplete_dynamicReceivesContext(t *testing.T) {
 
 type dynCtxHandlers struct{ t *testing.T }
 
-func (dynCtxHandlers) App() CommandHandlers        { return dynStub{} }
-func (h dynCtxHandlers) AppBuild() CommandHandlers { return dynCtxBuild{t: h.t} }
+func (dynCtxHandlers) App() Handlers        { return dynStub{} }
+func (h dynCtxHandlers) AppBuild() Handlers { return dynCtxBuild{t: h.t} }
 
 type dynCtxBuild struct {
 	dynStub
@@ -568,7 +568,7 @@ func (deployArgCompleter) CompleteArgValue(rtx *Context, arg, partial string) []
 	return nil
 }
 
-func (argCompleterHandlers) AppDeploy() CommandHandlers { return deployArgCompleter{} }
+func (argCompleterHandlers) AppDeploy() Handlers { return deployArgCompleter{} }
 
 // TestComplete_dynamicArgValue confirms a handler implementing ArgValueCompleter
 // supplies positional candidates (authoritative over the enum), and that a nil

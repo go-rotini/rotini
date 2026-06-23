@@ -100,7 +100,7 @@ func TestGenerateMatchesCompanionExample(t *testing.T) {
 		"rotini_help", "rotini_initialize", "rotini_validate", "rotini_version",
 	} {
 		mustContain(t, filepath.Join(tmp, "internal/cmd/rotini", name+".go"),
-			"package rotini", "rotini.CommandHandlers", "*rotini.Context")
+			"package rotini", "rotini.Handlers", "*rotini.Context")
 	}
 }
 
@@ -1706,8 +1706,8 @@ func TestGenerate_staticComposition(t *testing.T) {
 	// but their input structs are NOT redeclared (they live in the child's rtg).
 	rtg := filepath.Join(tmp, "cmd/parent/rtg/rotini.go")
 	mustContain(t, rtg,
-		"ParentChild() rotini.CommandHandlers",
-		"ParentChildGreet() rotini.CommandHandlers",
+		"ParentChild() rotini.Handlers",
+		"ParentChildGreet() rotini.Handlers",
 		`Name: "child"`, `Handler: "ParentChild"`,
 		`Name: "greet"`, `Handler: "ParentChildGreet"`,
 		`{Name: "who", Type: "string"}`,
@@ -1757,8 +1757,8 @@ commands:
 	// The grafted command and method use the override name "kid"…
 	rtg := filepath.Join(tmp, "cmd/parent/rtg/rotini.go")
 	mustContain(t, rtg,
-		"ParentKid() rotini.CommandHandlers",
-		"ParentKidGreet() rotini.CommandHandlers",
+		"ParentKid() rotini.Handlers",
+		"ParentKidGreet() rotini.Handlers",
 		`Name: "kid"`, `Handler: "ParentKid"`,
 		`Name: "greet"`, `Handler: "ParentKidGreet"`,
 	)
@@ -1819,8 +1819,8 @@ commands:
 	// grandchild commands…
 	parentRtg := filepath.Join(tmp, "cmd/parent/rtg/rotini.go")
 	mustContain(t, parentRtg,
-		"ParentChildGc() rotini.CommandHandlers",
-		"ParentChildGcPing() rotini.CommandHandlers",
+		"ParentChildGc() rotini.Handlers",
+		"ParentChildGcPing() rotini.Handlers",
 		`Name: "gc"`, `Handler: "ParentChildGc"`,
 		`Name: "ping"`, `Handler: "ParentChildGcPing"`,
 		`{Name: "host", Type: "string"}`,
@@ -1892,13 +1892,13 @@ commands:
 		// the parent's summary OVERLAYS the child's own (D-W8.2)…
 		`Summary: "parent's view of child"`,
 		// the child's own command survives…
-		"ParentChildGreet() rotini.CommandHandlers", `Name: "greet"`,
+		"ParentChildGreet() rotini.Handlers", `Name: "greet"`,
 		// …the inline authored sibling is grafted (own command — its inputs ARE redeclared here)…
-		"ParentChildLocal() rotini.CommandHandlers", `Name: "local"`,
+		"ParentChildLocal() rotini.Handlers", `Name: "local"`,
 		`{Name: "target", Type: "string"}`,
 		// …and the $ref authored sibling composes (its ping subcommand reached too).
-		"ParentChildSub() rotini.CommandHandlers", `Name: "sub"`,
-		"ParentChildSubPing() rotini.CommandHandlers", `Name: "ping"`,
+		"ParentChildSub() rotini.Handlers", `Name: "sub"`,
+		"ParentChildSubPing() rotini.Handlers", `Name: "ping"`,
 	)
 	// the inline sibling is an OWN command → it gets a parent stub file…
 	if _, err := os.Stat(filepath.Join(tmp, "cmd/parent/rth/parent_child_local.go")); err != nil {
@@ -2015,8 +2015,8 @@ commands:
 	// The external "deploy" subtree is composed into app's framework + Definition.
 	rtg := filepath.Join(tmp, "cmd/app/rtg/rotini.go")
 	mustContain(t, rtg,
-		"AppDeploy() rotini.CommandHandlers", `Name: "deploy"`,
-		"AppDeployUp() rotini.CommandHandlers", `Name: "up"`,
+		"AppDeploy() rotini.Handlers", `Name: "deploy"`,
+		"AppDeployUp() rotini.Handlers", `Name: "up"`,
 		`{Name: "target", Type: "string"}`,
 	)
 	// The rollup delegates to the EXTERNAL module's cli package (not the consumer's).
@@ -2073,8 +2073,8 @@ func TestGenerate_gitRefHandlerPassthrough(t *testing.T) {
 		t.Fatalf("generate(git:: ref + handler) = %v, want nil", err)
 	}
 	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),
-		"AppDeploy() rotini.CommandHandlers", `Name: "deploy"`,
-		"AppDeployUp() rotini.CommandHandlers", `Name: "up"`,
+		"AppDeploy() rotini.Handlers", `Name: "deploy"`,
+		"AppDeployUp() rotini.Handlers", `Name: "up"`,
 		`{Name: "target", Type: "string"}`,
 	)
 	// Passthrough delegation: alias.<Convention>() / alias.<Convention><Sub>() — no .Handlers().
@@ -2114,8 +2114,8 @@ func TestGenerate_inlineHandlerPassthrough(t *testing.T) {
 	// Own-types: the inline command's structure + inputs are generated locally despite
 	// the delegated handler (both deploy and its non-delegated child status).
 	mustContain(t, filepath.Join(tmp, "cmd/app/rtg/rotini.go"),
-		"AppDeploy() rotini.CommandHandlers", `Name: "deploy"`, `{Name: "region", Type: "string"}`,
-		"AppDeployStatus() rotini.CommandHandlers", `Name: "status"`, `{Name: "id", Type: "string"}`,
+		"AppDeploy() rotini.Handlers", `Name: "deploy"`, `{Name: "region", Type: "string"}`,
+		"AppDeployStatus() rotini.Handlers", `Name: "status"`, `{Name: "id", Type: "string"}`,
 	)
 
 	// Rollup: deploy delegates to the package; status (no handler:) keeps a local stub.

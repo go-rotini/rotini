@@ -347,7 +347,7 @@ func (e *PanicError) Unwrap() error {
 
 // WiringError reports that the generated [Definition] and the handler set are
 // out of sync — a resolved command names a handler method that does not exist,
-// or whose return value does not implement [CommandHandlers]. It is a build-
+// or whose return value does not implement [Handlers]. It is a build-
 // time bug surfaced at run time (always [CategoryInternal]); the structured
 // fields name the offending command and method so a funnel can report it
 // precisely without matching the message:
@@ -628,7 +628,7 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, infos, successe
 	}
 }
 
-// dispatch resolves each command in the chain to its [CommandHandlers] (by the
+// dispatch resolves each command in the chain to its [Handlers] (by the
 // recorded Handler method name, via reflection on the aggregate handlers),
 // asks the lifecycle planner for the step plan (the default plan reproduces
 // the contract table in lifecycle.go), and executes it as a balanced, LIFO
@@ -654,7 +654,7 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, infos, successe
 // the dispatch goroutine, so rtx state stays single-writer; the canceler only cancels ctx.
 func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (int, error) {
 	hv := reflect.ValueOf(p.handlers)
-	handlers := make([]CommandHandlers, len(chain))
+	handlers := make([]Handlers, len(chain))
 	for i, f := range chain {
 		// A wiring failure (generated Definition and handler set out of sync) is
 		// rotini's "this should never have happened" — a detected fault routed to
@@ -668,11 +668,11 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 			return p.settle(ctx, rtx)
 		}
 		out := m.Call(nil)
-		h, ok := out[0].Interface().(CommandHandlers)
+		h, ok := out[0].Interface().(Handlers)
 		if !ok || h == nil {
 			rtx.recordFault(asFault(&WiringError{
 				Command: f.Name, Handler: f.Handler,
-				Msg: fmt.Sprintf("handler %q does not implement CommandHandlers", f.Handler),
+				Msg: fmt.Sprintf("handler %q does not implement Handlers", f.Handler),
 			}))
 			return p.settle(ctx, rtx)
 		}

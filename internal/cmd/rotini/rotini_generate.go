@@ -8,14 +8,14 @@ import (
 	"github.com/go-rotini/rotini/internal"
 )
 
+var _ rotini.Handlers = (*rotiniGenerateHandlers)(nil)
+
 type rotiniGenerateHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
 }
-
-var _ rotini.CommandHandlers = (*rotiniGenerateHandlers)(nil)
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)

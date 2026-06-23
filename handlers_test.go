@@ -33,13 +33,13 @@ func (g *granular) Run(ctx context.Context, rtx *Context)             {}
 // embedded the defaults but omitted Run would fail to compile here — the guarantee
 // that Run is mandatory.)
 var (
-	_ CommandHandlers = (*onlyRun)(nil)
-	_ CommandHandlers = (*granular)(nil)
+	_ Handlers = (*onlyRun)(nil)
+	_ Handlers = (*granular)(nil)
 )
 
 func TestDefaultHooks_bundleSatisfiesInterfaceAndNoOps(t *testing.T) {
 	h := &onlyRun{}
-	var iface CommandHandlers = h
+	var iface Handlers = h
 
 	// The four embedded hooks run as harmless no-ops (nil rtx is fine — they ignore it).
 	iface.CascadingPreRun(context.Background(), nil)
@@ -55,7 +55,7 @@ func TestDefaultHooks_bundleSatisfiesInterfaceAndNoOps(t *testing.T) {
 
 func TestDefaultHooks_granularAndOverride(t *testing.T) {
 	g := &granular{}
-	var iface CommandHandlers = g
+	var iface Handlers = g
 
 	// The explicitly-defined CascadingPreRun is used (not a default — none was embedded).
 	iface.CascadingPreRun(context.Background(), nil)
@@ -71,7 +71,7 @@ func TestDefaultHooks_granularAndOverride(t *testing.T) {
 
 func TestDefaultHooks_overrideShadowsDefault(t *testing.T) {
 	// Embedding the defaults but defining a hook explicitly: the explicit one wins.
-	var iface CommandHandlers = &overrider{}
+	var iface Handlers = &overrider{}
 	iface.PreRun(context.Background(), nil)
 	if !overriderPreRan {
 		t.Error("explicit PreRun did not shadow the embedded DefaultPreRun")

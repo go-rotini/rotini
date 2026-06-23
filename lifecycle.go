@@ -72,19 +72,19 @@ type LifecycleStep struct {
 }
 
 // Lifecycle is the run phase's planner: given the resolved chain and each
-// frame's [CommandHandlers] (index-aligned with chain), it returns the ordered
+// frame's [Handlers] (index-aligned with chain), it returns the ordered
 // step plan the engine executes. It orders and pairs the declared hooks — it
 // cannot change the engine's halting/unwind/funnel semantics, and the handler
 // wiring rules (every frame's handler resolved from the generated set) hold
 // before it is consulted. See [DefaultLifecycle].
-type Lifecycle func(chain []ResolvedCommand, handlers []CommandHandlers) []LifecycleStep
+type Lifecycle func(chain []ResolvedCommand, handlers []Handlers) []LifecycleStep
 
 // DefaultLifecycle is rotini's run-phase plan, exported so a custom
 // [Lifecycle] can wrap or reshape it: one CascadingPreRun/CascadingPostRun
 // pair per frame (root → leaf), then the leaf's PreRun/PostRun pair, then the
 // leaf's Run with no teardown. With the engine's reverse unwind this yields
 // exactly the contract table above.
-func DefaultLifecycle(chain []ResolvedCommand, handlers []CommandHandlers) []LifecycleStep {
+func DefaultLifecycle(chain []ResolvedCommand, handlers []Handlers) []LifecycleStep {
 	steps := make([]LifecycleStep, 0, len(handlers)+2)
 	for i, h := range handlers {
 		steps = append(steps, LifecycleStep{Name: "cascading:" + chain[i].Name, Do: h.CascadingPreRun, Undo: h.CascadingPostRun})

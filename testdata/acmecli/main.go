@@ -133,12 +133,12 @@ func (sleepHandler) Run(ctx context.Context, rtx *rotini.Context) {
 
 type handlers struct{}
 
-func (handlers) Acme() rotini.CommandHandlers          { return noop{} }
-func (handlers) AcmeWidget() rotini.CommandHandlers    { return noop{} }
-func (handlers) AcmeWidgetGet() rotini.CommandHandlers { return getHandler{} }
-func (handlers) AcmeApply() rotini.CommandHandlers     { return applyHandler{} }
-func (handlers) AcmeIngest() rotini.CommandHandlers    { return ingestHandler{} }
-func (handlers) AcmeSleep() rotini.CommandHandlers     { return sleepHandler{} }
+func (handlers) Acme() rotini.Handlers          { return noop{} }
+func (handlers) AcmeWidget() rotini.Handlers    { return noop{} }
+func (handlers) AcmeWidgetGet() rotini.Handlers { return getHandler{} }
+func (handlers) AcmeApply() rotini.Handlers     { return applyHandler{} }
+func (handlers) AcmeIngest() rotini.Handlers    { return ingestHandler{} }
+func (handlers) AcmeSleep() rotini.Handlers     { return sleepHandler{} }
 
 func main() {
 	rotini.NewProgram(definition(), handlers{}).Execute()

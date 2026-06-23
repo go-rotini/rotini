@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// CommandHandlers is the lifecycle interface every command's handler set
+// Handlers is the lifecycle interface every command's handler set
 // implements. The runtime invokes the hooks in order, sharing one [Context]
 // across the chain; handlers read their typed inputs with [Parser.Parse].
-type CommandHandlers interface {
+type Handlers interface {
 	CascadingPreRun(ctx context.Context, rtx *Context)
 	PreRun(ctx context.Context, rtx *Context)
 	Run(ctx context.Context, rtx *Context)
@@ -203,7 +203,7 @@ type RemoteDiscoveryDef struct {
 
 // CommandDef describes one command node within a [Definition]. Handler is the
 // ProgramHandlers method name the runtime invokes (via reflection) to obtain
-// this command's [CommandHandlers].
+// this command's [Handlers].
 type CommandDef struct {
 	Name                  string
 	Aliases               []string

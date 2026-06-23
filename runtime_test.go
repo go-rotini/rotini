@@ -10,7 +10,7 @@ import (
 )
 
 // recHandler records each lifecycle hook it runs, and optionally inspects the
-// context during Run. It satisfies CommandHandlers.
+// context during Run. It satisfies Handlers.
 type recHandler struct {
 	name  string
 	log   *[]string
@@ -35,8 +35,8 @@ type testHandlers struct {
 	onRun func(rtx *Context)
 }
 
-func (t *testHandlers) App() CommandHandlers { return &recHandler{name: "app", log: t.log} }
-func (t *testHandlers) AppRun() CommandHandlers {
+func (t *testHandlers) App() Handlers { return &recHandler{name: "app", log: t.log} }
+func (t *testHandlers) AppRun() Handlers {
 	return &recHandler{name: "run", log: t.log, onRun: t.onRun}
 }
 
@@ -240,11 +240,11 @@ type actProgram struct {
 	actions map[string]act
 }
 
-func (p *actProgram) mk(name string) CommandHandlers {
+func (p *actProgram) mk(name string) Handlers {
 	return &actHandler{name: name, log: p.log, act: p.actions[name]}
 }
-func (p *actProgram) App() CommandHandlers    { return p.mk("app") }
-func (p *actProgram) AppRun() CommandHandlers { return p.mk("run") }
+func (p *actProgram) App() Handlers    { return p.mk("app") }
+func (p *actProgram) AppRun() Handlers { return p.mk("run") }
 
 func runActs(t *testing.T, args []string, actions map[string]act) (int, []string) {
 	t.Helper()
@@ -356,8 +356,8 @@ func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 // to exercise the panic-funnel-vs-hard-Exit interaction.
 type panicThenHardExit struct{ log *[]string }
 
-func (p *panicThenHardExit) App() CommandHandlers { return &recHandler{name: "app", log: p.log} }
-func (p *panicThenHardExit) AppRun() CommandHandlers {
+func (p *panicThenHardExit) App() Handlers { return &recHandler{name: "app", log: p.log} }
+func (p *panicThenHardExit) AppRun() Handlers {
 	return &panicThenHardExitLeaf{log: p.log}
 }
 

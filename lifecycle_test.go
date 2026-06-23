@@ -188,7 +188,7 @@ func TestWithResolver_customRemote(t *testing.T) {
 // The engine's contract holds around the custom plan: PostRun still pairs with
 // PreRun, and unwind still covers exactly the begun steps.
 func TestWithLifecycle_reversedTeardown(t *testing.T) {
-	reversed := func(chain []ResolvedCommand, hs []CommandHandlers) []LifecycleStep {
+	reversed := func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
 		steps := DefaultLifecycle(chain, hs)
 		for i, j := 0, len(hs)-1; i < j; i, j = i+1, j-1 {
 			steps[i].Undo, steps[j].Undo = steps[j].Undo, steps[i].Undo
@@ -214,8 +214,8 @@ func TestWithLifecycle_reversedTeardown(t *testing.T) {
 // unwind holds for a custom plan too.
 type haltHandlers struct{ log *[]string }
 
-func (t *haltHandlers) App() CommandHandlers { return &recHandler{name: "app", log: t.log} }
-func (t *haltHandlers) AppRun() CommandHandlers {
+func (t *haltHandlers) App() Handlers { return &recHandler{name: "app", log: t.log} }
+func (t *haltHandlers) AppRun() Handlers {
 	return &panicPreRunHandler{recHandler{name: "run", log: t.log}}
 }
 
@@ -255,8 +255,8 @@ type panicValueHandlers struct {
 	val any
 }
 
-func (t *panicValueHandlers) App() CommandHandlers { return &recHandler{name: "app", log: t.log} }
-func (t *panicValueHandlers) AppRun() CommandHandlers {
+func (t *panicValueHandlers) App() Handlers { return &recHandler{name: "app", log: t.log} }
+func (t *panicValueHandlers) AppRun() Handlers {
 	return &panicRunHandler{recHandler{name: "run", log: t.log}, t.val}
 }
 
@@ -344,8 +344,8 @@ func (h exHook) CascadingPostRun(context.Context, *Context) {
 	fmt.Println(h.name + ".CascadingPostRun")
 }
 
-func (exHandlers) App() CommandHandlers       { return exHook{name: "app"} }
-func (exHandlers) AppStatus() CommandHandlers { return exHook{name: "status"} }
+func (exHandlers) App() Handlers       { return exHook{name: "app"} }
+func (exHandlers) AppStatus() Handlers { return exHook{name: "status"} }
 
 // exampleDef is a root with one "status" sub-command.
 func exampleDef() Definition {
@@ -388,7 +388,7 @@ func ExampleProgram_WithLifecycle() {
 	NewProgram(exampleDef(), exHandlers{}).
 		WithArgs([]string{"status"}).
 		WithExit(func(int) {}).
-		WithLifecycle(func(chain []ResolvedCommand, hs []CommandHandlers) []LifecycleStep {
+		WithLifecycle(func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
 			steps := DefaultLifecycle(chain, hs)
 			for i, j := 0, len(hs)-1; i < j; i, j = i+1, j-1 {
 				steps[i].Undo, steps[j].Undo = steps[j].Undo, steps[i].Undo

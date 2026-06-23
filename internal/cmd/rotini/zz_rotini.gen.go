@@ -18,47 +18,47 @@ func Handlers() ProgramHandlers {
 	return &handlers{}
 }
 
-func (*handlers) Rotini() rotini.CommandHandlers {
+func (*handlers) Rotini() rotini.Handlers {
 	return &rotiniHandlers{}
 }
 
-func (*handlers) RotiniCompletion() rotini.CommandHandlers {
+func (*handlers) RotiniCompletion() rotini.Handlers {
 	return &rotiniCompletionHandlers{}
 }
 
-func (*handlers) RotiniGenerate() rotini.CommandHandlers {
+func (*handlers) RotiniGenerate() rotini.Handlers {
 	return &rotiniGenerateHandlers{}
 }
 
-func (*handlers) RotiniHelp() rotini.CommandHandlers {
+func (*handlers) RotiniHelp() rotini.Handlers {
 	return &rotiniHelpHandlers{}
 }
 
-func (*handlers) RotiniInitialize() rotini.CommandHandlers {
+func (*handlers) RotiniInitialize() rotini.Handlers {
 	return &rotiniInitializeHandlers{}
 }
 
-func (*handlers) RotiniMod() rotini.CommandHandlers {
+func (*handlers) RotiniMod() rotini.Handlers {
 	return &rotiniModHandlers{}
 }
 
-func (*handlers) RotiniValidate() rotini.CommandHandlers {
+func (*handlers) RotiniValidate() rotini.Handlers {
 	return &rotiniValidateHandlers{}
 }
 
-func (*handlers) RotiniVersion() rotini.CommandHandlers {
+func (*handlers) RotiniVersion() rotini.Handlers {
 	return &rotiniVersionHandlers{}
 }
 
 type ProgramHandlers interface {
-	Rotini() rotini.CommandHandlers
-	RotiniCompletion() rotini.CommandHandlers
-	RotiniGenerate() rotini.CommandHandlers
-	RotiniHelp() rotini.CommandHandlers
-	RotiniInitialize() rotini.CommandHandlers
-	RotiniMod() rotini.CommandHandlers
-	RotiniValidate() rotini.CommandHandlers
-	RotiniVersion() rotini.CommandHandlers
+	Rotini() rotini.Handlers
+	RotiniCompletion() rotini.Handlers
+	RotiniGenerate() rotini.Handlers
+	RotiniHelp() rotini.Handlers
+	RotiniInitialize() rotini.Handlers
+	RotiniMod() rotini.Handlers
+	RotiniValidate() rotini.Handlers
+	RotiniVersion() rotini.Handlers
 }
 
 var definition = rotini.Definition{

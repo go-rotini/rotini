@@ -23,7 +23,7 @@ func (h ctxRec) Run(ctx context.Context, _ *Context) {
 
 type ctxAgg struct{ h ctxRec }
 
-func (a ctxAgg) Main() CommandHandlers { return a.h }
+func (a ctxAgg) Main() Handlers { return a.h }
 
 func newCtxProgram(h ctxRec) *Program {
 	p := NewProgram(Definition{Name: "app", Handler: "Main"}, ctxAgg{h})
@@ -79,7 +79,7 @@ func (h lifeRec) CascadingPostRun(context.Context, *Context) {
 
 type lifeAgg struct{ h lifeRec }
 
-func (a lifeAgg) Main() CommandHandlers { return a.h }
+func (a lifeAgg) Main() Handlers { return a.h }
 
 func newLifeProgram(h lifeRec) *Program {
 	p := NewProgram(Definition{Name: "app", Handler: "Main"}, lifeAgg{h})
