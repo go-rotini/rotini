@@ -8,26 +8,26 @@ import (
 )
 
 // TestInitialize_confDefaults verifies `rotini init` honors the module-root conf's
-// `initialize` block (format + package), and that an explicit --format overrides it.
+// `initialize` block (format), and that an explicit --format overrides it.
 func TestInitialize_confDefaults(t *testing.T) {
 	tmp := initTestModule(t)
 	writeTestFile(t, filepath.Join(tmp, ".rotini.conf.yaml"),
 		"$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n"+
-			"initialize:\n  format: jsonc\n  package: tools\n")
+			"initialize:\n  format: jsonc\n")
 
-	// No explicit --format → conf's format (jsonc) and package (tools).
+	// No explicit --format → conf's format (jsonc). CLIs scaffold under cmd/.
 	if err := Initialize("mycli", "", false, ""); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	dir := filepath.Join(tmp, "tools", "mycli")
+	dir := filepath.Join(tmp, "cmd", "mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.spec.jsonc"), `"name": "mycli"`)
 	mustContain(t, filepath.Join(dir, ".rotini.conf.jsonc"), `"internal/cmd/mycli"`)
 
-	// An explicit --format overrides the conf default (still under the conf package).
+	// An explicit --format overrides the conf default.
 	if err := Initialize("other", "yaml", false, ""); err != nil {
 		t.Fatalf("Initialize (explicit format): %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(tmp, "tools", "other", ".rotini.spec.yaml")); err != nil {
+	if _, err := os.Stat(filepath.Join(tmp, "cmd", "other", ".rotini.spec.yaml")); err != nil {
 		t.Errorf("explicit --format=yaml not honored: %v", err)
 	}
 }
@@ -60,7 +60,7 @@ func TestInitialize_scaffolds(t *testing.T) {
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"),
 		"schema-conf.json",
 		"package: cmd/mycli", "package: internal/cmd/mycli",
-		"file: main.go", "file: zz_rotini.gen.go",
+		"file: main.go", "file: zz_rotini.go",
 		"help:\n      enabled: false",
 		"completion:\n      enabled: false")
 
@@ -69,7 +69,7 @@ func TestInitialize_scaffolds(t *testing.T) {
 	mustContain(t, filepath.Join(dir, "main.go"),
 		"//go:generate go tool rotini generate", "Execute()")
 	genDir := filepath.Join(tmp, "internal", "cmd", "mycli")
-	mustContain(t, filepath.Join(genDir, "zz_rotini.gen.go"),
+	mustContain(t, filepath.Join(genDir, "zz_rotini.go"),
 		"package mycli", "var Program = NewProgram(&handlers{})")
 
 	// The root command gets an EMPTY stub — no MustGet/parse wiring.

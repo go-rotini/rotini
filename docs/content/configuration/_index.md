@@ -16,7 +16,7 @@ title: "configuration"
 
 {{< code title="yaml" language="yaml" open="true" collapsible="true" copy="true" >}}
 initialize:
-  package: "internal"
+  format: "yaml"
 validate:
   behavior: "fail_collect"
 generate:

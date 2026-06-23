@@ -52,8 +52,6 @@ type GenerateConfig struct {
 type InitializeConfig struct {
 	// Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default "yaml".
 	Format string `json:"format,omitempty"`
-	// Directory under the module root where `rotini init` creates new CLIs (each new CLI becomes a Go package beneath it). Default "cmd".
-	Package string `json:"package,omitempty"`
 }
 
 // One generated package target: the directory (import path relative to the module root) and the rotini-controlled file written into it. When 'cmd' and 'cmdgen' resolve to the same package AND file, the framework and the handler rollup are merged into that one file; when they differ in package, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.

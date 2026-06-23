@@ -42,12 +42,6 @@
           ],
           "default": "yaml",
           "description": "Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default \"yaml\"."
-        },
-        "package": {
-          "type": "string",
-          "default": "cmd",
-          "description": "Directory under the module root where `rotini init` creates new CLIs (each new CLI becomes a Go package beneath it). Default \"cmd\".",
-          "pattern": "^[a-zA-Z0-9_][a-zA-Z0-9_./-]*$"
         }
       }
     },

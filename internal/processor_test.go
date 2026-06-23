@@ -294,7 +294,7 @@ func TestProcessorInitialize(t *testing.T) {
 	mustContain(t, filepath.Join(dir, ".rotini.spec.yaml"), "name: mycli")
 	mustContain(t, filepath.Join(dir, ".rotini.conf.yaml"), "package: internal/cmd/mycli")
 	mustContain(t, filepath.Join(dir, "main.go"), "//go:generate go tool rotini generate")
-	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.gen.go"),
+	mustContain(t, filepath.Join(tmp, "internal", "cmd", "mycli", "zz_rotini.go"),
 		"package mycli", "var Program = NewProgram(&handlers{})")
 }
 

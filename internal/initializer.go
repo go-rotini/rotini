@@ -1,7 +1,7 @@
 package internal
 
 // This file owns the `rotini initialize` operation: scaffolding a new CLI's
-// seed spec and conf under <package>/<name>/ of the current module, validating
+// seed spec and conf under cmd/<name>/ of the current module, validating
 // them, and running the standard generate over them. The seed is MINIMAL: a
 // root-only spec (no sub-commands or flags) and a conf declaring the entrypoint
 // + packages with every feature off. Init then runs the SAME generate as
@@ -46,19 +46,19 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 type InitializeFn = func(name, format string, force bool) error
 
 // Initialize scaffolds a new standalone rotini CLI named name: it writes the seed
-// .rotini.spec.<fmt> and .rotini.conf.<fmt> under <package>/<name>/ of the current
-// module (the package dir defaults to "cmd"; a module-root conf's `initialize`
-// block overrides it), validates them, and runs the standard generate to produce
-// the entrypoint, empty handler stubs, and codegen files — a ready-to-build CLI.
-// format selects the serialization (yaml, jsonc, json, or toml). The seeds (and
-// the create-once main.go/stubs) are left untouched unless force is set.
+// .rotini.spec.<fmt> and .rotini.conf.<fmt> under cmd/<name>/ of the current
+// module, validates them, and runs the standard generate to produce the
+// entrypoint, empty handler stubs, and codegen files — a ready-to-build CLI.
+// format selects the serialization (yaml, jsonc, json, or toml; a module-root
+// conf's `initialize` block sets the default). The seeds (and the create-once
+// main.go/stubs) are left untouched unless force is set.
 func Initialize(name, format string, force bool, version string) error {
 	return NewProcessor(version).Initialize(name, format, force)
 }
 
 // initialize renders and writes the default seed spec and conf for a new CLI
-// named name under <package>/<name>/, validates them, and runs the standard
-// generate over them.
+// named name under cmd/<name>/, validates them, and runs the standard generate
+// over them.
 func (p *Processor) initialize(name, format string, force bool) error {
 	if name == "" {
 		return errors.New("a CLI name is required")
@@ -72,19 +72,18 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		return err
 	}
 
-	// Defaults come from the module-root conf's `initialize` block (when present);
-	// an explicit --format overrides the format. A project without that conf gets
-	// rotini's built-ins (yaml, "cmd").
-	defaults := moduleInitDefaults(moduleRoot)
+	// The default format comes from the module-root conf's `initialize` block (when
+	// present); an explicit --format overrides it. A project without that conf gets
+	// rotini's built-in default (yaml).
 	if format == "" {
-		format = defaults.format
+		format = moduleInitFormat(moduleRoot)
 	}
 	f, err := normalizeFormat(format)
 	if err != nil {
 		return err
 	}
 
-	cliDir := filepath.Join(moduleRoot, filepath.FromSlash(defaults.pkg), name)
+	cliDir := filepath.Join(moduleRoot, "cmd", name)
 	specPath := filepath.Join(cliDir, ".rotini.spec."+string(f))
 	confPath := filepath.Join(cliDir, ".rotini.conf."+string(f))
 
@@ -131,31 +130,18 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	return s.generate()
 }
 
-// initDefaults holds the resolved `rotini init` defaults.
-type initDefaults struct {
-	format string
-	pkg    string
-}
-
-// moduleInitDefaults reads the `initialize` block from the module-root conf (when
-// present), falling back to rotini's built-ins (yaml format, "cmd" package dir).
-func moduleInitDefaults(moduleRoot string) initDefaults {
-	d := initDefaults{format: "yaml", pkg: "cmd"}
+// moduleInitFormat reads the default seed format from the `initialize` block of
+// the module-root conf (when present), falling back to rotini's built-in (yaml).
+func moduleInitFormat(moduleRoot string) string {
 	confPath, err := discoverConf(moduleRoot)
 	if err != nil {
-		return d
+		return "yaml"
 	}
 	conf, err := readConf(confPath)
-	if err != nil || conf.Initialize == nil {
-		return d
+	if err != nil || conf.Initialize == nil || conf.Initialize.Format == "" {
+		return "yaml"
 	}
-	if conf.Initialize.Format != "" {
-		d.format = conf.Initialize.Format
-	}
-	if conf.Initialize.Package != "" {
-		d.pkg = conf.Initialize.Package
-	}
-	return d
+	return conf.Initialize.Format
 }
 
 // normalizeFormat resolves the requested format name to its fileFormat,
