@@ -5,7 +5,7 @@ package main
 
 import (
 	"github.com/go-rotini/rotini"
-	r "github.com/go-rotini/rotini/internal/cmd/rotini"
+	cmd "github.com/go-rotini/rotini/internal/cmd/rotini"
 )
 
 var (
@@ -13,7 +13,7 @@ var (
 )
 
 func main() {
-	r.Program.
+	cmd.Program.
 		Bind(rotini.KeyParser, rotini.NewParser()).
 		Bind(rotini.KeySuggestor, rotini.NewSuggestor()).
 		Bind(rotini.KeyVersioner, rotini.NewVersioner(version)).
