@@ -53,6 +53,9 @@ test-race:
 	@go test -race -count=1 -coverprofile=test_race.out ./...
 	@go tool cover -func=test_race.out
 
-rotini:
+rotini-build:
+	@go build -ldflags "-s -w -X main.version=1.2.3" -o /Users/mattgetz/go/bin/rotini ./cmd/rotini/main.go
+
+rotini-install:
 	@go generate ./...
 	@go install ./cmd/...
