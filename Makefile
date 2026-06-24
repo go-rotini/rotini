@@ -3,9 +3,9 @@
 # FuzzXxx here as it is added.
 FUZZ_TARGETS := FuzzParse
 
-.PHONY: all clean lint test test-acceptance test-bench test-conformance test-fuzz test-mutation test-race rotini
+.PHONY: all clean lint test test-acceptance test-bench test-fuzz test-mutation test-race rotini-build rotini-install
 
-all: clean lint test test-acceptance test-bench test-conformance test-fuzz test-mutation test-race rotini
+all: clean lint test test-acceptance test-bench test-fuzz test-mutation test-race rotini-build rotini-install
 
 clean:
 	@rm -rf *.out test_mutation.json
@@ -35,10 +35,6 @@ test-acceptance:
 
 test-bench:
 	@go test -bench=. -benchmem -count=1 ./... | tee test_bench.out
-
-test-conformance:
-	@go test -v -count=1 -run TestConformance -coverprofile=test_conformance.out ./...
-	@go tool cover -func=test_conformance.out
 
 test-fuzz:
 	@for target in $(FUZZ_TARGETS); do \
