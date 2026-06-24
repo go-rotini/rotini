@@ -16,9 +16,6 @@ lint:
 	@go vet ./...
 	@go mod verify
 	@go tool golangci-lint run ./...
-	@# --ignore: these sigstore transitive deps are Apache-2.0 (verified) but go-licenses
-	@# can't auto-detect them — their LICENSE sits at the module root while the imported
-	@# packages live in nested subdirs (e.g. .../go/src/webpki.org/...).
 	@go tool go-licenses check ./... \
 		--ignore github.com/cyberphone/json-canonicalization \
 		--ignore github.com/in-toto/attestation \
