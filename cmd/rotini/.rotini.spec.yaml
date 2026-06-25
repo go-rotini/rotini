@@ -1,6 +1,6 @@
 $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
 name: rotini
-description: "\e[1mThe rotini cli framework companion cli.\e[0m\n\nFind more information at: https://rotini.dev"
+description: "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev"
 usage: |
   rotini <command> <arguments> [flags]
          [-v | --version] [-h | --help]
