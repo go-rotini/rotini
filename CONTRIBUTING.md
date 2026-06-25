@@ -5,11 +5,16 @@ Contributions are welcome! Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/go-rotini/fs.git
-cd fs
+git clone https://github.com/go-rotini/rotini.git
+cd rotini
 go mod download
-make all   # run all project processes
+make all   # run every project process (lint, the full test suite, build, install)
 ```
+
+`rotini` is two-faced: a spec-driven CLI **code generator** (the `go tool rotini`
+binary — `init`, `generate`, `mod`, …) and the **runtime library** that generated
+CLIs import. Most contributions touch one side or the other; the codegen engine
+lives under `internal/`, the runtime surface in the package root.
 
 ## Making Changes
 
@@ -17,6 +22,12 @@ make all   # run all project processes
 2. Write tests for any new functionality.
 3. Ensure `make all` passes before submitting a pull request.
 4. Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages (e.g., `feat:`, `fix:`, `test:`, `docs:`).
+
+If your change alters generated output, update the golden fixtures under
+`internal/testdata/` (and the help goldens) and confirm the diff is intentional.
+If it changes the spec or conf schema, keep `internal/schema-spec.json` /
+`internal/schema-conf.json` and the example references in `.docs/.rotini.spec.yaml`
+/ `.docs/.rotini.conf.yaml` in sync.
 
 ## Linting
 
@@ -27,33 +38,42 @@ make lint
 ## Testing
 
 ```bash
-make test              # run unit tests with coverage
-make test-acceptance   # run real-world end-to-end scenarios (project root discovery, archive round-trip, scaffold idempotency, etc.)
-make test-bench        # run benchmarks
-make test-conformance  # run cross-platform invariants (atomic-write, zip-slip defense, TOCTOU OpenNoFollow, symlink-loop detection)
-make test-fuzz         # run fuzz tests (60s per fuzzer)
-make test-mutation     # run mutation tests
-make test-race         # run tests with the race detector
+make test              # unit tests with coverage
+make test-acceptance   # end-to-end scenarios (init scaffolding, generate, $ref composition)
+make test-bench        # benchmarks
+make test-fuzz         # fuzz tests (parser / spec decoding; 60s per fuzzer)
+make test-mutation     # mutation tests (long-running, ~18 min)
+make test-race         # tests with the race detector
+make rotini-build      # build the codegen binary
+make rotini-install    # regenerate (go generate ./...) and install the tool
 ```
 
-CI exercises `make test`, `make test-race`, and `make test-conformance` on Linux, macOS, and Windows; FreeBSD is built and vetted via build tags.
+`make all` runs the full chain. `test-mutation` is slow; it's usually run on its
+own rather than in a tight edit loop.
 
 ## Pull Requests
 
 - Keep PRs focused on a single change.
-- Include tests that cover the change. Filesystem-touching code is expected to exercise both happy paths and error paths; the fault-injection layer in `fault_hooks.go` is available for the defensive branches.
+- Include tests that cover the change. Both happy paths and error paths are
+  expected — parse/bind/validation failures and the typed error classes
+  (`ParseError`, `BindError`, `RemoteError`, `WiringError`, `ServiceError`,
+  `PanicError`) all have observable, asserted behavior.
+- When you change codegen, include the regenerated golden fixtures in the PR.
 - Reference any relevant issues.
 
 ## Reporting Bugs
 
 Open an issue with:
 
-- A minimal reproducing example (a `go test` snippet or a runnable `main.go`).
-- The filesystem operation being attempted and the path layout it ran against.
+- A minimal reproducing example — the `.rotini.spec.*` (and `.rotini.conf.*` if
+  relevant), or a runnable `main.go` for runtime bugs.
+- The exact `rotini` command run (`init` / `generate` / `mod` / …) or the runtime
+  invocation, plus its full output.
 - The expected vs. actual behavior.
-- OS, filesystem type (apfs / ext4 / ntfs / xfs / smb / nfs / etc.), and Go version.
+- Your Go version and the `rotini` version (tool and/or library).
 
-For watcher / event-delivery bugs, also include whether the polling backend was forced via `WithPolling(...)` or selected automatically.
+For spec-composition (`$ref`) bugs, also include the ref form (local, `mod://`,
+`git::`, or raw `https://`) and the relevant `.rotini.lock` entry if one exists.
 
 ## Security
 

@@ -8,61 +8,88 @@ You should receive a response within 72 hours. If accepted, a fix will be develo
 
 ## Threat Model
 
-`fs` is a filesystem-helpers library. Its security posture is shaped around three classes of risk:
+`rotini` is a spec-driven CLI **code generator** plus the **runtime library** the
+generated CLIs import. Its security posture is shaped around three trust boundaries:
 
-1. **Untrusted input as a path.** A user-controlled filename, an archive entry's name, or a glob pattern reaching a privileged context.
-2. **Untrusted input as bytes.** Reading a file that may be attacker-controlled (or pointed at `/dev/zero`); extracting an archive from an untrusted source.
-3. **Concurrent / racing actors.** TOCTOU windows between a check (`Stat`) and a use (`Open`), or between resolving a path and acting on it.
+1. **A spec/conf as codegen input.** `rotini generate` turns a `.rotini.spec.*`
+   (and `.rotini.conf.*`) into Go source that you then compile and ship. A spec is
+   therefore code-adjacent: treat one you did not author with the same care as any
+   dependency you vendor.
+2. **Composed (`$ref`) specs from outside the repo.** A spec can compose another
+   spec by reference — local, `mod://`, `git::`, or raw `https://`. A remote ref
+   pulls authored intent across a trust boundary into your generated binary.
+3. **The generated CLI's own runtime.** What the rotini runtime does — and
+   deliberately does *not* do — when the end user's compiled program runs.
 
-The package's job is to make the safe path the easy path. The defenses below are the ones it bakes in by default.
+The package's job is to make the safe path the easy path: fetching is hermetic and
+pinned, the runtime injects nothing you did not declare, and errors are built not
+to leak secrets.
 
-## Resource Limits
+## Remote Spec Composition Is Pinned and Hermetic
 
-Every entry point that consumes external bytes is bounded by default. Disabling the bound is opt-in and documented.
+External `$ref`s are resolved like dependencies, not fetched on the fly:
 
-- **Bounded reads.** `ReadFile`, `ReadLines`, `ReadFirstLine`, and `OpenLines` honor `WithMaxSize` (default `DefaultMaxReadSize` = 100 MiB). A file exceeding the cap returns `ErrFileTooLarge`. The cap defends against `/dev/zero`-class reads, runaway logs, and similarly pathological inputs. Set the cap to `0` only when the source is a trusted regular file of known size.
-- **Bounded archive extraction.** `ExtractArchive` / `ExtractArchiveFile` honor `WithArchiveMaxBytes` (default 10 GiB). The cumulative extracted byte count is tracked across every entry; exceeding it returns `ErrArchiveTooLarge`. Defends against zip-bomb / tar-bomb attacks. Zip stream extraction additionally caps the temp-file buffer at `maxBytes+1` so a crafted compressed payload cannot exhaust disk before the cap trips.
-- **Bounded find-up walks.** `FindUp`, `FindUpAll`, and `ProjectRoot` honor `WithMaxAncestors` (default 32). Defends against pathological symlink loops and deeply-nested mount points that would otherwise drive the walk indefinitely.
+- **Fetching is confined to `rotini mod`.** `generate` and `validate` never reach
+  the network — they read only the local lockfile and content-addressed cache. A
+  code-generation pass is reproducible and offline.
+- **`git::` and raw `https://` refs are locked.** `rotini mod` pins each to an
+  immutable revision (a commit SHA for git) and the SHA-256 of the fetched bytes,
+  recorded in `.rotini.lock` (a go.sum for specs). Codegen verifies fetched bytes
+  against the lock and **refuses a moved tag or a tampered cache** rather than
+  trusting them.
+- **`mod://` refs ride Go's integrity.** A spec inside a Go module you depend on is
+  read from the module cache; `go.mod`/`go.sum` are its pins, so Go's own
+  verification applies. Local relative refs are pinned by the filesystem.
 
-## Path-Traversal Defense
+Review the contents of an external `$ref` before locking it, exactly as you would a
+new module dependency.
 
-- **Zip-slip / tar-slip.** Every archive entry resolves through `MustBeChildOf(dst, ...)` before any filesystem write. A crafted entry named `../../../etc/passwd` (or an absolute path) errors with `ErrEscapesRoot` rather than writing outside the extraction root. Hand-rolled extraction using `archive/zip` or `archive/tar` directly is the classic vulnerability; always use `ExtractArchive`.
-- **Symlink-escape inside archives.** Tar symlink entries whose target resolves outside `dst` are refused with `ErrEscapesRoot` at extraction time (see `archive_extract_tar.go:validateTarSymlinkTarget`).
-- **Mode masking.** Archive entries are masked to `0o644` for files and `0o755` for directories by default. Setuid, setgid, sticky, and other mode bits in the archive are stripped unless `WithPreserveMode(true)` is set explicitly. Don't enable mode preservation for archives from untrusted sources.
-- **`MustBeChildOf` / `IsSubpath`.** Public predicates for callers writing their own confined-path logic. Both perform `filepath.Abs` + `filepath.Clean` before comparison.
-- **`EvalSymlinksWithin`.** Resolves all symlinks in a path while verifying the resolved target stays inside a parent root. Use when a caller-supplied path must be a real on-disk location AND must not escape its sandbox.
+## Tool / Library Version Compatibility
 
-## TOCTOU Resistance
+The rotini **tool** that generates code and the rotini **library** the consuming
+module builds against must agree on the contract. `checkPackageVersion` refuses to
+generate on a definite **cross-major mismatch** (a `go install`ed tool from a
+different major than the project's `require`), catching the one case Go's minimal
+version selection cannot. The check is conservative: it skips whenever it cannot
+prove a mismatch (a dev/unknown tool version, a local `replace`, or no rotini
+require), so it never blocks a legitimate build.
 
-Many filesystem APIs have time-of-check-to-time-of-use windows. The package provides primitives that close those windows where the platform allows.
+## Secret Handling
 
-- **`OpenNoFollow`.** Opens a path with POSIX `O_NOFOLLOW`. If the final component is a symlink, returns `ErrSymlinkLoop`. Defends against link-replace attacks where an attacker swaps the target between a `Stat` and an `Open`. Intermediate components are still resolved normally; only the final component is protected.
-- **`OpenAt`.** Resolves a relative path through a held directory file descriptor via POSIX `openat(2)`. Defends against directory-replace races where a directory is swapped for a symlink mid-walk.
-- **Known limitation on Windows.** `OpenAt` falls back to `filepath.Join` + `os.OpenFile`; the fallback is **not** race-safe and is documented as such. Callers needing TOCTOU resistance on Windows must use other hardening (transactional NTFS, locked parent directories, etc.). `OpenNoFollow` opens the reparse point itself rather than following it; callers needing strict "refuse if final component is a symlink" semantics on Windows should inspect the returned file's mode.
-- **The `Exists` asymmetry.** `Exists(path)` returns `false` on permission errors as well as missing paths. This is deliberate for ergonomics but it means `if !Exists(p) { create(p) }` is unsafe in privileged contexts; a privilege-restricted attacker can hide an existing file. Use `Stat` directly and inspect the error when correctness depends on the distinction.
+- **Secret-aware inputs.** Env/config inputs marked `secret` in the spec carry that
+  marking through to the generated binding, so secret values are handled distinctly
+  from ordinary inputs.
+- **Errors do not leak secrets.** The typed error and fault classes
+  (`ParseError`, `BindError`, `RemoteError`, `WiringError`, `ServiceError`,
+  `PanicError`, and the `ErrUsage` / `ErrInternal` sentinels) are designed to be
+  non-leaky: messages describe the failure without echoing secret input values, and
+  internal faults surface as `ErrInternal` rather than spilling internals.
 
-## Filename Sanitization
+## What the Runtime Does NOT Do
 
-- **`SanitizeFilename`** strips ASCII control bytes, the Windows-illegal characters (`< > : " | ? * / \`), and trailing dots and spaces. When the cleaned stem matches a Windows reserved device name (CON, PRN, AUX, NUL, COM1–COM9, LPT1–LPT9), an underscore is inserted **before** the extension; `CON.txt` becomes `CON_.txt`. Suffixing the whole filename (`CON.txt_`) would leave Windows still treating the file as the CON device.
-- **`IsReservedName`** is portability-safe: it returns `true` for reserved names regardless of the host OS so callers writing files for cross-platform consumption (archive extraction, scaffolding) catch them before they hit a Windows reader.
+Pillar 1 of rotini's design is that the runtime injects nothing you did not ask for:
 
-## Hash and Integrity Operations
-
-- **`HashCompare`** uses `crypto/subtle.ConstantTimeCompare` so integrity check call sites are not timing-oracles.
-- **MD5 and SHA-1 are exposed** for non-security uses (legacy compatibility, content-addressed caches, file-integrity checks against published digests). They are documented as broken for security purposes; do not use them for anything an attacker can influence.
-- **Default algorithm.** `HashAlgo`'s zero value is `HashSHA256`. Pick SHA-256 or SHA-512 for new code unless you have a specific legacy reason.
-
-## What the Package Does NOT Do
-
-- **No shell execution.** The package never invokes a shell or `exec`s a subprocess. Glob patterns are evaluated via `path/filepath.Match`, not `sh -c`.
-- **No silent env mutation.** The package does not call `os.Setenv` or otherwise mutate process-global env state. (`Expand` reads env vars via `os.LookupEnv` but never writes.)
-- **No automatic privilege escalation.** Symlink helpers on Windows surface the privilege error clearly when the calling user lacks the `SeCreateSymbolicLinkPrivilege`; the package does not attempt to invoke `runas` or otherwise elevate.
-- **No telemetry.** The package emits no logs of its own from library entry points. `Watcher` accepts a `*slog.Logger` via `WithLogger`; the default is a discard logger.
+- **No telemetry.** The runtime emits no logs, metrics, or network calls of its own.
+- **No auto-injected behavior.** No implicit `--help`/`--version`/`--color`/`--no-*`
+  flags, and no "did you mean" suggestions, unless you declare them in the spec.
+  Fuzzy suggestion (`Suggestor`) ships, but is end-user opt-in.
+- **No network during generation.** Only `rotini mod` fetches; `generate` and
+  `validate` are offline.
+- **One runtime default.** Interrupt/SIGTERM handling is on by default (so a CLI
+  shuts down cleanly on Ctrl-C); it is opt-out via `WithoutSignalHandling`. Every
+  other runtime service is something a handler explicitly fetches or binds.
 
 ## Known Caveats
 
-- **`Symlink`'s idempotency is best-effort under concurrent callers.** Between `os.Readlink` and `os.Symlink` another process can create the link; POSIX `symlink(2)` is atomic for create-if-not-exists but Go's stdlib does not expose the flags needed to thread that atomicity through.
-- **`ProjectRoot` caches results process-globally with no invalidation.** Long-lived processes that change project layouts on disk will see stale answers. Designed for CLI tools; consider it best-effort in daemons.
-- **The watcher's polling backend reads mtimes from `os.Lstat`.** On filesystems that round mtime to second resolution (FAT, some SMB mounts), back-to-back writes within one second can be missed. Use `WithPolling`-with-a-finer-interval where this matters; the platform-native backend (post-v0.1) will close this gap on supported filesystems.
+- **A spec is trusted input to codegen.** `rotini` does not sandbox generation
+  against a hostile spec; it generates the code the spec describes. Do not run
+  `rotini generate` against a spec from an untrusted source you have not reviewed.
+- **The composition contract is enforced at compile time.** A `$ref` that delegates
+  to an external Go package is checked when you build, not by rotini — rotini cannot
+  type-check a foreign package on your behalf.
+- **Version compatibility is best-effort.** The cross-major guard intentionally
+  errs toward allowing the build when it cannot prove a mismatch; it is a safety net,
+  not a guarantee.
 
-For the full list of caveats including TOCTOU, the `Exists` permission asymmetry, watcher debounce latency, and macOS `/var` -> `/private/var` resolution, see the "Pitfalls" section of the package documentation in `doc.go`.
+For the runtime contract, the outcome/error model, and the opt-in service registry,
+see the package documentation in `doc.go`.
