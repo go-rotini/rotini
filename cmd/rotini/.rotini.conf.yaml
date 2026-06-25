@@ -6,10 +6,10 @@ generate:
       file: main.go
     cmd:
       package: internal/cmd/rotini
-      file: zz_rotini.gen.go
+      file: zz_rotini.go
     cmdgen:
       package: internal/cmd/rotini
-      file: zz_rotini.gen.go
+      file: zz_rotini.go
   features:
     help:
       enabled: true
