@@ -8,14 +8,11 @@ generate:
       path: cmd/rotini/.rotini-schema.conf.json
   packages:
     main:
-      package: cmd/rotini
-      file: main.go
+      file: cmd/rotini/main.go
     cmd:
-      package: internal/cmd/rotini
-      file: zz_rotini.go
+      file: internal/cmd/rotini/zz_rotini.go
     cmdgen:
-      package: internal/cmd/rotini
-      file: zz_rotini.go
+      file: internal/cmd/rotini/zz_rotini.go
   features:
     help:
       enabled: true

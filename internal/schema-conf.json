@@ -3,9 +3,7 @@
   "title": "Rotini Configuration Schema",
   "description": "Schema for a Rotini CLI configuration file.",
   "type": "object",
-  "required": [
-    "version"
-  ],
+  "required": ["version"],
   "additionalProperties": false,
   "properties": {
     "version": {
@@ -22,34 +20,12 @@
       "$ref": "#/definitions/GenerateConfig",
       "description": "Controls `rotini generate`: package targets and derived features. Omitted entirely → the defaults (merged single-file layout under internal/cmd/<root>, all features off)."
     },
-    "initialize": {
-      "$ref": "#/definitions/InitializeConfig",
-      "description": "Defaults for `rotini init`. Module-root confs ONLY — rejected by validation anywhere else (the block would be silently ignored)."
-    },
     "validate": {
       "$ref": "#/definitions/ValidateConfig",
       "description": "Controls how `rotini validate` reports problems (collect everything vs. fail fast)."
     }
   },
   "definitions": {
-    "InitializeConfig": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Defaults for `rotini init`, read ONLY from the .rotini.conf.* at the module root (beside go.mod). A project without such a conf gets rotini's built-in defaults; explicit `rotini init` flags override these. Declared in any conf that is NOT at the module root, the block would be silently ignored — rotini validation rejects it there.",
-      "properties": {
-        "format": {
-          "type": "string",
-          "enum": [
-            "yaml",
-            "jsonc",
-            "json",
-            "toml"
-          ],
-          "default": "yaml",
-          "description": "Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default \"yaml\"."
-        }
-      }
-    },
     "ValidateConfig": {
       "type": "object",
       "additionalProperties": false,
@@ -57,10 +33,7 @@
       "properties": {
         "fail": {
           "type": "string",
-          "enum": [
-            "fast",
-            "collect"
-          ],
+          "enum": ["fast", "collect"],
           "default": "collect",
           "description": "fast = stop at and report the first problem; collect = run to completion and report every problem at once (default)."
         }
@@ -103,9 +76,7 @@
     "SchemaConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "path"
-      ],
+      "required": ["path"],
       "description": "A single schema write target: the project-relative path the embedded JSON Schema is written to.",
       "properties": {
         "path": {

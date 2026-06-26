@@ -3,9 +3,7 @@
   "title": "Rotini Configuration Schema",
   "description": "Schema for a Rotini CLI configuration file.",
   "type": "object",
-  "required": [
-    "version"
-  ],
+  "required": ["version"],
   "additionalProperties": false,
   "properties": {
     "version": {
@@ -39,12 +37,7 @@
       "properties": {
         "format": {
           "type": "string",
-          "enum": [
-            "yaml",
-            "jsonc",
-            "json",
-            "toml"
-          ],
+          "enum": ["yaml", "jsonc", "json", "toml"],
           "default": "yaml",
           "description": "Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default \"yaml\"."
         }
@@ -57,10 +50,7 @@
       "properties": {
         "fail": {
           "type": "string",
-          "enum": [
-            "fast",
-            "collect"
-          ],
+          "enum": ["fast", "collect"],
           "default": "collect",
           "description": "fast = stop at and report the first problem; collect = run to completion and report every problem at once (default)."
         }
@@ -103,9 +93,7 @@
     "SchemaConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "path"
-      ],
+      "required": ["path"],
       "description": "A single schema write target: the project-relative path the embedded JSON Schema is written to.",
       "properties": {
         "path": {
