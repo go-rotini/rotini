@@ -1399,7 +1399,7 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 		combined: combined,
 	}
 
-	if ep := conf.Generate.Packages.Entrypoint; ep != nil && ep.Package != "" {
+	if ep := conf.Generate.Packages.Main; ep != nil && ep.Package != "" {
 		file := ep.File
 		if file == "" {
 			file = "main.go"

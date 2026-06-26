@@ -7,16 +7,15 @@ generate:
     spec:
       path: cmd/{{.Package}}/.rotini-schema.spec.json
   packages:
-    entrypoint:
-      package: cmd/{{.Package}}
-      file: main.go
+    main:
+      file: cmd/{{.Package}}/main.go
     cmd:
-      package: internal/cmd/{{.Package}}
-      file: zz_rotini.go
+      file: internal/cmd/{{.Package}}/zz_rotini.go
+      package: {{.Package}}
       keep: []
     cmdgen:
-      package: internal/cmd/{{.Package}}
-      file: zz_rotini.go
+      file: internal/cmd/{{.Package}}/zz_rotini.go
+      package: {{.Package}}
       keep: []
   features:
     help:

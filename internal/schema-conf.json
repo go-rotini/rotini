@@ -118,11 +118,11 @@
     "PackagesConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/markdown/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'entrypoint', when declared, is where generate writes the binary's main.go (create-once: never overwritten).",
+      "description": "The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/markdown/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'main', when declared, is where generate writes the binary's main.go (create-once: never overwritten).",
       "properties": {
-        "entrypoint": {
+        "main": {
           "$ref": "#/definitions/PackageConfig",
-          "description": "Where generate writes the binary's main.go — create-once, never overwritten. 'package' is required for the entrypoint to be written; 'file' defaults to 'main.go' here (not the shared zz_rotini.gen.go default); 'keep' does not apply (the entrypoint package is never pruned)."
+          "description": "Where generate writes the binary's main.go entrypoint — create-once, never overwritten. 'package' is required for main to be written; 'file' defaults to 'main.go' here (not the shared zz_rotini.gen.go default); 'keep' does not apply (the main package is never pruned)."
         },
         "cmd": {
           "$ref": "#/definitions/PackageConfig",
@@ -147,7 +147,7 @@
         "file": {
           "type": "string",
           "pattern": "^[^/\\\\]+\\.go$",
-          "description": "Bare name (no directory) of the rotini-controlled file written into the package; must end in .go. Defaults to 'zz_rotini.gen.go' (the entrypoint defaults to 'main.go').",
+          "description": "Bare name (no directory) of the rotini-controlled file written into the package; must end in .go. Defaults to 'zz_rotini.gen.go' (the main entrypoint defaults to 'main.go').",
           "default": "zz_rotini.gen.go"
         },
         "keep": {

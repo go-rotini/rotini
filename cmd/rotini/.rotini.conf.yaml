@@ -7,7 +7,7 @@ generate:
     conf:
       path: cmd/rotini/.rotini-schema.conf.json
   packages:
-    entrypoint:
+    main:
       package: cmd/rotini
       file: main.go
     cmd:

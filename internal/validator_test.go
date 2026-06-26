@@ -1156,19 +1156,19 @@ func TestValidate_confFilePattern(t *testing.T) {
 func TestValidate_entrypointLints(t *testing.T) {
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"name: demo\n")
 
-	orphan := writeTemp(t, "conf.yaml", validConfHeader+"generate:\n  packages:\n    entrypoint:\n      file: main.go\n")
-	if err := validateOnce(spec, orphan, "", ""); err == nil || !strings.Contains(err.Error(), "entrypoint.package is set") {
-		t.Errorf("validate(entrypoint file without package) = %v, want an entrypoint lint", err)
+	orphan := writeTemp(t, "conf.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      file: main.go\n")
+	if err := validateOnce(spec, orphan, "", ""); err == nil || !strings.Contains(err.Error(), "main.package is set") {
+		t.Errorf("validate(main file without package) = %v, want an entrypoint lint", err)
 	}
 
-	keep := writeTemp(t, "conf2.yaml", validConfHeader+"generate:\n  packages:\n    entrypoint:\n      package: cmd/demo\n      keep: [main.go]\n")
+	keep := writeTemp(t, "conf2.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      package: cmd/demo\n      keep: [main.go]\n")
 	if err := validateOnce(spec, keep, "", ""); err == nil || !strings.Contains(err.Error(), "never pruned") {
-		t.Errorf("validate(entrypoint keep) = %v, want a keep-has-no-effect lint", err)
+		t.Errorf("validate(main keep) = %v, want a keep-has-no-effect lint", err)
 	}
 
-	ok := writeTemp(t, "conf3.yaml", validConfHeader+"generate:\n  packages:\n    entrypoint:\n      package: cmd/demo\n      file: main.go\n")
+	ok := writeTemp(t, "conf3.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      package: cmd/demo\n      file: main.go\n")
 	if err := validateOnce(spec, ok, "", ""); err != nil {
-		t.Errorf("validate(well-formed entrypoint) = %v, want nil", err)
+		t.Errorf("validate(well-formed main) = %v, want nil", err)
 	}
 }
 

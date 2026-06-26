@@ -19,7 +19,7 @@ import (
 const companionConf = `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
 generate:
   packages:
-    entrypoint:
+    main:
       package: cmd/rotini
       file: main.go
     cmd:

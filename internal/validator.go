@@ -369,28 +369,28 @@ var confLints = []func(*Conf) []error{
 	lintFeatureKnobs,
 }
 
-// lintEntrypoint rejects an entrypoint block whose pieces would be silently
-// ignored: 'file'/'keep' without the required 'package' (the entrypoint is only
-// written when its package is declared), and 'keep' at all (the entrypoint
-// package is never pruned, so a keep list is an accepted lie).
+// lintEntrypoint rejects a main block whose pieces would be silently ignored:
+// 'file'/'keep' without the required 'package' (the main entrypoint is only
+// written when its package is declared), and 'keep' at all (the main package is
+// never pruned, so a keep list is an accepted lie).
 func lintEntrypoint(conf *Conf) []error {
-	if conf.Generate == nil || conf.Generate.Packages == nil || conf.Generate.Packages.Entrypoint == nil {
+	if conf.Generate == nil || conf.Generate.Packages == nil || conf.Generate.Packages.Main == nil {
 		return nil
 	}
-	ep := conf.Generate.Packages.Entrypoint
+	ep := conf.Generate.Packages.Main
 	var problems []error
 	if ep.Package == "" && (ep.File != "" || len(ep.Keep) > 0) {
 		problems = append(problems, &problem{
 			kind: "conf",
-			loc:  "generate.packages.entrypoint",
-			msg:  "declares file/keep but no package — the entrypoint main.go is only written when entrypoint.package is set",
+			loc:  "generate.packages.main",
+			msg:  "declares file/keep but no package — the entrypoint main.go is only written when main.package is set",
 		})
 	}
 	if len(ep.Keep) > 0 {
 		problems = append(problems, &problem{
 			kind: "conf",
-			loc:  "generate.packages.entrypoint.keep",
-			msg:  "has no effect — the entrypoint package is never pruned; remove it",
+			loc:  "generate.packages.main.keep",
+			msg:  "has no effect — the main package is never pruned; remove it",
 		})
 	}
 	return problems
