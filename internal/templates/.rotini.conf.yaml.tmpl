@@ -9,6 +9,7 @@ generate:
   packages:
     main:
       file: cmd/{{.Package}}/main.go
+      keep: []
     cmd:
       file: internal/cmd/{{.Package}}/zz_rotini.go
       keep: []
