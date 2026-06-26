@@ -19,20 +19,19 @@ import (
 	"strings"
 )
 
-// baselineSchemaVersion is the version segment scaffolded into new spec/conf
-// `$schema` URLs when the running rotini binary is unreleased (its bound version
-// is "v0.0.0", or empty). A real release stamps its own tag instead.
-const baselineSchemaVersion = "0.0.0"
+// baselineVersion is the version stamped into a new spec/conf's `version` key when
+// the running rotini binary is unreleased (its bound version is "v0.0.0", or empty).
+// A real release stamps its own tag instead.
+const baselineVersion = "0.0.0"
 
-// schemaURLVersion resolves the version segment for a scaffolded `$schema` URL
-// from the binary's bound version string ("vX.Y.Z" / "v0.0.0"): the leading "v"
-// is stripped to the "X.Y.Z" segment, falling back to the baseline when empty.
-// The URL is always the refs/tags/<VER> form.
-func schemaURLVersion(version string) string {
+// seedVersion resolves the bare "X.Y.Z" version stamped into a scaffolded spec/conf's
+// `version` key from the binary's bound version string ("vX.Y.Z" / "v0.0.0"): the
+// leading "v" is stripped, falling back to the baseline when empty.
+func seedVersion(version string) string {
 	if seg := strings.TrimPrefix(version, "v"); seg != "" {
 		return seg
 	}
-	return baselineSchemaVersion
+	return baselineVersion
 }
 
 // cliNameRe constrains a new CLI's name: it becomes the scaffold directory, the
@@ -99,7 +98,7 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		}
 	}
 
-	version := schemaURLVersion(p.version)
+	version := seedVersion(p.version)
 	specBytes, err := renderSpecFile(version, name, f)
 	if err != nil {
 		return err
