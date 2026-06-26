@@ -3,20 +3,20 @@
   "title": "Rotini Configuration Schema",
   "description": "Schema for a Rotini CLI configuration file.",
   "type": "object",
-  "additionalProperties": false,
   "required": [
     "version"
   ],
+  "additionalProperties": false,
   "properties": {
-    "$schema": {
-      "type": "string",
-      "description": "URL identifying the rotini configuration schema version. The version segment must match the installed rotini binary version.",
-      "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-conf\\.json$"
-    },
     "version": {
       "type": "string",
-      "description": "",
-      "pattern": ""
+      "description": "The rotini schema version this conf targets (X.Y.Z). Checked against the installed rotini binary's version; a mismatch is a validation error. This — not the optional `$schema` URL — is the source of the binary-version check.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "$schema": {
+      "type": "string",
+      "description": "Optional URL identifying the rotini configuration schema, for editor tooling only. The binary-version check reads the top-level `version` key, not this. Editors that prefer a local file can instead point a `# yaml-language-server: $schema=<path>` comment at the schema written via `generate.schemas.conf.path`.",
+      "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-conf\\.json$"
     },
     "generate": {
       "$ref": "#/definitions/GenerateConfig",
@@ -69,11 +69,11 @@
     "GenerateConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Controls `rotini generate`: where the generated code is written ('packages') and which derived doc/completion outputs are emitted ('features').",
+      "description": "Controls `rotini generate`: where rotini's JSON Schemas are written ('schemas'), where the generated code is written ('packages'), and which derived doc/completion outputs are emitted ('features').",
       "properties": {
         "schemas": {
           "$ref": "#/definitions/SchemasConfig",
-          "description": "Where rotini schemas are written."
+          "description": "Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so an editor `# yaml-language-server: $schema=<path>` comment can resolve them locally instead of fetching a remote URL."
         },
         "packages": {
           "$ref": "#/definitions/PackagesConfig",
@@ -88,13 +88,30 @@
     "SchemasConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Where rotini schemas are written.",
+      "description": "Where to write rotini's embedded JSON Schemas into this project. Each entry is opt-in: declare 'conf' and/or 'spec' with a 'path' to have `rotini generate` write that schema there (overwriting it from the embedded bytes each pass). The files are not pruned. Intended target for a local editor `# yaml-language-server: $schema=<path>` reference.",
       "properties": {
         "conf": {
-          "$ref": "#/definitions/SchemaConfig"
+          "$ref": "#/definitions/SchemaConfig",
+          "description": "Where to write rotini's conf-schema (the schema for this .rotini.conf file)."
         },
         "spec": {
-          "$ref": "#/definitions/SchemaConfig"
+          "$ref": "#/definitions/SchemaConfig",
+          "description": "Where to write rotini's spec-schema (the schema for .rotini.spec files)."
+        }
+      }
+    },
+    "SchemaConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ],
+      "description": "A single schema write target: the project-relative path the embedded JSON Schema is written to.",
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^[^/\\\\].*\\.json$",
+          "description": "Module-root-relative path (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a `# yaml-language-server: $schema=<path>` comment at it for local IDE syntax highlighting."
         }
       }
     },
@@ -114,18 +131,6 @@
         "cmdgen": {
           "$ref": "#/definitions/PackageConfig",
           "description": "The generated-framework package: the typed inputs, the definition, NewProgram, plus any enabled feature embeds."
-        }
-      }
-    },
-    "SchemaConfig": {
-      "type":"object",
-      "additionalProperties": false,
-      "description": "",
-      "properties": {
-        "path": {
-          "type": "string",
-          "description": "",
-          "pattern": ""
         }
       }
     },
