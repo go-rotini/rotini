@@ -1,5 +1,12 @@
-$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
+# yaml-language-server: $schema=./.rotini-schema.conf.json
+# $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
+version: 0.0.0
 generate:
+  schemas:
+    spec:
+      path: cmd/rotini/.rotini-schema.spec.json
+    conf:
+      path: cmd/rotini/.rotini-schema.conf.json
   packages:
     entrypoint:
       package: cmd/rotini
