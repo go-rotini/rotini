@@ -145,6 +145,13 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 		return err
 	}
 
+	// Write rotini's embedded JSON Schemas to the project (opt-in via generate.schemas)
+	// before codegen, so the editor `$schema=` references resolve even on a pass that
+	// later fails. These files are never pruned.
+	if err := writeSchemas(conf, moduleRoot); err != nil {
+		return err
+	}
+
 	// For each enabled doc feature (help/man), the cligen file gains
 	// embedded "<Prefix>" vars + a resolver, and each command's page is (re)written
 	// under that feature's dir — rendered from the command's doc-fields, or written
@@ -250,6 +257,38 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 		return err
 	}
 	return nil
+}
+
+// writeSchemas writes rotini's embedded JSON Schemas to the project paths declared
+// under generate.schemas (opt-in). Each path is module-root-relative; the embedded bytes
+// are written verbatim — unchanged on a no-op pass (stable mtime), overwritten otherwise —
+// so an editor `# yaml-language-server: $schema=<path>` reference can resolve the schema
+// locally instead of fetching a remote URL. These files are codegen output but are NOT
+// pruned (they are not command-derived; the .json suffix never matches a stub/feature
+// prune set either). An absent block, or an absent conf/spec entry, writes nothing.
+func writeSchemas(conf *Conf, moduleRoot string) error {
+	if conf.Generate == nil || conf.Generate.Schemas == nil {
+		return nil
+	}
+	write := func(label string, sc *SchemaConfig, content []byte) error {
+		if sc == nil || sc.Path == "" {
+			return nil
+		}
+		rel := filepath.FromSlash(sc.Path)
+		if filepath.IsAbs(rel) {
+			return fmt.Errorf("generate.schemas.%s.path %q must be module-root-relative, not absolute", label, sc.Path)
+		}
+		abs := filepath.Join(moduleRoot, rel)
+		if r, err := filepath.Rel(moduleRoot, abs); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("generate.schemas.%s.path %q must resolve under the module root", label, sc.Path)
+		}
+		return writeGeneratedFile(abs, content)
+	}
+	s := conf.Generate.Schemas
+	if err := write("conf", s.Conf, schemaConfFileBytes); err != nil {
+		return err
+	}
+	return write("spec", s.Spec, schemaSpecFileBytes)
 }
 
 // confFeature pairs a doc-feature descriptor with its conf entry.
