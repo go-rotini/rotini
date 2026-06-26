@@ -369,31 +369,23 @@ var confLints = []func(*Conf) []error{
 	lintFeatureKnobs,
 }
 
-// lintEntrypoint rejects a main block whose pieces would be silently ignored:
-// 'file'/'keep' without the required 'package' (the main entrypoint is only
-// written when its package is declared), and 'keep' at all (the main package is
-// never pruned, so a keep list is an accepted lie).
+// lintEntrypoint rejects a main block whose 'keep' would be silently ignored:
+// keep only takes effect once the entrypoint is actually written and its
+// directory pruned, and that happens only when 'file' is set. (The entrypoint's
+// Go package is always 'main'; there is no package key to reconcile.)
 func lintEntrypoint(conf *Conf) []error {
 	if conf.Generate == nil || conf.Generate.Packages == nil || conf.Generate.Packages.Main == nil {
 		return nil
 	}
 	ep := conf.Generate.Packages.Main
-	var problems []error
-	if ep.Package == "" && (ep.File != "" || len(ep.Keep) > 0) {
-		problems = append(problems, &problem{
-			kind: "conf",
-			loc:  "generate.packages.main",
-			msg:  "declares file/keep but no package — the entrypoint main.go is only written when main.package is set",
-		})
-	}
-	if len(ep.Keep) > 0 {
-		problems = append(problems, &problem{
+	if ep.File == "" && len(ep.Keep) > 0 {
+		return []error{&problem{
 			kind: "conf",
 			loc:  "generate.packages.main.keep",
-			msg:  "has no effect — the main package is never pruned; remove it",
-		})
+			msg:  "has no effect without generate.packages.main.file — the entrypoint is only written, and its directory pruned, when file is set",
+		}}
 	}
-	return problems
+	return nil
 }
 
 // lintFeatureDirs rejects an enabled, EMBEDDING feature whose explicit
@@ -406,10 +398,10 @@ func lintEntrypoint(conf *Conf) []error {
 func lintFeatureDirs(conf *Conf) []error {
 	if conf.Generate == nil || conf.Generate.Features == nil ||
 		conf.Generate.Packages == nil || conf.Generate.Packages.Cmdgen == nil ||
-		conf.Generate.Packages.Cmdgen.Package == "" {
+		conf.Generate.Packages.Cmdgen.File == "" {
 		return nil
 	}
-	cmdgen := strings.TrimSuffix(filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package), "/")
+	cmdgen := path.Dir(filepath.ToSlash(conf.Generate.Packages.Cmdgen.File))
 	feats := conf.Generate.Features
 	var problems []error
 	check := func(name string, f *Feature) {

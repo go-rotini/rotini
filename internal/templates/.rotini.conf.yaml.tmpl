@@ -11,11 +11,9 @@ generate:
       file: cmd/{{.Package}}/main.go
     cmd:
       file: internal/cmd/{{.Package}}/zz_rotini.go
-      package: {{.Package}}
       keep: []
     cmdgen:
       file: internal/cmd/{{.Package}}/zz_rotini.go
-      package: {{.Package}}
       keep: []
   features:
     help:

@@ -66,8 +66,7 @@ func TestInitialize_scaffolds(t *testing.T) {
 		"$schema=./.rotini-schema.conf.json",
 		"path: cmd/mycli/.rotini-schema.spec.json",
 		"path: cmd/mycli/.rotini-schema.conf.json",
-		"package: cmd/mycli", "package: internal/cmd/mycli",
-		"file: main.go", "file: zz_rotini.go",
+		"file: cmd/mycli/main.go", "file: internal/cmd/mycli/zz_rotini.go",
 		"help:\n      enabled: false",
 		"completion:\n      enabled: false")
 

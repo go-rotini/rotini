@@ -44,7 +44,7 @@ func TestConfRoundTrip(t *testing.T) {
 		Schema: "https://example.com/conf.json",
 		Generate: &GenerateConfig{
 			Packages: &PackagesConfig{
-				Cmd: &PackageConfig{Package: "internal/handlers", File: "handlers.gen.go"},
+				Cmd: &PackageConfig{File: "internal/handlers/handlers.gen.go"},
 			},
 		},
 	}

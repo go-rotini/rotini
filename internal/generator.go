@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -182,7 +183,7 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 				return fmt.Errorf("feature %s embed_dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
 			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, filepath.ToSlash(conf.Generate.Packages.Cmdgen.Package))
+				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.Packages.Cmdgen.File)))
 			}
 			embedRel = filepath.ToSlash(rel)
 		}
@@ -247,13 +248,26 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 	if err := writeEntrypoint(lay, string(detectFileFormat(specPath))); err != nil {
 		return err
 	}
-	// Pruning is implicit (always-on): drop orphaned cmd stubs and orphaned cmdgen
-	// feature outputs, sparing only the per-package `keep` paths (and test files
-	// and the editable feature templates).
-	if err := pruneStubs(gp, lay, conf.Generate.Packages.Cmd.Keep); err != nil {
+	// Pruning is implicit (always-on): drop orphaned cmd stubs, orphaned cmdgen
+	// feature outputs, and orphaned entrypoint .go files, sparing only the
+	// per-package `keep` paths (and test files and the editable feature
+	// templates). When the entrypoint shares the cmd directory its keep list is
+	// merged into that single prune pass.
+	var mainKeep []string
+	if m := conf.Generate.Packages.Main; m != nil {
+		mainKeep = m.Keep
+	}
+	cmdKeep := conf.Generate.Packages.Cmd.Keep
+	if lay.entrypointDir != "" && lay.entrypointDir == lay.handlerDir {
+		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
+	}
+	if err := pruneStubs(gp, lay, cmdKeep); err != nil {
 		return err
 	}
 	if err := pruneCligen(lay, conf.Generate.Packages.Cmdgen.Keep, outputs); err != nil {
+		return err
+	}
+	if err := pruneEntrypoint(lay, mainKeep); err != nil {
 		return err
 	}
 	return nil
@@ -1279,10 +1293,36 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
+	return pruneGoDir(lay.handlerDir, protected)
+}
 
-	entries, err := os.ReadDir(lay.handlerDir)
+// pruneEntrypoint removes orphaned .go files in the entrypoint directory, so a
+// `keep` list on the main package is honored (the main.go itself is create-once
+// and always protected; test files are kept automatically). It is a no-op when no
+// entrypoint is declared, or when the entrypoint shares the cmd package directory —
+// pruneStubs already covers that dir (and is passed the merged keep list). When
+// the entrypoint shares the cmdgen package directory the framework file is
+// protected too, so co-locating main.go with the framework is safe.
+func pruneEntrypoint(lay layout, keepList []string) error {
+	if lay.entrypointDir == "" || lay.entrypointDir == lay.handlerDir {
+		return nil
+	}
+	protected := map[string]bool{lay.entrypointFile: true}
+	if lay.entrypointDir == lay.frameworkDir {
+		protected[lay.frameworkFile] = true
+	}
+	for _, k := range keepList {
+		protected[filepath.ToSlash(k)] = true
+	}
+	return pruneGoDir(lay.entrypointDir, protected)
+}
+
+// pruneGoDir removes every non-test .go file in dir whose base name is not in the
+// protected set. Sub-directories and *_test.go files are never touched.
+func pruneGoDir(dir string, protected map[string]bool) error {
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("read handler dir %s: %w", lay.handlerDir, err)
+		return fmt.Errorf("read dir %s: %w", dir, err)
 	}
 	for _, e := range entries {
 		name := e.Name()
@@ -1292,7 +1332,7 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 		if protected[name] {
 			continue
 		}
-		if err := os.Remove(filepath.Join(lay.handlerDir, name)); err != nil {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			return fmt.Errorf("prune %s: %w", name, err)
 		}
 	}
@@ -1372,10 +1412,12 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 	cmd := conf.Generate.Packages.Cmd
 	cmdgen := conf.Generate.Packages.Cmdgen
 
-	cmdPkgDir := filepath.ToSlash(cmd.Package)
-	cmdgenPkgDir := filepath.ToSlash(cmdgen.Package)
+	cmdFile := filepath.ToSlash(cmd.File)
+	cmdgenFile := filepath.ToSlash(cmdgen.File)
+	cmdPkgDir := path.Dir(cmdFile)
+	cmdgenPkgDir := path.Dir(cmdgenFile)
 	samePackage := cmdPkgDir == cmdgenPkgDir
-	combined := samePackage && cmd.File == cmdgen.File
+	combined := cmdFile == cmdgenFile
 
 	frameworkImport := ""
 	frameworkQual := ""
@@ -1387,25 +1429,22 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 	lay := layout{
 		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdgenPkgDir)),
 		frameworkPkgName: goPkgName(cmdgenPkgDir),
-		frameworkFile:    cmdgen.File,
+		frameworkFile:    path.Base(cmdgenFile),
 		frameworkImport:  frameworkImport,
 		frameworkQual:    frameworkQual,
 
 		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
 		handlerPkgName: goPkgName(cmdPkgDir),
 		handlerImport:  moduleName + "/" + cmdPkgDir,
-		rollupFile:     cmd.File,
+		rollupFile:     path.Base(cmdFile),
 
 		combined: combined,
 	}
 
-	if ep := conf.Generate.Packages.Main; ep != nil && ep.Package != "" {
-		file := ep.File
-		if file == "" {
-			file = "main.go"
-		}
-		lay.entrypointDir = filepath.Join(moduleRoot, filepath.FromSlash(ep.Package))
-		lay.entrypointFile = file
+	if ep := conf.Generate.Packages.Main; ep != nil && ep.File != "" {
+		epFile := filepath.ToSlash(ep.File)
+		lay.entrypointDir = filepath.Join(moduleRoot, filepath.FromSlash(path.Dir(epFile)))
+		lay.entrypointFile = path.Base(epFile)
 	}
 
 	return lay
@@ -1430,10 +1469,10 @@ func goPkgName(dir string) string {
 // applyConfDefaults fills in the sane rotini conf defaults for any unset
 // generation settings, so a missing or partial conf still generates. The
 // default is one self-contained module-internal package: both cmd and cmdgen
-// point at "internal/cmd/<root>" / "zz_rotini.gen.go" (so framework + rollup
-// merge into a single file). The entrypoint gets no default — main.go is only
-// written when the conf declares one. rootName is the spec's root command name
-// (e.g. "rotini"), used to build the default package path.
+// point at the same file "internal/cmd/<root>/zz_rotini.gen.go" (so framework +
+// rollup merge into a single file). The entrypoint gets no default — main.go is
+// only written when the conf declares a main.file. rootName is the spec's root
+// command name (e.g. "rotini"), used to build the default file path.
 func applyConfDefaults(conf *Conf, rootName string) {
 	if conf.Generate == nil {
 		conf.Generate = &GenerateConfig{}
@@ -1448,12 +1487,8 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	if pkgs.Cmdgen == nil {
 		pkgs.Cmdgen = &PackageConfig{}
 	}
-	defaultPkg := "internal/cmd/" + rootName
-	const defaultFile = "zz_rotini.gen.go"
+	defaultFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
 	for _, p := range []*PackageConfig{pkgs.Cmd, pkgs.Cmdgen} {
-		if p.Package == "" {
-			p.Package = defaultPkg
-		}
 		if p.File == "" {
 			p.File = defaultFile
 		}
@@ -1464,7 +1499,7 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	// editable TEMPLATE to "<cmdgen-package>/templates". Co-located features
 	// cannot collide: each carries a feature-unique suffix/prefix (see
 	// docFeature) and pruning is scoped to them.
-	cmdgenDir := filepath.ToSlash(pkgs.Cmdgen.Package)
+	cmdgenDir := path.Dir(filepath.ToSlash(pkgs.Cmdgen.File))
 	for _, f := range featureConfigs(conf) {
 		if f.cfg == nil {
 			continue
@@ -2131,8 +2166,8 @@ func childCliImport(childDir, module string) string {
 	if confPath, err := discoverConf(childDir); err == nil {
 		cc, err := readConf(confPath)
 		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
-			cc.Generate.Packages.Cmd != nil && cc.Generate.Packages.Cmd.Package != "" {
-			return module + "/" + filepath.ToSlash(cc.Generate.Packages.Cmd.Package)
+			cc.Generate.Packages.Cmd != nil && cc.Generate.Packages.Cmd.File != "" {
+			return module + "/" + path.Dir(filepath.ToSlash(cc.Generate.Packages.Cmd.File))
 		}
 	}
 	return module + "/internal/cmd/" + filepath.Base(childDir)

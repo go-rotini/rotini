@@ -1150,25 +1150,26 @@ func TestValidate_confFilePattern(t *testing.T) {
 	}
 }
 
-// TestValidate_entrypointLints: accepted-but-ignored entrypoint pieces are
-// rejected rather than silently dropped — file/keep without the required
-// package, and keep at all (the entrypoint is never pruned).
+// TestValidate_entrypointLints: a main `keep` with no `file` is rejected rather
+// than silently ignored (keep only takes effect once the entrypoint is written
+// and its directory pruned, which requires file). A bare main `file` is now
+// valid — there is no package key to require — and keep alongside file works.
 func TestValidate_entrypointLints(t *testing.T) {
 	spec := writeTemp(t, "spec.yaml", validSpecHeader+"name: demo\n")
 
-	orphan := writeTemp(t, "conf.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      file: main.go\n")
-	if err := validateOnce(spec, orphan, "", ""); err == nil || !strings.Contains(err.Error(), "main.package is set") {
-		t.Errorf("validate(main file without package) = %v, want an entrypoint lint", err)
+	keepNoFile := writeTemp(t, "conf.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      keep: [extra.go]\n")
+	if err := validateOnce(spec, keepNoFile, "", ""); err == nil || !strings.Contains(err.Error(), "has no effect without generate.packages.main.file") {
+		t.Errorf("validate(main keep without file) = %v, want a keep-without-file lint", err)
 	}
 
-	keep := writeTemp(t, "conf2.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      package: cmd/demo\n      keep: [main.go]\n")
-	if err := validateOnce(spec, keep, "", ""); err == nil || !strings.Contains(err.Error(), "never pruned") {
-		t.Errorf("validate(main keep) = %v, want a keep-has-no-effect lint", err)
+	bare := writeTemp(t, "conf2.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      file: cmd/demo/main.go\n")
+	if err := validateOnce(spec, bare, "", ""); err != nil {
+		t.Errorf("validate(bare main file) = %v, want nil", err)
 	}
 
-	ok := writeTemp(t, "conf3.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      package: cmd/demo\n      file: main.go\n")
+	ok := writeTemp(t, "conf3.yaml", validConfHeader+"generate:\n  packages:\n    main:\n      file: cmd/demo/main.go\n      keep: [extra.go]\n")
 	if err := validateOnce(spec, ok, "", ""); err != nil {
-		t.Errorf("validate(well-formed main) = %v, want nil", err)
+		t.Errorf("validate(well-formed main with keep) = %v, want nil", err)
 	}
 }
 
@@ -1206,7 +1207,7 @@ func TestValidate_featureKnobsWarn(t *testing.T) {
 		check(t, "generate:\n  features:\n    help:\n      enabled: false\n      embed_dir: internal/cmd/demo/renders\n      template_dir: internal/cmd/demo/templates\n", "", 0)
 	})
 	t.Run("valid embed+template mode", func(t *testing.T) {
-		check(t, "generate:\n  packages:\n    cmdgen:\n      package: internal/cmd/demo\n  features:\n    man:\n      enabled: true\n      embed: true\n      embed_dir: internal/cmd/demo/renders\n      template: true\n      template_dir: internal/cmd/demo/templates\n", "", 0)
+		check(t, "generate:\n  packages:\n    cmdgen:\n      file: internal/cmd/demo/zz_rotini.gen.go\n  features:\n    man:\n      enabled: true\n      embed: true\n      embed_dir: internal/cmd/demo/renders\n      template: true\n      template_dir: internal/cmd/demo/templates\n", "", 0)
 	})
 }
 
@@ -1228,7 +1229,7 @@ func TestValidate_featureDirLint(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			conf := writeTemp(t, "conf.yaml", validConfHeader+
-				"generate:\n  packages:\n    cmdgen:\n      package: internal/cmd/demo\n"+
+				"generate:\n  packages:\n    cmdgen:\n      file: internal/cmd/demo/zz_rotini.gen.go\n"+
 				"  features:\n    help:\n      enabled: true\n      embed: true\n      embed_dir: "+tc.dir+"\n")
 			err := validateOnce(spec, conf, "", "")
 			if tc.wantErr && (err == nil || !strings.Contains(err.Error(), "must resolve under the cmdgen package")) {
@@ -1383,8 +1384,8 @@ func TestValidate_composedTreeDescend(t *testing.T) {
 	tmp := initTestModule(t)
 	conf := func(dir string) string {
 		return "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json\n" +
-			"generate:\n  packages:\n    cmd:\n      package: cmd/" + dir + "/rth\n      file: handlers.go\n" +
-			"    cmdgen:\n      package: cmd/" + dir + "/rtg\n      file: rotini.go\n"
+			"generate:\n  packages:\n    cmd:\n      file: cmd/" + dir + "/rth/handlers.go\n" +
+			"    cmdgen:\n      file: cmd/" + dir + "/rtg/rotini.go\n"
 	}
 	childSpec := `$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
 name: child

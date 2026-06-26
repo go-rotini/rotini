@@ -58,23 +58,21 @@ type InitializeConfig struct {
 	Format string `json:"format,omitempty"`
 }
 
-// One generated package target: the directory (import path relative to the module root) and the rotini-controlled file written into it. When 'cmd' and 'cmdgen' resolve to the same package AND file, the framework and the handler rollup are merged into that one file; when they differ in package, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.
+// One generated package target: the rotini-controlled file written into it, given as a module-root-relative path ending in '.go'. The target directory is that path's parent and the Go package name is the directory's last segment (always 'main' for the entrypoint). When 'cmd' and 'cmdgen' resolve to the same file, the framework and the handler rollup are merged into that one file; when they resolve to different directories, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.
 type PackageConfig struct {
-	// Bare name (no directory) of the rotini-controlled file written into the package; must end in .go. Defaults to 'zz_rotini.gen.go' (the main entrypoint defaults to 'main.go').
+	// Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file written into this target. May include directories; the path's parent directory is the target package and that directory's last segment is the Go package name (the entrypoint is always package 'main'). Defaults to 'internal/cmd/<root-command>/zz_rotini.gen.go'; the entrypoint has no default and is only written when 'file' is set.
 	File string `json:"file,omitempty"`
 	// Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. The editable per-feature templates and test files are always kept automatically. Intended to stay empty in steady state.
 	Keep []string `json:"keep,omitempty"`
-	// Import path (relative to the module root) of the target package; the Go package name is the last path segment. Defaults to 'internal/cmd/<root-command>'.
-	Package string `json:"package,omitempty"`
 }
 
-// The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/markdown/completion). Point both at the same package+file (the default) for one self-contained package, or at different packages to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'main', when declared, is where generate writes the binary's main.go (create-once: never overwritten).
+// The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/markdown/completion). Point both at the same file (the default) for one self-contained package, or at files in different directories to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'main', when declared, is where generate writes the binary's main.go (create-once: never overwritten).
 type PackagesConfig struct {
 	// The handler-logic package: the per-command stubs and the rollup (handlers struct, Program, Handlers()).
 	Cmd *PackageConfig `json:"cmd,omitempty"`
 	// The generated-framework package: the typed inputs, the definition, NewProgram, plus any enabled feature embeds.
 	Cmdgen *PackageConfig `json:"cmdgen,omitempty"`
-	// Where generate writes the binary's main.go entrypoint — create-once, never overwritten. 'package' is required for main to be written; 'file' defaults to 'main.go' here (not the shared zz_rotini.gen.go default); 'keep' does not apply (the main package is never pruned).
+	// Where generate writes the binary's main.go entrypoint — create-once, never overwritten. 'file' is required for main to be written (it has no default directory); the generated package is always 'main'. 'keep' spares hand-written .go files in the entrypoint directory from pruning.
 	Main *PackageConfig `json:"main,omitempty"`
 }
 
