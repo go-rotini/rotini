@@ -42,7 +42,7 @@ func populateLock(spec *Spec, specPath, moduleRoot, moduleName, version string) 
 		absSpec = filepath.Clean(a)
 	}
 	seen := map[string]bool{absSpec: true}
-	if err := collectExternal(spec.Commands, filepath.Dir(absSpec), moduleName, moduleRoot, version, lock, seen); err != nil {
+	if err := collectExternal(spec.Command.Commands, filepath.Dir(absSpec), moduleName, moduleRoot, version, lock, seen); err != nil {
 		return err
 	}
 	return writeLockfile(moduleRoot, lock)
@@ -94,7 +94,7 @@ func collectExternal(cmds []Command, base, moduleName, moduleRoot, version strin
 		}
 		// Recurse into the ref'd spec's own subtree (its base) and the siblings authored
 		// next to the ref (this spec's base).
-		if err := collectExternal(childSpec.Commands, childBase, moduleName, moduleRoot, version, lock, seen); err != nil {
+		if err := collectExternal(childSpec.Command.Commands, childBase, moduleName, moduleRoot, version, lock, seen); err != nil {
 			return err
 		}
 		if err := collectExternal(c.Commands, base, moduleName, moduleRoot, version, lock, seen); err != nil {
@@ -105,7 +105,7 @@ func collectExternal(cmds []Command, base, moduleName, moduleRoot, version strin
 }
 
 // fetchAndPin fetches an external locator live, validates it is a version-matched spec,
-// and returns its lock entry (revision + content hash + format + $schema) plus the bytes.
+// and returns its lock entry (revision + content hash + format + version) plus the bytes.
 func fetchAndPin(locator, version string) (lockEntry, []byte, error) {
 	var (
 		revision string
@@ -132,17 +132,17 @@ func fetchAndPin(locator, version string) (lockEntry, []byte, error) {
 	if err != nil {
 		return lockEntry{}, nil, fmt.Errorf("fetched %q is not a valid spec: %w", locator, err)
 	}
-	if err := checkComposedSchemaVersion(locator, spec.Schema, version); err != nil {
+	if err := checkComposedSchemaVersion(locator, spec.Version, version); err != nil {
 		return lockEntry{}, nil, err
 	}
-	return lockEntry{revision: revision, hash: hashBytes(data), format: format, schema: specSchemaVersion(spec.Schema)}, data, nil
+	return lockEntry{revision: revision, hash: hashBytes(data), format: format, schema: specSchemaVersion(spec.Version)}, data, nil
 }
 
-// specSchemaVersion extracts the version segment of a rotini `$schema` URL ("-" when
-// absent/foreign — the version guard has already vetted it when a version is enforced).
-func specSchemaVersion(docSchema string) string {
-	if m := rotiniSchemaURLRe.FindStringSubmatch(docSchema); m != nil {
-		return m[1]
+// specSchemaVersion normalizes a composed spec's declared `version` for the lock entry
+// ("-" when absent — the version guard has already vetted it when a version is enforced).
+func specSchemaVersion(docVersion string) string {
+	if v := strings.TrimPrefix(docVersion, "v"); v != "" {
+		return v
 	}
 	return "-"
 }

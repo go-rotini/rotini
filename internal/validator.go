@@ -18,7 +18,7 @@ import (
 
 // This file owns the `rotini validate` operation end-to-end: the session/file-level
 // validation that the Processor drives, plus the machinery (schema validation, the
-// $schema↔version guard, and the rotini-specific rules the JSON Schema can't express).
+// version guard, and the rotini-specific rules the JSON Schema can't express).
 
 // ValidateFn is the signature of [Processor.Validate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
@@ -68,7 +68,7 @@ func (s *session) failFast() bool {
 
 // validate schema-validates the spec against its compiled schema on the raw JSON
 // instance (so unknown-field rules fire), then — only when it is schema-valid — runs
-// the rotini-specific rules and enforces the $schema↔version guard. It returns every
+// the rotini-specific rules and enforces the version guard. It returns every
 // problem found, empty when the spec is valid.
 func (l *specLoader) validate() []error {
 	if problems := validateInstance("spec", l.instance, l.schema); len(problems) > 0 {
@@ -81,7 +81,7 @@ func (l *specLoader) validate() []error {
 		problems = append(problems, rule(l.spec)...)
 	}
 	locateProblems(problems, l.path, l.locate) // positions any pointer-shaped problems
-	if err := checkSchemaVersion("spec", l.spec.Schema, l.version); err != nil {
+	if err := checkSchemaVersion("spec", l.spec.Version, l.version); err != nil {
 		problems = append(problems, err)
 	}
 	problems = append(problems, validateComposedTree(l.spec, l.path, l.version)...)
@@ -92,7 +92,7 @@ func (l *specLoader) validate() []error {
 // child specs, run the generator's own composer (resolveTree) over the WHOLE tree so
 // `rotini validate` catches problems that only emerge once refs are followed — name/
 // alias collisions across composition boundaries, cyclic or missing refs, and each
-// composed spec's $schema. It reuses generate's exact compose logic (no separate walk),
+// composed spec's version. It reuses generate's exact compose logic (no separate walk),
 // so validate and generate cannot drift. Best-effort: it needs a module (composed
 // commands resolve to import paths) and only matters when refs are present, so a
 // ref-less spec or a module-less context is skipped — leaving per-spec validation as-is.
@@ -133,7 +133,7 @@ func specHasRefs(spec *Spec) bool {
 
 // validate schema-validates the conf against its compiled schema on the raw JSON
 // instance when one was resolved, then — only when it is schema-valid — runs the
-// rotini-specific conf rules and enforces the $schema↔version guard. A default
+// rotini-specific conf rules and enforces the version guard. A default
 // conf (no file) has nothing to validate. It returns every problem found.
 func (l *confLoader) validate() []error {
 	if l.path == "" {
@@ -149,7 +149,7 @@ func (l *confLoader) validate() []error {
 		problems = append(problems, rule(l.conf)...)
 	}
 	problems = append(problems, lintInitializeLocation(l.conf, l.path)...)
-	if err := checkSchemaVersion("conf", l.conf.Schema, l.version); err != nil {
+	if err := checkSchemaVersion("conf", l.conf.Version, l.version); err != nil {
 		problems = append(problems, err)
 	}
 	return problems
@@ -197,7 +197,7 @@ func lintInitializeLocation(conf *Conf, confPath string) []error {
 	}}
 }
 
-// ─── schema validation + the $schema↔version guard ─────────────────────────────.
+// ─── schema validation + the version guard ─────────────────────────────.
 
 // severity classifies a validation problem. The zero value is an error (fails
 // validation); a warning is surfaced separately but does NOT fail. The validate
@@ -293,68 +293,65 @@ func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) [
 	return problems
 }
 
-// rotiniSchemaURLRe matches the recognized rotini `$schema` URL form and captures the
-// X.Y.Z version segment. A URL that doesn't match (absent, a branch ref, a different
-// host) yields no capture, and checkSchemaVersion skips it.
-var rotiniSchemaURLRe = regexp.MustCompile(`^https://raw\.githubusercontent\.com/go-rotini/rotini/refs/tags/([0-9]+\.[0-9]+\.[0-9]+)/schema-(?:spec|conf)\.json$`)
-
-// checkSchemaVersion enforces that a document's `$schema` targets the same rotini
-// release as the running binary. version is the binary's bound version string
+// checkSchemaVersion enforces that a document's top-level `version` targets the same
+// rotini release as the running binary. version is the binary's bound version string
 // ("vX.Y.Z" or "v0.0.0"); its leading "v" is stripped to the "X.Y.Z" segment compared
-// against the document's `$schema` version. The check is skipped when the version is
-// empty/unknown, or when the document's `$schema` is absent or not the recognized
-// rotini refs/tags/<VER> form. A present, recognized, mismatched `$schema` is an error.
-func checkSchemaVersion(kind, docSchema, version string) error {
+// against the document's `version`. The check is skipped when the binary version is
+// empty/unknown, or when the document declares no `version` (must-match-if-present — the
+// JSON Schema separately requires `version`, so a schema-valid document always carries
+// one by the time this runs). A present, mismatched `version` is an error. (The optional
+// `$schema` URL is editor-tooling only and is no longer consulted for this check.)
+func checkSchemaVersion(kind, docVersion, version string) error {
 	want := strings.TrimPrefix(version, "v")
 	if want == "" {
 		return nil
 	}
-	m := rotiniSchemaURLRe.FindStringSubmatch(docSchema)
-	if m == nil {
+	got := strings.TrimPrefix(docVersion, "v")
+	if got == "" {
 		return nil
 	}
-	if docVer := m[1]; docVer != want {
+	if got != want {
 		return &problem{
 			kind: kind,
-			loc:  "$schema",
-			msg:  fmt.Sprintf("targets schema version %s but this rotini is %s — update the $schema version (or your rotini install) so they match", docVer, want),
+			loc:  "version",
+			msg:  fmt.Sprintf("targets rotini version %s but this rotini is %s — update the version (or your rotini install) so they match", got, want),
 		}
 	}
 	return nil
 }
 
-// checkComposedSchemaVersion is the STRICT cross-tree $schema guard for a COMPOSED
+// checkComposedSchemaVersion is the STRICT cross-tree version guard for a COMPOSED
 // spec (W8/D-W8.7). Unlike the entry-spec guard ([checkSchemaVersion], which is
-// must-match-if-present), a composed spec MUST declare a rotini $schema that EXACTLY
-// matches the generating version: a missing or foreign $schema is an error, because a
+// must-match-if-present), a composed spec MUST declare a `version` that EXACTLY matches
+// the generating version: a missing or mismatched version is an error, because a
 // composed tree must provably share one rotini version and you cannot confirm that
 // without it. Skipped only when the running version is unknown (version == "", e.g.
 // tests) — there is then nothing to match against. Errors carry the composed spec's
 // ref so the failure points at the right file.
-func checkComposedSchemaVersion(ref, docSchema, version string) error {
+func checkComposedSchemaVersion(ref, docVersion, version string) error {
 	want := strings.TrimPrefix(version, "v")
 	if want == "" {
 		return nil
 	}
-	m := rotiniSchemaURLRe.FindStringSubmatch(docSchema)
-	if m == nil {
-		msg := fmt.Sprintf("composed spec %q must declare a rotini $schema targeting version %s — every spec in a composed tree must target this rotini version (got %q)", ref, want, docSchema)
+	got := strings.TrimPrefix(docVersion, "v")
+	if got == "" {
+		msg := fmt.Sprintf("composed spec %q must declare a version targeting %s — every spec in a composed tree must target this rotini version", ref, want)
 		return composedVersionProblem(ref, want, "", msg)
 	}
-	if docVer := m[1]; docVer != want {
-		msg := fmt.Sprintf("composed spec %q targets schema version %s but this rotini is %s — every spec in a composed tree must target the same version", ref, docVer, want)
-		return composedVersionProblem(ref, want, docVer, msg)
+	if got != want {
+		msg := fmt.Sprintf("composed spec %q targets version %s but this rotini is %s — every spec in a composed tree must target the same version", ref, got, want)
+		return composedVersionProblem(ref, want, got, msg)
 	}
 	return nil
 }
 
-// composedVersionProblem wraps the spec-arm $schema mismatch as a validation [problem]
+// composedVersionProblem wraps the spec-arm version mismatch as a validation [problem]
 // that carries a typed [rotini.CompositionVersionError] (Arm = spec) — so the message
 // reports as before while a caller can errors.As to the shared composition-version type
 // (one type across the spec/package/binary arms; D-W9.4).
 func composedVersionProblem(ref, want, got, msg string) *problem {
 	return &problem{
-		kind: "spec", loc: "$schema", msg: msg,
+		kind: "spec", loc: "version", msg: msg,
 		cause: &rotini.CompositionVersionError{
 			Arm: rotini.CompositionSpecArm, Subject: ref, Want: want, Got: got, Msg: msg,
 		},
@@ -519,21 +516,22 @@ var specLints = []func(*Spec) []error{
 // via $ref. Generate enforces the same rule — validate is the gate.
 func lintRootCommand(spec *Spec) []error {
 	var problems []error
-	if spec.Ref != "" {
+	if spec.Command.Ref != "" {
 		problems = append(problems, &problem{kind: "spec", loc: "(root)", msg: "the root command cannot use $ref — compose child specs as sub-commands instead"})
 	}
-	if spec.Name == "" {
+	if spec.Command.Name == "" {
 		problems = append(problems, &problem{kind: "spec", loc: "(root)", msg: "the root command must have a name (it is the binary name)"})
 	}
 	return problems
 }
 
-// lintDocLevelKeys rejects the three document-level keys — $schema, env_prefix,
-// schemas — on a NON-root command. The reshape (W3) merged the document and the
-// root command into one shape (commands all the way down), so the schema accepts
-// these keys on every Command node; they are meaningful only on the root (the
-// document), and codegen reads them only there. Declaring one deeper is a silent
-// no-op, so validate rejects it. The root (spec.Command itself) is exempt.
+// lintDocLevelKeys rejects the two root-command-level keys — env_prefix, schemas —
+// on a NON-root command. The shared Command shape accepts these keys on every node;
+// they are meaningful only on the root command (under the document's `command` key),
+// and codegen reads them only there. Declaring one deeper is a silent no-op, so
+// validate rejects it. The root (spec.Command itself) is exempt. (The document-level
+// `$schema`/`version` keys live on the document, not on Command, so they cannot appear
+// on a sub-command and need no check here.)
 func lintDocLevelKeys(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -543,11 +541,8 @@ func lintDocLevelKeys(spec *Spec) []error {
 		add := func(key string) {
 			problems = append(problems, &problem{
 				kind: "spec", loc: "command " + path,
-				msg: fmt.Sprintf("sets %s, a document-level key valid only on the root command — remove it (codegen reads it only at the root, so here it is silently ignored)", key),
+				msg: fmt.Sprintf("sets %s, a root-command-level key valid only on the root command — remove it (codegen reads it only at the root, so here it is silently ignored)", key),
 			})
-		}
-		if c.Schema != "" {
-			add("$schema")
 		}
 		if c.EnvPrefix != "" {
 			add("env_prefix")
@@ -630,7 +625,7 @@ func lintRefNodeKeys(spec *Spec) []error {
 // no-silently-ignored-key invariant, reject it there rather than drop it.
 func lintHandlerSource(spec *Spec) []error {
 	var problems []error
-	if spec.Handler != nil {
+	if spec.Command.Handler != nil {
 		problems = append(problems, &problem{
 			kind: "spec", loc: "(root)",
 			msg: "sets handler: on the root command — handler: passthrough is supported on sub-commands only (a $ref node or an inline command), not the root",
@@ -647,13 +642,13 @@ func lintHandlerSource(spec *Spec) []error {
 // opt-in feature — never implied by root aliases.)
 func lintRootAliases(spec *Spec) []error {
 	var problems []error
-	if len(spec.Aliases) > 0 {
+	if len(spec.Command.Aliases) > 0 {
 		problems = append(problems, &problem{
 			kind: "spec", loc: "(root)",
 			msg: "the root command cannot declare aliases — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
 		})
 	}
-	if len(spec.DeprecatedIdentifiers) > 0 {
+	if len(spec.Command.DeprecatedIdentifiers) > 0 {
 		problems = append(problems, &problem{
 			kind: "spec", loc: "(root)",
 			msg: "the root command cannot declare deprecated_identifiers — with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
@@ -1381,7 +1376,7 @@ func walkCommands(spec *Spec, visit func(c *Command, path string)) {
 			walk(child, path+"/"+seg)
 		}
 	}
-	name := spec.Name
+	name := spec.Command.Name
 	if name == "" {
 		name = "(root)"
 	}
@@ -1422,7 +1417,7 @@ func walkChains(spec *Spec, visit func(chain []*Command, path string)) {
 			walk(child, chain, path+"/"+seg)
 		}
 	}
-	name := spec.Name
+	name := spec.Command.Name
 	if name == "" {
 		name = "(root)"
 	}
@@ -1521,8 +1516,8 @@ func lintImportConsistency(spec *Spec) []error {
 			walkSchemaImports(c.Output.BaseSchema, record)
 		}
 	})
-	for name := range spec.Schemas {
-		s := spec.Schemas[name]
+	for name := range spec.Command.Schemas {
+		s := spec.Command.Schemas[name]
 		walkSchemaImports(s.BaseSchema, record)
 	}
 
@@ -1656,8 +1651,8 @@ func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 // properties and array items) and offers the closest declared schema name as a suggestion.
 func lintSchemaRefs(spec *Spec) []error {
 	declared := map[string]bool{}
-	names := make([]string, 0, len(spec.Schemas))
-	for name := range spec.Schemas {
+	names := make([]string, 0, len(spec.Command.Schemas))
+	for name := range spec.Command.Schemas {
 		declared[name] = true
 		names = append(names, name)
 	}
@@ -1693,8 +1688,8 @@ func lintSchemaRefs(spec *Spec) []error {
 			walkSchemaRefs(c.Output.BaseSchema, checkAt("command "+path+" output"))
 		}
 	})
-	for name := range spec.Schemas {
-		s := spec.Schemas[name]
+	for name := range spec.Command.Schemas {
+		s := spec.Command.Schemas[name]
 		walkSchemaRefs(s.BaseSchema, checkAt("schema "+name))
 	}
 	return problems
@@ -1709,7 +1704,7 @@ func lintSchemaRefs(spec *Spec) []error {
 // break the build. Composed ($ref) commands generate no stub here and are skipped — the
 // walk mirrors the generator's own-command derivation so the two agree.
 func lintHandlerFilenames(spec *Spec) []error {
-	rootName := spec.Name
+	rootName := spec.Command.Name
 	var problems []error
 	byFile := map[string]string{} // stub file name -> the command path that first produced it
 	var walk func(c *Command, path, display string)

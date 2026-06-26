@@ -38,9 +38,9 @@ func newTestSession(t *testing.T, specPath, confPath string) *session {
 func TestLoad_explicitSpec_confBesideSpec(t *testing.T) {
 	dir := t.TempDir()
 	specPath := filepath.Join(dir, "myspec.yaml")
-	mustWriteSpec(t, specPath, &Spec{Command: Command{Schema: "https://x/spec.json", Name: "demo"}})
+	mustWriteSpec(t, specPath, &Spec{Version: "0.0.0", Schema: "https://x/spec.json", Command: Command{Name: "demo"}})
 	confPath := filepath.Join(dir, ".rotini.conf.yaml")
-	mustWriteConf(t, confPath, &Conf{Schema: "https://x/conf.json"})
+	mustWriteConf(t, confPath, &Conf{Version: "0.0.0", Schema: "https://x/conf.json"})
 
 	p := newTestSession(t, specPath, "")
 	if err := p.load(); err != nil {

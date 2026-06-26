@@ -38,7 +38,7 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 // built-in conf defaults, then emits the cmd and cmdgen packages plus the enabled doc
 // features.
 func (s *session) generate() error {
-	applyConfDefaults(s.conf.conf, s.spec.spec.Name)
+	applyConfDefaults(s.conf.conf, s.spec.spec.Command.Name)
 	return generateAll(s.spec.spec, s.conf.conf, s.spec.path, s.version)
 }
 
@@ -1608,7 +1608,7 @@ type genProgram struct {
 	schemas         map[string]Schema   // document-level named schemas (for output codegen)
 	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
 	envPrefix       string              // document-level env_prefix for DERIVED env-var names
-	version         string              // running rotini version, for the cross-tree $schema guard on composed specs ("" → skipped)
+	version         string              // running rotini version, for the cross-tree version guard on composed specs ("" → skipped)
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -1719,9 +1719,9 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName, version string) (
 		rootOutput:      root.Output,
 		rootDiscovery:   root.RemoteDiscovery,
 		rootPassthrough: root.Passthrough,
-		schemas:         spec.Schemas,
+		schemas:         spec.Command.Schemas,
 		configFiles:     allScopedConfigFiles(spec),
-		envPrefix:       spec.EnvPrefix,
+		envPrefix:       spec.Command.EnvPrefix,
 		version:         version,
 	}
 	gp.root = genCommand{
@@ -1942,10 +1942,10 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	// Cross-tree $schema guard (W8/D-W8.7): every composed spec MUST declare a rotini
-	// $schema that exactly matches the running version, so the whole composed tree
-	// provably shares one version. (Skipped only when gp.version is unset, e.g. tests.)
-	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Schema, gp.version); err != nil {
+	// Cross-tree version guard (W8/D-W8.7): every composed spec MUST declare a `version`
+	// that exactly matches the running version, so the whole composed tree provably
+	// shares one version. (Skipped only when gp.version is unset, e.g. tests.)
+	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Version, gp.version); err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
 	childRoot := rr.spec.Command
@@ -2032,7 +2032,7 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleRoot, 
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Schema, gp.version); err != nil {
+	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Version, gp.version); err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
 	if isExternalLocator(locator) {

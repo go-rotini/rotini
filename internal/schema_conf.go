@@ -4,14 +4,16 @@ package internal
 
 // Schema for a Rotini CLI configuration file.
 type Conf struct {
-	// URL identifying the rotini configuration schema version. The version segment must match the installed rotini binary version.
-	Schema string `json:"$schema"`
+	// Optional URL identifying the rotini configuration schema, for editor tooling only. The binary-version check reads the top-level `version` key, not this. Editors that prefer a local file can instead point a `# yaml-language-server: $schema=<path>` comment at the schema written via `generate.schemas.conf.path`.
+	Schema string `json:"$schema,omitempty"`
 	// Controls `rotini generate`: package targets and derived features. Omitted entirely → the defaults (merged single-file layout under internal/cmd/<root>, all features off).
 	Generate *GenerateConfig `json:"generate,omitempty"`
 	// Defaults for `rotini init`. Module-root confs ONLY — rejected by validation anywhere else (the block would be silently ignored).
 	Initialize *InitializeConfig `json:"initialize,omitempty"`
 	// Controls how `rotini validate` reports problems (collect everything vs. fail fast).
 	Validate *ValidateConfig `json:"validate,omitempty"`
+	// The rotini schema version this conf targets (X.Y.Z). Checked against the installed rotini binary's version; a mismatch is a validation error. This — not the optional `$schema` URL — is the source of the binary-version check.
+	Version string `json:"version"`
 }
 
 // A rendered/derived codegen feature: a toggle (enabled) plus two orthogonal sourcing knobs — embed (//go:embed a rendered file in 'embed_dir' vs an inline string literal) and template (seed the editable rendering template into 'template_dir' vs render from the built-in).
@@ -40,12 +42,14 @@ type FeaturesConfig struct {
 	Markdown *Feature `json:"markdown,omitempty"`
 }
 
-// Controls `rotini generate`: where the generated code is written ('packages') and which derived doc/completion outputs are emitted ('features').
+// Controls `rotini generate`: where rotini's JSON Schemas are written ('schemas'), where the generated code is written ('packages'), and which derived doc/completion outputs are emitted ('features').
 type GenerateConfig struct {
 	// The derived codegen outputs (help/man/markdown/completion), each an opt-in toggle plus its rotini-managed embed/template directories.
 	Features *FeaturesConfig `json:"features,omitempty"`
 	// Where the generated code is written: the entrypoint main.go, the handler-logic package (cmd), and the generated-framework package (cmdgen).
 	Packages *PackagesConfig `json:"packages,omitempty"`
+	// Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so an editor `# yaml-language-server: $schema=<path>` comment can resolve them locally instead of fetching a remote URL.
+	Schemas *SchemasConfig `json:"schemas,omitempty"`
 }
 
 // Defaults for `rotini init`, read ONLY from the .rotini.conf.* at the module root (beside go.mod). A project without such a conf gets rotini's built-in defaults; explicit `rotini init` flags override these. Declared in any conf that is NOT at the module root, the block would be silently ignored — rotini validation rejects it there.
@@ -72,6 +76,20 @@ type PackagesConfig struct {
 	Cmdgen *PackageConfig `json:"cmdgen,omitempty"`
 	// Where generate writes the binary's main.go — create-once, never overwritten. 'package' is required for the entrypoint to be written; 'file' defaults to 'main.go' here (not the shared zz_rotini.gen.go default); 'keep' does not apply (the entrypoint package is never pruned).
 	Entrypoint *PackageConfig `json:"entrypoint,omitempty"`
+}
+
+// A single schema write target: the project-relative path the embedded JSON Schema is written to.
+type SchemaConfig struct {
+	// Module-root-relative path (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a `# yaml-language-server: $schema=<path>` comment at it for local IDE syntax highlighting.
+	Path string `json:"path"`
+}
+
+// Where to write rotini's embedded JSON Schemas into this project. Each entry is opt-in: declare 'conf' and/or 'spec' with a 'path' to have `rotini generate` write that schema there (overwriting it from the embedded bytes each pass). The files are not pruned. Intended target for a local editor `# yaml-language-server: $schema=<path>` reference.
+type SchemasConfig struct {
+	// Where to write rotini's conf-schema (the schema for this .rotini.conf file).
+	Conf *SchemaConfig `json:"conf,omitempty"`
+	// Where to write rotini's spec-schema (the schema for .rotini.spec files).
+	Spec *SchemaConfig `json:"spec,omitempty"`
 }
 
 // Controls how `rotini validate` reports problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. The `--fail` flag overrides this.

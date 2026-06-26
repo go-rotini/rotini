@@ -1,5 +1,4 @@
 # yaml-language-server: $schema=./.rotini-schema.spec.json
-# $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
 version: 0.0.0
 command:
   name: rotini

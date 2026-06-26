@@ -2,9 +2,14 @@
 
 package internal
 
-// Schema for a Rotini CLI definition spec file. The document IS the root command — commands all the way down: its keys are the root command's keys directly (name, doc-fields, flags/arguments/env/config/config_files/stdin, sub-commands, …), plus three document-level keys ($schema, env_prefix, schemas) that are valid only on the root.
+// Schema for a Rotini CLI definition spec file. The document wraps a top-level `version` and a single root `command` (the CLI's root command); from there the tree is commands all the way down. `env_prefix` and `schemas` are root-command-level keys valid only on the root command (under `command`), and `$schema` is an optional document-level editor-tooling key.
 type Spec struct {
-	Command
+	// Optional URL identifying the rotini spec schema, for editor tooling only. The binary-version check reads the top-level `version` key, not this. Editors that prefer a local file can instead point a `# yaml-language-server: $schema=<path>` comment at the schema written via the conf's `generate.schemas.spec.path`.
+	Schema string `json:"$schema,omitempty"`
+	// The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/arguments/env/config/config_files/stdin) and sub-commands. The root must use 'name' (not '$ref'). The root-command-level keys `env_prefix` and `schemas` live here.
+	Command Command `json:"command"`
+	// The rotini schema version this spec targets (X.Y.Z). Checked against the installed rotini binary's version; a mismatch is a validation error. This — not the optional `$schema` URL — is the source of the binary-version check.
+	Version string `json:"version"`
 }
 
 type ArgumentInput struct {
@@ -58,12 +63,10 @@ type BaseSchema struct {
 	Type string `json:"type,omitempty"`
 }
 
-// A command node in the CLI command tree — the root command (the document itself) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The three document-level keys ($schema, env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
+// A command node in the CLI command tree — the root command (under the document's 'command' key) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The two root-command-level keys (env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
 type Command struct {
 	// Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, header, footer, examples, help, headings, group, hidden, deprecated, deprecated_identifiers, filename) WIN over the child's when present — so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node — the composed command delegates to the child's handler, built against the child's own inputs/output — so rotini validation rejects them here (declare them in the child spec).
 	Ref string `json:"$ref,omitempty"`
-	// Document-level (root only): URL identifying the rotini spec schema version. The version segment must match the rotini binary version used.
-	Schema string `json:"$schema,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.
 	Aliases []string `json:"aliases,omitempty"`
 	// Positional argument inputs for this command
