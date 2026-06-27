@@ -77,7 +77,7 @@ func (p *Processor) Mod(specPath string) error {
 	if err != nil {
 		return err
 	}
-	return populateLock(spec, resolvedSpec, root, name, p.version)
+	return populateLock(spec, resolvedSpec, root, name)
 }
 
 // run resolves the spec/conf paths up-front (so watch watches exactly the files read),

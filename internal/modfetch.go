@@ -32,7 +32,7 @@ type ModFn = func(specPath string) error
 
 // populateLock fetches + pins every external `$ref` reachable from spec into the
 // module's lock + cache, then writes them. It is what `rotini mod` runs.
-func populateLock(spec *Spec, specPath, moduleRoot, moduleName, version string) error {
+func populateLock(spec *Spec, specPath, moduleRoot, moduleName string) error {
 	lock, err := readLockfile(moduleRoot)
 	if err != nil {
 		return err
@@ -42,7 +42,7 @@ func populateLock(spec *Spec, specPath, moduleRoot, moduleName, version string) 
 		absSpec = filepath.Clean(a)
 	}
 	seen := map[string]bool{absSpec: true}
-	if err := collectExternal(spec.Command.Commands, filepath.Dir(absSpec), moduleName, moduleRoot, version, lock, seen); err != nil {
+	if err := collectExternal(spec.Command.Commands, filepath.Dir(absSpec), moduleName, moduleRoot, lock, seen); err != nil {
 		return err
 	}
 	return writeLockfile(moduleRoot, lock)
@@ -52,10 +52,10 @@ func populateLock(spec *Spec, specPath, moduleRoot, moduleName, version string) 
 // ref is fetched, pinned into lock+cache, and recursed into; a mod:///local ref is
 // loaded and recursed into (to reach nested external refs); an inline command recurses
 // against the same base.
-func collectExternal(cmds []Command, base, moduleName, moduleRoot, version string, lock map[string]lockEntry, seen map[string]bool) error {
+func collectExternal(cmds []Command, base, moduleName, moduleRoot string, lock map[string]lockEntry, seen map[string]bool) error {
 	for _, c := range cmds {
 		if c.Ref == "" {
-			if err := collectExternal(c.Commands, base, moduleName, moduleRoot, version, lock, seen); err != nil {
+			if err := collectExternal(c.Commands, base, moduleName, moduleRoot, lock, seen); err != nil {
 				return err
 			}
 			continue
@@ -72,7 +72,7 @@ func collectExternal(cmds []Command, base, moduleName, moduleRoot, version strin
 		var childSpec *Spec
 		var childBase string
 		if isExternalLocator(locator) {
-			entry, data, err := fetchAndPin(locator, version)
+			entry, data, err := fetchAndPin(locator)
 			if err != nil {
 				return err
 			}
@@ -94,10 +94,10 @@ func collectExternal(cmds []Command, base, moduleName, moduleRoot, version strin
 		}
 		// Recurse into the ref'd spec's own subtree (its base) and the siblings authored
 		// next to the ref (this spec's base).
-		if err := collectExternal(childSpec.Command.Commands, childBase, moduleName, moduleRoot, version, lock, seen); err != nil {
+		if err := collectExternal(childSpec.Command.Commands, childBase, moduleName, moduleRoot, lock, seen); err != nil {
 			return err
 		}
-		if err := collectExternal(c.Commands, base, moduleName, moduleRoot, version, lock, seen); err != nil {
+		if err := collectExternal(c.Commands, base, moduleName, moduleRoot, lock, seen); err != nil {
 			return err
 		}
 	}
@@ -106,7 +106,7 @@ func collectExternal(cmds []Command, base, moduleName, moduleRoot, version strin
 
 // fetchAndPin fetches an external locator live, validates it is a version-matched spec,
 // and returns its lock entry (revision + content hash + format + version) plus the bytes.
-func fetchAndPin(locator, version string) (lockEntry, []byte, error) {
+func fetchAndPin(locator string) (lockEntry, []byte, error) {
 	var (
 		revision string
 		data     []byte
@@ -131,9 +131,6 @@ func fetchAndPin(locator, version string) (lockEntry, []byte, error) {
 	spec, err := decodeData[Spec](format, data, locator)
 	if err != nil {
 		return lockEntry{}, nil, fmt.Errorf("fetched %q is not a valid spec: %w", locator, err)
-	}
-	if err := checkComposedSchemaVersion(locator, spec.Version, version); err != nil {
-		return lockEntry{}, nil, err
 	}
 	return lockEntry{revision: revision, hash: hashBytes(data), format: format, schema: specSchemaVersion(spec.Version)}, data, nil
 }

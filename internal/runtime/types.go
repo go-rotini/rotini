@@ -77,23 +77,6 @@ type RemoteDef struct {
 	Summary string        // one-line description (completion candidates carry it as "name\tsummary")
 	Binary  string        // expected executable name, e.g. "kubectl-ctx"
 	Timeout time.Duration // 0 means no timeout
-	Verify  *RemoteVerify // opt-in pre-dispatch trust checks; nil = none (the default)
-}
-
-// RemoteVerify is the opt-in trust a remote command declares for its dispatched binary
-// (W9/D-W9.3/D-W9.4/D-W9.6) — checked once, before the binary runs. The zero value /
-// a nil [RemoteDef.Verify] verifies nothing (dispatch is unchanged); each field opts in
-// to one rung of the shared trust ladder.
-type RemoteVerify struct {
-	// Version enables the same-major handshake: rotini runs `<binary> __rotini` and
-	// compares the rotini version it reports against the host's, failing dispatch with a
-	// binary-arm [*CompositionVersionError] on a definite cross-major mismatch (an
-	// undeterminable remote version is skipped — best-effort, like the spec/package arms).
-	Version bool
-	// SHA256 pins the dispatched binary's content hash ("sha256:<hex>" or a bare hex):
-	// rotini hashes the resolved binary and fails dispatch with a [*RemoteError]
-	// ([RemoteVerificationFailed]) if it does not match. Empty pins nothing.
-	SHA256 string
 }
 
 // BindMeta is the generated, data-only descriptor the default binder ([Binder])
@@ -174,10 +157,6 @@ type RemoteDiscoveryDef struct {
 	Prefix string // executable-name prefix, e.g. "acme-"
 	Path   string // extra directory to scan, in addition to the host dir and PATH
 	Hidden bool   // dispatch discovered plugins but omit them from completion listings
-	// Verify is opt-in pre-dispatch trust applied to every discovered plugin (D-W9.4):
-	// only [RemoteVerify.Version] (the same-major handshake) applies to open-ended
-	// discovery, so it is the only field validation allows here. nil = none (the default).
-	Verify *RemoteVerify
 }
 
 // CommandDef describes one command node within a [Definition]. Handler is the

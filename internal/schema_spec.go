@@ -296,8 +296,6 @@ type RemoteCommandSpec struct {
 	Summary string `json:"summary,omitempty"`
 	// Host-side timeout for the remote binary execution. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 	Timeout string `json:"timeout,omitempty"`
-	// Opt-in pre-dispatch trust for this remote's binary (W9). Verified once, before the binary runs; omitted verifies nothing and dispatch is unchanged.
-	Verify *RemoteVerifySpec `json:"verify,omitempty"`
 }
 
 // Auto-expose external '<prefix>*' executables as remote sub-commands (kubectl/git/gh plugin style), alongside any declared remote_commands. Presence enables discovery; a discovered name that collides with a declared command or remote is skipped.
@@ -308,16 +306,6 @@ type RemoteDiscovery struct {
 	Path string `json:"path,omitempty"`
 	// Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-').
 	Prefix string `json:"prefix,omitempty"`
-	// Opt-in pre-dispatch trust applied to EVERY discovered plugin (W9/D-W9.4). Only 'version' (the same-major '__rotini' handshake) applies to open-ended discovery; 'sha256' pins a specific binary and cannot generalize to plugins not known ahead of time, so it is rejected here by validation (declare it on an explicit remote_commands[] entry instead). A discovered non-rotini plugin that does not answer the handshake is skipped (best-effort).
-	Verify *RemoteVerifySpec `json:"verify,omitempty"`
-}
-
-// Opt-in trust checks a remote command declares for its dispatched binary (W9/D-W9.3/D-W9.4/D-W9.10). Each field opts in to one rung of the shared trust ladder.
-type RemoteVerifySpec struct {
-	// Pin the dispatched binary's SHA-256 content hash ('sha256:<hex>' or a bare 64-char hex). rotini hashes the resolved binary and refuses to dispatch on a mismatch.
-	Sha256 string `json:"sha256,omitempty"`
-	// Enable the same-major rotini version handshake: rotini runs '<binary> __rotini' and refuses to dispatch on a definite cross-major mismatch (an undeterminable remote version is skipped — best-effort).
-	Version bool `json:"version,omitempty"`
 }
 
 // JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.

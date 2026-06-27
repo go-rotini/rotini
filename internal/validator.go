@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-rotini/jsonschema"
-	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 // This file owns the `rotini validate` operation end-to-end: the session/file-level
@@ -80,9 +79,6 @@ func (l *specLoader) validate() []error {
 		problems = append(problems, rule(l.spec)...)
 	}
 	locateProblems(problems, l.path, l.locate) // positions any pointer-shaped problems
-	if err := checkSchemaVersion("spec", l.spec.Version, l.version); err != nil {
-		problems = append(problems, err)
-	}
 	problems = append(problems, validateComposedTree(l.spec, l.path, l.version)...)
 	return problems
 }
@@ -148,9 +144,6 @@ func (l *confLoader) validate() []error {
 		problems = append(problems, rule(l.conf)...)
 	}
 
-	if err := checkSchemaVersion("conf", l.conf.Version, l.version); err != nil {
-		problems = append(problems, err)
-	}
 	return problems
 }
 
@@ -175,7 +168,7 @@ type problem struct {
 	pos   string // "path:line:col" in the original source; "" degrades to loc-only
 	msg   string
 	sev   severity // zero value = error
-	cause error    // optional typed error this problem carries (e.g. *rotini.CompositionVersionError), reachable via errors.As
+	cause error    // optional typed error this problem carries, reachable via errors.As
 }
 
 // splitProblems separates a finding list into fatal errors and non-fatal
@@ -199,8 +192,8 @@ func (e *problem) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
 }
 
-// Unwrap exposes an optional typed cause (e.g. a [rotini.CompositionVersionError]) so a
-// caller's errors.As/Is reaches it through the aggregated validation error.
+// Unwrap exposes an optional typed cause so a caller's errors.As/Is reaches it
+// through the aggregated validation error.
 func (e *problem) Unwrap() error { return e.cause }
 
 // locateProblems back-fills source positions onto pointer-shaped problems: a
@@ -248,71 +241,6 @@ func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) [
 		problems = append(problems, &problem{kind: kind, loc: loc, msg: ve.Message})
 	}
 	return problems
-}
-
-// checkSchemaVersion enforces that a document's top-level `version` targets the same
-// rotini release as the running binary. version is the binary's bound version string
-// ("vX.Y.Z" or "v0.0.0"); its leading "v" is stripped to the "X.Y.Z" segment compared
-// against the document's `version`. The check is skipped when the binary version is
-// empty/unknown, or when the document declares no `version` (must-match-if-present — the
-// JSON Schema separately requires `version`, so a schema-valid document always carries
-// one by the time this runs). A present, mismatched `version` is an error. (The optional
-// `$schema` URL is editor-tooling only and is no longer consulted for this check.)
-func checkSchemaVersion(kind, docVersion, version string) error {
-	want := strings.TrimPrefix(version, "v")
-	if want == "" {
-		return nil
-	}
-	got := strings.TrimPrefix(docVersion, "v")
-	if got == "" {
-		return nil
-	}
-	if got != want {
-		return &problem{
-			kind: kind,
-			loc:  "version",
-			msg:  fmt.Sprintf("targets rotini version %s but this rotini is %s — update the version (or your rotini install) so they match", got, want),
-		}
-	}
-	return nil
-}
-
-// checkComposedSchemaVersion is the STRICT cross-tree version guard for a COMPOSED
-// spec (W8/D-W8.7). Unlike the entry-spec guard ([checkSchemaVersion], which is
-// must-match-if-present), a composed spec MUST declare a `version` that EXACTLY matches
-// the generating version: a missing or mismatched version is an error, because a
-// composed tree must provably share one rotini version and you cannot confirm that
-// without it. Skipped only when the running version is unknown (version == "", e.g.
-// tests) — there is then nothing to match against. Errors carry the composed spec's
-// ref so the failure points at the right file.
-func checkComposedSchemaVersion(ref, docVersion, version string) error {
-	want := strings.TrimPrefix(version, "v")
-	if want == "" {
-		return nil
-	}
-	got := strings.TrimPrefix(docVersion, "v")
-	if got == "" {
-		msg := fmt.Sprintf("composed spec %q must declare a version targeting %s — every spec in a composed tree must target this rotini version", ref, want)
-		return composedVersionProblem(ref, want, "", msg)
-	}
-	if got != want {
-		msg := fmt.Sprintf("composed spec %q targets version %s but this rotini is %s — every spec in a composed tree must target the same version", ref, got, want)
-		return composedVersionProblem(ref, want, got, msg)
-	}
-	return nil
-}
-
-// composedVersionProblem wraps the spec-arm version mismatch as a validation [problem]
-// that carries a typed [rotini.CompositionVersionError] (Arm = spec) — so the message
-// reports as before while a caller can errors.As to the shared composition-version type
-// (one type across the spec/package/binary arms; D-W9.4).
-func composedVersionProblem(ref, want, got, msg string) *problem {
-	return &problem{
-		kind: "spec", loc: "version", msg: msg,
-		cause: &rotini.CompositionVersionError{
-			Arm: rotini.CompositionSpecArm, Subject: ref, Want: want, Got: got, Msg: msg,
-		},
-	}
 }
 
 // ─── the rotini-specific rules (what the JSON Schema can't express) ─────────────.
@@ -521,7 +449,6 @@ var specLints = []func(*Spec) []error{
 	lintVariadicArguments,
 	lintDeprecatedIdentifiers,
 	lintRemoteTimeouts,
-	lintRemoteDiscoveryVerify,
 	lintDottedKeys,
 	lintFrom,
 	lintConfigurationFiles,
@@ -1350,31 +1277,6 @@ func lintRemoteTimeouts(spec *Spec) []error {
 					msg:  fmt.Sprintf("remote_commands %q timeout %q is not a positive Go duration (e.g. \"10s\", \"1m30s\")", r.Name, r.Timeout),
 				})
 			}
-		}
-	})
-	return problems
-}
-
-// lintRemoteDiscoveryVerify enforces that a remote_discovery.verify declares only the
-// version handshake. Discovery is open-ended — it dispatches plugins not known ahead of
-// time — so a sha256 pin (which fixes a SPECIFIC binary) cannot generalize to it; it
-// belongs on an explicit remote_commands[] entry. Per the no-silently-ignored-key
-// invariant, declaring it here is an error rather than a no-op.
-func lintRemoteDiscoveryVerify(spec *Spec) []error {
-	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
-		d := c.RemoteDiscovery
-		if d == nil || d.Verify == nil {
-			return
-		}
-		reject := func(key string) {
-			problems = append(problems, &problem{
-				kind: "spec", loc: "command " + path,
-				msg: fmt.Sprintf("remote_discovery verify.%s cannot apply to open-ended plugin discovery — it pins a specific binary; only verify.version is honored here (declare %s on a remote_commands[] entry instead)", key, key),
-			})
-		}
-		if d.Verify.Sha256 != "" {
-			reject("sha256")
 		}
 	})
 	return problems

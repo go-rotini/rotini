@@ -2,38 +2,13 @@ package rotini
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"time"
 )
-
-// rotiniVersionCommand is the hidden entry every rotini program answers (mirroring
-// [completeCommand]): `<binary> __rotini` prints the rotini version the binary was built
-// against, so a host can negotiate same-major compatibility before dispatching to it (the
-// binary arm of D-W9.4). It is always answerable; the host PROBE is opt-in ([RemoteVerify.Version]).
-const rotiniVersionCommand = "__rotini"
-
-// rotiniVersionReport is the line `<binary> __rotini` prints: a self-identifying marker
-// plus the rotini version ([rotiniLibraryVersion]; blank when undeterminable).
-func rotiniVersionReport() string { return "rotini " + rotiniLibraryVersion() }
-
-// parseRotiniVersionReport extracts the version from a [rotiniVersionReport] line,
-// returning "" when the output is not a recognizable report (so the host skips the check).
-func parseRotiniVersionReport(out string) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
-	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "rotini ")
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(rest)
-}
 
 // RemoteErrorKind classifies a remote-dispatch failure: the plugin binary could
 // not be located, it exceeded its declared timeout, or it could not be spawned.
@@ -49,10 +24,6 @@ const (
 	// exec or pipe failure — NOT the plugin's own non-zero exit, which passes
 	// through untouched).
 	RemoteSpawnFailed
-	// RemoteVerificationFailed: an opt-in pre-dispatch trust check rejected the
-	// binary (a [RemoteVerify.SHA256] content-hash mismatch) — the binary was
-	// found but is not trusted, so it is NOT run.
-	RemoteVerificationFailed
 )
 
 // String renders the kind as a short, stable label.
@@ -64,8 +35,6 @@ func (k RemoteErrorKind) String() string {
 		return "timeout"
 	case RemoteSpawnFailed:
 		return "spawn-failed"
-	case RemoteVerificationFailed:
-		return "verification-failed"
 	default:
 		return "unknown"
 	}
@@ -160,16 +129,6 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 		})
 	}
 
-	// Opt-in pre-dispatch trust (D-W9.3/D-W9.4): a content-hash pin and/or a same-major
-	// version handshake, both BEFORE the binary runs. A failure aborts the dispatch and is
-	// recorded through the funnel (the binary is the consumer's environment).
-	if r.Def.Verify != nil {
-		if err := verifyRemoteBinary(ctx, path, r.Def); err != nil {
-			rtx.RecordError(err)
-			return p.settle(ctx, rtx)
-		}
-	}
-
 	if r.Def.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, r.Def.Timeout)
@@ -211,88 +170,6 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 func (p *Program) remoteFailure(ctx context.Context, rtx *Context, re *RemoteError) (int, error) {
 	rtx.RecordError(re)
 	return p.settle(ctx, rtx)
-}
-
-// remoteVersionProbeTimeout caps the `__rotini` handshake probe so a misbehaving binary
-// can't hang dispatch; it is independent of the command's own run timeout.
-const remoteVersionProbeTimeout = 5 * time.Second
-
-// verifyRemoteBinary runs the opt-in pre-dispatch checks for a resolved plugin at path
-// (def.Verify is non-nil): the content-hash pin first (cheap, local), then the same-major
-// version handshake (spawns). It returns the typed failure to record (a [*RemoteError] for
-// a hash mismatch, a binary-arm [*CompositionVersionError] for a cross-major), or nil to
-// proceed.
-func verifyRemoteBinary(ctx context.Context, path string, def RemoteDef) error {
-	v := def.Verify
-	if v.SHA256 != "" {
-		sum, err := fileSHA256(path)
-		if err != nil {
-			return &RemoteError{
-				Name: def.Name, Binary: def.Binary, Kind: RemoteVerificationFailed, Cause: err,
-				Msg: fmt.Sprintf("%s: cannot hash %s for verification: %v", def.Name, def.Binary, err), cat: CategoryInternal,
-			}
-		}
-		if !sha256Matches(v.SHA256, sum) {
-			return &RemoteError{
-				Name: def.Name, Binary: def.Binary, Kind: RemoteVerificationFailed,
-				Msg: fmt.Sprintf("%s: binary %s failed sha256 verification — pinned %s, got sha256:%s", def.Name, def.Binary, normalizeSHA256(v.SHA256), sum), cat: CategoryInternal,
-			}
-		}
-	}
-	if v.Version {
-		return verifyRemoteVersion(ctx, path, def)
-	}
-	return nil
-}
-
-// verifyRemoteVersion runs `<path> __rotini` and fails on a definite cross-major mismatch
-// with the host's rotini version. It is best-effort: an undeterminable host version, a
-// remote that doesn't answer the handshake, or an unparseable report all skip the check
-// (proceed) rather than block — only a clearly-different major aborts dispatch.
-func verifyRemoteVersion(ctx context.Context, path string, def RemoteDef) error {
-	host := hostRotiniVersion()
-	if host == "" {
-		return nil
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, remoteVersionProbeTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(probeCtx, path, rotiniVersionCommand).Output()
-	if err != nil {
-		return nil // not a rotini binary, or one too old to answer __rotini
-	}
-	remote := parseRotiniVersionReport(string(out))
-	if remote == "" || sameMajorVersion(host, remote) {
-		return nil
-	}
-	return &CompositionVersionError{
-		Arm: CompositionBinaryArm, Subject: def.Binary, Want: host, Got: remote,
-		Msg: fmt.Sprintf("remote %q binary %s was built with rotini %s but this program is rotini %s — a different major may speak an incompatible dispatch protocol; rebuild the plugin against a compatible rotini", def.Name, def.Binary, remote, host),
-	}
-}
-
-// fileSHA256 returns the hex-encoded SHA-256 of the file at path (no "sha256:" prefix).
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open binary: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("read binary: %w", err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// normalizeSHA256 lowercases a declared hash and strips an optional "sha256:" prefix, so a
-// pin written either way ("sha256:ABC…" or "abc…") compares equal.
-func normalizeSHA256(declared string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(declared), "sha256:"))
-}
-
-// sha256Matches reports whether a declared pin equals the computed hex digest.
-func sha256Matches(declared, hexDigest string) bool {
-	return normalizeSHA256(declared) == strings.ToLower(hexDigest)
 }
 
 // resolveRemoteBinary finds the plugin binary: first adjacent to the running

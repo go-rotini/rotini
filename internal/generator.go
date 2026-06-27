@@ -157,10 +157,6 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 	if err != nil {
 		return err
 	}
-	// Package arm (D-W9.4): refuse to generate code against a cross-major rotini library.
-	if err := checkPackageVersion(moduleRoot, version); err != nil {
-		return err
-	}
 	lay := resolveLayout(conf, moduleRoot, moduleName)
 	gp, err := resolveTree(spec, specPath, moduleRoot, moduleName, version)
 	if err != nil {
@@ -796,11 +792,6 @@ func discoveryLiteral(host string, d *RemoteDiscovery) string {
 	if d.Hidden {
 		b.WriteString(", Hidden: true")
 	}
-	// Only the version handshake applies to open-ended discovery (lintRemoteDiscoveryVerify
-	// rejects sha256 here), so emit just that rung.
-	if v := d.Verify; v != nil && v.Version {
-		b.WriteString(", Verify: &" + rotiniPkgName + ".RemoteVerify{Version: true}")
-	}
 	b.WriteString("}")
 	return b.String()
 }
@@ -839,18 +830,6 @@ func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 			if d, err := time.ParseDuration(rc.Timeout); err == nil && d > 0 {
 				fmt.Fprintf(b, ", Timeout: %d", int64(d))
 			}
-		}
-		if v := rc.Verify; v != nil && (v.Version || v.Sha256 != "") {
-			b.WriteString(", Verify: &rotini.RemoteVerify{")
-			sep := ""
-			if v.Version {
-				b.WriteString("Version: true")
-				sep = ", "
-			}
-			if v.Sha256 != "" {
-				b.WriteString(sep + "SHA256: " + strconv.Quote(v.Sha256))
-			}
-			b.WriteString("}")
 		}
 	})
 }
@@ -2112,12 +2091,6 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
-	// Cross-tree version guard (W8/D-W8.7): every composed spec MUST declare a `version`
-	// that exactly matches the running version, so the whole composed tree provably
-	// shares one version. (Skipped only when gp.version is unset, e.g. tests.)
-	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Version, gp.version); err != nil {
-		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
-	}
 	childRoot := rr.spec.Command
 	if childRoot.Name == "" {
 		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
@@ -2200,9 +2173,6 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleRoot, 
 
 	rr, err := loadRef(locator, moduleName, moduleRoot)
 	if err != nil {
-		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
-	}
-	if err := checkComposedSchemaVersion(c.Ref, rr.spec.Version, gp.version); err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
 	if isExternalLocator(locator) {

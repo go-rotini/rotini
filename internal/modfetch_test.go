@@ -1,7 +1,6 @@
 package internal
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -33,12 +32,12 @@ func stubFetchers(t *testing.T, gitByRepo map[string]struct {
 }
 
 func TestFetchAndPin_git(t *testing.T) {
-	body := "$schema: " + modTestSchema + "\nname: deploy\n"
+	body := "$schema: " + modTestSchema + "\nversion: 0.0.0\ncommand:\n  name: deploy\n"
 	stubFetchers(t, map[string]struct{ rev, body string }{
 		"https://github.com/acme/clis": {rev: "deadbeef", body: body},
 	}, nil)
 
-	entry, data, err := fetchAndPin("git::https://github.com/acme/clis@v1/deploy/.rotini.spec.yaml", "0.0.0")
+	entry, data, err := fetchAndPin("git::https://github.com/acme/clis@v1/deploy/.rotini.spec.yaml")
 	if err != nil {
 		t.Fatalf("fetchAndPin: %v", err)
 	}
@@ -59,23 +58,12 @@ func TestFetchAndPin_git(t *testing.T) {
 	}
 }
 
-// A version mismatch on the fetched spec's $schema is a hard error (D-W8.7).
-func TestFetchAndPin_schemaVersionMismatch(t *testing.T) {
-	body := "$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/9.9.9/schema-spec.json\nname: deploy\n"
-	stubFetchers(t, nil, map[string]string{
-		"https://example.com/cli/.rotini.spec.yaml": body,
-	})
-	if _, _, err := fetchAndPin("https://example.com/cli/.rotini.spec.yaml", "0.0.0"); err == nil {
-		t.Fatalf("want a schema-version error, got nil")
-	}
-}
-
 // populateLock fetches every external ref a tree reaches (git + raw), writes the lock +
 // cache, and the round-trip reads back through loadLockedExternal.
 func TestPopulateLock_roundTrip(t *testing.T) {
 	root := t.TempDir()
-	gitBody := "$schema: " + modTestSchema + "\nname: deploy\n"
-	rawBody := "$schema: " + modTestSchema + "\nname: report\n"
+	gitBody := "$schema: " + modTestSchema + "\nversion: 0.0.0\ncommand:\n  name: deploy\n"
+	rawBody := "$schema: " + modTestSchema + "\nversion: 0.0.0\ncommand:\n  name: report\n"
 	stubFetchers(t, map[string]struct{ rev, body string }{
 		"https://github.com/acme/clis": {rev: "abc123", body: gitBody},
 	}, map[string]string{
@@ -92,7 +80,7 @@ func TestPopulateLock_roundTrip(t *testing.T) {
 		},
 	}}
 
-	if err := populateLock(spec, root+"/.rotini.spec.yaml", root, "x.com/app", "0.0.0"); err != nil {
+	if err := populateLock(spec, root+"/.rotini.spec.yaml", root, "x.com/app"); err != nil {
 		t.Fatalf("populateLock: %v", err)
 	}
 
@@ -142,7 +130,7 @@ func TestPopulateLock_noExternalRefs(t *testing.T) {
 	defer func() { gitFetchFunc, httpFetchFunc = og, oh }()
 
 	spec := &Spec{Command: Command{Name: "app", Commands: []Command{{Name: "sub"}}}}
-	if err := populateLock(spec, root+"/.rotini.spec.yaml", root, "x.com/app", "0.0.0"); err != nil {
+	if err := populateLock(spec, root+"/.rotini.spec.yaml", root, "x.com/app"); err != nil {
 		t.Fatalf("populateLock: %v", err)
 	}
 	lock, err := readLockfile(root)
@@ -155,13 +143,13 @@ func TestPopulateLock_noExternalRefs(t *testing.T) {
 }
 
 func TestSpecSchemaVersion(t *testing.T) {
-	if v := specSchemaVersion(modTestSchema); v != "0.0.0" {
+	if v := specSchemaVersion("0.0.0"); v != "0.0.0" {
 		t.Errorf("version = %q, want 0.0.0", v)
+	}
+	if v := specSchemaVersion("v1.2.3"); v != "1.2.3" {
+		t.Errorf("v-prefixed = %q, want 1.2.3", v)
 	}
 	if v := specSchemaVersion(""); v != "-" {
 		t.Errorf("absent = %q, want -", v)
-	}
-	if v := specSchemaVersion("https://example.com/foreign.json"); !strings.HasPrefix(v, "-") {
-		t.Errorf("foreign = %q, want -", v)
 	}
 }
