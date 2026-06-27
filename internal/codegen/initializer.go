@@ -114,19 +114,16 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		return err
 	}
 
-	// Validate the seeds, then run the standard generate over them — the exact
-	// same path `rotini generate` runs (no init-special-casing). This kickstarts
-	// the new CLI: it writes the entrypoint main.go (which carries the
-	// //go:generate directive, so every later regen is just `go generate ./...`),
-	// an empty handler stub per command, and the cmd/cmdgen codegen files.
-	s := newSession(specPath, confPath, p.version)
-	if err := s.load(); err != nil {
+	// Reconcile the just-written seeds, then run the standard generate over them — the
+	// exact same path `rotini generate` runs (no init-special-casing). generate gates on
+	// validation, so this kickstarts the new CLI: it writes the entrypoint main.go (which
+	// carries the //go:generate directive, so every later regen is just `go generate
+	// ./...`), an empty handler stub per command, and the codegen files.
+	rs, rc, err := p.reconcile(specPath, confPath)
+	if err != nil {
 		return err
 	}
-	if err := s.validate(); err != nil {
-		return err
-	}
-	return s.generate()
+	return p.generate(rs, rc)
 }
 
 // normalizeFormat resolves the requested format name to its fileFormat,

@@ -7,10 +7,20 @@ import (
 	"strings"
 )
 
-// This file holds the conf lint rules — the rotini-specific checks the JSON Schema
-// cannot express. Each is a pure func(*Conf) []error, registered in confLints.
+// This file holds the conf lint STAGE: the lintConf method plus the rotini-specific
+// conf rules (the checks the JSON Schema cannot express). Each rule is a pure
+// func(*Conf) []error, registered in confLints.
 
-// ─── the rotini-specific rules (what the JSON Schema can't express) ─────────────.
+// lintConf is the lint stage for the conf: it runs every conf rule over the reconciled
+// conf, returning every problem. It assumes the conf is schema-valid (the Processor runs
+// it only after validateConf passes).
+func (p *Processor) lintConf(rc *reconciledConf) []error {
+	var problems []error
+	for _, rule := range confLints {
+		problems = append(problems, rule(rc.conf)...)
+	}
+	return problems
+}
 
 // confLints is the ordered set of conf rules run after the conf is schema-valid,
 // mirroring specLints. Like the spec rules, they reject configuration that would

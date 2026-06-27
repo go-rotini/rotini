@@ -136,13 +136,15 @@ func bytesToJSON(format fileFormat, data []byte) ([]byte, error) {
 }
 
 // readSpec reads and decodes the rotini spec file at path (serialization chosen from
-// the extension). It does not validate against the schema; build a specLoader for that.
+// the extension). It does not validate against the schema — the Processor's reconcile +
+// validate stages do that.
 func readSpec(path string) (*Spec, error) {
 	return readFile[Spec](path)
 }
 
 // readConf reads and decodes the rotini conf file at path (serialization chosen from
-// the extension). It does not validate against the schema; build a confLoader for that.
+// the extension). It does not validate against the schema — the Processor's reconcile +
+// validate stages do that.
 func readConf(path string) (*Conf, error) {
 	return readFile[Conf](path)
 }

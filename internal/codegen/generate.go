@@ -26,15 +26,6 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 	return NewProcessor(version).Generate(specPath, confPath, watch, onGenerate)
 }
 
-// generate runs the generator phase over a loaded session (call load — and, through
-// the pass, validate — first: invalid input must never reach codegen). It applies the
-// built-in conf defaults, then emits the cmd and cmdgen packages plus the enabled doc
-// features.
-func (s *session) generate() error {
-	applyConfDefaults(s.conf.conf, s.spec.spec.Command.Name)
-	return generateAll(s.spec.spec, s.conf.conf, s.spec.path, s.version)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Code generation — the cli/cligen program (framework, rollup, stubs, literals).
 // ─────────────────────────────────────────────────────────────────────────────.
@@ -144,13 +135,13 @@ func runtimeImportSpec(moduleName, dir string) string {
 // the entrypoint main.go when the conf declares one, (re)writes the handler
 // rollup, and prunes orphaned stubs. specPath is needed to resolve $ref paths
 // relative to the spec.
-func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
+func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	moduleRoot, moduleName, err := findModule()
 	if err != nil {
 		return err
 	}
 	lay := resolveLayout(conf, moduleRoot, moduleName)
-	gp, err := resolveTree(spec, specPath, moduleName, version)
+	gp, err := resolveTree(spec, specPath, moduleName)
 	if err != nil {
 		return err
 	}

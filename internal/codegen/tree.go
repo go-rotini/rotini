@@ -32,7 +32,6 @@ type genProgram struct {
 	schemas         map[string]Schema   // document-level named schemas (for output codegen)
 	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
 	envPrefix       string              // document-level env_prefix for DERIVED env-var names
-	version         string              // running rotini version, for the cross-tree version guard on composed specs ("" → skipped)
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -129,7 +128,7 @@ func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
 	return out
 }
 
-func resolveTree(spec *Spec, specPath, moduleName, version string) (*genProgram, error) {
+func resolveTree(spec *Spec, specPath, moduleName string) (*genProgram, error) {
 	root := spec.Command
 	if root.Ref != "" || root.Name == "" {
 		return nil, errors.New("root command must have a name (the top-level \"command\" cannot use $ref)")
@@ -146,7 +145,6 @@ func resolveTree(spec *Spec, specPath, moduleName, version string) (*genProgram,
 		schemas:         spec.Command.Schemas,
 		configFiles:     allScopedConfigFiles(spec),
 		envPrefix:       spec.Command.EnvPrefix,
-		version:         version,
 	}
 	gp.root = genCommand{
 		prefix:      gp.rootPascal,

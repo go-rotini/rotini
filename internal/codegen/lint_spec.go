@@ -9,8 +9,23 @@ import (
 	"time"
 )
 
-// This file holds the spec lint rules (the rotini-specific checks the JSON Schema
-// cannot express). Each is a pure func(*Spec) []error, registered in specLints.
+// This file holds the spec lint STAGE: the lintSpec method plus the rotini-specific
+// spec rules (the checks the JSON Schema cannot express). Each rule is a pure
+// func(*Spec) []error, registered in specLints.
+
+// lintSpec is the lint stage for the spec: it runs every spec rule plus the deep
+// composed-$ref tree check over the reconciled spec, returning every problem positioned
+// to source. It assumes the spec is schema-valid (the Processor runs it only after
+// validateSpec passes).
+func (p *Processor) lintSpec(rs *reconciledSpec) []error {
+	var problems []error
+	for _, rule := range specLints {
+		problems = append(problems, rule(rs.spec)...)
+	}
+	locateProblems(problems, rs.path, rs.locate) // positions any pointer-shaped problems
+	problems = append(problems, validateComposedTree(rs.spec, rs.path)...)
+	return problems
+}
 
 // specLints is the ordered set of spec rules run after the spec is schema-valid.
 // Adding a rule is a one-line append here; each stays a pure func(*Spec) []error for

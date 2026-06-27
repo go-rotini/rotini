@@ -9,9 +9,10 @@ import (
 	"github.com/go-rotini/jsonschema"
 )
 
-// This file owns the `rotini validate` operation end-to-end: the session/file-level
-// validation that the Processor drives, plus the machinery (schema validation, the
-// version guard, and the rotini-specific rules the JSON Schema can't express).
+// This file owns the validate STAGE of the pipeline: validateSpec/validateConf (the
+// version check + JSON-Schema validation the Processor runs before lint), plus the
+// shared validation machinery — the deep composed-$ref check, the problem type, and
+// the schema/position helpers. The lint stage lives in lint_spec.go / lint_conf.go.
 
 // ValidateFn is the signature of [Processor.Validate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
@@ -25,57 +26,59 @@ func Validate(specPath, confPath string, watch bool, failMode, version string, o
 	return NewProcessor(version).Validate(specPath, confPath, watch, failMode, onValidate, nil)
 }
 
-// ─── session + file validation ────────────────────────────────────────────────.
+// ─── validate (version + schema) ───────────────────────────────────────────────.
 
-// validate runs the validator phase over the loaded spec and conf (call load first):
-// each file validates itself. Problems are aggregated via errors.Join, or — in fast
-// mode — the first is returned. It returns nil when both are valid.
-func (s *session) validate() error {
-	fast := s.failFast()
-
-	specErrs, specWarns := splitProblems(s.spec.validate())
-	s.warnings = append(s.warnings, specWarns...)
-	if fast && len(specErrs) > 0 {
-		return specErrs[0]
-	}
-
-	confErrs, confWarns := splitProblems(s.conf.validate())
-	s.warnings = append(s.warnings, confWarns...)
-	if fast && len(confErrs) > 0 {
-		return confErrs[0]
-	}
-
-	return errors.Join(append(specErrs, confErrs...)...)
-}
-
-// failFast reports whether validation should stop at the first problem. The --fail
-// override (s.failMode) wins; otherwise the loaded conf's validate.fail is used. Only
-// "fast" enables it — anything else collects every problem (the default).
-func (s *session) failFast() bool {
-	mode := s.failMode
-	if mode == "" && s.conf != nil && s.conf.conf != nil && s.conf.conf.Validate != nil {
-		mode = s.conf.conf.Validate.Fail
-	}
-	return mode == "fast"
-}
-
-// validate schema-validates the spec against its compiled schema on the raw JSON
-// instance (so unknown-field rules fire), then — only when it is schema-valid — runs
-// the rotini-specific rules and enforces the version guard. It returns every
-// problem found, empty when the spec is valid.
-func (l *specLoader) validate() []error {
-	if problems := validateInstance("spec", l.instance, l.schema); len(problems) > 0 {
-		locateProblems(problems, l.path, l.locate)
-		return problems
-	}
-
+// validateSpec is the validate stage for the spec: it checks the spec targets THIS
+// rotini (its `version` matches the binary) and is schema-valid against the embedded
+// spec schema on the canonical-JSON instance (so unknown-field rules fire), returning
+// every problem positioned to source. It does NOT lint — that is lintSpec, run only
+// when this passes (the lint rules assume a schema-valid shape).
+func (p *Processor) validateSpec(rs *reconciledSpec) []error {
 	var problems []error
-	for _, rule := range specLints {
-		problems = append(problems, rule(l.spec)...)
+	if vp := versionProblem("spec", rs.spec.Version, p.version); vp != nil {
+		problems = append(problems, vp)
 	}
-	locateProblems(problems, l.path, l.locate) // positions any pointer-shaped problems
-	problems = append(problems, validateComposedTree(l.spec, l.path, l.version)...)
+	problems = append(problems, validateInstance("spec", rs.json, p.specSchema)...)
+	locateProblems(problems, rs.path, rs.locate)
 	return problems
+}
+
+// validateConf is validateSpec for the conf. A defaulted conf (no file) has nothing to
+// validate and returns no problems.
+func (p *Processor) validateConf(rc *reconciledConf) []error {
+	if rc.path == "" {
+		return nil
+	}
+	var problems []error
+	if vp := versionProblem("conf", rc.conf.Version, p.version); vp != nil {
+		problems = append(problems, vp)
+	}
+	problems = append(problems, validateInstance("conf", rc.json, p.confSchema)...)
+	locateProblems(problems, rc.path, rc.locate)
+	return problems
+}
+
+// versionProblem reports a spec/conf whose `version` targets a different rotini than the
+// running binary. The `version` key carries the rotini version the document targets;
+// codegen and validation are only reliable when it matches this binary, so a mismatch is
+// a fatal problem. Skipped when the binary version is unknown ("" — a dev/test build) or
+// the document declares none (the schema requires one, so this is belt-and-suspenders).
+func versionProblem(kind, docVersion, binaryVersion string) *problem {
+	want := strings.TrimPrefix(binaryVersion, "v")
+	if want == "" {
+		return nil
+	}
+	got := strings.TrimPrefix(docVersion, "v")
+	if got == "" {
+		return nil
+	}
+	if got != want {
+		return &problem{
+			kind: kind, loc: "version",
+			msg: fmt.Sprintf("targets rotini version %s but this rotini is %s — update the version (or your rotini install) so they match", got, want),
+		}
+	}
+	return nil
 }
 
 // validateComposedTree is the deep `$ref` descend (W8/D-W8.3): when the spec composes
@@ -86,7 +89,7 @@ func (l *specLoader) validate() []error {
 // so validate and generate cannot drift. Best-effort: it needs a module (composed
 // commands resolve to import paths) and only matters when refs are present, so a
 // ref-less spec or a module-less context is skipped — leaving per-spec validation as-is.
-func validateComposedTree(spec *Spec, specPath, version string) []error {
+func validateComposedTree(spec *Spec, specPath string) []error {
 	if !specHasRefs(spec) {
 		return nil
 	}
@@ -104,7 +107,7 @@ func validateComposedTree(spec *Spec, specPath, version string) []error {
 		(absSpec != absRoot && !strings.HasPrefix(absSpec, absRoot+string(filepath.Separator))) {
 		return nil
 	}
-	if _, err := resolveTree(spec, specPath, name, version); err != nil {
+	if _, err := resolveTree(spec, specPath, name); err != nil {
 		return []error{&problem{kind: "spec", loc: "composition", msg: err.Error()}}
 	}
 	return nil
@@ -121,28 +124,7 @@ func specHasRefs(spec *Spec) bool {
 	return found
 }
 
-// validate schema-validates the conf against its compiled schema on the raw JSON
-// instance when one was resolved, then — only when it is schema-valid — runs the
-// rotini-specific conf rules and enforces the version guard. A default
-// conf (no file) has nothing to validate. It returns every problem found.
-func (l *confLoader) validate() []error {
-	if l.path == "" {
-		return nil
-	}
-	if problems := validateInstance("conf", l.instance, l.schema); len(problems) > 0 {
-		locateProblems(problems, l.path, l.locate)
-		return problems
-	}
-
-	var problems []error
-	for _, rule := range confLints {
-		problems = append(problems, rule(l.conf)...)
-	}
-
-	return problems
-}
-
-// ─── schema validation + the version guard ─────────────────────────────.
+// ─── the problem type + schema-validation machinery ────────────────────────────.
 
 // severity classifies a validation problem. The zero value is an error (fails
 // validation); a warning is surfaced separately but does NOT fail. The validate
