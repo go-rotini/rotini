@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/go-rotini/rotini"
+	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 // rotiniModulePath is the import path of the rotini module — the require/replace the

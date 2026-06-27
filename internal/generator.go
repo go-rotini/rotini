@@ -15,7 +15,7 @@ import (
 	"unicode"
 
 	"github.com/go-rotini/jsonschema"
-	"github.com/go-rotini/rotini"
+	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

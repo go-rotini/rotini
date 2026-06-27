@@ -5,7 +5,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/go-rotini/rotini"
+	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 // svc is a registry binding a test injects in addition to the always-present parser — used

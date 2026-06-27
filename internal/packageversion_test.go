@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/go-rotini/rotini"
+	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 func writeGoMod(t *testing.T, body string) string {

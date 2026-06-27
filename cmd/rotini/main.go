@@ -4,8 +4,8 @@
 package main
 
 import (
-	"github.com/go-rotini/rotini"
 	cmd "github.com/go-rotini/rotini/internal/cmd/rotini"
+	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 var (

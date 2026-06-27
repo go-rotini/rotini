@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-rotini/rotini"
+	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 type handlers struct{}

@@ -88,7 +88,7 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(out), "\"time\"\n\n\t\"github.com/go-rotini/rotini\"") {
+	if !strings.Contains(string(out), "\"time\"\n\n\trotini \"github.com/go-rotini/rotini/internal/runtime\"") {
 		t.Error("imports should be grouped std then third-party")
 	}
 	t.Logf("rotini:\n%s", out)

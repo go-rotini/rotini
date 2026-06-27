@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/go-rotini/jsonschema"
-	"github.com/go-rotini/rotini"
+	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 // This file owns the `rotini validate` operation end-to-end: the session/file-level
