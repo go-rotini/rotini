@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/go-rotini/rotini/internal/codegen"
-	rotini "github.com/go-rotini/rotini/internal/runtime"
+	"github.com/go-rotini/rotini/internal/rotini"
 )
 
 var _ rotini.Handlers = (*rotiniInitializeHandlers)(nil)
