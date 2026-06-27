@@ -44,7 +44,11 @@ func NewProcessor(version string) *Processor {
 	if err != nil {
 		panic(err)
 	}
-	return &Processor{version: version, specSchema: specSchema, confSchema: confSchema}
+	return &Processor{
+		version:    version,
+		specSchema: specSchema,
+		confSchema: confSchema,
+	}
 }
 
 // Generate runs the generate workflow: reconcile → validate (the gate) → emit the
