@@ -19,7 +19,7 @@ type rotiniVersionHandlers struct {
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniVersionInputs](rtx)
 	if err != nil {
-		rtx.RecordError(err)
+		fmt.Fprintln(rtx.Stderr, err)
 		rtx.SignalExit(1)
 		return
 	}
@@ -33,4 +33,5 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
 	fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
+	rtx.SignalExit(0)
 }
