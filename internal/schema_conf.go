@@ -12,58 +12,43 @@ type Conf struct {
 	Version string `json:"version"`
 }
 
-// A rendered/derived codegen feature: a toggle (enabled) plus two orthogonal sourcing knobs — embed (//go:embed a rendered file in 'embed_dir' vs an inline string literal) and template (seed the editable rendering template into 'template_dir' vs render from the built-in).
+// One rendered/derived codegen feature, discriminated by 'type' (help/completion/man/markdown): a toggle (enabled) plus two orthogonal sourcing knobs — embed (//go:embed a rendered file in 'embed_dir' vs an inline string literal) and template (seed the editable rendering template into 'template_dir' vs render from the built-in). The two dirs default from the framework package — embed_dir to '<framework-package>/renders', template_dir to '<framework-package>/templates'. In embed mode embed_dir must resolve under the framework package (//go:embed cannot reach outside it); inline features and template_dir have no such constraint. Output files never collide: help pages are 'help_*.txt', man pages 'man_*.txt', markdown 'markdown_*.md', completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.
 type Feature struct {
-	// How this feature's generated content is sourced into the cmdgen Go file. true: the rendered content is written to a file under 'embed_dir' and the Go var is backed by a //go:embed directive. false (the default): no output file is written — the Go var is a hardcoded string literal holding the content inline, so the generated .go is self-contained. Var names and the resolver are identical either way.
+	// How this feature's generated content is sourced into the framework Go file. true: the rendered content is written to a file under 'embed_dir' and the Go var is backed by a //go:embed directive. false (the default): no output file is written — the Go var is a hardcoded string literal holding the content inline, so the generated .go is self-contained. Var names and the resolver are identical either way.
 	Embed bool `json:"embed,omitempty"`
-	// Directory (relative to the module root) where this feature's rendered OUTPUT files (help_*.txt / man_*.txt / markdown_*.md / completion_<shell>.txt) are written in embed mode (embed: true) and sourced via //go:embed — so in embed mode it MUST resolve under the cmdgen package (//go:embed cannot reach outside it). In inline mode (embed: false) no output files are written and this is unused — rotini validation WARNS (non-fatal) if you set it there. Defaults to '<cmdgen-package>/renders'.
+	// Directory (relative to the module root) where this feature's rendered OUTPUT files (help_*.txt / man_*.txt / markdown_*.md / completion_<shell>.txt) are written in embed mode (embed: true) and sourced via //go:embed — so in embed mode it MUST resolve under the framework package (//go:embed cannot reach outside it). In inline mode (embed: false) no output files are written and this is unused — rotini validation WARNS (non-fatal) if you set it there. Defaults to '<framework-package>/renders'.
 	EmbedDir string `json:"embed_dir,omitempty"`
-	// When true, rotini generates this feature's outputs into the cmdgen package and emits the embed vars + resolver. Opt-in only.
+	// When true, rotini generates this feature's outputs into the framework package and emits the embed vars + resolver. Opt-in only.
 	Enabled bool `json:"enabled,omitempty"`
 	// Whether the editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded into 'template_dir' for customization. true: the template is seeded when missing and pages render from it. false (the default): no template is seeded and pages render from rotini's built-in default. Has no effect on completion (which has no editable template) — rotini validation WARNS if you set it there. A template you have already edited is never pruned — flipping this to false leaves it in place but inert.
 	Template bool `json:"template,omitempty"`
-	// Directory (relative to the module root) where this feature's editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded when template: true. Templates are never //go:embed'd, so this is unconstrained — it may resolve anywhere. Unused when no template is seeded (template: false, or completion which has none) — rotini validation WARNS (non-fatal) if you set it there. Defaults to '<cmdgen-package>/templates'.
+	// Directory (relative to the module root) where this feature's editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded when template: true. Templates are never //go:embed'd, so this is unconstrained — it may resolve anywhere. Unused when no template is seeded (template: false, or completion which has none) — rotini validation WARNS (non-fatal) if you set it there. Defaults to '<framework-package>/templates'.
 	TemplateDir string `json:"template_dir,omitempty"`
-}
-
-// Rendered/derived codegen features generated into the cmdgen (framework) package. Each shares one contract: a toggle (enabled), the var-sourcing strategy (embed: //go:embed a file in embed_dir vs an inline string literal), whether the editable rendering template is seeded (template, into template_dir), and a '<Prefix>' var + resolver in the cmdgen file. In embed mode embed_dir must resolve under the cmdgen package (//go:embed cannot reach outside it); inline features and template_dir have no such constraint. The two dirs default from the cmdgen package — embed_dir to '<cmdgen-package>/renders', template_dir to '<cmdgen-package>/templates'. Output files never collide: help pages are 'help_*.txt', man pages 'man_*.txt', markdown 'markdown_*.md', completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.
-type FeaturesConfig struct {
-	// Embedded shell completion scripts — the features group's exception: generated per supported shell (bash/zsh/fish/powershell) from the program name, not per command, with no doc-data, no editable template, and no verbatim escape. Emits 'Completion<Shell>' vars plus a 'Completion(shell string) (string, error)' resolver that a handler reads instead of building the script itself (`rotini init --wire completion` seeds exactly that handler). The scripts call the binary's hidden `__complete` entry, whose candidates are one per line, each optionally carrying a one-line description after a tab ('name\tdescription' — command/flag summaries ride automatically): zsh/fish/powershell render the description beside the name, bash strips it.
-	Completion *Feature `json:"completion,omitempty"`
-	// Embedded, per-command help text. When enabled, rotini produces a per-command help .txt for every command and embeds them in the cmdgen package as 'Help<Prefix>' string vars plus a 'Help(path ...string) (string, error)' resolver. Each .txt is rotini-managed: when a command sets a verbatim 'help' string in the spec it is written exactly; otherwise the page is rendered from the command's structured help fields (summary/description/usage/...) via the editable help template in the feature's dir.
-	Help *Feature `json:"help,omitempty"`
-	// Embedded, per-command man pages. Same render-or-verbatim contract as help: each command's .txt is rendered from its doc-fields through the editable man template in the feature's dir, or written verbatim when the command sets a 'man' string in the spec. Emits 'Man<Prefix>' vars plus a 'Man(path ...string) (string, error)' resolver.
-	Man *Feature `json:"man,omitempty"`
-	// Per-command reference markdown — the fourth doc feature, same render-or-verbatim contract as help/man: each command's .md is rendered from its doc-fields through the editable markdown template in the feature's dir ('markdown.md.tmpl'), or written verbatim when the command sets a 'markdown' string in the spec. Emits 'Markdown<Prefix>' vars plus a 'Markdown(path ...string) (string, error)' resolver; files are named 'markdown_*.md'. The build-time feedstock for a docs site — unlike help/man there is no wired command to serve it at run time.
-	Markdown *Feature `json:"markdown,omitempty"`
+	// Which derived output this entry configures. help/man/markdown are per-command render-or-verbatim doc pages (rendered from the command's structured doc-fields via the editable template, or written verbatim when the command sets that string in the spec), each emitting a '<Prefix>' var + 'Help/Man/Markdown(path ...string) (string, error)' resolver. completion is the exception: per-shell scripts (bash/zsh/fish/powershell) generated from the program name, with no editable template and no verbatim escape, emitting 'Completion<Shell>' vars + a 'Completion(shell string) (string, error)' resolver; the scripts call the binary's hidden '__complete' entry.
+	Type string `json:"type"`
 }
 
 // Controls `rotini generate`: where rotini's JSON Schemas are written ('schemas'), where the generated code is written ('packages'), and which derived doc/completion outputs are emitted ('features').
 type GenerateConfig struct {
-	// The derived codegen outputs (help/man/markdown/completion), each an opt-in toggle plus its rotini-managed embed/template directories.
-	Features *FeaturesConfig `json:"features,omitempty"`
-	// Where the generated code is written: the entrypoint main.go, the handler-logic package (cmd), and the generated-framework package (cmdgen).
-	Packages *PackagesConfig `json:"packages,omitempty"`
+	// The derived codegen outputs, one per `type` (help / completion / man / markdown), each an opt-in toggle plus its embed/template sourcing knobs.
+	Features []Feature `json:"features,omitempty"`
+	// Generated code targets, one per `type` (main / handlers / models / runtime_required / runtime_optional). 'main' is the binary entrypoint (create-once). 'handlers' is the editable per-command stubs + the rollup. 'models' is the typed input/output structs. 'runtime_required' is the always-present dispatch runtime. 'runtime_optional' is the opt-in services named in its 'include'. Targets sharing a 'file' must agree on 'package' and merge into that one file (the default merged layout); distinct directories split into importable packages.
+	Packages []PackageConfig `json:"packages,omitempty"`
 	// Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so an editor `# yaml-language-server: $schema=<path>` comment can resolve them locally instead of fetching a remote URL.
 	Schemas *SchemasConfig `json:"schemas,omitempty"`
 }
 
-// One generated package target: the rotini-controlled file written into it, given as a module-root-relative path ending in '.go'. The target directory is that path's parent and the Go package name is the directory's last segment (always 'main' for the entrypoint). When 'cmd' and 'cmdgen' resolve to the same file, the framework and the handler rollup are merged into that one file; when they resolve to different directories, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.
 type PackageConfig struct {
-	// Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file written into this target. May include directories; the path's parent directory is the target package and that directory's last segment is the Go package name (the entrypoint is always package 'main'). Defaults to 'internal/cmd/<root-command>/zz_rotini.gen.go'; the entrypoint has no default and is only written when 'file' is set.
+	// Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. The framework categories (handlers/models/runtime_required/runtime_optional) default to 'internal/cmd/<root-command>/zz_rotini.gen.go'; main has no default and is only written when 'file' is set.
 	File string `json:"file,omitempty"`
+	// runtime_optional ONLY: the opt-in runtime services to GENERATE. Empty/absent generates none (Pillar 1). rotini emits each named service; you wire its Program.Bind() yourself (there is no auto-bind — some services take constructor args, e.g. a build-time version). The enum is the current set and is expected to grow.
+	Include []string `json:"include,omitempty"`
 	// Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. The editable per-feature templates and test files are always kept automatically. Intended to stay empty in steady state.
 	Keep []string `json:"keep,omitempty"`
-}
-
-// The generated package targets. 'cmd' holds the handler logic — the per-command stubs and the rollup (handlers struct, Program, Handlers()). 'cmdgen' holds the generated framework — the typed inputs, the definition, NewProgram — plus any enabled feature embeds (help/man/markdown/completion). Point both at the same file (the default) for one self-contained package, or at files in different directories to split the handler logic from the framework/types (so another package can import cmdgen's types for passthrough functions without an import cycle). 'main', when declared, is where generate writes the binary's main.go (create-once: never overwritten).
-type PackagesConfig struct {
-	// The handler-logic package: the per-command stubs and the rollup (handlers struct, Program, Handlers()).
-	Cmd *PackageConfig `json:"cmd,omitempty"`
-	// The generated-framework package: the typed inputs, the definition, NewProgram, plus any enabled feature embeds.
-	Cmdgen *PackageConfig `json:"cmdgen,omitempty"`
-	// Where generate writes the binary's main.go entrypoint — create-once, never overwritten. 'file' is required for main to be written (it has no default directory); the generated package is always 'main'. 'keep' spares hand-written .go files in the entrypoint directory from pruning.
-	Main *PackageConfig `json:"main,omitempty"`
+	// Go package name written at the top of 'file'. Defaults to the file's parent-directory name (sanitized to a valid Go identifier). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'.
+	Package string `json:"package,omitempty"`
+	// Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). handlers = the editable per-command handler stubs + the rollup (handlers struct, Program, Handlers()). models = the typed per-command input/output structs (Collect[T]/Parse* targets). runtime_required = the always-present dispatch runtime (Definition, NewProgram, the lifecycle, the error taxonomy). runtime_optional = the opt-in services named in 'include' (parser/binder/suggestor/versioner/styler).
+	Type string `json:"type"`
 }
 
 // A single schema write target: the project-relative path the embedded JSON Schema is written to.

@@ -308,24 +308,14 @@ type RemoteDiscovery struct {
 	Path string `json:"path,omitempty"`
 	// Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-').
 	Prefix string `json:"prefix,omitempty"`
-	// Opt-in pre-dispatch trust applied to EVERY discovered plugin (W9/D-W9.4). Only 'version' (the same-major '__rotini' handshake) applies to open-ended discovery; 'sha256'/'signature' pin a specific binary/identity and cannot generalize to plugins not known ahead of time, so they are rejected here by validation (declare those on an explicit remote_commands[] entry instead). A discovered non-rotini plugin that does not answer the handshake is skipped (best-effort).
+	// Opt-in pre-dispatch trust applied to EVERY discovered plugin (W9/D-W9.4). Only 'version' (the same-major '__rotini' handshake) applies to open-ended discovery; 'sha256' pins a specific binary and cannot generalize to plugins not known ahead of time, so it is rejected here by validation (declare it on an explicit remote_commands[] entry instead). A discovered non-rotini plugin that does not answer the handshake is skipped (best-effort).
 	Verify *RemoteVerifySpec `json:"verify,omitempty"`
-}
-
-// Expected keyless (sigstore) signer identity for a remote binary's sidecar bundle (W9/D-W9.10). Both are matched against the Fulcio certificate the bundle carries.
-type RemoteSignatureSpec struct {
-	// Expected OIDC issuer of the signing identity, e.g. 'https://token.actions.githubusercontent.com' for GitHub Actions.
-	Issuer string `json:"issuer"`
-	// Expected certificate identity (SAN) of the signer, e.g. the GitHub Actions workflow URI 'https://github.com/acme/clis/.github/workflows/release.yml@refs/tags/v1'.
-	Subject string `json:"subject"`
 }
 
 // Opt-in trust checks a remote command declares for its dispatched binary (W9/D-W9.3/D-W9.4/D-W9.10). Each field opts in to one rung of the shared trust ladder.
 type RemoteVerifySpec struct {
 	// Pin the dispatched binary's SHA-256 content hash ('sha256:<hex>' or a bare 64-char hex). rotini hashes the resolved binary and refuses to dispatch on a mismatch.
 	Sha256 string `json:"sha256,omitempty"`
-	// Verify a keyless (sigstore) signature on the dispatched binary against an expected signer identity, offline, before dispatch (W9/D-W9.10). The signature travels as a sidecar bundle '<binary>.sigstore.json' produced by standard tooling (cosign / GitHub's actions/attest-build-provenance) in the publisher's CI — keyless OIDC, no long-lived private key. rotini only VERIFIES (it never signs). Unlike sha256 (which re-pins every build), this trusts the signer identity across rebuilds. The sigstore-backed verifier is wired separately to keep rotini's core dependency-light; a declared signature check with no verifier wired, or a missing/invalid bundle, fails closed (the binary is NOT run).
-	Signature *RemoteSignatureSpec `json:"signature,omitempty"`
 	// Enable the same-major rotini version handshake: rotini runs '<binary> __rotini' and refuses to dispatch on a definite cross-major mismatch (an undeterminable remote version is skipped — best-effort).
 	Version bool `json:"version,omitempty"`
 }

@@ -81,7 +81,7 @@ type RemoteDef struct {
 }
 
 // RemoteVerify is the opt-in trust a remote command declares for its dispatched binary
-// (W9/D-W9.3/D-W9.4/D-W9.6/D-W9.10) — checked once, before the binary runs. The zero value /
+// (W9/D-W9.3/D-W9.4/D-W9.6) — checked once, before the binary runs. The zero value /
 // a nil [RemoteDef.Verify] verifies nothing (dispatch is unchanged); each field opts in
 // to one rung of the shared trust ladder.
 type RemoteVerify struct {
@@ -94,27 +94,6 @@ type RemoteVerify struct {
 	// rotini hashes the resolved binary and fails dispatch with a [*RemoteError]
 	// ([RemoteVerificationFailed]) if it does not match. Empty pins nothing.
 	SHA256 string
-	// Signature opts into keyless (sigstore) signature verification of the dispatched
-	// binary against an expected signer identity, offline, before dispatch (D-W9.10). The
-	// signature travels as a sidecar bundle "<binary>.sigstore.json" produced by standard
-	// tooling in the publisher's CI — rotini only verifies, never signs. The sigstore-backed
-	// verifier is wired separately to keep the core dependency-light; with none wired, or on
-	// a missing/invalid bundle, the check fails closed with a [*RemoteError]
-	// ([RemoteVerificationFailed]). nil pins no signature.
-	Signature *RemoteSignatureVerify
-}
-
-// RemoteSignatureVerify is the expected keyless (sigstore) signer identity for a remote
-// binary's sidecar bundle (D-W9.10): both fields are matched against the Fulcio certificate
-// the bundle carries. Trusting the identity (not a build digest) is what lets a remote
-// rebuild and re-sign without re-pinning the host.
-type RemoteSignatureVerify struct {
-	// Issuer is the expected OIDC issuer of the signing identity (e.g.
-	// "https://token.actions.githubusercontent.com").
-	Issuer string
-	// Subject is the expected certificate identity / SAN of the signer (e.g. a GitHub
-	// Actions workflow URI).
-	Subject string
 }
 
 // BindMeta is the generated, data-only descriptor the default binder ([Binder])

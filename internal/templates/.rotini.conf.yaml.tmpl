@@ -6,33 +6,33 @@ generate:
     spec:
       path: cmd/{{.Package}}/.rotini-schema.spec.json
   packages:
-    main:
+    - type: main
       file: cmd/{{.Package}}/main.go
       keep: []
-    cmd:
+    - type: handlers
       file: internal/cmd/{{.Package}}/zz_rotini.go
       keep: []
-    cmdgen:
+    - type: runtime_required
       file: internal/cmd/{{.Package}}/zz_rotini.go
       keep: []
   features:
-    help:
+    - type: help
       enabled: false
       embed: false
       embed_dir: internal/cmd/{{.Package}}/renders
       template_dir: internal/cmd/{{.Package}}/templates
-    completion:
+    - type: completion
       enabled: false
       embed: false
       embed_dir: internal/cmd/{{.Package}}/renders
       template_dir: internal/cmd/{{.Package}}/templates
-    man:
+    - type: man
       enabled: false
       embed: true
       embed_dir: internal/cmd/{{.Package}}/renders
       template: true
       template_dir: internal/cmd/{{.Package}}/templates
-    markdown:
+    - type: markdown
       enabled: false
       embed: true
       embed_dir: internal/cmd/{{.Package}}/renders

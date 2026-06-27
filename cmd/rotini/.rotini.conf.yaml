@@ -6,32 +6,35 @@ generate:
     conf:
       path: cmd/rotini/.rotini-schema.conf.json
   packages:
-    main:
+    - type: main
       file: cmd/rotini/main.go
-    cmd:
+      package: main
+    - type: handlers
       file: internal/cmd/rotini/zz_rotini.go
-    cmdgen:
+      package: rotini
+    - type: runtime_required
       file: internal/cmd/rotini/zz_rotini.go
+      package: rotini
   features:
-    help:
+    - type: help
       enabled: true
       embed: false
       embed_dir: internal/cmd/rotini/renders
       template: false
       template_dir: internal/cmd/rotini/templates
-    completion:
+    - type: completion
       enabled: true
       embed: false
       embed_dir: internal/cmd/rotini/renders
       template: false
       template_dir: internal/cmd/rotini/templates
-    man:
+    - type: man
       enabled: false
       embed: false
       embed_dir: internal/cmd/rotini/renders
       template: false
       template_dir: internal/cmd/rotini/templates
-    markdown:
+    - type: markdown
       enabled: false
       embed: false
       embed_dir: internal/cmd/rotini/renders

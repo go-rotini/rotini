@@ -183,7 +183,7 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 				return fmt.Errorf("feature %s embed_dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
 			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmdgen package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.Packages.Cmdgen.File)))
+				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the framework package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.frameworkPkg().File)))
 			}
 			embedRel = filepath.ToSlash(rel)
 		}
@@ -254,17 +254,17 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 	// templates). When the entrypoint shares the cmd directory its keep list is
 	// merged into that single prune pass.
 	var mainKeep []string
-	if m := conf.Generate.Packages.Main; m != nil {
+	if m := conf.Generate.mainPkg(); m != nil {
 		mainKeep = m.Keep
 	}
-	cmdKeep := conf.Generate.Packages.Cmd.Keep
+	cmdKeep := conf.Generate.handlersPkg().Keep
 	if lay.entrypointDir != "" && lay.entrypointDir == lay.handlerDir {
 		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
 	}
 	if err := pruneStubs(gp, lay, cmdKeep); err != nil {
 		return err
 	}
-	if err := pruneCligen(lay, conf.Generate.Packages.Cmdgen.Keep, outputs); err != nil {
+	if err := pruneCligen(lay, conf.Generate.frameworkPkg().Keep, outputs); err != nil {
 		return err
 	}
 	if err := pruneEntrypoint(lay, mainKeep); err != nil {
@@ -324,15 +324,15 @@ type featureOutput struct {
 // featureConfigs pairs every doc feature with its conf entry (nil when unset).
 // Requires conf.Generate to be non-nil (guaranteed after applyConfDefaults).
 func featureConfigs(conf *Conf) []confFeature {
-	feats := conf.Generate.Features
-	if feats == nil {
+	g := conf.Generate
+	if g == nil {
 		return nil
 	}
 	return []confFeature{
-		{helpFeatureDesc, feats.Help},
-		{manFeatureDesc, feats.Man},
-		{markdownFeatureDesc, feats.Markdown},
-		{completionFeatureDesc, feats.Completion},
+		{helpFeatureDesc, g.featureOf("help")},
+		{manFeatureDesc, g.featureOf("man")},
+		{markdownFeatureDesc, g.featureOf("markdown")},
+		{completionFeatureDesc, g.featureOf("completion")},
 	}
 }
 
@@ -764,7 +764,7 @@ func discoveryLiteral(host string, d *RemoteDiscovery) string {
 		b.WriteString(", Hidden: true")
 	}
 	// Only the version handshake applies to open-ended discovery (lintRemoteDiscoveryVerify
-	// rejects sha256/signature here), so emit just that rung.
+	// rejects sha256 here), so emit just that rung.
 	if v := d.Verify; v != nil && v.Version {
 		b.WriteString(", Verify: &" + rotiniPkgName + ".RemoteVerify{Version: true}")
 	}
@@ -807,7 +807,7 @@ func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 				fmt.Fprintf(b, ", Timeout: %d", int64(d))
 			}
 		}
-		if v := rc.Verify; v != nil && (v.Version || v.Sha256 != "" || v.Signature != nil) {
+		if v := rc.Verify; v != nil && (v.Version || v.Sha256 != "") {
 			b.WriteString(", Verify: &rotini.RemoteVerify{")
 			sep := ""
 			if v.Version {
@@ -816,10 +816,6 @@ func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 			}
 			if v.Sha256 != "" {
 				b.WriteString(sep + "SHA256: " + strconv.Quote(v.Sha256))
-				sep = ", "
-			}
-			if s := v.Signature; s != nil {
-				b.WriteString(sep + "Signature: &rotini.RemoteSignatureVerify{Issuer: " + strconv.Quote(s.Issuer) + ", Subject: " + strconv.Quote(s.Subject) + "}")
 			}
 			b.WriteString("}")
 		}
@@ -1409,8 +1405,8 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 // become unqualified) and even the same file (framework + rollup are merged).
 // The entrypoint is optional — its layout fields are "" when undeclared.
 func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
-	cmd := conf.Generate.Packages.Cmd
-	cmdgen := conf.Generate.Packages.Cmdgen
+	cmd := conf.Generate.handlersPkg()
+	cmdgen := conf.Generate.frameworkPkg()
 
 	cmdFile := filepath.ToSlash(cmd.File)
 	cmdgenFile := filepath.ToSlash(cmdgen.File)
@@ -1419,29 +1415,40 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 	samePackage := cmdPkgDir == cmdgenPkgDir
 	combined := cmdFile == cmdgenFile
 
+	// The Go package name is the explicit conf `package` when set, else derived
+	// from the target directory's last segment.
+	handlerPkgName := goPkgName(cmdPkgDir)
+	if cmd.Package != "" {
+		handlerPkgName = cmd.Package
+	}
+	frameworkPkgName := goPkgName(cmdgenPkgDir)
+	if cmdgen.Package != "" {
+		frameworkPkgName = cmdgen.Package
+	}
+
 	frameworkImport := ""
 	frameworkQual := ""
 	if !samePackage {
 		frameworkImport = moduleName + "/" + cmdgenPkgDir
-		frameworkQual = goPkgName(cmdgenPkgDir) + "."
+		frameworkQual = frameworkPkgName + "."
 	}
 
 	lay := layout{
 		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdgenPkgDir)),
-		frameworkPkgName: goPkgName(cmdgenPkgDir),
+		frameworkPkgName: frameworkPkgName,
 		frameworkFile:    path.Base(cmdgenFile),
 		frameworkImport:  frameworkImport,
 		frameworkQual:    frameworkQual,
 
 		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
-		handlerPkgName: goPkgName(cmdPkgDir),
+		handlerPkgName: handlerPkgName,
 		handlerImport:  moduleName + "/" + cmdPkgDir,
 		rollupFile:     path.Base(cmdFile),
 
 		combined: combined,
 	}
 
-	if ep := conf.Generate.Packages.Main; ep != nil && ep.File != "" {
+	if ep := conf.Generate.mainPkg(); ep != nil && ep.File != "" {
 		epFile := filepath.ToSlash(ep.File)
 		lay.entrypointDir = filepath.Join(moduleRoot, filepath.FromSlash(path.Dir(epFile)))
 		lay.entrypointFile = path.Base(epFile)
@@ -1477,38 +1484,50 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	if conf.Generate == nil {
 		conf.Generate = &GenerateConfig{}
 	}
-	if conf.Generate.Packages == nil {
-		conf.Generate.Packages = &PackagesConfig{}
+	g := conf.Generate
+
+	// ensure returns the package target of the given type, appending a fresh entry
+	// when absent. The returned pointer is used before the next ensure call (whose
+	// append may reallocate), so it stays valid.
+	ensure := func(typ string) *PackageConfig {
+		if p := g.packageOf(typ); p != nil {
+			return p
+		}
+		g.Packages = append(g.Packages, PackageConfig{Type: typ})
+		return &g.Packages[len(g.Packages)-1]
 	}
-	pkgs := conf.Generate.Packages
-	if pkgs.Cmd == nil {
-		pkgs.Cmd = &PackageConfig{}
-	}
-	if pkgs.Cmdgen == nil {
-		pkgs.Cmdgen = &PackageConfig{}
-	}
+
+	// The framework-bound categories default to one self-contained file
+	// "internal/cmd/<root>/zz_rotini.gen.go" — handlers (rollup + stubs) and
+	// runtime_required (framework) merge into it. models/runtime_optional, when
+	// declared, default to the same file. main gets no default (written only when
+	// the conf declares its file).
 	defaultFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
-	for _, p := range []*PackageConfig{pkgs.Cmd, pkgs.Cmdgen} {
-		if p.File == "" {
+	for _, typ := range []string{"handlers", "runtime_required"} {
+		if p := ensure(typ); p.File == "" {
 			p.File = defaultFile
 		}
 	}
-	// Each present feature defaults its two dirs from the cmdgen package
-	// (module-relative): rendered OUTPUT files to "<cmdgen-package>/renders"
-	// (always under cmdgen so //go:embed can reach them in embed mode), and the
-	// editable TEMPLATE to "<cmdgen-package>/templates". Co-located features
-	// cannot collide: each carries a feature-unique suffix/prefix (see
-	// docFeature) and pruning is scoped to them.
-	cmdgenDir := path.Dir(filepath.ToSlash(pkgs.Cmdgen.File))
-	for _, f := range featureConfigs(conf) {
-		if f.cfg == nil {
-			continue
+	for _, typ := range []string{"models", "runtime_optional"} {
+		if p := g.packageOf(typ); p != nil && p.File == "" {
+			p.File = defaultFile
 		}
-		if f.cfg.EmbedDir == "" {
-			f.cfg.EmbedDir = cmdgenDir + "/renders"
+	}
+
+	// Each present feature defaults its two dirs from the framework package
+	// (module-relative): rendered OUTPUT files to "<framework-package>/renders"
+	// (always under the framework so //go:embed can reach them in embed mode), and
+	// the editable TEMPLATE to "<framework-package>/templates". Co-located features
+	// cannot collide: each carries a feature-unique suffix/prefix (see docFeature)
+	// and pruning is scoped to them.
+	frameworkDir := path.Dir(filepath.ToSlash(g.frameworkPkg().File))
+	for i := range g.Features {
+		f := &g.Features[i]
+		if f.EmbedDir == "" {
+			f.EmbedDir = frameworkDir + "/renders"
 		}
-		if f.cfg.TemplateDir == "" {
-			f.cfg.TemplateDir = cmdgenDir + "/templates"
+		if f.TemplateDir == "" {
+			f.TemplateDir = frameworkDir + "/templates"
 		}
 	}
 }
@@ -2164,10 +2183,10 @@ func (gp *genProgram) addImport(alias, path string) {
 // internal/cmd/<child> convention (named after the child's directory).
 func childCliImport(childDir, module string) string {
 	if confPath, err := discoverConf(childDir); err == nil {
-		cc, err := readConf(confPath)
-		if err == nil && cc.Generate != nil && cc.Generate.Packages != nil &&
-			cc.Generate.Packages.Cmd != nil && cc.Generate.Packages.Cmd.File != "" {
-			return module + "/" + path.Dir(filepath.ToSlash(cc.Generate.Packages.Cmd.File))
+		if cc, err := readConf(confPath); err == nil {
+			if h := cc.Generate.handlersPkg(); h != nil && h.File != "" {
+				return module + "/" + path.Dir(filepath.ToSlash(h.File))
+			}
 		}
 	}
 	return module + "/internal/cmd/" + filepath.Base(childDir)

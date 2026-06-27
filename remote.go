@@ -50,9 +50,8 @@ const (
 	// through untouched).
 	RemoteSpawnFailed
 	// RemoteVerificationFailed: an opt-in pre-dispatch trust check rejected the
-	// binary (a [RemoteVerify.SHA256] content-hash mismatch, or a [RemoteVerify.Signature]
-	// keyless signature that is missing, unverifiable, or does not match the expected
-	// identity) — the binary was found but is not trusted, so it is NOT run.
+	// binary (a [RemoteVerify.SHA256] content-hash mismatch) — the binary was
+	// found but is not trusted, so it is NOT run.
 	RemoteVerificationFailed
 )
 
@@ -219,10 +218,10 @@ func (p *Program) remoteFailure(ctx context.Context, rtx *Context, re *RemoteErr
 const remoteVersionProbeTimeout = 5 * time.Second
 
 // verifyRemoteBinary runs the opt-in pre-dispatch checks for a resolved plugin at path
-// (def.Verify is non-nil): the content-hash pin first (cheap, local), then the keyless
-// signature (local, sidecar bundle), then the same-major version handshake (spawns). It
-// returns the typed failure to record (a [*RemoteError] for a hash/signature mismatch, a
-// binary-arm [*CompositionVersionError] for a cross-major), or nil to proceed.
+// (def.Verify is non-nil): the content-hash pin first (cheap, local), then the same-major
+// version handshake (spawns). It returns the typed failure to record (a [*RemoteError] for
+// a hash mismatch, a binary-arm [*CompositionVersionError] for a cross-major), or nil to
+// proceed.
 func verifyRemoteBinary(ctx context.Context, path string, def RemoteDef) error {
 	v := def.Verify
 	if v.SHA256 != "" {
@@ -240,52 +239,8 @@ func verifyRemoteBinary(ctx context.Context, path string, def RemoteDef) error {
 			}
 		}
 	}
-	if v.Signature != nil {
-		if err := verifyRemoteSignature(path, def); err != nil {
-			return err
-		}
-	}
 	if v.Version {
 		return verifyRemoteVersion(ctx, path, def)
-	}
-	return nil
-}
-
-// keylessBundleSuffix is the sidecar bundle convention for the keyless signature rung: a
-// remote binary <path> is signed alongside a <path>.sigstore.json bundle (the format
-// cosign / GitHub's actions/attest-build-provenance emit).
-const keylessBundleSuffix = ".sigstore.json"
-
-// keylessVerifier verifies a keyless (sigstore) signature bundle for a dispatched binary
-// against an expected signer identity, fully offline. It returns nil when the bundle is a
-// valid signature over binaryPath by an identity matching (issuer, subject), else an error
-// describing the failure.
-type keylessVerifier func(binaryPath, bundlePath, issuer, subject string) error
-
-// verifyKeyless is the keyless verifier the dispatch gate uses (D-W9.10): rotini VERIFIES,
-// it never signs. It defaults to the sigstore-backed implementation ([sigstoreVerifyKeyless]
-// in keyless.go); tests override it (and a nil value makes verifyRemoteSignature fail
-// closed, exercising the no-verifier path).
-var verifyKeyless keylessVerifier = sigstoreVerifyKeyless
-
-// verifyRemoteSignature checks a keyless signature on the resolved binary at path against
-// the expected identity (def.Verify.Signature is non-nil). It fails CLOSED: no wired
-// verifier, a missing sidecar bundle, or a verification error all abort dispatch with a
-// [*RemoteError] ([RemoteVerificationFailed]) — a declared trust check never silently passes.
-func verifyRemoteSignature(path string, def RemoteDef) error {
-	sig := def.Verify.Signature
-	fail := func(msg string, cause error) error {
-		return &RemoteError{Name: def.Name, Binary: def.Binary, Kind: RemoteVerificationFailed, Cause: cause, Msg: msg, cat: CategoryInternal}
-	}
-	if verifyKeyless == nil {
-		return fail(fmt.Sprintf("%s: binary %s declares a keyless signature check but no sigstore verifier is wired — import a rotini keyless verifier to enable it", def.Name, def.Binary), nil)
-	}
-	bundle := path + keylessBundleSuffix
-	if _, err := os.Stat(bundle); err != nil {
-		return fail(fmt.Sprintf("%s: binary %s is missing its signature bundle %s — keyless verification cannot proceed", def.Name, def.Binary, filepath.Base(bundle)), err)
-	}
-	if err := verifyKeyless(path, bundle, sig.Issuer, sig.Subject); err != nil {
-		return fail(fmt.Sprintf("%s: binary %s failed keyless signature verification (issuer %q, subject %q): %v", def.Name, def.Binary, sig.Issuer, sig.Subject, err), err)
 	}
 	return nil
 }

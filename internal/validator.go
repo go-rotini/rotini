@@ -321,9 +321,83 @@ func composedVersionProblem(ref, want, got, msg string) *problem {
 // mirroring specLints. Like the spec rules, they reject configuration that would
 // be silently ignored or that generate would reject later — validate is the gate.
 var confLints = []func(*Conf) []error{
+	lintPackageTypes,
+	lintFeatureTypes,
+	lintPackageColocation,
 	lintEntrypoint,
 	lintFeatureDirs,
 	lintFeatureKnobs,
+}
+
+// lintPackageTypes rejects a generate.packages array that names the same `type`
+// twice. The JSON Schema enums the legal type values but cannot enforce
+// at-most-once-per-type across array items (uniqueItems compares whole items, not
+// a single field), so the duplicate — which would make a target's destination
+// ambiguous — is caught here.
+func lintPackageTypes(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	seen := map[string]bool{}
+	for _, p := range conf.Generate.Packages {
+		if seen[p.Type] {
+			problems = append(problems, &problem{
+				kind: "conf", loc: "generate.packages",
+				msg: fmt.Sprintf("type %q is declared more than once — each package type may appear at most once", p.Type),
+			})
+		}
+		seen[p.Type] = true
+	}
+	return problems
+}
+
+// lintFeatureTypes rejects a generate.features array that names the same `type`
+// twice, for the same reason as lintPackageTypes (the schema enums the type but
+// cannot bound it to one entry).
+func lintFeatureTypes(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	seen := map[string]bool{}
+	for _, f := range conf.Generate.Features {
+		if seen[f.Type] {
+			problems = append(problems, &problem{
+				kind: "conf", loc: "generate.features",
+				msg: fmt.Sprintf("type %q is declared more than once — each feature type may appear at most once", f.Type),
+			})
+		}
+		seen[f.Type] = true
+	}
+	return problems
+}
+
+// lintPackageColocation rejects two package targets that write the SAME file but
+// declare DIFFERENT Go packages — the second write would clobber the first with a
+// conflicting `package` clause. This is inherently cross-item (the JSON Schema sees
+// one item at a time), so it lives here. Targets that omit `package` derive it from
+// the directory and never conflict; only explicit disagreement is flagged.
+func lintPackageColocation(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	byFile := map[string]string{} // file → first explicit package seen
+	for _, p := range conf.Generate.Packages {
+		if p.File == "" || p.Package == "" {
+			continue
+		}
+		if prev, ok := byFile[p.File]; ok && prev != p.Package {
+			problems = append(problems, &problem{
+				kind: "conf", loc: "generate.packages",
+				msg: fmt.Sprintf("file %q is targeted by package %q and %q — targets sharing a file must declare the same package", p.File, prev, p.Package),
+			})
+			continue
+		}
+		byFile[p.File] = p.Package
+	}
+	return problems
 }
 
 // lintEntrypoint rejects a main block whose 'keep' would be silently ignored:
@@ -331,10 +405,10 @@ var confLints = []func(*Conf) []error{
 // directory pruned, and that happens only when 'file' is set. (The entrypoint's
 // Go package is always 'main'; there is no package key to reconcile.)
 func lintEntrypoint(conf *Conf) []error {
-	if conf.Generate == nil || conf.Generate.Packages == nil || conf.Generate.Packages.Main == nil {
+	if conf.Generate == nil || conf.Generate.mainPkg() == nil {
 		return nil
 	}
-	ep := conf.Generate.Packages.Main
+	ep := conf.Generate.mainPkg()
 	if ep.File == "" && len(ep.Keep) > 0 {
 		return []error{&problem{
 			kind: "conf",
@@ -353,13 +427,14 @@ func lintEntrypoint(conf *Conf) []error {
 // is unset the defaults guarantee nesting (the default embed_dir is
 // <cmdgen>/renders), so there is nothing to check.
 func lintFeatureDirs(conf *Conf) []error {
-	if conf.Generate == nil || conf.Generate.Features == nil ||
-		conf.Generate.Packages == nil || conf.Generate.Packages.Cmdgen == nil ||
-		conf.Generate.Packages.Cmdgen.File == "" {
+	if conf.Generate == nil {
 		return nil
 	}
-	cmdgen := path.Dir(filepath.ToSlash(conf.Generate.Packages.Cmdgen.File))
-	feats := conf.Generate.Features
+	fw := conf.Generate.frameworkPkg()
+	if len(conf.Generate.Features) == 0 || fw == nil || fw.File == "" {
+		return nil
+	}
+	cmdgen := path.Dir(filepath.ToSlash(fw.File))
 	var problems []error
 	check := func(name string, f *Feature) {
 		if f == nil || !f.Enabled || !f.Embed || f.EmbedDir == "" {
@@ -370,14 +445,14 @@ func lintFeatureDirs(conf *Conf) []error {
 			problems = append(problems, &problem{
 				kind: "conf",
 				loc:  "generate.features." + name + ".embed_dir",
-				msg:  fmt.Sprintf("%q must resolve under the cmdgen package %q so //go:embed can reach it", f.EmbedDir, cmdgen),
+				msg:  fmt.Sprintf("%q must resolve under the framework package %q so //go:embed can reach it", f.EmbedDir, cmdgen),
 			})
 		}
 	}
-	check("help", feats.Help)
-	check("man", feats.Man)
-	check("markdown", feats.Markdown)
-	check("completion", feats.Completion)
+	check("help", conf.Generate.featureOf("help"))
+	check("man", conf.Generate.featureOf("man"))
+	check("markdown", conf.Generate.featureOf("markdown"))
+	check("completion", conf.Generate.featureOf("completion"))
 	return problems
 }
 
@@ -389,7 +464,7 @@ func lintFeatureDirs(conf *Conf) []error {
 // `template`/`template_dir` at all. Disabled features are left alone (staged config).
 // Warnings route to the funnel (as warnings); validation still passes.
 func lintFeatureKnobs(conf *Conf) []error {
-	if conf.Generate == nil || conf.Generate.Features == nil {
+	if conf.Generate == nil || len(conf.Generate.Features) == 0 {
 		return nil
 	}
 	var problems []error
@@ -1282,9 +1357,9 @@ func lintRemoteTimeouts(spec *Spec) []error {
 
 // lintRemoteDiscoveryVerify enforces that a remote_discovery.verify declares only the
 // version handshake. Discovery is open-ended — it dispatches plugins not known ahead of
-// time — so a sha256 pin or a keyless signature identity (which fix a SPECIFIC binary)
-// cannot generalize to it; those belong on an explicit remote_commands[] entry. Per the
-// no-silently-ignored-key invariant, declaring them here is an error rather than a no-op.
+// time — so a sha256 pin (which fixes a SPECIFIC binary) cannot generalize to it; it
+// belongs on an explicit remote_commands[] entry. Per the no-silently-ignored-key
+// invariant, declaring it here is an error rather than a no-op.
 func lintRemoteDiscoveryVerify(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -1300,9 +1375,6 @@ func lintRemoteDiscoveryVerify(spec *Spec) []error {
 		}
 		if d.Verify.Sha256 != "" {
 			reject("sha256")
-		}
-		if d.Verify.Signature != nil {
-			reject("signature")
 		}
 	})
 	return problems
