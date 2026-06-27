@@ -27,8 +27,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	if err != nil {
-		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", err.Error())
-		fmt.Fprintln(rtx.Stdout, help)
+		rtx.RecordError(err)
 		rtx.SignalExit(1)
 		return
 	}
