@@ -535,7 +535,7 @@ func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature, embed 
 		name := feat.varPrefix + hn.prefix
 		v := templateFeatureVar{Name: name}
 		if embed {
-			// A "." dir (the feature dir IS the cmdgen package dir) embeds the bare
+			// A "." dir (the feature dir IS the cli package dir) embeds the bare
 			// file name — "./x" is not a valid //go:embed pattern.
 			embedPath := hn.file
 			if dir != "" && dir != "." {

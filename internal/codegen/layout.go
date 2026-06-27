@@ -75,12 +75,12 @@ func pruneGoDir(dir string, protected map[string]bool) error {
 }
 
 // pruneCligen removes orphaned rotini-managed outputs in each enabled feature's
-// dir (under the cmdgen package) — the per-command pages for commands no longer
+// dir (under the cli package) — the per-command pages for commands no longer
 // in the spec. Only files matching the feature's unique suffix AND prefix are
 // candidates, so features sharing one embed dir never prune each other's files.
 // The editable per-feature template, test files, and any keep-listed
-// (package-relative) path are preserved. Top-level cmdgen files (the gen file)
-// are never auto-removed. keepList entries are package-relative to the cmdgen
+// (package-relative) path are preserved. Top-level cli package files (the gen file)
+// are never auto-removed. keepList entries are package-relative to the cli
 // package.
 func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 	keep := make(map[string]bool, len(keepList))
@@ -122,7 +122,7 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 			if protected[name] {
 				continue
 			}
-			// keep entries are package-relative (to the cmdgen package).
+			// keep entries are package-relative (to the cli package).
 			rel := name
 			if r, err := filepath.Rel(lay.cliDir, filepath.Join(o.absEmbedDir, name)); err == nil {
 				rel = filepath.ToSlash(r)

@@ -27,7 +27,7 @@ func Generate(specPath, confPath string, watch bool, version string, onGenerate 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Code generation — the cli/cligen program (framework, rollup, stubs, literals).
+// Code generation — the cli package (framework + rollup + stubs + literals).
 // ─────────────────────────────────────────────────────────────────────────────.
 
 // Generated programs reference the rotini runtime package under this name in
@@ -118,12 +118,11 @@ func runtimeImportSpec(moduleName, dir string) string {
 	return "rotini " + strconv.Quote(importPath)
 }
 
-// generateAll runs a single generation pass: it resolves the spec (expanding
-// any composed $ref children), writes the framework file, creates missing
-// handler stubs (an empty stub per command — the end-user wires them), writes
-// the entrypoint main.go when the conf declares one, (re)writes the handler
-// rollup, and prunes orphaned stubs. specPath is needed to resolve $ref paths
-// relative to the spec.
+// generateAll runs a single generation pass: it resolves the spec (expanding any
+// composed $ref children), writes the one generated cli file (framework + rollup),
+// creates missing handler stubs (an empty stub per command — the end-user wires
+// them), emits the runtime, writes the entrypoint main.go when the conf declares
+// one, and prunes orphans. specPath resolves $ref paths relative to the spec.
 func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	moduleRoot, moduleName, err := findModule()
 	if err != nil {
@@ -173,14 +172,14 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		absTemplateDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.TemplateDir))
 
 		// The //go:embed path only matters in embed mode, and ONLY then must the
-		// embed_dir resolve under the cmdgen package (embed can't reach outside
+		// embed_dir resolve under the cli package (embed can't reach outside
 		// it). An inline feature writes no embedded file, so embed_dir is
 		// unconstrained; template_dir is never embedded, so it always is.
 		embedRel := ""
 		if f.cfg.Embed {
 			rel, err := filepath.Rel(lay.cliDir, absEmbedDir)
 			if err != nil {
-				return fmt.Errorf("feature %s embed_dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.EmbedDir, err)
+				return fmt.Errorf("feature %s embed_dir %q is not under the cli package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
 			if strings.HasPrefix(rel, "..") {
 				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the framework package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.frameworkPkg().File)))
@@ -231,7 +230,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	if err := writeEntrypoint(lay, string(detectFileFormat(specPath))); err != nil {
 		return err
 	}
-	// Pruning is implicit (always-on): drop orphaned cmd stubs, orphaned cmdgen
+	// Pruning is implicit (always-on): drop orphaned cmd stubs, orphaned cli
 	// feature outputs, and orphaned entrypoint .go files, sparing only the
 	// per-package `keep` paths (and test files and the editable feature
 	// templates). When the entrypoint shares the cmd directory its keep list is
