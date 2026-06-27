@@ -175,11 +175,11 @@ func loadRef(locator, consumingModule, moduleRoot string) (resolvedRef, error) {
 }
 
 // loadLockedExternal reads an external (git/raw) spec HERMETICALLY: it must be pinned
-// in the .rotini.lock and present (or vendored) in the content-addressed cache, and the
-// cached bytes must hash to the locked value. Codegen never trusts a live fetch or a
-// moved tag — `rotini mod` is what pins. An unlocked ref, a cache miss, or a hash
-// mismatch is a clear, actionable error. (module/dir are empty: an external spec is not
-// a Go package, so its handlers are wired by the W9 passthrough, not an import.)
+// in the committed .rotini.lock and present (or vendored) in the content-addressed
+// cache, and the cached bytes must hash to the locked value. Codegen never trusts a
+// live fetch or a moved tag. An unlocked ref, a cache miss, or a hash mismatch is a
+// clear, actionable error. (module/dir are empty: an external spec is not a Go package,
+// so its handlers are wired by the W9 passthrough, not an import.)
 func loadLockedExternal(locator, moduleRoot string) (resolvedRef, error) {
 	lock, err := readLockfile(moduleRoot)
 	if err != nil {
@@ -187,14 +187,14 @@ func loadLockedExternal(locator, moduleRoot string) (resolvedRef, error) {
 	}
 	entry, ok := lock[locator]
 	if !ok {
-		return resolvedRef{}, fmt.Errorf("external $ref %q is not locked — run `rotini mod` to pin it", locator)
+		return resolvedRef{}, fmt.Errorf("external $ref %q is not pinned in .rotini.lock", locator)
 	}
 	data, err := cacheRead(moduleRoot, entry.hash)
 	if err != nil {
-		return resolvedRef{}, fmt.Errorf("locked external $ref %q is not in the cache — run `rotini mod` (or vendor %s)", locator, cacheSubdir)
+		return resolvedRef{}, fmt.Errorf("locked external $ref %q is not in the cache (vendor %s)", locator, cacheSubdir)
 	}
 	if got := hashBytes(data); got != entry.hash {
-		return resolvedRef{}, fmt.Errorf("external $ref %q content hash %s does not match the lock (%s) — tampered or stale; run `rotini mod`", locator, got, entry.hash)
+		return resolvedRef{}, fmt.Errorf("external $ref %q content hash %s does not match the lock (%s) — tampered or stale cache", locator, got, entry.hash)
 	}
 	spec, err := decodeData[Spec](entry.format, data, locator)
 	if err != nil {

@@ -5,7 +5,7 @@ package internal
 // lock. git:: and raw https:// refs ARE: the lock pins each authored ref to an
 // immutable revision + content hash, and the cache holds the fetched bytes, so codegen
 // is hermetic and reproducible (it verifies against the lock, never trusting a moved
-// tag or a tampered cache). `rotini mod` writes the lock + cache; codegen reads them.
+// tag or a tampered cache). The lock + cache are committed/vendored; codegen reads them.
 
 import (
 	"bufio"
@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -77,39 +76,6 @@ func readLockfile(moduleRoot string) (map[string]lockEntry, error) {
 	return out, nil
 }
 
-// writeLockfile writes ref→entry deterministically (sorted by ref) so the file is
-// review- and merge-friendly. An empty set prunes any existing lock rather than
-// leaving a header-only file (no external refs → no lock, like go.sum).
-func writeLockfile(moduleRoot string, entries map[string]lockEntry) error {
-	if len(entries) == 0 {
-		if err := os.Remove(lockfilePath(moduleRoot)); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("remove %s: %w", lockfileName, err)
-		}
-		return nil
-	}
-	refs := make([]string, 0, len(entries))
-	for ref := range entries {
-		refs = append(refs, ref)
-	}
-	sort.Strings(refs)
-
-	var b strings.Builder
-	b.WriteString("# rotini.lock — machine-managed pins for external $ref specs.\n")
-	b.WriteString("# Commit this file; run `rotini mod` to update. Fields: <ref> <revision> <hash> <format> <schema>\n")
-	for _, ref := range refs {
-		e := entries[ref]
-		rev := e.revision
-		if rev == "" {
-			rev = "-"
-		}
-		fmt.Fprintf(&b, "%s %s %s %s %s\n", ref, rev, e.hash, e.format, e.schema)
-	}
-	if err := os.WriteFile(lockfilePath(moduleRoot), []byte(b.String()), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", lockfileName, err)
-	}
-	return nil
-}
-
 // cachePath is where a hashed spec is stored — content-addressed, committable
 // (vendored) for hermetic/offline codegen.
 func cachePath(moduleRoot, hash string) string {
@@ -123,15 +89,4 @@ func cacheRead(moduleRoot, hash string) ([]byte, error) {
 		return nil, fmt.Errorf("read cache %s: %w", hash, err)
 	}
 	return data, nil
-}
-
-func cacheWrite(moduleRoot, hash string, data []byte) error {
-	p := cachePath(moduleRoot, hash)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return fmt.Errorf("create cache dir: %w", err)
-	}
-	if err := os.WriteFile(p, data, 0o644); err != nil {
-		return fmt.Errorf("write cache %s: %w", hash, err)
-	}
-	return nil
 }

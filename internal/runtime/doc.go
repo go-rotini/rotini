@@ -68,9 +68,9 @@
 //     module's spec; its handlers auto-delegate from THAT module's generated
 //     package — composition across a module boundary with no extra wiring.
 //  5. External composition + passthrough — a "$ref" to a git::<url>@<ref> or a raw
-//     https:// spec. Such a spec is not a Go package, so `rotini mod` fetches it
-//     and pins it (the resolved revision + a content hash) into .rotini.lock and a
-//     content-addressed cache; codegen reads that hermetically, never the network.
+//     https:// spec. Such a spec is not a Go package; it must be pinned (a resolved
+//     revision + content hash) in a committed .rotini.lock and present in the
+//     content-addressed cache, which codegen reads hermetically — never the network.
 //     With no package to auto-delegate to, the node carries
 //     handler: { import: <alias path>, convention: <Name> } — the imported package
 //     exports <Convention>() rotini.Handlers per command, and codegen
@@ -84,9 +84,9 @@
 //     unmatched token to <prefix><token> the same way.
 //
 // `rotini validate` follows refs and collision-checks the whole assembled tree,
-// so a duplicate name, a cycle, or a missing ref is caught before codegen — and
-// `rotini mod` is the one command that touches the network, keeping generate and
-// validate hermetic.
+// so a duplicate name, a cycle, or a missing ref is caught before codegen, and
+// generate and validate stay hermetic (external refs read from the committed
+// lock + cache, never the network).
 //
 // # The slim runtime
 //

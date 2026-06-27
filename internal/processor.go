@@ -56,30 +56,6 @@ func (p *Processor) Initialize(name, format string, force bool) error {
 	return p.initialize(name, format, force)
 }
 
-// Mod runs the mod workflow (W8/D-W8.4b): resolve the spec, then fetch + pin every
-// external (git/raw) `$ref` it reaches into the module's `.rotini.lock` + content-
-// addressed cache. It is the one place rotini reaches the network — generate and
-// validate read the lock/cache hermetically. The spec must live inside the current
-// Go module (composed refs and the lock are anchored at the module root).
-func (p *Processor) Mod(specPath string) error {
-	resolvedSpec, err := resolveSpecPath(specPath)
-	if err != nil {
-		return err
-	}
-	if resolvedSpec == "" {
-		return errSpecPathRequired
-	}
-	spec, err := readSpec(resolvedSpec)
-	if err != nil {
-		return err
-	}
-	root, name, err := findModule()
-	if err != nil {
-		return err
-	}
-	return populateLock(spec, resolvedSpec, root, name)
-}
-
 // run resolves the spec/conf paths up-front (so watch watches exactly the files read),
 // then drives the shared run/watch engine: each pass builds a fresh session (re-reading
 // the files, so edits are picked up) and runs pass over it, stamped with a

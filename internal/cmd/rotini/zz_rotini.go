@@ -38,10 +38,6 @@ func (*handlers) RotiniInitialize() rotini.Handlers {
 	return &rotiniInitializeHandlers{}
 }
 
-func (*handlers) RotiniMod() rotini.Handlers {
-	return &rotiniModHandlers{}
-}
-
 func (*handlers) RotiniValidate() rotini.Handlers {
 	return &rotiniValidateHandlers{}
 }
@@ -56,7 +52,6 @@ type ProgramHandlers interface {
 	RotiniGenerate() rotini.Handlers
 	RotiniHelp() rotini.Handlers
 	RotiniInitialize() rotini.Handlers
-	RotiniMod() rotini.Handlers
 	RotiniValidate() rotini.Handlers
 	RotiniVersion() rotini.Handlers
 }
@@ -104,16 +99,6 @@ var definition = rotini.Definition{
 				{Name: "conf_file_path", Identifiers: []string{"-c", "--config"}, Summary: "path to the rotini conf file", Type: "string", Default: ".rotini.conf.yaml"},
 				{Name: "fail", Identifiers: []string{"--fail"}, Summary: "failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect", Type: "string", Enum: []string{"fast", "collect"}},
 				{Name: "watch", Identifiers: []string{"--watch", "-w"}, Summary: "watch a rotini spec file for changes and re-generate", Type: "bool"},
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
-			},
-			Arguments: []rotini.ArgDef{
-				{Name: "spec_file_path", Type: "string", Default: ".rotini.spec.yaml"},
-			},
-		},
-		{Name: "mod",
-			Handler: "RotiniMod",
-			Summary: "fetch and pin external spec refs",
-			Flags: []rotini.FlagDef{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 			Arguments: []rotini.ArgDef{
@@ -249,24 +234,6 @@ type RotiniInitializeInputs struct {
 	RotiniInitialize RotiniInitializeCommandInputs
 }
 
-type RotiniModFlags struct {
-	Help bool `rotini:"help"`
-}
-
-type RotiniModArguments struct {
-	SpecFilePath string `rotini:"spec_file_path"`
-}
-
-type RotiniModCommandInputs struct {
-	Flags     RotiniModFlags
-	Arguments RotiniModArguments
-}
-
-type RotiniModInputs struct {
-	Rotini    RotiniCommandInputs
-	RotiniMod RotiniModCommandInputs
-}
-
 type RotiniValidateFlags struct {
 	ConfFilePath string `rotini:"conf_file_path"`
 	Fail         string `rotini:"fail"`
@@ -319,15 +286,13 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 		Bind(rotini.KeyBindMeta, BindMeta)
 }
 
-var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize;init    scaffold a cli program\n  generate;gen       generate a cli program\n  validate;val       validate a spec file\n  mod                fetch and pin external spec refs\n  help               print help\n  version            print version\n  completion         print a shell completion script\n\nFlags:\n  --no-styles     disable output styles\n  -v,--version    print version\n  -h,--help       print help\n\nEnvironment:\n  ROTINI_NO_STYLES    disable output styles\n  CI                  is cli environment\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize;init    scaffold a cli program\n  generate;gen       generate a cli program\n  validate;val       validate a spec file\n  help               print help\n  version            print version\n  completion         print a shell completion script\n\nFlags:\n  --no-styles     disable output styles\n  -v,--version    print version\n  -h,--help       print help\n\nEnvironment:\n  ROTINI_NO_STYLES    disable output styles\n  CI                  is cli environment\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniInitialize = "Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, empty handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize [name] [flags]\n\nArguments:\n  [name]    the root command name written to the created spec file (expected binary name)\n\nFlags:\n  --format string    the created rotini spec file format (defaults to the module conf's initialize.format, else yaml) [yaml|json|jsonc|toml]\n  --force            force re-initialization if files exist that init would overwrite\n  -h,--help          print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniGenerate = "Generate a cli program from a rotini spec file.\n\nUsage:\n  rotini generate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default .rotini.spec.yaml)\n\nFlags:\n  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)\n  --watch,-w            watch a rotini spec file for changes and re-generate\n  -h,--help             print help\n\nExamples:\n  rotini generate\n  rotini generate ./path/to/.rotini.json --watch\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniValidate = "Validate a rotini spec file for correctness.\n\nUsage:\n  rotini validate [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default .rotini.spec.yaml)\n\nFlags:\n  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)\n  --fail string         failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]\n  --watch,-w            watch a rotini spec file for changes and re-generate\n  -h,--help             print help\n\nExamples:\n  rotini validate\n  rotini val ./path/to/.rotini.yaml\n\nUse \"rotini help <command>\" for more information about a command."
-
-var HelpRotiniMod = "Fetch every external (git/raw) spec referenced by $ref and pin each to an immutable revision and content hash, writing the .rotini.lock and content-addressed cache. Run this whenever an external $ref is added or its target moves; generate and validate then read the lock and cache without touching the network.\n\nUsage:\n  rotini mod [spec_file_path] [flags]\n\nArguments:\n  [spec_file_path]    path to the spec file (default .rotini.spec.yaml)\n\nFlags:\n  -h,--help    print help\n\nExamples:\n  rotini mod\n  rotini mod ./path/to/.rotini.spec.yaml\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...] [flags]\n\nArguments:\n  [command...]    name of the command to print help for\n\nFlags:\n  -h,--help    print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -348,8 +313,6 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniGenerate, nil
 	case "validate", "val":
 		return HelpRotiniValidate, nil
-	case "mod":
-		return HelpRotiniMod, nil
 	case "help":
 		return HelpRotiniHelp, nil
 	case "version":
