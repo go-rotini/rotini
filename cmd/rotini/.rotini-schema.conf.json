@@ -47,7 +47,7 @@
         "packages": {
           "type": "array",
           "items": { "$ref": "#/definitions/PackageConfig" },
-          "description": "Generated code targets, one per `type` (main / models / runtime). 'main' is the binary entrypoint (create-once). 'models' is the cli package: the editable per-command handler stubs PLUS the one generated file (the typed input/output structs, the framework glue, and the handlers rollup, all merged). 'runtime' is the entire rotini runtime, merged into its single 'file' as one self-contained package the cli package imports."
+          "description": "Generated code targets, one per `type` (main / models / runtime). 'main' is the binary entrypoint (create-once). 'cmd' is the cli package: the editable per-command handler stubs PLUS the one generated file (the typed input/output structs, the framework glue, and the handlers rollup, all merged). 'runtime' is the entire rotini runtime, merged into its single 'file' as one self-contained package the cli package imports."
         },
         "features": {
           "type": "array",
@@ -94,13 +94,13 @@
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["main", "models", "runtime"],
-              "description": "Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). models = the cli package: it locates the editable per-command handler stubs AND the single generated file written into that directory — the typed input/output structs (Collect[T]/Parse* targets), the framework glue (Definition, NewProgram, ProgramHandlers, BindMeta), and the handlers rollup (handlers struct, Program, Handlers(), command→handler wiring), all merged into the one 'file'. runtime = the entire rotini runtime (dispatch core, lifecycle, error taxonomy, parser/binder/suggestor/versioner/styler) merged into the ONE 'file' as a single self-contained package the cli package imports."
+              "enum": ["main", "cmd", "runtime"],
+              "description": "Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). cmd = the cli package: it locates the editable per-command handler stubs AND the single generated file written into that directory — the typed input/output structs (Collect[T]/Parse* targets), the framework glue (Definition, NewProgram, ProgramHandlers, BindMeta), and the handlers rollup (handlers struct, Program, Handlers(), command→handler wiring), all merged into the one 'file'. runtime = the entire rotini runtime (dispatch core, lifecycle, error taxonomy, parser/binder/suggestor/versioner/styler) merged into the ONE 'file' as a single self-contained package the cli package imports."
             },
             "file": {
               "type": "string",
               "pattern": "^[^/\\\\].*\\.go$",
-              "description": "Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. 'models' defaults to 'internal/cmd/<root-command>/zz_rotini.gen.go' (the cli package's generated file); main has no default and is only written when 'file' is set. The runtime is written ENTIRELY into its single 'file' (one package, all of it merged into that one file)."
+              "description": "Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.gen.go' (the cli package's generated file); main has no default and is only written when 'file' is set. The runtime is written ENTIRELY into its single 'file' (one package, all of it merged into that one file)."
             },
             "package": {
               "type": "string",

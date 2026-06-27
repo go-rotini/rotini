@@ -9,7 +9,7 @@ generate:
     - type: main
       file: cmd/rotini/main.go
       package: main
-    - type: models
+    - type: cmd
       file: internal/cmd/rotini/zz_rotini.go
       package: rotini
     - type: runtime

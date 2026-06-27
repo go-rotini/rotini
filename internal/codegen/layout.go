@@ -140,11 +140,11 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 
 // resolveLayout turns the (defaulted) conf package settings into absolute output
 // directories, package names, and import paths. The cli package is the single
-// `models` target — its directory holds the editable handler stubs and the one
+// `cmd` target — its directory holds the editable handler stubs and the one
 // generated file (framework + rollup merged, unqualified). The entrypoint and
 // runtime are optional/separate — their layout fields are set below.
 func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
-	cli := conf.Generate.frameworkPkg() // the single cli/models target
+	cli := conf.Generate.frameworkPkg() // the single cli (`cmd`) target
 
 	cliFile := filepath.ToSlash(cli.File)
 	cliPkgDir := path.Dir(cliFile)
@@ -229,15 +229,15 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	}
 
 	// The per-CLI generated code defaults to one self-contained file
-	// "internal/cmd/<root>/zz_rotini.gen.go" — handlers (rollup + stubs) and
-	// models (the framework glue + typed inputs) merge into it. The RUNTIME is a
-	// separate emitted package, defaulting to a "rotini" subpackage beside it —
+	// "internal/cmd/<root>/zz_rotini.gen.go" — the `cmd` target (framework + rollup
+	// + typed inputs, beside the editable stubs). The RUNTIME is a separate emitted
+	// package, defaulting to a "rotini" subpackage beside it —
 	// "internal/cmd/<root>/rotini/zz_runtime.gen.go" — the single file the entire
 	// runtime merges into, which the framework imports. main gets no default
 	// (written only when the conf declares its file).
 	frameworkFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
 	runtimeFile := "internal/cmd/" + rootName + "/rotini/zz_runtime.gen.go"
-	if p := ensure("models"); p.File == "" {
+	if p := ensure("cmd"); p.File == "" {
 		p.File = frameworkFile
 	}
 	if p := ensure("runtime"); p.File == "" {

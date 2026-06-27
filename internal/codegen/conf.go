@@ -5,9 +5,10 @@ package codegen
 // `type`). The generator and validator look targets up by type through these
 // helpers instead of map fields, so the discriminator lives in one place.
 //
-// Package-type vocabulary: main (entrypoint) | handlers (the editable stubs +
-// rollup) | models (typed inputs/outputs) | runtime (the ENTIRE rotini runtime,
-// merged into one file as a single self-contained package — see runtimePkg).
+// Package-type vocabulary: main (entrypoint) | cmd (the cli package: the editable
+// handler stubs + the one generated file — framework + rollup + typed inputs) |
+// runtime (the ENTIRE rotini runtime, merged into one self-contained file — see
+// runtimePkg).
 
 // packageOf returns the package target with the given type, or nil when absent.
 func (g *GenerateConfig) packageOf(typ string) *PackageConfig {
@@ -25,13 +26,13 @@ func (g *GenerateConfig) packageOf(typ string) *PackageConfig {
 // mainPkg is the binary entrypoint target (nil when no main.go is written).
 func (g *GenerateConfig) mainPkg() *PackageConfig { return g.packageOf("main") }
 
-// frameworkPkg is the single cli-package target (`models`): the directory holding
+// frameworkPkg is the single cli-package target (`cmd`): the directory holding
 // the editable handler stubs AND the one generated file — the framework glue the
 // rotini.go template emits (the definition literal, the typed NewProgram wrapper,
 // BindMeta, ProgramHandlers, the input structs, feature embeds) PLUS the rollup
 // (handlers struct + Program + command→handler wiring), all in one package. The
 // RUNTIME it imports is the only separate package (see runtimePkg).
-func (g *GenerateConfig) frameworkPkg() *PackageConfig { return g.packageOf("models") }
+func (g *GenerateConfig) frameworkPkg() *PackageConfig { return g.packageOf("cmd") }
 
 // runtimePkg is the EMITTED-runtime target: the single 'file' the entire rotini
 // runtime is merged into (its parent directory is the runtime package). The
