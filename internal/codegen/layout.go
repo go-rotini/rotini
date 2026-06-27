@@ -144,7 +144,7 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 // generated file (framework + rollup merged, unqualified). The entrypoint and
 // runtime are optional/separate — their layout fields are set below.
 func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
-	cli := conf.Generate.frameworkPkg() // the single cli (`cmd`) target
+	cli := conf.Generate.cmdPkg() // the single cli (`cmd`) target
 
 	cliFile := filepath.ToSlash(cli.File)
 	cliPkgDir := path.Dir(cliFile)
@@ -207,7 +207,7 @@ func goPkgName(dir string) string {
 // applyConfDefaults fills in the sane rotini conf defaults for any unset
 // generation settings, so a missing or partial conf still generates. The default
 // cli package is "internal/cmd/<root>/" with its generated file at
-// "internal/cmd/<root>/zz_rotini.gen.go" (the `models` target — framework + rollup
+// "internal/cmd/<root>/zz_rotini.gen.go" (the `cmd` target — framework + rollup
 // + typed inputs in one file), and the runtime in a "rotini" subpackage beside it.
 // The entrypoint gets no default — main.go is only written when the conf declares a
 // main.file. rootName is the spec's root command name, used to build the paths.
@@ -250,7 +250,7 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	// the editable TEMPLATE to "<framework-package>/templates". Co-located features
 	// cannot collide: each carries a feature-unique suffix/prefix (see docFeature)
 	// and pruning is scoped to them.
-	frameworkDir := path.Dir(filepath.ToSlash(g.frameworkPkg().File))
+	frameworkDir := path.Dir(filepath.ToSlash(g.cmdPkg().File))
 	for i := range g.Features {
 		f := &g.Features[i]
 		if f.EmbedDir == "" {

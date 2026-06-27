@@ -498,7 +498,7 @@ func (gp *genProgram) addImport(alias, path string) {
 func childCliImport(childDir, module string) string {
 	if confPath, err := discoverConf(childDir); err == nil {
 		if cc, err := readConf(confPath); err == nil {
-			if h := cc.Generate.frameworkPkg(); h != nil && h.File != "" {
+			if h := cc.Generate.cmdPkg(); h != nil && h.File != "" {
 				return module + "/" + path.Dir(filepath.ToSlash(h.File))
 			}
 		}

@@ -135,7 +135,7 @@ func lintFeatureDirs(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
 	}
-	fw := conf.Generate.frameworkPkg()
+	fw := conf.Generate.cmdPkg()
 	if len(conf.Generate.Features) == 0 || fw == nil || fw.File == "" {
 		return nil
 	}

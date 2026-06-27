@@ -26,13 +26,13 @@ func (g *GenerateConfig) packageOf(typ string) *PackageConfig {
 // mainPkg is the binary entrypoint target (nil when no main.go is written).
 func (g *GenerateConfig) mainPkg() *PackageConfig { return g.packageOf("main") }
 
-// frameworkPkg is the single cli-package target (`cmd`): the directory holding
+// cmdPkg is the single cli-package target (`cmd`): the directory holding
 // the editable handler stubs AND the one generated file — the framework glue the
 // rotini.go template emits (the definition literal, the typed NewProgram wrapper,
 // BindMeta, ProgramHandlers, the input structs, feature embeds) PLUS the rollup
 // (handlers struct + Program + command→handler wiring), all in one package. The
 // RUNTIME it imports is the only separate package (see runtimePkg).
-func (g *GenerateConfig) frameworkPkg() *PackageConfig { return g.packageOf("cmd") }
+func (g *GenerateConfig) cmdPkg() *PackageConfig { return g.packageOf("cmd") }
 
 // runtimePkg is the EMITTED-runtime target: the single 'file' the entire rotini
 // runtime is merged into (its parent directory is the runtime package). The

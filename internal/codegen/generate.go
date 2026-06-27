@@ -78,7 +78,7 @@ type genCommand struct {
 }
 
 // layout holds the resolved package locations and import paths for a single
-// generation pass. The cli package (the conf's single `models` target) holds the
+// generation pass. The cli package (the conf's single `cmd` target) holds the
 // editable handler stubs AND the one generated file — the framework (Definition,
 // NewProgram, ProgramHandlers, the typed inputs) and the rollup (the handlers
 // struct + Program + the command→handler wiring) merged into it, all referencing
@@ -182,7 +182,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 				return fmt.Errorf("feature %s embed_dir %q is not under the cli package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
 			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the framework package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.frameworkPkg().File)))
+				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the framework package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.cmdPkg().File)))
 			}
 			embedRel = filepath.ToSlash(rel)
 		}
@@ -239,14 +239,14 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	if m := conf.Generate.mainPkg(); m != nil {
 		mainKeep = m.Keep
 	}
-	cmdKeep := conf.Generate.frameworkPkg().Keep
+	cmdKeep := conf.Generate.cmdPkg().Keep
 	if lay.entrypointDir != "" && lay.entrypointDir == lay.cliDir {
 		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
 	}
 	if err := pruneStubs(gp, lay, cmdKeep); err != nil {
 		return err
 	}
-	if err := pruneCligen(lay, conf.Generate.frameworkPkg().Keep, outputs); err != nil {
+	if err := pruneCligen(lay, conf.Generate.cmdPkg().Keep, outputs); err != nil {
 		return err
 	}
 	if err := pruneEntrypoint(lay, mainKeep); err != nil {
