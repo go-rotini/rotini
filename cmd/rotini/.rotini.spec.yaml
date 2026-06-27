@@ -204,29 +204,3 @@ command:
             - --help
           schema:
             type: bool
-    - name: completion
-      summary: print a shell completion script
-      description: Print the completion script for a shell; load it with your shell's source/eval idiom.
-      examples:
-        - rotini completion zsh
-        - source <(rotini completion bash)
-      footer: Use "rotini help <command>" for more information about a command.
-      arguments:
-        - name: shell
-          summary: the target shell
-          schema:
-            type: string
-            required: true
-            enum:
-              - bash
-              - zsh
-              - fish
-              - powershell
-      flags:
-        - name: help
-          summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
