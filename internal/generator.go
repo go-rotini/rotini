@@ -178,7 +178,11 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 	// CLI carries its own runtime and never imports go-rotini/rotini). Skipped for
 	// rotini's own dogfood, which points runtime_required at the embed source and
 	// imports it in place.
-	if err := writeEmittedRuntime(lay, moduleRoot); err != nil {
+	var runtimeKeep []string
+	if rt := conf.Generate.runtimePkg(); rt != nil {
+		runtimeKeep = rt.Keep
+	}
+	if err := writeEmittedRuntime(lay, moduleRoot, runtimeKeep); err != nil {
 		return err
 	}
 
@@ -1232,10 +1236,13 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 
 // writeEmittedRuntime writes the rotini runtime source into the conf's runtime
 // package directory (lay.runtimeDir), each file's `package rotini` clause rewritten
-// to the runtime package. It is a no-op when lay.skipRuntimeEmit is set — rotini's
-// own dogfood points runtime_required at the embed source (internal/runtime) and
-// imports it in place rather than emitting a copy.
-func writeEmittedRuntime(lay layout, moduleRoot string) error {
+// to the runtime package, then prunes any stale .go left from a previous emit (so a
+// runtime that loses a file does not leave an orphan behind). It is a no-op when
+// lay.skipRuntimeEmit is set — rotini's own dogfood points runtime_required at the
+// embed source (internal/runtime) and imports it in place rather than emitting a copy.
+// runtimeKeep spares package-relative paths from pruning; the dir is otherwise fully
+// rotini-managed (test files are always kept by pruneGoDir).
+func writeEmittedRuntime(lay layout, moduleRoot string, runtimeKeep []string) error {
 	if lay.skipRuntimeEmit || lay.runtimeDir == "" {
 		return nil
 	}
@@ -1244,12 +1251,17 @@ func writeEmittedRuntime(lay layout, moduleRoot string) error {
 		return err
 	}
 	dir := filepath.Join(moduleRoot, filepath.FromSlash(lay.runtimeDir))
+	protected := make(map[string]bool, len(files)+len(runtimeKeep))
 	for name, content := range files {
 		if err := writeGeneratedFile(filepath.Join(dir, name), content); err != nil {
 			return err
 		}
+		protected[name] = true
 	}
-	return nil
+	for _, k := range runtimeKeep {
+		protected[filepath.Base(filepath.ToSlash(k))] = true
+	}
+	return pruneGoDir(dir, protected)
 }
 
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint
