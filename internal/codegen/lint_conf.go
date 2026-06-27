@@ -1,0 +1,195 @@
+package codegen
+
+import (
+	"fmt"
+	"path"
+	"path/filepath"
+	"strings"
+)
+
+// This file holds the conf lint rules — the rotini-specific checks the JSON Schema
+// cannot express. Each is a pure func(*Conf) []error, registered in confLints.
+
+// ─── the rotini-specific rules (what the JSON Schema can't express) ─────────────.
+
+// confLints is the ordered set of conf rules run after the conf is schema-valid,
+// mirroring specLints. Like the spec rules, they reject configuration that would
+// be silently ignored or that generate would reject later — validate is the gate.
+var confLints = []func(*Conf) []error{
+	lintPackageTypes,
+	lintFeatureTypes,
+	lintPackageColocation,
+	lintEntrypoint,
+	lintFeatureDirs,
+	lintFeatureKnobs,
+}
+
+// lintPackageTypes rejects a generate.packages array that names the same `type`
+// twice. The JSON Schema enums the legal type values but cannot enforce
+// at-most-once-per-type across array items (uniqueItems compares whole items, not
+// a single field), so the duplicate — which would make a target's destination
+// ambiguous — is caught here.
+func lintPackageTypes(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	seen := map[string]bool{}
+	for _, p := range conf.Generate.Packages {
+		if seen[p.Type] {
+			problems = append(problems, &problem{
+				kind: "conf", loc: "generate.packages",
+				msg: fmt.Sprintf("type %q is declared more than once — each package type may appear at most once", p.Type),
+			})
+		}
+		seen[p.Type] = true
+	}
+	return problems
+}
+
+// lintFeatureTypes rejects a generate.features array that names the same `type`
+// twice, for the same reason as lintPackageTypes (the schema enums the type but
+// cannot bound it to one entry).
+func lintFeatureTypes(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	seen := map[string]bool{}
+	for _, f := range conf.Generate.Features {
+		if seen[f.Type] {
+			problems = append(problems, &problem{
+				kind: "conf", loc: "generate.features",
+				msg: fmt.Sprintf("type %q is declared more than once — each feature type may appear at most once", f.Type),
+			})
+		}
+		seen[f.Type] = true
+	}
+	return problems
+}
+
+// lintPackageColocation rejects two package targets that write the SAME file but
+// declare DIFFERENT Go packages — the second write would clobber the first with a
+// conflicting `package` clause. This is inherently cross-item (the JSON Schema sees
+// one item at a time), so it lives here. Targets that omit `package` derive it from
+// the directory and never conflict; only explicit disagreement is flagged.
+func lintPackageColocation(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	byFile := map[string]string{} // file → first explicit package seen
+	for _, p := range conf.Generate.Packages {
+		if p.File == "" || p.Package == "" {
+			continue
+		}
+		if prev, ok := byFile[p.File]; ok && prev != p.Package {
+			problems = append(problems, &problem{
+				kind: "conf", loc: "generate.packages",
+				msg: fmt.Sprintf("file %q is targeted by package %q and %q — targets sharing a file must declare the same package", p.File, prev, p.Package),
+			})
+			continue
+		}
+		byFile[p.File] = p.Package
+	}
+	return problems
+}
+
+// lintEntrypoint rejects a main block whose 'keep' would be silently ignored:
+// keep only takes effect once the entrypoint is actually written and its
+// directory pruned, and that happens only when 'file' is set. (The entrypoint's
+// Go package is always 'main'; there is no package key to reconcile.)
+func lintEntrypoint(conf *Conf) []error {
+	if conf.Generate == nil || conf.Generate.mainPkg() == nil {
+		return nil
+	}
+	ep := conf.Generate.mainPkg()
+	if ep.File == "" && len(ep.Keep) > 0 {
+		return []error{&problem{
+			kind: "conf",
+			loc:  "generate.packages.main.keep",
+			msg:  "has no effect without generate.packages.main.file — the entrypoint is only written, and its directory pruned, when file is set",
+		}}
+	}
+	return nil
+}
+
+// lintFeatureDirs rejects an enabled, EMBEDDING feature whose explicit
+// embed_dir cannot resolve under an explicitly-set cmdgen package — //go:embed
+// could never reach it, so generate would fail; validate is the gate. Only
+// embed mode (embed: true) is checked: an inline feature writes no embedded
+// file, and template_dir is never embedded (unconstrained). When either side
+// is unset the defaults guarantee nesting (the default embed_dir is
+// <cmdgen>/renders), so there is nothing to check.
+func lintFeatureDirs(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	fw := conf.Generate.frameworkPkg()
+	if len(conf.Generate.Features) == 0 || fw == nil || fw.File == "" {
+		return nil
+	}
+	cmdgen := path.Dir(filepath.ToSlash(fw.File))
+	var problems []error
+	check := func(name string, f *Feature) {
+		if f == nil || !f.Enabled || !f.Embed || f.EmbedDir == "" {
+			return
+		}
+		dir := path.Clean(filepath.ToSlash(f.EmbedDir))
+		if dir != cmdgen && !strings.HasPrefix(dir, cmdgen+"/") {
+			problems = append(problems, &problem{
+				kind: "conf",
+				loc:  "generate.features." + name + ".embed_dir",
+				msg:  fmt.Sprintf("%q must resolve under the framework package %q so //go:embed can reach it", f.EmbedDir, cmdgen),
+			})
+		}
+	}
+	check("help", conf.Generate.featureOf("help"))
+	check("man", conf.Generate.featureOf("man"))
+	check("markdown", conf.Generate.featureOf("markdown"))
+	check("completion", conf.Generate.featureOf("completion"))
+	return problems
+}
+
+// lintFeatureKnobs WARNS (non-fatal) when an ENABLED feature sets a directory knob
+// its mode ignores — upholding rotini's no-silently-ignored-key principle without
+// failing the build, since the override is inert rather than broken: an `embed_dir`
+// without embed mode (inline content writes no embedded file), a `template_dir`
+// without seeding a template, and — for completion, which has no editable template —
+// `template`/`template_dir` at all. Disabled features are left alone (staged config).
+// Warnings route to the funnel (as warnings); validation still passes.
+func lintFeatureKnobs(conf *Conf) []error {
+	if conf.Generate == nil || len(conf.Generate.Features) == 0 {
+		return nil
+	}
+	var problems []error
+	warn := func(name, key, msg string) {
+		problems = append(problems, &problem{
+			kind: "conf", loc: "generate.features." + name + "." + key,
+			sev: severityWarning, msg: msg,
+		})
+	}
+	for _, cf := range featureConfigs(conf) {
+		f := cf.cfg
+		if f == nil || !f.Enabled {
+			continue
+		}
+		name := cf.desc.name
+		if f.EmbedDir != "" && !f.Embed {
+			warn(name, "embed_dir", "is set but embed is false — embed_dir is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")
+		}
+		if cf.desc.tmplFile == "" { // no editable template (completion)
+			if f.Template {
+				warn(name, "template", name+" has no editable template — 'template' has no effect here")
+			}
+			if f.TemplateDir != "" {
+				warn(name, "template_dir", name+" has no editable template — 'template_dir' has no effect here")
+			}
+			continue
+		}
+		if f.TemplateDir != "" && !f.Template {
+			warn(name, "template_dir", "is set but template is false — template_dir is used only when the editable template is seeded (template: true); it is otherwise ignored")
+		}
+	}
+	return problems
+}
