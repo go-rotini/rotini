@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"strings"
 {{- end}}
-	rotini "github.com/go-rotini/rotini/internal/runtime"
+	{{.RuntimeImport}}
 )
 
 type ProgramHandlers interface {

@@ -31,11 +31,17 @@ func (g *GenerateConfig) mainPkg() *PackageConfig { return g.packageOf("main") }
 // handlersPkg is the handler-logic target: the per-command stubs and the rollup.
 func (g *GenerateConfig) handlersPkg() *PackageConfig { return g.packageOf("handlers") }
 
-// frameworkPkg is the canonical generated-framework target (typed inputs, the
-// definition, NewProgram, feature embeds). The framework is nominally split across
-// models/runtime_required/runtime_optional; runtime_required is the locator the
-// generator uses while they share one merged file (pre-emission).
-func (g *GenerateConfig) frameworkPkg() *PackageConfig { return g.packageOf("runtime_required") }
+// frameworkPkg is the generated-framework target: the per-CLI glue the
+// rotini.go template emits — the definition literal, the typed NewProgram
+// wrapper, BindMeta, ProgramHandlers, the input structs, and feature embeds.
+// This is the `models` category (the framework rides with the typed inputs);
+// the RUNTIME it imports is a separate package (see runtimePkg).
+func (g *GenerateConfig) frameworkPkg() *PackageConfig { return g.packageOf("models") }
+
+// runtimePkg is the EMITTED-runtime target: the directory the rotini runtime
+// source is written into (or, for rotini's own dogfood, internal/runtime in
+// place). The framework and handlers import this package, qualified `rotini.`.
+func (g *GenerateConfig) runtimePkg() *PackageConfig { return g.packageOf("runtime_required") }
 
 // featureOf returns the derived-output feature with the given type, or nil.
 func (g *GenerateConfig) featureOf(typ string) *Feature {

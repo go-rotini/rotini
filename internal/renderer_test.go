@@ -21,7 +21,7 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 		t.Errorf("main: %v", err)
 	}
 	// Every command — including help/version/completion — gets the same empty stub.
-	if _, err := renderHandlerStubFile("cli", "appSubHandlers"); err != nil {
+	if _, err := renderHandlerStubFile("cli", "appSubHandlers", `rotini "example.com/app/internal/cmd/app/rotini"`); err != nil {
 		t.Errorf("handler stub: %v", err)
 	}
 }
@@ -29,6 +29,7 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 func TestSmokeRenderHandlersFile(t *testing.T) {
 	out, err := renderHandlersFile(templateHandlersData{
 		Package:         "cli",
+		RuntimeImport:   `rotini "example.com/app/internal/cmd/app/rotini"`,
 		FrameworkImport: "example.com/app/internal/cmd/app/cligen",
 		FrameworkQual:   "cligen.",
 		ChildImports:    []templateHandlersImport{{Alias: "childcli", Path: "example.com/child/cli"}},
@@ -45,10 +46,11 @@ func TestSmokeRenderHandlersFile(t *testing.T) {
 
 func TestSmokeRenderRotiniFile(t *testing.T) {
 	out, err := renderRotiniFile(templateRotiniData{
-		Package:    "cligen",
-		Imports:    []string{`"time"`},
-		Methods:    []string{"App", "AppGenerate"},
-		Definition: "var definition = rotini.Definition{}",
+		Package:       "cligen",
+		RuntimeImport: `rotini "github.com/go-rotini/rotini/internal/runtime"`,
+		Imports:       []string{`"time"`},
+		Methods:       []string{"App", "AppGenerate"},
+		Definition:    "var definition = rotini.Definition{}",
 		Blocks: []templateInputBlock{
 			{
 				Prefix: "App",

@@ -12,8 +12,15 @@ generate:
     - type: handlers
       file: internal/cmd/rotini/zz_rotini.go
       package: rotini
-    - type: runtime_required
+    - type: models
       file: internal/cmd/rotini/zz_rotini.go
+      package: rotini
+    # rotini's own dogfood points runtime_required at the embed source
+    # (internal/runtime) — emission is skipped and the framework imports it
+    # in place. A normal CLI would point this at a 'rotini' subpackage that
+    # `rotini generate` writes the runtime into.
+    - type: runtime_required
+      file: internal/runtime/zz_runtime.go
       package: rotini
   features:
     - type: help

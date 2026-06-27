@@ -12,8 +12,11 @@ generate:
     - type: handlers
       file: internal/cmd/{{.Package}}/zz_rotini.go
       keep: []
-    - type: runtime_required
+    - type: models
       file: internal/cmd/{{.Package}}/zz_rotini.go
+      keep: []
+    - type: runtime_required
+      file: internal/cmd/{{.Package}}/rotini/zz_runtime.go
       keep: []
   features:
     - type: help

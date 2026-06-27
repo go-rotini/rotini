@@ -171,17 +171,19 @@ func renderMainFile(pkg, pkgAlias, extension string) ([]byte, error) {
 }
 
 // templateHandlerData is the per-command handler stub context: every generated
-// command gets an empty stub (the end-user wires it). It reads only Package and
-// HandlersType.
+// command gets an empty stub (the end-user wires it). RuntimeImport is the
+// emitted-runtime import line (the stub references rotini.Context / rotini.Handlers).
 type templateHandlerData struct {
-	Package      string
-	HandlersType string
+	Package       string
+	HandlersType  string
+	RuntimeImport string
 }
 
-func renderHandlerStubFile(pkg, handlersType string) ([]byte, error) {
+func renderHandlerStubFile(pkg, handlersType, runtimeImport string) ([]byte, error) {
 	return renderGoFile("handler", templateHandlerStub, templateHandlerData{
-		Package:      pkg,
-		HandlersType: handlersType,
+		Package:       pkg,
+		HandlersType:  handlersType,
+		RuntimeImport: runtimeImport,
 	})
 }
 
@@ -206,6 +208,7 @@ type templateHandlersMethod struct {
 
 type templateHandlersData struct {
 	Package         string
+	RuntimeImport   string // emitted-runtime import line (identifier `rotini`)
 	FrameworkImport string // "" when cmd and cmdgen share a package
 	FrameworkQual   string // e.g. "cmdgen."; "" when same package
 	ChildImports    []templateHandlersImport
@@ -287,15 +290,16 @@ type templateFeature struct {
 }
 
 type templateRotiniData struct {
-	Package     string
-	Imports     []string // pre-rendered import lines (aliased form "alias \"path\"")
-	Methods     []string // ProgramHandlers method names, e.g. "RotiniGenerate"
-	Definition  string   // pre-rendered definition var declaration
-	Blocks      []templateInputBlock
-	OutputTypes string // pre-rendered output type declarations; "" when none
-	BindMeta    string // pre-rendered bind metadata; "" when none
-	Features    []templateFeature
-	EmbedImport bool // emit `import _ "embed"` — only when some feature uses //go:embed
+	Package       string
+	RuntimeImport string   // emitted-runtime import line (identifier `rotini`)
+	Imports       []string // pre-rendered import lines (aliased form "alias \"path\"")
+	Methods       []string // ProgramHandlers method names, e.g. "RotiniGenerate"
+	Definition    string   // pre-rendered definition var declaration
+	Blocks        []templateInputBlock
+	OutputTypes   string // pre-rendered output type declarations; "" when none
+	BindMeta      string // pre-rendered bind metadata; "" when none
+	Features      []templateFeature
+	EmbedImport   bool // emit `import _ "embed"` — only when some feature uses //go:embed
 }
 
 func renderRotiniFile(data templateRotiniData) ([]byte, error) {

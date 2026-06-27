@@ -2,7 +2,7 @@
 package {{.Package}}
 
 import (
-	rotini "github.com/go-rotini/rotini/internal/runtime"
+	{{.RuntimeImport}}
 {{- if .FrameworkImport}}
 	"{{.FrameworkImport}}"
 {{- end}}

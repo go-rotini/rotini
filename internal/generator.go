@@ -122,7 +122,28 @@ type layout struct {
 	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
 	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
 
+	runtimeImport   string // pre-rendered runtime import spec line, e.g. `rotini "…/internal/runtime"` or `"…/rotini"` (identifier always `rotini`)
+	runtimeDir      string // module-relative dir the emitted runtime source is written into (slash path)
+	skipRuntimeEmit bool   // true when runtimeDir IS rotini's own embed source (internal/runtime) — import in place, write nothing
+
 	combined bool // same package AND same file → framework+rollup merged into one file
+}
+
+// runtimeSourceDir is the module-relative directory holding the runtime embed
+// source. A conf pointing runtime_required here (rotini's own dogfood) imports
+// it in place; emission is skipped.
+const runtimeSourceDir = "internal/runtime"
+
+// runtimeImportSpec renders the Go import line for the emitted runtime package at
+// the module-relative dir. The identifier is ALWAYS `rotini` (so the templates'
+// `rotini.` qualifier resolves): a dir already named "rotini" imports plain (the
+// package is `rotini`), any other dir is aliased — avoiding a redundant alias.
+func runtimeImportSpec(moduleName, dir string) string {
+	importPath := moduleName + "/" + dir
+	if path.Base(dir) == "rotini" {
+		return strconv.Quote(importPath)
+	}
+	return "rotini " + strconv.Quote(importPath)
 }
 
 // generateAll runs a single generation pass: it resolves the spec (expanding
@@ -150,6 +171,14 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 	// before codegen, so the editor `$schema=` references resolve even on a pass that
 	// later fails. These files are never pruned.
 	if err := writeSchemas(conf, moduleRoot); err != nil {
+		return err
+	}
+
+	// Emit the rotini runtime SOURCE into the conf's runtime package (so the built
+	// CLI carries its own runtime and never imports go-rotini/rotini). Skipped for
+	// rotini's own dogfood, which points runtime_required at the embed source and
+	// imports it in place.
+	if err := writeEmittedRuntime(lay, moduleRoot); err != nil {
 		return err
 	}
 
@@ -1142,15 +1171,16 @@ func renderFrameworkFile(gp *genProgram, lay layout, features []templateFeature)
 	}
 
 	return renderRotiniFile(templateRotiniData{
-		Package:     lay.frameworkPkgName,
-		Imports:     renderImports(imports),
-		Methods:     gp.methods(),
-		Definition:  renderDefinition(gp),
-		Blocks:      blocks,
-		OutputTypes: outputTypes,
-		BindMeta:    renderBindMeta(gp),
-		Features:    features,
-		EmbedImport: anyEmbed(features),
+		Package:       lay.frameworkPkgName,
+		RuntimeImport: lay.runtimeImport,
+		Imports:       renderImports(imports),
+		Methods:       gp.methods(),
+		Definition:    renderDefinition(gp),
+		Blocks:        blocks,
+		OutputTypes:   outputTypes,
+		BindMeta:      renderBindMeta(gp),
+		Features:      features,
+		EmbedImport:   anyEmbed(features),
 	})
 }
 
@@ -1189,11 +1219,33 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		content, err := renderHandlerStubFile(lay.handlerPkgName, c.handler)
+		content, err := renderHandlerStubFile(lay.handlerPkgName, c.handler, lay.runtimeImport)
 		if err != nil {
 			return err
 		}
 		if err := writeGeneratedFile(path, content); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeEmittedRuntime writes the rotini runtime source into the conf's runtime
+// package directory (lay.runtimeDir), each file's `package rotini` clause rewritten
+// to the runtime package. It is a no-op when lay.skipRuntimeEmit is set — rotini's
+// own dogfood points runtime_required at the embed source (internal/runtime) and
+// imports it in place rather than emitting a copy.
+func writeEmittedRuntime(lay layout, moduleRoot string) error {
+	if lay.skipRuntimeEmit || lay.runtimeDir == "" {
+		return nil
+	}
+	files, err := emitRuntime("rotini")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(moduleRoot, filepath.FromSlash(lay.runtimeDir))
+	for name, content := range files {
+		if err := writeGeneratedFile(filepath.Join(dir, name), content); err != nil {
 			return err
 		}
 	}
@@ -1260,6 +1312,7 @@ func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
 
 	return renderHandlersFile(templateHandlersData{
 		Package:         lay.handlerPkgName,
+		RuntimeImport:   lay.runtimeImport,
 		FrameworkImport: lay.frameworkImport, // "" when cmd and cmdgen share a package
 		FrameworkQual:   lay.frameworkQual,   // e.g. "cmdgen."; "" when same package
 		ChildImports:    gp.childImports,
@@ -1454,6 +1507,15 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 		lay.entrypointFile = path.Base(epFile)
 	}
 
+	// The runtime is a separate emitted package the framework/handlers import.
+	// runtime_required's directory is where it lands (or, when that IS the embed
+	// source, it is imported in place and emission is skipped).
+	if rt := conf.Generate.runtimePkg(); rt != nil && rt.File != "" {
+		lay.runtimeDir = path.Dir(filepath.ToSlash(rt.File))
+		lay.runtimeImport = runtimeImportSpec(moduleName, lay.runtimeDir)
+		lay.skipRuntimeEmit = lay.runtimeDir == runtimeSourceDir
+	}
+
 	return lay
 }
 
@@ -1497,21 +1559,24 @@ func applyConfDefaults(conf *Conf, rootName string) {
 		return &g.Packages[len(g.Packages)-1]
 	}
 
-	// The framework-bound categories default to one self-contained file
+	// The per-CLI generated code defaults to one self-contained file
 	// "internal/cmd/<root>/zz_rotini.gen.go" — handlers (rollup + stubs) and
-	// runtime_required (framework) merge into it. models/runtime_optional, when
-	// declared, default to the same file. main gets no default (written only when
-	// the conf declares its file).
-	defaultFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
-	for _, typ := range []string{"handlers", "runtime_required"} {
+	// models (the framework glue + typed inputs) merge into it. The RUNTIME is a
+	// separate emitted package, defaulting to a "rotini" subpackage beside it —
+	// "internal/cmd/<root>/rotini/zz_runtime.gen.go" — which the framework imports.
+	// main gets no default (written only when the conf declares its file).
+	frameworkFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
+	runtimeFile := "internal/cmd/" + rootName + "/rotini/zz_runtime.gen.go"
+	for _, typ := range []string{"handlers", "models"} {
 		if p := ensure(typ); p.File == "" {
-			p.File = defaultFile
+			p.File = frameworkFile
 		}
 	}
-	for _, typ := range []string{"models", "runtime_optional"} {
-		if p := g.packageOf(typ); p != nil && p.File == "" {
-			p.File = defaultFile
-		}
+	if p := ensure("runtime_required"); p.File == "" {
+		p.File = runtimeFile
+	}
+	if p := g.packageOf("runtime_optional"); p != nil && p.File == "" {
+		p.File = runtimeFile
 	}
 
 	// Each present feature defaults its two dirs from the framework package
