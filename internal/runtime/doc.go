@@ -46,7 +46,7 @@
 //
 // rotini is commands all the way down: a command is composable at any node, so a
 // CLI is assembled from specs the way its tree is assembled from commands. A
-// "$ref" pulls another spec in as a subcommand. Six modes span where a command's
+// "$ref" pulls another spec in as a subcommand. Five modes span where a command's
 // spec and its handler code come from, from wholly-owned to wholly-remote:
 //
 //  1. Standalone — an own spec node with its own generated handler stub. The
@@ -67,17 +67,7 @@
 //     through the Go module cache and pinned by go.sum. The child is another
 //     module's spec; its handlers auto-delegate from THAT module's generated
 //     package — composition across a module boundary with no extra wiring.
-//  5. External composition + passthrough — a "$ref" to a git::<url>@<ref> or a raw
-//     https:// spec. Such a spec is not a Go package; it must be pinned (a resolved
-//     revision + content hash) in a committed .rotini.lock and present in the
-//     content-addressed cache, which codegen reads hermetically — never the network.
-//     With no package to auto-delegate to, the node carries
-//     handler: { import: <alias path>, convention: <Name> } — the imported package
-//     exports <Convention>() rotini.Handlers per command, and codegen
-//     delegates alias.<Convention>(). The same handler: also overrides the
-//     auto-delegation on a local or module "$ref" (see mode 2); it is valid on any
-//     sub-command, not the root.
-//  6. Remote command — a sibling binary <program>-<name>, dispatched at RUNTIME
+//  5. Remote command — a sibling binary <program>-<name>, dispatched at RUNTIME
 //     (remote_commands / remote_discovery), not composed at codegen: the spec tree
 //     links the command and the runtime spawns the binary, reporting a dispatch
 //     failure as a [*RemoteError]. Discovery (remote_discovery) dispatches an

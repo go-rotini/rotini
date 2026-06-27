@@ -158,7 +158,7 @@ func generateAll(spec *Spec, conf *Conf, specPath, version string) error {
 		return err
 	}
 	lay := resolveLayout(conf, moduleRoot, moduleName)
-	gp, err := resolveTree(spec, specPath, moduleRoot, moduleName, version)
+	gp, err := resolveTree(spec, specPath, moduleName, version)
 	if err != nil {
 		return err
 	}
@@ -1854,7 +1854,7 @@ func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
 	return out
 }
 
-func resolveTree(spec *Spec, specPath, moduleRoot, moduleName, version string) (*genProgram, error) {
+func resolveTree(spec *Spec, specPath, moduleName, version string) (*genProgram, error) {
 	root := spec.Command
 	if root.Ref != "" || root.Name == "" {
 		return nil, errors.New("root command must have a name (the top-level \"command\" cannot use $ref)")
@@ -1893,7 +1893,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName, version string) (
 	base := filepath.Dir(absSpec) // the entry spec is always local; its dir is the base for relative refs
 	seen := map[string]bool{absSpec: true}
 
-	tree, err := gp.walk(root.Commands, "", base, moduleRoot, moduleName, seen, composeCtx{})
+	tree, err := gp.walk(root.Commands, "", base, moduleName, seen, composeCtx{})
 	if err != nil {
 		return nil, err
 	}
@@ -1904,7 +1904,7 @@ func resolveTree(spec *Spec, specPath, moduleRoot, moduleName, version string) (
 	return gp, nil
 }
 
-func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
 	out := make([]rnode, 0, len(cmds))
 	for _, c := range cmds {
 		if c.Ref != "" {
@@ -1912,14 +1912,14 @@ func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleRoot, moduleN
 				// Transitive $ref: the direct child already composed this grandchild
 				// and exposes handler methods for it, so graft its tree here and
 				// delegate to the child (no new import) — see composeNestedRef.
-				nodes, err := gp.composeNestedRef(c, parentPath, base, moduleRoot, moduleName, seen, ctx)
+				nodes, err := gp.composeNestedRef(c, parentPath, base, moduleName, seen, ctx)
 				if err != nil {
 					return nil, err
 				}
 				out = append(out, nodes...)
 				continue
 			}
-			node, err := gp.composeRef(c, parentPath, base, moduleRoot, moduleName, seen)
+			node, err := gp.composeRef(c, parentPath, base, moduleName, seen)
 			if err != nil {
 				return nil, err
 			}
@@ -1973,7 +1973,7 @@ func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleRoot, moduleN
 			gp.own = append(gp.own, gc)
 		}
 
-		children, err := gp.walk(c.Commands, path, base, moduleRoot, moduleName, seen, ctx)
+		children, err := gp.walk(c.Commands, path, base, moduleName, seen, ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -2076,7 +2076,7 @@ func overlayCommand(child, parent Command) Command {
 // commands delegate to the child; the authored siblings are own/new compositions). The
 // delegation always targets the child's real handler methods. Transitive $refs (a
 // composed child that itself $refs) are handled by composeNestedRef during the walk.
-func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, moduleName string, seen map[string]bool) (rnode, error) {
+func (gp *genProgram) composeRef(c Command, parentPath, base, moduleName string, seen map[string]bool) (rnode, error) {
 	locator, err := locateRef(base, c.Ref)
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
@@ -2087,7 +2087,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	seen[locator] = true
 	defer delete(seen, locator)
 
-	rr, err := loadRef(locator, moduleName, moduleRoot)
+	rr, err := loadRef(locator, moduleName)
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
 	}
@@ -2099,8 +2099,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	// Resolve the handler source for the composed subtree (W9). An explicit `handler:`
 	// (the package-import passthrough) wins: handlers come from the declared package via
 	// alias.<Convention>(). Otherwise a local/mod:// child auto-delegates to its own
-	// generated cli (alias.Handlers().<Name>()). A git/raw spec is not a Go package, so
-	// without a `handler:` there is nothing to delegate to — that is an error.
+	// generated cli (alias.Handlers().<Name>()).
 	var alias, delegateRoot string
 	var passthrough bool
 	switch {
@@ -2108,8 +2107,6 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 		a, p := parseAliasPath(c.Handler.Import)
 		alias, delegateRoot, passthrough = a, c.Handler.Convention, true
 		gp.addImport(a, p)
-	case isExternalLocator(locator):
-		return rnode{}, fmt.Errorf("compose %q: an external git/raw $ref needs a `handler:` — a fetched spec is not an importable Go package, so declare handler.import + handler.convention to source its handlers", c.Ref)
 	default:
 		alias = identAlias(childRoot.Name)
 		delegateRoot = toPascalCase(childRoot.Name)
@@ -2130,7 +2127,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	gp.composed = append(gp.composed, composedCmd{prefix: prefix, delegateAlias: alias, delegateMethod: delegateRoot, passthrough: passthrough})
 
 	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough}
-	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleRoot, moduleName, seen, ctx)
+	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
 	}
@@ -2139,7 +2136,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 	// commands / new compositions (the outer, non-composed context), grafted alongside
 	// the child's own subtree. A name/alias collision across the merged set is an error.
 	if len(c.Commands) > 0 {
-		authored, err := gp.walk(c.Commands, composeRootPath, base, moduleRoot, moduleName, seen, composeCtx{})
+		authored, err := gp.walk(c.Commands, composeRootPath, base, moduleName, seen, composeCtx{})
 		if err != nil {
 			return rnode{}, err
 		}
@@ -2160,7 +2157,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleRoot, module
 // Parent overlay keys win, mirroring composeRef; any `commands:` authored next to the
 // nested `$ref` are merged additively (they resolve against the spec that holds the
 // nested ref and delegate to the same direct child, which already composed them).
-func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleRoot, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
 	locator, err := locateRef(base, c.Ref)
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
@@ -2171,12 +2168,9 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleRoot, 
 	seen[locator] = true
 	defer delete(seen, locator)
 
-	rr, err := loadRef(locator, moduleName, moduleRoot)
+	rr, err := loadRef(locator, moduleName)
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
-	}
-	if isExternalLocator(locator) {
-		return nil, fmt.Errorf("compose %q: external git/raw $ref composition is not yet supported — it needs a handler source (the W9 passthrough); use a local or mod:// $ref", c.Ref)
 	}
 	gc := rr.spec.Command
 	if gc.Name == "" {
@@ -2190,7 +2184,7 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleRoot, 
 	synth := overlayCommand(gc, c)
 	synth.Ref = ""
 	synth.Commands = gc.Commands // overlayCommand left Commands == gc's; siblings merge below
-	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleRoot, moduleName, seen, ctx)
+	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -2202,7 +2196,7 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleRoot, 
 		if parentPath != "" {
 			siblingParent = parentPath + "_" + synth.Name
 		}
-		authored, err := gp.walk(c.Commands, siblingParent, base, moduleRoot, moduleName, seen, ctx)
+		authored, err := gp.walk(c.Commands, siblingParent, base, moduleName, seen, ctx)
 		if err != nil {
 			return nil, err
 		}

@@ -109,7 +109,7 @@ func validateComposedTree(spec *Spec, specPath, version string) []error {
 		(absSpec != absRoot && !strings.HasPrefix(absSpec, absRoot+string(filepath.Separator))) {
 		return nil
 	}
-	if _, err := resolveTree(spec, specPath, root, name, version); err != nil {
+	if _, err := resolveTree(spec, specPath, name, version); err != nil {
 		return []error{&problem{kind: "spec", loc: "composition", msg: err.Error()}}
 	}
 	return nil

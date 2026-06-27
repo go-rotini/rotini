@@ -11,7 +11,8 @@ package internal
 //     module the project depends on, read from the module cache (ride go.mod/go.sum —
 //     D-W8.5; reproducibility/integrity/caching are Go's, not rotini's).
 //
-// (git:: and raw https:// land with the .rotini.lock work — D-W8.4b.)
+// External git:: and raw https:// refs are NOT supported (rotini neither fetches nor
+// pins them); loadRef rejects them.
 
 import (
 	"encoding/json"
@@ -138,9 +139,9 @@ func joinURL(base, ref string) (string, error) {
 
 // loadRef reads the spec at a locator and resolves the composition metadata.
 // consumingModule is the module the ENTRY spec belongs to (used for local refs, which
-// share the entry's module); moduleRoot is where the .rotini.lock + cache live (for
-// external git/raw refs).
-func loadRef(locator, consumingModule, moduleRoot string) (resolvedRef, error) {
+// share the entry's module). Only LOCAL and mod:// refs compose: external git/raw refs
+// are not supported (rotini neither fetches nor pins them).
+func loadRef(locator, consumingModule string) (resolvedRef, error) {
 	switch {
 	case strings.HasPrefix(locator, modScheme):
 		module, version, sub, err := parseModLocator(locator)
@@ -163,7 +164,7 @@ func loadRef(locator, consumingModule, moduleRoot string) (resolvedRef, error) {
 			childBase: modLocator(module, version, path.Dir(sub)),
 		}, nil
 	case isExternalLocator(locator):
-		return loadLockedExternal(locator, moduleRoot)
+		return resolvedRef{}, fmt.Errorf("external (git/raw) $ref composition is not supported — use a local path or a mod://<module> $ref")
 	default:
 		spec, err := readSpec(locator)
 		if err != nil {
@@ -172,45 +173,6 @@ func loadRef(locator, consumingModule, moduleRoot string) (resolvedRef, error) {
 		dir := filepath.Dir(locator)
 		return resolvedRef{spec: spec, dir: dir, module: consumingModule, childBase: dir}, nil
 	}
-}
-
-// loadLockedExternal reads an external (git/raw) spec HERMETICALLY: it must be pinned
-// in the committed .rotini.lock and present (or vendored) in the content-addressed
-// cache, and the cached bytes must hash to the locked value. Codegen never trusts a
-// live fetch or a moved tag. An unlocked ref, a cache miss, or a hash mismatch is a
-// clear, actionable error. (module/dir are empty: an external spec is not a Go package,
-// so its handlers are wired by the W9 passthrough, not an import.)
-func loadLockedExternal(locator, moduleRoot string) (resolvedRef, error) {
-	lock, err := readLockfile(moduleRoot)
-	if err != nil {
-		return resolvedRef{}, err
-	}
-	entry, ok := lock[locator]
-	if !ok {
-		return resolvedRef{}, fmt.Errorf("external $ref %q is not pinned in .rotini.lock", locator)
-	}
-	data, err := cacheRead(moduleRoot, entry.hash)
-	if err != nil {
-		return resolvedRef{}, fmt.Errorf("locked external $ref %q is not in the cache (vendor %s)", locator, cacheSubdir)
-	}
-	if got := hashBytes(data); got != entry.hash {
-		return resolvedRef{}, fmt.Errorf("external $ref %q content hash %s does not match the lock (%s) — tampered or stale cache", locator, got, entry.hash)
-	}
-	spec, err := decodeData[Spec](entry.format, data, locator)
-	if err != nil {
-		return resolvedRef{}, fmt.Errorf("decode locked %q: %w", locator, err)
-	}
-	return resolvedRef{spec: spec, childBase: externalChildBase(locator)}, nil
-}
-
-// externalChildBase is the base a locked external spec's own relative $refs resolve
-// against: for git, the spec's directory within the same repo@revision; for a raw URL,
-// the full URL (URL reference resolution handles the file→dir step).
-func externalChildBase(locator string) string {
-	if repo, rev, sub, err := parseGitLocator(locator); err == nil && strings.HasPrefix(locator, gitScheme) {
-		return gitLocator(repo, rev, path.Dir(sub))
-	}
-	return locator
 }
 
 // modLocator builds the canonical mod:// locator for a module@version + cleaned subpath.
