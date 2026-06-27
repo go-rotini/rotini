@@ -8,21 +8,13 @@
   "properties": {
     "version": {
       "type": "string",
-      "description": "The rotini schema version this conf targets (X.Y.Z). Checked against the installed rotini binary's version; a mismatch is a validation error. This — not the optional `$schema` URL — is the source of the binary-version check.",
-      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
-    },
-    "$schema": {
-      "type": "string",
-      "description": "Optional URL identifying the rotini configuration schema, for editor tooling only. The binary-version check reads the top-level `version` key, not this. Editors that prefer a local file can instead point a `# yaml-language-server: $schema=<path>` comment at the schema written via `generate.schemas.conf.path`.",
-      "pattern": "^https://raw\\.githubusercontent\\.com/go-rotini/rotini/refs/tags/[0-9]+\\.[0-9]+\\.[0-9]+/schema-conf\\.json$"
+      "description": "The rotini version used by this rotini configuration file; expects semantic version format (x.x.x). If there is a version mismatch between the rotini tooling used and the configuration file version, the rotini tooling will report this as an error.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "default": "0.0.0"
     },
     "generate": {
       "$ref": "#/definitions/GenerateConfig",
       "description": "Controls `rotini generate`: package targets and derived features. Omitted entirely → the defaults (merged single-file layout under internal/cmd/<root>, all features off)."
-    },
-    "initialize": {
-      "$ref": "#/definitions/InitializeConfig",
-      "description": "Defaults for `rotini init`. Module-root confs ONLY — rejected by validation anywhere else (the block would be silently ignored)."
     },
     "validate": {
       "$ref": "#/definitions/ValidateConfig",
@@ -30,19 +22,6 @@
     }
   },
   "definitions": {
-    "InitializeConfig": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Defaults for `rotini init`, read ONLY from the .rotini.conf.* at the module root (beside go.mod). A project without such a conf gets rotini's built-in defaults; explicit `rotini init` flags override these. Declared in any conf that is NOT at the module root, the block would be silently ignored — rotini validation rejects it there.",
-      "properties": {
-        "format": {
-          "type": "string",
-          "enum": ["yaml", "jsonc", "json", "toml"],
-          "default": "yaml",
-          "description": "Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default \"yaml\"."
-        }
-      }
-    },
     "ValidateConfig": {
       "type": "object",
       "additionalProperties": false,

@@ -4,15 +4,11 @@ package internal
 
 // Schema for a Rotini CLI configuration file.
 type Conf struct {
-	// Optional URL identifying the rotini configuration schema, for editor tooling only. The binary-version check reads the top-level `version` key, not this. Editors that prefer a local file can instead point a `# yaml-language-server: $schema=<path>` comment at the schema written via `generate.schemas.conf.path`.
-	Schema string `json:"$schema,omitempty"`
 	// Controls `rotini generate`: package targets and derived features. Omitted entirely → the defaults (merged single-file layout under internal/cmd/<root>, all features off).
 	Generate *GenerateConfig `json:"generate,omitempty"`
-	// Defaults for `rotini init`. Module-root confs ONLY — rejected by validation anywhere else (the block would be silently ignored).
-	Initialize *InitializeConfig `json:"initialize,omitempty"`
 	// Controls how `rotini validate` reports problems (collect everything vs. fail fast).
 	Validate *ValidateConfig `json:"validate,omitempty"`
-	// The rotini schema version this conf targets (X.Y.Z). Checked against the installed rotini binary's version; a mismatch is a validation error. This — not the optional `$schema` URL — is the source of the binary-version check.
+	// The rotini version used by this rotini configuration file; expects semantic version format (x.x.x). If there is a version mismatch between the rotini tooling used and the configuration file version, the rotini tooling will report this as an error.
 	Version string `json:"version"`
 }
 
@@ -50,12 +46,6 @@ type GenerateConfig struct {
 	Packages *PackagesConfig `json:"packages,omitempty"`
 	// Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so an editor `# yaml-language-server: $schema=<path>` comment can resolve them locally instead of fetching a remote URL.
 	Schemas *SchemasConfig `json:"schemas,omitempty"`
-}
-
-// Defaults for `rotini init`, read ONLY from the .rotini.conf.* at the module root (beside go.mod). A project without such a conf gets rotini's built-in defaults; explicit `rotini init` flags override these. Declared in any conf that is NOT at the module root, the block would be silently ignored — rotini validation rejects it there.
-type InitializeConfig struct {
-	// Serialization for the spec/conf files scaffolded by `rotini init` when run without an explicit --format. Default "yaml".
-	Format string `json:"format,omitempty"`
 }
 
 // One generated package target: the rotini-controlled file written into it, given as a module-root-relative path ending in '.go'. The target directory is that path's parent and the Go package name is the directory's last segment (always 'main' for the entrypoint). When 'cmd' and 'cmdgen' resolve to the same file, the framework and the handler rollup are merged into that one file; when they resolve to different directories, the rollup imports the framework. Rotini-managed files that no longer correspond to a command are pruned every pass; list package-relative paths under 'keep' to spare hand-written files.

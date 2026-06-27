@@ -75,7 +75,7 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	// present); an explicit --format overrides it. A project without that conf gets
 	// rotini's built-in default (yaml).
 	if format == "" {
-		format = moduleInitFormat(moduleRoot)
+		format = "yaml"
 	}
 	f, err := normalizeFormat(format)
 	if err != nil {
@@ -127,20 +127,6 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		return err
 	}
 	return s.generate()
-}
-
-// moduleInitFormat reads the default seed format from the `initialize` block of
-// the module-root conf (when present), falling back to rotini's built-in (yaml).
-func moduleInitFormat(moduleRoot string) string {
-	confPath, err := discoverConf(moduleRoot)
-	if err != nil {
-		return "yaml"
-	}
-	conf, err := readConf(confPath)
-	if err != nil || conf.Initialize == nil || conf.Initialize.Format == "" {
-		return "yaml"
-	}
-	return conf.Initialize.Format
 }
 
 // normalizeFormat resolves the requested format name to its fileFormat,
