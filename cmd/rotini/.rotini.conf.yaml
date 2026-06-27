@@ -1,4 +1,3 @@
-# yaml-language-server: $schema=./.rotini-schema.conf.json
 version: 0.0.0
 generate:
   schemas:
