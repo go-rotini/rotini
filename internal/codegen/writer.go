@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // This file owns writing outputs: encoded spec/conf documents and every
 // generated artifact (Go files, doc pages, completion scripts, seeds). All

@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // This file owns reading inputs: spec/conf file decoding (serialization chosen
 // from the extension, via go-rotini/fs), raw-JSON conversion for schema

@@ -4,14 +4,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/internal/codegen"
 )
 
 // TestRotiniValidate covers the validate command handler (rotini_validate.go). Validate now
 // mirrors Generate (watch + a per-pass callback), injected at the "validate" registry seam, so
 // the handler's branches — the per-pass callback's result vs. error paths and the final error —
 // are exercised with doubles (the "spec:/conf:" header always prints first). One case leaves
-// "validate" unbound so the real internal.Validate runs (integration).
+// "validate" unbound so the real codegen.Validate runs (integration).
 func TestRotiniValidate(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -31,7 +31,7 @@ func TestRotiniValidate(t *testing.T) {
 		{
 			name: "success: header and the pass summary print",
 			argv: []string{"validate"},
-			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), _ func([]error)) error {
+			binds: []svc{{"validate", codegen.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), _ func([]error)) error {
 				cb("[12:00:00] 1ms", nil)
 				return nil
 			})}},
@@ -40,7 +40,7 @@ func TestRotiniValidate(t *testing.T) {
 		{
 			name: "per-pass callback error and a final error both surface",
 			argv: []string{"validate"},
-			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), _ func([]error)) error {
+			binds: []svc{{"validate", codegen.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), _ func([]error)) error {
 				cb("[12:00:00] 1ms", nil)              // a clean pass → stdout
 				cb("", errors.New("schema violation")) // a failing pass → stderr, inline, non-terminal
 				return errors.New("validation failed")
@@ -52,7 +52,7 @@ func TestRotiniValidate(t *testing.T) {
 		{
 			name: "validator warnings route to the OnWarning funnel; the run still succeeds",
 			argv: []string{"validate"},
-			binds: []svc{{"validate", internal.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), warn func([]error)) error {
+			binds: []svc{{"validate", codegen.ValidateFn(func(_, _ string, _ bool, _ string, cb func(string, error), warn func([]error)) error {
 				warn([]error{errors.New("config_files shadow")}) // non-fatal → RecordWarning
 				cb("[12:00:00] 1ms", nil)
 				return nil

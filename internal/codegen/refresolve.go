@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // $ref resolution for spec composition (W8/D-W8.4). A command `$ref` names another
 // rotini spec to compose; this file turns that ref — relative to where the referring

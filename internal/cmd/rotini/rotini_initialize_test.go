@@ -4,14 +4,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/internal/codegen"
 )
 
 // TestRotiniInitialize covers the initialize command handler (rotini_initialize.go). The
 // missing-name guard runs before any work; the scaffold itself is injected at the
 // "initialize" registry seam so its success/failure branches are exercised with doubles.
 // One case leaves "initialize" unbound and runs outside a module so the real
-// internal.Initialize fails (integration).
+// codegen.Initialize fails (integration).
 func TestRotiniInitialize(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -36,13 +36,13 @@ func TestRotiniInitialize(t *testing.T) {
 		{
 			name:     "success is silent",
 			argv:     []string{"init", "mycli"},
-			binds:    []svc{{"initialize", internal.InitializeFn(func(_, _ string, _ bool) error { return nil })}},
+			binds:    []svc{{"initialize", codegen.InitializeFn(func(_, _ string, _ bool) error { return nil })}},
 			wantCode: 0,
 		},
 		{
 			name:    "initialize error surfaces",
 			argv:    []string{"init", "mycli"},
-			binds:   []svc{{"initialize", internal.InitializeFn(func(_, _ string, _ bool) error { return errors.New("already exists") })}},
+			binds:   []svc{{"initialize", codegen.InitializeFn(func(_, _ string, _ bool) error { return errors.New("already exists") })}},
 			wantErr: "already exists", wantCode: 1,
 		},
 		{

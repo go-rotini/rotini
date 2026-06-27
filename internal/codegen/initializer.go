@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // This file owns the `rotini initialize` operation: scaffolding a new CLI's
 // seed spec and conf under cmd/<name>/ of the current module, validating

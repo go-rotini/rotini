@@ -1,11 +1,12 @@
-package internal
+package codegen
 
 import (
-	"embed"
 	"fmt"
 	"io/fs"
 	"regexp"
 	"strings"
+
+	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
 // runtimePackageClause matches the runtime files' `package rotini` clause (a whole
@@ -44,30 +45,23 @@ func replacePackageClause(src, clause []byte) ([]byte, int) {
 	return runtimePackageClause.ReplaceAll(src, clause), n
 }
 
-// runtimeFS embeds the rotini runtime SOURCE (the internal/runtime package). On
-// `rotini generate`, these files are EMITTED into the user's generated package —
-// with their `package rotini` clause rewritten to the target package — so a built
-// CLI carries its own runtime and never imports go-rotini/rotini at run time.
-//
-//go:embed runtime/*.go
-var runtimeFS embed.FS
-
-// runtimeSourceFiles returns the emittable runtime source: every non-test .go
-// file under internal/runtime, keyed by base filename, with bytes verbatim (the
-// package-clause rewrite happens at emit time). Test files (_test.go) are
-// excluded — the runtime's own tests are not shipped into user projects.
+// runtimeSourceFiles returns the emittable runtime source: every runtime .go file
+// (from the internal/runtime package's own embedded [rotini.Source]), keyed by base
+// filename, bytes verbatim — the package-clause rewrite happens at emit time. The
+// runtime's test files and its embed.go (the self-embed support file) are excluded:
+// neither is runtime behavior, so neither is shipped into user projects.
 func runtimeSourceFiles() (map[string][]byte, error) {
 	out := map[string][]byte{}
-	entries, err := runtimeFS.ReadDir("runtime")
+	entries, err := rotini.Source.ReadDir(".")
 	if err != nil {
 		return nil, err
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || strings.HasSuffix(name, "_test.go") {
+		if e.IsDir() || strings.HasSuffix(name, "_test.go") || name == "embed.go" {
 			continue
 		}
-		b, err := fs.ReadFile(runtimeFS, "runtime/"+name)
+		b, err := fs.ReadFile(rotini.Source, name)
 		if err != nil {
 			return nil, err
 		}

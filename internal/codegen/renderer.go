@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // This file owns template parsing and rendering: every generated artifact —
 // seed spec/conf files, the main.go entrypoint, handler stubs and seeds, the

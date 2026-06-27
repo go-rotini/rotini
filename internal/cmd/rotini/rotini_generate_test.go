@@ -4,14 +4,14 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/internal/codegen"
 )
 
 // TestRotiniGenerate covers the generate command handler (rotini_generate.go). The work is
 // injected at the "generate" registry seam, so the handler's branches — including the
 // per-file callback's result vs. error paths, which are near-impossible to drive through the
 // real codegen — are exercised with doubles. One case leaves "generate" unbound so the real
-// internal.Generate runs (integration), proving the handler↔dependency wiring.
+// codegen.Generate runs (integration), proving the handler↔dependency wiring.
 func TestRotiniGenerate(t *testing.T) {
 	cases := []struct {
 		name             string
@@ -31,7 +31,7 @@ func TestRotiniGenerate(t *testing.T) {
 		{
 			name: "success: header and the per-file result print",
 			argv: []string{"generate", ".rotini.spec.yaml"},
-			binds: []svc{{"generate", internal.GenerateFn(func(_, _ string, _ bool, cb func(string, error)) error {
+			binds: []svc{{"generate", codegen.GenerateFn(func(_, _ string, _ bool, cb func(string, error)) error {
 				cb("cmd/mycli/rtg/rotini.go", nil)
 				return nil
 			})}},
@@ -40,7 +40,7 @@ func TestRotiniGenerate(t *testing.T) {
 		{
 			name: "per-file callback error and a final error both surface",
 			argv: []string{"generate", ".rotini.spec.yaml"},
-			binds: []svc{{"generate", internal.GenerateFn(func(_, _ string, _ bool, cb func(string, error)) error {
+			binds: []svc{{"generate", codegen.GenerateFn(func(_, _ string, _ bool, cb func(string, error)) error {
 				cb("cmd/mycli/rtg/rotini.go", nil) // a good file → stdout
 				cb("", errors.New("bad template")) // a per-file (watch) error → stderr, inline, non-terminal
 				return errors.New("generation failed")

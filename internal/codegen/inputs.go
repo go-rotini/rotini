@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // Inputs is the codegen/validation view of a command's typed input channels.
 // The spec schema flattens these onto the command itself (no `inputs:` wrapper —

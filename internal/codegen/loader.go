@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // This file owns loading and compiling the embedded rotini JSON Schemas, and
 // the specLoader/confLoader pairs that hold a compiled schema together with the

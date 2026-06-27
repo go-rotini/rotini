@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/internal/codegen"
 	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
@@ -38,8 +38,8 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", args.SpecFilePath, flags.ConfFilePath)
 
 	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	rtx.BindIfAbsent("generate", internal.NewProcessor(v.VersionSemantic).Generate)
-	generate := rotini.MustGet[internal.GenerateFn](rtx, "generate")
+	rtx.BindIfAbsent("generate", codegen.NewProcessor(v.VersionSemantic).Generate)
+	generate := rotini.MustGet[codegen.GenerateFn](rtx, "generate")
 
 	err := generate(
 		args.SpecFilePath,

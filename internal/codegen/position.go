@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // This file maps JSON-pointer instance locations back to line:column positions
 // in the ORIGINAL source bytes, so a validation problem can name the place the

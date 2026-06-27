@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/internal/codegen"
 	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
@@ -44,8 +44,8 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	rtx.BindIfAbsent("initialize", internal.NewProcessor(v.VersionSemantic).Initialize)
-	initialize := rotini.MustGet[internal.InitializeFn](rtx, "initialize")
+	rtx.BindIfAbsent("initialize", codegen.NewProcessor(v.VersionSemantic).Initialize)
+	initialize := rotini.MustGet[codegen.InitializeFn](rtx, "initialize")
 
 	if err := initialize(args.Name, flags.Format, flags.Force); err != nil {
 		rtx.RecordError(err)

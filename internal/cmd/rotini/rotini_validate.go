@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/internal/codegen"
 	rotini "github.com/go-rotini/rotini/internal/runtime"
 )
 
@@ -39,8 +39,8 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
 	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	rtx.BindIfAbsent("validate", internal.NewProcessor(v.VersionSemantic).Validate)
-	validate := rotini.MustGet[internal.ValidateFn](rtx, "validate")
+	rtx.BindIfAbsent("validate", codegen.NewProcessor(v.VersionSemantic).Validate)
+	validate := rotini.MustGet[codegen.ValidateFn](rtx, "validate")
 
 	err := validate(
 		args.SpecFilePath,

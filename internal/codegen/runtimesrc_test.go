@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 import (
 	"go/parser"

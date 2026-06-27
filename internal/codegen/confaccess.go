@@ -1,4 +1,4 @@
-package internal
+package codegen
 
 // Accessors over the conf's typed package/feature ARRAYS (schema-conf.json models
 // generate.packages and generate.features as discriminated lists, one entry per
