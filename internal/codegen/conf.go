@@ -5,12 +5,9 @@ package codegen
 // `type`). The generator and validator look targets up by type through these
 // helpers instead of map fields, so the discriminator lives in one place.
 //
-// Package-type vocabulary (ROTINI_REFACTOR.md): main (entrypoint) | handlers (the
-// editable stubs + rollup) | models (typed inputs/outputs) | runtime_required (the
-// always-present dispatch runtime) | runtime_optional (the include-gated services).
-// Until the runtime-emission work (Phase 4) splits them into distinct files, the
-// framework-bound types resolve to ONE merged framework file, with runtime_required
-// as the canonical locator — see frameworkPkg.
+// Package-type vocabulary: main (entrypoint) | handlers (the editable stubs +
+// rollup) | models (typed inputs/outputs) | runtime (the ENTIRE rotini runtime,
+// merged into one file as a single self-contained package — see runtimePkg).
 
 // packageOf returns the package target with the given type, or nil when absent.
 func (g *GenerateConfig) packageOf(typ string) *PackageConfig {
@@ -38,10 +35,10 @@ func (g *GenerateConfig) handlersPkg() *PackageConfig { return g.packageOf("hand
 // the RUNTIME it imports is a separate package (see runtimePkg).
 func (g *GenerateConfig) frameworkPkg() *PackageConfig { return g.packageOf("models") }
 
-// runtimePkg is the EMITTED-runtime target: the directory the rotini runtime
-// source is written into (or, for rotini's own dogfood, internal/runtime in
-// place). The framework and handlers import this package, qualified `rotini.`.
-func (g *GenerateConfig) runtimePkg() *PackageConfig { return g.packageOf("runtime_required") }
+// runtimePkg is the EMITTED-runtime target: the single 'file' the entire rotini
+// runtime is merged into (its parent directory is the runtime package). The
+// framework and handlers import this package, qualified `rotini.`.
+func (g *GenerateConfig) runtimePkg() *PackageConfig { return g.packageOf("runtime") }
 
 // featureOf returns the derived-output feature with the given type, or nil.
 func (g *GenerateConfig) featureOf(typ string) *Feature {

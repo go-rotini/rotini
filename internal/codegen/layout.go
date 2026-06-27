@@ -201,11 +201,18 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 		lay.entrypointFile = path.Base(epFile)
 	}
 
-	// The runtime is a separate emitted package the framework/handlers import.
-	// runtime_required's directory is where it lands (or, when that IS the embed
-	// source, it is imported in place and emission is skipped).
+	// The runtime is a separate emitted package the framework/handlers import: the
+	// ENTIRE runtime merges into the single 'file' (runtimeFile), under runtimeDir
+	// (its package). When that directory IS the embed source it is imported in place
+	// and emission is skipped. The merged file declares runtimePkgName.
 	if rt := conf.Generate.runtimePkg(); rt != nil && rt.File != "" {
-		lay.runtimeDir = path.Dir(filepath.ToSlash(rt.File))
+		rtFile := filepath.ToSlash(rt.File)
+		lay.runtimeDir = path.Dir(rtFile)
+		lay.runtimeFile = path.Base(rtFile)
+		lay.runtimePkgName = rt.Package
+		if lay.runtimePkgName == "" {
+			lay.runtimePkgName = goPkgName(lay.runtimeDir)
+		}
 		lay.runtimeImport = runtimeImportSpec(moduleName, lay.runtimeDir)
 		lay.skipRuntimeEmit = lay.runtimeDir == runtimeSourceDir
 	}
@@ -257,8 +264,9 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	// "internal/cmd/<root>/zz_rotini.gen.go" — handlers (rollup + stubs) and
 	// models (the framework glue + typed inputs) merge into it. The RUNTIME is a
 	// separate emitted package, defaulting to a "rotini" subpackage beside it —
-	// "internal/cmd/<root>/rotini/zz_runtime.gen.go" — which the framework imports.
-	// main gets no default (written only when the conf declares its file).
+	// "internal/cmd/<root>/rotini/zz_runtime.gen.go" — the single file the entire
+	// runtime merges into, which the framework imports. main gets no default
+	// (written only when the conf declares its file).
 	frameworkFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
 	runtimeFile := "internal/cmd/" + rootName + "/rotini/zz_runtime.gen.go"
 	for _, typ := range []string{"handlers", "models"} {
@@ -266,10 +274,7 @@ func applyConfDefaults(conf *Conf, rootName string) {
 			p.File = frameworkFile
 		}
 	}
-	if p := ensure("runtime_required"); p.File == "" {
-		p.File = runtimeFile
-	}
-	if p := g.packageOf("runtime_optional"); p != nil && p.File == "" {
+	if p := ensure("runtime"); p.File == "" {
 		p.File = runtimeFile
 	}
 

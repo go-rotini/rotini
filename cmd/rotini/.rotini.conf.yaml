@@ -15,10 +15,7 @@ generate:
     - type: models
       file: internal/cmd/rotini/zz_rotini.go
       package: rotini
-    - type: runtime_required
-      file: internal/rotini/zz_rotini.go
-      package: rotini
-    - type: runtime_optional
+    - type: runtime
       file: internal/rotini/zz_rotini.go
       package: rotini
   features:

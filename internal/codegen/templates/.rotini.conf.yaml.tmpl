@@ -15,7 +15,7 @@ generate:
     - type: models
       file: internal/cmd/{{.Package}}/zz_rotini.go
       keep: []
-    - type: runtime_required
+    - type: runtime
       file: internal/cmd/{{.Package}}/rotini/zz_runtime.go
       keep: []
   features:

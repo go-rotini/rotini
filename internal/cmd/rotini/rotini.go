@@ -16,35 +16,22 @@ type rotiniHandlers struct {
 	rotini.DefaultCascadingPostRun
 }
 
+func (*rotiniHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "rotiniHandlers CascadingPreRun")
+}
+
+func (*rotiniHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "rotiniHandlers PreRun")
+}
+
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rotini.Collect[RotiniInputs](rtx)
-	flags := inputs.Rotini.Flags
-	env := inputs.Rotini.Env
+	fmt.Fprintln(rtx.Stdout, "rotiniHandlers Run")
+}
 
-	help := HelpRotini
-	if flags.Nostyles || env.Nostyles || env.Ci {
-		help = rotini.Strip(HelpRotini)
-	}
+func (*rotiniHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "rotiniHandlers PostRun")
+}
 
-	if err != nil {
-		rtx.RecordError(err)
-		rtx.SignalExit(1)
-		return
-	}
-
-	switch {
-	case flags.Help:
-		fmt.Fprintln(rtx.Stdout, help)
-		rtx.SignalExit(0)
-		return
-	case flags.Version:
-		v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-		fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
-		rtx.SignalExit(0)
-		return
-	default:
-		fmt.Fprintln(rtx.Stdout, help)
-		rtx.SignalExit(1)
-		return
-	}
+func (*rotiniHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "rotiniHandlers CascadingPostRun")
 }

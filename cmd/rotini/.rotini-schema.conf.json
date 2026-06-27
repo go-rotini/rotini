@@ -47,7 +47,7 @@
         "packages": {
           "type": "array",
           "items": { "$ref": "#/definitions/PackageConfig" },
-          "description": "Generated code targets, one per `type` (main / handlers / models / runtime_required / runtime_optional). 'main' is the binary entrypoint (create-once). 'handlers' is the editable per-command stubs + the rollup. 'models' is the typed input/output structs. 'runtime_required' is the always-present dispatch runtime. 'runtime_optional' is the opt-in services named in its 'include'. Targets sharing a 'file' must agree on 'package' and merge into that one file (the default merged layout); distinct directories split into importable packages."
+          "description": "Generated code targets, one per `type` (main / handlers / models / runtime). 'main' is the binary entrypoint (create-once). 'handlers' is the editable per-command stubs + the rollup. 'models' is the typed input/output structs. 'runtime' is the entire rotini runtime, merged into its single 'file' as one self-contained package the framework imports. Targets sharing a 'file' must agree on 'package' and merge into that one file (the default merged layout); distinct directories split into importable packages."
         },
         "features": {
           "type": "array",
@@ -90,17 +90,17 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["type"],
-          "description": "One generated code target, discriminated by 'type'. 'file' is the module-root-relative path ending in '.go' the rotini-controlled code is written to; 'package' is the Go package name at its top; 'keep' lists package-relative paths the pruner must spare; 'include' is runtime_optional-only.",
+          "description": "One generated code target, discriminated by 'type'. 'file' is the module-root-relative path ending in '.go' the rotini-controlled code is written to; 'package' is the Go package name at its top; 'keep' lists package-relative paths the pruner must spare.",
           "properties": {
             "type": {
               "type": "string",
-              "enum": ["main", "handlers", "models", "runtime_required", "runtime_optional"],
-              "description": "Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). handlers = the editable per-command handler stubs + the rollup (handlers struct, Program, Handlers()). models = the typed per-command input/output structs (Collect[T]/Parse* targets). runtime_required = the always-present dispatch runtime (Definition, NewProgram, the lifecycle, the error taxonomy). runtime_optional = the opt-in services named in 'include' (parser/binder/suggestor/versioner/styler)."
+              "enum": ["main", "handlers", "models", "runtime"],
+              "description": "Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). handlers = the editable per-command handler stubs + the rollup (handlers struct, Program, Handlers()). models = the typed per-command input/output structs (Collect[T]/Parse* targets). runtime = the entire rotini runtime (dispatch core, lifecycle, error taxonomy, parser/binder/suggestor/versioner/styler) merged into the ONE 'file' as a single self-contained package the generated framework imports."
             },
             "file": {
               "type": "string",
               "pattern": "^[^/\\\\].*\\.go$",
-              "description": "Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. The framework categories (handlers/models/runtime_required/runtime_optional) default to 'internal/cmd/<root-command>/zz_rotini.gen.go'; main has no default and is only written when 'file' is set."
+              "description": "Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. The framework categories (handlers/models/runtime) default to 'internal/cmd/<root-command>/zz_rotini.gen.go'; main has no default and is only written when 'file' is set. The runtime is written ENTIRELY into its single 'file' (one package, all of it merged into that one file)."
             },
             "package": {
               "type": "string",
@@ -114,15 +114,6 @@
                 "pattern": "^[^/\\\\].*$"
               },
               "description": "Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. The editable per-feature templates and test files are always kept automatically. Intended to stay empty in steady state."
-            },
-            "include": {
-              "type": "array",
-              "uniqueItems": true,
-              "items": {
-                "type": "string",
-                "enum": ["parser", "binder", "suggestor", "versioner", "styler"]
-              },
-              "description": "runtime_optional ONLY: the opt-in runtime services to GENERATE. Empty/absent generates none (Pillar 1). rotini emits each named service; you wire its Program.Bind() yourself (there is no auto-bind — some services take constructor args, e.g. a build-time version). The enum is the current set and is expected to grow."
             }
           }
         },
@@ -130,11 +121,6 @@
           "$comment": "type:main pins the Go package to 'main'.",
           "if": { "required": ["type"], "properties": { "type": { "const": "main" } } },
           "then": { "properties": { "package": { "const": "main" } } }
-        },
-        {
-          "$comment": "include is valid only on runtime_optional; forbidden on every other type.",
-          "if": { "not": { "required": ["type"], "properties": { "type": { "const": "runtime_optional" } } } },
-          "then": { "properties": { "include": false } }
         }
       ]
     },

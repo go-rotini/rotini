@@ -106,15 +106,17 @@ type layout struct {
 	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
 
 	runtimeImport   string // pre-rendered runtime import spec line, e.g. `rotini "…/internal/runtime"` or `"…/rotini"` (identifier always `rotini`)
-	runtimeDir      string // module-relative dir the emitted runtime source is written into (slash path)
+	runtimeDir      string // module-relative dir the emitted runtime is written into (slash path) — its package directory
+	runtimeFile     string // basename of the single file the ENTIRE runtime merges into, e.g. "zz_runtime.gen.go"
+	runtimePkgName  string // Go package name written atop the merged runtime file, e.g. "rotini"
 	skipRuntimeEmit bool   // true when runtimeDir IS rotini's own embed source (internal/runtime) — import in place, write nothing
 
 	combined bool // same package AND same file → framework+rollup merged into one file
 }
 
 // runtimeSourceDir is the module-relative directory holding the runtime embed
-// source. A conf pointing runtime_required here (rotini's own dogfood) imports
-// it in place; emission is skipped.
+// source. A conf pointing the runtime target here imports it in place; emission
+// is skipped (rotini's embed source is its own runtime).
 const runtimeSourceDir = "internal/runtime"
 
 // runtimeImportSpec renders the Go import line for the emitted runtime package at
@@ -153,10 +155,9 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		return err
 	}
 
-	// Emit the rotini runtime SOURCE into the conf's runtime package (so the built
-	// CLI carries its own runtime and never imports go-rotini/rotini). Skipped for
-	// rotini's own dogfood, which points runtime_required at the embed source and
-	// imports it in place.
+	// Emit the rotini runtime into the conf's single runtime file (so the built CLI
+	// carries its own runtime and never imports go-rotini/rotini). Skipped only when
+	// the runtime target points at the embed source, which is imported in place.
 	var runtimeKeep []string
 	if rt := conf.Generate.runtimePkg(); rt != nil {
 		runtimeKeep = rt.Keep
@@ -456,30 +457,29 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 	return nil
 }
 
-// writeEmittedRuntime writes the rotini runtime source into the conf's runtime
-// package directory (lay.runtimeDir), each file's `package rotini` clause rewritten
-// to the runtime package, then prunes any stale .go left from a previous emit (so a
-// runtime that loses a file does not leave an orphan behind). It is a no-op when
-// lay.skipRuntimeEmit is set — rotini's own dogfood points runtime_required at the
-// embed source (internal/runtime) and imports it in place rather than emitting a copy.
-// runtimeKeep spares package-relative paths from pruning; the dir is otherwise fully
-// rotini-managed (test files are always kept by pruneGoDir).
+// writeEmittedRuntime merges the ENTIRE rotini runtime into the conf's single
+// runtime 'file' (lay.runtimeDir/lay.runtimeFile) as one self-contained package
+// (lay.runtimePkgName), then prunes any other .go in that directory — so a previous
+// per-file emit or a stale layout leaves no orphan behind, and the runtime is exactly
+// one generated file. It is a no-op when lay.skipRuntimeEmit is set — rotini's own
+// dogfood may point runtime at the embed source (internal/runtime) and import it in
+// place rather than emitting a copy. runtimeKeep spares package-relative paths from
+// pruning; the dir is otherwise fully rotini-managed (test files are always kept by
+// pruneGoDir).
 func writeEmittedRuntime(lay layout, moduleRoot string, runtimeKeep []string) error {
 	if lay.skipRuntimeEmit || lay.runtimeDir == "" {
 		return nil
 	}
-	files, err := emitRuntime("rotini")
+	merged, err := mergeRuntime(lay.runtimePkgName)
 	if err != nil {
 		return err
 	}
 	dir := filepath.Join(moduleRoot, filepath.FromSlash(lay.runtimeDir))
-	protected := make(map[string]bool, len(files)+len(runtimeKeep))
-	for name, content := range files {
-		if err := writeGeneratedFile(filepath.Join(dir, name), content); err != nil {
-			return err
-		}
-		protected[name] = true
+	if err := writeGeneratedFile(filepath.Join(dir, lay.runtimeFile), merged); err != nil {
+		return err
 	}
+	protected := make(map[string]bool, len(runtimeKeep)+1)
+	protected[lay.runtimeFile] = true
 	for _, k := range runtimeKeep {
 		protected[filepath.Base(filepath.ToSlash(k))] = true
 	}

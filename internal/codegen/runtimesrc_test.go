@@ -1,54 +1,50 @@
 package codegen
 
 import (
+	"bytes"
 	"go/parser"
 	"go/token"
 	"testing"
 )
 
-func TestEmitRuntime_rewritesPackageClause(t *testing.T) {
+// TestMergeRuntime_singlePackage proves the runtime merges into ONE valid Go file
+// under the requested package — not a directory of per-file copies.
+func TestMergeRuntime_singlePackage(t *testing.T) {
 	const pkg = "acme"
-	files, err := emitRuntime(pkg)
+	merged, err := mergeRuntime(pkg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(files) == 0 {
-		t.Fatal("emitRuntime returned no files")
+	if len(merged) == 0 {
+		t.Fatal("mergeRuntime returned empty output")
 	}
-	// Sentinel runtime files must be present (and no test files).
-	for _, must := range []string{"program.go", "context.go", "parser.go", "binder.go"} {
-		if _, ok := files[must]; !ok {
-			t.Errorf("emitted set missing %s", must)
-		}
-	}
+
 	fset := token.NewFileSet()
-	for name, b := range files {
-		if got := len(name); got >= 8 && name[got-8:] == "_test.go" {
-			t.Errorf("test file leaked into emitted runtime: %s", name)
-		}
-		f, err := parser.ParseFile(fset, name, b, parser.PackageClauseOnly)
-		if err != nil {
-			t.Fatalf("emitted %s does not parse: %v", name, err)
-		}
-		if f.Name.Name != pkg {
-			t.Errorf("emitted %s has package %q, want %q", name, f.Name.Name, pkg)
+	f, err := parser.ParseFile(fset, "runtime.go", merged, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("merged runtime does not parse as a single file: %v", err)
+	}
+	if f.Name.Name != pkg {
+		t.Errorf("merged package = %q, want %q", f.Name.Name, pkg)
+	}
+
+	// Core + service identifiers from across the formerly-separate files must all
+	// survive in the one merged file.
+	for _, want := range []string{"NewProgram", "func NewParser", "func NewBinder", "func NewSuggestor", "func NewVersioner", "type Context"} {
+		if !bytes.Contains(merged, []byte(want)) {
+			t.Errorf("merged runtime missing %q", want)
 		}
 	}
 }
 
-func TestEmitRuntime_identityForRotini(t *testing.T) {
-	// pkgName "rotini" must be a faithful no-op against the source bytes.
-	src, err := runtimeSourceFiles()
+// TestMergeRuntime_noTestContent proves the runtime's test files do not leak into the
+// merged output (runtimeSourceFiles excludes them).
+func TestMergeRuntime_noTestContent(t *testing.T) {
+	merged, err := mergeRuntime("rotini")
 	if err != nil {
 		t.Fatal(err)
 	}
-	emitted, err := emitRuntime("rotini")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, b := range src {
-		if string(emitted[name]) != string(b) {
-			t.Errorf("emitRuntime(\"rotini\") changed %s; want byte-identical to source", name)
-		}
+	if bytes.Contains(merged, []byte("func Test")) {
+		t.Error("a _test.go function leaked into the merged runtime")
 	}
 }

@@ -4,13 +4,12 @@
 // everything beyond dispatch is an explicit, opt-in service.
 //
 // This package is the runtime SOURCE. It is not imported from go-rotini/rotini at
-// run time: `rotini generate` EMITS this source into your project as its own local
-// package (the conf's runtime_required target), which the generated framework and
-// your handlers import — so a built CLI carries its own runtime with no go-rotini/
+// run time: `rotini generate` merges this source into your project's conf-declared
+// runtime 'file' as one self-contained local package, which the generated framework
+// and your handlers import — so a built CLI carries its own runtime with no go-rotini/
 // rotini run-time dependency. The symbols below ([Program], [Context], [Collect],
 // the [Handlers] hooks, …) are exactly what a handler author uses, qualified
-// `rotini.`, against that emitted package. (rotini's own dogfood imports this
-// package in place rather than emitting a copy of itself.)
+// `rotini.`, against that emitted package.
 //
 // The package rests on four pillars, and this tour reads in their order:
 // declare → generate → run → opt in. The companion CLI (cmd/rotini, built
