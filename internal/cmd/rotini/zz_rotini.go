@@ -22,10 +22,6 @@ func (*handlers) Rotini() rotini.Handlers {
 	return &rotiniHandlers{}
 }
 
-func (*handlers) RotiniCompletion() rotini.Handlers {
-	return &rotiniCompletionHandlers{}
-}
-
 func (*handlers) RotiniGenerate() rotini.Handlers {
 	return &rotiniGenerateHandlers{}
 }
@@ -48,7 +44,6 @@ func (*handlers) RotiniVersion() rotini.Handlers {
 
 type ProgramHandlers interface {
 	Rotini() rotini.Handlers
-	RotiniCompletion() rotini.Handlers
 	RotiniGenerate() rotini.Handlers
 	RotiniHelp() rotini.Handlers
 	RotiniInitialize() rotini.Handlers
@@ -122,16 +117,6 @@ var definition = rotini.Definition{
 				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 			},
 		},
-		{Name: "completion",
-			Handler: "RotiniCompletion",
-			Summary: "print a shell completion script",
-			Flags: []rotini.FlagDef{
-				{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
-			},
-			Arguments: []rotini.ArgDef{
-				{Name: "shell", Type: "string", Required: true, Enum: []string{"bash", "zsh", "fish", "powershell"}},
-			},
-		},
 	},
 }
 
@@ -156,24 +141,6 @@ type RotiniCommandInputs struct {
 
 type RotiniInputs struct {
 	Rotini RotiniCommandInputs
-}
-
-type RotiniCompletionFlags struct {
-	Help bool `rotini:"help"`
-}
-
-type RotiniCompletionArguments struct {
-	Shell string `rotini:"shell"`
-}
-
-type RotiniCompletionCommandInputs struct {
-	Flags     RotiniCompletionFlags
-	Arguments RotiniCompletionArguments
-}
-
-type RotiniCompletionInputs struct {
-	Rotini           RotiniCommandInputs
-	RotiniCompletion RotiniCompletionCommandInputs
 }
 
 type RotiniGenerateFlags struct {
@@ -286,7 +253,7 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 		Bind(rotini.KeyBindMeta, BindMeta)
 }
 
-var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize;init    scaffold a cli program\n  generate;gen       generate a cli program\n  validate;val       validate a spec file\n  help               print help\n  version            print version\n  completion         print a shell completion script\n\nFlags:\n  --no-styles     disable output styles\n  -v,--version    print version\n  -h,--help       print help\n\nEnvironment:\n  ROTINI_NO_STYLES    disable output styles\n  CI                  is cli environment\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize;init    scaffold a cli program\n  generate;gen       generate a cli program\n  validate;val       validate a spec file\n  help               print help\n  version            print version\n\nFlags:\n  --no-styles     disable output styles\n  -v,--version    print version\n  -h,--help       print help\n\nEnvironment:\n  ROTINI_NO_STYLES    disable output styles\n  CI                  is cli environment\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniInitialize = "Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, empty handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize [name] [flags]\n\nArguments:\n  [name]    the root command name written to the created spec file (expected binary name)\n\nFlags:\n  --format string    the created rotini spec file format (defaults to the module conf's initialize.format, else yaml) [yaml|json|jsonc|toml]\n  --force            force re-initialization if files exist that init would overwrite\n  -h,--help          print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n\nUse \"rotini help <command>\" for more information about a command."
 
@@ -297,8 +264,6 @@ var HelpRotiniValidate = "Validate a rotini spec file for correctness.\n\nUsage:
 var HelpRotiniHelp = "Print help for a specific command.\n\nUsage:\n  rotini help [command...] [flags]\n\nArguments:\n  [command...]    name of the command to print help for\n\nFlags:\n  -h,--help    print help\n\nExamples:\n  rotini help\n  rotini help generate\n  rotini help init\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniVersion = "Print the rotini cli version.\n\nUsage:\n  rotini version [flags]\n\nFlags:\n  -h,--help    print help\n\nExamples:\n  rotini version\n\nUse \"rotini help <command>\" for more information about a command."
-
-var HelpRotiniCompletion = "Print the completion script for a shell; load it with your shell's source/eval idiom.\n\nUsage:\n  rotini completion <shell> [flags]\n\nArguments:\n  <shell>    the target shell [bash|zsh|fish|powershell]\n\nFlags:\n  -h,--help    print help\n\nExamples:\n  rotini completion zsh\n  source <(rotini completion bash)\n\nUse \"rotini help <command>\" for more information about a command."
 
 // Help returns the generated help text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
@@ -317,8 +282,6 @@ func Help(path ...string) (string, error) {
 		return HelpRotiniHelp, nil
 	case "version":
 		return HelpRotiniVersion, nil
-	case "completion":
-		return HelpRotiniCompletion, nil
 	default:
 		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
 	}
