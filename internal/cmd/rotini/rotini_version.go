@@ -19,7 +19,7 @@ type rotiniVersionHandlers struct {
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniVersionInputs](rtx)
 	if err != nil {
-		rtx.RecordError(err)
+		fmt.Fprintln(rtx.Stderr, err)
 		rtx.SignalExit(1)
 		return
 	}
