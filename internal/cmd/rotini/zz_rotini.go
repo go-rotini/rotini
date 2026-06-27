@@ -8,40 +8,6 @@ import (
 	"github.com/go-rotini/rotini/internal/rotini"
 )
 
-type handlers struct{}
-
-var _ ProgramHandlers = (*handlers)(nil)
-
-var Program = NewProgram(&handlers{})
-
-func Handlers() ProgramHandlers {
-	return &handlers{}
-}
-
-func (*handlers) Rotini() rotini.Handlers {
-	return &rotiniHandlers{}
-}
-
-func (*handlers) RotiniGenerate() rotini.Handlers {
-	return &rotiniGenerateHandlers{}
-}
-
-func (*handlers) RotiniHelp() rotini.Handlers {
-	return &rotiniHelpHandlers{}
-}
-
-func (*handlers) RotiniInitialize() rotini.Handlers {
-	return &rotiniInitializeHandlers{}
-}
-
-func (*handlers) RotiniValidate() rotini.Handlers {
-	return &rotiniValidateHandlers{}
-}
-
-func (*handlers) RotiniVersion() rotini.Handlers {
-	return &rotiniVersionHandlers{}
-}
-
 type ProgramHandlers interface {
 	Rotini() rotini.Handlers
 	RotiniGenerate() rotini.Handlers
@@ -251,6 +217,44 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 	// (rotini.ParseEnv, rotini.ParseFiles, …) need only the Context.
 	return rotini.NewProgram(definition, handlers).
 		Bind(rotini.KeyBindMeta, BindMeta)
+}
+
+// handlers is the generated ProgramHandlers implementation: each method wires a
+// command to its handler (an own command's local handler type, or a composed
+// command's delegated package). Program is the ready-to-run program; Handlers()
+// returns a fresh value (e.g. for tests).
+type handlers struct{}
+
+var _ ProgramHandlers = (*handlers)(nil)
+
+var Program = NewProgram(&handlers{})
+
+func Handlers() ProgramHandlers {
+	return &handlers{}
+}
+
+func (*handlers) Rotini() rotini.Handlers {
+	return &rotiniHandlers{}
+}
+
+func (*handlers) RotiniGenerate() rotini.Handlers {
+	return &rotiniGenerateHandlers{}
+}
+
+func (*handlers) RotiniHelp() rotini.Handlers {
+	return &rotiniHelpHandlers{}
+}
+
+func (*handlers) RotiniInitialize() rotini.Handlers {
+	return &rotiniInitializeHandlers{}
+}
+
+func (*handlers) RotiniValidate() rotini.Handlers {
+	return &rotiniValidateHandlers{}
+}
+
+func (*handlers) RotiniVersion() rotini.Handlers {
+	return &rotiniVersionHandlers{}
 }
 
 var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize;init    scaffold a cli program\n  generate;gen       generate a cli program\n  validate;val       validate a spec file\n  help               print help\n  version            print version\n\nFlags:\n  --no-styles     disable output styles\n  -v,--version    print version\n  -h,--help       print help\n\nEnvironment:\n  ROTINI_NO_STYLES    disable output styles\n  CI                  is cli environment\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."

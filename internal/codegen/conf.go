@@ -25,14 +25,12 @@ func (g *GenerateConfig) packageOf(typ string) *PackageConfig {
 // mainPkg is the binary entrypoint target (nil when no main.go is written).
 func (g *GenerateConfig) mainPkg() *PackageConfig { return g.packageOf("main") }
 
-// handlersPkg is the handler-logic target: the per-command stubs and the rollup.
-func (g *GenerateConfig) handlersPkg() *PackageConfig { return g.packageOf("handlers") }
-
-// frameworkPkg is the generated-framework target: the per-CLI glue the
-// rotini.go template emits — the definition literal, the typed NewProgram
-// wrapper, BindMeta, ProgramHandlers, the input structs, and feature embeds.
-// This is the `models` category (the framework rides with the typed inputs);
-// the RUNTIME it imports is a separate package (see runtimePkg).
+// frameworkPkg is the single cli-package target (`models`): the directory holding
+// the editable handler stubs AND the one generated file — the framework glue the
+// rotini.go template emits (the definition literal, the typed NewProgram wrapper,
+// BindMeta, ProgramHandlers, the input structs, feature embeds) PLUS the rollup
+// (handlers struct + Program + command→handler wiring), all in one package. The
+// RUNTIME it imports is the only separate package (see runtimePkg).
 func (g *GenerateConfig) frameworkPkg() *PackageConfig { return g.packageOf("models") }
 
 // runtimePkg is the EMITTED-runtime target: the single 'file' the entire rotini

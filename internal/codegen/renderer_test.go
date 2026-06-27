@@ -26,31 +26,18 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 	}
 }
 
-func TestSmokeRenderHandlersFile(t *testing.T) {
-	out, err := renderHandlersFile(templateHandlersData{
-		Package:         "cli",
-		RuntimeImport:   `rotini "example.com/app/internal/cmd/app/rotini"`,
-		FrameworkImport: "example.com/app/internal/cmd/app/cligen",
-		FrameworkQual:   "cligen.",
-		ChildImports:    []templateHandlersImport{{Alias: "childcli", Path: "example.com/child/cli"}},
-		Methods: []templateHandlersMethod{
-			{Method: "App", HandlerType: "appHandlers"},
-			{Method: "AppChild", Composed: true, DelegateAlias: "childcli", DelegateMethod: "Child"},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("handlers:\n%s", out)
-}
-
 func TestSmokeRenderRotiniFile(t *testing.T) {
 	out, err := renderRotiniFile(templateRotiniData{
 		Package:       "cligen",
 		RuntimeImport: `rotini "github.com/go-rotini/rotini/internal/runtime"`,
 		Imports:       []string{`"time"`},
+		ChildImports:  []templateHandlersImport{{Alias: "childcli", Path: "example.com/child/cli"}},
 		Methods:       []string{"App", "AppGenerate"},
-		Definition:    "var definition = rotini.Definition{}",
+		RollupMethods: []templateHandlersMethod{
+			{Method: "App", HandlerType: "appHandlers"},
+			{Method: "AppChild", Composed: true, DelegateAlias: "childcli", DelegateMethod: "Child"},
+		},
+		Definition: "var definition = rotini.Definition{}",
 		Blocks: []templateInputBlock{
 			{
 				Prefix: "App",
@@ -90,8 +77,16 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(out), "\"time\"\n\n\trotini \"github.com/go-rotini/rotini/internal/runtime\"") {
+	if !strings.Contains(string(out), "\"time\"\n\n\tchildcli \"example.com/child/cli\"") {
 		t.Error("imports should be grouped std then third-party")
+	}
+	// The rollup is folded into the cli file: the handlers struct + its per-command
+	// wiring (own commands return a local stub; composed commands delegate).
+	if !strings.Contains(string(out), "return &appHandlers{}") {
+		t.Error("rollup wiring for an own command is missing from the generated cli file")
+	}
+	if !strings.Contains(string(out), "childcli.Handlers().Child()") {
+		t.Error("rollup wiring for a composed command is missing from the generated cli file")
 	}
 	t.Logf("rotini:\n%s", out)
 }
@@ -262,16 +257,6 @@ func TestSplitGoFile_parseError(t *testing.T) {
 func TestGroupImports_parseError(t *testing.T) {
 	if _, err := groupImports([]byte("not go")); err == nil {
 		t.Error("groupImports(invalid) = nil, want a parse error")
-	}
-}
-
-func TestMergeGenFile_parseErrors(t *testing.T) {
-	good := []byte("package x\n\nvar A = 1\n")
-	if _, err := mergeGenFile("x", []byte("not go"), good); err == nil {
-		t.Error("mergeGenFile(bad rollup) = nil, want a parse error")
-	}
-	if _, err := mergeGenFile("x", good, []byte("not go")); err == nil {
-		t.Error("mergeGenFile(bad framework) = nil, want a parse error")
 	}
 }
 

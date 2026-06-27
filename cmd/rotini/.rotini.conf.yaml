@@ -9,9 +9,6 @@ generate:
     - type: main
       file: cmd/rotini/main.go
       package: main
-    - type: handlers
-      file: internal/cmd/rotini/zz_rotini.go
-      package: rotini
     - type: models
       file: internal/cmd/rotini/zz_rotini.go
       package: rotini

@@ -5,6 +5,9 @@ import (
 {{- range .Imports}}
 	{{.}}
 {{- end}}
+{{- range .ChildImports}}
+	{{.Alias}} "{{.Path}}"
+{{- end}}
 {{- if .EmbedImport}}
 	_ "embed"
 {{- end}}
@@ -96,6 +99,32 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 	return rotini.NewProgram(definition, handlers).
 		Bind(rotini.KeyBindMeta, BindMeta)
 }
+
+// handlers is the generated ProgramHandlers implementation: each method wires a
+// command to its handler (an own command's local handler type, or a composed
+// command's delegated package). Program is the ready-to-run program; Handlers()
+// returns a fresh value (e.g. for tests).
+type handlers struct{}
+
+var _ ProgramHandlers = (*handlers)(nil)
+
+var Program = NewProgram(&handlers{})
+
+func Handlers() ProgramHandlers {
+	return &handlers{}
+}
+{{- range .RollupMethods}}
+
+func (*handlers) {{.Method}}() rotini.Handlers {
+{{- if .Passthrough}}
+	return {{.DelegateAlias}}.{{.DelegateMethod}}()
+{{- else if .Composed}}
+	return {{.DelegateAlias}}.Handlers().{{.DelegateMethod}}()
+{{- else}}
+	return &{{.HandlerType}}{}
+{{- end}}
+}
+{{- end}}
 {{range .Features}}
 {{range .Vars}}
 {{- if .Embed}}

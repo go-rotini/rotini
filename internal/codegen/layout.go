@@ -14,20 +14,17 @@ import (
 // Layout resolution, output pruning, and the naming / import-path helpers that
 // place generated code and keep regeneration idempotent.
 
-// pruneStubs removes handler .go files that no longer correspond to an own
-// command, preserving the rollup file, the keep list, and any test files. The
-// cmd package is flat, so keepList entries (package-relative) are just file names
-// for its top-level stubs. When cmd and cmdgen share a package (two-files-one-
-// package layout), the framework file also lives here, so it is protected too —
-// otherwise it would be pruned as an orphan (and likewise the entrypoint main.go
-// when the entrypoint shares the cmd package).
+// pruneStubs removes handler .go files in the cli package that no longer correspond
+// to an own command, preserving the generated cli file, the keep list, and any test
+// files. The cli package is flat, so keepList entries (package-relative) are just file
+// names for its top-level stubs. When the entrypoint shares the cli package, its
+// create-once main.go is protected too (otherwise it would be pruned as an orphan).
 func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	protected := map[string]bool{
-		gp.root.filename:  true,
-		lay.rollupFile:    true,
-		lay.frameworkFile: true,
+		gp.root.filename: true,
+		lay.cliFile:      true,
 	}
-	if lay.entrypointDir == lay.handlerDir && lay.entrypointFile != "" {
+	if lay.entrypointDir == lay.cliDir && lay.entrypointFile != "" {
 		protected[lay.entrypointFile] = true
 	}
 	for _, c := range gp.own {
@@ -36,24 +33,19 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
-	return pruneGoDir(lay.handlerDir, protected)
+	return pruneGoDir(lay.cliDir, protected)
 }
 
 // pruneEntrypoint removes orphaned .go files in the entrypoint directory, so a
 // `keep` list on the main package is honored (the main.go itself is create-once
 // and always protected; test files are kept automatically). It is a no-op when no
-// entrypoint is declared, or when the entrypoint shares the cmd package directory —
-// pruneStubs already covers that dir (and is passed the merged keep list). When
-// the entrypoint shares the cmdgen package directory the framework file is
-// protected too, so co-locating main.go with the framework is safe.
+// entrypoint is declared, or when the entrypoint shares the cli package directory —
+// pruneStubs already covers that dir (and is passed the merged keep list).
 func pruneEntrypoint(lay layout, keepList []string) error {
-	if lay.entrypointDir == "" || lay.entrypointDir == lay.handlerDir {
+	if lay.entrypointDir == "" || lay.entrypointDir == lay.cliDir {
 		return nil
 	}
 	protected := map[string]bool{lay.entrypointFile: true}
-	if lay.entrypointDir == lay.frameworkDir {
-		protected[lay.frameworkFile] = true
-	}
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
@@ -132,7 +124,7 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 			}
 			// keep entries are package-relative (to the cmdgen package).
 			rel := name
-			if r, err := filepath.Rel(lay.frameworkDir, filepath.Join(o.absEmbedDir, name)); err == nil {
+			if r, err := filepath.Rel(lay.cliDir, filepath.Join(o.absEmbedDir, name)); err == nil {
 				rel = filepath.ToSlash(r)
 			}
 			if keep[rel] {
@@ -146,53 +138,29 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 	return nil
 }
 
-// resolveLayout turns the (defaulted) conf package settings into absolute
-// output directories, package names, the framework import path, and the
-// same-package/combined flags. cmd and cmdgen may name the same package (refs
-// become unqualified) and even the same file (framework + rollup are merged).
-// The entrypoint is optional — its layout fields are "" when undeclared.
+// resolveLayout turns the (defaulted) conf package settings into absolute output
+// directories, package names, and import paths. The cli package is the single
+// `models` target — its directory holds the editable handler stubs and the one
+// generated file (framework + rollup merged, unqualified). The entrypoint and
+// runtime are optional/separate — their layout fields are set below.
 func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
-	cmd := conf.Generate.handlersPkg()
-	cmdgen := conf.Generate.frameworkPkg()
+	cli := conf.Generate.frameworkPkg() // the single cli/models target
 
-	cmdFile := filepath.ToSlash(cmd.File)
-	cmdgenFile := filepath.ToSlash(cmdgen.File)
-	cmdPkgDir := path.Dir(cmdFile)
-	cmdgenPkgDir := path.Dir(cmdgenFile)
-	samePackage := cmdPkgDir == cmdgenPkgDir
-	combined := cmdFile == cmdgenFile
+	cliFile := filepath.ToSlash(cli.File)
+	cliPkgDir := path.Dir(cliFile)
 
 	// The Go package name is the explicit conf `package` when set, else derived
 	// from the target directory's last segment.
-	handlerPkgName := goPkgName(cmdPkgDir)
-	if cmd.Package != "" {
-		handlerPkgName = cmd.Package
-	}
-	frameworkPkgName := goPkgName(cmdgenPkgDir)
-	if cmdgen.Package != "" {
-		frameworkPkgName = cmdgen.Package
-	}
-
-	frameworkImport := ""
-	frameworkQual := ""
-	if !samePackage {
-		frameworkImport = moduleName + "/" + cmdgenPkgDir
-		frameworkQual = frameworkPkgName + "."
+	cliPkgName := goPkgName(cliPkgDir)
+	if cli.Package != "" {
+		cliPkgName = cli.Package
 	}
 
 	lay := layout{
-		frameworkDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdgenPkgDir)),
-		frameworkPkgName: frameworkPkgName,
-		frameworkFile:    path.Base(cmdgenFile),
-		frameworkImport:  frameworkImport,
-		frameworkQual:    frameworkQual,
-
-		handlerDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
-		handlerPkgName: handlerPkgName,
-		handlerImport:  moduleName + "/" + cmdPkgDir,
-		rollupFile:     path.Base(cmdFile),
-
-		combined: combined,
+		cliDir:     filepath.Join(moduleRoot, filepath.FromSlash(cliPkgDir)),
+		cliPkgName: cliPkgName,
+		cliFile:    path.Base(cliFile),
+		cliImport:  moduleName + "/" + cliPkgDir,
 	}
 
 	if ep := conf.Generate.mainPkg(); ep != nil && ep.File != "" {
@@ -237,12 +205,12 @@ func goPkgName(dir string) string {
 }
 
 // applyConfDefaults fills in the sane rotini conf defaults for any unset
-// generation settings, so a missing or partial conf still generates. The
-// default is one self-contained module-internal package: both cmd and cmdgen
-// point at the same file "internal/cmd/<root>/zz_rotini.gen.go" (so framework +
-// rollup merge into a single file). The entrypoint gets no default — main.go is
-// only written when the conf declares a main.file. rootName is the spec's root
-// command name (e.g. "rotini"), used to build the default file path.
+// generation settings, so a missing or partial conf still generates. The default
+// cli package is "internal/cmd/<root>/" with its generated file at
+// "internal/cmd/<root>/zz_rotini.gen.go" (the `models` target — framework + rollup
+// + typed inputs in one file), and the runtime in a "rotini" subpackage beside it.
+// The entrypoint gets no default — main.go is only written when the conf declares a
+// main.file. rootName is the spec's root command name, used to build the paths.
 func applyConfDefaults(conf *Conf, rootName string) {
 	if conf.Generate == nil {
 		conf.Generate = &GenerateConfig{}
@@ -269,10 +237,8 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	// (written only when the conf declares its file).
 	frameworkFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
 	runtimeFile := "internal/cmd/" + rootName + "/rotini/zz_runtime.gen.go"
-	for _, typ := range []string{"handlers", "models"} {
-		if p := ensure(typ); p.File == "" {
-			p.File = frameworkFile
-		}
+	if p := ensure("models"); p.File == "" {
+		p.File = frameworkFile
 	}
 	if p := ensure("runtime"); p.File == "" {
 		p.File = runtimeFile

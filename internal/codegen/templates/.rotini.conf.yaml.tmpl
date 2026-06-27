@@ -9,9 +9,6 @@ generate:
     - type: main
       file: cmd/{{.Package}}/main.go
       keep: []
-    - type: handlers
-      file: internal/cmd/{{.Package}}/zz_rotini.go
-      keep: []
     - type: models
       file: internal/cmd/{{.Package}}/zz_rotini.go
       keep: []

@@ -78,29 +78,18 @@ type genCommand struct {
 }
 
 // layout holds the resolved package locations and import paths for a single
-// generation pass. The cmd (handler) package and the cmdgen (framework) package
-// may be the same package — even the same file — or two distinct packages:
-//
-//   - distinct packages (split): the rollup in the cmd package imports the
-//     cmdgen package and refers to it qualified (cmdgen.ProgramHandlers);
-//   - same package, distinct files: framework and rollup are two files in one
-//     package, with unqualified references;
-//   - same package and file (combined): framework and rollup are merged into a
-//     single file, with unqualified references.
-//
-// The entrypoint package is optional: when the conf declares one, generate
-// writes the binary's main.go there (create-once, never overwritten).
+// generation pass. The cli package (the conf's single `models` target) holds the
+// editable handler stubs AND the one generated file — the framework (Definition,
+// NewProgram, ProgramHandlers, the typed inputs) and the rollup (the handlers
+// struct + Program + the command→handler wiring) merged into it, all referencing
+// each other unqualified since they share the package. The runtime is the only
+// separate, imported package. The entrypoint package is optional: when the conf
+// declares one, generate writes the binary's main.go there (create-once).
 type layout struct {
-	frameworkDir     string // absolute output dir for the framework (cmdgen) file
-	frameworkPkgName string // cmdgen package name, e.g. "mycli" or "cmdgen"
-	frameworkFile    string // framework file name, e.g. "zz_rotini.gen.go"
-	frameworkImport  string // cmdgen import path; "" when cmd and cmdgen share a package
-	frameworkQual    string // qualifier for the rollup's framework refs, e.g. "cmdgen."; "" when same package
-
-	handlerDir     string // absolute output dir for stubs + rollup (cmd package)
-	handlerPkgName string // cmd package name, e.g. "mycli"
-	handlerImport  string // cmd package import path (the entrypoint's Program import)
-	rollupFile     string // rollup file name, e.g. "zz_rotini.gen.go"
+	cliDir     string // absolute output dir for the cli package (editable stubs + the generated file)
+	cliPkgName string // cli package name, e.g. "mycli"
+	cliFile    string // basename of the single generated file (framework + rollup), e.g. "zz_rotini.gen.go"
+	cliImport  string // cli package import path (the entrypoint's Program import)
 
 	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
 	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
@@ -110,8 +99,6 @@ type layout struct {
 	runtimeFile     string // basename of the single file the ENTIRE runtime merges into, e.g. "zz_runtime.gen.go"
 	runtimePkgName  string // Go package name written atop the merged runtime file, e.g. "rotini"
 	skipRuntimeEmit bool   // true when runtimeDir IS rotini's own embed source (internal/runtime) — import in place, write nothing
-
-	combined bool // same package AND same file → framework+rollup merged into one file
 }
 
 // runtimeSourceDir is the module-relative directory holding the runtime embed
@@ -191,7 +178,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		// unconstrained; template_dir is never embedded, so it always is.
 		embedRel := ""
 		if f.cfg.Embed {
-			rel, err := filepath.Rel(lay.frameworkDir, absEmbedDir)
+			rel, err := filepath.Rel(lay.cliDir, absEmbedDir)
 			if err != nil {
 				return fmt.Errorf("feature %s embed_dir %q is not under the cmdgen package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
@@ -216,33 +203,16 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		outputs = append(outputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
 	}
 
-	// Render the framework (cmdgen) and the handler rollup (cmd). When cmd and
-	// cmdgen resolve to the same package AND file, the two are merged into a single
-	// file (rollup body first, then framework body); otherwise they are written to
-	// their own files (two files in one package, or two packages).
-	fwContent, err := renderFrameworkFile(gp, lay, frameworks)
+	// Render the one cli file — the framework (Definition, NewProgram,
+	// ProgramHandlers, the typed inputs) and the rollup (the handlers struct +
+	// Program + command→handler wiring) together, all unqualified since they share
+	// the cli package — and write it beside the editable handler stubs.
+	cliContent, err := renderCliFile(gp, lay, frameworks)
 	if err != nil {
 		return err
 	}
-	rollupContent, err := renderHandlerRollup(gp, lay)
-	if err != nil {
+	if err := writeGeneratedFile(filepath.Join(lay.cliDir, lay.cliFile), cliContent); err != nil {
 		return err
-	}
-	if lay.combined {
-		merged, err := mergeGenFile(lay.handlerPkgName, rollupContent, fwContent)
-		if err != nil {
-			return err
-		}
-		if err := writeGeneratedFile(filepath.Join(lay.handlerDir, lay.rollupFile), merged); err != nil {
-			return err
-		}
-	} else {
-		if err := writeGeneratedFile(filepath.Join(lay.frameworkDir, lay.frameworkFile), fwContent); err != nil {
-			return err
-		}
-		if err := writeGeneratedFile(filepath.Join(lay.handlerDir, lay.rollupFile), rollupContent); err != nil {
-			return err
-		}
 	}
 
 	for _, o := range outputs {
@@ -270,8 +240,8 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	if m := conf.Generate.mainPkg(); m != nil {
 		mainKeep = m.Keep
 	}
-	cmdKeep := conf.Generate.handlersPkg().Keep
-	if lay.entrypointDir != "" && lay.entrypointDir == lay.handlerDir {
+	cmdKeep := conf.Generate.frameworkPkg().Keep
+	if lay.entrypointDir != "" && lay.entrypointDir == lay.cliDir {
 		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
 	}
 	if err := pruneStubs(gp, lay, cmdKeep); err != nil {
@@ -360,11 +330,13 @@ func enabledFeatures(conf *Conf) []confFeature {
 	return out
 }
 
-// renderFrameworkFile renders the framework file: the ProgramHandlers aggregate
-// interface plus the typed input structs for every command. The caller writes it
-// (to its own file, or merged with the rollup when cli and cligen are combined).
-// It is fully generated and carries a DO NOT EDIT banner.
-func renderFrameworkFile(gp *genProgram, lay layout, features []templateFeature) ([]byte, error) {
+// renderCliFile renders the single generated cli file: the framework (the
+// ProgramHandlers aggregate interface, the typed input structs, the Definition,
+// NewProgram, BindMeta) AND the rollup (the handlers struct, Program, Handlers(),
+// and the per-command handler wiring) — one package, all unqualified. It is fully
+// generated and carries a DO NOT EDIT banner; the editable handler stubs are
+// separate create-once files in the same package.
+func renderCliFile(gp *genProgram, lay layout, features []templateFeature) ([]byte, error) {
 	own := gp.ownCommands()
 
 	blocks := make([]templateInputBlock, 0, len(own))
@@ -392,16 +364,18 @@ func renderFrameworkFile(gp *genProgram, lay layout, features []templateFeature)
 		}
 	}
 
-	outputTypes, err := buildOutputTypes(gp, lay.frameworkPkgName)
+	outputTypes, err := buildOutputTypes(gp, lay.cliPkgName)
 	if err != nil {
 		return nil, err
 	}
 
 	return renderRotiniFile(templateRotiniData{
-		Package:       lay.frameworkPkgName,
+		Package:       lay.cliPkgName,
 		RuntimeImport: lay.runtimeImport,
 		Imports:       renderImports(imports),
+		ChildImports:  gp.childImports,
 		Methods:       gp.methods(),
+		RollupMethods: rollupMethods(gp),
 		Definition:    renderDefinition(gp),
 		Blocks:        blocks,
 		OutputTypes:   outputTypes,
@@ -440,13 +414,13 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 		if c.passthrough {
 			continue // inline-passthrough: the package owns the handler, no stub seeded
 		}
-		path := filepath.Join(lay.handlerDir, c.filename)
+		path := filepath.Join(lay.cliDir, c.filename)
 		if _, err := os.Stat(path); err == nil {
 			continue
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		content, err := renderHandlerStubFile(lay.handlerPkgName, c.handler, lay.runtimeImport)
+		content, err := renderHandlerStubFile(lay.cliPkgName, c.handler, lay.runtimeImport)
 		if err != nil {
 			return err
 		}
@@ -503,21 +477,18 @@ func writeEntrypoint(lay layout, extension string) error {
 	}
 	// The generated package is imported aliased as "cmd" so the reference never
 	// collides with the rotini runtime package (also named "rotini").
-	content, err := renderMainFile(lay.handlerImport, "cmd", extension)
+	content, err := renderMainFile(lay.cliImport, "cmd", extension)
 	if err != nil {
 		return err
 	}
 	return writeGeneratedFile(path, content)
 }
 
-// renderHandlerRollup renders the handler rollup: the unexported handlers
-// struct, the ProgramHandlers assertion, the Program var, the Handlers accessor,
-// and one method per command — own commands return a local stub, composed
-// commands delegate to the child's cli package. References to the framework
-// (ProgramHandlers, NewProgram) are unqualified when cli and cligen share a
-// package, else qualified with the cligen package name. The caller writes it (to
-// its own file, or merged with the framework when combined).
-func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
+// rollupMethods builds the rollup's per-command wiring (one method each, sorted):
+// own commands return a local handler stub, composed commands delegate to the
+// child's cli package. renderCliFile folds these into the generated file's handlers
+// struct — unqualified, since the rollup shares the cli package with the framework.
+func rollupMethods(gp *genProgram) []templateHandlersMethod {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
@@ -543,13 +514,5 @@ func renderHandlerRollup(gp *genProgram, lay layout) ([]byte, error) {
 		})
 	}
 	sort.Slice(methods, func(i, j int) bool { return methods[i].Method < methods[j].Method })
-
-	return renderHandlersFile(templateHandlersData{
-		Package:         lay.handlerPkgName,
-		RuntimeImport:   lay.runtimeImport,
-		FrameworkImport: lay.frameworkImport, // "" when cmd and cmdgen share a package
-		FrameworkQual:   lay.frameworkQual,   // e.g. "cmdgen."; "" when same package
-		ChildImports:    gp.childImports,
-		Methods:         methods,
-	})
+	return methods
 }
