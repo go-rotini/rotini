@@ -204,10 +204,6 @@ type RotiniVersionInputs struct {
 	RotiniVersion RotiniVersionCommandInputs
 }
 
-type RotiniVersionOutput struct {
-	Version string `json:"version,omitempty"`
-}
-
 // BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.
 var BindMeta = rotini.BindMeta{}
 
