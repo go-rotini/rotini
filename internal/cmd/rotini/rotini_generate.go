@@ -37,8 +37,8 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", args.SpecFilePath, flags.ConfFilePath)
 
-	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	rtx.BindIfAbsent("generate", codegen.NewProcessor(v.VersionSemantic).Generate)
+	version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+	rtx.BindIfAbsent("generate", codegen.NewProcessor(version).Generate)
 	generate := rotini.MustGet[codegen.GenerateFn](rtx, "generate")
 
 	err := generate(

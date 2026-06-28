@@ -43,8 +43,8 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	rtx.BindIfAbsent("initialize", codegen.NewProcessor(v.VersionSemantic).Initialize)
+	version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+	rtx.BindIfAbsent("initialize", codegen.NewProcessor(version).Initialize)
 	initialize := rotini.MustGet[codegen.InitializeFn](rtx, "initialize")
 
 	if err := initialize(args.Name, flags.Format, flags.Force); err != nil {

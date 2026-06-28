@@ -38,8 +38,8 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
-	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	rtx.BindIfAbsent("validate", codegen.NewProcessor(v.VersionSemantic).Validate)
+	version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+	rtx.BindIfAbsent("validate", codegen.NewProcessor(version).Validate)
 	validate := rotini.MustGet[codegen.ValidateFn](rtx, "validate")
 
 	err := validate(

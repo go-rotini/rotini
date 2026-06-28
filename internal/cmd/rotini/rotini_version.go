@@ -31,7 +31,7 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
+	version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+	fmt.Fprintf(rtx.Stdout, "v%s\n", version)
 	rtx.SignalExit(0)
 }

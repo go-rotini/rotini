@@ -3,8 +3,19 @@ package rotini
 import (
 	"context"
 	"fmt"
+	"regexp"
+	"runtime/debug"
 
 	"github.com/go-rotini/rotini/internal/rotini"
+)
+
+const (
+	KeyRotiniVersion = "versioner"
+)
+
+var (
+	readBuildInfo     = debug.ReadBuildInfo
+	semanticVersionRe = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)`)
 )
 
 var _ rotini.Handlers = (*rotiniHandlers)(nil)
@@ -14,6 +25,19 @@ type rotiniHandlers struct {
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
+}
+
+func RotiniVersion(ldflagVersion string) string {
+	version := ldflagVersion
+	if info, ok := readBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+
+	if match := semanticVersionRe.FindStringSubmatch(version); match != nil {
+		version = match[1]
+	}
+
+	return version
 }
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
@@ -39,8 +63,8 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(0)
 		return
 	case flags.Version:
-		v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-		fmt.Fprintf(rtx.Stdout, "v%s\n", v.VersionSemantic)
+		version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+		fmt.Fprintf(rtx.Stdout, "v%s\n", version)
 		rtx.SignalExit(0)
 		return
 	default:
