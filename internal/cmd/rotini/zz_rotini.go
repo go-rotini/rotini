@@ -290,28 +290,3 @@ func Help(path ...string) (string, error) {
 		return "", fmt.Errorf("no help for command %q", strings.Join(path, " "))
 	}
 }
-
-var CompletionBash = "# bash completion for rotini\n# Candidates arrive as \"name<TAB>description\"; bash cannot render descriptions,\n# so everything from the first tab is stripped.\n_rotini_complete() {\n    local args line IFS=$'\\n'\n    args=(\"${COMP_WORDS[@]:1:$COMP_CWORD}\")\n    COMPREPLY=()\n    for line in $(rotini __complete \"${args[@]}\" 2>/dev/null); do\n        COMPREPLY+=(\"${line%%$'\\t'*}\")\n    done\n}\ncomplete -o default -F _rotini_complete rotini\n"
-
-var CompletionZsh = "#compdef rotini\n# Candidates arrive as \"name<TAB>description\"; zsh renders the description\n# beside the name via _describe (colons in either part are escaped).\n_rotini() {\n    local -a lines pairs\n    local line name desc\n    lines=(${(f)\"$(rotini __complete ${words[2,$CURRENT]} 2>/dev/null)\"})\n    for line in $lines; do\n        if [[ $line == *$'\\t'* ]]; then\n            name=${line%%$'\\t'*}\n            desc=${line#*$'\\t'}\n            pairs+=(\"${name//:/\\\\:}:${desc//:/\\\\:}\")\n        else\n            pairs+=(\"${line//:/\\\\:}\")\n        fi\n    done\n    _describe 'rotini' pairs\n}\ncompdef _rotini rotini\n"
-
-var CompletionFish = "# fish completion for rotini\nfunction __rotini_complete\n    set -l tokens (commandline -opc) (commandline -ct)\n    rotini __complete $tokens[2..-1] 2>/dev/null\nend\n\nfunction __rotini_has_results\n    set -g __rotini_results (__rotini_complete)\n    test (count $__rotini_results) -gt 0\nend\n\n# Offer the binary's candidates when it has any; otherwise fall back to fish's\n# file completion (the binary returns nothing for path-valued flags and\n# arguments, exactly so the shell takes over). Candidates arrive as\n# \"name<TAB>description\" — fish renders that shape natively.\ncomplete -c rotini -f -n '__rotini_has_results' -a '$__rotini_results'\ncomplete -c rotini -F -n 'not __rotini_has_results'\n"
-
-var CompletionPowershell = "# PowerShell completion for rotini\nRegister-ArgumentCompleter -Native -CommandName rotini -ScriptBlock {\n    param($wordToComplete, $commandAst, $cursorPosition)\n    $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })\n    if ($wordToComplete -eq '') { $tokens += '' }\n    rotini __complete @tokens 2>$null | ForEach-Object {\n        # Candidates arrive as \"name<TAB>description\"; the description becomes\n        # the CompletionResult tooltip.\n        $parts = $_ -split \"`t\", 2\n        $text = $parts[0]\n        $tip = if ($parts.Count -gt 1 -and $parts[1]) { $parts[1] } else { $text }\n        [System.Management.Automation.CompletionResult]::new($text, $text, 'ParameterValue', $tip)\n    }\n}\n"
-
-// Completion returns the embedded completion script for shell, or an error when
-// shell is not one rotini generated a script for.
-func Completion(shell string) (string, error) {
-	switch shell {
-	case "bash":
-		return CompletionBash, nil
-	case "zsh":
-		return CompletionZsh, nil
-	case "fish":
-		return CompletionFish, nil
-	case "powershell":
-		return CompletionPowershell, nil
-	default:
-		return "", fmt.Errorf("no completion for shell %q", shell)
-	}
-}

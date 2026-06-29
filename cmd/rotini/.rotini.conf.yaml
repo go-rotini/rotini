@@ -24,7 +24,7 @@ generate:
       template: false
       template_dir: internal/cmd/rotini/templates
     - type: completion
-      enabled: true
+      enabled: false
       embed: false
       embed_dir: internal/cmd/rotini/renders
       template: false
