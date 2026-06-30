@@ -36,6 +36,18 @@ func (g *GenerateConfig) mainPkg() *PackageConfig { return g.packageOf(typeMain)
 // separate package (see runtimePkg).
 func (g *GenerateConfig) cmdPkg() *PackageConfig { return g.packageOf(typeCmd) }
 
+// cmdTarget is cmdPkg for callers that run AFTER applyConfDefaults, where the cmd
+// target is guaranteed present (the defaults ensure it). It panics if absent — a
+// programming error (defaults not applied), made explicit rather than a latent
+// nil-deref downstream. Pre-default readers (the lint rules, child-conf probes) keep
+// using the nilable cmdPkg.
+func (g *GenerateConfig) cmdTarget() *PackageConfig {
+	if p := g.cmdPkg(); p != nil {
+		return p
+	}
+	panic("codegen: cmd package target missing — applyConfDefaults must run before resolveLayout/emit")
+}
+
 // runtimePkg is the EMITTED-runtime target: the single 'file' the entire rotini
 // runtime is merged into (its parent directory is the runtime package). The cmd
 // package imports it, qualified `rotini.`.

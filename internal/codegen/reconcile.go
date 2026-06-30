@@ -31,10 +31,31 @@ type reconciledConf struct {
 	locate sourceLocator // JSON-pointer → source line:col (nil when no file / no positions)
 }
 
+// reconcileDoc is the shared read tail: it reads + decodes the document at resolved into
+// *T, plus its canonical-JSON instance (for schema validation) and a source locator.
+// reconcileSpec and reconcileConf differ only in the decoded type and their
+// required-vs-optional path handling; this is everything they have in common. (bytesToJSON
+// already labels its error "convert <format> to json", so the wrap here only adds the path.)
+func reconcileDoc[T any](resolved string) (doc *T, instance []byte, locate sourceLocator, err error) {
+	format, data, err := readRaw(resolved)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	doc, err = decodeData[T](format, data, resolved)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	instance, err = bytesToJSON(format, data)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%s: %w", resolved, err)
+	}
+	return doc, instance, newSourceLocator(format, data), nil
+}
+
 // reconcileSpec reads + decodes the end-user spec at path (or the first .rotini.spec.* in
 // the working directory when path is ""). The spec is REQUIRED: with no path and none
 // discovered it returns errSpecPathRequired.
-func (p *Processor) reconcileSpec(path string) (*reconciledSpec, error) {
+func reconcileSpec(path string) (*reconciledSpec, error) {
 	resolved, err := resolveSpecPath(path)
 	if err != nil {
 		return nil, err
@@ -42,25 +63,17 @@ func (p *Processor) reconcileSpec(path string) (*reconciledSpec, error) {
 	if resolved == "" {
 		return nil, errSpecPathRequired
 	}
-	format, data, err := readRaw(resolved)
+	spec, instance, locate, err := reconcileDoc[Spec](resolved)
 	if err != nil {
 		return nil, err
 	}
-	spec, err := decodeData[Spec](format, data, resolved)
-	if err != nil {
-		return nil, err
-	}
-	instance, err := bytesToJSON(format, data)
-	if err != nil {
-		return nil, fmt.Errorf("convert %s to json: %w", resolved, err)
-	}
-	return &reconciledSpec{path: resolved, spec: spec, json: instance, locate: newSourceLocator(format, data)}, nil
+	return &reconciledSpec{path: resolved, spec: spec, json: instance, locate: locate}, nil
 }
 
 // reconcileConf reads + decodes the end-user conf beside the spec (or at confPath). The
 // conf is OPTIONAL: no path given and none discovered — or a resolved path that does not
 // exist — yields the DEFAULT &Conf{} with an empty path.
-func (p *Processor) reconcileConf(specPath, confPath string) (*reconciledConf, error) {
+func reconcileConf(specPath, confPath string) (*reconciledConf, error) {
 	rc := &reconciledConf{conf: &Conf{}}
 
 	resolved := resolveConfBesideSpec(specPath, confPath)
@@ -74,18 +87,10 @@ func (p *Processor) reconcileConf(specPath, confPath string) (*reconciledConf, e
 		return nil, fmt.Errorf("stat conf %s: %w", resolved, statErr)
 	}
 
-	format, data, err := readRaw(resolved)
+	conf, instance, locate, err := reconcileDoc[Conf](resolved)
 	if err != nil {
 		return nil, err
 	}
-	conf, err := decodeData[Conf](format, data, resolved)
-	if err != nil {
-		return nil, err
-	}
-	instance, err := bytesToJSON(format, data)
-	if err != nil {
-		return nil, fmt.Errorf("convert %s to json: %w", resolved, err)
-	}
-	rc.path, rc.conf, rc.json, rc.locate = resolved, conf, instance, newSourceLocator(format, data)
+	rc.path, rc.conf, rc.json, rc.locate = resolved, conf, instance, locate
 	return rc, nil
 }

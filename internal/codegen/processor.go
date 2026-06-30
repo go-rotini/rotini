@@ -96,11 +96,11 @@ func (p *Processor) Initialize(name, format string, force bool) error {
 // on a missing one), the conf is OPTIONAL (reconcileConf yields the default shape when
 // absent). The conf is resolved beside the (now-known) spec path.
 func (p *Processor) reconcile(specPath, confPath string) (*reconciledSpec, *reconciledConf, error) {
-	rs, err := p.reconcileSpec(specPath)
+	rs, err := reconcileSpec(specPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	rc, err := p.reconcileConf(rs.path, confPath)
+	rc, err := reconcileConf(rs.path, confPath)
 	if err != nil {
 		return nil, nil, err
 	}

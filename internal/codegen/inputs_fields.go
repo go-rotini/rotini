@@ -88,41 +88,48 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 // enforce, or "" when none are set. Mirrors the FlagDef/ArgDef constraints A1 enforces
 // for argv, but carried on the env/config field itself since channels have no Definition.
 func constraintTags(schema *InputSchema) string {
-	if schema == nil {
-		return ""
-	}
 	var parts []string
-	if schema.Minimum != nil {
-		parts = append(parts, `min:"`+strconv.FormatFloat(*schema.Minimum, 'g', -1, 64)+`"`)
-	}
-	if schema.Maximum != nil {
-		parts = append(parts, `max:"`+strconv.FormatFloat(*schema.Maximum, 'g', -1, 64)+`"`)
-	}
-	if schema.ExclusiveMinimum != nil {
-		parts = append(parts, `xmin:"`+strconv.FormatFloat(*schema.ExclusiveMinimum, 'g', -1, 64)+`"`)
-	}
-	if schema.ExclusiveMaximum != nil {
-		parts = append(parts, `xmax:"`+strconv.FormatFloat(*schema.ExclusiveMaximum, 'g', -1, 64)+`"`)
-	}
-	if schema.MultipleOf != nil {
-		parts = append(parts, `multipleof:"`+strconv.FormatFloat(*schema.MultipleOf, 'g', -1, 64)+`"`)
-	}
-	if schema.MinLength != 0 {
-		parts = append(parts, `minlen:"`+strconv.Itoa(schema.MinLength)+`"`)
-	}
-	if schema.MaxLength != 0 {
-		parts = append(parts, `maxlen:"`+strconv.Itoa(schema.MaxLength)+`"`)
-	}
-	if schema.MinItems != 0 {
-		parts = append(parts, `minitems:"`+strconv.Itoa(schema.MinItems)+`"`)
-	}
-	if schema.MaxItems != 0 {
-		parts = append(parts, `maxitems:"`+strconv.Itoa(schema.MaxItems)+`"`)
-	}
-	if schema.Pattern != "" {
-		parts = append(parts, `pattern:"`+schema.Pattern+`"`)
-	}
+	eachConstraint(schema, func(tag, _, tagVal, _ string) {
+		parts = append(parts, tag+`:"`+tagVal+`"`)
+	})
 	return strings.Join(parts, " ")
+}
+
+// eachConstraint visits every present validation constraint on schema in a stable
+// order, passing its struct-tag name, its rotini.Constraints field name, and the value
+// rendered two ways: tagVal for a struct tag, litVal for a Go literal. It is the single
+// enumeration both constraintTags (binder struct tags) and constraintsLiteral (the
+// Definition's Constraints{} literal) drive, so the two cannot drift in set or order.
+func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal string)) {
+	if schema == nil {
+		return
+	}
+	floatC := func(tag, field string, p *float64) {
+		if p == nil {
+			return
+		}
+		s := strconv.FormatFloat(*p, 'g', -1, 64)
+		visit(tag, field, s, rotiniPkgName+".Ptr[float64]("+s+")")
+	}
+	intC := func(tag, field string, n int) {
+		if n == 0 {
+			return
+		}
+		s := strconv.Itoa(n)
+		visit(tag, field, s, s)
+	}
+	floatC("min", "Minimum", schema.Minimum)
+	floatC("max", "Maximum", schema.Maximum)
+	floatC("xmin", "ExclusiveMinimum", schema.ExclusiveMinimum)
+	floatC("xmax", "ExclusiveMaximum", schema.ExclusiveMaximum)
+	floatC("multipleof", "MultipleOf", schema.MultipleOf)
+	intC("minlen", "MinLength", schema.MinLength)
+	intC("maxlen", "MaxLength", schema.MaxLength)
+	intC("minitems", "MinItems", schema.MinItems)
+	intC("maxitems", "MaxItems", schema.MaxItems)
+	if schema.Pattern != "" {
+		visit("pattern", "Pattern", schema.Pattern, strconv.Quote(schema.Pattern))
+	}
 }
 
 // envVarOf returns an env input's explicit environment variable (schema.variable),

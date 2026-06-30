@@ -109,7 +109,7 @@ func emit(spec *Spec, conf *Conf, specPath string) error {
 				return fmt.Errorf("feature %s embed_dir %q is not under the cmd package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
 			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.cmdPkg().File)))
+				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.cmdTarget().File)))
 			}
 			embedRel = filepath.ToSlash(rel)
 		}
@@ -166,14 +166,14 @@ func emit(spec *Spec, conf *Conf, specPath string) error {
 	if m := conf.Generate.mainPkg(); m != nil {
 		mainKeep = m.Keep
 	}
-	cmdKeep := conf.Generate.cmdPkg().Keep
+	cmdKeep := conf.Generate.cmdTarget().Keep
 	if lay.entrypointDir != "" && lay.entrypointDir == lay.cmdDir {
 		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
 	}
 	if err := pruneStubs(gp, lay, cmdKeep); err != nil {
 		return err
 	}
-	if err := pruneFeatureOutputs(lay, conf.Generate.cmdPkg().Keep, outputs); err != nil {
+	if err := pruneFeatureOutputs(lay, conf.Generate.cmdTarget().Keep, outputs); err != nil {
 		return err
 	}
 	if err := pruneEntrypoint(lay, mainKeep); err != nil {

@@ -16,23 +16,23 @@ import (
 // generated file (framework + rollup merged, unqualified). The entrypoint and
 // runtime are optional/separate — their layout fields are set below.
 func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
-	cli := conf.Generate.cmdPkg() // the single cli (`cmd`) target
+	cmd := conf.Generate.cmdTarget() // the single cmd target (post-default)
 
-	cmdFile := filepath.ToSlash(cli.File)
-	cliPkgDir := path.Dir(cmdFile)
+	cmdFile := filepath.ToSlash(cmd.File)
+	cmdPkgDir := path.Dir(cmdFile)
 
 	// The Go package name is the explicit conf `package` when set, else derived
 	// from the target directory's last segment.
-	cmdPkgName := goPkgName(cliPkgDir)
-	if cli.Package != "" {
-		cmdPkgName = cli.Package
+	cmdPkgName := goPkgName(cmdPkgDir)
+	if cmd.Package != "" {
+		cmdPkgName = cmd.Package
 	}
 
 	lay := layout{
-		cmdDir:     filepath.Join(moduleRoot, filepath.FromSlash(cliPkgDir)),
+		cmdDir:     filepath.Join(moduleRoot, filepath.FromSlash(cmdPkgDir)),
 		cmdPkgName: cmdPkgName,
 		cmdFile:    path.Base(cmdFile),
-		cmdImport:  moduleName + "/" + cliPkgDir,
+		cmdImport:  moduleName + "/" + cmdPkgDir,
 	}
 
 	if ep := conf.Generate.mainPkg(); ep != nil && ep.File != "" {
@@ -122,7 +122,7 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	// the editable TEMPLATE to "<framework-package>/templates". Co-located features
 	// cannot collide: each carries a feature-unique suffix/prefix (see docFeature)
 	// and pruning is scoped to them.
-	frameworkDir := path.Dir(filepath.ToSlash(g.cmdPkg().File))
+	frameworkDir := path.Dir(filepath.ToSlash(g.cmdTarget().File))
 	for i := range g.Features {
 		f := &g.Features[i]
 		if f.EmbedDir == "" {

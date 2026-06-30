@@ -8,9 +8,9 @@ import (
 	"time"
 )
 
-// Rendering a spec command into Go: the typed input field derivation
-// (flag/arg/env/config fields from the input schema) and the Definition / BindMeta
-// / *Def Go-literal builders the framework file embeds.
+// Go-literal SOURCE emission: the Definition / BindMeta / *Def builders the generated
+// framework file embeds. The typed-input field derivation that feeds these (and the
+// shared eachConstraint enumerator) lives in inputs_fields.go.
 
 // literal fields an Inputs contributes to a Definition or CommandDef literal,
 // omitting any that render empty. Shared by renderDefinition (the root) and
@@ -364,42 +364,10 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 // an undeclared one emits nothing. Length/count bounds keep the zero-sentinel
 // convention.
 func constraintsLiteral(schema *InputSchema) string {
-	// The explicit type parameter matters: Ptr(1) would infer *int and the
-	// generated literal would not compile against the *float64 field.
-	ptr := func(f float64) string {
-		return rotiniPkgName + ".Ptr[float64](" + strconv.FormatFloat(f, 'g', -1, 64) + ")"
-	}
 	var parts []string
-	if schema.Minimum != nil {
-		parts = append(parts, "Minimum: "+ptr(*schema.Minimum))
-	}
-	if schema.Maximum != nil {
-		parts = append(parts, "Maximum: "+ptr(*schema.Maximum))
-	}
-	if schema.ExclusiveMinimum != nil {
-		parts = append(parts, "ExclusiveMinimum: "+ptr(*schema.ExclusiveMinimum))
-	}
-	if schema.ExclusiveMaximum != nil {
-		parts = append(parts, "ExclusiveMaximum: "+ptr(*schema.ExclusiveMaximum))
-	}
-	if schema.MultipleOf != nil {
-		parts = append(parts, "MultipleOf: "+ptr(*schema.MultipleOf))
-	}
-	if schema.MinLength != 0 {
-		parts = append(parts, "MinLength: "+strconv.Itoa(schema.MinLength))
-	}
-	if schema.MaxLength != 0 {
-		parts = append(parts, "MaxLength: "+strconv.Itoa(schema.MaxLength))
-	}
-	if schema.MinItems != 0 {
-		parts = append(parts, "MinItems: "+strconv.Itoa(schema.MinItems))
-	}
-	if schema.MaxItems != 0 {
-		parts = append(parts, "MaxItems: "+strconv.Itoa(schema.MaxItems))
-	}
-	if schema.Pattern != "" {
-		parts = append(parts, "Pattern: "+strconv.Quote(schema.Pattern))
-	}
+	eachConstraint(schema, func(_, field, _, litVal string) {
+		parts = append(parts, field+": "+litVal)
+	})
 	if len(parts) == 0 {
 		return ""
 	}
