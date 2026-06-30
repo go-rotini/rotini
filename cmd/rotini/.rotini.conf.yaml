@@ -3,9 +3,9 @@ version: 0.0.0
 generate:
   schemas:
     spec:
-      path: cmd/rotini/.rotini-schema.spec.json
+      file: cmd/rotini/.rotini-schema.spec.json
     conf:
-      path: cmd/rotini/.rotini-schema.conf.json
+      file: cmd/rotini/.rotini-schema.conf.json
   packages:
     - type: main
       file: cmd/rotini/main.go

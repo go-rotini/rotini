@@ -267,16 +267,16 @@ func writeSchemas(conf *Conf, moduleRoot string) error {
 		return nil
 	}
 	write := func(label string, sc *SchemaConfig, content []byte) error {
-		if sc == nil || sc.Path == "" {
+		if sc == nil || sc.File == "" {
 			return nil
 		}
-		rel := filepath.FromSlash(sc.Path)
+		rel := filepath.FromSlash(sc.File)
 		if filepath.IsAbs(rel) {
-			return fmt.Errorf("generate.schemas.%s.path %q must be module-root-relative, not absolute", label, sc.Path)
+			return fmt.Errorf("generate.schemas.%s.path %q must be module-root-relative, not absolute", label, sc.File)
 		}
 		abs := filepath.Join(moduleRoot, rel)
 		if r, err := filepath.Rel(moduleRoot, abs); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("generate.schemas.%s.path %q must resolve under the module root", label, sc.Path)
+			return fmt.Errorf("generate.schemas.%s.path %q must resolve under the module root", label, sc.File)
 		}
 		return writeGeneratedFile(abs, content)
 	}

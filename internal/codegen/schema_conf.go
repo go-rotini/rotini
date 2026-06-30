@@ -51,8 +51,8 @@ type PackageConfig struct {
 
 // A single schema write target: the project-relative path the embedded JSON Schema is written to.
 type SchemaConfig struct {
-	// Module-root-relative path (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a `# yaml-language-server: $schema=<path>` comment at it for local IDE syntax highlighting.
-	Path string `json:"path"`
+	// Module-root-relative path file (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a `# yaml-language-server: $schema=<path>` comment at it for local IDE syntax highlighting.
+	File string `json:"file"`
 }
 
 // Where to write rotini's embedded JSON Schemas into this project. Each entry is opt-in: declare 'conf' and/or 'spec' with a 'path' to have `rotini generate` write that schema there (overwriting it from the embedded bytes each pass). The files are not pruned. Intended target for a local editor `# yaml-language-server: $schema=<path>` reference.

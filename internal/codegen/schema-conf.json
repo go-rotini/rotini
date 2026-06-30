@@ -74,13 +74,13 @@
     "SchemaConfig": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["path"],
+      "required": ["file"],
       "description": "A single schema write target: the project-relative path the embedded JSON Schema is written to.",
       "properties": {
-        "path": {
+        "file": {
           "type": "string",
           "pattern": "^[^/\\\\].*\\.json$",
-          "description": "Module-root-relative path (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a `# yaml-language-server: $schema=<path>` comment at it for local IDE syntax highlighting."
+          "description": "Module-root-relative path file (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a `# yaml-language-server: $schema=<path>` comment at it for local IDE syntax highlighting."
         }
       }
     },
