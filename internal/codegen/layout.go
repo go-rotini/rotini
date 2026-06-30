@@ -1,145 +1,17 @@
 package codegen
 
 import (
-	"fmt"
-	"os"
 	"path"
 	"path/filepath"
-	"sort"
-	"strconv"
 	"strings"
 	"unicode"
 )
 
-// Layout resolution, output pruning, and the naming / import-path helpers that
-// place generated code and keep regeneration idempotent.
-
-// pruneStubs removes handler .go files in the cli package that no longer correspond
-// to an own command, preserving the generated cli file, the keep list, and any test
-// files. The cli package is flat, so keepList entries (package-relative) are just file
-// names for its top-level stubs. When the entrypoint shares the cli package, its
-// create-once main.go is protected too (otherwise it would be pruned as an orphan).
-func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
-	protected := map[string]bool{
-		gp.root.filename: true,
-		lay.cmdFile:      true,
-	}
-	if lay.entrypointDir == lay.cmdDir && lay.entrypointFile != "" {
-		protected[lay.entrypointFile] = true
-	}
-	for _, c := range gp.own {
-		protected[c.filename] = true
-	}
-	for _, k := range keepList {
-		protected[filepath.ToSlash(k)] = true
-	}
-	return pruneGoDir(lay.cmdDir, protected)
-}
-
-// pruneEntrypoint removes orphaned .go files in the entrypoint directory, so a
-// `keep` list on the main package is honored (the main.go itself is create-once
-// and always protected; test files are kept automatically). It is a no-op when no
-// entrypoint is declared, or when the entrypoint shares the cli package directory —
-// pruneStubs already covers that dir (and is passed the merged keep list).
-func pruneEntrypoint(lay layout, keepList []string) error {
-	if lay.entrypointDir == "" || lay.entrypointDir == lay.cmdDir {
-		return nil
-	}
-	protected := map[string]bool{lay.entrypointFile: true}
-	for _, k := range keepList {
-		protected[filepath.ToSlash(k)] = true
-	}
-	return pruneGoDir(lay.entrypointDir, protected)
-}
-
-// pruneGoDir removes every non-test .go file in dir whose base name is not in the
-// protected set. Sub-directories and *_test.go files are never touched.
-func pruneGoDir(dir string, protected map[string]bool) error {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return fmt.Errorf("read dir %s: %w", dir, err)
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		if protected[name] {
-			continue
-		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil {
-			return fmt.Errorf("prune %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
-// pruneCligen removes orphaned rotini-managed outputs in each enabled feature's
-// dir (under the cli package) — the per-command pages for commands no longer
-// in the spec. Only files matching the feature's unique suffix AND prefix are
-// candidates, so features sharing one embed dir never prune each other's files.
-// The editable per-feature template, test files, and any keep-listed
-// (package-relative) path are preserved. Top-level cli package files (the gen file)
-// are never auto-removed. keepList entries are package-relative to the cli
-// package.
-func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
-	keep := make(map[string]bool, len(keepList))
-	for _, k := range keepList {
-		keep[filepath.ToSlash(k)] = true
-	}
-	for _, o := range outputs {
-		// The editable template is always protected (it is the author's content,
-		// never pruned even when template:false leaves it inert). The current
-		// command set's output pages are protected only in embed mode — an inline
-		// feature writes none, so any on-disk pages are stale and get pruned.
-		// Pruning scans the embed_dir for stale OUTPUT files. The editable
-		// template lives in template_dir (a different tree) and is rotini's only
-		// managed file there, so it is never a prune candidate. The current
-		// command set's output files are protected only in embed mode — inline
-		// features write none, so any on-disk pages are stale and get pruned.
-		protected := map[string]bool{}
-		if o.embed {
-			for _, n := range o.nodes {
-				protected[n.file] = true
-			}
-		}
-
-		entries, err := os.ReadDir(o.absEmbedDir)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return fmt.Errorf("read %s embed_dir %s: %w", o.desc.name, o.absEmbedDir, err)
-		}
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
-				continue
-			}
-			if o.desc.filePrefix != "" && !strings.HasPrefix(name, o.desc.filePrefix) {
-				continue
-			}
-			if protected[name] {
-				continue
-			}
-			// keep entries are package-relative (to the cli package).
-			rel := name
-			if r, err := filepath.Rel(lay.cmdDir, filepath.Join(o.absEmbedDir, name)); err == nil {
-				rel = filepath.ToSlash(r)
-			}
-			if keep[rel] {
-				continue
-			}
-			if err := os.Remove(filepath.Join(o.absEmbedDir, name)); err != nil {
-				return fmt.Errorf("prune %s: %w", rel, err)
-			}
-		}
-	}
-	return nil
-}
+// Layout resolution: the conf's package targets → absolute output dirs, package
+// names, and import paths (pruning lives in prune.go, naming in naming.go).
 
 // resolveLayout turns the (defaulted) conf package settings into absolute output
-// directories, package names, and import paths. The cli package is the single
+// directories, package names, and import paths. The cmd package is the single
 // `cmd` target — its directory holds the editable handler stubs and the one
 // generated file (framework + rollup merged, unqualified). The entrypoint and
 // runtime are optional/separate — their layout fields are set below.
@@ -206,7 +78,7 @@ func goPkgName(dir string) string {
 
 // applyConfDefaults fills in the sane rotini conf defaults for any unset
 // generation settings, so a missing or partial conf still generates. The default
-// cli package is "internal/cmd/<root>/" with its generated file at
+// cmd package is "internal/cmd/<root>/" with its generated file at
 // "internal/cmd/<root>/zz_rotini.gen.go" (the `cmd` target — framework + rollup
 // + typed inputs in one file), and the runtime in a "rotini" subpackage beside it.
 // The entrypoint gets no default — main.go is only written when the conf declares a
@@ -237,10 +109,10 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	// (written only when the conf declares its file).
 	frameworkFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
 	runtimeFile := "internal/cmd/" + rootName + "/rotini/zz_runtime.gen.go"
-	if p := ensure("cmd"); p.File == "" {
+	if p := ensure(typeCmd); p.File == "" {
 		p.File = frameworkFile
 	}
-	if p := ensure("runtime"); p.File == "" {
+	if p := ensure(typeRuntime); p.File == "" {
 		p.File = runtimeFile
 	}
 
@@ -262,151 +134,26 @@ func applyConfDefaults(conf *Conf, rootName string) {
 	}
 }
 
-// fieldImport returns the Go import path backing a field's schema: the explicit
-// spec `import:` when set, otherwise the import rotini knows is needed for its own
-// built-in type aliases (duration/time/datetime/date → "time"). "" means no import.
-func fieldImport(schema *InputSchema) string {
-	if schema == nil {
-		return ""
-	}
-	if imp := strings.TrimSpace(schema.Import); imp != "" {
-		return imp
-	}
-	// An array's element type carries the import: explicit items.import first,
-	// then the built-in vocabulary (items duration → "time").
-	if schema.Items != nil && jsonSchemaTypeToGo(schema.Type) == "[]string" {
-		if imp := strings.TrimSpace(schema.Items.Import); imp != "" {
-			return imp
-		}
-		return builtinImport(schema.Items.Type)
-	}
-	return builtinImport(schema.Type)
-}
+// layout holds the resolved package locations and import paths for a single generation
+// pass. The cmd package (the conf's single `cmd` target) holds the editable handler
+// stubs AND the one generated file — the framework (Definition, NewProgram,
+// ProgramHandlers, the typed inputs) and the rollup (the handlers struct + Program + the
+// command→handler wiring) merged into it, all referencing each other unqualified since
+// they share the package. The runtime is the only separate, imported package. The
+// entrypoint package is optional: when the conf declares one, generate writes the
+// binary's main.go there (create-once).
+type layout struct {
+	cmdDir     string // absolute output dir for the cmd package (editable stubs + the generated file)
+	cmdPkgName string // cmd package name, e.g. "mycli"
+	cmdFile    string // basename of the single generated file (framework + rollup), e.g. "zz_rotini.gen.go"
+	cmdImport  string // cmd package import path (the entrypoint's Program import)
 
-// builtinImport returns the import path rotini's own type vocabulary requires, or
-// "" when the type needs none. Only the time-family aliases (which jsonSchemaTypeToGo
-// maps to time.Time/time.Duration) carry an implicit import.
-func builtinImport(rotiniType string) string {
-	switch rotiniType {
-	case "duration", "time", "datetime", "date":
-		return "time"
-	}
-	return ""
-}
+	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
+	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
 
-// parseAliasPath splits the `alias path` external-Go-binding form (shared by an input
-// type's `import:` and a command's `handler.import` — D-W9.5) into its alias and path;
-// a bare path derives its alias from the last segment.
-func parseAliasPath(imp string) (alias, importPath string) {
-	imp = strings.TrimSpace(imp)
-	if a, p, ok := strings.Cut(imp, " "); ok {
-		return strings.TrimSpace(a), strings.TrimSpace(p)
-	}
-	return identAlias(filepath.Base(imp)), imp
-}
-
-// renderImports turns a set of spec `import:` values into sorted Go import specs:
-// a plain path becomes "path"; the aliased form "alias path" becomes alias "path".
-func renderImports(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for imp := range set {
-		if alias, path, ok := strings.Cut(imp, " "); ok {
-			out = append(out, alias+" "+strconv.Quote(strings.TrimSpace(path)))
-		} else {
-			out = append(out, strconv.Quote(imp))
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// toPascalCase converts a name to PascalCase, treating '-', '_' and ' ' as word
-// boundaries (e.g. "foo_bar" -> "FooBar", "generate" -> "Generate").
-func toPascalCase(s string) string {
-	var b strings.Builder
-	capitalize := true
-	for _, r := range s {
-		if r == '-' || r == '_' || r == ' ' {
-			capitalize = true
-			continue
-		}
-		if capitalize {
-			b.WriteRune(unicode.ToUpper(r))
-			capitalize = false
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-// lowerFirst returns s with its first rune lower-cased.
-func lowerFirst(s string) string {
-	if s == "" {
-		return ""
-	}
-	r := []rune(s)
-	r[0] = unicode.ToLower(r[0])
-	return string(r)
-}
-
-// goReservedFilenames are the trailing "_"-separated tokens the go tool reads
-// specially from a file's name alone: "test" (a "_test.go" test file, excluded from
-// the normal build) and the GOOS/GOARCH names (an implicit build constraint, e.g.
-// "app_windows.go" builds only on Windows). Kept as one set since stubFilename only
-// needs membership, not which rule matched.
-var goReservedFilenames = func() map[string]bool {
-	m := map[string]bool{}
-	for _, s := range []string{
-		"test",
-		// GOOS
-		"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos",
-		"ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris",
-		"wasip1", "windows", "zos",
-		// GOARCH
-		"386", "amd64", "amd64p32", "arm", "arm64", "arm64be", "armbe", "loong64",
-		"mips", "mips64", "mips64le", "mips64p32", "mips64p32le", "mipsle", "ppc",
-		"ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64",
-		"wasm",
-	} {
-		m[s] = true
-	}
-	return m
-}()
-
-// reservedTrailingToken reports whether stem's trailing "_"-separated token is one the
-// go tool reads specially from a file's name — "test" (a "_test.go" test file) or a
-// GOOS/GOARCH (an implicit build constraint).
-func reservedTrailingToken(stem string) bool {
-	parts := strings.Split(stem, "_")
-	return goReservedFilenames[parts[len(parts)-1]]
-}
-
-// stubFilename builds a handler-stub file name from base (a command's root name or
-// "<root>_<path>"), escaping the names the go tool would read specially from the
-// filename alone — a "_test.go" test file, or a "_<GOOS>.go"/"_<GOARCH>.go" build
-// constraint — by appending a trailing underscore. That makes the trailing
-// "_"-separated token empty, which matches none of those rules, so a command named
-// "test"/"windows"/"wasm"/… still compiles into the ordinary build.
-func stubFilename(base string) string {
-	if reservedTrailingToken(base) {
-		base += "_"
-	}
-	return base + ".go"
-}
-
-// commandStubFilename returns a command's handler-stub file name: its explicit
-// `filename` override when set, else the derived "<root>[_<path>].go" (reserved-name
-// escaped by stubFilename). path is the underscore-joined command path relative to the
-// root, "" for the root command itself. The same derivation is shared by codegen (to
-// name the stub) and lintHandlerFilenames (to validate uniqueness), so they agree.
-func commandStubFilename(rootName, path, override string) string {
-	if override != "" {
-		return override
-	}
-	base := rootName
-	if path != "" {
-		base += "_" + path
-	}
-	return stubFilename(base)
+	runtimeImport   string // pre-rendered runtime import spec line, e.g. `rotini "…/internal/runtime"` or `"…/rotini"` (identifier always `rotini`)
+	runtimeDir      string // module-relative dir the emitted runtime is written into (slash path) — its package directory
+	runtimeFile     string // basename of the single file the ENTIRE runtime merges into, e.g. "zz_runtime.gen.go"
+	runtimePkgName  string // Go package name written atop the merged runtime file, e.g. "rotini"
+	skipRuntimeEmit bool   // true when runtimeDir IS rotini's own embed source (internal/runtime) — import in place, write nothing
 }

@@ -58,7 +58,7 @@ func detectFileFormat(path string) fileFormat {
 
 // readRaw detects path's serialization format from its extension and reads the
 // file's bytes, erroring on an unknown extension or a read failure. It is the shared
-// preamble of readFile and toJSON.
+// preamble of readFile and bytesToJSON.
 func readRaw(path string) (fileFormat, []byte, error) {
 	format := detectFileFormat(path)
 	if format == formatUnknown {

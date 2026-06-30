@@ -16,7 +16,7 @@ import (
 // the live command tree. Supported shells: bash, zsh, fish, powershell.
 //
 // It is used at codegen time: when the completion feature is enabled, the
-// generator renders one script per supported shell and embeds it in the cligen
+// generator renders one script per supported shell and embeds it in the cmd
 // package (the runtime then serves the embedded script, never calling this).
 func completionScript(prog, shell string) (string, error) {
 	var tmpl string

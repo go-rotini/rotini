@@ -150,7 +150,7 @@ func lintFeatureDirs(conf *Conf) []error {
 			problems = append(problems, &problem{
 				kind: "conf",
 				loc:  "generate.features." + name + ".embed_dir",
-				msg:  fmt.Sprintf("%q must resolve under the framework package %q so //go:embed can reach it", f.EmbedDir, cmdgen),
+				msg:  fmt.Sprintf("%q must resolve under the cmd package %q so //go:embed can reach it", f.EmbedDir, cmdgen),
 			})
 		}
 	}

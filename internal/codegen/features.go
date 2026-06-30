@@ -527,15 +527,15 @@ func permute(chain [][]string) []string {
 	return out
 }
 
-// buildFeatureFramework turns a feature's nodes into the embed vars + resolver
+// buildFeatureBlock turns a feature's nodes into the embed vars + resolver
 // cases the framework template emits (one resolver per feature).
-func buildFeatureFramework(nodes []helpNode, dir string, feat docFeature, embed bool, contents []string) templateFeature {
+func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool, contents []string) templateFeature {
 	h := templateFeature{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
 	for i, hn := range nodes {
 		name := feat.varPrefix + hn.prefix
 		v := templateFeatureVar{Name: name}
 		if embed {
-			// A "." dir (the feature dir IS the cli package dir) embeds the bare
+			// A "." dir (the feature dir IS the cmd package dir) embeds the bare
 			// file name — "./x" is not a valid //go:embed pattern.
 			embedPath := hn.file
 			if dir != "" && dir != "." {

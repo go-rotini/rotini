@@ -20,79 +20,13 @@ import (
 type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error)) error
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Code generation — the cli package (framework + rollup + stubs + literals).
+// Code generation — the cmd package (framework + rollup + stubs + literals).
 // ─────────────────────────────────────────────────────────────────────────────.
 
 // Generated programs reference the rotini runtime package under this name in
 // rendered literals (the Definition, BindMeta, …); the templates hardcode the
 // matching import.
 const rotiniPkgName = "rotini"
-
-// fieldDef is one generated struct field: a Go identifier, its type, and its
-// `rotini` struct-tag content — a flag/argument logical name (empty for the
-// per-command fields of an <Cmd>Inputs struct, which the binder maps by position).
-type fieldDef struct {
-	Field   string
-	GoType  string
-	Tag     string
-	Import  string // Go import path backing GoType ("" for builtins); aliased form "alias path"
-	Recon   string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
-	EnvVar  string // explicit environment variable name for an env field (schema.variable); "" = snake-upper default
-	EnvNest string // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
-	CfgFile string // a config input's pinned source file (schema.file): the value is read from that configuration_files entry ONLY
-	Comment string // trailing line-comment on the generated field ("" for none) — e.g. the TextUnmarshaler contract nudge on explicitly-imported argv types
-	// Constraint is the space-separated validation struct-tags for an env/config field
-	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), which the binder enforces over the
-	// reconciled value; "" when the input declares no numeric/string/array constraints.
-	Constraint string
-}
-
-// genCommand is the fully resolved description of one command node (root or
-// sub-command) that the renderers consume.
-type genCommand struct {
-	prefix      string // PascalCase type prefix, e.g. "RotiniGenerate"
-	handler     string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
-	filename    string // handler stub file name, e.g. "rotini_generate.go"
-	flags       []fieldDef
-	args        []fieldDef
-	env         []fieldDef // <Prefix>Env fields (pure environment inputs)
-	config      []fieldDef // <Prefix>Config fields (pure config-file inputs)
-	stdinType   string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
-	stdinFormat string     // stdin decode format, e.g. "yaml"; "" when no stdin
-	inputs      []fieldDef // InputsFields for this command's <Prefix>Inputs
-
-	// Inline-command passthrough (W9 / D-W9.7): the command's structure + inputs are
-	// generated locally (this is still an own command), but its handler delegates to a
-	// package instead of a generated stub. When passthrough is set the rollup emits
-	// `return delegateAlias.delegateMethod()` and no stub file is seeded.
-	passthrough    bool
-	delegateAlias  string
-	delegateMethod string
-}
-
-// layout holds the resolved package locations and import paths for a single
-// generation pass. The cli package (the conf's single `cmd` target) holds the
-// editable handler stubs AND the one generated file — the framework (Definition,
-// NewProgram, ProgramHandlers, the typed inputs) and the rollup (the handlers
-// struct + Program + the command→handler wiring) merged into it, all referencing
-// each other unqualified since they share the package. The runtime is the only
-// separate, imported package. The entrypoint package is optional: when the conf
-// declares one, generate writes the binary's main.go there (create-once).
-type layout struct {
-	cmdDir     string // absolute output dir for the cli package (editable stubs + the generated file)
-	cmdPkgName string // cli package name, e.g. "mycli"
-	cmdFile    string // basename of the single generated file (framework + rollup), e.g. "zz_rotini.gen.go"
-	cmdImport  string // cli package import path (the entrypoint's Program import)
-
-	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
-	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
-
-	runtimeImport   string // pre-rendered runtime import spec line, e.g. `rotini "…/internal/runtime"` or `"…/rotini"` (identifier always `rotini`)
-	runtimeDir      string // module-relative dir the emitted runtime is written into (slash path) — its package directory
-	runtimeFile     string // basename of the single file the ENTIRE runtime merges into, e.g. "zz_runtime.gen.go"
-	runtimePkgName  string // Go package name written atop the merged runtime file, e.g. "rotini"
-	skipRuntimeEmit bool   // true when runtimeDir IS rotini's own embed source (internal/runtime) — import in place, write nothing
-}
 
 // runtimeSourceDir is the module-relative directory holding the runtime embed
 // source. A conf pointing the runtime target here imports it in place; emission
@@ -145,14 +79,14 @@ func emit(spec *Spec, conf *Conf, specPath string) error {
 		return err
 	}
 
-	// For each enabled doc feature (help/man), the cligen file gains
+	// For each enabled doc feature (help/man), the cmd file gains
 	// embedded "<Prefix>" vars + a resolver, and each command's page is (re)written
 	// under that feature's dir — rendered from the command's doc-fields, or written
 	// verbatim when the command sets the feature's spec string. The conf's feature
 	// dir is module-relative; the absolute dir is where files are written/pruned and
-	// the cligen-package-relative path is what //go:embed references.
+	// the cmd-package-relative path is what //go:embed references.
 	feats := enabledFeatures(conf)
-	frameworks := make([]templateFeature, 0, len(feats))
+	featureBlocks := make([]templateFeature, 0, len(feats))
 	outputs := make([]featureOutput, 0, len(feats))
 	for _, f := range feats {
 		var nodes []helpNode
@@ -165,17 +99,17 @@ func emit(spec *Spec, conf *Conf, specPath string) error {
 		absTemplateDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.TemplateDir))
 
 		// The //go:embed path only matters in embed mode, and ONLY then must the
-		// embed_dir resolve under the cli package (embed can't reach outside
+		// embed_dir resolve under the cmd package (embed can't reach outside
 		// it). An inline feature writes no embedded file, so embed_dir is
 		// unconstrained; template_dir is never embedded, so it always is.
 		embedRel := ""
 		if f.cfg.Embed {
 			rel, err := filepath.Rel(lay.cmdDir, absEmbedDir)
 			if err != nil {
-				return fmt.Errorf("feature %s embed_dir %q is not under the cli package: %w", f.desc.name, f.cfg.EmbedDir, err)
+				return fmt.Errorf("feature %s embed_dir %q is not under the cmd package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
 			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the framework package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.cmdPkg().File)))
+				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.cmdPkg().File)))
 			}
 			embedRel = filepath.ToSlash(rel)
 		}
@@ -191,15 +125,15 @@ func emit(spec *Spec, conf *Conf, specPath string) error {
 			return err
 		}
 
-		frameworks = append(frameworks, buildFeatureFramework(nodes, embedRel, f.desc, f.cfg.Embed, contents))
+		featureBlocks = append(featureBlocks, buildFeatureBlock(nodes, embedRel, f.desc, f.cfg.Embed, contents))
 		outputs = append(outputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
 	}
 
 	// Render the one cli file — the framework (Definition, NewProgram,
 	// ProgramHandlers, the typed inputs) and the rollup (the handlers struct +
 	// Program + command→handler wiring) together, all unqualified since they share
-	// the cli package — and write it beside the editable handler stubs.
-	cliContent, err := renderCmdFile(gp, lay, frameworks)
+	// the cmd package — and write it beside the editable handler stubs.
+	cliContent, err := renderCmdFile(gp, lay, featureBlocks)
 	if err != nil {
 		return err
 	}
@@ -209,7 +143,7 @@ func emit(spec *Spec, conf *Conf, specPath string) error {
 
 	for _, o := range outputs {
 		// Inline features write no output files — their content is in the .go.
-		// (pruneCligen removes any stale files left from a previous embed:true.)
+		// (pruneFeatureOutputs removes any stale files left from a previous embed:true.)
 		if !o.embed {
 			continue
 		}
@@ -239,7 +173,7 @@ func emit(spec *Spec, conf *Conf, specPath string) error {
 	if err := pruneStubs(gp, lay, cmdKeep); err != nil {
 		return err
 	}
-	if err := pruneCligen(lay, conf.Generate.cmdPkg().Keep, outputs); err != nil {
+	if err := pruneFeatureOutputs(lay, conf.Generate.cmdPkg().Keep, outputs); err != nil {
 		return err
 	}
 	if err := pruneEntrypoint(lay, mainKeep); err != nil {
@@ -478,8 +412,8 @@ func writeEntrypoint(lay layout, extension string) error {
 
 // rollupMethods builds the rollup's per-command wiring (one method each, sorted):
 // own commands return a local handler stub, composed commands delegate to the
-// child's cli package. renderCmdFile folds these into the generated file's handlers
-// struct — unqualified, since the rollup shares the cli package with the framework.
+// child's cmd package. renderCmdFile folds these into the generated file's handlers
+// struct — unqualified, since the rollup shares the cmd package with the framework.
 func rollupMethods(gp *genProgram) []templateHandlersMethod {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
 	for _, c := range gp.ownCommands() {
