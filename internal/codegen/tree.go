@@ -383,7 +383,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleName string,
 	default:
 		alias = identAlias(childRoot.Name)
 		delegateRoot = toPascalCase(childRoot.Name)
-		gp.addImport(alias, childCliImport(rr.dir, rr.module))
+		gp.addImport(alias, childCmdImport(rr.dir, rr.module))
 	}
 
 	// Overlay the parent's $ref-node keys onto the child (parent wins when present).
@@ -490,12 +490,12 @@ func (gp *genProgram) addImport(alias, path string) {
 	gp.childImports = append(gp.childImports, templateHandlersImport{Alias: alias, Path: path})
 }
 
-// childCliImport resolves the import path of a composed child's cmd package — the
+// childCmdImport resolves the import path of a composed child's cmd package — the
 // handler package that exposes Handlers() — within the module the child belongs to
 // (the consuming module for a local ref, the external module for a mod:// ref). It
 // reads the child's conf (in childDir) for the cmd package, falling back to the default
 // internal/cmd/<child> convention (named after the child's directory).
-func childCliImport(childDir, module string) string {
+func childCmdImport(childDir, module string) string {
 	if confPath, err := discoverConf(childDir); err == nil {
 		if cc, err := readConf(confPath); err == nil {
 			if h := cc.Generate.cmdPkg(); h != nil && h.File != "" {

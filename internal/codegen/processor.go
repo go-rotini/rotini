@@ -64,7 +64,7 @@ func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate f
 		if err != nil {
 			return nil, err
 		}
-		return nil, p.generate(rs, rc) // generate surfaces no warnings of its own
+		return nil, p.validateAndEmit(rs, rc) // generate surfaces no warnings of its own
 	}
 	return p.run(specPath, confPath, watch, pass, onGenerate, nil)
 }
@@ -111,17 +111,17 @@ func (p *Processor) reconcile(specPath, confPath string) (*reconciledSpec, *reco
 	return rs, rc, nil
 }
 
-// checkSpec schema-validates the spec, then — only when it is schema-valid (the lint
+// validateAndLintSpec schema-validates the spec, then — only when it is schema-valid (the lint
 // rules assume a valid shape) — lints it. It returns every problem found.
-func (p *Processor) checkSpec(rs *reconciledSpec) []error {
+func (p *Processor) validateAndLintSpec(rs *reconciledSpec) []error {
 	if problems := p.validateSpec(rs); len(problems) > 0 {
 		return problems
 	}
 	return p.lintSpec(rs)
 }
 
-// checkConf is checkSpec for the conf.
-func (p *Processor) checkConf(rc *reconciledConf) []error {
+// validateAndLintConf is validateAndLintSpec for the conf.
+func (p *Processor) validateAndLintConf(rc *reconciledConf) []error {
 	if problems := p.validateConf(rc); len(problems) > 0 {
 		return problems
 	}
@@ -134,13 +134,13 @@ func (p *Processor) checkConf(rc *reconciledConf) []error {
 func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, failMode string) (warnings []error, err error) {
 	fast := failFast(failMode, rc)
 
-	specErrs, specWarns := splitProblems(p.checkSpec(rs))
+	specErrs, specWarns := splitProblems(p.validateAndLintSpec(rs))
 	warnings = append(warnings, specWarns...)
 	if fast && len(specErrs) > 0 {
 		return warnings, specErrs[0]
 	}
 
-	confErrs, confWarns := splitProblems(p.checkConf(rc))
+	confErrs, confWarns := splitProblems(p.validateAndLintConf(rc))
 	warnings = append(warnings, confWarns...)
 	if fast && len(confErrs) > 0 {
 		return warnings, confErrs[0]
@@ -149,14 +149,14 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 	return warnings, errors.Join(append(specErrs, confErrs...)...)
 }
 
-// generate is the gate-then-emit step: validation must pass (the gate — invalid input
+// validateAndEmit is the gate-then-emit step: validation must pass (the gate — invalid input
 // never reaches codegen), then the conf defaults are applied and the program emitted.
-func (p *Processor) generate(rs *reconciledSpec, rc *reconciledConf) error {
+func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) error {
 	if _, err := p.validateDocuments(rs, rc, ""); err != nil {
 		return err
 	}
 	applyConfDefaults(rc.conf, rs.spec.Command.Name)
-	return generateAll(rs.spec, rc.conf, rs.path)
+	return emit(rs.spec, rc.conf, rs.path)
 }
 
 // failFast reports whether validation stops at the first problem: the --fail override

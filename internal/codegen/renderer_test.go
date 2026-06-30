@@ -129,12 +129,23 @@ func smokeDocData() templateHelpData {
 	}
 }
 
-func TestSmokeRenderHelpFile(t *testing.T) {
-	out, err := renderHelpFile(smokeDocData())
+// renderDocSmoke drives the live doc-render path (parse + render) over an embedded
+// template, the same path features.go uses in production.
+func renderDocSmoke(t *testing.T, name, text string, data templateHelpData) string {
+	t.Helper()
+	tmpl, err := parseDocTemplate(name, text)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := string(out)
+	out, err := renderDocText(tmpl, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestSmokeRenderHelpFile(t *testing.T) {
+	s := renderDocSmoke(t, "help", templateHelp, smokeDocData())
 	if strings.HasSuffix(s, "\n") {
 		t.Error("help page should not end with a trailing newline")
 	}
@@ -148,11 +159,7 @@ func TestSmokeRenderHelpFile(t *testing.T) {
 }
 
 func TestSmokeRenderManFile(t *testing.T) {
-	out, err := renderManFile(smokeDocData())
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(out)
+	s := renderDocSmoke(t, "man", templateMan, smokeDocData())
 	for _, want := range []string{"NAME", "SYNOPSIS", "EXIT STATUS", "SEE ALSO"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("man page missing %q section", want)
@@ -239,12 +246,6 @@ func TestRenderDocText_execError(t *testing.T) {
 	}
 	if _, err := renderDocText(tmpl, templateHelpData{}); err == nil {
 		t.Error("renderDocText(missing sub-template) = nil, want an execute error")
-	}
-}
-
-func TestRenderDocFile_parseError(t *testing.T) {
-	if _, err := renderDocFile("broken", "{{", templateHelpData{}); err == nil {
-		t.Error("renderDocFile(unparsable) = nil, want a parse error")
 	}
 }
 

@@ -3,7 +3,6 @@ package codegen
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/go-rotini/jsonschema"
@@ -11,20 +10,14 @@ import (
 
 // This file owns the validate STAGE of the pipeline: validateSpec/validateConf (the
 // version check + JSON-Schema validation the Processor runs before lint), plus the
-// shared validation machinery — the deep composed-$ref check, the problem type, and
-// the schema/position helpers. The lint stage lives in lint_spec.go / lint_conf.go.
+// shared finding machinery (the problem type, splitProblems, locateProblems,
+// validateInstance). The lint stage lives in lint_spec.go / lint_conf.go; the deep
+// composed-$ref check is lint_compose.go.
 
 // ValidateFn is the signature of [Processor.Validate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double (see [GenerateFn]).
 type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error
-
-// Validate is a convenience over [Processor.Validate]: it builds a Processor for
-// version and runs the validate workflow. The companion handlers drive the Processor
-// directly; this serves internal callers (tests).
-func Validate(specPath, confPath string, watch bool, failMode, version string, onValidate func(result string, err error)) error {
-	return NewProcessor(version).Validate(specPath, confPath, watch, failMode, onValidate, nil)
-}
 
 // ─── validate (version + schema) ───────────────────────────────────────────────.
 
@@ -79,49 +72,6 @@ func versionProblem(kind, docVersion, binaryVersion string) *problem {
 		}
 	}
 	return nil
-}
-
-// validateComposedTree is the deep `$ref` descend (W8/D-W8.3): when the spec composes
-// child specs, run the generator's own composer (resolveTree) over the WHOLE tree so
-// `rotini validate` catches problems that only emerge once refs are followed — name/
-// alias collisions across composition boundaries, cyclic or missing refs, and each
-// composed spec's version. It reuses generate's exact compose logic (no separate walk),
-// so validate and generate cannot drift. Best-effort: it needs a module (composed
-// commands resolve to import paths) and only matters when refs are present, so a
-// ref-less spec or a module-less context is skipped — leaving per-spec validation as-is.
-func validateComposedTree(spec *Spec, specPath string) []error {
-	if !specHasRefs(spec) {
-		return nil
-	}
-	root, name, err := findModule()
-	if err != nil {
-		return nil // no module: a composed CLI can't generate here anyway; not validate's error to raise
-	}
-	// The composer resolves refs + import paths relative to the CWD module; only run it
-	// when the spec actually lives inside that module (else CWD ≠ the spec's project and
-	// the relative refs/imports would be meaningless — leave it to a validate run from
-	// the right place).
-	absSpec, err1 := filepath.Abs(specPath)
-	absRoot, err2 := filepath.Abs(root)
-	if err1 != nil || err2 != nil ||
-		(absSpec != absRoot && !strings.HasPrefix(absSpec, absRoot+string(filepath.Separator))) {
-		return nil
-	}
-	if _, err := resolveTree(spec, specPath, name); err != nil {
-		return []error{&problem{kind: "spec", loc: "composition", msg: err.Error()}}
-	}
-	return nil
-}
-
-// specHasRefs reports whether any command in the tree composes a child spec via $ref.
-func specHasRefs(spec *Spec) bool {
-	found := false
-	walkCommands(spec, func(c *Command, _ string) {
-		if c.Ref != "" {
-			found = true
-		}
-	})
-	return found
 }
 
 // ─── the problem type + schema-validation machinery ────────────────────────────.

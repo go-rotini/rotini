@@ -17,7 +17,6 @@ package codegen
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -65,20 +64,12 @@ func locateRef(base, ref string) (string, error) {
 			return "", err
 		}
 		return modLocator(m, v, sub), nil
-	case strings.HasPrefix(ref, gitScheme):
-		repo, rev, sub, err := parseGitLocator(ref)
-		if err != nil {
-			return "", err
-		}
-		return gitLocator(repo, rev, sub), nil
-	case strings.HasPrefix(ref, httpsScheme):
-		return ref, nil // an absolute URL is its own locator
+	case isExternalLocator(ref):
+		return ref, nil // git::/https:// is its own locator; loadRef refuses it (rotini neither fetches nor pins external refs)
 	case strings.HasPrefix(base, modScheme):
 		return joinModLocator(base, ref)
-	case strings.HasPrefix(base, gitScheme):
-		return joinGitLocator(base, ref)
-	case strings.HasPrefix(base, httpsScheme):
-		return joinURL(base, ref)
+	case isExternalLocator(base):
+		return ref, nil // a relative ref beneath an external base is refused at load too
 	default: // local relative path against a local directory
 		p := filepath.Clean(filepath.Join(base, filepath.FromSlash(ref)))
 		if abs, err := filepath.Abs(p); err == nil {
@@ -86,55 +77,6 @@ func locateRef(base, ref string) (string, error) {
 		}
 		return p, nil
 	}
-}
-
-// parseGitLocator splits "git::<url>@<ref>/<sub>". The URL carries no '@' (https git
-// remotes don't), so the revision is the first '@'-delimited field and the subpath the
-// remainder after the next '/'. The subpath is cleaned; "." means the repo root.
-func parseGitLocator(loc string) (repo, rev, sub string, err error) {
-	repo, rest, ok := strings.Cut(strings.TrimPrefix(loc, gitScheme), "@")
-	if !ok || repo == "" {
-		return "", "", "", fmt.Errorf("invalid git ref %q — want git::<url>@<ref>/<path>", loc)
-	}
-	if r, sp, ok := strings.Cut(rest, "/"); ok {
-		rev, sub = r, path.Clean(sp)
-	} else {
-		rev, sub = rest, "."
-	}
-	if rev == "" {
-		return "", "", "", fmt.Errorf("invalid git ref %q — missing revision", loc)
-	}
-	return repo, rev, sub, nil
-}
-
-func gitLocator(repo, rev, sub string) string {
-	return gitScheme + repo + "@" + rev + "/" + path.Clean(sub)
-}
-
-func joinGitLocator(base, ref string) (string, error) {
-	repo, rev, dir, err := parseGitLocator(base)
-	if err != nil {
-		return "", err
-	}
-	sub := path.Clean(path.Join(dir, filepath.ToSlash(ref)))
-	if sub == ".." || strings.HasPrefix(sub, "../") {
-		return "", fmt.Errorf("relative $ref %q escapes its repo %s", ref, repo)
-	}
-	return gitLocator(repo, rev, sub), nil
-}
-
-// joinURL resolves a relative ref against a raw https base URL (standard URL reference
-// resolution — a relative ref resolves against the base document's directory).
-func joinURL(base, ref string) (string, error) {
-	b, err := url.Parse(base)
-	if err != nil {
-		return "", fmt.Errorf("invalid base URL %q: %w", base, err)
-	}
-	r, err := url.Parse(ref)
-	if err != nil {
-		return "", fmt.Errorf("invalid $ref URL %q: %w", ref, err)
-	}
-	return b.ResolveReference(r).String(), nil
 }
 
 // loadRef reads the spec at a locator and resolves the composition metadata.

@@ -44,17 +44,6 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 // double (see [GenerateFn]).
 type InitializeFn = func(name, format string, force bool) error
 
-// Initialize scaffolds a new standalone rotini CLI named name: it writes the seed
-// .rotini.spec.<fmt> and .rotini.conf.<fmt> under cmd/<name>/ of the current
-// module, validates them, and runs the standard generate to produce the
-// entrypoint, empty handler stubs, and codegen files — a ready-to-build CLI.
-// format selects the serialization (yaml, jsonc, json, or toml; a module-root
-// conf's `initialize` block sets the default). The seeds (and the create-once
-// main.go/stubs) are left untouched unless force is set.
-func Initialize(name, format string, force bool, version string) error {
-	return NewProcessor(version).Initialize(name, format, force)
-}
-
 // initialize renders and writes the default seed spec and conf for a new CLI
 // named name under cmd/<name>/, validates them, and runs the standard generate
 // over them.
@@ -82,9 +71,9 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		return err
 	}
 
-	cliDir := filepath.Join(moduleRoot, "cmd", name)
-	specPath := filepath.Join(cliDir, ".rotini.spec."+string(f))
-	confPath := filepath.Join(cliDir, ".rotini.conf."+string(f))
+	cmdDir := filepath.Join(moduleRoot, "cmd", name)
+	specPath := filepath.Join(cmdDir, ".rotini.spec."+string(f))
+	confPath := filepath.Join(cmdDir, ".rotini.conf."+string(f))
 
 	if !force {
 		for _, pth := range []string{specPath, confPath} {
@@ -123,7 +112,7 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	if err != nil {
 		return err
 	}
-	return p.generate(rs, rc)
+	return p.validateAndEmit(rs, rc)
 }
 
 // normalizeFormat resolves the requested format name to its fileFormat,

@@ -363,8 +363,7 @@ type templateDocExitRow struct {
 }
 
 // templateHelpData is the per-command doc-data context. The help and man
-// templates render the same data (templateManData is an alias); man
-// additionally renders ExitStatus and SeeAlso.
+// templates render the same data; man additionally renders ExitStatus and SeeAlso.
 type templateHelpData struct {
 	Header        string
 	Invocation    string // full command path, e.g. "rotini generate"
@@ -383,34 +382,6 @@ type templateHelpData struct {
 	Examples      []string
 	ExitStatus    []templateDocExitRow
 	SeeAlso       []string
-}
-
-type templateManData = templateHelpData
-
-func renderHelpFile(data templateHelpData) ([]byte, error) {
-	return renderDocFile("help", templateHelp, data)
-}
-
-func renderManFile(data templateManData) ([]byte, error) {
-	return renderDocFile("man", templateMan, data)
-}
-
-// renderDocFile renders one doc page through a one-shot template text (the
-// embedded defaults). The doc features render user-editable templates instead —
-// parse those once with parseDocTemplate and render each page with
-// renderDocText.
-func renderDocFile(name, text string, data templateHelpData) ([]byte, error) {
-	tmpl, err := parseDocTemplate(name, text)
-	if err != nil {
-		return nil, err
-	}
-
-	rendered, err := renderDocText(tmpl, data)
-	if err != nil {
-		return nil, err
-	}
-
-	return []byte(rendered), nil
 }
 
 // parseDocTemplate parses doc-template text (help/man) with the shared FuncMap.

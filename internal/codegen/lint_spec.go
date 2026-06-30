@@ -23,7 +23,7 @@ func (p *Processor) lintSpec(rs *reconciledSpec) []error {
 		problems = append(problems, rule(rs.spec)...)
 	}
 	locateProblems(problems, rs.path, rs.locate) // positions any pointer-shaped problems
-	problems = append(problems, validateComposedTree(rs.spec, rs.path)...)
+	problems = append(problems, lintComposedTree(rs.spec, rs.path)...)
 	return problems
 }
 

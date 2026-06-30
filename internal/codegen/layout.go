@@ -22,9 +22,9 @@ import (
 func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	protected := map[string]bool{
 		gp.root.filename: true,
-		lay.cliFile:      true,
+		lay.cmdFile:      true,
 	}
-	if lay.entrypointDir == lay.cliDir && lay.entrypointFile != "" {
+	if lay.entrypointDir == lay.cmdDir && lay.entrypointFile != "" {
 		protected[lay.entrypointFile] = true
 	}
 	for _, c := range gp.own {
@@ -33,7 +33,7 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
-	return pruneGoDir(lay.cliDir, protected)
+	return pruneGoDir(lay.cmdDir, protected)
 }
 
 // pruneEntrypoint removes orphaned .go files in the entrypoint directory, so a
@@ -42,7 +42,7 @@ func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
 // entrypoint is declared, or when the entrypoint shares the cli package directory —
 // pruneStubs already covers that dir (and is passed the merged keep list).
 func pruneEntrypoint(lay layout, keepList []string) error {
-	if lay.entrypointDir == "" || lay.entrypointDir == lay.cliDir {
+	if lay.entrypointDir == "" || lay.entrypointDir == lay.cmdDir {
 		return nil
 	}
 	protected := map[string]bool{lay.entrypointFile: true}
@@ -124,7 +124,7 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 			}
 			// keep entries are package-relative (to the cli package).
 			rel := name
-			if r, err := filepath.Rel(lay.cliDir, filepath.Join(o.absEmbedDir, name)); err == nil {
+			if r, err := filepath.Rel(lay.cmdDir, filepath.Join(o.absEmbedDir, name)); err == nil {
 				rel = filepath.ToSlash(r)
 			}
 			if keep[rel] {
@@ -146,21 +146,21 @@ func pruneCligen(lay layout, keepList []string, outputs []featureOutput) error {
 func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 	cli := conf.Generate.cmdPkg() // the single cli (`cmd`) target
 
-	cliFile := filepath.ToSlash(cli.File)
-	cliPkgDir := path.Dir(cliFile)
+	cmdFile := filepath.ToSlash(cli.File)
+	cliPkgDir := path.Dir(cmdFile)
 
 	// The Go package name is the explicit conf `package` when set, else derived
 	// from the target directory's last segment.
-	cliPkgName := goPkgName(cliPkgDir)
+	cmdPkgName := goPkgName(cliPkgDir)
 	if cli.Package != "" {
-		cliPkgName = cli.Package
+		cmdPkgName = cli.Package
 	}
 
 	lay := layout{
-		cliDir:     filepath.Join(moduleRoot, filepath.FromSlash(cliPkgDir)),
-		cliPkgName: cliPkgName,
-		cliFile:    path.Base(cliFile),
-		cliImport:  moduleName + "/" + cliPkgDir,
+		cmdDir:     filepath.Join(moduleRoot, filepath.FromSlash(cliPkgDir)),
+		cmdPkgName: cmdPkgName,
+		cmdFile:    path.Base(cmdFile),
+		cmdImport:  moduleName + "/" + cliPkgDir,
 	}
 
 	if ep := conf.Generate.mainPkg(); ep != nil && ep.File != "" {

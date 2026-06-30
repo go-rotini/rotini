@@ -19,13 +19,6 @@ import (
 // double.
 type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error)) error
 
-// Generate is a convenience over [Processor.Generate]: it builds a Processor for
-// version and runs the generate workflow. The companion handlers drive the Processor
-// directly; this serves internal callers (init and tests).
-func Generate(specPath, confPath string, watch bool, version string, onGenerate func(result string, err error)) error {
-	return NewProcessor(version).Generate(specPath, confPath, watch, onGenerate)
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Code generation — the cli package (framework + rollup + stubs + literals).
 // ─────────────────────────────────────────────────────────────────────────────.
@@ -86,10 +79,10 @@ type genCommand struct {
 // separate, imported package. The entrypoint package is optional: when the conf
 // declares one, generate writes the binary's main.go there (create-once).
 type layout struct {
-	cliDir     string // absolute output dir for the cli package (editable stubs + the generated file)
-	cliPkgName string // cli package name, e.g. "mycli"
-	cliFile    string // basename of the single generated file (framework + rollup), e.g. "zz_rotini.gen.go"
-	cliImport  string // cli package import path (the entrypoint's Program import)
+	cmdDir     string // absolute output dir for the cli package (editable stubs + the generated file)
+	cmdPkgName string // cli package name, e.g. "mycli"
+	cmdFile    string // basename of the single generated file (framework + rollup), e.g. "zz_rotini.gen.go"
+	cmdImport  string // cli package import path (the entrypoint's Program import)
 
 	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
 	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
@@ -118,12 +111,12 @@ func runtimeImportSpec(moduleName, dir string) string {
 	return "rotini " + strconv.Quote(importPath)
 }
 
-// generateAll runs a single generation pass: it resolves the spec (expanding any
+// emit runs a single generation pass: it resolves the spec (expanding any
 // composed $ref children), writes the one generated cli file (framework + rollup),
 // creates missing handler stubs (an empty stub per command — the end-user wires
 // them), emits the runtime, writes the entrypoint main.go when the conf declares
 // one, and prunes orphans. specPath resolves $ref paths relative to the spec.
-func generateAll(spec *Spec, conf *Conf, specPath string) error {
+func emit(spec *Spec, conf *Conf, specPath string) error {
 	moduleRoot, moduleName, err := findModule()
 	if err != nil {
 		return err
@@ -177,7 +170,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		// unconstrained; template_dir is never embedded, so it always is.
 		embedRel := ""
 		if f.cfg.Embed {
-			rel, err := filepath.Rel(lay.cliDir, absEmbedDir)
+			rel, err := filepath.Rel(lay.cmdDir, absEmbedDir)
 			if err != nil {
 				return fmt.Errorf("feature %s embed_dir %q is not under the cli package: %w", f.desc.name, f.cfg.EmbedDir, err)
 			}
@@ -206,11 +199,11 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 	// ProgramHandlers, the typed inputs) and the rollup (the handlers struct +
 	// Program + command→handler wiring) together, all unqualified since they share
 	// the cli package — and write it beside the editable handler stubs.
-	cliContent, err := renderCliFile(gp, lay, frameworks)
+	cliContent, err := renderCmdFile(gp, lay, frameworks)
 	if err != nil {
 		return err
 	}
-	if err := writeGeneratedFile(filepath.Join(lay.cliDir, lay.cliFile), cliContent); err != nil {
+	if err := writeGeneratedFile(filepath.Join(lay.cmdDir, lay.cmdFile), cliContent); err != nil {
 		return err
 	}
 
@@ -240,7 +233,7 @@ func generateAll(spec *Spec, conf *Conf, specPath string) error {
 		mainKeep = m.Keep
 	}
 	cmdKeep := conf.Generate.cmdPkg().Keep
-	if lay.entrypointDir != "" && lay.entrypointDir == lay.cliDir {
+	if lay.entrypointDir != "" && lay.entrypointDir == lay.cmdDir {
 		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
 	}
 	if err := pruneStubs(gp, lay, cmdKeep); err != nil {
@@ -329,13 +322,13 @@ func enabledFeatures(conf *Conf) []confFeature {
 	return out
 }
 
-// renderCliFile renders the single generated cli file: the framework (the
+// renderCmdFile renders the single generated cli file: the framework (the
 // ProgramHandlers aggregate interface, the typed input structs, the Definition,
 // NewProgram, BindMeta) AND the rollup (the handlers struct, Program, Handlers(),
 // and the per-command handler wiring) — one package, all unqualified. It is fully
 // generated and carries a DO NOT EDIT banner; the editable handler stubs are
 // separate create-once files in the same package.
-func renderCliFile(gp *genProgram, lay layout, features []templateFeature) ([]byte, error) {
+func renderCmdFile(gp *genProgram, lay layout, features []templateFeature) ([]byte, error) {
 	own := gp.ownCommands()
 
 	blocks := make([]templateInputBlock, 0, len(own))
@@ -363,13 +356,13 @@ func renderCliFile(gp *genProgram, lay layout, features []templateFeature) ([]by
 		}
 	}
 
-	outputTypes, err := buildOutputTypes(gp, lay.cliPkgName)
+	outputTypes, err := buildOutputTypes(gp, lay.cmdPkgName)
 	if err != nil {
 		return nil, err
 	}
 
 	return renderRotiniFile(templateRotiniData{
-		Package:       lay.cliPkgName,
+		Package:       lay.cmdPkgName,
 		RuntimeImport: lay.runtimeImport,
 		Imports:       renderImports(imports),
 		ChildImports:  gp.childImports,
@@ -413,13 +406,13 @@ func writeHandlerStubs(gp *genProgram, lay layout) error {
 		if c.passthrough {
 			continue // inline-passthrough: the package owns the handler, no stub seeded
 		}
-		path := filepath.Join(lay.cliDir, c.filename)
+		path := filepath.Join(lay.cmdDir, c.filename)
 		if _, err := os.Stat(path); err == nil {
 			continue
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		content, err := renderHandlerStubFile(lay.cliPkgName, c.handler, lay.runtimeImport)
+		content, err := renderHandlerStubFile(lay.cmdPkgName, c.handler, lay.runtimeImport)
 		if err != nil {
 			return err
 		}
@@ -476,7 +469,7 @@ func writeEntrypoint(lay layout, extension string) error {
 	}
 	// The generated package is imported aliased as "cmd" so the reference never
 	// collides with the rotini runtime package (also named "rotini").
-	content, err := renderMainFile(lay.cliImport, "cmd", extension)
+	content, err := renderMainFile(lay.cmdImport, "cmd", extension)
 	if err != nil {
 		return err
 	}
@@ -485,7 +478,7 @@ func writeEntrypoint(lay layout, extension string) error {
 
 // rollupMethods builds the rollup's per-command wiring (one method each, sorted):
 // own commands return a local handler stub, composed commands delegate to the
-// child's cli package. renderCliFile folds these into the generated file's handlers
+// child's cli package. renderCmdFile folds these into the generated file's handlers
 // struct — unqualified, since the rollup shares the cli package with the framework.
 func rollupMethods(gp *genProgram) []templateHandlersMethod {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))

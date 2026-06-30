@@ -638,7 +638,7 @@ func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, fe
 		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
 	}
 	for i, hn := range nodes {
-		if err := writeIfChanged(filepath.Join(featDir, hn.file), contents[i]); err != nil {
+		if err := writeGeneratedFile(filepath.Join(featDir, hn.file), []byte(contents[i])); err != nil {
 			return fmt.Errorf("write %s %s: %w", feat.name, hn.file, err)
 		}
 	}
