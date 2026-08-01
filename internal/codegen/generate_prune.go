@@ -15,7 +15,7 @@ import (
 // files. The cmd package is flat, so keepList entries (package-relative) are just file
 // names for its top-level stubs. When the entrypoint shares the cmd package, its
 // create-once main.go is protected too (otherwise it would be pruned as an orphan).
-func pruneStubs(gp *genProgram, lay layout, keepList []string) error {
+func pruneStubs(gp *program, lay layout, keepList []string) error {
 	protected := map[string]bool{
 		gp.root.filename: true,
 		lay.cmdFile:      true,

@@ -35,7 +35,7 @@ func writeInputDefsLiteral(b *strings.Builder, in *Inputs) {
 // hold the *Program (from the generated NewProgram), never the Definition. Emitted into
 // the framework file and gofmt-formatted with the rest of it, so the produced text only
 // needs to be valid Go, not pretty.
-func renderDefinition(gp *genProgram) string {
+func renderDefinition(gp *program) string {
 	var b strings.Builder
 	b.WriteString("var definition = " + rotiniPkgName + ".Definition{\n")
 	b.WriteString("Name: " + strconv.Quote(gp.rootName) + ",\n")
@@ -60,7 +60,7 @@ func renderDefinition(gp *genProgram) string {
 // renderBindMeta renders the `var BindMeta = rotini.BindMeta{…}` descriptor the
 // default binder consumes — the document-level config-file sources. Returns "" when
 // there are none (so a CLI with no configuration_files stays unchanged).
-func renderBindMeta(gp *genProgram) string {
+func renderBindMeta(gp *program) string {
 	// Emitted UNCONDITIONALLY (ergonomics E3-S2): an empty descriptor is the
 	// honest zero — handler and main.go code can reference BindMeta uniformly,
 	// and the generated NewProgram binds it under rotini.KeyBindMeta either way.

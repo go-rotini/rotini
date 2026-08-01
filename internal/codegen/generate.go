@@ -10,18 +10,15 @@ import (
 	"strings"
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// The `rotini generate` workflow.
-// ─────────────────────────────────────────────────────────────────────────────.
+// This file is the spine of the GENERATE stage: a validated spec + conf resolve into a
+// [program] (resolveProgram), and program.generate() runs the emit steps in order. The
+// step methods (emitSchemas/emitRuntime/emitCmdFile/…) live here; the generate_* files
+// are the renderers and writers those steps call.
 
 // GenerateFn is the signature of [Processor.Generate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double.
 type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error)) error
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Code generation — the cmd package (framework + rollup + stubs + literals).
-// ─────────────────────────────────────────────────────────────────────────────.
 
 // Generated programs reference the rotini runtime package under this name in
 // rendered literals (the Definition, BindMeta, …); the templates hardcode the
@@ -45,105 +42,130 @@ func runtimeImportSpec(moduleName, dir string) string {
 	return "rotini " + strconv.Quote(importPath)
 }
 
-// emit runs a single generation pass: it resolves the spec (expanding any
-// composed $ref children), writes the one generated cli file (framework + rollup),
-// creates missing handler stubs (an empty stub per command — the end-user wires
-// them), emits the runtime, writes the entrypoint main.go when the conf declares
-// one, and prunes orphans. specPath resolves $ref paths relative to the spec.
-func emit(spec *Spec, conf *Conf, specPath string) error {
-	moduleRoot, moduleName, err := findModule()
+// program is the rotini CLI fully resolved from a spec + conf and ready to emit: the
+// command tree (its own inline commands plus any `$ref`-composed children), the OUTPUT
+// LAYOUT (where each generated file goes), and the MODULE it is written into. It is the
+// spine of the generate stage — resolveProgram builds it, and its generate() method runs
+// the emit steps in order. The renderers (generate_literals.go, generate_schemagen.go,
+// the templates) are the tools those steps call.
+type program struct {
+	// inputs — the validated spec + conf and where the spec was read from.
+	spec     *Spec
+	conf     *Conf
+	specPath string
+
+	// context — where the program lives and where its output goes.
+	module module // the Go module the spec belongs to (root dir + import path)
+	layout layout // resolved output locations (the cmd package, the runtime, the entrypoint)
+
+	// resolved command tree — spec (+ $ref composition) → the model the renderers consume.
+	rootName        string
+	rootPascal      string
+	rootInputs      *Inputs
+	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
+	rootHelp        cmdHelp             // root command's flattened help fields
+	rootOutput      *Schema             // root command's output type (nil when unset)
+	rootDiscovery   *RemoteDiscovery    // root command's plugin discovery (nil = off)
+	rootPassthrough bool                // root command's passthrough (raw positionals)
+	schemas         map[string]Schema   // document-level named schemas (for output codegen)
+	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
+	envPrefix       string              // document-level env_prefix for DERIVED env-var names
+
+	root         genCommand               // the root command (own)
+	own          []genCommand             // inline sub-commands, sorted by prefix
+	composed     []composedCmd            // composed sub-commands, sorted by prefix
+	tree         []rnode                  // full resolved tree (own + grafted), for the Definition
+	childImports []templateHandlersImport // unique child cli imports for the rollup
+
+	// resolved doc/completion features — embedded into the cmd file (featureBlocks) and
+	// written as their own pages (featureOutputs).
+	featureBlocks  []templateFeature
+	featureOutputs []featureOutput
+}
+
+// module is the Go module a spec lives in: the filesystem root (the directory holding
+// go.mod) and the module import path. Generated output paths resolve against it.
+type module struct {
+	root string // absolute dir containing go.mod
+	path string // module import path (from go.mod)
+}
+
+// resolveProgram resolves a validated spec + conf into a program ready to emit: it finds
+// the module, resolves the command tree (expanding any $ref children), resolves the
+// output layout, and resolves the enabled doc/completion features — everything the
+// program's generate() steps need.
+func resolveProgram(spec *Spec, conf *Conf, specPath string) (*program, error) {
+	root, name, err := findModule()
+	if err != nil {
+		return nil, err
+	}
+	p, err := resolveTree(spec, specPath, name)
+	if err != nil {
+		return nil, err
+	}
+	p.spec, p.conf, p.specPath = spec, conf, specPath
+	p.module = module{root: root, path: name}
+	p.layout = resolveLayout(conf, root, name)
+	if err := p.resolveFeatures(); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// generate emits the program — the ordered codegen process. Each step is a method below;
+// reading this list top to bottom IS reading what `rotini generate` does.
+func (p *program) generate() error {
+	steps := []struct {
+		name string
+		do   func() error
+	}{
+		{"emit schemas", p.emitSchemas},
+		{"emit runtime", p.emitRuntime},
+		{"emit cmd file", p.emitCmdFile},
+		{"emit feature outputs", p.emitFeatures},
+		{"emit handler stubs", p.emitStubs},
+		{"emit entrypoint", p.emitEntrypoint},
+		{"prune orphans", p.prune},
+	}
+	for _, s := range steps {
+		if err := s.do(); err != nil {
+			return fmt.Errorf("%s: %w", s.name, err)
+		}
+	}
+	return nil
+}
+
+// ─── the generate steps ─────────────────────────────────────────────────────────.
+
+// emitSchemas writes rotini's embedded JSON Schemas to the project (opt-in via
+// generate.schemas), before codegen so an editor $schema= reference resolves even on a
+// pass that later fails. These files are never pruned.
+func (p *program) emitSchemas() error { return writeSchemas(p.conf, p.module.root) }
+
+// emitRuntime merges the entire rotini runtime into the conf's single runtime file, so
+// the built CLI carries its own runtime. Skipped when the target IS the embed source.
+func (p *program) emitRuntime() error {
+	var keep []string
+	if rt := p.conf.Generate.runtimePkg(); rt != nil {
+		keep = rt.Keep
+	}
+	return writeEmittedRuntime(p.layout, p.module.root, keep)
+}
+
+// emitCmdFile renders + writes the one generated cmd file (framework + rollup + typed
+// inputs + feature embeds), beside the editable handler stubs.
+func (p *program) emitCmdFile() error {
+	content, err := renderCmdFile(p, p.layout, p.featureBlocks)
 	if err != nil {
 		return err
 	}
-	lay := resolveLayout(conf, moduleRoot, moduleName)
-	gp, err := resolveTree(spec, specPath, moduleName)
-	if err != nil {
-		return err
-	}
+	return writeGeneratedFile(filepath.Join(p.layout.cmdDir, p.layout.cmdFile), content)
+}
 
-	// Write rotini's embedded JSON Schemas to the project (opt-in via generate.schemas)
-	// before codegen, so the editor `$schema=` references resolve even on a pass that
-	// later fails. These files are never pruned.
-	if err := writeSchemas(conf, moduleRoot); err != nil {
-		return err
-	}
-
-	// Emit the rotini runtime into the conf's single runtime file (so the built CLI
-	// carries its own runtime and never imports go-rotini/rotini). Skipped only when
-	// the runtime target points at the embed source, which is imported in place.
-	var runtimeKeep []string
-	if rt := conf.Generate.runtimePkg(); rt != nil {
-		runtimeKeep = rt.Keep
-	}
-	if err := writeEmittedRuntime(lay, moduleRoot, runtimeKeep); err != nil {
-		return err
-	}
-
-	// For each enabled doc feature (help/man), the cmd file gains
-	// embedded "<Prefix>" vars + a resolver, and each command's page is (re)written
-	// under that feature's dir — rendered from the command's doc-fields, or written
-	// verbatim when the command sets the feature's spec string. The conf's feature
-	// dir is module-relative; the absolute dir is where files are written/pruned and
-	// the cmd-package-relative path is what //go:embed references.
-	feats := enabledFeatures(conf)
-	featureBlocks := make([]templateFeature, 0, len(feats))
-	outputs := make([]featureOutput, 0, len(feats))
-	for _, f := range feats {
-		var nodes []helpNode
-		if f.desc.perShell {
-			nodes = completionNodes() // completion: per shell, not per command
-		} else {
-			nodes = flattenFeature(gp, f.desc)
-		}
-		absEmbedDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.EmbedDir))
-		absTemplateDir := filepath.Join(moduleRoot, filepath.FromSlash(f.cfg.TemplateDir))
-
-		// The //go:embed path only matters in embed mode, and ONLY then must the
-		// embed_dir resolve under the cmd package (embed can't reach outside
-		// it). An inline feature writes no embedded file, so embed_dir is
-		// unconstrained; template_dir is never embedded, so it always is.
-		embedRel := ""
-		if f.cfg.Embed {
-			rel, err := filepath.Rel(lay.cmdDir, absEmbedDir)
-			if err != nil {
-				return fmt.Errorf("feature %s embed_dir %q is not under the cmd package: %w", f.desc.name, f.cfg.EmbedDir, err)
-			}
-			if strings.HasPrefix(rel, "..") {
-				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(conf.Generate.cmdTarget().File)))
-			}
-			embedRel = filepath.ToSlash(rel)
-		}
-
-		var contents []string
-		var err error
-		if f.desc.perShell {
-			contents, err = completionContents(gp.rootName, nodes)
-		} else {
-			contents, err = docFeatureContents(absTemplateDir, nodes, f.desc, f.cfg.Template)
-		}
-		if err != nil {
-			return err
-		}
-
-		featureBlocks = append(featureBlocks, buildFeatureBlock(nodes, embedRel, f.desc, f.cfg.Embed, contents))
-		outputs = append(outputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
-	}
-
-	// Render the one cli file — the framework (Definition, NewProgram,
-	// ProgramHandlers, the typed inputs) and the rollup (the handlers struct +
-	// Program + command→handler wiring) together, all unqualified since they share
-	// the cmd package — and write it beside the editable handler stubs.
-	cliContent, err := renderCmdFile(gp, lay, featureBlocks)
-	if err != nil {
-		return err
-	}
-	if err := writeGeneratedFile(filepath.Join(lay.cmdDir, lay.cmdFile), cliContent); err != nil {
-		return err
-	}
-
-	for _, o := range outputs {
-		// Inline features write no output files — their content is in the .go.
-		// (pruneFeatureOutputs removes any stale files left from a previous embed:true.)
+// emitFeatures writes each EMBED-mode feature's per-command pages (help/man/completion);
+// inline features carry their content in the cmd file, so they write nothing here.
+func (p *program) emitFeatures() error {
+	for _, o := range p.featureOutputs {
 		if !o.embed {
 			continue
 		}
@@ -151,33 +173,81 @@ func emit(spec *Spec, conf *Conf, specPath string) error {
 			return err
 		}
 	}
-	if err := writeHandlerStubs(gp, lay); err != nil {
-		return err
-	}
-	if err := writeEntrypoint(lay, string(detectFileFormat(specPath))); err != nil {
-		return err
-	}
-	// Pruning is implicit (always-on): drop orphaned cmd stubs, orphaned cli
-	// feature outputs, and orphaned entrypoint .go files, sparing only the
-	// per-package `keep` paths (and test files and the editable feature
-	// templates). When the entrypoint shares the cmd directory its keep list is
-	// merged into that single prune pass.
+	return nil
+}
+
+// emitStubs creates a missing handler stub per command (create-once — the end-user wires
+// them); an existing stub is never overwritten.
+func (p *program) emitStubs() error { return writeHandlerStubs(p, p.layout) }
+
+// emitEntrypoint writes the binary's main.go when the conf declares an entrypoint
+// (create-once). The spec/conf extension is baked into its //go:generate directive.
+func (p *program) emitEntrypoint() error {
+	return writeEntrypoint(p.layout, string(detectFileFormat(p.specPath)))
+}
+
+// prune drops orphaned generated files — stubs and feature pages no longer in the spec —
+// sparing each package's `keep` paths (and test files + editable templates). When the
+// entrypoint shares the cmd directory its keep list folds into that one pass.
+func (p *program) prune() error {
 	var mainKeep []string
-	if m := conf.Generate.mainPkg(); m != nil {
+	if m := p.conf.Generate.mainPkg(); m != nil {
 		mainKeep = m.Keep
 	}
-	cmdKeep := conf.Generate.cmdTarget().Keep
-	if lay.entrypointDir != "" && lay.entrypointDir == lay.cmdDir {
+	cmdKeep := p.conf.Generate.cmdTarget().Keep
+	if p.layout.entrypointDir != "" && p.layout.entrypointDir == p.layout.cmdDir {
 		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
 	}
-	if err := pruneStubs(gp, lay, cmdKeep); err != nil {
+	if err := pruneStubs(p, p.layout, cmdKeep); err != nil {
 		return err
 	}
-	if err := pruneFeatureOutputs(lay, conf.Generate.cmdTarget().Keep, outputs); err != nil {
+	if err := pruneFeatureOutputs(p.layout, p.conf.Generate.cmdTarget().Keep, p.featureOutputs); err != nil {
 		return err
 	}
-	if err := pruneEntrypoint(lay, mainKeep); err != nil {
-		return err
+	return pruneEntrypoint(p.layout, mainKeep)
+}
+
+// resolveFeatures resolves the enabled doc/completion features into the blocks embedded
+// in the cmd file (featureBlocks) and the per-command output pages (featureOutputs).
+func (p *program) resolveFeatures() error {
+	feats := enabledFeatures(p.conf)
+	p.featureBlocks = make([]templateFeature, 0, len(feats))
+	p.featureOutputs = make([]featureOutput, 0, len(feats))
+	for _, f := range feats {
+		var nodes []helpNode
+		if f.desc.perShell {
+			nodes = completionNodes()
+		} else {
+			nodes = flattenFeature(p, f.desc)
+		}
+		absEmbedDir := filepath.Join(p.module.root, filepath.FromSlash(f.cfg.EmbedDir))
+		absTemplateDir := filepath.Join(p.module.root, filepath.FromSlash(f.cfg.TemplateDir))
+
+		embedRel := ""
+		if f.cfg.Embed {
+			rel, err := filepath.Rel(p.layout.cmdDir, absEmbedDir)
+			if err != nil {
+				return fmt.Errorf("feature %s embed_dir %q is not under the cmd package: %w", f.desc.name, f.cfg.EmbedDir, err)
+			}
+			if strings.HasPrefix(rel, "..") {
+				return fmt.Errorf("generate.features.%s.embed_dir %q must resolve under the cmd package %q so //go:embed can reach it", f.desc.name, f.cfg.EmbedDir, path.Dir(filepath.ToSlash(p.conf.Generate.cmdTarget().File)))
+			}
+			embedRel = filepath.ToSlash(rel)
+		}
+
+		var contents []string
+		var err error
+		if f.desc.perShell {
+			contents, err = completionContents(p.rootName, nodes)
+		} else {
+			contents, err = docFeatureContents(absTemplateDir, nodes, f.desc, f.cfg.Template)
+		}
+		if err != nil {
+			return err
+		}
+
+		p.featureBlocks = append(p.featureBlocks, buildFeatureBlock(nodes, embedRel, f.desc, f.cfg.Embed, contents))
+		p.featureOutputs = append(p.featureOutputs, featureOutput{desc: f.desc, absEmbedDir: absEmbedDir, nodes: nodes, contents: contents, embed: f.cfg.Embed})
 	}
 	return nil
 }
@@ -262,7 +332,7 @@ func enabledFeatures(conf *Conf) []confFeature {
 // and the per-command handler wiring) — one package, all unqualified. It is fully
 // generated and carries a DO NOT EDIT banner; the editable handler stubs are
 // separate create-once files in the same package.
-func renderCmdFile(gp *genProgram, lay layout, features []templateFeature) ([]byte, error) {
+func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte, error) {
 	own := gp.ownCommands()
 
 	blocks := make([]templateInputBlock, 0, len(own))
@@ -335,7 +405,7 @@ func anyEmbed(features []templateFeature) bool {
 // empty stub, so a fresh CLI ships with working -h/--help, -v/--version, and
 // help/version commands. To opt out, delete those handler files and run a
 // normal `rotini generate` — the empty stubs are seeded in their place.
-func writeHandlerStubs(gp *genProgram, lay layout) error {
+func writeHandlerStubs(gp *program, lay layout) error {
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
 			continue // inline-passthrough: the package owns the handler, no stub seeded
@@ -414,7 +484,7 @@ func writeEntrypoint(lay layout, extension string) error {
 // own commands return a local handler stub, composed commands delegate to the
 // child's cmd package. renderCmdFile folds these into the generated file's handlers
 // struct — unqualified, since the rollup shares the cmd package with the framework.
-func rollupMethods(gp *genProgram) []templateHandlersMethod {
+func rollupMethods(gp *program) []templateHandlersMethod {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {

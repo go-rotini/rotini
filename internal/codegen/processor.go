@@ -27,10 +27,10 @@ type Processor struct {
 	confSchema *jsonschema.Schema // compiled embedded conf JSON Schema
 }
 
-// NewProcessor returns a Processor tagged with the running binary's version string (the
-// companion CLI passes a the running binary's version string). It compiles the embedded
-// JSON Schemas once; a compile failure is a rotini packaging bug, never user input, so
-// it panics rather than surfacing a user-facing error.
+// NewProcessor returns a Processor tagged with the running binary's version string. It
+// compiles rotini's embedded spec + conf JSON Schemas once (the "valid CLI" contract the
+// validate stage checks the end-user's files against); a compile failure is a rotini
+// packaging bug, never user input, so it panics rather than surfacing a user-facing error.
 func NewProcessor(version string) *Processor {
 	specSchema, err := loadSpecSchema()
 	if err != nil {
@@ -152,7 +152,11 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) erro
 		return err
 	}
 	applyConfDefaults(rc.conf, rs.spec.Command.Name)
-	return emit(rs.spec, rc.conf, rs.path)
+	prog, err := resolveProgram(rs.spec, rc.conf, rs.path)
+	if err != nil {
+		return err
+	}
+	return prog.generate()
 }
 
 // failFast reports whether validation stops at the first problem: the --fail override

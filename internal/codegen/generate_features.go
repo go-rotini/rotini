@@ -128,7 +128,7 @@ func commandHelp(c Command) cmdHelp {
 // carries its verbatim page (the feature's spec escape, when set) and its built
 // doc-data (templateHelpData, used when no verbatim page is given). The file
 // extension is the feature's; the doc-data is identical across features.
-func flattenFeature(gp *genProgram, feat docFeature) []helpNode {
+func flattenFeature(gp *program, feat docFeature) []helpNode {
 	out := []helpNode{{
 		prefix:   gp.rootPascal,
 		file:     feat.filePrefix + gp.rootName + feat.ext,

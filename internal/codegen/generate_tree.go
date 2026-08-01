@@ -10,42 +10,18 @@ import (
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
-// The resolved command tree — spec (+ $ref composition) → genProgram.
+// The resolved command tree — spec (+ $ref composition) → program.
 // ─────────────────────────────────────────────────────────────────────────────.
-
-// genProgram is a parent spec resolved for code generation: its own command
-// tree (inline commands — emit types, stubs, and a rollup method that returns a
-// local stub) plus any statically composed commands pulled in via `$ref` (emit
-// a rollup method that delegates to the child's cmd package; no types or stubs).
-type genProgram struct {
-	rootName        string
-	rootPascal      string
-	rootInputs      *Inputs
-	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
-	rootHelp        cmdHelp             // root command's flattened help fields
-	rootOutput      *Schema             // root command's output type (nil when unset)
-	rootDiscovery   *RemoteDiscovery    // root command's plugin discovery (nil = off)
-	rootPassthrough bool                // root command's passthrough (raw positionals)
-	schemas         map[string]Schema   // document-level named schemas (for output codegen)
-	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
-	envPrefix       string              // document-level env_prefix for DERIVED env-var names
-
-	root         genCommand               // the root command (own)
-	own          []genCommand             // inline sub-commands, sorted by prefix
-	composed     []composedCmd            // composed sub-commands, sorted by prefix
-	tree         []rnode                  // full resolved tree (own + grafted), for the Definition
-	childImports []templateHandlersImport // unique child cli imports for the rollup
-}
 
 // ownCommands returns the commands this program emits types and stubs for —
 // the root, then every own (inline) sub-command.
-func (gp *genProgram) ownCommands() []genCommand {
+func (gp *program) ownCommands() []genCommand {
 	return append([]genCommand{gp.root}, gp.own...)
 }
 
 // methods returns the ProgramHandlers method names: the root, then every own
 // and composed sub-command, sorted.
-func (gp *genProgram) methods() []string {
+func (gp *program) methods() []string {
 	out := make([]string, 0, 1+len(gp.own)+len(gp.composed))
 	out = append(out, gp.root.prefix)
 	for _, c := range gp.own {
@@ -97,7 +73,7 @@ type composeCtx struct {
 	passthrough bool   // delegate via alias.method() (W9 passthrough) instead of alias.Handlers().method()
 }
 
-// resolveTree resolves spec into a genProgram, loading any `$ref`'d child specs
+// resolveTree resolves spec into a program, loading any `$ref`'d child specs
 // (relative to specPath) and grafting them as composed subtrees.
 // scopedConfigFile is a config_files source paired with the command path it is
 // declared on — the Scope the binder matches against the resolved chain to honor
@@ -125,12 +101,12 @@ func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
 	return out
 }
 
-func resolveTree(spec *Spec, specPath, moduleName string) (*genProgram, error) {
+func resolveTree(spec *Spec, specPath, moduleName string) (*program, error) {
 	root := spec.Command
 	if root.Ref != "" || root.Name == "" {
 		return nil, errors.New("root command must have a name (the top-level \"command\" cannot use $ref)")
 	}
-	gp := &genProgram{
+	gp := &program{
 		rootName:        root.Name,
 		rootPascal:      toPascalCase(root.Name),
 		rootInputs:      root.inputs(),
@@ -174,7 +150,7 @@ func resolveTree(spec *Spec, specPath, moduleName string) (*genProgram, error) {
 	return gp, nil
 }
 
-func (gp *genProgram) walk(cmds []Command, parentPath, base, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
 	out := make([]rnode, 0, len(cmds))
 	for _, c := range cmds {
 		if c.Ref != "" {
@@ -346,7 +322,7 @@ func overlayCommand(child, parent Command) Command {
 // commands delegate to the child; the authored siblings are own/new compositions). The
 // delegation always targets the child's real handler methods. Transitive $refs (a
 // composed child that itself $refs) are handled by composeNestedRef during the walk.
-func (gp *genProgram) composeRef(c Command, parentPath, base, moduleName string, seen map[string]bool) (rnode, error) {
+func (gp *program) composeRef(c Command, parentPath, base, moduleName string, seen map[string]bool) (rnode, error) {
 	locator, err := locateRef(base, c.Ref)
 	if err != nil {
 		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
@@ -427,7 +403,7 @@ func (gp *genProgram) composeRef(c Command, parentPath, base, moduleName string,
 // Parent overlay keys win, mirroring composeRef; any `commands:` authored next to the
 // nested `$ref` are merged additively (they resolve against the spec that holds the
 // nested ref and delegate to the same direct child, which already composed them).
-func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
+func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
 	locator, err := locateRef(base, c.Ref)
 	if err != nil {
 		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
@@ -478,7 +454,7 @@ func (gp *genProgram) composeNestedRef(c Command, parentPath, base, moduleName s
 	return nodes, nil
 }
 
-func (gp *genProgram) addImport(alias, path string) {
+func (gp *program) addImport(alias, path string) {
 	for _, ci := range gp.childImports {
 		if ci.Path == path {
 			return

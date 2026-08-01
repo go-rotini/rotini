@@ -26,7 +26,7 @@ const outputRootSentinel = "rotiniGeneratedOutputsRoot"
 // named type when the output is a bare `$ref`, or a struct for an inline shape.
 // Generation reuses jsonschema.GenerateGo (the same engine behind the spec/conf
 // types), so refs, nesting, arrays, and allOf embedding all work.
-func buildOutputTypes(gp *genProgram, pkg string) (string, error) {
+func buildOutputTypes(gp *program, pkg string) (string, error) {
 	defs := collectOutputDefs(gp)
 	if len(defs) == 0 {
 		return "", nil
@@ -66,7 +66,7 @@ func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
 // document: each document-level named schema, plus one "<Prefix>Output" per
 // command that declares an output. Refs are rewritten from the spec's
 // "#/schemas/" space to the document's "#/definitions/" space.
-func collectOutputDefs(gp *genProgram) map[string]any {
+func collectOutputDefs(gp *program) map[string]any {
 	defs := map[string]any{}
 	for name, sch := range gp.schemas {
 		defs[name] = schemaToDoc(sch)
@@ -106,7 +106,7 @@ type pathFromClaim struct {
 // by logical name; an env input by its variable (explicit `variable:`, else
 // the SNAKE_UPPER projection of its name). Validation guarantees single
 // claims per channel and that the named entry exists.
-func collectPathFrom(gp *genProgram) map[string]pathFromClaim {
+func collectPathFrom(gp *program) map[string]pathFromClaim {
 	out := map[string]pathFromClaim{}
 	add := func(in *Inputs) {
 		if in == nil {
@@ -163,7 +163,7 @@ func envVarName(e EnvInput, envPrefix string) string {
 // type name to a self-contained JSON Schema (the payload schema, plus the document's
 // named schemas as definitions so any "#/schemas/X" refs resolve). The binder
 // validates the decoded payload against it. Returns nil when no command has stdin.
-func collectStdinSchemas(gp *genProgram) map[string]string {
+func collectStdinSchemas(gp *program) map[string]string {
 	out := map[string]string{}
 	add := func(prefix string, in *Inputs) {
 		if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
