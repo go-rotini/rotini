@@ -252,6 +252,14 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 
 		lines := make(chan Line)
 		var wg sync.WaitGroup
+
+		// Scan() returns false for BOTH end-of-stream and a read failure, so the
+		// error has to be checked after the loop — otherwise a line past the 1MB cap
+		// (bufio.ErrTooLong) or an I/O fault would silently truncate the output and
+		// the run would still look successful. First failure wins; it is reported
+		// after the loop, alongside the exit status.
+		var scanOnce sync.Once
+		var scanErr error
 		scan := func(r io.Reader, stream Stream) {
 			defer wg.Done()
 			sc := bufio.NewScanner(r)
@@ -262,6 +270,9 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 				case <-ctx.Done():
 					return
 				}
+			}
+			if err := sc.Err(); err != nil {
+				scanOnce.Do(func() { scanErr = err })
 			}
 		}
 		wg.Add(2)
@@ -283,6 +294,14 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 				code = -1
 			}
 			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: code, Cause: err})
+			return
+		}
+		// The command succeeded but its output did not arrive intact — which the
+		// consumer must be told, since it just finished a loop that looked complete.
+		if scanErr != nil {
+			yield(Line{}, &SubprocessError{
+				Name: s.name, Args: s.args, ExitCode: cmd.ProcessState.ExitCode(), Cause: scanErr,
+			})
 		}
 	}
 }

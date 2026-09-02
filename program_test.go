@@ -166,7 +166,12 @@ func TestProgram_RunContext_cancellationHalts(t *testing.T) {
 // A nil context is a wiring mistake, reported rather than panicking deeper.
 func TestProgram_RunContext_nilContext(t *testing.T) {
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
-	code, err := p.RunContext(nil, []string{"run", "x"})
+
+	// Declared rather than passed as a literal nil: "never pass a nil Context" is
+	// right at every real call site, and vet and IDE inspections say so. The point
+	// here is that the guard exists for callers who get it wrong anyway.
+	var missing context.Context
+	code, err := p.RunContext(missing, []string{"run", "x"})
 	if !errors.Is(err, ErrInternal) || code == 0 {
 		t.Errorf("RunContext(nil) = (%d, %v), want a non-zero code and an internal error", code, err)
 	}

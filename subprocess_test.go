@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -194,5 +195,48 @@ func TestSubprocess_linesBreakStopsTheChild(t *testing.T) {
 func TestStream_String(t *testing.T) {
 	if StreamStdout.String() != "stdout" || StreamStderr.String() != "stderr" {
 		t.Error("Stream.String is wrong")
+	}
+}
+
+// Scan() reports false for BOTH end-of-stream and a read failure, so a scanner used
+// without a final Err() check silently truncates. Lines caps a line at 1MB, so a
+// longer one must surface as an error rather than as a short, successful-looking run.
+func TestSubprocess_linesReportsScanFailure(t *testing.T) {
+	// One line of 2MB, no newline until the end — past the scanner's cap.
+	script := "printf 'x%.0s' $(seq 1 2000000); echo"
+
+	var got []Line
+	var runErr error
+	for line, err := range NewSubprocess("sh", "-c", script).Lines(context.Background()) {
+		if err != nil {
+			runErr = err
+			continue
+		}
+		got = append(got, line)
+	}
+
+	if runErr == nil {
+		t.Fatalf("an over-long line was silently truncated: got %d lines, no error", len(got))
+	}
+	var subErr *SubprocessError
+	if !errors.As(runErr, &subErr) {
+		t.Fatalf("err = %v, want a *SubprocessError", runErr)
+	}
+	if !errors.Is(runErr, bufio.ErrTooLong) {
+		t.Errorf("cause = %v, want bufio.ErrTooLong", subErr.Cause)
+	}
+}
+
+// A clean run still reports no error — the scan check must not invent failures.
+func TestSubprocess_linesNoFalseScanError(t *testing.T) {
+	var n int
+	for _, err := range NewSubprocess("sh", "-c", "echo a; echo b; echo c").Lines(context.Background()) {
+		if err != nil {
+			t.Fatalf("clean run reported %v", err)
+		}
+		n++
+	}
+	if n != 3 {
+		t.Errorf("got %d lines, want 3", n)
 	}
 }
