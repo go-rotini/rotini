@@ -1081,7 +1081,7 @@ func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 	}
 }
 
-// The structs below mirror the shape the framework package (rtg) generates for a
+// The structs below mirror the shape the generated cmd package emits for a
 // root command "app" with a sub-command "run".
 
 type appFlags struct {

@@ -67,13 +67,13 @@ Open an issue with:
 
 - A minimal reproducing example — the `.rotini.spec.*` (and `.rotini.conf.*` if
   relevant), or a runnable `main.go` for runtime bugs.
-- The exact `rotini` command run (`init` / `generate` / `mod` / …) or the runtime
+- The exact `rotini` command run (`init` / `generate` / `validate`) or the runtime
   invocation, plus its full output.
 - The expected vs. actual behavior.
 - Your Go version and the `rotini` version (tool and/or library).
 
-For spec-composition (`$ref`) bugs, also include the ref form (local, `mod://`,
-`git::`, or raw `https://`) and the relevant `.rotini.lock` entry if one exists.
+For spec-composition (`$ref`) bugs, also include the ref form (a local relative path
+or `mod://<module>@<version>/<path>`) and, for a `mod://` ref, its `go.mod` require.
 
 ## Security
 

@@ -27,24 +27,22 @@ generate:
   packages:
     # A LIST of generated code targets, one per `type`. Every entry shares three
     # fields:
-    #   type    — REQUIRED. One of: main | handlers | models | runtime_required |
-    #             runtime_optional. Each type may appear at most ONCE (cross-item
-    #             lint; the schema enums the value but can't bound the count).
+    #   type    — REQUIRED. One of: main | cmd. Each type may appear at most ONCE
+    #             (cross-item lint; the schema enums the value but can't bound the
+    #             count).
     #   file    — module-root-relative path ending in .go; its parent directory is
-    #             the target package directory. handlers/models default to
-    #             'internal/cmd/<root>/zz_rotini.gen.go'; runtime_required/optional
-    #             default to the 'rotini' subpackage 'internal/cmd/<root>/rotini/...';
-    #             main has no default.
+    #             the target package directory. `cmd` defaults to
+    #             'internal/cmd/<root>/zz_rotini.gen.go'; main has no default.
     #   package — Go package name at the top of `file`. Defaults to the directory's
     #             last segment (sanitized). For type:main it MUST be 'main' (schema-
     #             enforced via const). Targets that resolve to the SAME file must
     #             declare the same package (cross-item lint).
-    # Only runtime_optional carries `include` (schema-rejected elsewhere).
     #
-    # The RUNTIME (runtime_required/runtime_optional) is EMITTED into its own
-    # package that the framework + handlers import (qualified `rotini.`), so a built
-    # CLI carries its own runtime and never imports go-rotini/rotini at run time.
-    # The per-CLI generated code (handlers + models) is a separate package.
+    # The rotini RUNTIME is NOT generated: it is an ordinary library dependency the
+    # generated code imports (`go get github.com/go-rotini/rotini`), so no target
+    # here decides where it lands. Everything rotini writes for THIS cli — the typed
+    # inputs, the Definition, the rollup, and the editable handler stubs — lands in
+    # the one `cmd` package.
     - type: main                       # the binary entrypoint (main.go) — CREATE-ONCE:
       file: cmd/acme/main.go           # never overwritten after the first pass. `file`
       package: main                    # is REQUIRED for it to be written (no default dir).
@@ -112,7 +110,7 @@ generate:
       embed_dir: internal/cmd/acme/renders   # `markdown:` on a command = verbatim escape).
       template: true                   # Build-time docs feedstock — NO run-time
       template_dir: internal/cmd/acme/templates   # command serves it (unlike help/man/
-                                       # completion, which `rotini init --with <x>` can wire)
+                                       # completion, which a command's handler can render).
 
 # ===========================================================================
 # validate — how `rotini validate` reports problems. Strictness itself is

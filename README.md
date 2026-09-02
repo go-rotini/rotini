@@ -7,10 +7,10 @@ package that generated CLIs import.
 
 - **As a tool** (`go get -tool github.com/go-rotini/rotini`) it exposes the
   codegen binary. You invoke `go tool rotini init`, `go tool rotini generate`,
-  `go tool rotini validate`, `go tool rotini mod`, etc.
+  `go tool rotini validate`.
 - **As a library** (`go get github.com/go-rotini/rotini`) it exposes the
   `rotini` package — the slim runtime the generated entrypoint builds a
-  [`Program`] with and calls `Execute()` on.
+  `Program` with and calls `Execute()` on.
 
 You describe your CLI's commands, flags, and arguments in a `.rotini.spec.*`
 file; `rotini generate` emits the typed framework and wiring; you fill in the
@@ -37,6 +37,8 @@ go tool rotini init todo
 #   cmd/todo/main.go             — entrypoint (carries the //go:generate directive)
 #   internal/cmd/todo/           — generated framework + one empty handler stub per command
 
+go get github.com/go-rotini/rotini   # the runtime the generated code imports
+
 # edit cmd/todo/.rotini.spec.yaml to grow your CLI, then regenerate:
 go generate ./...                # re-runs `rotini generate` via the directive in main.go
 
@@ -47,15 +49,13 @@ go build ./cmd/todo
 
 ## Commands
 
-| Command      | Aliases | Purpose                                                          |
-|--------------|---------|------------------------------------------------------------------|
-| `initialize` | `init`  | Scaffold a new CLI (spec + conf + entrypoint + first generate).  |
-| `generate`   | `gen`   | Generate the framework/wiring from a spec + conf.                |
-| `validate`   |         | Validate a spec + conf without generating.                       |
-| `mod`        |         | Fetch and pin external `$ref` specs into `.rotini.lock`.         |
-| `completion` |         | Emit a shell completion script.                                  |
-| `help`       |         | Help for any command.                                            |
-| `version`    |         | Print the tool version.                                          |
+| Command      | Aliases | Purpose                                                         |
+|--------------|---------|-----------------------------------------------------------------|
+| `initialize` | `init`  | Scaffold a new CLI (spec + conf + entrypoint + first generate). |
+| `generate`   | `gen`   | Generate the framework/wiring from a spec + conf.               |
+| `validate`   | `val`   | Validate a spec + conf without generating.                      |
+| `help`       |         | Help for any command.                                           |
+| `version`    |         | Print the tool version.                                         |
 
 ## Documentation
 

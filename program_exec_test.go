@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -119,5 +120,53 @@ func TestProgram_Run_seedsBoundServicesPerRun(t *testing.T) {
 	}
 	if want := []bool{false, false}; !slices.Equal(leaked, want) {
 		t.Errorf("in-run Bind visibility = %v, want %v — a run's own binding must not leak forward", leaked, want)
+	}
+}
+
+// TestProgram_RunContext_scopesOneInvocation pins why RunContext exists alongside
+// WithContext: a host that dispatches many invocations (a REPL, a stdio server)
+// must be able to scope EACH one without permanently changing the program.
+func TestProgram_RunContext_scopesOneInvocation(t *testing.T) {
+	var seen []bool
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {}}
+	p, _, _ := newTestProgram(h, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if _, err := p.RunContext(ctx, []string{"run", "x"}); err != nil {
+		t.Fatalf("RunContext = %v", err)
+	}
+	cancel()
+	// The program was NOT mutated: a later plain Run still owns its own context.
+	if p.ctx != nil {
+		t.Error("RunContext mutated the program's context")
+	}
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Errorf("Run after RunContext = %v, want nil", err)
+	}
+	_ = seen
+}
+
+// A canceled context halts the invocation.
+func TestProgram_RunContext_cancellationHalts(t *testing.T) {
+	var ran bool
+	h := &testHandlers{log: new([]string), onRun: func(*Context) { ran = true }}
+	p, _, _ := newTestProgram(h, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := p.RunContext(ctx, []string{"run", "x"}); err != nil {
+		t.Fatalf("RunContext on a canceled context = %v", err)
+	}
+	if ran {
+		t.Error("the handler ran under an already-canceled context")
+	}
+}
+
+// A nil context is a wiring mistake, reported rather than panicking deeper.
+func TestProgram_RunContext_nilContext(t *testing.T) {
+	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
+	code, err := p.RunContext(nil, []string{"run", "x"})
+	if !errors.Is(err, ErrInternal) || code == 0 {
+		t.Errorf("RunContext(nil) = (%d, %v), want a non-zero code and an internal error", code, err)
 	}
 }

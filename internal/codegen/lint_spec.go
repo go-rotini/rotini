@@ -2,6 +2,8 @@ package codegen
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
 	"regexp"
 	"slices"
 	"sort"
@@ -60,6 +62,7 @@ var specLints = []func(*Spec) []error{
 	lintCountFlags,
 	lintPassthrough,
 	lintPatternCompiles,
+	lintSchemaTypes,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -1135,4 +1138,84 @@ func lintHandlerFilenames(spec *Spec) []error {
 	}
 	walk(&spec.Command, "", display)
 	return problems
+}
+
+// lintSchemaTypes rejects an input `type:` that cannot become a Go type.
+//
+// The JSON Schema deliberately leaves `type` free-form — it accepts Go names (int,
+// []string, map[string]int), JSON Schema names (integer, array, object), rotini's own
+// aliases (count, duration, date) and imported types — so no enum can constrain it and
+// nothing else checks it. An unresolvable value therefore used to reach codegen intact
+// and surface as a raw `gofmt: expected ';', found '-'` over the whole generated file,
+// naming neither the input nor its line in the spec.
+//
+// The test is the honest one: resolve the alias, then require the result to parse as a
+// Go TYPE expression. That accepts every legitimate form (including ones rotini has no
+// vocabulary for, like []uuid.UUID) and rejects only what could not compile.
+func lintSchemaTypes(spec *Spec) []error {
+	var problems []error
+	walkCommands(spec, func(c *Command, path string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Type == "" {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", loc: "command " + path,
+					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
+			}
+			resolved := jsonSchemaTypeToGo(schema.Type)
+			expr, err := parser.ParseExpr(resolved)
+			if err != nil || !isGoTypeExpr(expr) {
+				add(fmt.Sprintf("type %q is not a Go type — use a builtin (string, int, bool, []string, map[string]int), a rotini alias (count, duration, date), a JSON Schema name (integer, number, array, object), or an imported type with `import:`", schema.Type))
+				return
+			}
+			// A qualified type the AUTHOR wrote (not one an alias resolved to) needs an
+			// explicit import: rotini only knows the import for its own vocabulary, so
+			// without it the generated file references a package it never imports.
+			if resolved == schema.Type && isQualifiedType(expr) && strings.TrimSpace(schema.Import) == "" {
+				add(fmt.Sprintf("type %q is qualified but declares no `import:` — the generated code would reference a package it does not import", schema.Type))
+			}
+		})
+	})
+	return problems
+}
+
+// isGoTypeExpr reports whether a parsed expression denotes a Go TYPE rather than a
+// value expression. "not-a-type" parses fine as the expression not-a-type (two
+// subtractions), which is exactly the case this rejects.
+func isGoTypeExpr(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return true
+	case *ast.SelectorExpr: // pkg.Type
+		_, ok := e.X.(*ast.Ident)
+		return ok
+	case *ast.StarExpr:
+		return isGoTypeExpr(e.X)
+	case *ast.ArrayType:
+		return e.Len == nil && isGoTypeExpr(e.Elt) // slices only; a fixed-size array is not an input shape
+	case *ast.MapType:
+		return isGoTypeExpr(e.Key) && isGoTypeExpr(e.Value)
+	case *ast.InterfaceType:
+		return len(e.Methods.List) == 0 // interface{} — the `any` spelling
+	default:
+		return false
+	}
+}
+
+// isQualifiedType reports whether a type expression names a package-qualified type
+// anywhere within it (T, []T, map[string]T, *T).
+func isQualifiedType(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.SelectorExpr:
+		return true
+	case *ast.StarExpr:
+		return isQualifiedType(e.X)
+	case *ast.ArrayType:
+		return isQualifiedType(e.Elt)
+	case *ast.MapType:
+		return isQualifiedType(e.Key) || isQualifiedType(e.Value)
+	default:
+		return false
+	}
 }

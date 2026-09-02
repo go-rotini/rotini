@@ -42,7 +42,7 @@
         },
         "schemas": {
           "type": "object",
-          "description": "Document-level (root only): reusable named schema definitions. Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type that other packages may import (a cmd/cmdgen split makes them cross-package).",
+          "description": "Document-level (root only): reusable named schema definitions. Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package, which other packages may import.",
           "additionalProperties": {
             "$ref": "#/definitions/Schema"
           },
@@ -236,7 +236,7 @@
         },
         "handler": {
           "$ref": "#/definitions/HandlerSource",
-          "description": "Source this command's handlers from an external Go PACKAGE instead of a generated stub (W9 handler-code composition). Valid on any SUB-command, not the root. On a '$ref' node it supplies the handlers a composed external spec can't provide itself — REQUIRED for a git/raw '$ref' (a fetched spec is not an importable Go package), and an override for a local/mod:// '$ref' (use this package's handlers instead of the auto-derived child cli). On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package."
+          "description": "Source this command's handlers from an external Go PACKAGE instead of a generated stub (W9 handler-code composition). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package."
         }
       }
     },

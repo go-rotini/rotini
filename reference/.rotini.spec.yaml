@@ -588,27 +588,26 @@ command:
     #                          CODE from a package — the own-types + delegated-handler
     #                          hybrid. No stub is seeded. Per-command, no subtree cascade:
     #                          an inline sub-command without its own `handler:` still gets
-    #                          a normal stub. Pairs with the conf `cmd`/`cmdgen` package
-    #                          split (an in-project handler package can import the
-    #                          generated `cmdgen` input types directly).
+    #                          a normal stub. The handler package imports the generated
+    #                          `cmd` package for its input types.
     #   3. Local `$ref`      — `$ref: ./sibling.spec.yaml` (same module). The child's
     #                          tree merges in (parent keys win on overlap); codegen
     #                          auto-delegates to the child's package (child.Handlers().X()).
     #   4. Module `$ref`     — `$ref: mod://<module>@<version>/<path>`, resolved via the
     #                          Go module cache, pinned by go.sum; handlers auto-delegate
     #                          from THAT module's package (cross-module, no extra wiring).
-    #   5. External `$ref`   — `$ref: git::<url>@<ref>/<path>` or raw `https://…`. Not a
-    #      + passthrough       Go package, so `rotini mod` fetches + pins it (revision +
-    #                          content hash) into .rotini.lock + .rotini/cache/ (codegen
-    #                          reads that hermetically, never the network). With no package
-    #                          to auto-delegate to, the node MUST carry a `handler:` —
-    #                          `handler: { import: deploycli github.com/acme/clis/rth,
+    #      NOT SUPPORTED     — `$ref: git::<url>@<ref>/<path>` and raw `https://…` are
+    #                          REFUSED: rotini has no fetcher, so a spec naming one fails
+    #                          validation rather than being retrieved. Vendor the spec into
+    #                          your module (mode 3) or depend on the module that owns it
+    #                          (mode 4) instead.
+    #                          A `handler:` OVERRIDES the auto-delegation on a local or
+    #                          module `$ref`, and works on an inline command (mode 2):
+    #                          `handler: { import: deploycli github.com/acme/clis/deploy,
     #                          convention: Deploy }` — whose package exports
     #                          `<Convention>() rotini.Handlers` per command; codegen
-    #                          delegates `deploycli.Deploy()`. (A `handler:` also OVERRIDES
-    #                          the auto-delegation on a local/module `$ref`, and works on
-    #                          an inline command — see mode 2. Valid on any sub-command,
-    #                          not the root.)
+    #                          delegates `deploycli.Deploy()`. Valid on any sub-command,
+    #                          not the root.
     #   6. Remote command    — a sibling binary dispatched at RUNTIME, not composed at
     #                          codegen: see `remote_commands` / `remote_discovery` below.
     # Every composed spec (3–5) MUST declare a `$schema` that EXACTLY matches the

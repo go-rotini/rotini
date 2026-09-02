@@ -450,6 +450,32 @@ func (p *Program) Execute() error {
 // handler DURING a run stays local to that run). Stream and signal configuration
 // applies to every call.
 func (p *Program) Run(argv []string) (int, error) {
+	if p.ctx != nil {
+		return p.runWith(p.ctx, true, argv)
+	}
+	return p.runWith(context.Background(), false, argv)
+}
+
+// RunContext is [Program.Run] under an explicit context, for THIS invocation only:
+// unlike [Program.WithContext] it does not modify the program, so a host that
+// dispatches many invocations (a REPL, a stdio server) can scope each one without
+// permanently changing how the program handles signals.
+//
+// Supplying a context defers signal handling to the caller, exactly as
+// [Program.WithContext] does — override with [Program.WithSignals].
+//
+// ctx must not be nil; a nil context is a wiring mistake and is reported as an
+// [ErrInternal] rather than panicking somewhere deeper.
+func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
+	if ctx == nil {
+		return 1, InternalError(errors.New("rotini: RunContext called with a nil context"))
+	}
+	return p.runWith(ctx, true, argv)
+}
+
+// runWith is the shared core. hasCtx says whether a context was SUPPLIED (by
+// WithContext or RunContext), which is what decides the default signal trap.
+func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (int, error) {
 	if len(argv) > 0 && argv[0] == completeCommand {
 		rtx := p.newRunContext()
 		for _, c := range complete(p.def, argv[1:], p.handlers, rtx) {
@@ -465,8 +491,8 @@ func (p *Program) Run(argv []string) (int, error) {
 	// (a WithContext context, no trap) the caller's context is used as-is, so handlers see
 	// exactly what was passed; rotini still halts on its cancellation by observing ctx.Err().
 	// A canceled run context halts the lifecycle either way — see [Program.dispatch].
-	ctx := p.ctx
-	trap := ctx == nil // signalAuto: trap iff the caller supplied no context
+	ctx := runCtx
+	trap := !hasCtx // signalAuto: trap iff the caller supplied no context
 	switch p.signalMode {
 	case signalOff:
 		trap = false
@@ -475,16 +501,11 @@ func (p *Program) Run(argv []string) (int, error) {
 	}
 
 	// Derive a cancelable child only when rotini needs to be the canceler (the trap) or when
-	// it owns the context outright (no WithContext); otherwise the caller's context passes
-	// through untouched.
+	// it owns the context outright (no supplied context); otherwise the caller's context
+	// passes through untouched.
 	var cancel context.CancelCauseFunc
-	switch {
-	case ctx == nil:
-		ctx, cancel = context.WithCancelCause(context.Background())
-	case trap:
+	if !hasCtx || trap {
 		ctx, cancel = context.WithCancelCause(ctx)
-	}
-	if cancel != nil {
 		defer cancel(nil)
 	}
 

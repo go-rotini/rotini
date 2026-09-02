@@ -78,8 +78,9 @@
 //
 // `rotini validate` follows refs and collision-checks the whole assembled tree,
 // so a duplicate name, a cycle, or a missing ref is caught before codegen, and
-// generate and validate stay hermetic (external refs read from the committed
-// lock + cache, never the network).
+// generate and validate stay hermetic — rotini has no fetcher: a local ref reads the
+// filesystem, a mod:// ref reads the Go module cache (pinned by go.mod/go.sum), and a
+// git:: or raw https:// ref is refused outright.
 //
 // # The slim runtime
 //
@@ -218,4 +219,67 @@
 // None of these are wired unless the generated code — or yours — binds them;
 // the spec declares, the generator writes it down, and the runtime does
 // exactly that.
+//
+// # Batteries
+//
+// Beyond the runtime, rotini carries the pieces a one-shot, interactive, or
+// long-running binary keeps needing. They are batteries on a shelf: importing
+// rotini wires none of them, starts no goroutine, and touches no terminal —
+// each does something only because your handler constructed it and called it.
+//
+//   - [Printer] is the "data out" complement to [Collect]'s "data in": one writer
+//     that renders a value as text, JSON, YAML, TOML or a table, chosen from
+//     whatever your --output flag carried ([ParseFormat] turns the flag's string
+//     into a [Format]). It pairs with the spec's command output: key, which
+//     generates the typed <Prefix>Output struct — the spec declares the shape, the
+//     Printer renders it, and neither wires a flag.
+//   - [Table] renders aligned columns, measuring cells by DISPLAY width ([Width]),
+//     so styled and wide-rune text line up. Optionally bounded to a width budget
+//     and optionally styled through a [Styler].
+//   - [Prompt], [Confirm] and [Select] ask questions. They read from an
+//     [io.Reader], so the same code works interactively, from a pipe
+//     (echo y | mycli), and in a test — and input that ends without an answer is
+//     [ErrNotInteractive] rather than a hang. [Select] is a numbered menu (no raw
+//     terminal mode, so it works over a pipe) and resolves a typed answer by
+//     number, by exact text, or — with [Select.WithSuggestor] — by fuzzy match.
+//   - [Spinner] and [Progress] show live activity. Both redraw ONE line in place,
+//     and both stay silent on a non-terminal writer so a CI log is never smeared
+//     with carriage returns (the one place rotini detects anything by default —
+//     see the [Spinner] docs for why, and WithAnimation to override).
+//   - [Pager] sends long output through $PAGER, and passes it straight through
+//     when there is no terminal — so a piped invocation is never hijacked.
+//   - [Subprocess] wraps [os/exec] with environment, working directory and
+//     timeout control; a non-zero exit is a [*SubprocessError] quoting the child's
+//     stderr, and [Subprocess.Lines] streams tagged output as an iterator you can
+//     break out of.
+//
+// # Program shapes
+//
+// A rotini binary is not always a one-shot command. These run the SAME program in
+// a different shape, and all of them rest on [Program.Run] / [Program.RunContext]
+// being re-entrant — each dispatch gets a fresh [Context], so nothing leaks
+// between invocations while the services bound once up front reach all of them.
+//
+//   - [REPL] runs a [Program] as an interactive loop: each typed line is
+//     tokenized like a shell command line and dispatched against the same
+//     [Definition] the binary uses, so every command, flag and handler behaves
+//     identically. A failing command is reported and the loop continues; the
+//     session ends on an exit word, end of input, or a done context.
+//   - [Service] runs long-lived workers until the context ends or one fails, with
+//     ordered shutdown hooks that run in every case. Because the runtime already
+//     cancels the run context on SIGINT/SIGTERM, a handler that builds a Service
+//     on its own ctx gets signal-driven graceful shutdown for free.
+//   - [Scheduler] is [Service] with timers: interval tasks with optional jitter,
+//     so a fleet started together does not stampede in lockstep.
+//   - [StdioServer] serves JSON-RPC 2.0 over stdin/stdout, in newline-delimited
+//     or Content-Length framing — how LSP language servers and MCP servers speak.
+//     It is the shape a CLI takes when a tool drives it instead of a human.
+//   - [Wizard] sequences steps into a guided flow with branching ([WizardStep.When])
+//     and back navigation ([ErrWizardBack]). It owns no streams: a step does its own
+//     asking with a [Prompt], [Select] or [Confirm], which keeps the flow pure
+//     orchestration and testable with plain funcs.
+//
+// For watching files and for a single-instance lock, use go-rotini/fs
+// (fs.NewWatcher, fs.PIDLock); for caching in a long-running program, go-rotini/
+// memcache. rotini does not reimplement them.
 package rotini

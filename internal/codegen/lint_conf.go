@@ -125,12 +125,12 @@ func lintEntrypoint(conf *Conf) []error {
 }
 
 // lintFeatureDirs rejects an enabled, EMBEDDING feature whose explicit
-// embed_dir cannot resolve under an explicitly-set cmdgen package — //go:embed
+// embed_dir cannot resolve under an explicitly-set cmd package — //go:embed
 // could never reach it, so generate would fail; validate is the gate. Only
 // embed mode (embed: true) is checked: an inline feature writes no embedded
 // file, and template_dir is never embedded (unconstrained). When either side
 // is unset the defaults guarantee nesting (the default embed_dir is
-// <cmdgen>/renders), so there is nothing to check.
+// <cmd-package>/renders), so there is nothing to check.
 func lintFeatureDirs(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
@@ -139,18 +139,18 @@ func lintFeatureDirs(conf *Conf) []error {
 	if len(conf.Generate.Features) == 0 || fw == nil || fw.File == "" {
 		return nil
 	}
-	cmdgen := path.Dir(filepath.ToSlash(fw.File))
+	cmdDir := path.Dir(filepath.ToSlash(fw.File))
 	var problems []error
 	check := func(name string, f *Feature) {
 		if f == nil || !f.Enabled || !f.Embed || f.EmbedDir == "" {
 			return
 		}
 		dir := path.Clean(filepath.ToSlash(f.EmbedDir))
-		if dir != cmdgen && !strings.HasPrefix(dir, cmdgen+"/") {
+		if dir != cmdDir && !strings.HasPrefix(dir, cmdDir+"/") {
 			problems = append(problems, &problem{
 				kind: "conf",
 				loc:  "generate.features." + name + ".embed_dir",
-				msg:  fmt.Sprintf("%q must resolve under the cmd package %q so //go:embed can reach it", f.EmbedDir, cmdgen),
+				msg:  fmt.Sprintf("%q must resolve under the cmd package %q so //go:embed can reach it", f.EmbedDir, cmdDir),
 			})
 		}
 	}

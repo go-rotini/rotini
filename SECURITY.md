@@ -16,33 +16,32 @@ generated CLIs import. Its security posture is shaped around three trust boundar
    therefore code-adjacent: treat one you did not author with the same care as any
    dependency you vendor.
 2. **Composed (`$ref`) specs from outside the repo.** A spec can compose another
-   spec by reference — local, `mod://`, `git::`, or raw `https://`. A remote ref
-   pulls authored intent across a trust boundary into your generated binary.
+   spec by reference — a local relative path, or `mod://` for a spec inside a Go
+   module you already depend on. Either way the ref pulls authored intent across a
+   trust boundary into your generated binary.
 3. **The generated CLI's own runtime.** What the rotini runtime does — and
    deliberately does *not* do — when the end user's compiled program runs.
 
-The package's job is to make the safe path the easy path: fetching is hermetic and
-pinned, the runtime injects nothing you did not declare, and errors are built not
+The package's job is to make the safe path the easy path: codegen never reaches the
+network, the runtime injects nothing you did not declare, and errors are built not
 to leak secrets.
 
-## Remote Spec Composition Is Pinned and Hermetic
+## Spec Composition Never Reaches the Network
 
-External `$ref`s are resolved like dependencies, not fetched on the fly:
+`rotini` has no fetcher. Every `$ref` resolves from something already on disk:
 
-- **Fetching is confined to `rotini mod`.** `generate` and `validate` never reach
-  the network — they read only the local lockfile and content-addressed cache. A
-  code-generation pass is reproducible and offline.
-- **`git::` and raw `https://` refs are locked.** `rotini mod` pins each to an
-  immutable revision (a commit SHA for git) and the SHA-256 of the fetched bytes,
-  recorded in `.rotini.lock` (a go.sum for specs). Codegen verifies fetched bytes
-  against the lock and **refuses a moved tag or a tampered cache** rather than
-  trusting them.
+- **`generate` and `validate` are offline, always.** There is no command that
+  fetches a spec, so a code-generation pass cannot be influenced by the network.
+- **`git::` and raw `https://` refs are REFUSED.** rotini neither fetches nor pins
+  them; a spec naming one fails validation rather than being retrieved. (Earlier
+  designs pinned them through a `rotini mod` command and a `.rotini.lock` file;
+  both were dropped in favor of not fetching at all.)
 - **`mod://` refs ride Go's integrity.** A spec inside a Go module you depend on is
-  read from the module cache; `go.mod`/`go.sum` are its pins, so Go's own
+  read from the module cache, so `go.mod`/`go.sum` are its pins and Go's own
   verification applies. Local relative refs are pinned by the filesystem.
 
-Review the contents of an external `$ref` before locking it, exactly as you would a
-new module dependency.
+Review the contents of a composed `$ref` before depending on it, exactly as you
+would a new module dependency.
 
 ## Tool / Library Version Compatibility
 
@@ -73,8 +72,8 @@ Pillar 1 of rotini's design is that the runtime injects nothing you did not ask 
 - **No auto-injected behavior.** No implicit `--help`/`--version`/`--color`/`--no-*`
   flags, and no "did you mean" suggestions, unless you declare them in the spec.
   Fuzzy suggestion (`Suggestor`) ships, but is end-user opt-in.
-- **No network during generation.** Only `rotini mod` fetches; `generate` and
-  `validate` are offline.
+- **No network during generation.** rotini has no fetcher at all: `generate` and
+  `validate` read only the filesystem and the Go module cache.
 - **One runtime default.** Interrupt/SIGTERM handling is on by default (so a CLI
   shuts down cleanly on Ctrl-C); it is opt-out via `WithoutSignalHandling`. Every
   other runtime service is something a handler explicitly fetches or binds.

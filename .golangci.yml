@@ -92,6 +92,9 @@ linters:
       check-blank: true
     gosec:
       excludes:
+        # Scheduling jitter (Scheduler.next) uses math/rand deliberately: it
+        # spreads ticks, it is never a security decision.
+        - G404
         - G304
         - G115
         - G301
