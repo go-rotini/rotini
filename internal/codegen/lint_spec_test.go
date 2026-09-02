@@ -59,7 +59,7 @@ func specWithFlagType(typ, imp string) *Spec {
 			Flags: []FlagInput{{
 				Name:        "v",
 				Identifiers: []string{"--v"},
-				Schema:      &InputSchema{BaseSchema: BaseSchema{Type: typ, Import: imp}},
+				Schema:      &InputSchema{Type: typ, Import: imp},
 			}},
 		},
 	}

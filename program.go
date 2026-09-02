@@ -59,8 +59,7 @@ const (
 //	ctx, cancel := context.WithTimeoutCause(parent, 5*time.Second, rotini.ExitCode(124))
 //
 // A handler reaches the same cancel function via the registry — bind it in main
-// (`Bind("cancel", cancel)`) and call `MustGet[context.CancelCauseFunc](rtx,
-// "cancel")(rotini.ExitCode(3))`. Canceling WITHOUT an ExitCode cause (a plain
+// (`Bind("cancel", cancel)`) and call `rtx.MustGet[context.CancelCauseFunc](// "cancel")(rotini.ExitCode(3))`. Canceling WITHOUT an ExitCode cause (a plain
 // cancel or deadline) still halts cleanly, with the code falling through to the
 // normal resolution (0 unless a handler recorded an error or fault). Cancellation
 // is cooperative — it never preempts a running hook — and teardown always runs.
@@ -244,7 +243,7 @@ func (p *Program) WithArgs(args []string) *Program {
 // run stops cleanly and the exit code falls through to the normal resolution (0 unless a
 // handler recorded an error). A handler can cancel the run by holding this context's cancel
 // function — bind it (`Bind("cancel", cancel)`) and call it, e.g.
-// `MustGet[context.CancelCauseFunc](rtx, "cancel")(rotini.ExitCode(3))` — or, to stop without
+// `rtx.MustGet[context.CancelCauseFunc]("cancel")(rotini.ExitCode(3))` — or, to stop without
 // canceling the context (leaving it live for teardown), use [Context.SignalExit]/[Context.Exit].
 //
 // By default, supplying a context also opts OUT of rotini's signal trap (the caller owns
@@ -724,7 +723,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 			return p.settle(ctx, rtx)
 		}
 		out := m.Call(nil)
-		h, ok := out[0].Interface().(Handlers)
+		h, ok := reflect.TypeAssert[Handlers](out[0])
 		if !ok || h == nil {
 			rtx.recordFault(asFault(&WiringError{
 				Command: f.Name, Handler: f.Handler,

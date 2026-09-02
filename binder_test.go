@@ -765,7 +765,7 @@ func tbPortDef() Definition {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0)},
+			Minimum: Ptr(1.0), Maximum: Ptr(65535.0),
 		}},
 	}
 }
@@ -1082,8 +1082,7 @@ func TestBindError_envCoercion_isCleanUsage(t *testing.T) {
 	}
 
 	// The recon cause is still reachable for a handler that wants the detail.
-	var ce *recon.CoercionError
-	if !errors.As(err, &ce) {
+	if ce, ok := errors.AsType[*recon.CoercionError](err); !ok {
 		t.Error("errors.As could not reach the recon *CoercionError cause")
 	} else if ce.Path.String() != "loud" {
 		t.Errorf("CoercionError.Path = %q, want loud", ce.Path.String())
@@ -1130,5 +1129,60 @@ func TestBindError_typeContract(t *testing.T) {
 	noCause := usageBind(channelStdin, "", "required stdin payload is empty", nil)
 	if !errors.Is(noCause, ErrUsage) {
 		t.Error("a nil-cause usage BindError must still match ErrUsage")
+	}
+}
+
+// ── KeyBinder as an override ─────────────────────────────────────────────.
+
+// A Binder bound under KeyBinder replaces the one Collect would build. Before this
+// worked, KeyBinder was exported and documented but had no consumer: binding one had
+// no effect, and the advice to bind a custom binder was untrue.
+func TestKeyBinder_overridesTheDefault(t *testing.T) {
+	custom := NewBinder(BindMeta{EnvPrefix: "SENTINEL"})
+
+	var got *Binder
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+	p.Bind(KeyBinder, custom)
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got != custom {
+		t.Errorf("binderFor returned %p, want the bound %p — KeyBinder must override", got, custom)
+	}
+}
+
+// With nothing bound, Collect still works: the default is built from the generated
+// descriptor, so binding is an override rather than a prerequisite.
+func TestKeyBinder_defaultsWhenUnbound(t *testing.T) {
+	var got *Binder
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("binderFor returned nil with no binder bound")
+	}
+}
+
+// A nil or wrongly-typed binding falls back rather than panicking mid-run.
+func TestKeyBinder_ignoresUnusableBindings(t *testing.T) {
+	for name, value := range map[string]any{"nil": (*Binder)(nil), "wrong type": "not a binder"} {
+		t.Run(name, func(t *testing.T) {
+			var got *Binder
+			h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+			p, _, _ := newTestProgram(h, nil)
+			p.Bind(KeyBinder, value)
+
+			if _, err := p.Run([]string{"run", "x"}); err != nil {
+				t.Fatal(err)
+			}
+			if got == nil {
+				t.Error("an unusable KeyBinder binding produced a nil binder instead of the default")
+			}
+		})
 	}
 }

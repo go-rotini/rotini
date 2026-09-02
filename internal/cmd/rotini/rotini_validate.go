@@ -18,7 +18,7 @@ type rotiniValidateHandlers struct {
 }
 
 func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
+	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
 
 	var inputs RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
@@ -38,9 +38,9 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
-	version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+	version := rtx.MustGet[string](KeyRotiniVersion)
 	rtx.BindIfAbsent("validate", codegen.NewProcessor(version).Validate)
-	validate := rotini.MustGet[codegen.ValidateFn](rtx, "validate")
+	validate := rtx.MustGet[codegen.ValidateFn]("validate")
 
 	err := validate(
 		args.SpecFilePath,

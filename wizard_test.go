@@ -3,6 +3,7 @@ package rotini
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
 	"testing"
 	"time"
@@ -41,9 +42,7 @@ func TestWizard_stepSeesEarlierAnswers(t *testing.T) {
 		Step("first", func(context.Context, map[string]string) (string, error) { return "1", nil }).
 		Step("second", func(_ context.Context, answers map[string]string) (string, error) {
 			seen = map[string]string{}
-			for k, v := range answers {
-				seen[k] = v
-			}
+			maps.Copy(seen, answers)
 			return "2", nil
 		}).
 		Run(context.Background())

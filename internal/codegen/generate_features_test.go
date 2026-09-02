@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -344,12 +345,7 @@ func buildEmitted(t *testing.T, dir string) {
 }
 
 func slicesContains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, want)
 }
 
 // readEmittedIfExists reads an emitted file, returning the error when it is absent —

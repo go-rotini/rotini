@@ -40,7 +40,7 @@ func TestKey_provideAndGet(t *testing.T) {
 // interoperate rather than being parallel worlds.
 func TestKey_isTheSameRegistrySlot(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		if _, ok := Get[demoStore](rtx, demoStoreKey.Name()); !ok {
+		if _, ok := rtx.Get[demoStore](demoStoreKey.Name()); !ok {
 			t.Error("a Provide'd value is not reachable through the untyped Get")
 		}
 	}}

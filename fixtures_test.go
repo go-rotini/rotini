@@ -3,6 +3,7 @@ package rotini
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -79,12 +80,7 @@ func newTestProgram(h any, args []string) (*Program, *bytes.Buffer, *bytes.Buffe
 }
 
 func contains(ss []string, want string) bool {
-	for _, s := range ss {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss, want)
 }
 
 // act is an action injected into one named hook of one command.

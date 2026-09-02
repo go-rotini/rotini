@@ -123,7 +123,7 @@ func TestPrinter_tableFromSliceOfMapsHasStableColumns(t *testing.T) {
 			t.Fatalf("table column order is unstable:\n%s\nvs\n%s", first, got)
 		}
 	}
-	head := strings.SplitN(first, "\n", 2)[0]
+	head, _, _ := strings.Cut(first, "\n")
 	if !strings.HasPrefix(head, "alpha") || !strings.Contains(head, "zeta") {
 		t.Errorf("map columns are not sorted: %q", head)
 	}
@@ -188,7 +188,7 @@ func TestPrinter_widthBudgetReachesTheTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, line := range strings.Split(strings.TrimRight(buf.String(), "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(buf.String(), "\n"), "\n") {
 		if Width(line) > 12 {
 			t.Errorf("line %q exceeds the 12-cell budget", line)
 		}

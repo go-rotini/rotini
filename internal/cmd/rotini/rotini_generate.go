@@ -18,7 +18,7 @@ type rotiniGenerateHandlers struct {
 }
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
+	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
 
 	var inputs RotiniGenerateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
@@ -37,9 +37,9 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", args.SpecFilePath, flags.ConfFilePath)
 
-	version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+	version := rtx.MustGet[string](KeyRotiniVersion)
 	rtx.BindIfAbsent("generate", codegen.NewProcessor(version).Generate)
-	generate := rotini.MustGet[codegen.GenerateFn](rtx, "generate")
+	generate := rtx.MustGet[codegen.GenerateFn]("generate")
 
 	err := generate(
 		args.SpecFilePath,

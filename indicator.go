@@ -94,7 +94,8 @@ type Spinner struct {
 // NewSpinner returns a stopped spinner drawing on w.
 func NewSpinner(w io.Writer) *Spinner {
 	return &Spinner{
-		line:     line{w: w, animate: animates(w)},
+		w:        w,
+		animate:  animates(w),
 		frames:   spinnerFrames,
 		interval: 100 * time.Millisecond,
 	}
@@ -216,7 +217,8 @@ type Progress struct {
 // filled bar (the fraction is unknowable).
 func NewProgress(w io.Writer, total int64) *Progress {
 	return &Progress{
-		line:    line{w: w, animate: animates(w)},
+		w:       w,
+		animate: animates(w),
 		total:   total,
 		width:   30,
 		started: time.Now(),

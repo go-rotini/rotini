@@ -63,7 +63,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(0)
 		return
 	case flags.Version:
-		version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+		version := rtx.MustGet[string](KeyRotiniVersion)
 		fmt.Fprintf(rtx.Stdout, "v%s\n", version)
 		rtx.SignalExit(0)
 		return

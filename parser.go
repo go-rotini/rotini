@@ -152,7 +152,7 @@ func (e *ParseError) Unwrap() error { return ErrUsage }
 //	rth.Program.Bind(rotini.KeyParser, rotini.NewParser()).Execute()
 //
 //	// a handler
-//	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
+//	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
 //	var in MycliInputs
 //	err := parser.Parse(rtx, &in)
 type Parser struct{}

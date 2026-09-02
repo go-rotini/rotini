@@ -19,6 +19,7 @@ linters:
     - arangolint
     - gosmopolitan
     - exhaustruct
+    - exhaustruct_v5 # the v2.13 rename; disabled for the same reason as exhaustruct
     - varnamelen
     - wsl_v5
     - nlreturn
@@ -90,6 +91,10 @@ linters:
     errcheck:
       check-type-assertions: false
       check-blank: true
+      exclude-functions:
+        # AsType returns (E, bool) with E constrained to error, so discarding the
+        # value reads to errcheck as dropping an error. The bool IS the check.
+        - errors.AsType
     gosec:
       excludes:
         # Scheduling jitter (Scheduler.next) uses math/rand deliberately: it

@@ -20,9 +20,14 @@ import (
 // in the documented precedence. It is the engine behind [Collect]; the à-la-carte
 // per-channel surface is in overlay.go.
 
-// KeyBinder is the conventional registry key a main binds the [Binder] under
-// (and handlers retrieve it by). The binder is opt-in like every service —
-// the generated main binds it only when the spec declares non-argv channels.
+// KeyBinder is the registry key a [Binder] is bound under.
+//
+// Nothing needs to be bound for [Collect] and the per-channel functions to work: with
+// no override they build a binder from the generated descriptor ([KeyBindMeta]).
+// Binding one here REPLACES that default — the seam for a program that needs extra
+// recon sources, or a test that wants a double:
+//
+//	cmd.Program.Bind(rotini.KeyBinder, rotini.NewBinder(myMeta)).Execute()
 const KeyBinder = "binder"
 
 // Binder is the default multi-source input binder: it fills a command's typed
@@ -36,7 +41,7 @@ const KeyBinder = "binder"
 //	    Execute()
 //
 //	// a handler
-//	binder := rotini.MustGet[*rotini.Binder](rtx, rotini.KeyBinder)
+//	binder := rtx.MustGet[*rotini.Binder](rotini.KeyBinder)
 //	var in WidgetCreateInputs
 //	if err := binder.Bind(rtx, &in); err != nil { /* handler owns it */ }
 //
@@ -68,7 +73,14 @@ func binderFor(rtx *Context) *Binder {
 	if rtx == nil {
 		return NewBinder(BindMeta{}) // the channel layer reports the nil context as a ParseError
 	}
-	meta, _ := Get[BindMeta](rtx, KeyBindMeta)
+	// A Binder bound under KeyBinder wins: that is the seam for a program that needs
+	// extra recon sources, or a test that wants a double. Absent one, the default is
+	// built from the generated descriptor — so Collect works with nothing wired, and
+	// binding is an OVERRIDE rather than a prerequisite.
+	if b, ok := rtx.Get[*Binder](KeyBinder); ok && b != nil {
+		return b
+	}
+	meta, _ := rtx.Get[BindMeta](KeyBindMeta)
 	return NewBinder(meta)
 }
 

@@ -37,12 +37,12 @@ func (k Key[T]) Name() string { return k.name }
 func (k Key[T]) String() string { return k.name }
 
 // Get returns the value bound under k, and whether one was bound as type T.
-func (k Key[T]) Get(rtx *Context) (T, bool) { return Get[T](rtx, k.name) }
+func (k Key[T]) Get(rtx *Context) (T, bool) { return rtx.Get[T](k.name) }
 
 // MustGet returns the value bound under k, or routes a miss to the outcome funnel as
 // a [*ServiceError] — the same contract as [MustGet], with the type supplied by the
 // key rather than at the call site.
-func (k Key[T]) MustGet(rtx *Context) T { return MustGet[T](rtx, k.name) }
+func (k Key[T]) MustGet(rtx *Context) T { return rtx.MustGet[T](k.name) }
 
 // BindTo binds value under k on THIS invocation's context — for a service a hook
 // computes per run (a request-scoped client, say). Bind program-wide services with

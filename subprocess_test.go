@@ -49,8 +49,7 @@ func TestSubprocess_nonZeroExitCarriesStderr(t *testing.T) {
 	if !errors.Is(err, ErrInternal) {
 		t.Error("a subprocess failure must categorize as internal — the program chose the command")
 	}
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
 		t.Error("the underlying *exec.ExitError is not reachable")
 	}
 }
@@ -77,8 +76,7 @@ func TestSubprocess_missingBinary(t *testing.T) {
 	if code != -1 {
 		t.Errorf("exit code for a missing binary = %d, want -1", code)
 	}
-	var subErr *SubprocessError
-	if !errors.As(err, &subErr) {
+	if _, ok := errors.AsType[*SubprocessError](err); !ok {
 		t.Fatalf("err = %v, want a *SubprocessError", err)
 	}
 	if !strings.Contains(err.Error(), "failed to run") {

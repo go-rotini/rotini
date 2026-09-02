@@ -82,10 +82,15 @@ spec becomes the single place all of it is declared — and checked.
 
 ## Install
 
+Requires **Go 1.27** or later.
+
 ```
 go get -tool github.com/go-rotini/rotini@latest   # the codegen tool
 go get github.com/go-rotini/rotini@latest         # the runtime
 ```
+
+(Your own module may still declare an older Go version — calling rotini's generic
+methods does not require 1.27 in the caller, only declaring them does.)
 
 ## Quickstart
 

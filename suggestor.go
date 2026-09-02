@@ -41,7 +41,7 @@ const defaultMinScore = 0.6
 // handler after a parse failure — rotini itself suggests nothing; a
 // rotini.ParseError carries the offending Token and the valid Candidates:
 //
-//	suggestor := rotini.MustGet[*rotini.Suggestor](rtx, rotini.KeySuggestor)
+//	suggestor := rtx.MustGet[*rotini.Suggestor](rotini.KeySuggestor)
 //	if best, ok := suggestor.Closest(parseErr.Token, parseErr.Candidates); ok {
 //		fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
 //	}

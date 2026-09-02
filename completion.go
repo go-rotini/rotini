@@ -436,7 +436,7 @@ func resolveHandler[T any](handlers any, handlerName string) (T, bool) {
 	if !m.IsValid() || m.Type().NumIn() != 0 || m.Type().NumOut() != 1 {
 		return zero, false
 	}
-	completer, ok := m.Call(nil)[0].Interface().(T)
+	completer, ok := reflect.TypeAssert[T](m.Call(nil)[0])
 	return completer, ok
 }
 

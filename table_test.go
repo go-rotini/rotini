@@ -24,7 +24,7 @@ func TestTable_alignsColumns(t *testing.T) {
 // Trailing padding on the last column would be invisible but real — it shows up in
 // golden files and in `diff`, so it is trimmed.
 func TestTable_trimsTrailingPadding(t *testing.T) {
-	for _, line := range strings.Split(NewTable("A", "B").Row("x", "y").Row("longer", "z").Render(), "\n") {
+	for line := range strings.SplitSeq(NewTable("A", "B").Row("x", "y").Row("longer", "z").Render(), "\n") {
 		if strings.HasSuffix(line, " ") {
 			t.Errorf("line %q has trailing whitespace", line)
 		}
@@ -71,7 +71,7 @@ func TestTable_widthBudgetTruncates(t *testing.T) {
 		Row("alpha", "a very long description indeed").
 		WithWidth(24).
 		Render()
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if w := Width(line); w > 24 {
 			t.Errorf("line %q is %d cells, over the 24 budget", line, w)
 		}

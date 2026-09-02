@@ -90,10 +90,10 @@ func ExampleMustGet() {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Bind("api", &apiClient{baseURL: "https://api.example"})
 
-	client := MustGet[*apiClient](rtx, "api")
+	client := rtx.MustGet[*apiClient]("api")
 	fmt.Println(client.baseURL)
 
-	if _, ok := Get[*apiClient](rtx, "other"); !ok {
+	if _, ok := rtx.Get[*apiClient]("other"); !ok {
 		fmt.Println("nothing bound under \"other\"")
 	}
 	// Output:

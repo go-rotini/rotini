@@ -19,7 +19,7 @@ type rotiniInitializeHandlers struct {
 }
 
 func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
+	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
 
 	var inputs RotiniInitializeInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
@@ -43,9 +43,9 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	version := rotini.MustGet[string](rtx, KeyRotiniVersion)
+	version := rtx.MustGet[string](KeyRotiniVersion)
 	rtx.BindIfAbsent("initialize", codegen.NewProcessor(version).Initialize)
-	initialize := rotini.MustGet[codegen.InitializeFn](rtx, "initialize")
+	initialize := rtx.MustGet[codegen.InitializeFn]("initialize")
 
 	if err := initialize(args.Name, flags.Format, flags.Force); err != nil {
 		rtx.RecordError(err)

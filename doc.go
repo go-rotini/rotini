@@ -115,7 +115,7 @@
 //   - [Context.RecordError] (an error) — the end-user's own failures: a bad input,
 //     a domain error.
 //   - A recovered panic, or a rotini-DETECTED fault (a [*WiringError] from a
-//     [Definition] vs. handlers mismatch, a resolver fault, a [MustGet] on a
+//     [Definition] vs. handlers mismatch, a resolver fault, a [Context.MustGet] on a
 //     missing service) — rotini's "this should never have happened". There is NO
 //     record call: the lifecycle captures it, and the funnel receives it as its
 //     panics slice.
@@ -171,7 +171,7 @@
 //     [RemoteErrorKind]). Recorded as an error: a missing plugin is the consumer's
 //     environment, not the engineer's fault.
 //   - [*WiringError] (a [Definition] vs. handlers mismatch), [*ServiceError] (a
-//     [MustGet] miss), and [*PanicError] (any recovered panic) arrive as panics.
+//     [Context.MustGet] miss), and [*PanicError] (any recovered panic) arrive as panics.
 //
 // rotini ships no opinions on top: no "did you mean", no help dump on error. A
 // program that wants either writes its own funnel — e.g. one that ranges its
@@ -193,6 +193,9 @@
 //	// any handler — no string, no type assertion, no miss check
 //	store := tasks.StoreKey.MustGet(rtx)
 //
+// For a one-off lookup the registry is reached directly, with the type supplied at the
+// call site: rtx.Get[T](key) and rtx.MustGet[T](key).
+//
 // A handler that needs to know WHICH command it is — for a log line, an audit record,
 // or an error message — asks the context: [Context.Command] is the resolved leaf and
 // [Context.Path] is the canonical invocation ("tasks add"), with the full chain and
@@ -201,7 +204,7 @@
 // # Opt-in services
 //
 // Everything else is a value a handler fetches from the registry —
-// [Program.Bind] to provide, [Get] / [MustGet] to consume, with the [KeyParser],
+// [Program.Bind] to provide, [Context.Get] / [Context.MustGet] to consume, with the [KeyParser],
 // [KeyBinder], [KeySuggestor], [KeyStyler] conventions naming
 // the usual suspects:
 //

@@ -83,11 +83,9 @@ func DiscoveryDiagnostics
 func EnvNoColor
 func ExitCode
 func Formats
-func Get
 func Hyperlink
 func InternalError
 func IsTerminal
-func MustGet
 func NewBinder
 func NewConfirm
 func NewContextFor
@@ -137,6 +135,8 @@ method Context.BindIfAbsent
 method Context.Chain
 method Context.Command
 method Context.Exit
+method Context.Get
+method Context.MustGet
 method Context.Path
 method Context.RecordError
 method Context.RecordInfo

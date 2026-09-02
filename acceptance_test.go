@@ -137,7 +137,7 @@ func TestAcceptance_completionProtocol(t *testing.T) {
 	// One candidate per line; a described candidate is "name\tdescription",
 	// an undescribed one is bare — both shapes ride the same wire.
 	byName := map[string]string{}
-	for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(stdout, "\n"), "\n") {
 		name, desc, _ := strings.Cut(line, "\t")
 		byName[name] = desc
 	}

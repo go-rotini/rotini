@@ -15,13 +15,13 @@ func TestGet_typed(t *testing.T) {
 	buf := &bytes.Buffer{}
 	rtx.Bind("buf", buf)
 
-	if got, ok := Get[*bytes.Buffer](rtx, "buf"); !ok || got != buf {
+	if got, ok := rtx.Get[*bytes.Buffer]("buf"); !ok || got != buf {
 		t.Fatalf("Get[*bytes.Buffer] = (%v, %v), want the bound buffer", got, ok)
 	}
-	if _, ok := Get[*bytes.Buffer](rtx, "missing"); ok {
+	if _, ok := rtx.Get[*bytes.Buffer]("missing"); ok {
 		t.Error("Get of an unbound key should be ok=false")
 	}
-	if _, ok := Get[*int](rtx, "buf"); ok {
+	if _, ok := rtx.Get[*int]("buf"); ok {
 		t.Error("Get of a wrong-typed binding should be ok=false")
 	}
 }
@@ -33,13 +33,13 @@ func TestBindIfAbsent_keepsExistingElseRegistersDefault(t *testing.T) {
 	// A prior binding (e.g. a test's double) is kept — BindIfAbsent no-ops.
 	rtx.Bind("buf", injected)
 	rtx.BindIfAbsent("buf", def)
-	if MustGet[*bytes.Buffer](rtx, "buf") != injected {
+	if rtx.MustGet[*bytes.Buffer]("buf") != injected {
 		t.Error("BindIfAbsent must not overwrite an existing binding")
 	}
 
 	// An absent key gets the default registered into the registry.
 	rtx.BindIfAbsent("other", def)
-	if MustGet[*bytes.Buffer](rtx, "other") != def {
+	if rtx.MustGet[*bytes.Buffer]("other") != def {
 		t.Error("BindIfAbsent should register the default when the key is absent")
 	}
 }
@@ -48,7 +48,7 @@ func TestMustGet_returnsBoundService(t *testing.T) {
 	rtx := newContext()
 	buf := &bytes.Buffer{}
 	rtx.Bind("buf", buf)
-	if MustGet[*bytes.Buffer](rtx, "buf") != buf {
+	if rtx.MustGet[*bytes.Buffer]("buf") != buf {
 		t.Fatal("MustGet did not return the bound service")
 	}
 }
@@ -71,7 +71,7 @@ func TestMustGet_panicsServiceError(t *testing.T) {
 		}
 	}()
 
-	_ = MustGet[*bytes.Buffer](rtx, "missing") // panics → recovered above
+	_ = rtx.MustGet[*bytes.Buffer]("missing") // panics → recovered above
 }
 
 func TestMustGet_panicsOnWrongType(t *testing.T) {
@@ -84,7 +84,7 @@ func TestMustGet_panicsOnWrongType(t *testing.T) {
 		}
 	}()
 
-	_ = MustGet[*int](rtx, "buf") // bound, but not an *int → panics
+	_ = rtx.MustGet[*int]("buf") // bound, but not an *int → panics
 }
 
 // The registry is the DI seam shared by every hook, and concurrent tooling (tickers,
@@ -100,20 +100,20 @@ func TestContext_concurrentRegistry(t *testing.T) {
 	)
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		go func(w int) {
 			defer wg.Done()
 			key := fmt.Sprintf("svc-%d", w%keys)
-			for i := 0; i < iters; i++ {
+			for range iters {
 				rtx.Bind(key, w)
 				_ = rtx.Value(key)
-				_, _ = Get[int](rtx, key)
+				_, _ = rtx.Get[int](key)
 			}
 		}(w)
 	}
 	wg.Wait()
 
-	for k := 0; k < keys; k++ {
+	for k := range keys {
 		if rtx.Value(fmt.Sprintf("svc-%d", k)) == nil {
 			t.Errorf("key svc-%d unbound after concurrent access", k)
 		}

@@ -235,7 +235,7 @@ func TestParse_numericConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0)},
+			Minimum: Ptr(1.0), Maximum: Ptr(65535.0),
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -259,13 +259,13 @@ func TestParse_constraintsExclusiveAndZero(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "delta", Identifiers: []string{"--delta"}, Type: "int",
-				Constraints: Constraints{Minimum: Ptr(0.0)}}, // the once-rejected zero bound
+				Minimum: Ptr(0.0)}, // the once-rejected zero bound
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float64",
-				Constraints: Constraints{ExclusiveMinimum: Ptr(0.0), ExclusiveMaximum: Ptr(1.0)}},
+				ExclusiveMinimum: Ptr(0.0), ExclusiveMaximum: Ptr(1.0)},
 			{Name: "step", Identifiers: []string{"--step"}, Type: "int",
-				Constraints: Constraints{MultipleOf: Ptr(5.0)}},
+				MultipleOf: Ptr(5.0)},
 			{Name: "ports", Identifiers: []string{"--ports"}, Type: "[]int",
-				Constraints: Constraints{MultipleOf: Ptr(2.0)}},
+				MultipleOf: Ptr(2.0)},
 		},
 	}
 	cases := []struct {
@@ -315,15 +315,15 @@ func TestParse_constraintsWidenedTypes(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "workers", Identifiers: []string{"--workers"}, Type: "uint",
-				Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(64.0)}},
+				Minimum: Ptr(1.0), Maximum: Ptr(64.0)},
 			{Name: "offset", Identifiers: []string{"--offset"}, Type: "int64",
-				Constraints: Constraints{Minimum: Ptr(-100.0), Maximum: Ptr(100.0)}},
+				Minimum: Ptr(-100.0), Maximum: Ptr(100.0)},
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float32",
-				Constraints: Constraints{Maximum: Ptr(1.0)}},
+				Maximum: Ptr(1.0)},
 			{Name: "port", Identifiers: []string{"--port"}, Type: "[]int",
-				Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0), MaxItems: 3}},
+				Minimum: Ptr(1.0), Maximum: Ptr(65535.0), MaxItems: 3},
 			{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
-				Constraints: Constraints{MinLength: 2}},
+				MinLength: 2},
 		},
 	}
 	cases := []struct {
@@ -352,7 +352,7 @@ func TestParse_stringLengthConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "name", Identifiers: []string{"--name"}, Type: "string",
-			Constraints: Constraints{MinLength: 2, MaxLength: 5},
+			MinLength: 2, MaxLength: 5,
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -371,7 +371,7 @@ func TestParse_patternConstraint(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "id", Identifiers: []string{"--id"}, Type: "string",
-			Constraints: Constraints{Pattern: "^[a-z]+$"},
+			Pattern: "^[a-z]+$",
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -389,7 +389,7 @@ func TestParse_itemCountConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
-			Constraints: Constraints{MinItems: 1, MaxItems: 2},
+			MinItems: 1, MaxItems: 2,
 		}},
 	}
 	for _, c := range []struct {
@@ -414,7 +414,7 @@ func TestParse_variadicArgItemCount(t *testing.T) {
 		Name: "app", Handler: "App",
 		Arguments: []ArgDef{{
 			Name: "files", Type: "[]string", Variadic: true,
-			Constraints: Constraints{MinItems: 2},
+			MinItems: 2,
 		}},
 	}
 	var in struct{}
@@ -546,7 +546,7 @@ func TestParse_secretConstraintValueRedacted(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "pin", Identifiers: []string{"--pin"}, Type: "string", Secret: true,
-				Constraints: Constraints{Pattern: "^[0-9]{4}$"}},
+				Pattern: "^[0-9]{4}$"},
 		},
 	}
 	var in struct{}
@@ -1706,7 +1706,7 @@ func TestParseError_kindPerPath(t *testing.T) {
 		},
 		{
 			name: "constraint violation (minimum)",
-			def:  Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "n", Identifiers: []string{"--n"}, Type: "int", Constraints: Constraints{Minimum: min1}}}},
+			def:  Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "n", Identifiers: []string{"--n"}, Type: "int", Minimum: min1}}},
 			argv: []string{"--n", "0"},
 			want: ParseKindConstraintViolation,
 		},

@@ -121,7 +121,7 @@ func newContext() *Context {
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
 //	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"}).Bind(rotini.KeyParser, rotini.NewParser())
 //	var in appInputs
-//	err := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser).Parse(rtx, &in)
+//	err := rtx.MustGet[*rotini.Parser](rotini.KeyParser).Parse(rtx, &in)
 //
 // To drive a whole *generated* program end-to-end (the usual handler test), construct it
 // with the generated NewProgram and run it under a recording exit + capture streams —
@@ -163,7 +163,7 @@ func (rtx *Context) Bind(key string, value any) *Context {
 // overwrite unconditionally.
 //
 //	rtx.BindIfAbsent("generate", internal.Generate)
-//	gen := rotini.MustGet[internal.GenerateFn](rtx, "generate")
+//	gen := rtx.MustGet[internal.GenerateFn]("generate")
 func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
@@ -476,34 +476,35 @@ func (rtx *Context) recordFault(pe *PanicError) {
 	rtx.faults = append(rtx.faults, pe)
 }
 
-// Get returns the service bound under key as T — the typed, comma-ok form of the
-// raw [Context.Value] (which returns any). ok is false when no service is bound
-// under key or the bound value is not a T:
+// Get returns the service bound under key as T — the typed, comma-ok form of the raw
+// [Context.Value] (which returns any). ok is false when no service is bound under key
+// or the bound value is not a T:
 //
-//	parser, ok := rotini.Get[*rotini.Parser](rtx, rotini.KeyParser)
+//	parser, ok := rtx.Get[*rotini.Parser](rotini.KeyParser)
 //	if !ok {
 //		// not bound — fail the command, or fall back
 //	}
 //
-// It never panics; use [MustGet] to route a missing/wrong-type service through the
-// funnel (as a fault) instead of handling it inline.
-func Get[T any](rtx *Context, key string) (T, bool) {
+// It never panics; use [Context.MustGet] to route a missing or wrong-type service
+// through the funnel (as a fault) instead of handling it inline. A service reached in
+// more than one place is better named by a typed [Key], which supplies T for you.
+func (rtx *Context) Get[T any](key string) (T, bool) {
 	v, ok := rtx.Value(key).(T)
 	return v, ok
 }
 
-// MustGet returns the service bound under key as T, or panics with a
-// [*ServiceError] (unwrapping to [ErrServiceNotFound]) when it is absent or not a
-// T. The panic is intentional and recoverable: the runtime recovers it inside
-// dispatch and routes it through the program's funnel — so a handler that
-// cannot run without a service reaches for MustGet instead of handling a miss
-// inline:
+// MustGet returns the service bound under key as T, or panics with a [*ServiceError]
+// (unwrapping to [ErrServiceNotFound]) when it is absent or not a T.
 //
-//	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
+// The panic is intentional and recoverable: the runtime recovers it inside dispatch
+// and routes it through the program's funnel — so a handler that cannot run without a
+// service reaches for MustGet rather than handling a miss inline:
+//
+//	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
 //	var in MycliInputs
 //	err := parser.Parse(rtx, &in)
-func MustGet[T any](rtx *Context, key string) T {
-	v, ok := Get[T](rtx, key)
+func (rtx *Context) MustGet[T any](key string) T {
+	v, ok := rtx.Get[T](key)
 	if !ok {
 		panic(&ServiceError{Key: key})
 	}

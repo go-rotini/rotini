@@ -104,9 +104,9 @@ func TestProgram_Run_isReentrant(t *testing.T) {
 func TestProgram_Run_seedsBoundServicesPerRun(t *testing.T) {
 	var seeded, leaked []bool
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		_, ok := Get[string](rtx, "seeded")
+		_, ok := rtx.Get[string]("seeded")
 		seeded = append(seeded, ok)
-		_, ok = Get[string](rtx, "per-run")
+		_, ok = rtx.Get[string]("per-run")
 		leaked = append(leaked, ok)
 		rtx.Bind("per-run", "bound during this run")
 	}}
@@ -545,7 +545,7 @@ func TestProgram_handlerCancelsViaBoundCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
-		MustGet[context.CancelFunc](rtx, "cancel")()
+		rtx.MustGet[context.CancelFunc]("cancel")()
 	}}
 	code, err := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).Run(nil)
 	if err != nil {
@@ -564,7 +564,7 @@ func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
-		MustGet[context.CancelCauseFunc](rtx, "cancel")(ExitCode(3))
+		rtx.MustGet[context.CancelCauseFunc]("cancel")(ExitCode(3))
 	}}
 	code, _ := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).Run(nil)
 	if code != 3 {

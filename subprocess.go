@@ -185,8 +185,7 @@ func (s *Subprocess) Run(ctx context.Context) (int, error) {
 	if err == nil {
 		return code, nil
 	}
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
+	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
 		code = -1
 	}
 	return code, &SubprocessError{
@@ -280,8 +279,7 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 
 		if err := cmd.Wait(); err != nil {
 			code := cmd.ProcessState.ExitCode()
-			var exitErr *exec.ExitError
-			if !errors.As(err, &exitErr) {
+			if _, isExit := errors.AsType[*exec.ExitError](err); !isExit {
 				code = -1
 			}
 			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: code, Cause: err})
