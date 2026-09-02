@@ -55,6 +55,8 @@ type scopeInputs struct {
 // [*ParseError] for uniformity, but the author's bug.
 type ParseKind int
 
+// The parse failure kinds. Branch on these rather than on a message: the message is
+// presentation, the kind is data.
 const (
 	// ParseKindUnspecified is the zero value: a [ParseError] whose construction
 	// site did not classify it (a hand-built error, or a path predating EH5).
@@ -126,8 +128,10 @@ type ParseError struct {
 	Candidates []string  // the vocabulary Token failed against — sibling commands, declared flags, enum members (nil when none applies)
 }
 
+// Error renders the parse failure as a single, user-facing line.
 func (e *ParseError) Error() string { return e.Msg }
 
+// Unwrap exposes the category sentinel, so [CategoryOf] and errors.Is reach it.
 func (e *ParseError) Unwrap() error { return ErrUsage }
 
 // Parser is rotini's argument parser, and it is a *service*: a CLI binds it to the
@@ -192,6 +196,7 @@ type Deprecation struct {
 	Identifier string // the deprecated token actually used on argv (e.g. "--conf", "build")
 }
 
+// Error renders the deprecation notice as a single line.
 func (d Deprecation) Error() string {
 	return fmt.Sprintf("deprecated %s identifier %q was used", d.Kind, d.Identifier)
 }

@@ -85,6 +85,19 @@ func canceledExitCode(ctx context.Context) int {
 	return 0
 }
 
+// Program is a rotini CLI, ready to run: the compiled command tree ([Definition]),
+// the handlers that implement it, and every configurable seam around them.
+//
+// The generated entrypoint builds one with [NewProgram] and calls [Program.Execute].
+// Everything else is optional: streams ([Program.WithStdout] and friends), the exit
+// action ([Program.WithExit]), signal handling, the outcome funnel, and the resolve
+// and lifecycle phases can each be replaced without touching a handler.
+//
+// A Program is reusable. [Program.Run] dispatches one invocation and returns instead
+// of exiting, giving each call a fresh [Context], which is what lets a [REPL], a
+// [StdioServer] or a test drive the same program many times over.
+//
+// The zero value is not usable; start from [NewProgram].
 type Program struct {
 	ctx       context.Context
 	args      []string
@@ -350,6 +363,8 @@ type PanicError struct {
 	Stack []byte
 }
 
+// Error renders the recovered panic's value as a single line. The captured stack
+// rides along on the type for an errors.As, and is deliberately not printed here.
 func (e *PanicError) Error() string { return fmt.Sprintf("%v", e.Value) }
 
 // Unwrap exposes a panicked error value so errors.Is/errors.As and [CategoryOf]
@@ -376,6 +391,7 @@ type WiringError struct {
 	Msg     string // the human-readable failure
 }
 
+// Error renders the [Definition]-versus-handlers mismatch as a single line.
 func (e *WiringError) Error() string { return e.Msg }
 
 // Unwrap reports [ErrInternal]: a wiring mismatch is always the author's bug,

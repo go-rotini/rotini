@@ -49,6 +49,8 @@ type BindError struct {
 	usage bool // true → CategoryUsage (ErrUsage); false → CategoryInternal
 }
 
+// Error renders a clean, rotini-owned message naming the channel and the input.
+// Values are never echoed, so a secret cannot leak through it.
 func (e *BindError) Error() string { return e.Msg }
 
 // Unwrap exposes the [Cause] (when present) and the category sentinel via

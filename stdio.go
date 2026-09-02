@@ -42,6 +42,7 @@ type RPCError struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+// Error renders the JSON-RPC error as "jsonrpc <code>: <message>".
 func (e *RPCError) Error() string { return fmt.Sprintf("jsonrpc %d: %s", e.Code, e.Message) }
 
 // NewRPCError returns an error a handler can return to set the JSON-RPC code.

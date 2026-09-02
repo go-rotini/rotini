@@ -18,6 +18,7 @@ import (
 // Stream identifies which of a subprocess's output streams a line came from.
 type Stream int
 
+// The two output streams a subprocess line can come from.
 const (
 	StreamStdout Stream = iota
 	StreamStderr
@@ -51,6 +52,8 @@ type SubprocessError struct {
 	Cause    error
 }
 
+// Error renders the failure with the command, its exit status, and the first line
+// of whatever it wrote to stderr — rather than a bare "exit status 1".
 func (e *SubprocessError) Error() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "rotini: %s", e.Name)

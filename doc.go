@@ -287,7 +287,16 @@
 //     asking with a [Prompt], [Select] or [Confirm], which keeps the flow pure
 //     orchestration and testable with plain funcs.
 //
-// For watching files and for a single-instance lock, use go-rotini/fs
-// (fs.NewWatcher, fs.PIDLock); for caching in a long-running program, go-rotini/
-// memcache. rotini does not reimplement them.
+// # What rotini deliberately does not ship
+//
+// Three things a CLI often wants live elsewhere in the same ecosystem, and rotini
+// does not wrap them:
+//
+//   - watching files — go-rotini/fs, fs.NewWatcher (debounce, recursion, polling)
+//   - a single-instance lock — go-rotini/fs, fs.PIDLock (with stale-lock recovery)
+//   - caching in a long-running program — go-rotini/memcache
+//
+// Import them directly. A re-export would give each API two names, put its
+// documentation in the wrong package, and pull another module's surface inside
+// rotini's compatibility promise — for no added capability.
 package rotini

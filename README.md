@@ -59,6 +59,13 @@ because your handler constructed it:
 | `StdioServer` | JSON-RPC 2.0 over stdio — LSP and MCP framing |
 | `Wizard` | multi-step flows with branching and back navigation |
 
+Two things rotini deliberately does **not** reimplement, because they already exist in
+the same ecosystem: **file watching** is `fs.NewWatcher` and a **single-instance lock**
+is `fs.PIDLock`, both in [`go-rotini/fs`](https://github.com/go-rotini/fs); caching for
+a long-running program is [`go-rotini/memcache`](https://github.com/go-rotini/memcache).
+rotini does not wrap them — a facade would put another package's API inside rotini's
+frozen surface and put its documentation in the wrong place.
+
 **3. The generated code is small, legible, and yours.** A hello-world CLI generates
 **108 lines** across three files. The machinery is an ordinary import you upgrade with
 `go get -u` — not a vendored copy you must never edit.

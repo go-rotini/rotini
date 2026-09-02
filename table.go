@@ -9,6 +9,7 @@ import (
 // Align is a table column's horizontal alignment.
 type Align int
 
+// The column alignments. Left is the default; right suits numeric columns.
 const (
 	AlignLeft  Align = iota // the default
 	AlignRight              // for numeric columns

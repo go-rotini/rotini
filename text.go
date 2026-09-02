@@ -7,10 +7,17 @@ import (
 
 var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
+// Strip removes every ANSI escape sequence from text — SGR styling and OSC
+// sequences alike — leaving the characters a terminal would actually display. It is
+// what a program applies when a consumer asked for no styling, and what codegen
+// applies to man and markdown pages, which have no place for terminal escapes.
 func Strip(text string) string {
 	return ansiSequences.ReplaceAllString(text, "")
 }
 
+// Hyperlink wraps text in an OSC 8 terminal hyperlink pointing at url. Terminals
+// that support it render text as a clickable link; the rest display text unchanged,
+// so it is always safe to emit.
 func Hyperlink(url, text string) string {
 	return "\x1b]8;;" + url + "\x07" + text + "\x1b]8;;\x07"
 }

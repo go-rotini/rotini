@@ -69,6 +69,7 @@ type RemoteError struct {
 	cat Category // how CategoryOf classifies it (CategoryNone for a timeout)
 }
 
+// Error renders the plugin-dispatch failure as a single, user-facing line.
 func (e *RemoteError) Error() string { return e.Msg }
 
 // Unwrap exposes the Cause (when present) and the category sentinel

@@ -6,8 +6,12 @@ import (
 	"strings"
 )
 
+// ANSIColor is one of the 16 standard terminal colors — the eight originals and
+// their bright variants. These are the only colors every terminal agrees on, and
+// the only ones that survive downsampling to [ProfileANSI16].
 type ANSIColor int
 
+// The 16 standard terminal colors, in their conventional order.
 const (
 	ANSIColorBlack ANSIColor = iota
 	ANSIColorRed
@@ -27,8 +31,16 @@ const (
 	ANSIColorBrightWhite
 )
 
+// Profile is how much color a terminal can render. It is a CEILING: a [Style]
+// carrying a 24-bit color renders it downsampled to whatever its profile allows, so
+// the same style is safe to reuse across terminals.
+//
+// rotini never sets a profile for you — see [DetectProfile] for the opt-in guess.
 type Profile int
 
+// The color profiles, ordered from least to most capable. Each renders a color by
+// downsampling it to what that profile supports; [ProfileNoColor] emits no escapes
+// at all.
 const (
 	ProfileNoColor Profile = iota
 	ProfileANSI16

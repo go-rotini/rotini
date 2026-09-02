@@ -16,11 +16,13 @@ import (
 // carries.
 type Format string
 
+// The output formats a [Printer] renders. They are the natural enum for an
+// --output flag; [Formats] returns them and [ParseFormat] resolves a flag's value.
 const (
 	FormatText  Format = "text"  // human-readable lines; the default
 	FormatJSON  Format = "json"  // indented JSON
-	FormatYAML  Format = "yaml"  //
-	FormatTOML  Format = "toml"  //
+	FormatYAML  Format = "yaml"  // YAML, for a human-editable structured result
+	FormatTOML  Format = "toml"  // TOML, for a config-shaped result
 	FormatTable Format = "table" // aligned columns, for a slice of records
 )
 

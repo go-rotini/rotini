@@ -24,6 +24,7 @@ type ServiceError struct {
 	Key string // the registry key that was requested
 }
 
+// Error renders the missing- or mistyped-service fault as a single line.
 func (e *ServiceError) Error() string {
 	return fmt.Sprintf("rotini: no service bound under key %q", e.Key)
 }

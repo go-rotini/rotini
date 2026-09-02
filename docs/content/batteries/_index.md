@@ -187,4 +187,12 @@ Going back over a branch that was skipped skips it again — the flow does not r
 
 ## What rotini deliberately does not ship
 
-Watching files and single-instance locking live in **`go-rotini/fs`** (`fs.NewWatcher`, `fs.PIDLock`); caching for a long-running program lives in **`go-rotini/memcache`**. rotini does not reimplement them.
+| Need | Use |
+|---|---|
+| watch files or directories | `fs.NewWatcher` — debounce, recursion, polling ([go-rotini/fs](https://github.com/go-rotini/fs)) |
+| stop two copies running at once | `fs.PIDLock` — advisory lock with stale-lock recovery |
+| cache in a long-running program | [go-rotini/memcache](https://github.com/go-rotini/memcache) — bounded, generic, thread-safe |
+
+rotini does not wrap these. A facade would give each API two names, put its documentation in the wrong package, and pull another module's surface inside rotini's frozen compatibility promise — all for zero added capability.
+
+The "one import" promise is about not shopping the ecosystem and reconciling four libraries' idioms. These are the same author, the same release cadence, the same house style: importing them directly is not the problem that promise solves.
