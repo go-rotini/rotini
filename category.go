@@ -2,6 +2,9 @@ package rotini
 
 import "errors"
 
+// The error taxonomy: whose fault an error is, and the sentinels every rotini error
+// type unwraps to so a funnel can classify one with a single call.
+
 // Category classifies an error by whose fault it is, so the funnel can decide the
 // exit code and message style from a single call to [CategoryOf] — rather than every CLI
 // re-deriving the taxonomy. rotini tags its

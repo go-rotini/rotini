@@ -10,6 +10,13 @@ import (
 	"strings"
 )
 
+// Asking questions: [Prompt] (free text), [Confirm] (yes/no) and [Select] (a menu),
+// over an [io.Reader] rather than the terminal directly.
+//
+// That is what makes them work identically when driven interactively, from a pipe, and
+// from a test — and why input that ends without an answer is [ErrNotInteractive]
+// rather than a hang.
+
 // ErrNotInteractive reports that a prompt had no answer available: its input
 // reached EOF without a line. It is what makes an interactive battery safe in a
 // pipeline or CI job — the run fails fast and says why, instead of blocking

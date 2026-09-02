@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// Plugin dispatch: resolving a co-located `<program>-<name>` binary, optionally
+// verifying it, and exec'ing it with stream and signal passthrough — the git-style
+// sub-command model, declared in the spec as remote_commands / remote_discovery.
+
 // RemoteErrorKind classifies a remote-dispatch failure: the plugin binary could
 // not be located, it exceeded its declared timeout, or it could not be spawned.
 type RemoteErrorKind int

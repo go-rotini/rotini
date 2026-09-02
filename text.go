@@ -2,16 +2,30 @@ package rotini
 
 import (
 	"regexp"
+	"strings"
 	"unicode"
 )
 
+// Escape-aware text measurement: stripping ANSI sequences, measuring DISPLAY width in
+// terminal cells, and OSC 8 hyperlinks. Used wherever styled text must line up —
+// table columns above all.
+
 var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
+
+// esc begins every ANSI escape sequence. Text without one cannot match
+// ansiSequences, so Strip returns it untouched — a zero-allocation path for the
+// overwhelmingly common case of text that was never styled. Width is built on Strip
+// and inherits it.
+const esc = '\x1b'
 
 // Strip removes every ANSI escape sequence from text — SGR styling and OSC
 // sequences alike — leaving the characters a terminal would actually display. It is
 // what a program applies when a consumer asked for no styling, and what codegen
 // applies to man and markdown pages, which have no place for terminal escapes.
 func Strip(text string) string {
+	if !strings.ContainsRune(text, esc) {
+		return text
+	}
 	return ansiSequences.ReplaceAllString(text, "")
 }
 
@@ -28,7 +42,7 @@ func Hyperlink(url, text string) string {
 // grapheme-cluster segmentation), sufficient for aligning styled output.
 func Width(text string) int {
 	width := 0
-	for _, r := range Strip(text) {
+	for _, r := range Strip(text) { // unstyled text costs no allocation here
 		width += runeWidth(r)
 	}
 	return width

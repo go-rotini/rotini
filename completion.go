@@ -86,48 +86,11 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 		return nil // raw tokens past the boundary: let the shell fall back to files
 	}
 
-	// Completing the value of the preceding flag (the separate-word form,
-	// including bash's "--flag = val" word splitting). The handler of the command
-	// that declares the flag may supply dynamic candidates (FlagValueCompleter);
-	// a nil return (or no completer) falls back to the flag's static enum, and an
-	// empty result lets the shell fall back to file completion — never to
-	// sub-command names, which dispatch would treat as this flag's value.
-	if !cc.afterTerminator {
-		if name, ok := pendingValueFlag(context); ok {
-			if fd, owner, found := findFlag(cc.chain, name); found && takesValue(fd) {
-				return filterPrefix(flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, partial), partial)
-			}
-		}
+	if cands, handled := completePendingFlagValue(cc, context, words, partial, handlers, rtx); handled {
+		return cands
 	}
-
-	// Completing a flag name — or, with an inline "=", a flag's value. Only
-	// declared, non-hidden flags are offered — rotini auto-adds no flags, so
-	// `-h`/`--help` appear here exactly when the CLI declares them, not by
-	// framework injection. The whole chain contributes: ancestor flags resolve on
-	// descendants at runtime.
-	if !cc.afterTerminator && strings.HasPrefix(partial, "-") {
-		if name, val, hasInline := splitFlag(partial); hasInline {
-			if fd, owner, found := findFlag(cc.chain, name); found && takesValue(fd) {
-				cands := flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, val)
-				out := make([]string, 0, len(cands))
-				for _, c := range cands {
-					out = append(out, name+"="+c)
-				}
-				return filterPrefix(out, partial)
-			}
-			return nil
-		}
-		var ids []string
-		for _, v := range slices.Backward(cc.chain) {
-			for _, f := range v.Flags {
-				if !f.Hidden {
-					for _, id := range f.Identifiers {
-						ids = append(ids, withDescription(id, f.Summary))
-					}
-				}
-			}
-		}
-		return filterPrefix(ids, partial)
+	if cands, handled := completeFlagWord(cc, words, partial, handlers, rtx); handled {
+		return cands
 	}
 
 	// Completing a positional word. Until the first positional is consumed it may
@@ -135,25 +98,94 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	// dispatch no longer descends, so only argument values remain.
 	var names []string
 	if !cc.afterTerminator && cc.positionals == 0 {
-		for _, c := range cur.Commands {
-			if c.Hidden {
-				continue
-			}
-			names = append(names, withDescription(c.Name, c.Summary))
-			for _, a := range c.Aliases {
-				names = append(names, withDescription(a, c.Summary))
-			}
-		}
-		for _, r := range cur.Remotes {
-			names = append(names, withDescription(r.Name, r.Summary))
-			for _, a := range r.Aliases {
-				names = append(names, withDescription(a, r.Summary))
-			}
-		}
-		names = append(names, DiscoveredPlugins(cur)...)
+		names = dispatchableNames(cur)
 	}
 	names = append(names, argValueCandidates(handlers, rtx, cc, words, partial)...)
 	return filterPrefix(names, partial)
+}
+
+// completePendingFlagValue handles the separate-word form — "--flag <TAB>", and
+// bash's "--flag = val" splitting — where the word being completed is the VALUE of
+// the preceding flag.
+//
+// The handler of the command that declares the flag may supply dynamic candidates
+// ([FlagValueCompleter]); a nil return (or no completer) falls back to the flag's
+// static enum, and an empty result lets the shell fall back to file completion —
+// never to sub-command names, which dispatch would read as this flag's value.
+func completePendingFlagValue(cc completionContext, context, words []string, partial string, handlers any, rtx *Context) ([]string, bool) {
+	if cc.afterTerminator {
+		return nil, false
+	}
+	name, ok := pendingValueFlag(context)
+	if !ok {
+		return nil, false
+	}
+	fd, owner, found := findFlag(cc.chain, name)
+	if !found || !takesValue(fd) {
+		return nil, false
+	}
+	return filterPrefix(flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, partial), partial), true
+}
+
+// completeFlagWord handles a word that begins with "-": either a flag NAME, or a
+// flag's value in the inline "--flag=value" form.
+//
+// Only declared, non-hidden flags are offered — rotini auto-adds no flags, so
+// -h/--help appear here exactly when the CLI declares them, never by injection. The
+// whole chain contributes, since ancestor flags resolve on descendants at runtime.
+func completeFlagWord(cc completionContext, words []string, partial string, handlers any, rtx *Context) ([]string, bool) {
+	if cc.afterTerminator || !strings.HasPrefix(partial, "-") {
+		return nil, false
+	}
+
+	if name, val, hasInline := splitFlag(partial); hasInline {
+		fd, owner, found := findFlag(cc.chain, name)
+		if !found || !takesValue(fd) {
+			return nil, true // a flag that takes no value has nothing to offer after "="
+		}
+		cands := flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, val)
+		out := make([]string, 0, len(cands))
+		for _, c := range cands {
+			out = append(out, name+"="+c)
+		}
+		return filterPrefix(out, partial), true
+	}
+
+	var ids []string
+	for _, v := range slices.Backward(cc.chain) {
+		for _, f := range v.Flags {
+			if f.Hidden {
+				continue
+			}
+			for _, id := range f.Identifiers {
+				ids = append(ids, withDescription(id, f.Summary))
+			}
+		}
+	}
+	return filterPrefix(ids, partial), true
+}
+
+// dispatchableNames lists everything the next positional word could dispatch to:
+// sub-commands and their aliases, declared remote commands and theirs, and the
+// plugins discovery finds on PATH.
+func dispatchableNames(cur ResolvedCommand) []string {
+	var names []string
+	for _, c := range cur.Commands {
+		if c.Hidden {
+			continue
+		}
+		names = append(names, withDescription(c.Name, c.Summary))
+		for _, a := range c.Aliases {
+			names = append(names, withDescription(a, c.Summary))
+		}
+	}
+	for _, r := range cur.Remotes {
+		names = append(names, withDescription(r.Name, r.Summary))
+		for _, a := range r.Aliases {
+			names = append(names, withDescription(a, r.Summary))
+		}
+	}
+	return append(names, DiscoveredPlugins(cur)...)
 }
 
 // walkContext resolves the words preceding the completed one with dispatch's

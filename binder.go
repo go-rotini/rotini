@@ -14,6 +14,11 @@ import (
 	"github.com/go-rotini/recon"
 )
 
+// The multi-source [Binder]: fill a command's typed inputs from every declared channel
+// — argv, environment, configuration files, stdin, defaults — reconciled through recon
+// in the documented precedence. It is the engine behind [Collect]; the à-la-carte
+// per-channel surface is in overlay.go.
+
 // KeyBinder is the conventional registry key a main binds the [Binder] under
 // (and handlers retrieve it by). The binder is opt-in like every service —
 // the generated main binds it only when the spec declares non-argv channels.
@@ -269,11 +274,12 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
 	offset := len(chain) - v.NumField()
-	srcs := []recon.Source{recon.NewMapSource("flags", flagOverrides(v, chain, argv)), flagEnvSource(b.envPrefix)}
 	files, err := b.fileSources(b.chainConfigFiles(chain), overrides)
 	if err != nil {
 		return err
 	}
+	srcs := make([]recon.Source, 0, 2+len(files))
+	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, argv)), flagEnvSource(b.envPrefix))
 	srcs = append(srcs, files...)
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {

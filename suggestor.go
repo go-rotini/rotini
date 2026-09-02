@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// The [Suggestor]: string-distance matching over a candidate vocabulary, for turning a
+// mistyped token into "did you mean". Stateless and dependency-free.
+//
+// rotini itself never calls it (Pillar 1 — no suggestions are shipped): a program binds
+// one and applies it to a [ParseError]'s Token and Candidates if it wants them.
+
 // KeySuggestor is the conventional key under which a [Suggestor] is registered in
 // a service registry — used, for example, by rotini, whose generated entrypoint
 // binds the Suggestor under this key and whose handlers retrieve it by it.

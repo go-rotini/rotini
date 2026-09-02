@@ -9,6 +9,10 @@ import (
 	"sync"
 )
 
+// The per-invocation [Context]: the service registry, the program's streams, the
+// resolved chain, and the outcome recording a handler reports through. One is built
+// per [Program.Run] — records and exit state never leak between invocations.
+
 // ErrServiceNotFound is the sentinel reported when a registry key is unbound — the
 // [MustGet] panics a [*ServiceError] wrapping it, which the runtime
 // recovers and routes to the funnel (a missing service is rotini's

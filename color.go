@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// The color model behind [Style]: the 16 standard terminal colors, the [Profile]
+// ceiling a terminal can render, and the downsampling that renders a 24-bit color
+// correctly on a 256- or 16-color terminal.
+
 // ANSIColor is one of the 16 standard terminal colors — the eight originals and
 // their bright variants. These are the only colors every terminal agrees on, and
 // the only ones that survive downsampling to [ProfileANSI16].

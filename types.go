@@ -3,20 +3,13 @@ package rotini
 import (
 	"github.com/go-rotini/recon"
 
-	"context"
 	"time"
 )
 
-// Handlers is the lifecycle interface every command's handler set
-// implements. The runtime invokes the hooks in order, sharing one [Context]
-// across the chain; handlers read their typed inputs with [Parser.Parse].
-type Handlers interface {
-	CascadingPreRun(ctx context.Context, rtx *Context)
-	PreRun(ctx context.Context, rtx *Context)
-	Run(ctx context.Context, rtx *Context)
-	PostRun(ctx context.Context, rtx *Context)
-	CascadingPostRun(ctx context.Context, rtx *Context)
-}
+// The data-only [Definition] contract: the compiled command tree codegen emits as a Go
+// literal and the runtime dispatches against. Everything in this file is a plain data
+// shape with no behavior — which is what lets the generated file be read as a
+// description of the CLI rather than as code.
 
 // Definition is the compiled command tree for a generated rotini program. The
 // generated package emits it as a Go literal and the rollup passes it to

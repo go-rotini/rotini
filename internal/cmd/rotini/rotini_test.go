@@ -276,9 +276,9 @@ func TestCLI_aliases(t *testing.T) {
 		t.Run(tc.alias, func(t *testing.T) {
 			var ran bool
 			p, _, _ := newTestCLI(t)
-			p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error)) error { ran = true; return nil }))
-			p.Bind("validate", codegen.ValidateFn(func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil }))
-			p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) error { ran = true; return nil }))
+			p.Bind("generate", func(string, string, bool, func(string, error)) error { ran = true; return nil })
+			p.Bind("validate", func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
+			p.Bind("initialize", func(string, string, bool) error { ran = true; return nil })
 
 			argv := []string{tc.alias, "x"}
 			if _, err := p.Run(argv); err != nil {

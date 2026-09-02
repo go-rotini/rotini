@@ -7,6 +7,12 @@ import (
 	"maps"
 )
 
+// [Wizard]: sequencing steps into a guided flow with branching and back navigation.
+//
+// It owns no streams and does no asking — a step does that itself, typically with a
+// [Prompt], [Select] or [Confirm] — which keeps the flow pure orchestration and
+// testable with plain functions.
+
 // ErrWizardBack is returned by a step's Ask to move back to the previous step
 // that actually ran (skipped steps are skipped going back too). At the first
 // step it re-asks rather than exiting, so "back" is never a way out.

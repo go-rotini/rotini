@@ -15,6 +15,10 @@ import (
 	"time"
 )
 
+// [Subprocess]: running an external command with environment, working-directory and
+// timeout control, streamed output, and a failure that quotes the child's stderr
+// instead of "exit status 1".
+
 // Stream identifies which of a subprocess's output streams a line came from.
 type Stream int
 

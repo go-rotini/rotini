@@ -6,6 +6,14 @@ import (
 	"strings"
 )
 
+// Command RESOLUTION: turning an argv into the chain of commands it names, plus the
+// flag-token helpers that reading argv requires.
+//
+// Distinct from parser.go, and the distinction is the point: resolution is REQUIRED —
+// dispatch cannot pick a handler without it — while parser.go's [Parser] is an opt-in
+// service that parses and validates a command's declared inputs once dispatch has
+// already chosen it.
+
 // ResolvedCommand is one node on the invoked command path (root → leaf): the
 // flattened command-tree data the runtime resolved for this invocation. The
 // runtime computes the chain in order to dispatch the correct handler, and

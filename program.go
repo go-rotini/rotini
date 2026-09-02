@@ -465,6 +465,12 @@ func (p *Program) Execute() error {
 // services bound with [Program.Bind] are seeded into every run (a binding made by a
 // handler DURING a run stays local to that run). Stream and signal configuration
 // applies to every call.
+//
+// A note for hosts that dispatch in a LOOP: with no supplied context Run installs
+// rotini's signal trap and tears it down again on every call, which measures around
+// 30µs — irrelevant once per process, but roughly 20x the cost of the dispatch itself
+// when repeated. Prefer [Program.RunContext] (or [Program.WithoutSignalHandling]),
+// which install no trap; that is what [REPL] and [StdioServer] do.
 func (p *Program) Run(argv []string) (int, error) {
 	if p.ctx != nil {
 		return p.runWith(p.ctx, true, argv)

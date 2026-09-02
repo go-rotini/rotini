@@ -6,6 +6,10 @@ import (
 	"strings"
 )
 
+// [Table]: rows of cells rendered as aligned columns, measured by DISPLAY width so
+// styled and wide-rune text line up. The rendering half of [Printer]'s table format,
+// and usable on its own.
+
 // Align is a table column's horizontal alignment.
 type Align int
 

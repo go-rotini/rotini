@@ -575,11 +575,10 @@ func (argCompleterHandlers) AppDeploy() Handlers { return deployArgCompleter{} }
 // return defers to the static enum.
 func TestComplete_dynamicArgValue(t *testing.T) {
 	def := completionFixtureDef()
-	got := complete(def, []string{"deploy", "x"}, argCompleterHandlers{}, nil)
 	want := []string{"dyn-one", "dyn-two"}
-	// "x" filters out the subcommand/enum names; the dynamic candidates remain
-	// unfiltered-by-enum but still prefix-filtered — none start with x, so refine:
-	got = complete(def, []string{"deploy", "dyn"}, argCompleterHandlers{}, nil)
+	// Candidates are prefix-filtered, so query with a prefix the dynamic ones share:
+	// "x" would filter every one of them out and prove nothing.
+	got := complete(def, []string{"deploy", "dyn"}, argCompleterHandlers{}, nil)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dynamic arg candidates = %v, want %v", got, want)
 	}

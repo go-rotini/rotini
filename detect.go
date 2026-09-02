@@ -1,14 +1,14 @@
 package rotini
 
-// Terminal and color detection. Every function here is OPT-IN: rotini never calls
-// them for you (Pillar 1). A program decides whether to style its output and feeds
-// the answer in — see [Style.SetEnabled], [Styler.SetProfile], and the deliberate
-// exception documented on [Spinner], which declines to smear a non-terminal.
-
 import (
 	"os"
 	"strings"
 )
+
+// Terminal and color detection. Every function here is OPT-IN: rotini never calls
+// them for you (Pillar 1). A program decides whether to style its output and feeds
+// the answer in — see [Style.SetEnabled], [Styler.SetProfile], and the deliberate
+// exception documented on [Spinner], which declines to smear a non-terminal.
 
 // EnvNoColor reports whether the environment asks for no color, honoring the
 // NO_COLOR convention and its CLICOLOR_FORCE override (a non-empty, non-"0"

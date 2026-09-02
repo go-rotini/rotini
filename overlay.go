@@ -1,5 +1,13 @@
 package rotini
 
+import (
+	"reflect"
+	"slices"
+	"strings"
+
+	"github.com/go-rotini/recon"
+)
+
 // This file is the à-la-carte input surface: per-channel acquisition
 // (ParseArgv / ParseEnv / ParseFiles / ParseStdin / Defaults), each returning a
 // sparsely-populated Layer over the same generated inputs type, and
@@ -17,14 +25,6 @@ package rotini
 //	argv, _     := rotini.ParseArgv[MycliInputs](rtx)
 //	inputs, report := rotini.OverlayInputsP(defaults, files, env, argv)
 //	if err := report.Validate(); err != nil { /* handler owns it */ }
-
-import (
-	"reflect"
-	"slices"
-	"strings"
-
-	"github.com/go-rotini/recon"
-)
 
 // FieldPath identifies one leaf field of a generated inputs struct by its
 // dot-joined Go field path, e.g. "RotiniGenerate.Flags.ConfFilePath" — the
@@ -522,88 +522,113 @@ func channelLayer(v reflect.Value, chain []ResolvedCommand, layerName, structNam
 		if bindErr != nil {
 			return
 		}
-		// The channel struct itself.
-		cs := ci.FieldByName(structName)
-		if cs.IsValid() && cs.Kind() == reflect.Struct {
-			if err := reg.Bind(cs.Addr().Interface()); err != nil {
-				bindErr = reconBind(channelForStruct(structName), err)
-				return
-			}
-			if err := validateChannelStruct(cs, reg, cfg); err != nil {
-				bindErr = err
-				return
-			}
-			if cfg != nil {
-				if err := bindPinnedConfig(cs, cfg); err != nil {
-					bindErr = err
-					return
-				}
-			}
-			// Nested env families (envnest) are filled directly — recon
-			// resolves leaf keys only — and recorded as non-textual presence.
-			nested := map[string]bool{}
-			if structName == "Env" {
-				var err error
-				if nested, err = fillEnvNested(cs); err != nil {
-					bindErr = err
-					return
-				}
-			}
-			eachTaggedField(ci, structName, func(fieldName, logical string, _ reflect.Value) {
-				tag := taggedFieldTag(ci, structName, fieldName)
-				body := tag.Get("recon")
-				key := reconKey(body)
-				if key == "" {
-					return
-				}
-				fieldReg := reg
-				if pin := tag.Get("cfgfile"); pin != "" && cfg != nil {
-					if pinned, err := cfg.For(pin); err == nil {
-						fieldReg = pinned
-					}
-				}
-				if nested[key] {
-					set[fieldPath(topName, structName, fieldName)] = Provenance{
-						Layer: layerName,
-						Raw:   redactValue("", reconHasSecret(body)),
-					}
-					return
-				}
-				if val, found, err := fieldReg.Get(key); err == nil && found {
-					set[fieldPath(topName, structName, fieldName)] = Provenance{
-						Layer: layerName,
-						Raw:   redactValue(val.String(), reconHasSecret(body)),
-					}
-				}
-			})
+		if err := fillChannelStruct(set, ci, topName, structName, layerName, reg, cfg); err != nil {
+			bindErr = err
+			return
 		}
-		// Flag fallbacks: recon-keyed flags read this channel too.
-		eachTaggedField(ci, "Flags", func(fieldName, logical string, f reflect.Value) {
-			key := reconKey(taggedFieldTag(ci, "Flags", fieldName).Get("recon"))
-			if key == "" {
-				return
-			}
-			val, found, err := flagReg.Get(key)
-			if err != nil || !found {
-				return
-			}
-			s := val.String()
-			_ = coerce(f, []string{s})
-			fd, _ := findFlagDef(chain[scope].Flags, logical)
-			set[fieldPath(topName, "Flags", fieldName)] = Provenance{
-				Layer: layerName,
-				Raw:   redactValue(s, fd.Secret),
-			}
-			if store.scopes[scope].flags == nil {
-				store.scopes[scope].flags = map[string][]string{}
-			}
-			store.scopes[scope].flags[logical] = []string{s}
-		})
+		recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg)
 	})
 	if bindErr != nil {
 		return nil, nil, bindErr
 	}
 	return set, &layerCore{chain: chain, store: store}, nil
+}
+
+// fillChannelStruct binds one command's channel struct (Env/Config/…) from the
+// registry, validates it, and records where each field's value came from. A command
+// that declares no such struct is skipped.
+func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs) error {
+	cs := ci.FieldByName(structName)
+	if !cs.IsValid() || cs.Kind() != reflect.Struct {
+		return nil
+	}
+	if err := reg.Bind(cs.Addr().Interface()); err != nil {
+		return reconBind(channelForStruct(structName), err)
+	}
+	if err := validateChannelStruct(cs, reg, cfg); err != nil {
+		return err
+	}
+	if cfg != nil {
+		if err := bindPinnedConfig(cs, cfg); err != nil {
+			return err
+		}
+	}
+
+	// Nested env families (envnest) are filled directly — recon resolves leaf keys
+	// only — and recorded as non-textual presence.
+	nested := map[string]bool{}
+	if structName == "Env" {
+		var err error
+		if nested, err = fillEnvNested(cs); err != nil {
+			return err
+		}
+	}
+
+	eachTaggedField(ci, structName, func(fieldName, _ string, _ reflect.Value) {
+		recordChannelField(set, ci, topName, structName, layerName, fieldName, reg, cfg, nested)
+	})
+	return nil
+}
+
+// recordChannelField records the provenance of one channel field: which layer supplied
+// it and its raw value, redacted when the input is declared secret. A field pinned to
+// one configuration file (cfgfile) is read from that file's registry alone.
+func recordChannelField(set Presence, ci reflect.Value, topName, structName, layerName, fieldName string, reg *recon.Registry, cfg *cfgRegs, nested map[string]bool) {
+	tag := taggedFieldTag(ci, structName, fieldName)
+	body := tag.Get("recon")
+	key := reconKey(body)
+	if key == "" {
+		return
+	}
+
+	fieldReg := reg
+	if pin := tag.Get("cfgfile"); pin != "" && cfg != nil {
+		if pinned, err := cfg.For(pin); err == nil {
+			fieldReg = pinned
+		}
+	}
+
+	// A nested family was filled directly, so it has no single textual value.
+	if nested[key] {
+		set[fieldPath(topName, structName, fieldName)] = Provenance{
+			Layer: layerName,
+			Raw:   redactValue("", reconHasSecret(body)),
+		}
+		return
+	}
+	if val, found, err := fieldReg.Get(key); err == nil && found {
+		set[fieldPath(topName, structName, fieldName)] = Provenance{
+			Layer: layerName,
+			Raw:   redactValue(val.String(), reconHasSecret(body)),
+		}
+	}
+}
+
+// recordFlagFallbacks fills the flags that declare a recon key — a flag whose value
+// may also come from this channel — and records both the provenance and the raw text,
+// so a later argv layer can still override it.
+func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []ResolvedCommand, scope int, topName, layerName string, flagReg *recon.Registry) {
+	eachTaggedField(ci, "Flags", func(fieldName, logical string, f reflect.Value) {
+		key := reconKey(taggedFieldTag(ci, "Flags", fieldName).Get("recon"))
+		if key == "" {
+			return
+		}
+		val, found, err := flagReg.Get(key)
+		if err != nil || !found {
+			return
+		}
+		s := val.String()
+		_ = coerce(f, []string{s})
+		fd, _ := findFlagDef(chain[scope].Flags, logical)
+		set[fieldPath(topName, "Flags", fieldName)] = Provenance{
+			Layer: layerName,
+			Raw:   redactValue(s, fd.Secret),
+		}
+		if store.scopes[scope].flags == nil {
+			store.scopes[scope].flags = map[string][]string{}
+		}
+		store.scopes[scope].flags[logical] = []string{s}
+	})
 }
 
 // stdinLayer acquires the stdin channel into v.

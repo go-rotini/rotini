@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// [Service]: the daemon shape — long-lived workers supervised until the context ends
+// or one fails, with shutdown hooks that run in every case. [Scheduler] is built on it.
+
 // ErrShutdownTimeout reports that a service's workers did not stop within the
 // shutdown budget. The service returns rather than hanging, so a supervisor's own
 // kill timer is never the thing that ends the process.

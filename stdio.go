@@ -12,6 +12,10 @@ import (
 	"sync"
 )
 
+// [StdioServer]: serving JSON-RPC 2.0 over stdin/stdout, in newline-delimited or
+// Content-Length framing — the shape a CLI takes when a tool drives it (LSP, MCP)
+// instead of a human.
+
 // Framing is how a [StdioServer] delimits messages on the wire.
 type Framing int
 

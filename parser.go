@@ -15,6 +15,13 @@ import (
 	"unicode/utf8"
 )
 
+// The opt-in argv [Parser]: given a resolved chain, parse and validate the command
+// line against what those commands declare — GNU/POSIX grammar, typed coercion, enum
+// and constraint checks — failing with a data-shaped [*ParseError].
+//
+// Nothing here runs unless a program binds it (Pillar 1). Dispatch itself needs only
+// resolve.go; a handler that wants its inputs asks for them.
+
 // KeyParser is the conventional registry key the generated main binds the
 // [Parser] under (and handlers retrieve it by) — see [Program.Bind].
 const KeyParser = "parser"
@@ -280,6 +287,68 @@ func parseInto(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsed
 	return store, nil
 }
 
+// flagTokenValue resolves the value one argv flag token carries, and returns the argv
+// index the caller should continue from — which advances only when the value came from
+// the FOLLOWING token rather than from an inline "=value".
+//
+// The four shapes: a count flag takes no value (an inline one is an error, since the
+// tally is computed rather than parsed); a bool defaults to "true" but honors an
+// inline value; anything with an inline value uses it; anything else consumes the next
+// token, and running out of tokens is a needs-a-value error.
+func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []string, i int) (value string, next int, err error) {
+	switch {
+	case fdef.Type == "count":
+		if hasInline {
+			return "", i, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("flag %q counts occurrences and takes no value", name), Flag: name}
+		}
+		return "1", i, nil // each occurrence appends one marker; the binder tallies them
+	case fdef.Type == "bool":
+		if hasInline {
+			return inline, i, nil
+		}
+		return "true", i, nil
+	case hasInline:
+		return inline, i, nil
+	default:
+		i++
+		if i >= len(argv) {
+			return "", i, &ParseError{Kind: ParseKindNeedsValue, Msg: fmt.Sprintf("flag %q needs a value", name), Flag: name}
+		}
+		return argv[i], i, nil
+	}
+}
+
+// consumeFlagToken parses one flag token from argv[i], records it through addFlag,
+// and reports how many EXTRA argv entries it consumed beyond that token — a separate
+// value word, or the tail of a short cluster.
+//
+// A token matching no declared identifier is retried as a POSIX short cluster
+// (-vh -> -v -h, -n5 -> -n 5); long "--" flags never cluster, so an unmatched one is
+// an unknown-flag error carrying the chain's vocabulary for a Suggestor to work with.
+func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int, addFlag func(int, FlagDef, string) error) (int, error) {
+	name, inline, hasInline := splitFlag(tok)
+
+	fdef, idx, ok := findFlagIndex(chain, name)
+	if !ok {
+		if isShortCluster(name) {
+			return parseCluster(chain, name[1:], inline, hasInline, argv, i, addFlag)
+		}
+		return 0, &ParseError{
+			Kind:       ParseKindUnknownFlag,
+			Msg:        fmt.Sprintf("unknown flag %q", name),
+			Flag:       name,
+			Token:      name,
+			Candidates: chainFlagIdentifiers(chain),
+		}
+	}
+
+	value, next, err := flagTokenValue(fdef, name, inline, hasInline, argv, i)
+	if err != nil {
+		return 0, err
+	}
+	return next - i, addFlag(idx, fdef, value)
+}
+
 // parseArgvTokens is parseInto minus defaults: exactly what argv supplied,
 // nothing more. It records each explicitly-set flag in the store's argvSet, the
 // single source of truth for "set on the command line" (flag groups,
@@ -336,51 +405,11 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 		}
 
 		if !terminated && isFlag(tok) {
-			name, inline, hasInline := splitFlag(tok)
-			fdef, idx, ok := findFlagIndex(chain, name)
-			if !ok {
-				// No exact identifier — try POSIX clustered short flags: -vh → -v
-				// -h, -n5 → -n 5. Long flags ("--" prefix) never cluster.
-				if isShortCluster(name) {
-					consumed, err := parseCluster(chain, name[1:], inline, hasInline, argv, i, addFlag)
-					if err != nil {
-						return nil, err
-					}
-					i += consumed
-					continue
-				}
-				return nil, &ParseError{
-					Kind:       ParseKindUnknownFlag,
-					Msg:        fmt.Sprintf("unknown flag %q", name),
-					Flag:       name,
-					Token:      name,
-					Candidates: chainFlagIdentifiers(chain),
-				}
-			}
-			var value string
-			switch {
-			case fdef.Type == "count":
-				if hasInline {
-					return nil, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("flag %q counts occurrences and takes no value", name), Flag: name}
-				}
-				value = "1" // each occurrence appends one marker; the binder tallies them
-			case fdef.Type == "bool":
-				value = "true"
-				if hasInline {
-					value = inline
-				}
-			case hasInline:
-				value = inline
-			default:
-				i++
-				if i >= len(argv) {
-					return nil, &ParseError{Kind: ParseKindNeedsValue, Msg: fmt.Sprintf("flag %q needs a value", name), Flag: name}
-				}
-				value = argv[i]
-			}
-			if err := addFlag(idx, fdef, value); err != nil {
+			extra, err := consumeFlagToken(chain, tok, argv, i, addFlag)
+			if err != nil {
 				return nil, err
 			}
+			i += extra
 			continue
 		}
 
@@ -514,52 +543,93 @@ func hasVariadicArg(args []ArgDef) bool {
 // length) is redacted in the error.
 func checkConstraints(label, typ string, c Constraints, values []string, secret bool) error {
 	if isArrayType(typ) || isMapType(typ) {
-		switch n := len(values); {
-		case c.MinItems > 0 && n < c.MinItems:
-			return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)}
-		case c.MaxItems > 0 && n > c.MaxItems:
-			return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)}
+		if err := checkItemCount(label, c, len(values)); err != nil {
+			return err
 		}
 	}
 	elem := constraintElemType(typ)
 	for _, v := range values {
+		var err error
 		switch {
 		case isNumericType(elem):
-			n, err := strconv.ParseFloat(v, 64)
-			if err != nil {
-				continue // not range-checkable; coerce already tolerates malformed input
-			}
-			if c.Minimum != nil && n < *c.Minimum {
-				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be >= %s (got %s)", label, formatNum(*c.Minimum), redactValue(v, secret))}
-			}
-			if c.Maximum != nil && n > *c.Maximum {
-				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be <= %s (got %s)", label, formatNum(*c.Maximum), redactValue(v, secret))}
-			}
-			if c.ExclusiveMinimum != nil && n <= *c.ExclusiveMinimum {
-				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be > %s (got %s)", label, formatNum(*c.ExclusiveMinimum), redactValue(v, secret))}
-			}
-			if c.ExclusiveMaximum != nil && n >= *c.ExclusiveMaximum {
-				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be < %s (got %s)", label, formatNum(*c.ExclusiveMaximum), redactValue(v, secret))}
-			}
-			if c.MultipleOf != nil && !isMultipleOf(n, *c.MultipleOf) {
-				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be a multiple of %s (got %s)", label, formatNum(*c.MultipleOf), redactValue(v, secret))}
-			}
+			err = checkNumericBounds(label, c, v, secret)
 		case elem == "string":
-			ln := utf8.RuneCountInString(v)
-			gotLen := strconv.Itoa(ln)
-			if secret {
-				gotLen = "[redacted]"
-			}
-			if c.MinLength > 0 && ln < c.MinLength {
-				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)}
-			} else if c.MaxLength > 0 && ln > c.MaxLength {
-				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)}
-			}
-			if c.Pattern != "" {
-				if ok, err := regexp.MatchString(c.Pattern, v); err == nil && !ok {
-					return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))}
-				}
-			}
+			err = checkStringBounds(label, c, v, secret)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// constraintViolation builds the one error shape every bound check returns.
+func constraintViolation(format string, args ...any) error {
+	return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf(format, args...)}
+}
+
+// checkItemCount enforces the collection-level bounds — how many values an array or
+// map input may carry, as opposed to what each value must be.
+func checkItemCount(label string, c Constraints, n int) error {
+	switch {
+	case c.MinItems > 0 && n < c.MinItems:
+		return constraintViolation("%s needs at least %d %s (got %d)", label, c.MinItems, plural("value", c.MinItems), n)
+	case c.MaxItems > 0 && n > c.MaxItems:
+		return constraintViolation("%s accepts at most %d %s (got %d)", label, c.MaxItems, plural("value", c.MaxItems), n)
+	}
+	return nil
+}
+
+// checkNumericBounds enforces the numeric bounds on one value. A value that will not
+// parse as a number is skipped rather than rejected: coerce already tolerates
+// malformed input, and reporting it twice would be noise.
+func checkNumericBounds(label string, c Constraints, v string, secret bool) error {
+	n, numeric := parseNumber(v)
+	if !numeric {
+		return nil
+	}
+	got := redactValue(v, secret)
+	switch {
+	case c.Minimum != nil && n < *c.Minimum:
+		return constraintViolation("%s must be >= %s (got %s)", label, formatNum(*c.Minimum), got)
+	case c.Maximum != nil && n > *c.Maximum:
+		return constraintViolation("%s must be <= %s (got %s)", label, formatNum(*c.Maximum), got)
+	case c.ExclusiveMinimum != nil && n <= *c.ExclusiveMinimum:
+		return constraintViolation("%s must be > %s (got %s)", label, formatNum(*c.ExclusiveMinimum), got)
+	case c.ExclusiveMaximum != nil && n >= *c.ExclusiveMaximum:
+		return constraintViolation("%s must be < %s (got %s)", label, formatNum(*c.ExclusiveMaximum), got)
+	case c.MultipleOf != nil && !isMultipleOf(n, *c.MultipleOf):
+		return constraintViolation("%s must be a multiple of %s (got %s)", label, formatNum(*c.MultipleOf), got)
+	}
+	return nil
+}
+
+// parseNumber reports whether v is a number, and its value. A value that will not
+// parse is not a constraint violation: coerce already rejects malformed input, and
+// reporting the same problem twice would be noise.
+func parseNumber(v string) (float64, bool) {
+	n, err := strconv.ParseFloat(v, 64)
+	return n, err == nil
+}
+
+// checkStringBounds enforces the length and pattern bounds on one value. A length is
+// reported as [redacted] for a secret input — the length alone leaks something about
+// a credential.
+func checkStringBounds(label string, c Constraints, v string, secret bool) error {
+	ln := utf8.RuneCountInString(v)
+	gotLen := strconv.Itoa(ln)
+	if secret {
+		gotLen = "[redacted]"
+	}
+	switch {
+	case c.MinLength > 0 && ln < c.MinLength:
+		return constraintViolation("%s must be at least %d %s long (got %s)", label, c.MinLength, plural("character", c.MinLength), gotLen)
+	case c.MaxLength > 0 && ln > c.MaxLength:
+		return constraintViolation("%s must be at most %d %s long (got %s)", label, c.MaxLength, plural("character", c.MaxLength), gotLen)
+	}
+	if c.Pattern != "" {
+		if ok, err := regexp.MatchString(c.Pattern, v); err == nil && !ok {
+			return constraintViolation("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))
 		}
 	}
 	return nil

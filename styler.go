@@ -7,6 +7,13 @@ import (
 	"strings"
 )
 
+// Text styling: [Style], a chainable set of SGR attributes, and [Styler], a registry
+// that renders text by INTENT ("warning", "path") so a CLI's look lives in one place.
+//
+// The color model and its downsampling are in color.go; escape-aware measuring and
+// stripping are in text.go. Nothing here detects anything — see detect.go for the
+// opt-in helpers a program uses to decide.
+
 // KeyStyler is the conventional registry key a program binds a [Styler] under, so
 // handlers reach one shared set of named styles with [MustGet].
 const KeyStyler = "styler"
