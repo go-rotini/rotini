@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/go-rotini/rotini/internal/rotini"
+	"github.com/go-rotini/rotini"
 )
 
 var _ rotini.Handlers = (*rotiniHelpHandlers)(nil)

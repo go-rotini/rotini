@@ -9,7 +9,7 @@ import (
 	"text/template"
 	"unicode"
 
-	rotini "github.com/go-rotini/rotini/internal/runtime"
+	"github.com/go-rotini/rotini"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

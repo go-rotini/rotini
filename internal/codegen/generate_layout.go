@@ -41,22 +41,6 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 		lay.entrypointFile = path.Base(epFile)
 	}
 
-	// The runtime is a separate emitted package the framework/handlers import: the
-	// ENTIRE runtime merges into the single 'file' (runtimeFile), under runtimeDir
-	// (its package). When that directory IS the embed source it is imported in place
-	// and emission is skipped. The merged file declares runtimePkgName.
-	if rt := conf.Generate.runtimePkg(); rt != nil && rt.File != "" {
-		rtFile := filepath.ToSlash(rt.File)
-		lay.runtimeDir = path.Dir(rtFile)
-		lay.runtimeFile = path.Base(rtFile)
-		lay.runtimePkgName = rt.Package
-		if lay.runtimePkgName == "" {
-			lay.runtimePkgName = goPkgName(lay.runtimeDir)
-		}
-		lay.runtimeImport = runtimeImportSpec(moduleName, lay.runtimeDir)
-		lay.skipRuntimeEmit = lay.runtimeDir == runtimeSourceDir
-	}
-
 	return lay
 }
 
@@ -102,18 +86,12 @@ func applyConfDefaults(conf *Conf, rootName string) {
 
 	// The per-CLI generated code defaults to one self-contained file
 	// "internal/cmd/<root>/zz_rotini.gen.go" — the `cmd` target (framework + rollup
-	// + typed inputs, beside the editable stubs). The RUNTIME is a separate emitted
-	// package, defaulting to a "rotini" subpackage beside it —
-	// "internal/cmd/<root>/rotini/zz_runtime.gen.go" — the single file the entire
-	// runtime merges into, which the framework imports. main gets no default
-	// (written only when the conf declares its file).
+	// + typed inputs, beside the editable stubs). main gets no default (written only
+	// when the conf declares its file). The rotini runtime is imported, not emitted,
+	// so it has no target at all.
 	frameworkFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
-	runtimeFile := "internal/cmd/" + rootName + "/rotini/zz_runtime.gen.go"
 	if p := ensure(typeCmd); p.File == "" {
 		p.File = frameworkFile
-	}
-	if p := ensure(typeRuntime); p.File == "" {
-		p.File = runtimeFile
 	}
 
 	// Each present feature defaults its two dirs from the framework package
@@ -139,9 +117,9 @@ func applyConfDefaults(conf *Conf, rootName string) {
 // stubs AND the one generated file — the framework (Definition, NewProgram,
 // ProgramHandlers, the typed inputs) and the rollup (the handlers struct + Program + the
 // command→handler wiring) merged into it, all referencing each other unqualified since
-// they share the package. The runtime is the only separate, imported package. The
-// entrypoint package is optional: when the conf declares one, generate writes the
-// binary's main.go there (create-once).
+// they share the package. The rotini runtime is an ordinary library import (see
+// [runtimeImport]), not generated. The entrypoint package is optional: when the conf
+// declares one, generate writes the binary's main.go there (create-once).
 type layout struct {
 	cmdDir     string // absolute output dir for the cmd package (editable stubs + the generated file)
 	cmdPkgName string // cmd package name, e.g. "mycli"
@@ -151,9 +129,4 @@ type layout struct {
 	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
 	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
 
-	runtimeImport   string // pre-rendered runtime import spec line, e.g. `rotini "…/internal/runtime"` or `"…/rotini"` (identifier always `rotini`)
-	runtimeDir      string // module-relative dir the emitted runtime is written into (slash path) — its package directory
-	runtimeFile     string // basename of the single file the ENTIRE runtime merges into, e.g. "zz_runtime.gen.go"
-	runtimePkgName  string // Go package name written atop the merged runtime file, e.g. "rotini"
-	skipRuntimeEmit bool   // true when runtimeDir IS rotini's own embed source (internal/runtime) — import in place, write nothing
 }

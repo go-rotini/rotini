@@ -32,14 +32,14 @@ func TestDetectFileFormat(t *testing.T) {
 
 // TestReadSpec_formatsAndTags reads hand-authored documents in each format
 // to confirm format detection and that the json struct tags ("$schema",
-// "name", "commands") drive decoding across YAML/JSON/JSONC alike. The document
-// IS the root command (no "command:" wrapper — W3 reshape).
+// "command", "name", "commands") drive decoding across YAML/JSON/JSONC alike.
+// The root command is nested under the "command" key ([Spec.Command]).
 func TestReadSpec_formatsAndTags(t *testing.T) {
 	docs := map[string]string{
-		".yaml": "$schema: https://x/spec.json\nname: demo\ncommands:\n  - name: sub\n",
-		".json": `{"$schema":"https://x/spec.json","name":"demo","commands":[{"name":"sub"}]}`,
+		".yaml": "$schema: https://x/spec.json\ncommand:\n  name: demo\n  commands:\n    - name: sub\n",
+		".json": `{"$schema":"https://x/spec.json","command":{"name":"demo","commands":[{"name":"sub"}]}}`,
 		".jsonc": "{\n  // leading comment\n  \"$schema\": \"https://x/spec.json\",\n" +
-			"  \"name\": \"demo\", \"commands\": [{\"name\": \"sub\"}],\n}\n",
+			"  \"command\": { \"name\": \"demo\", \"commands\": [{\"name\": \"sub\"}] },\n}\n",
 	}
 	for ext, doc := range docs {
 		t.Run(ext, func(t *testing.T) {

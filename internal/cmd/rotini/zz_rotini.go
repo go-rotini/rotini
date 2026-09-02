@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/go-rotini/rotini/internal/rotini"
+	"github.com/go-rotini/rotini"
 )
 
 type ProgramHandlers interface {

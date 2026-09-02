@@ -4,8 +4,8 @@
 package main
 
 import (
+	"github.com/go-rotini/rotini"
 	cmd "github.com/go-rotini/rotini/internal/cmd/rotini"
-	"github.com/go-rotini/rotini/internal/rotini"
 )
 
 var (
@@ -14,7 +14,7 @@ var (
 
 func main() {
 	cmd.Program.
-		Bind(cmd.KeyRotiniVersion, cmd.RotiniVersion(version)).
+		Bind(cmd.KeyRotiniVersion, cmd.ResolveVersion(version)).
 		Bind(rotini.KeyParser, rotini.NewParser()).
 		Bind(rotini.KeySuggestor, rotini.NewSuggestor()).
 		Execute()

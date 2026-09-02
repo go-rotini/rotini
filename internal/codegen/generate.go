@@ -6,13 +6,12 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 )
 
 // This file is the spine of the GENERATE stage: a validated spec + conf resolve into a
 // [program] (resolveProgram), and program.generate() runs the emit steps in order. The
-// step methods (emitSchemas/emitRuntime/emitCmdFile/…) live here; the generate_* files
+// step methods (emitSchemas/emitCmdFile/…) live here; the generate_* files
 // are the renderers and writers those steps call.
 
 // GenerateFn is the signature of [Processor.Generate]. A command handler binds it
@@ -25,22 +24,11 @@ type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(re
 // matching import.
 const rotiniPkgName = "rotini"
 
-// runtimeSourceDir is the module-relative directory holding the runtime embed
-// source. A conf pointing the runtime target here imports it in place; emission
-// is skipped (rotini's embed source is its own runtime).
-const runtimeSourceDir = "internal/runtime"
-
-// runtimeImportSpec renders the Go import line for the emitted runtime package at
-// the module-relative dir. The identifier is ALWAYS `rotini` (so the templates'
-// `rotini.` qualifier resolves): a dir already named "rotini" imports plain (the
-// package is `rotini`), any other dir is aliased — avoiding a redundant alias.
-func runtimeImportSpec(moduleName, dir string) string {
-	importPath := moduleName + "/" + dir
-	if path.Base(dir) == "rotini" {
-		return strconv.Quote(importPath)
-	}
-	return "rotini " + strconv.Quote(importPath)
-}
+// runtimeImport is the import line the generated code carries for the rotini
+// runtime, whose symbols it references under [rotiniPkgName]. The runtime is an
+// ordinary library dependency (`go get github.com/go-rotini/rotini`), not emitted
+// code, so the path is fixed and needs no alias — the package IS `rotini`.
+const runtimeImport = `"github.com/go-rotini/rotini"`
 
 // program is the rotini CLI fully resolved from a spec + conf and ready to emit: the
 // command tree (its own inline commands plus any `$ref`-composed children), the OUTPUT
@@ -120,7 +108,6 @@ func (p *program) generate() error {
 		do   func() error
 	}{
 		{"emit schemas", p.emitSchemas},
-		{"emit runtime", p.emitRuntime},
 		{"emit cmd file", p.emitCmdFile},
 		{"emit feature outputs", p.emitFeatures},
 		{"emit handler stubs", p.emitStubs},
@@ -141,16 +128,6 @@ func (p *program) generate() error {
 // generate.schemas), before codegen so an editor $schema= reference resolves even on a
 // pass that later fails. These files are never pruned.
 func (p *program) emitSchemas() error { return writeSchemas(p.conf, p.module.root) }
-
-// emitRuntime merges the entire rotini runtime into the conf's single runtime file, so
-// the built CLI carries its own runtime. Skipped when the target IS the embed source.
-func (p *program) emitRuntime() error {
-	var keep []string
-	if rt := p.conf.Generate.runtimePkg(); rt != nil {
-		keep = rt.Keep
-	}
-	return writeEmittedRuntime(p.layout, p.module.root, keep)
-}
 
 // emitCmdFile renders + writes the one generated cmd file (framework + rollup + typed
 // inputs + feature embeds), beside the editable handler stubs.
@@ -367,7 +344,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 
 	return renderRotiniFile(templateRotiniData{
 		Package:       lay.cmdPkgName,
-		RuntimeImport: lay.runtimeImport,
+		RuntimeImport: runtimeImport,
 		Imports:       renderImports(imports),
 		ChildImports:  gp.childImports,
 		Methods:       gp.methods(),
@@ -416,7 +393,7 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		content, err := renderHandlerStubFile(lay.cmdPkgName, c.handler, lay.runtimeImport)
+		content, err := renderHandlerStubFile(lay.cmdPkgName, c.handler, runtimeImport)
 		if err != nil {
 			return err
 		}
@@ -425,35 +402,6 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		}
 	}
 	return nil
-}
-
-// writeEmittedRuntime merges the ENTIRE rotini runtime into the conf's single
-// runtime 'file' (lay.runtimeDir/lay.runtimeFile) as one self-contained package
-// (lay.runtimePkgName), then prunes any other .go in that directory — so a previous
-// per-file emit or a stale layout leaves no orphan behind, and the runtime is exactly
-// one generated file. It is a no-op when lay.skipRuntimeEmit is set — rotini's own
-// dogfood may point runtime at the embed source (internal/runtime) and import it in
-// place rather than emitting a copy. runtimeKeep spares package-relative paths from
-// pruning; the dir is otherwise fully rotini-managed (test files are always kept by
-// pruneGoDir).
-func writeEmittedRuntime(lay layout, moduleRoot string, runtimeKeep []string) error {
-	if lay.skipRuntimeEmit || lay.runtimeDir == "" {
-		return nil
-	}
-	merged, err := mergeRuntime(lay.runtimePkgName)
-	if err != nil {
-		return err
-	}
-	dir := filepath.Join(moduleRoot, filepath.FromSlash(lay.runtimeDir))
-	if err := writeGeneratedFile(filepath.Join(dir, lay.runtimeFile), merged); err != nil {
-		return err
-	}
-	protected := make(map[string]bool, len(runtimeKeep)+1)
-	protected[lay.runtimeFile] = true
-	for _, k := range runtimeKeep {
-		protected[filepath.Base(filepath.ToSlash(k))] = true
-	}
-	return pruneGoDir(dir, protected)
 }
 
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint

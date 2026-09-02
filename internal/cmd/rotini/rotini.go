@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"runtime/debug"
 
-	"github.com/go-rotini/rotini/internal/rotini"
+	"github.com/go-rotini/rotini"
 )
 
 const (
@@ -27,7 +27,7 @@ type rotiniHandlers struct {
 	rotini.DefaultCascadingPostRun
 }
 
-func RotiniVersion(ldflagVersion string) string {
+func ResolveVersion(ldflagVersion string) string {
 	version := ldflagVersion
 	if info, ok := readBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
 		version = info.Main.Version

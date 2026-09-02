@@ -3,6 +3,8 @@ package codegen
 import (
 	"errors"
 	"maps"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -118,15 +120,12 @@ func TestConstraintRendering(t *testing.T) {
 
 // TestConstraintNumericFamilyMatchesRuntime guards the hand-copied constraintNumericFamily
 // (codegen cannot import the runtime's unexported numericFamily) against silent drift by
-// extracting the runtime's set from its embedded source.
+// extracting the runtime's set from its source. The runtime is the module's root package,
+// two levels up from internal/codegen.
 func TestConstraintNumericFamilyMatchesRuntime(t *testing.T) {
-	src, err := runtimeSourceFiles()
+	parser, err := os.ReadFile(filepath.Join("..", "..", "parser.go"))
 	if err != nil {
 		t.Fatal(err)
-	}
-	parser, ok := src["parser.go"]
-	if !ok {
-		t.Fatal("runtime parser.go missing from the embedded source")
 	}
 	body := string(parser)
 	start := strings.Index(body, "var numericFamily = map[string]bool{")

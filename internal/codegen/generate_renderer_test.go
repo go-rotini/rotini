@@ -29,7 +29,7 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 func TestSmokeRenderRotiniFile(t *testing.T) {
 	out, err := renderRotiniFile(templateRotiniData{
 		Package:       "cligen",
-		RuntimeImport: `rotini "github.com/go-rotini/rotini/internal/runtime"`,
+		RuntimeImport: `"github.com/go-rotini/rotini"`,
 		Imports:       []string{`"time"`},
 		ChildImports:  []templateHandlersImport{{Alias: "childcli", Path: "example.com/child/cli"}},
 		Methods:       []string{"App", "AppGenerate"},
@@ -246,12 +246,6 @@ func TestRenderDocText_execError(t *testing.T) {
 	}
 	if _, err := renderDocText(tmpl, templateHelpData{}); err == nil {
 		t.Error("renderDocText(missing sub-template) = nil, want an execute error")
-	}
-}
-
-func TestSplitGoFile_parseError(t *testing.T) {
-	if _, _, err := splitGoFile([]byte("not go")); err == nil {
-		t.Error("splitGoFile(invalid) = nil, want a parse error")
 	}
 }
 

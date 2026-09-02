@@ -11,45 +11,8 @@ import (
 	"strings"
 )
 
-// Go-source AST surgery shared by renderGoFile (import grouping) and mergeRuntime
-// (split + re-merge): parse a gofmt'd file into imports + body, and regroup a merged
-// import block into the std / third-party convention.
-
-// splitGoFile parses a gofmt'd Go source file and returns its import specs (each
-// reconstructed as it appears in source, e.g. `_ "embed"` or `"fmt"`) and the
-// file body verbatim — everything after the import block (or after the package
-// clause when there are no imports). Returning the body as raw source preserves
-// directive comments like //go:embed exactly.
-func splitGoFile(src []byte) (imports []string, body []byte, err error) {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
-	if err != nil {
-		return nil, nil, fmt.Errorf("parse generated source: %w", err)
-	}
-	bodyStart := fset.Position(f.Name.End()).Offset
-	for _, d := range f.Decls {
-		gd, ok := d.(*ast.GenDecl)
-		if !ok || gd.Tok != token.IMPORT {
-			continue
-		}
-		for _, s := range gd.Specs {
-			is, ok := s.(*ast.ImportSpec)
-			if !ok {
-				continue // an IMPORT decl holds only ImportSpecs
-			}
-			if is.Name != nil {
-				imports = append(imports, is.Name.Name+" "+is.Path.Value)
-			} else {
-				imports = append(imports, is.Path.Value)
-			}
-		}
-		if e := fset.Position(gd.End()).Offset; e > bodyStart {
-			bodyStart = e
-		}
-	}
-	body = bytes.TrimLeft(src[bodyStart:], "\n\r\t ")
-	return imports, body, nil
-}
+// Go-source AST surgery for renderGoFile: regroup a gofmt'd import block into the
+// std / third-party convention.
 
 // groupImports rewrites a Go source file's single gofmt'd import block into the two
 // conventional groups — standard library first, then third-party — separated by a

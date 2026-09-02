@@ -16,6 +16,7 @@ package codegen
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path"
@@ -106,7 +107,7 @@ func loadRef(locator, consumingModule string) (resolvedRef, error) {
 			childBase: modLocator(module, version, path.Dir(sub)),
 		}, nil
 	case isExternalLocator(locator):
-		return resolvedRef{}, fmt.Errorf("external (git/raw) $ref composition is not supported — use a local path or a mod://<module> $ref")
+		return resolvedRef{}, errors.New("external (git/raw) $ref composition is not supported — use a local path or a mod://<module> $ref")
 	default:
 		spec, err := readSpec(locator)
 		if err != nil {

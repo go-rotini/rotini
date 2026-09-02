@@ -18,7 +18,7 @@ import (
 // to source. It assumes the spec is schema-valid (the Processor runs it only after
 // validateSpec passes).
 func (p *Processor) lintSpec(rs *reconciledSpec) []error {
-	var problems []error
+	problems := make([]error, 0, len(specLints))
 	for _, rule := range specLints {
 		problems = append(problems, rule(rs.spec)...)
 	}

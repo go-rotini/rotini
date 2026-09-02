@@ -32,20 +32,20 @@ type Feature struct {
 type GenerateConfig struct {
 	// The derived codegen outputs, one per `type` (help / completion / man / markdown), each an opt-in toggle plus its embed/template sourcing knobs.
 	Features []Feature `json:"features,omitempty"`
-	// Generated code targets, one per `type` (main / models / runtime). 'main' is the binary entrypoint (create-once). 'cmd' is the cli package: the editable per-command handler stubs PLUS the one generated file (the typed input/output structs, the framework glue, and the handlers rollup, all merged). 'runtime' is the entire rotini runtime, merged into its single 'file' as one self-contained package the cli package imports.
+	// Generated code targets, one per `type` (main / cmd). 'main' is the binary entrypoint (create-once). 'cmd' is the cli package: the editable per-command handler stubs PLUS the one generated file (the typed input/output structs, the framework glue, and the handlers rollup, all merged). The rotini runtime is NOT generated — it is an ordinary library dependency the generated code imports (`go get github.com/go-rotini/rotini`).
 	Packages []PackageConfig `json:"packages,omitempty"`
 	// Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so an editor `# yaml-language-server: $schema=<path>` comment can resolve them locally instead of fetching a remote URL.
 	Schemas *SchemasConfig `json:"schemas,omitempty"`
 }
 
 type PackageConfig struct {
-	// Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.gen.go' (the cli package's generated file); main has no default and is only written when 'file' is set. The runtime is written ENTIRELY into its single 'file' (one package, all of it merged into that one file).
+	// Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.gen.go' (the cli package's generated file); main has no default and is only written when 'file' is set.
 	File string `json:"file,omitempty"`
 	// Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. The editable per-feature templates and test files are always kept automatically. Intended to stay empty in steady state.
 	Keep []string `json:"keep,omitempty"`
 	// Go package name written at the top of 'file'. Defaults to the file's parent-directory name (sanitized to a valid Go identifier). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'.
 	Package string `json:"package,omitempty"`
-	// Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). cmd = the cli package: it locates the editable per-command handler stubs AND the single generated file written into that directory — the typed input/output structs (Collect[T]/Parse* targets), the framework glue (Definition, NewProgram, ProgramHandlers, BindMeta), and the handlers rollup (handlers struct, Program, Handlers(), command→handler wiring), all merged into the one 'file'. runtime = the entire rotini runtime (dispatch core, lifecycle, error taxonomy, parser/binder/suggestor/versioner/styler) merged into the ONE 'file' as a single self-contained package the cli package imports.
+	// Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). cmd = the cli package: it locates the editable per-command handler stubs AND the single generated file written into that directory — the typed input/output structs (Collect[T]/Parse* targets), the framework glue (Definition, NewProgram, ProgramHandlers, BindMeta), and the handlers rollup (handlers struct, Program, Handlers(), command→handler wiring), all merged into the one 'file'. There is no 'runtime' target: the rotini runtime is imported from github.com/go-rotini/rotini, not emitted.
 	Type string `json:"type"`
 }
 

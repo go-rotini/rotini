@@ -2,7 +2,7 @@
 package demo
 
 import (
-	"example.com/demo/internal/demo/rotini"
+	"github.com/go-rotini/rotini"
 )
 
 type ProgramHandlers interface {

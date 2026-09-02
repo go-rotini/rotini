@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"example.com/demo/internal/demo/rotini"
+	"github.com/go-rotini/rotini"
 )
 
 var _ rotini.Handlers = (*demoBuildHandlers)(nil)

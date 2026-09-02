@@ -15,7 +15,7 @@ import (
 // conf, returning every problem. It assumes the conf is schema-valid (the Processor runs
 // it only after validateConf passes).
 func (p *Processor) lintConf(rc *reconciledConf) []error {
-	var problems []error
+	problems := make([]error, 0, len(confLints))
 	for _, rule := range confLints {
 		problems = append(problems, rule(rc.conf)...)
 	}

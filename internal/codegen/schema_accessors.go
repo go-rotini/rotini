@@ -7,9 +7,8 @@ package codegen
 
 // Package-type discriminators — the `type` values of generate.packages entries.
 const (
-	typeMain    = "main"    // the binary entrypoint (main.go, create-once)
-	typeCmd     = "cmd"     // the cmd package: editable stubs + the one generated file
-	typeRuntime = "runtime" // the entire rotini runtime, merged into one file
+	typeMain = "main" // the binary entrypoint (main.go, create-once)
+	typeCmd  = "cmd"  // the cmd package: editable stubs + the one generated file
 )
 
 // packageOf returns the package target with the given type, or nil when absent.
@@ -32,8 +31,8 @@ func (g *GenerateConfig) mainPkg() *PackageConfig { return g.packageOf(typeMain)
 // stubs AND the one generated file — the framework glue the rotini.go template emits
 // (the definition literal, the typed NewProgram wrapper, BindMeta, ProgramHandlers, the
 // input structs, feature embeds) PLUS the rollup (handlers struct + Program +
-// command→handler wiring), all in one package. The RUNTIME it imports is the only
-// separate package (see runtimePkg).
+// command→handler wiring), all in one package. The rotini runtime it imports is an
+// ordinary library dependency, not generated.
 func (g *GenerateConfig) cmdPkg() *PackageConfig { return g.packageOf(typeCmd) }
 
 // cmdTarget is cmdPkg for callers that run AFTER applyConfDefaults, where the cmd
@@ -47,11 +46,6 @@ func (g *GenerateConfig) cmdTarget() *PackageConfig {
 	}
 	panic("codegen: cmd package target missing — applyConfDefaults must run before resolveLayout/emit")
 }
-
-// runtimePkg is the EMITTED-runtime target: the single 'file' the entire rotini
-// runtime is merged into (its parent directory is the runtime package). The cmd
-// package imports it, qualified `rotini.`.
-func (g *GenerateConfig) runtimePkg() *PackageConfig { return g.packageOf(typeRuntime) }
 
 // featureOf returns the derived-output feature with the given type, or nil.
 func (g *GenerateConfig) featureOf(typ string) *Feature {

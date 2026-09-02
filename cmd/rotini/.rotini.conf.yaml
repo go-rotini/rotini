@@ -13,9 +13,6 @@ generate:
     - type: cmd
       file: internal/cmd/rotini/zz_rotini.go
       package: rotini
-    - type: runtime
-      file: internal/rotini/zz_rotini.go
-      package: rotini
   features:
     - type: help
       enabled: true

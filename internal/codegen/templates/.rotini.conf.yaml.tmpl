@@ -2,18 +2,15 @@ version: {{.Version}}
 generate:
   schemas:
     conf:
-      path: cmd/{{.Package}}/.rotini-schema.conf.json
+      file: cmd/{{.Package}}/.rotini-schema.conf.json
     spec:
-      path: cmd/{{.Package}}/.rotini-schema.spec.json
+      file: cmd/{{.Package}}/.rotini-schema.spec.json
   packages:
     - type: main
       file: cmd/{{.Package}}/main.go
       keep: []
     - type: cmd
       file: internal/cmd/{{.Package}}/zz_rotini.go
-      keep: []
-    - type: runtime
-      file: internal/cmd/{{.Package}}/rotini/zz_runtime.go
       keep: []
   features:
     - type: help

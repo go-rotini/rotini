@@ -3,13 +3,18 @@
 // and run it on a slim runtime that does nothing the spec didn't declare —
 // everything beyond dispatch is an explicit, opt-in service.
 //
-// This package is the runtime SOURCE. It is not imported from go-rotini/rotini at
-// run time: `rotini generate` merges this source into your project's conf-declared
-// runtime 'file' as one self-contained local package, which the generated framework
-// and your handlers import — so a built CLI carries its own runtime with no go-rotini/
-// rotini run-time dependency. The symbols below ([Program], [Context], [Collect],
-// the [Handlers] hooks, …) are exactly what a handler author uses, qualified
-// `rotini.`, against that emitted package.
+// rotini is two-faced, and one module serves both faces at one version:
+//
+//   - As a TOOL — `go get -tool github.com/go-rotini/rotini` — it installs the
+//     codegen binary (`go tool rotini init` / `generate` / `validate`), which
+//     compiles your spec into a per-CLI framework file plus one editable handler
+//     stub per command.
+//   - As a LIBRARY — `go get github.com/go-rotini/rotini` — it is THIS package: the
+//     runtime that generated code imports and your handlers are written against.
+//
+// Generated code is small and yours; the runtime is an ordinary versioned import.
+// The symbols below ([Program], [Context], [Collect], the [Handlers] hooks, …) are
+// exactly what a handler author uses, qualified `rotini.`.
 //
 // The package rests on four pillars, and this tour reads in their order:
 // declare → generate → run → opt in. The companion CLI (cmd/rotini, built
@@ -178,7 +183,7 @@
 //
 // Everything else is a value a handler fetches from the registry —
 // [Program.Bind] to provide, [Get] / [MustGet] to consume, with the [KeyParser],
-// [KeyBinder], [KeySuggestor], [KeyVersioner] conventions naming
+// [KeyBinder], [KeySuggestor], [KeyStyler] conventions naming
 // the usual suspects:
 //
 //   - [Collect] is the 95% handler's whole input story: every declared
@@ -197,9 +202,7 @@
 //     [OverlayInputsP]) acquires channels one at a time for programs that
 //     want custom precedence, with the same [Report].
 //   - [Suggestor] turns a [ParseError]'s unknown token and candidate
-//     vocabulary into "did you mean" suggestions; [Versioner] resolves
-//     one version string whether the binary was built with -ldflags or installed
-//     by module path.
+//     vocabulary into "did you mean" suggestions.
 //   - Text styling — a [Style] fluent builder
 //     for SGR styling (16/256/RGB/hex color, with opt-in Profile downsampling),
 //     a Styler registry of named styles (render text by intent — "warning",

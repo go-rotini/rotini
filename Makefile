@@ -3,7 +3,14 @@
 # FuzzXxx here as it is added.
 FUZZ_TARGETS := FuzzParse
 
-.PHONY: all clean lint test test-acceptance test-bench test-fuzz test-mutation test-race rotini-build rotini-install
+# Where `rotini-build` writes the dogfood binary. Honors GOBIN, falling back to
+# the default $(go env GOPATH)/bin, so the target is not tied to one machine.
+GOBIN ?= $(shell go env GOBIN)
+ifeq ($(GOBIN),)
+GOBIN := $(shell go env GOPATH)/bin
+endif
+
+.PHONY: all clean lint test test-acceptance test-bench test-fuzz test-mutation test-race rotini rotini-build rotini-install
 
 all: clean lint test test-acceptance test-bench test-fuzz test-mutation test-race rotini-build rotini-install
 
@@ -16,10 +23,7 @@ lint:
 	@go vet ./...
 	@go mod verify
 	@go tool golangci-lint run ./...
-	@go tool go-licenses check ./... \
-		--ignore github.com/cyberphone/json-canonicalization \
-		--ignore github.com/in-toto/attestation \
-		--ignore github.com/in-toto/in-toto-golang
+	@go tool go-licenses check ./...
 	@go tool govulncheck ./...
 
 test:
@@ -46,8 +50,12 @@ test-race:
 	@go test -race -count=1 -coverprofile=test_race.out ./...
 	@go tool cover -func=test_race.out
 
+# rotini is the verification-chain entry point (see .docs/ROTINI_WORK_ITEMS.md).
+# Same order as `all`: build the versioned binary, then regenerate and install.
+rotini: rotini-build rotini-install
+
 rotini-build:
-	@go build -ldflags "-s -w -X main.version=1.2.3" -o /Users/mattgetz/go/bin/rotini ./cmd/rotini/main.go
+	@go build -ldflags "-s -w -X main.version=1.2.3" -o $(GOBIN)/rotini ./cmd/rotini/main.go
 
 rotini-install:
 	@go generate ./...

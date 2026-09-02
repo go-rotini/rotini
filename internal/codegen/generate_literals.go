@@ -72,61 +72,90 @@ func renderBindMeta(gp *program) string {
 	if gp.envPrefix != "" {
 		b.WriteString("EnvPrefix: " + strconv.Quote(gp.envPrefix) + ",\n")
 	}
-	if len(files) > 0 {
-		pathFrom := collectPathFrom(gp)
-		b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
-		for _, f := range files {
-			b.WriteString("{Name: " + strconv.Quote(f.Name))
-			b.WriteString(", Scope: " + strconv.Quote(f.Scope))
-			if f.Path != "" {
-				b.WriteString(", Path: " + strconv.Quote(f.Path))
-			}
-			if f.Format != "" {
-				b.WriteString(", Format: " + strconv.Quote(f.Format))
-			}
-			if d := f.Discover; d != nil {
-				b.WriteString(", Discover: &" + rotiniPkgName + ".DiscoverDef{Strategy: " + strconv.Quote(d.Strategy) + ", File: " + strconv.Quote(d.File))
-				if d.App != "" {
-					b.WriteString(", App: " + strconv.Quote(d.App))
-				}
-				b.WriteString("}")
-			}
-			if f.Schema != nil {
-				if js := validationSchema(*f.Schema, gp.schemas); js != "" {
-					b.WriteString(", Schema: " + goRawString(js))
-				}
-			}
-			if c, ok := pathFrom[f.Name]; ok {
-				b.WriteString(", PathFrom: &" + rotiniPkgName + ".PathFromDef{")
-				if c.flag != "" {
-					b.WriteString("Flag: " + strconv.Quote(c.flag))
-					if c.env != "" {
-						b.WriteString(", ")
-					}
-				}
-				if c.env != "" {
-					b.WriteString("Env: " + strconv.Quote(c.env))
-				}
-				b.WriteString("}")
-			}
-			b.WriteString("},\n")
-		}
-		b.WriteString("},\n")
-	}
-	if len(stdinSchemas) > 0 {
-		b.WriteString("StdinSchemas: map[string]string{\n")
-		keys := make([]string, 0, len(stdinSchemas))
-		for k := range stdinSchemas {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			b.WriteString(strconv.Quote(k) + ": " + goRawString(stdinSchemas[k]) + ",\n")
-		}
-		b.WriteString("},\n")
-	}
+	renderConfigFiles(&b, gp, files)
+	renderStdinSchemas(&b, stdinSchemas)
 	b.WriteString("}")
 	return b.String()
+}
+
+// renderConfigFiles renders the BindMeta literal's ConfigFiles field — one
+// rotini.ConfigFile per declared document-level source. Writes nothing when the
+// CLI declares no configuration_files.
+func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile) {
+	if len(files) == 0 {
+		return
+	}
+	pathFrom := collectPathFrom(gp)
+	b.WriteString("ConfigFiles: []" + rotiniPkgName + ".ConfigFile{\n")
+	for _, f := range files {
+		b.WriteString("{Name: " + strconv.Quote(f.Name))
+		b.WriteString(", Scope: " + strconv.Quote(f.Scope))
+		if f.Path != "" {
+			b.WriteString(", Path: " + strconv.Quote(f.Path))
+		}
+		if f.Format != "" {
+			b.WriteString(", Format: " + strconv.Quote(f.Format))
+		}
+		renderDiscover(b, f.Discover)
+		if f.Schema != nil {
+			if js := validationSchema(*f.Schema, gp.schemas); js != "" {
+				b.WriteString(", Schema: " + goRawString(js))
+			}
+		}
+		if c, ok := pathFrom[f.Name]; ok {
+			renderPathFrom(b, c)
+		}
+		b.WriteString("},\n")
+	}
+	b.WriteString("},\n")
+}
+
+// renderDiscover renders a config file's `Discover:` field (the spec's discover:
+// strategy) inline, or nothing when the source names a fixed path.
+func renderDiscover(b *strings.Builder, d *ConfigurationFileDiscover) {
+	if d == nil {
+		return
+	}
+	b.WriteString(", Discover: &" + rotiniPkgName + ".DiscoverDef{Strategy: " + strconv.Quote(d.Strategy) + ", File: " + strconv.Quote(d.File))
+	if d.App != "" {
+		b.WriteString(", App: " + strconv.Quote(d.App))
+	}
+	b.WriteString("}")
+}
+
+// renderPathFrom renders a config file's `PathFrom:` field — the flag and/or env
+// var whose value supplies the file's path at run time.
+func renderPathFrom(b *strings.Builder, c pathFromClaim) {
+	b.WriteString(", PathFrom: &" + rotiniPkgName + ".PathFromDef{")
+	if c.flag != "" {
+		b.WriteString("Flag: " + strconv.Quote(c.flag))
+		if c.env != "" {
+			b.WriteString(", ")
+		}
+	}
+	if c.env != "" {
+		b.WriteString("Env: " + strconv.Quote(c.env))
+	}
+	b.WriteString("}")
+}
+
+// renderStdinSchemas renders the BindMeta literal's StdinSchemas field — the
+// per-command validation schema for a declared stdin payload, keyed by command
+// path and emitted in sorted order so the output is deterministic.
+func renderStdinSchemas(b *strings.Builder, schemas map[string]string) {
+	if len(schemas) == 0 {
+		return
+	}
+	b.WriteString("StdinSchemas: map[string]string{\n")
+	keys := make([]string, 0, len(schemas))
+	for k := range schemas {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b.WriteString(strconv.Quote(k) + ": " + goRawString(schemas[k]) + ",\n")
+	}
+	b.WriteString("},\n")
 }
 
 // goRawString renders s as a Go string literal, preferring a backtick raw string

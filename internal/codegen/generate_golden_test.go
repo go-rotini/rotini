@@ -2,8 +2,6 @@ package codegen
 
 import (
 	"flag"
-	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"sort"
@@ -56,15 +54,7 @@ generate:
     - type: cmd
       file: internal/cmd/demo/zz_demo.go
       package: demo
-    - type: runtime
-      file: internal/demo/rotini/zz_runtime.go
-      package: rotini
 `
-
-// runtimeRel is the module-relative path of the emitted merged runtime — snapshotted
-// only as a parse-check (it is the whole runtime, ~7k lines; byte-snapshotting it would
-// make every unrelated runtime edit churn this golden).
-const runtimeRel = "internal/demo/rotini/zz_runtime.go"
 
 // emitInModule writes spec+conf into a fresh temp module, runs the generate pass with
 // the working directory set there, and returns every emitted .go file keyed by its
@@ -139,18 +129,6 @@ func TestGenerateGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	emitted := emitInModule(t, goldenSpec, goldenConf)
-
-	// The runtime file must be valid Go in the declared package, but is not snapshotted.
-	rt, ok := emitted[runtimeRel]
-	if !ok {
-		t.Fatalf("runtime file %q was not emitted; got %v", runtimeRel, sortedKeys(emitted))
-	}
-	if f, err := parser.ParseFile(token.NewFileSet(), runtimeRel, rt, parser.PackageClauseOnly); err != nil {
-		t.Errorf("emitted runtime does not parse: %v", err)
-	} else if f.Name.Name != "rotini" {
-		t.Errorf("emitted runtime package = %q, want rotini", f.Name.Name)
-	}
-	delete(emitted, runtimeRel)
 
 	if *updateGolden {
 		writeGolden(t, goldenDir, emitted)
