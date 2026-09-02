@@ -10,19 +10,15 @@ import (
 	"strings"
 )
 
-// Asking questions: [Prompt] (free text), [Confirm] (yes/no) and [Select] (a menu),
-// over an [io.Reader] rather than the terminal directly.
-//
-// That is what makes them work identically when driven interactively, from a pipe, and
-// from a test — and why input that ends without an answer is [ErrNotInteractive]
+// Asking questions: [Prompt] (free text), [Confirm] (yes/no) and [Select] (a menu), each over
+// an [io.Reader] rather than the terminal directly, so they behave identically interactively,
+// from a pipe, and from a test. Input that ends without an answer is [ErrNotInteractive]
 // rather than a hang.
 
-// ErrNotInteractive reports that a prompt had no answer available: its input
-// reached EOF without a line. It is what makes an interactive battery safe in a
-// pipeline or CI job — the run fails fast and says why, instead of blocking
-// forever on a stdin nobody is typing into.
-//
-// It is a usage error ([ErrUsage]): the environment, not the program, is wrong.
+// ErrNotInteractive reports that a prompt's input reached EOF without a line. It is what makes
+// an interactive battery safe in a pipeline or CI job: the run fails fast and says why instead
+// of blocking on a stdin nobody is typing into. It is an [ErrUsage] — the environment, not the
+// program, is wrong.
 var ErrNotInteractive = UsageError(errors.New("rotini: no input available (not interactive)"))
 
 // ErrPromptInvalid reports that an answer failed validation and no retries
@@ -45,12 +41,10 @@ func newAsker(in io.Reader, out io.Writer) asker {
 	return asker{in: bufio.NewReader(in), out: out}
 }
 
-// readLine reads one line, honoring ctx: the read runs on its own goroutine so a
-// canceled context returns immediately rather than waiting for a keystroke that
-// may never come. EOF with no data is [ErrNotInteractive].
-//
-// The goroutine may outlive the call (a blocked Read cannot be interrupted); it
-// writes to a buffered channel and exits on its own, leaking nothing permanent.
+// readLine reads one line, honoring ctx: the read runs on its own goroutine so a canceled
+// context returns immediately rather than waiting for a keystroke that may never come. The
+// goroutine may outlive the call, since a blocked Read cannot be interrupted; it writes to a
+// buffered channel and exits on its own.
 func (a asker) readLine(ctx context.Context) (string, error) {
 	type result struct {
 		line string
@@ -85,14 +79,7 @@ func (a asker) write(s string) {
 	}
 }
 
-// Prompt asks for one line of free text.
-//
-// It reads from an [io.Reader] rather than the terminal directly, so the same
-// prompt works interactively, from a pipe (`echo value | mycli`), and in a test
-// with a [strings.Reader]. Input that ends without an answer is
-// [ErrNotInteractive], never a hang.
-//
-// The zero value is not usable; start from [NewPrompt].
+// Prompt asks for one line of free text. The zero value is not usable; start from [NewPrompt].
 type Prompt struct {
 	asker
 
@@ -109,21 +96,20 @@ func NewPrompt(in io.Reader, out io.Writer) *Prompt {
 	return &Prompt{asker: newAsker(in, out)}
 }
 
-// WithLabel sets the text written before reading. It returns the receiver to chain.
+// WithLabel sets the text written before reading.
 func (p *Prompt) WithLabel(label string) *Prompt { p.label = label; return p }
 
-// WithDefault sets the value an empty answer resolves to; it is shown in the
-// label as "[default]". A prompt with a default never reports
-// [ErrNotInteractive] — the default IS the non-interactive answer. It returns the
-// receiver to chain.
+// WithDefault sets the value an empty answer resolves to, shown in the label as "[default]".
+// A prompt with a default never reports [ErrNotInteractive] — the default is the
+// non-interactive answer.
 func (p *Prompt) WithDefault(value string) *Prompt { p.def = value; return p }
 
 // WithValidate rejects an answer when fn returns an error; the message is shown
-// and the question re-asked, up to the retry budget. It returns the receiver to chain.
+// and the question re-asked, up to the retry budget.
 func (p *Prompt) WithValidate(fn func(string) error) *Prompt { p.validate = fn; return p }
 
 // WithRetries sets how many times an invalid answer may be re-asked (default 0 —
-// one attempt). It returns the receiver to chain.
+// one attempt).
 func (p *Prompt) WithRetries(n int) *Prompt {
 	if n >= 0 {
 		p.retries = n
@@ -170,10 +156,8 @@ func promptLabel(label, def string) string {
 	return label + ": "
 }
 
-// Confirm asks a yes/no question.
-//
-// The accepted answers are configurable, an empty answer takes the default, and
-// input that ends without one is [ErrNotInteractive] unless a default was set.
+// Confirm asks a yes/no question. The accepted answers are configurable, an empty answer takes
+// the default, and input that ends without one is [ErrNotInteractive] unless a default was set.
 //
 // The zero value is not usable; start from [NewConfirm].
 type Confirm struct {
@@ -196,16 +180,16 @@ func NewConfirm(in io.Reader, out io.Writer) *Confirm {
 	}
 }
 
-// WithLabel sets the question text. It returns the receiver to chain.
+// WithLabel sets the question text.
 func (c *Confirm) WithLabel(label string) *Confirm { c.label = label; return c }
 
 // WithDefault sets the answer an empty line (or non-interactive input) resolves
 // to, shown as the capitalized choice in "[y/N]". Without one, an empty answer
-// re-asks. It returns the receiver to chain.
+// re-asks.
 func (c *Confirm) WithDefault(value bool) *Confirm { c.def = &value; return c }
 
 // WithAffirmative replaces the accepted "yes" tokens (default y, yes). Matching
-// is case-insensitive. It returns the receiver to chain.
+// is case-insensitive.
 func (c *Confirm) WithAffirmative(tokens ...string) *Confirm {
 	if len(tokens) > 0 {
 		c.affirmative = tokens
@@ -213,8 +197,7 @@ func (c *Confirm) WithAffirmative(tokens ...string) *Confirm {
 	return c
 }
 
-// WithNegative replaces the accepted "no" tokens (default n, no). It returns the
-// receiver to chain.
+// WithNegative replaces the accepted "no" tokens (default n, no).
 func (c *Confirm) WithNegative(tokens ...string) *Confirm {
 	if len(tokens) > 0 {
 		c.negative = tokens
@@ -223,7 +206,7 @@ func (c *Confirm) WithNegative(tokens ...string) *Confirm {
 }
 
 // WithRetries sets how many times an unrecognized answer may be re-asked
-// (default 2). Zero means a single attempt. It returns the receiver to chain.
+// (default 2). Zero means a single attempt.
 func (c *Confirm) WithRetries(n int) *Confirm {
 	if n >= 0 {
 		c.retries = n
@@ -281,12 +264,11 @@ func matchToken(answer string, tokens []string) bool {
 
 // Select asks the user to choose one of a list of options.
 //
-// The menu is NUMBERED and read line-wise rather than driven by arrow keys: raw
-// terminal mode would need a platform dependency rotini does not carry, and would
-// not work at all over a pipe. A numbered menu answers the same question, stays
-// scriptable (`echo 2 | mycli`), and degrades to [ErrNotInteractive] cleanly.
-// An answer that is not a number is matched against the option text, exactly
-// first and then — with [Select.WithSuggestor] — by fuzzy distance.
+// The menu is numbered and read line-wise rather than driven by arrow keys: raw terminal mode
+// would need a platform dependency rotini does not carry and would not work over a pipe at
+// all. A numbered menu stays scriptable and degrades to [ErrNotInteractive] cleanly. An answer
+// that is not a number is matched against the option text — exactly, then by fuzzy distance
+// with [Select.WithSuggestor].
 //
 // The zero value is not usable; start from [NewSelect].
 type Select struct {
@@ -305,12 +287,11 @@ func NewSelect(in io.Reader, out io.Writer, options ...string) *Select {
 	return &Select{asker: newAsker(in, out), options: options, def: -1, retries: defaultRetries}
 }
 
-// WithLabel sets the text written above the menu. It returns the receiver to chain.
+// WithLabel sets the text written above the menu.
 func (s *Select) WithLabel(label string) *Select { s.label = label; return s }
 
-// WithDefault sets the zero-based index an empty answer resolves to, and the
-// answer used when input is not interactive. Out-of-range clears it. It returns
-// the receiver to chain.
+// WithDefault sets the zero-based index an empty answer resolves to, and the answer used when
+// input is not interactive. Out-of-range clears it.
 func (s *Select) WithDefault(index int) *Select {
 	s.def = -1
 	if index >= 0 && index < len(s.options) {
@@ -319,14 +300,12 @@ func (s *Select) WithDefault(index int) *Select {
 	return s
 }
 
-// WithSuggestor lets a typed answer that is neither a number nor an exact option
-// be resolved by fuzzy match — the same [Suggestor] a program uses for "did you
-// mean". Without one, only numbers and exact text are accepted. It returns the
-// receiver to chain.
+// WithSuggestor lets an answer that is neither a number nor an exact option be resolved by
+// fuzzy match. Without one, only numbers and exact text are accepted.
 func (s *Select) WithSuggestor(suggestor *Suggestor) *Select { s.suggestor = suggestor; return s }
 
 // WithRetries sets how many times an unrecognized answer may be re-asked
-// (default 2). Zero means a single attempt. It returns the receiver to chain.
+// (default 2). Zero means a single attempt.
 func (s *Select) WithRetries(n int) *Select {
 	if n >= 0 {
 		s.retries = n

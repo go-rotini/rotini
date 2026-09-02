@@ -8,14 +8,11 @@ import (
 // This file owns the deep composed-$ref lint check — relocated here from validate.go
 // because it runs in the LINT stage (lintSpec appends it), not schema validation.
 
-// lintComposedTree is the deep `$ref` descend (W8/D-W8.3): when the spec composes
-// child specs, run the generator's own composer (resolveTree) over the WHOLE tree so
-// `rotini validate` catches problems that only emerge once refs are followed — name/
-// alias collisions across composition boundaries, cyclic or missing refs, and each
-// composed spec's version. It reuses generate's exact compose logic (no separate walk),
-// so validate and generate cannot drift. Best-effort: it needs a module (composed
-// commands resolve to import paths) and only matters when refs are present, so a
-// ref-less spec or a module-less context is skipped — leaving per-spec validation as-is.
+// lintComposedTree is the deep `$ref` descend: it runs the generator's own composer over the
+// whole tree so `rotini validate` catches what only emerges once refs are followed — collisions
+// across composition boundaries, cyclic or missing refs, and each composed spec's version.
+// Reusing generate's compose logic is what keeps validate and generate from drifting. It is
+// best-effort: a ref-less spec or a module-less context is skipped.
 func lintComposedTree(spec *Spec, specPath string) []error {
 	if !specHasRefs(spec) {
 		return nil

@@ -10,27 +10,21 @@ import (
 	"time"
 )
 
-// Activity indicators — Spinner (indeterminate) and Progress (determinate) — share
-// one single-line renderer: each redraw returns to column 0 with "\r" and repaints,
-// so the indicator occupies exactly one line for its whole life.
+// Activity indicators — [Spinner] (indeterminate) and [Progress] (determinate) — share one
+// single-line renderer: each redraw returns to column 0 with "\r" and repaints, so an
+// indicator occupies exactly one line for its whole life.
 //
 // # Animation and non-terminal output
 //
-// Redrawing with "\r" is meaningless in a file or a pipe: it produces one long
-// smeared line in a CI log. So an indicator ANIMATES ONLY WHEN ITS WRITER IS A
-// TERMINAL, decided once at construction from [IsTerminal] when the writer is an
-// *os.File and false otherwise (a buffer or pipe never animates).
+// Redrawing with "\r" smears into one long line in a log file or a pipe, so an indicator
+// animates only when its writer is a terminal, decided once at construction from [IsTerminal]
+// and false for anything that is not an *os.File. This is the one thing rotini detects by
+// default, and it is deliberate: unlike color, which is a presentation choice the program
+// should own, a "\r" written into a log file is corruption. [Spinner.WithAnimation] and
+// [Progress.WithAnimation] override the decision in both directions.
 //
-// This is the one place rotini detects anything by default, and it is deliberate:
-// unlike color — a presentation choice the program should own (see [DetectProfile],
-// which stays opt-in) — a "\r" written into a log file is CORRUPTION, and Pillar 1
-// protects a user from surprise behavior, not from a battery declining to garble
-// their output. [Spinner.WithAnimation] and [Progress.WithAnimation] override the
-// decision in both directions.
-//
-// A non-animating indicator is silent while running and prints nothing on stop:
-// its job was the live view, and the program still reports its outcome through the
-// funnel.
+// A non-animating indicator is silent while running and prints nothing on stop; the program
+// still reports its outcome through the funnel.
 
 // spinnerFrames is the default frame set: ASCII, so it renders in any terminal
 // and any font.
@@ -72,11 +66,9 @@ func (l *line) clear() {
 	l.drawn = 0
 }
 
-// Spinner is an animated activity indicator for work of unknown duration.
-//
-// It is inert until [Spinner.Start] and stops at [Spinner.Stop] or when the
-// context is done, so a spinner can never outlive its run. On a non-terminal
-// writer it never draws at all (see the package notes above).
+// Spinner is an animated activity indicator for work of unknown duration. It is inert until
+// [Spinner.Start] and stops at [Spinner.Stop] or when the context is done, so it can never
+// outlive its run. On a non-terminal writer it never draws at all.
 //
 // The zero value is not usable; start from [NewSpinner].
 type Spinner struct {
@@ -101,8 +93,7 @@ func NewSpinner(w io.Writer) *Spinner {
 	}
 }
 
-// WithFrames replaces the animation frames (default ASCII |/-\). It returns the
-// receiver to chain.
+// WithFrames replaces the animation frames (default ASCII |/-\).
 func (s *Spinner) WithFrames(frames ...string) *Spinner {
 	if len(frames) > 0 {
 		s.frames = frames
@@ -110,8 +101,7 @@ func (s *Spinner) WithFrames(frames ...string) *Spinner {
 	return s
 }
 
-// WithInterval sets the time between frames (default 100ms). It returns the
-// receiver to chain.
+// WithInterval sets the time between frames (default 100ms).
 func (s *Spinner) WithInterval(d time.Duration) *Spinner {
 	if d > 0 {
 		s.interval = d
@@ -119,7 +109,7 @@ func (s *Spinner) WithInterval(d time.Duration) *Spinner {
 	return s
 }
 
-// WithMessage sets the text drawn beside the spinner. It returns the receiver to chain.
+// WithMessage sets the text drawn beside the spinner.
 func (s *Spinner) WithMessage(msg string) *Spinner {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,8 +117,7 @@ func (s *Spinner) WithMessage(msg string) *Spinner {
 	return s
 }
 
-// WithAnimation forces animation on or off, overriding the terminal decision. It
-// returns the receiver to chain.
+// WithAnimation forces animation on or off, overriding the terminal decision.
 func (s *Spinner) WithAnimation(enabled bool) *Spinner {
 	s.drawMu.Lock()
 	defer s.drawMu.Unlock()
@@ -194,11 +183,9 @@ func (s *Spinner) Stop() {
 	s.clear()
 }
 
-// Progress is a determinate progress bar for "n of total" work.
-//
-// Like [Spinner] it draws one line in place and only on a terminal. It is
-// caller-driven: nothing advances until [Progress.Set] or [Progress.Add], so
-// there is no goroutine and no timer to leak.
+// Progress is a determinate progress bar for "n of total" work. Like [Spinner] it draws one
+// line in place and only on a terminal, and it is caller-driven: nothing advances until
+// [Progress.Set] or [Progress.Add], so there is no goroutine and no timer to leak.
 //
 // The zero value is not usable; start from [NewProgress].
 type Progress struct {
@@ -225,7 +212,7 @@ func NewProgress(w io.Writer, total int64) *Progress {
 	}
 }
 
-// WithWidth sets the bar's width in cells (default 30). It returns the receiver to chain.
+// WithWidth sets the bar's width in cells (default 30).
 func (p *Progress) WithWidth(n int) *Progress {
 	if n > 0 {
 		p.mu.Lock()
@@ -235,7 +222,7 @@ func (p *Progress) WithWidth(n int) *Progress {
 	return p
 }
 
-// WithMessage sets the text drawn after the bar. It returns the receiver to chain.
+// WithMessage sets the text drawn after the bar.
 func (p *Progress) WithMessage(msg string) *Progress {
 	p.mu.Lock()
 	p.message = msg
@@ -243,8 +230,7 @@ func (p *Progress) WithMessage(msg string) *Progress {
 	return p
 }
 
-// WithAnimation forces drawing on or off, overriding the terminal decision. It
-// returns the receiver to chain.
+// WithAnimation forces drawing on or off, overriding the terminal decision.
 func (p *Progress) WithAnimation(enabled bool) *Progress {
 	p.drawMu.Lock()
 	defer p.drawMu.Unlock()

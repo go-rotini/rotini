@@ -31,12 +31,9 @@ const rotiniPkgName = "rotini"
 // code, so the path is fixed and needs no alias — the package IS `rotini`.
 const runtimeImport = `"github.com/go-rotini/rotini"`
 
-// program is the rotini CLI fully resolved from a spec + conf and ready to emit: the
-// command tree (its own inline commands plus any `$ref`-composed children), the OUTPUT
-// LAYOUT (where each generated file goes), and the MODULE it is written into. It is the
-// spine of the generate stage — resolveProgram builds it, and its generate() method runs
-// the emit steps in order. The renderers (generate_literals.go, generate_schemagen.go,
-// the templates) are the tools those steps call.
+// program is the CLI fully resolved from a spec and conf and ready to emit: the command tree,
+// the output layout, and the module it is written into. It is the spine of the generate stage
+// — resolveProgram builds it, and its generate method runs the emit steps in order.
 type program struct {
 	// inputs — the validated spec + conf and where the spec was read from.
 	spec     *Spec
@@ -255,13 +252,11 @@ func (p *program) resolveFeatures() error {
 	return nil
 }
 
-// writeSchemas writes rotini's embedded JSON Schemas to the project paths declared
-// under generate.schemas (opt-in). Each path is module-root-relative; the embedded bytes
-// are written verbatim — unchanged on a no-op pass (stable mtime), overwritten otherwise —
-// so an editor `# yaml-language-server: $schema=<path>` reference can resolve the schema
-// locally instead of fetching a remote URL. These files are codegen output but are NOT
-// pruned (they are not command-derived; the .json suffix never matches a stub/feature
-// prune set either). An absent block, or an absent conf/spec entry, writes nothing.
+// writeSchemas writes rotini's embedded JSON Schemas to the module-root-relative paths
+// declared under generate.schemas, so an editor's `$schema` reference can resolve locally
+// instead of fetching a remote URL. The bytes are written verbatim and left untouched on a
+// no-op pass, keeping mtime stable. These files are never pruned: they are not
+// command-derived, and .json matches no prune set.
 func writeSchemas(conf *Conf, moduleRoot string) error {
 	if conf.Generate == nil || conf.Generate.Schemas == nil {
 		return nil
@@ -329,12 +324,11 @@ func enabledFeatures(conf *Conf) []confFeature {
 	return out
 }
 
-// renderCmdFile renders the single generated cli file: the framework (the
-// ProgramHandlers aggregate interface, the typed input structs, the Definition,
-// NewProgram, BindMeta) AND the rollup (the handlers struct, Program, Handlers(),
-// and the per-command handler wiring) — one package, all unqualified. It is fully
-// generated and carries a DO NOT EDIT banner; the editable handler stubs are
-// separate create-once files in the same package.
+// renderCmdFile renders the single generated cli file: the framework (the ProgramHandlers
+// interface, the typed input structs, the Definition, NewProgram, BindMeta) and the rollup
+// (the handlers struct, Program, Handlers, and the per-command wiring). It is fully generated
+// and carries a DO NOT EDIT banner; the editable stubs are separate create-once files in the
+// same package.
 func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte, error) {
 	blocks, imports := inputBlocks(gp)
 
@@ -434,16 +428,14 @@ func anyEmbed(features []templateFeature) bool {
 	return false
 }
 
-// writeHandlerStubs creates a per-command handler stub for the root command and
-// every OWN sub-command, but only when the file does not already exist — stubs
-// are user-editable, so an existing stub is never overwritten. Composed
-// commands have no stub here; their handlers live in the child's package.
+// writeHandlerStubs creates a handler stub for the root command and every own sub-command,
+// only when the file does not already exist: stubs are user-editable and never overwritten.
+// Composed commands have no stub here; their handlers live in the child's package.
 //
-// initStyle (only `rotini initialize` sets it) seeds the root command and the
-// top-level help/version commands from the wired init templates instead of the
-// empty stub, so a fresh CLI ships with working -h/--help, -v/--version, and
-// help/version commands. To opt out, delete those handler files and run a
-// normal `rotini generate` — the empty stubs are seeded in their place.
+// initStyle, which only `rotini initialize` sets, seeds the root and the top-level
+// help/version commands from the wired init templates instead of the empty stub, so a fresh
+// CLI ships with working -h/--help and -v/--version. To opt out, delete those files and run a
+// normal generate.
 func writeHandlerStubs(gp *program, lay layout) error {
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
@@ -466,11 +458,10 @@ func writeHandlerStubs(gp *program, lay layout) error {
 	return nil
 }
 
-// writeEntrypoint writes the binary's main.go to the conf-declared entrypoint
-// package — create-once: the file binds user-owned build metadata (version/
-// commit/date), so an existing main.go is never overwritten. A conf without an
-// entrypoint writes nothing. extension is the spec/conf file extension (e.g.
-// "yaml") baked into the //go:generate directive so it points at the seeded files.
+// writeEntrypoint writes the binary's main.go to the conf-declared entrypoint package,
+// create-once: the file binds user-owned build metadata, so an existing main.go is never
+// overwritten. extension is the spec/conf file extension baked into the //go:generate
+// directive so it points at the seeded files.
 func writeEntrypoint(lay layout, extension string) error {
 	if lay.entrypointDir == "" {
 		return nil
@@ -498,7 +489,7 @@ func rollupMethods(gp *program) []templateHandlersMethod {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
-			// Inline-command passthrough (D-W9.7): own command (types generated
+			// Inline-command passthrough: own command (types generated
 			// locally) whose handler delegates to a package instead of a stub.
 			methods = append(methods, templateHandlersMethod{
 				Method:         c.prefix,

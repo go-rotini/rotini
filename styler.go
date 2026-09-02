@@ -7,12 +7,9 @@ import (
 	"strings"
 )
 
-// Text styling: [Style], a chainable set of SGR attributes, and [Styler], a registry
-// that renders text by INTENT ("warning", "path") so a CLI's look lives in one place.
-//
-// The color model and its downsampling are in color.go; escape-aware measuring and
-// stripping are in text.go. Nothing here detects anything — see detect.go for the
-// opt-in helpers a program uses to decide.
+// Text styling: [Style], a chainable set of SGR attributes, and [Styler], a registry that
+// renders text by intent so a CLI's look lives in one place. Nothing here detects anything —
+// see detect.go for the opt-in helpers a program uses to decide.
 
 // KeyStyler is the conventional registry key a program binds a [Styler] under, so
 // handlers reach one shared set of named styles with [MustGet].
@@ -20,12 +17,12 @@ const KeyStyler = "styler"
 
 const reset = "\x1b[0m"
 
-// Styler renders text by INTENT rather than by appearance: a program defines what
-// "warning" or "path" looks like once, and handlers ask for it by name. Restyling a
-// CLI is then one place, not every call site.
+// Styler renders text by intent rather than appearance: a program defines what "warning" or
+// "path" looks like once, and handlers ask for it by name, so restyling a CLI is one place
+// rather than every call site.
 //
-// A disabled Styler STRIPS instead of passing through, so turning styling off yields
-// clean text even if a style was baked into the string it was given.
+// A disabled Styler strips rather than passing through, so turning styling off yields clean
+// text even if a style was baked into the string it was given.
 //
 // The zero value is not usable; start from [NewStyler].
 type Styler struct {
@@ -45,14 +42,14 @@ func NewStyler() *Styler {
 }
 
 // SetEnabled turns styling on or off for every style in the registry. Disabled, the
-// Styler strips escapes from whatever it renders. It returns the receiver to chain.
+// Styler strips escapes from whatever it renders.
 func (s *Styler) SetEnabled(enabled bool) *Styler {
 	s.enabled = enabled
 	return s
 }
 
 // SetProfile caps the color depth of every style in the registry, downsampling
-// richer colors to fit. It returns the receiver to chain.
+// richer colors to fit.
 func (s *Styler) SetProfile(profile Profile) *Styler {
 	s.profile = profile
 	return s
@@ -80,7 +77,7 @@ func (s *Styler) Set(key string, style *Style) *Styler {
 }
 
 // Delete removes the style registered under key. Rendering an unregistered key
-// leaves the text unstyled rather than failing. It returns the receiver to chain.
+// leaves the text unstyled rather than failing.
 func (s *Styler) Delete(key string) *Styler {
 	delete(s.styles, key)
 	return s
@@ -120,13 +117,12 @@ func (s *Styler) Fprintf(w io.Writer, key, format string, a ...any) {
 	_, _ = fmt.Fprint(w, s.Renderf(key, format, a...))
 }
 
-// Style is a set of SGR attributes — weight, decoration, foreground and background
-// color — built by chaining and applied with [Style.Sprint] or the Fprint family.
+// Style is a set of SGR attributes — weight, decoration, foreground and background color —
+// built by chaining and applied with [Style.Sprint] or the Fprint family. Color is emitted at
+// whatever the [Profile] allows, so one Style renders correctly on a truecolor terminal and a
+// 16-color one alike.
 //
-// A DISABLED style passes text through untouched (it adds nothing), which is the
-// difference from a disabled [Styler] (which strips). Color is emitted at whatever
-// the [Profile] allows, so one Style renders correctly on a truecolor terminal and
-// a 16-color one alike.
+// A disabled Style passes text through untouched, where a disabled [Styler] strips.
 //
 // The zero value is not usable; start from [NewStyle].
 type Style struct {
@@ -143,14 +139,13 @@ func NewStyle() *Style {
 }
 
 // SetEnabled turns this style on or off. A disabled style passes its text through
-// unchanged. It returns the receiver to chain.
+// unchanged.
 func (s *Style) SetEnabled(enabled bool) *Style {
 	s.enabled = enabled
 	return s
 }
 
-// SetProfile caps this style's color depth, downsampling richer colors to fit. It
-// returns the receiver to chain.
+// SetProfile caps this style's color depth, downsampling richer colors to fit.
 func (s *Style) SetProfile(profile Profile) *Style {
 	s.profile = profile
 	return s
@@ -164,106 +159,101 @@ func (s *Style) Clone() *Style {
 	return &clone
 }
 
-// Bold adds the bold attribute. It returns the receiver to chain.
+// Bold adds the bold attribute.
 func (s *Style) Bold() *Style {
 	return s.addAttr("1")
 }
 
-// Faint adds the faint (dim) attribute. It returns the receiver to chain.
+// Faint adds the faint (dim) attribute.
 func (s *Style) Faint() *Style {
 	return s.addAttr("2")
 }
 
-// Italic adds the italic attribute. It returns the receiver to chain.
+// Italic adds the italic attribute.
 func (s *Style) Italic() *Style {
 	return s.addAttr("3")
 }
 
-// Underline adds the underline attribute. It returns the receiver to chain.
+// Underline adds the underline attribute.
 func (s *Style) Underline() *Style {
 	return s.addAttr("4")
 }
 
-// DoubleUnderline adds the double-underline attribute. It returns the receiver to chain.
+// DoubleUnderline adds the double-underline attribute.
 func (s *Style) DoubleUnderline() *Style {
 	return s.addAttr("21")
 }
 
-// Blink adds the slow-blink attribute. It returns the receiver to chain.
+// Blink adds the slow-blink attribute.
 func (s *Style) Blink() *Style {
 	return s.addAttr("5")
 }
 
-// RapidBlink adds the rapid-blink attribute. It returns the receiver to chain.
+// RapidBlink adds the rapid-blink attribute.
 func (s *Style) RapidBlink() *Style {
 	return s.addAttr("6")
 }
 
 // Reverse adds the reverse-video attribute, swapping foreground and background.
-// It returns the receiver to chain.
 func (s *Style) Reverse() *Style {
 	return s.addAttr("7")
 }
 
-// Conceal adds the conceal attribute. It returns the receiver to chain.
+// Conceal adds the conceal attribute.
 func (s *Style) Conceal() *Style {
 	return s.addAttr("8")
 }
 
-// Strikethrough adds the strikethrough attribute. It returns the receiver to chain.
+// Strikethrough adds the strikethrough attribute.
 func (s *Style) Strikethrough() *Style {
 	return s.addAttr("9")
 }
 
-// Overline adds the overline attribute. It returns the receiver to chain.
+// Overline adds the overline attribute.
 func (s *Style) Overline() *Style {
 	return s.addAttr("53")
 }
 
-// ForegroundANSI sets the foreground to one of the 16 standard colors. It returns
-// the receiver to chain.
+// ForegroundANSI sets the foreground to one of the 16 standard colors.
 func (s *Style) ForegroundANSI(c ANSIColor) *Style {
 	s.fg = colorANSI(c)
 	return s
 }
 
-// BackgroundANSI sets the background to one of the 16 standard colors. It returns
-// the receiver to chain.
+// BackgroundANSI sets the background to one of the 16 standard colors.
 func (s *Style) BackgroundANSI(c ANSIColor) *Style {
 	s.bg = colorANSI(c)
 	return s
 }
 
 // ForegroundRGB sets a 24-bit foreground color, downsampled when the profile cannot
-// render it. It returns the receiver to chain.
+// render it.
 func (s *Style) ForegroundRGB(red, green, blue uint8) *Style {
 	s.fg = colorRGB{red, green, blue}
 	return s
 }
 
 // BackgroundRGB sets a 24-bit background color, downsampled when the profile cannot
-// render it. It returns the receiver to chain.
+// render it.
 func (s *Style) BackgroundRGB(red, green, blue uint8) *Style {
 	s.bg = colorRGB{red, green, blue}
 	return s
 }
 
-// Foreground256 sets a foreground color from the 256-color palette. It returns the
-// receiver to chain.
+// Foreground256 sets a foreground color from the 256-color palette.
 func (s *Style) Foreground256(code uint8) *Style {
 	s.fg = color256(code)
 	return s
 }
 
-// Background256 sets a background color from the 256-color palette. It returns the
-// receiver to chain.
+// Background256 sets a background color from the 256-color palette.
 func (s *Style) Background256(code uint8) *Style {
 	s.bg = color256(code)
 	return s
 }
 
 // ForegroundHex sets a 24-bit foreground color from a "#rrggbb" or "rrggbb" string.
-// An unparseable value is ignored. It returns the receiver to chain.
+// An unparseable value is ignored.
 func (s *Style) ForegroundHex(hex string) *Style {
 	if red, green, blue, ok := parseHex(hex); ok {
 		s.fg = colorRGB{red, green, blue}
@@ -272,7 +262,7 @@ func (s *Style) ForegroundHex(hex string) *Style {
 }
 
 // BackgroundHex sets a 24-bit background color from a "#rrggbb" or "rrggbb" string.
-// An unparseable value is ignored. It returns the receiver to chain.
+// An unparseable value is ignored.
 func (s *Style) BackgroundHex(hex string) *Style {
 	if red, green, blue, ok := parseHex(hex); ok {
 		s.bg = colorRGB{red, green, blue}
@@ -280,9 +270,8 @@ func (s *Style) BackgroundHex(hex string) *Style {
 	return s
 }
 
-// Raw appends a literal SGR parameter string, for an attribute rotini has no method
-// for. The value is emitted verbatim — you own its correctness. It returns the
-// receiver to chain.
+// Raw appends a literal SGR parameter string, for an attribute rotini has no method for. The value
+// is emitted verbatim — you own its correctness.
 func (s *Style) Raw(sgr string) *Style {
 	if sgr != "" {
 		s.attrs = append(s.attrs, sgr)
@@ -291,7 +280,7 @@ func (s *Style) Raw(sgr string) *Style {
 }
 
 // Merge layers other's attributes and colors on top of this style's, with other
-// winning on conflict. It returns the receiver to chain.
+// winning on conflict.
 func (s *Style) Merge(other *Style) *Style {
 	if other == nil {
 		return s

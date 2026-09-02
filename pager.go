@@ -9,13 +9,10 @@ import (
 	"strings"
 )
 
-// Pager sends long output through the user's pager ($PAGER, else `less`), and
-// passes it straight through when there is no terminal to page into.
-//
-// The passthrough is the point: `mycli list | grep x` and a CI job must both get
-// plain text on stdout, never a pager fighting over a tty that is not there. Like
-// [Spinner] the decision comes from the writer — an *os.File that is a terminal
-// pages, anything else does not — and [Pager.WithEnabled] overrides it.
+// Pager sends long output through the user's pager ($PAGER, else `less`), and passes it
+// straight through when there is no terminal to page into — so `mycli list | grep x` and a CI
+// job both get plain text on stdout. Like [Spinner] the decision comes from the writer, and
+// [Pager.WithEnabled] overrides it.
 //
 // The zero value is not usable; start from [NewPager].
 type Pager struct {
@@ -30,14 +27,13 @@ func NewPager(w io.Writer) *Pager {
 }
 
 // WithCommand sets the pager command line (e.g. "less -R"). Empty — the default —
-// uses $PAGER, falling back to `less -R`. It returns the receiver to chain.
+// uses $PAGER, falling back to `less -R`.
 func (p *Pager) WithCommand(command string) *Pager {
 	p.command = command
 	return p
 }
 
-// WithEnabled forces paging on or off, overriding the terminal decision. It
-// returns the receiver to chain.
+// WithEnabled forces paging on or off, overriding the terminal decision.
 func (p *Pager) WithEnabled(enabled bool) *Pager {
 	p.enabled = enabled
 	return p

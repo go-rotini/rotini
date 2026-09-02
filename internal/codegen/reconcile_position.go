@@ -1,13 +1,10 @@
 package codegen
 
-// This file maps JSON-pointer instance locations back to line:column positions
-// in the ORIGINAL source bytes, so a validation problem can name the place the
-// user actually typed — `.rotini.spec.yaml:12:7` — instead of only the pointer.
-// Each format delegates to its codec's RFC-6901 locator: yaml, toml, and jsonc
-// all expose PathPointer + Path.ReadPositions over a parsed AST whose nodes
-// carry source positions. JSON is served by the jsonc parser (JSON ⊂ JSONC).
-// Parsing is lazy and cached per document — locators are only consulted on the
-// failure path.
+// Mapping JSON-pointer instance locations back to line:column positions in the original source
+// bytes, so a validation problem can name the place the user actually typed. Each format
+// delegates to its codec's RFC-6901 locator over a parsed AST whose nodes carry positions;
+// JSON is served by the jsonc parser. Parsing is lazy and cached per document, since locators
+// are consulted only on the failure path.
 
 import (
 	"sync"

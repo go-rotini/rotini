@@ -44,7 +44,7 @@ func builtinImport(rotiniType string) string {
 }
 
 // parseAliasPath splits the `alias path` external-Go-binding form (shared by an input
-// type's `import:` and a command's `handler.import` — D-W9.5) into its alias and path;
+// type's `import:` and a command's `handler.import`) into its alias and path;
 // a bare path derives its alias from the last segment.
 func parseAliasPath(imp string) (alias, importPath string) {
 	imp = strings.TrimSpace(imp)
@@ -99,11 +99,9 @@ func lowerFirst(s string) string {
 	return string(r)
 }
 
-// goReservedFilenames are the trailing "_"-separated tokens the go tool reads
-// specially from a file's name alone: "test" (a "_test.go" test file, excluded from
-// the normal build) and the GOOS/GOARCH names (an implicit build constraint, e.g.
-// "app_windows.go" builds only on Windows). Kept as one set since stubFilename only
-// needs membership, not which rule matched.
+// goReservedFilenames are the trailing "_"-separated tokens the go tool reads specially from a
+// file's name alone: "test", and the GOOS and GOARCH names, which imply a build constraint.
+// One set, since stubFilename needs membership rather than which rule matched.
 var goReservedFilenames = func() map[string]bool {
 	m := map[string]bool{}
 	for _, s := range []string{
@@ -131,12 +129,10 @@ func reservedTrailingToken(stem string) bool {
 	return goReservedFilenames[parts[len(parts)-1]]
 }
 
-// stubFilename builds a handler-stub file name from base (a command's root name or
-// "<root>_<path>"), escaping the names the go tool would read specially from the
-// filename alone — a "_test.go" test file, or a "_<GOOS>.go"/"_<GOARCH>.go" build
-// constraint — by appending a trailing underscore. That makes the trailing
-// "_"-separated token empty, which matches none of those rules, so a command named
-// "test"/"windows"/"wasm"/… still compiles into the ordinary build.
+// stubFilename builds a handler-stub file name from base, escaping the names the go tool would
+// read specially by appending a trailing underscore. That makes the trailing "_"-separated
+// token empty, which matches no rule, so a command named "test" or "windows" still compiles
+// into the ordinary build.
 func stubFilename(base string) string {
 	if reservedTrailingToken(base) {
 		base += "_"
@@ -144,11 +140,9 @@ func stubFilename(base string) string {
 	return base + ".go"
 }
 
-// commandStubFilename returns a command's handler-stub file name: its explicit
-// `filename` override when set, else the derived "<root>[_<path>].go" (reserved-name
-// escaped by stubFilename). path is the underscore-joined command path relative to the
-// root, "" for the root command itself. The same derivation is shared by codegen (to
-// name the stub) and lintHandlerFilenames (to validate uniqueness), so they agree.
+// commandStubFilename returns a command's stub file name: its explicit `filename` override, or
+// the derived "<root>[_<path>].go". Codegen and lintHandlerFilenames share this derivation, so
+// naming and uniqueness validation agree.
 func commandStubFilename(rootName, path, override string) string {
 	if override != "" {
 		return override

@@ -11,10 +11,10 @@ var _ rotini.Handlers = (*demoBuildHandlers)(nil)
 
 // demoBuildHandlers implements `demo build`.
 //
-// The four embedded types are no-op implementations of the hooks this command does
-// not use, so only Run is written below. Implement any of them by declaring a method
-// with the same name — CascadingPreRun and CascadingPostRun run for every command in
-// the chain, PreRun/Run/PostRun only for this one.
+// The embedded types are no-op implementations of the hooks this command does not use, so
+// only Run is written below. Implement one by declaring a method with the same name:
+// CascadingPreRun and CascadingPostRun run for every command in the chain, PreRun, Run and
+// PostRun only for this one.
 type demoBuildHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
@@ -24,12 +24,9 @@ type demoBuildHandlers struct {
 
 // Run performs `demo build`.
 //
-// Collect reconciles every input channel the spec declares for this command — argv
-// flags and arguments, environment variables, configuration files and defaults — into
-// the generated DemoBuildInputs type, validated, in the documented precedence.
-//
-// A handler does not print its own errors: it RECORDS them, and the runtime reports
-// them once, after teardown, with the right exit code.
+// Collect reconciles every input channel the spec declares for this command into the
+// generated DemoBuildInputs, validated, in the documented precedence. A handler does not print
+// its own errors: it records them, and the runtime reports them once, after teardown.
 func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[DemoBuildInputs](rtx)
 	if err != nil {

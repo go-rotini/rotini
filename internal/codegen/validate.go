@@ -7,11 +7,9 @@ import (
 	"github.com/go-rotini/jsonschema"
 )
 
-// This file owns the validate STAGE of the pipeline: validateSpec/validateConf (the
-// version check + JSON-Schema validation the Processor runs before lint) plus the
-// schema-validation helper validateInstance. The shared problem/finding machinery is
-// problem.go; the lint stage lives in lint_spec.go / lint_conf.go; the deep
-// composed-$ref check is lint_compose.go.
+// The validate stage: the version check and JSON Schema validation the Processor runs before
+// lint. The problem machinery is in validate_problem.go, the lint rules in lint_spec.go and
+// lint_conf.go, and the deep composed-$ref check in lint_compose.go.
 
 // ValidateFn is the signature of [Processor.Validate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
@@ -20,11 +18,10 @@ type ValidateFn = func(specPath, confPath string, watch bool, failMode string, o
 
 // ─── validate (version + schema) ───────────────────────────────────────────────.
 
-// validateSpec is the validate stage for the spec: it checks the spec targets THIS
-// rotini (its `version` matches the binary) and is schema-valid against the embedded
-// spec schema on the canonical-JSON instance (so unknown-field rules fire), returning
-// every problem positioned to source. It does NOT lint — that is lintSpec, run only
-// when this passes (the lint rules assume a schema-valid shape).
+// validateSpec checks that the spec targets this rotini and is schema-valid against the
+// embedded spec schema, validating the canonical-JSON instance so unknown-field rules fire,
+// and returns every problem positioned to source. Linting is lintSpec's job, run only once
+// this passes, since the lint rules assume a schema-valid shape.
 func (p *Processor) validateSpec(rs *reconciledSpec) []error {
 	var problems []error
 	if vp := versionProblem("spec", rs.spec.Version, p.version); vp != nil {
@@ -50,11 +47,9 @@ func (p *Processor) validateConf(rc *reconciledConf) []error {
 	return problems
 }
 
-// versionProblem reports a spec/conf whose `version` targets a different rotini than the
-// running binary. The `version` key carries the rotini version the document targets;
-// codegen and validation are only reliable when it matches this binary, so a mismatch is
-// a fatal problem. Skipped when the binary version is unknown ("" — a dev/test build) or
-// the document declares none (the schema requires one, so this is belt-and-suspenders).
+// versionProblem reports a document whose `version` targets a different rotini than the
+// running binary: codegen and validation are reliable only when the two match. It is skipped
+// when the binary version is unknown (a dev build) or the document declares none.
 func versionProblem(kind, docVersion, binaryVersion string) *problem {
 	want := strings.TrimPrefix(binaryVersion, "v")
 	if want == "" {
@@ -73,11 +68,10 @@ func versionProblem(kind, docVersion, binaryVersion string) *problem {
 	return nil
 }
 
-// validateInstance validates a document's raw JSON instance (so schema rules
-// like additionalProperties:false see unknown fields) against the given
-// compiled schema, returning one [*problem] per violation. The instance is the
-// one the loader converted from its single read, so validation and generation
-// always judge the same bytes. It returns nil when the document is valid.
+// validateInstance validates a document's raw JSON instance — raw, so rules like
+// additionalProperties:false see unknown fields — against the compiled schema, returning one
+// [*problem] per violation. The instance came from the loader's single read, so validation and
+// generation always judge the same bytes.
 func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) []error {
 	result, err := schema.Validate(instance)
 	if err != nil {

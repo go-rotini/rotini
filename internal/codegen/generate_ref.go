@@ -1,18 +1,13 @@
 package codegen
 
-// $ref resolution for spec composition (W8/D-W8.4). A command `$ref` names another
-// rotini spec to compose; this file turns that ref — relative to where the referring
-// spec was loaded from — into a concrete spec plus what composition needs from it. Two
-// source forms today:
+// $ref resolution for spec composition: turning a ref, relative to where the referring spec
+// was loaded from, into a concrete spec plus what composition needs from it. Two source forms:
 //
-//   - LOCAL relative path  (e.g. "../deploy/.rotini.spec.yaml") — resolved against the
-//     referring spec's directory.
-//   - MODULE-resolved      "mod://<module>@<version>/<path>" — a spec file inside a Go
-//     module the project depends on, read from the module cache (ride go.mod/go.sum —
-//     D-W8.5; reproducibility/integrity/caching are Go's, not rotini's).
+//   - A local relative path, resolved against the referring spec's directory.
+//   - "mod://<module>@<version>/<path>", a spec inside a module the project depends on, read
+//     from the module cache — reproducibility and integrity are Go's, not rotini's.
 //
-// External git:: and raw https:// refs are NOT supported (rotini neither fetches nor
-// pins them); loadRef rejects them.
+// git:: and raw https:// refs are not supported, since rotini neither fetches nor pins them.
 
 import (
 	"encoding/json"
@@ -41,11 +36,10 @@ func isExternalLocator(locator string) bool {
 // cache. Overridable in tests; production rides `go mod download` (go.sum-verified).
 var moduleDirFunc = goModDownloadDir
 
-// resolvedRef is a $ref resolved to a concrete spec plus the metadata composition
-// needs: the filesystem dir of the spec (to discover its conf → cli import path), the
-// module the spec belongs to (the consuming module for a LOCAL ref, the EXTERNAL module
-// for a mod:// ref — so an external child's handlers import from the right module), and
-// the base locator for the spec's own relative sub-refs.
+// resolvedRef is a $ref resolved to a concrete spec plus what composition needs: the spec's
+// directory (to discover its conf, and so its import path), the module it belongs to — the
+// consuming module for a local ref, the external one for a mod:// ref — and the base locator
+// for its own relative sub-refs.
 type resolvedRef struct {
 	spec      *Spec
 	dir       string
@@ -156,11 +150,9 @@ func joinModLocator(base, ref string) (string, error) {
 	return modLocator(module, version, sub), nil
 }
 
-// goModDownloadDir resolves a module@version to its module-cache directory via the Go
-// toolchain — `go mod download` verifies against go.sum and caches, so codegen rides
-// Go's reproducibility/integrity (D-W8.5) and adds no machinery of its own. A module
-// not resolvable (absent from the build graph, checksum mismatch, …) surfaces Go's own
-// error, pointing the author at `go get`.
+// goModDownloadDir resolves a module@version to its cache directory via `go mod download`,
+// which verifies against go.sum, so codegen adds no machinery of its own. An unresolvable
+// module surfaces Go's own error, pointing the author at `go get`.
 func goModDownloadDir(module, version string) (string, error) {
 	cmd := exec.Command("go", "mod", "download", "-json", module+"@"+version)
 	out, runErr := cmd.Output() // -json writes a JSON object to stdout even on failure

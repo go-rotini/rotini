@@ -15,31 +15,22 @@ import (
 	"unicode/utf8"
 )
 
-// The opt-in argv [Parser]: given a resolved chain, parse and validate the command
-// line against what those commands declare — GNU/POSIX grammar, typed coercion, enum
-// and constraint checks — failing with a data-shaped [*ParseError].
-//
-// Nothing here runs unless a program binds it (Pillar 1). Dispatch itself needs only
-// resolve.go; a handler that wants its inputs asks for them.
-
 // KeyParser is the conventional registry key the generated main binds the
 // [Parser] under (and handlers retrieve it by) — see [Program.Bind].
 const KeyParser = "parser"
 
-// parsedInputs is one invocation's parsed argv, indexed by position in the
-// resolved command chain (root = 0 … leaf). [Parse] builds it via [parseInto] and
-// reads it back through the reflective binder. Keying by chain position — not by
-// command name — means two commands on a single path can never collide, and a
-// statically-composed child still reads its inputs through its own generated types
-// unchanged: those describe its own root→leaf tail of the chain, bound leaf-first.
+// parsedInputs is one invocation's parsed argv, indexed by position in the resolved chain
+// (root = 0 … leaf). Keying by position rather than command name means two commands on a
+// single path can never collide, and a statically-composed child still reads its own
+// generated types unchanged.
 type parsedInputs struct {
 	scopes  []scopeInputs     // one entry per resolved chain frame, root → leaf
 	argvSet []map[string]bool // per frame: logical flag names explicitly set on argv (not defaults, not env/config fallback)
 }
 
-// setOnArgv reports whether the flag with logical name was explicitly provided
-// on argv in chain frame idx — the presence convention flag groups and
-// dependencies enforce (a default or env/config fallback does not count).
+// setOnArgv reports whether the flag was explicitly provided on argv in chain frame idx — the
+// presence convention flag groups and dependencies enforce. A default or fallback is not
+// presence.
 func (p *parsedInputs) setOnArgv(idx int, name string) bool {
 	if p == nil || idx < 0 || idx >= len(p.argvSet) || p.argvSet[idx] == nil {
 		return false
@@ -54,12 +45,9 @@ type scopeInputs struct {
 	args  []string
 }
 
-// ParseKind classifies a [ParseError] by what went wrong, so a funnel can
-// branch on the failure WITHOUT matching the human message — the message is
-// presentation, the kind is data. Most kinds are the end-user's to fix (a typo,
-// a bad value); [ParseKindInternal] is a misuse of the parser API itself (a nil
-// parser/context or a bad out argument) — still surfaced as a usage-shaped
-// [*ParseError] for uniformity, but the author's bug.
+// ParseKind classifies a [ParseError] so a funnel can branch on the failure without matching
+// the human message. Most kinds are the end-user's to fix; [ParseKindInternal] is a misuse of
+// the parser API itself — surfaced as a [*ParseError] for uniformity, but the author's bug.
 type ParseKind int
 
 // The parse failure kinds. Branch on these rather than on a message: the message is
@@ -108,14 +96,11 @@ func (k ParseKind) String() string {
 	}
 }
 
-// ParseError is a parse-time failure caused by bad input. It is data, not
-// presentation: the message carries no opinions (no suggestions, no usage
-// dump), and the structured fields let a handler compose its own response —
-// switch on [ParseError.Kind] to branch, pair Token with Candidates and a bound
-// [Suggestor] for "did you mean", or render help for Command. Handlers
-// conventionally map it to exit code 2 (the usual CLI usage-error code). It
-// unwraps to [ErrUsage], so CategoryOf classifies it as CategoryUsage; retrieve
-// the fields with errors.As:
+// ParseError is a parse-time failure caused by bad input. It is data, not presentation: the
+// message offers no suggestions and no usage dump, and the structured fields let a handler
+// compose its own response — switch on Kind, pair Token with Candidates and a bound
+// [Suggestor] for "did you mean", or render help for Command. Handlers conventionally map it
+// to exit code 2. It unwraps to [ErrUsage].
 //
 //	var pe *rotini.ParseError
 //	if errors.As(err, &pe) {
@@ -141,17 +126,13 @@ func (e *ParseError) Error() string { return e.Msg }
 // Unwrap exposes the category sentinel, so [CategoryOf] and errors.Is reach it.
 func (e *ParseError) Unwrap() error { return ErrUsage }
 
-// Parser is rotini's argument parser, and it is a *service*: a CLI binds it to the
-// context registry under the key "parser" so that (1) parsing is opt-in — a CLI
-// that wants raw argv binds nothing and reads Context.Args itself — and
-// (2) the registry is a dependency-injection seam (the same handler code runs
-// whether you bound the production parser or a double). A handler retrieves it and
-// calls [Parser.Parse]:
+// Parser is rotini's argv parser: given a resolved chain, it parses and validates the command
+// line against what those commands declare — GNU/POSIX grammar, typed coercion, enum and
+// constraint checks — failing with a [*ParseError].
 //
-//	// main.go
-//	rth.Program.Bind(rotini.KeyParser, rotini.NewParser()).Execute()
+// It is a service, so parsing is opt-in (a CLI that wants raw argv binds nothing and reads
+// [Context.Args]) and the registry is a dependency-injection seam:
 //
-//	// a handler
 //	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
 //	var in MycliInputs
 //	err := parser.Parse(rtx, &in)
@@ -163,21 +144,18 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-// Parse binds the running command's arguments into out — a non-nil pointer to the
-// typed inputs struct codegen emits (e.g. &MycliInputs{}) — using the resolved
-// command and raw argv on rtx, in the json.Unmarshal style:
+// Parse binds the running command's arguments into out — a non-nil pointer to the generated
+// inputs struct — from the resolved chain and raw argv on rtx, in the json.Unmarshal style:
 //
 //	var in MycliInputs
 //	if err := parser.Parse(rtx, &in); err != nil { /* handler owns it */ }
 //
-// It applies declared defaults and validates required/enum, then fills out by
-// reflection from the `rotini:"…"` struct tags (each per-command field carries
-// `scope=<command-name>`, each flag/argument field its logical name; built-ins and
-// any encoding.TextUnmarshaler are coerced; a trailing []string absorbs remaining
-// positionals). Parse returns an error when out is not a non-nil pointer, an
-// unknown flag is given, a flag's value is missing, a required input is absent, or
-// a value is outside a declared enum — print it (see [Usage]), rtx.Exit, or fall
-// back to Context.Args.
+// It applies declared defaults, validates required and enum, then fills out by reflection from
+// the `rotini:"…"` struct tags. Built-ins and any [encoding.TextUnmarshaler] are coerced, and
+// a trailing []string absorbs the remaining positionals.
+//
+// It returns a [*ParseError] when out is not a non-nil pointer, a flag is unknown or missing
+// its value, a required input is absent, or a value falls outside a declared enum.
 func (p *Parser) Parse(rtx *Context, out any) error {
 	store, chain, err := p.parseBind(rtx, out)
 	if err != nil {
@@ -192,11 +170,10 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 	return validateFlagDependencies(chain, store)
 }
 
-// Deprecation is a deprecated CLI token found in this invocation's argv: the specific
-// deprecated identifier/alias used, the kind of input, and that input's logical name. It
-// is pure identification — the framework attaches no message and does nothing with it; the
-// handler decides (print a warning, emit telemetry, fail the run, ignore). It implements
-// error so it can be returned or printed directly.
+// Deprecation is a deprecated CLI token found in this invocation's argv: the identifier used,
+// the kind of input, and that input's logical name. It is pure identification — rotini attaches
+// no message and does nothing with it. It implements error so it can be returned or printed
+// directly.
 type Deprecation struct {
 	Kind       string // "flag" or "command"
 	Name       string // the input's logical name (the flag/command name)
@@ -208,12 +185,10 @@ func (d Deprecation) Error() string {
 	return fmt.Sprintf("deprecated %s identifier %q was used", d.Kind, d.Identifier)
 }
 
-// Deprecations scans this invocation's argv against the spec's deprecated_identifiers and
-// returns each deprecated token that was actually used — a command invoked via a deprecated
-// alias, or a flag set via a deprecated identifier (the non-deprecated spellings are
-// unaffected). It is a data feed only: the framework prints nothing; the handler decides
-// what to do with each (warn, telemetry, exit, ignore). It does not parse and holds no
-// parser state — call it any time the context's chain is resolved (typically after Parse).
+// Deprecations returns each deprecated token this invocation actually used — a command
+// invoked via a deprecated alias, or a flag set via a deprecated identifier. It is a data feed
+// only: rotini prints nothing, and the handler decides what to do with each. It holds no
+// parser state, so it can be called any time the chain is resolved.
 func (p *Parser) Deprecations(rtx *Context) []Deprecation {
 	if rtx == nil {
 		return nil
@@ -241,12 +216,10 @@ func (p *Parser) Deprecations(rtx *Context) []Deprecation {
 	return out
 }
 
-// parseBind parses argv into a store and binds it into out, but performs no
-// required/enum/constraint validation — that is [validate]'s job. It is the shared
-// front half of [Parser.Parse] (which then validates the argv-only store) and of the
-// [Binder] (which first reconciles env/config fallbacks into the store, then
-// validates last — so a required input is satisfiable from any source, not just
-// argv). It returns the store and the resolved chain for that deferred validation.
+// parseBind parses argv into a store and binds it into out without validating — that is
+// [validate]'s job. It is the shared front half of [Parser.Parse] and of the [Binder], which
+// reconciles env and config fallbacks into the store before validating, so a required input is
+// satisfiable from any source. It returns the store and chain for that deferred pass.
 func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedCommand, error) {
 	if p == nil {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil parser"}
@@ -272,12 +245,10 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 	return store, chain, nil
 }
 
-// parseInto binds argv to an already-resolved chain, strictly: an unrecognized
-// flag, or a flag missing its value, is a [ParseError]. Command tokens already in
-// the chain are consumed; everything after the leaf command (and after "--") is a
-// positional argument of the leaf. Declared defaults are applied. parseInto does
-// not check required inputs or enums — that is [validate]'s job — so a handler can
-// inspect what was supplied before deciding how strict to be.
+// parseInto binds argv to an already-resolved chain, strictly: an unrecognized flag, or one
+// missing its value, is a [ParseError]. Chain command tokens are consumed, and everything
+// after the leaf command and after "--" is a positional of the leaf. Declared defaults are
+// applied; required and enum checks are [validate]'s job.
 func parseInto(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsedInputs, error) {
 	store, err := parseArgvTokens(chain, argv, stdin)
 	if err != nil {
@@ -287,14 +258,13 @@ func parseInto(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsed
 	return store, nil
 }
 
-// flagTokenValue resolves the value one argv flag token carries, and returns the argv
-// index the caller should continue from — which advances only when the value came from
-// the FOLLOWING token rather than from an inline "=value".
+// flagTokenValue resolves the value one argv flag token carries and returns the index to
+// continue from, which advances only when the value came from the following token rather than
+// an inline "=value".
 //
-// The four shapes: a count flag takes no value (an inline one is an error, since the
-// tally is computed rather than parsed); a bool defaults to "true" but honors an
-// inline value; anything with an inline value uses it; anything else consumes the next
-// token, and running out of tokens is a needs-a-value error.
+// Four shapes: a count flag takes no value, and an inline one is an error since the tally is
+// computed; a bool defaults to "true" but honors an inline value; anything with an inline
+// value uses it; anything else consumes the next token, and running out is an error.
 func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []string, i int) (value string, next int, err error) {
 	switch {
 	case fdef.Type == "count":
@@ -318,13 +288,12 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 	}
 }
 
-// consumeFlagToken parses one flag token from argv[i], records it through addFlag,
-// and reports how many EXTRA argv entries it consumed beyond that token — a separate
-// value word, or the tail of a short cluster.
+// consumeFlagToken parses one flag token from argv[i], records it, and reports how many extra
+// argv entries it consumed — a separate value word, or the tail of a short cluster.
 //
-// A token matching no declared identifier is retried as a POSIX short cluster
-// (-vh -> -v -h, -n5 -> -n 5); long "--" flags never cluster, so an unmatched one is
-// an unknown-flag error carrying the chain's vocabulary for a Suggestor to work with.
+// A token matching no declared identifier is retried as a POSIX short cluster (-vh → -v -h,
+// -n5 → -n 5). Long flags never cluster, so an unmatched one is an unknown-flag error carrying
+// the chain's vocabulary for a [Suggestor].
 func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int, addFlag func(int, FlagDef, string) error) (int, error) {
 	name, inline, hasInline := splitFlag(tok)
 
@@ -349,12 +318,10 @@ func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int,
 	return next - i, addFlag(idx, fdef, value)
 }
 
-// parseArgvTokens is parseInto minus defaults: exactly what argv supplied,
-// nothing more. It records each explicitly-set flag in the store's argvSet, the
-// single source of truth for "set on the command line" (flag groups,
-// dependencies, and the argv overlay layer all read it). stdin backs the
-// from:stdin sentinel — a flag value of exactly "-" on a flag that opted in
-// (it is only read when such a value actually appears).
+// parseArgvTokens is parseInto minus defaults: exactly what argv supplied. It records each
+// explicitly-set flag in the store's argvSet, the single source of truth for "set on the
+// command line". stdin backs the from:stdin sentinel and is read only when a "-" value on an
+// opted-in flag actually appears.
 func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsedInputs, error) {
 	store := &parsedInputs{
 		scopes:  make([]scopeInputs, len(chain)),
@@ -428,19 +395,15 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 	return store, nil
 }
 
-// validate enforces the declarative constraints on the resolved chain against a
-// parsed store: a stray positional on a branch-only command is a mistyped
-// sub-command; required flags/arguments must be present (or defaulted); and any
-// value for a flag or argument that declares an Enum must be one of its members.
-// It is the strict half of [Parse]; a handler that wants laxer behavior can bind
-// inputs without it.
+// validate enforces the declarative constraints on the resolved chain against a parsed store:
+// a stray positional on a branch-only command is a mistyped sub-command, required inputs must
+// be present or defaulted, and any value must fall inside a declared enum.
 func validate(chain []ResolvedCommand, store *parsedInputs) error {
 	leaf := chain[len(chain)-1]
 	si := store.scopes[len(chain)-1]
 
-	// A stray positional on a command that branches but takes no arguments is a
-	// mistyped sub-command, not an argument. The error carries the sibling
-	// vocabulary so a handler (with a bound [Suggestor]) can offer corrections.
+	// A stray positional on a command that branches but takes no arguments is a mistyped
+	// sub-command. The error carries the sibling vocabulary for a [Suggestor].
 	if len(leaf.Commands) > 0 && len(leaf.Arguments) == 0 && len(si.args) > 0 {
 		tok := si.args[0]
 		return &ParseError{
@@ -480,9 +443,8 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 		}
 	}
 
-	// With no variadic argument to absorb them, more positionals than declared
-	// arguments is a usage error rather than a silent drop. (A branch-only command's
-	// stray positional was handled above as a mistyped sub-command.)
+	// With no variadic argument to absorb them, extra positionals are a usage error rather
+	// than a silent drop.
 	if n := len(leaf.Arguments); !hasVariadicArg(leaf.Arguments) && len(si.args) > n {
 		if n == 0 {
 			return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args)), Command: leaf.Name}
@@ -530,17 +492,13 @@ func hasVariadicArg(args []ArgDef) bool {
 	return false
 }
 
-// checkConstraints enforces an input's declared numeric/string/array bounds against
-// the value(s) supplied for it (one element for a scalar; possibly many for a
-// repeatable flag or variadic argument). label is the human-facing identifier; typ is
-// the resolved Go type. A zero bound (or empty pattern) is unset and skipped. Numeric
-// bounds apply to the full int/uint/float family, length/pattern to strings, and item
-// counts to arrays/maps; for a repeatable input the per-value checks apply to each
-// ELEMENT (a []int's minimum bounds every occurrence). A constraint declared on a
-// type none of those fit cannot come from a valid spec (lintConstraintApplicability
-// rejects it at validate time); a hand-built Definition that does it anyway is
-// skipped here, not guessed at. When secret is true the offending value (and its
-// length) is redacted in the error.
+// checkConstraints enforces an input's declared bounds against the values supplied for it —
+// one for a scalar, possibly many for a repeatable flag or variadic argument. Numeric bounds
+// apply to the int/uint/float family, length and pattern to strings, item counts to
+// arrays/maps; for a repeatable input the per-value checks apply to each element. A constraint
+// on a type none of those fit cannot come from a valid spec, so a hand-built Definition that
+// does it anyway is skipped rather than guessed at. A secret input's value and length are
+// redacted in the error.
 func checkConstraints(label, typ string, c Constraints, values []string, secret bool) error {
 	if isArrayType(typ) || isMapType(typ) {
 		if err := checkItemCount(label, c, len(values)); err != nil {
@@ -580,9 +538,8 @@ func checkItemCount(label string, c Constraints, n int) error {
 	return nil
 }
 
-// checkNumericBounds enforces the numeric bounds on one value. A value that will not
-// parse as a number is skipped rather than rejected: coerce already tolerates
-// malformed input, and reporting it twice would be noise.
+// checkNumericBounds enforces the numeric bounds on one value. An unparseable value is
+// skipped: coerce already reports it, and reporting it twice would be noise.
 func checkNumericBounds(label string, c Constraints, v string, secret bool) error {
 	n, numeric := parseNumber(v)
 	if !numeric {
@@ -604,17 +561,14 @@ func checkNumericBounds(label string, c Constraints, v string, secret bool) erro
 	return nil
 }
 
-// parseNumber reports whether v is a number, and its value. A value that will not
-// parse is not a constraint violation: coerce already rejects malformed input, and
-// reporting the same problem twice would be noise.
+// parseNumber reports whether v is a number, and its value.
 func parseNumber(v string) (float64, bool) {
 	n, err := strconv.ParseFloat(v, 64)
 	return n, err == nil
 }
 
-// checkStringBounds enforces the length and pattern bounds on one value. A length is
-// reported as [redacted] for a secret input — the length alone leaks something about
-// a credential.
+// checkStringBounds enforces the length and pattern bounds on one value. A secret's length is
+// redacted — the length alone leaks something about a credential.
 func checkStringBounds(label string, c Constraints, v string, secret bool) error {
 	ln := utf8.RuneCountInString(v)
 	gotLen := strconv.Itoa(ln)
@@ -635,10 +589,8 @@ func checkStringBounds(label string, c Constraints, v string, secret bool) error
 	return nil
 }
 
-// isMultipleOf reports whether n is an integer multiple of m (JSON Schema
-// semantics: the division yields an integer), with a small relative tolerance
-// for float representation (1.2 / 0.1 must count). A non-positive m never
-// matches — validation rejects it before it gets here.
+// isMultipleOf reports whether n is an integer multiple of m, with a small relative tolerance
+// for float representation so 1.2 / 0.1 counts.
 func isMultipleOf(n, m float64) bool {
 	if m <= 0 {
 		return false
@@ -656,12 +608,9 @@ func redactValue(v string, secret bool) string {
 	return v
 }
 
-// validateFlagGroups enforces each command's cross-flag presence rules (mutually
-// exclusive / required together / one-of / at-least-one). "Set" means explicitly
-// provided on argv — a default or env/config fallback does not count (matching the
-// command-line-presence convention of cobra/clap) — read from the store's argvSet
-// (which, unlike a raw argv re-scan, also sees flags set inside short clusters).
-// Each violation is a usage error.
+// validateFlagGroups enforces each command's cross-flag presence rules. Set means explicitly
+// provided on argv — a default or fallback does not count — read from the store's argvSet,
+// which unlike a raw argv re-scan also sees flags set inside short clusters.
 func validateFlagGroups(chain []ResolvedCommand, store *parsedInputs) error {
 	for i, f := range chain {
 		for _, g := range f.FlagGroups {
@@ -685,11 +634,9 @@ func validateFlagGroups(chain []ResolvedCommand, store *parsedInputs) error {
 	return nil
 }
 
-// validateFlagDependencies enforces each command's conditional cross-flag requirements:
-// when a dependency's When flag is explicitly set on argv, every flag it Requires must
-// also be set. "Set" follows the same explicit-argv convention as flag groups (the
-// store's argvSet); a missing requirement is a usage error naming the absent flag(s)
-// and the trigger.
+// validateFlagDependencies enforces each command's conditional cross-flag requirements: when a
+// dependency's When flag is set on argv, every flag it Requires must be too. Set follows the
+// same explicit-argv convention as flag groups.
 func validateFlagDependencies(chain []ResolvedCommand, store *parsedInputs) error {
 	for i, f := range chain {
 		for _, dep := range f.FlagDependencies {
@@ -764,11 +711,9 @@ func joinAnd(items []string) string {
 	}
 }
 
-// numericFamily is every resolved type string whose values are range-checkable
-// numbers — the full int/uint/float vocabulary plus the JSON-Schema aliases
-// (hand-built Definitions may use either spelling). The old allowlist was
-// int|float64 only, which silently ignored bounds on every other numeric type
-// (production-readiness R1).
+// numericFamily is every resolved type string whose values are range-checkable numbers — the
+// int/uint/float vocabulary plus the JSON Schema aliases, since a hand-built Definition may
+// use either spelling.
 var numericFamily = map[string]bool{
 	"int": true, "int8": true, "int16": true, "int32": true, "int64": true,
 	"uint": true, "uint8": true, "uint16": true, "uint32": true, "uint64": true,
@@ -778,9 +723,8 @@ var numericFamily = map[string]bool{
 
 func isNumericType(typ string) bool { return numericFamily[typ] }
 
-// constraintElemType is the type a constraint's PER-VALUE checks apply to: the
-// element type for an array/repeatable input (each occurrence is one value),
-// the type itself otherwise. Item-count bounds stay on the collection.
+// constraintElemType is the type a constraint's per-value checks apply to: the element type
+// for a repeatable input, the type itself otherwise. Item-count bounds stay on the collection.
 func constraintElemType(typ string) string {
 	return strings.TrimPrefix(typ, "[]")
 }
@@ -862,14 +806,11 @@ func plural(word string, n int) string {
 	return word + "s"
 }
 
-// resolveFlagValue applies a flag's declared acquisition modes (spec `from:`)
-// to one argv-supplied value. With "file", a value starting with '@' is
-// replaced by the named file's contents; with "stdin", a value of exactly "-"
-// is replaced by the piped stdin (which must not be empty — giving "-" demands
-// a pipe). Resolved text is whitespace-trimmed (token files end in a newline)
-// and then flows through the same coercion/enum/constraint checks as a literal
-// value — the flag's value IS the resolved text. Without the matching `from`
-// mode, '@' and '-' are ordinary characters. Declared defaults and env/config
+// resolveFlagValue applies a flag's declared acquisition modes to one argv-supplied value.
+// With "file", a value starting with '@' becomes the named file's contents; with "stdin", a
+// value of exactly "-" becomes the piped stdin, which must not be empty. Resolved text is
+// whitespace-trimmed and then flows through the same coercion and validation as a literal
+// value. Without the matching mode, '@' and '-' are ordinary characters, and defaults and
 // fallbacks never resolve — sentinels are argv grammar.
 func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error) {
 	switch {
@@ -900,20 +841,16 @@ func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error)
 	return value, nil
 }
 
-// isShortCluster reports whether name is a candidate POSIX short-flag cluster: a
-// single-dash token with more than one character (e.g. "-vh", "-n5") — as opposed
-// to a long flag ("--x") or a bare short flag ("-v", which the exact match already
-// handled). Clustering is tried only after an exact-identifier lookup misses.
+// isShortCluster reports whether name is a candidate POSIX short-flag cluster: a single-dash
+// token of more than one character. It is tried only after an exact-identifier lookup misses.
 func isShortCluster(name string) bool {
 	return len(name) > 2 && name[0] == '-' && name[1] != '-'
 }
 
-// parseCluster expands a POSIX short-flag cluster (body is the characters after
-// the leading '-', e.g. "vh" from -vh, or "n5" from -n5) against the chain. Each
-// character is a single short flag, looked up as "-<c>": booleans are set in turn,
-// and the first value-taking flag consumes the rest of the cluster, then the
-// inline "=value", then the next argv token — whichever is present. It returns how
-// many extra argv tokens it consumed (0 or 1).
+// parseCluster expands a POSIX short-flag cluster against the chain. Each character is one
+// short flag: booleans are set in turn, and the first value-taking flag consumes the rest of
+// the cluster, else the inline "=value", else the next argv token. It returns how many extra
+// argv tokens it consumed.
 func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value string) error) (int, error) {
 	for k := range len(body) {
 		short := "-" + body[k:k+1]
@@ -951,9 +888,8 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 	return 0, nil
 }
 
-// findFlagIndex searches the resolved chain leaf→root for a flag whose identifiers
-// include name, returning its definition and the chain index of the command that
-// owns it.
+// findFlagIndex searches the chain leaf→root for a flag whose identifiers include name,
+// returning its definition and the owning command's chain index.
 func findFlagIndex(chain []ResolvedCommand, name string) (FlagDef, int, bool) {
 	for i, v := range slices.Backward(chain) {
 		for _, f := range v.Flags {
@@ -965,8 +901,7 @@ func findFlagIndex(chain []ResolvedCommand, name string) (FlagDef, int, bool) {
 	return FlagDef{}, -1, false
 }
 
-// childCommandNames is the dispatchable-name vocabulary of a command's visible
-// children — sub-command names and aliases, plus declared remotes — for a
+// childCommandNames is the dispatchable vocabulary of a command's visible children, for a
 // mistyped-command [ParseError]'s Candidates.
 func childCommandNames(cur ResolvedCommand) []string {
 	var names []string
@@ -984,9 +919,8 @@ func childCommandNames(cur ResolvedCommand) []string {
 	return names
 }
 
-// chainFlagIdentifiers is the declared, non-hidden flag vocabulary of the whole
-// resolved chain (ancestor flags resolve on descendants), for an unknown-flag
-// [ParseError]'s Candidates.
+// chainFlagIdentifiers is the non-hidden flag vocabulary of the whole chain, for an
+// unknown-flag [ParseError]'s Candidates.
 func chainFlagIdentifiers(chain []ResolvedCommand) []string {
 	var ids []string
 	for _, v := range slices.Backward(chain) {
@@ -999,11 +933,10 @@ func chainFlagIdentifiers(chain []ResolvedCommand) []string {
 	return ids
 }
 
-// bindInputs fills a <Cmd>Inputs struct: one field per command on the resolved
-// path, in root→leaf order. The fields bind to the tail of the chain aligned at
-// the leaf, so each command's inputs come from the right frame no matter how deep
-// it was reached — including a statically-composed subtree reached under extra
-// parent frames, which simply go unbound.
+// bindInputs fills a <Cmd>Inputs struct, one field per command on the resolved path in
+// root→leaf order. Fields bind to the tail of the chain aligned at the leaf, so each command's
+// inputs come from the right frame however deep it was reached; extra parent frames from a
+// statically-composed subtree simply go unbound.
 func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand) error {
 	if v.Kind() != reflect.Struct {
 		return nil
@@ -1041,9 +974,8 @@ func bindCommandInputs(v reflect.Value, si scopeInputs, frame ResolvedCommand) e
 	return nil
 }
 
-// bindFlags fills a <Cmd>Flags struct by matching each field's `rotini:"<name>"`
-// tag against the parsed flag values, surfacing a coercion failure as a usage error
-// naming the flag (by its CLI identifiers).
+// bindFlags fills a <Cmd>Flags struct by matching each field's `rotini:"<name>"` tag against
+// the parsed values, surfacing a coercion failure as a usage error naming the flag.
 func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error {
 	if v.Kind() != reflect.Struct {
 		return nil
@@ -1091,9 +1023,8 @@ func labelForFlag(defs []FlagDef, name string) string {
 	return name
 }
 
-// bindArgs fills a <Cmd>Arguments struct positionally; a trailing []string field
-// is variadic and absorbs all remaining positionals. A coercion failure is a usage
-// error naming the argument.
+// bindArgs fills a <Cmd>Arguments struct positionally; a trailing []string field is variadic
+// and absorbs the remaining positionals.
 func bindArgs(v reflect.Value, args []string) error {
 	if v.Kind() != reflect.Struct {
 		return nil
@@ -1125,10 +1056,9 @@ var (
 	textUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 )
 
-// coerce sets f from the raw string value(s), returning an error when a value cannot be
-// parsed into f's type — including a custom type's own [encoding.TextUnmarshaler] error,
-// the per-type parse+validate hook. (The caller turns that into a usage error naming the
-// flag/argument.) It never panics: an unparseable value is reported, not silently zeroed.
+// coerce sets f from the raw string values, returning an error when one cannot be parsed into
+// f's type — including a custom type's own [encoding.TextUnmarshaler] error. It never panics:
+// an unparseable value is reported, not silently zeroed.
 func coerce(f reflect.Value, raw []string) error {
 	if len(raw) == 0 {
 		return nil
@@ -1198,17 +1128,14 @@ func coerce(f reflect.Value, raw []string) error {
 	return nil
 }
 
-// unsupportedType is the loud refusal for a field type coerce has no rule for:
-// silence here would zero the field and hide a spec/codegen mistake. The fix is
-// the documented contract — give the type an UnmarshalText.
+// unsupportedType is the loud refusal for a field type coerce has no rule for: silence would
+// zero the field and hide a codegen mistake. The fix is to give the type an UnmarshalText.
 func unsupportedType(t reflect.Type) error {
 	return fmt.Errorf("cannot parse into %s — the type must implement encoding.TextUnmarshaler", t)
 }
 
-// coerceSlice fills a slice field from the raw values (one per repeated flag
-// occurrence, or the trailing positionals for a variadic argument), coercing
-// each element into the slice's element type — []string verbatim, []int parsed,
-// []time.Duration / TextUnmarshaler elements through their own parsers.
+// coerceSlice fills a slice field from the raw values — one per repeated flag occurrence, or
+// the trailing positionals of a variadic argument — coercing each into the element type.
 func coerceSlice(f reflect.Value, raw []string) error {
 	out := reflect.MakeSlice(f.Type(), len(raw), len(raw))
 	for i, r := range raw {
@@ -1225,18 +1152,14 @@ func notValid(value, typeName string) error {
 	return fmt.Errorf("%q is not a valid %s", value, typeName)
 }
 
-// coerceMap fills a string-keyed map field from raw "key=value" pairs (one per repeated
-// flag occurrence), splitting on the first '='. The value is coerced into the map's
-// element type (string/int/…); an `any` element stores the raw string. Later pairs win
-// on a duplicate key. Malformed (no '=') pairs are skipped — validation rejects them. A
-// value that doesn't parse into the element type is returned as an error.
-// coerceMapDotted fills a map[string]any flag (spec dotted_keys) from raw
-// "key=value" pairs whose keys are '.'-separated paths into nested maps:
-// "image.tag=v2" → m["image"].(map[string]any)["tag"] = "v2". Each assignment
-// overwrites whatever sits at its path (creating intermediate maps as needed),
-// so later pairs win — including a pair that replaces a scalar with a subtree
-// or vice versa. Malformed (no '=') pairs are skipped — validation rejects
-// them; an empty path segment ("a..b", ".a", "a.") is an error.
+// coerceMap fills a string-keyed map field from raw "key=value" pairs, splitting on the first
+// '='. The value is coerced into the map's element type; an `any` element stores the raw
+// string. Later pairs win on a duplicate key, and malformed pairs are skipped — validation
+// rejects them.
+// coerceMapDotted fills a map[string]any flag from "key=value" pairs whose keys are dotted
+// paths into nested maps: "image.tag=v2" → m["image"].(map[string]any)["tag"] = "v2". Each
+// assignment overwrites whatever sits at its path, creating intermediate maps as needed, so
+// later pairs win. Malformed pairs are skipped; an empty path segment is an error.
 func coerceMapDotted(f reflect.Value, raw []string) error {
 	m := map[string]any{}
 	if !reflect.TypeFor[map[string]any]().AssignableTo(f.Type()) {

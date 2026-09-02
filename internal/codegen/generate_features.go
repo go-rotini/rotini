@@ -25,17 +25,13 @@ const (
 	markdownTemplateName = "markdown.md.tmpl"
 )
 
-// docFeature describes one doc-rendered codegen feature (help, man). Both share
-// the doc-data pipeline (buildHelpData → renderDocText) and differ only in their
-// file suffix, embed-var/resolver names, the editable template, and which
+// docFeature describes one doc-rendered codegen feature. All share the doc-data pipeline and
+// differ only in file suffix, embed-var and resolver names, the editable template, and which
 // per-command verbatim spec string escapes the render.
 //
-// All enabled features default to ONE shared embed dir, so each feature's
-// output files must be distinguishable by name alone: filePrefix is a
-// feature-unique prefix ("help_" / "man_" / "completion_") that also groups
-// each feature's files together in directory listings, ext the file suffix,
-// and pruning only considers files matching both — features sharing a dir can
-// never prune (or collide with) each other's files.
+// Enabled features default to one shared embed dir, so their output files must be
+// distinguishable by name alone: filePrefix is feature-unique and pruning considers only files
+// matching both it and ext, so features sharing a dir can never prune each other's files.
 type docFeature struct {
 	name       string               // feature key, e.g. "help"
 	noun       string               // word used in the resolver doc comment / error, e.g. "help"
@@ -61,13 +57,13 @@ var (
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
 		ext: ".txt", filePrefix: "man_", tmplFile: manTemplateName, embedded: templateMan,
 		verbatim: func(h cmdHelp) string { return h.Man },
-		strip:    true, // a roff/plain man page carries no legitimate SGR (E6-S1)
+		strip:    true, // a roff/plain man page carries no legitimate SGR
 	}
 	markdownFeatureDesc = docFeature{
 		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
 		ext: ".md", filePrefix: "markdown_", tmplFile: markdownTemplateName, embedded: templateMarkdown,
 		verbatim: func(h cmdHelp) string { return h.Markdown },
-		strip:    true, // a markdown file carries no legitimate SGR (E6-S1)
+		strip:    true, // a markdown file carries no legitimate SGR
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
 	// no template, no verbatim. Scripts come from completionScript at codegen.
@@ -81,11 +77,9 @@ var (
 // deterministic order (matches completionScript's supported set).
 var completionShells = []string{"bash", "zsh", "fish", "powershell"}
 
-// helpNode is one command's help wiring: the embed var/resolver identity plus
-// everything needed to produce its .txt. One is produced per command (root +
-// every own and composed sub-command). The .txt is produced one of two ways,
-// selected by whether the command's verbatim `help` string is set: non-empty →
-// write it verbatim; empty → render `data` through the template.
+// helpNode is one command's help wiring: the embed var and resolver identity plus what is
+// needed to produce its .txt, either verbatim from the command's `help` string or rendered
+// from data through the template.
 type helpNode struct {
 	prefix   string           // PascalCase command prefix; the embed var is "Help"+prefix
 	file     string           // .txt file name within the help dir
@@ -123,11 +117,9 @@ func commandHelp(c Command) cmdHelp {
 	}
 }
 
-// flattenFeature produces a node per command for one doc feature across the whole
-// resolved tree: the root first, then every sub-command in tree order. Each node
-// carries its verbatim page (the feature's spec escape, when set) and its built
-// doc-data (templateHelpData, used when no verbatim page is given). The file
-// extension is the feature's; the doc-data is identical across features.
+// flattenFeature produces a node per command for one doc feature across the resolved tree, the
+// root first and then every sub-command in tree order. Each node carries its verbatim page,
+// when the spec set one, and its built doc-data for when it did not.
 func flattenFeature(gp *program, feat docFeature) []helpNode {
 	out := []helpNode{{
 		prefix:   gp.rootPascal,
@@ -336,11 +328,9 @@ func configLocation(c ConfigInput) string {
 	}
 }
 
-// groupCommands buckets command rows by their Group, preserving the order in which each
-// group first appears in the declared command list. Ungrouped rows (Group == "") form a
-// bucket with Title "" — each template heads it with its own default. When no row
-// declares a group, the result is a single Title-"" bucket holding every command in
-// order, so a non-grouped command list renders byte-identically to before.
+// groupCommands buckets command rows by Group, preserving the order in which each group first
+// appears. Ungrouped rows form a bucket with an empty Title, which each template heads with
+// its own default, so a spec that declares no groups renders one bucket of every command.
 func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
 	if len(rows) == 0 {
 		return nil
@@ -558,13 +548,11 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 	return h
 }
 
-// writeFeatureFiles produces each command's rendered page for one feature under
-// its dir in the framework package. When the command's verbatim spec string for
-// the feature is set, that string is written byte-exact; otherwise the page is
-// rendered from the shared doc-data via the feature's template. Either way the
-// file is rotini-managed — (re)written every pass, skipped when already identical —
-// like rotini.go and handlers.go. The template is loaded (seeding the editable
-// default when missing) only when at least one command renders.
+// writeFeatureFiles produces each command's rendered page for one feature. A verbatim spec
+// string is written byte-exact; otherwise the page renders from the shared doc-data through
+// the feature's template. Either way the file is rotini-managed: rewritten every pass, skipped
+// when already identical. The template is loaded, seeding the editable default when missing,
+// only when at least one command renders.
 func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedTemplate bool) ([]string, error) {
 	renders := false
 	for _, hn := range nodes {
@@ -646,7 +634,7 @@ func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, fe
 }
 
 // stripForFeature removes spec-authored ANSI styling from a feature's output
-// when the feature is not a terminal surface (man, markdown — E6-S1). Help
+// when the feature is not a terminal surface (man, markdown). Help
 // keeps its styling; this returns text unchanged for non-strip features.
 func stripForFeature(feat docFeature, text string) string {
 	if !feat.strip {

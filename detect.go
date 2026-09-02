@@ -5,10 +5,9 @@ import (
 	"strings"
 )
 
-// Terminal and color detection. Every function here is OPT-IN: rotini never calls
-// them for you (Pillar 1). A program decides whether to style its output and feeds
-// the answer in — see [Style.SetEnabled], [Styler.SetProfile], and the deliberate
-// exception documented on [Spinner], which declines to smear a non-terminal.
+// Terminal and color detection. Every function here is opt-in: rotini never calls them for
+// you. A program decides whether to style its output and feeds the answer in — see
+// [Style.SetEnabled] and [Styler.SetProfile], and the deliberate exception on [Spinner].
 
 // EnvNoColor reports whether the environment asks for no color, honoring the
 // NO_COLOR convention and its CLICOLOR_FORCE override (a non-empty, non-"0"
@@ -20,13 +19,9 @@ func EnvNoColor() bool {
 	return os.Getenv("NO_COLOR") != ""
 }
 
-// DetectProfile guesses the richest color [Profile] the environment supports, from
-// COLORTERM and TERM, and returns [ProfileNoColor] when color is unwanted (see
-// [EnvNoColor]) or the terminal is dumb.
-//
-// It is a guess from environment variables, not a capability query — pass the
-// result to [Style.SetProfile] or [Styler.SetProfile] if you want it, or ignore it
-// and choose your own.
+// DetectProfile guesses the richest color [Profile] the environment supports from COLORTERM
+// and TERM, returning [ProfileNoColor] when color is unwanted or the terminal is dumb. It is a
+// guess from environment variables, not a capability query.
 func DetectProfile() Profile {
 	if EnvNoColor() {
 		return ProfileNoColor
@@ -48,11 +43,9 @@ func DetectProfile() Profile {
 	}
 }
 
-// IsTerminal reports whether file is a character device — a terminal rather than a
-// pipe, a regular file, or /dev/null. A nil file is not a terminal.
-//
-// It is the check behind "is anyone watching this?": paging, animating, and
-// prompting all become wrong when the answer is no.
+// IsTerminal reports whether file is a character device — a terminal rather than a pipe, a
+// regular file, or /dev/null. A nil file is not a terminal. It is the check behind "is anyone
+// watching this?": paging, animating and prompting all become wrong when the answer is no.
 func IsTerminal(file *os.File) bool {
 	if file == nil {
 		return false

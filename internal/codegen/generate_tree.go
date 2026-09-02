@@ -55,7 +55,7 @@ type rnode struct {
 
 // composedCmd is a command supplied by a composed child: the parent's rollup
 // method (prefix) delegates to delegateAlias.delegateMethod(). When passthrough is
-// set (W9 handler-code composition), the call is alias.method() — the package exports
+// set, the call is alias.method() — the package exports
 // the constructor directly; otherwise it is alias.Handlers().method() (a generated cli).
 type composedCmd struct {
 	prefix         string
@@ -69,16 +69,12 @@ type composeCtx struct {
 	composed    bool
 	rootPath    string // underscore path of the composed subtree's root in the parent
 	childPascal string // root method name the subtree delegates under (child's name, or the handler convention)
-	alias       string // import alias of the handler package (composed child cli, or a W9 passthrough package)
-	passthrough bool   // delegate via alias.method() (W9 passthrough) instead of alias.Handlers().method()
+	alias       string // import alias of the handler package (composed child cli, or a passthrough package)
+	passthrough bool   // delegate via alias.method() (passthrough) instead of alias.Handlers().method()
 }
 
-// resolveTree resolves spec into a program, loading any `$ref`'d child specs
-// (relative to specPath) and grafting them as composed subtrees.
-// scopedConfigFile is a config_files source paired with the command path it is
-// declared on — the Scope the binder matches against the resolved chain to honor
-// the cascade (D-W3.1). The path is name-joined ("root", "root/sub", …), the same
-// form Binder.chainConfigFiles computes from the chain.
+// resolveTree resolves spec into a program, loading any `$ref`'d child specs relative to
+// specPath and grafting them as composed subtrees.
 type scopedConfigFile struct {
 	ConfigurationFile
 
@@ -206,11 +202,9 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				inputs:      inputsFields(gp.rootPascal, path),
 			}
 			if c.Handler != nil {
-				// Inline-command passthrough (D-W9.7/.9): still an own command (inputs
-				// generated above), but the handler delegates to the package per-node —
-				// no subtree cascade, so a child without its own handler: still stubs.
-				// Clear the stub filename so a converted command's old stub is pruned
-				// (the package owns the handler now), matching inline→$ref conversion.
+				// Inline-command passthrough: still an own command, but the handler
+				// delegates to the package per node, with no subtree cascade. Clear the
+				// stub filename so a converted command's old stub is pruned.
 				alias, importPath := parseAliasPath(c.Handler.Import)
 				gp.addImport(alias, importPath)
 				gc.passthrough = true
@@ -249,13 +243,11 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 	return out, nil
 }
 
-// overlayCommand applies the $ref OVERLAY model (D-W8.2): the `$ref`'d child command
-// is the base, and every identity/presentation key the parent author declared on the
-// `$ref` node wins over the child's when present (else the child's is kept). This is
-// how a parent consuming a child tailors its tree (rename, re-summarize, regroup,
-// hide, deprecate) without forking the child. NOT overlaid here: `commands` (merged
-// additively at the call site) and the handler-coupled keys (inputs/output/remote_*),
-// which a composed command cannot honor — validation rejects those on a `$ref` node.
+// overlayCommand applies the $ref overlay model: the child command is the base, and every
+// identity or presentation key the parent declared on the `$ref` node wins over the child's.
+// That is how a parent tailors a child's tree — rename, re-summarize, regroup, hide — without
+// forking it. Not overlaid here: `commands`, merged additively at the call site, and the
+// handler-coupled keys, which validation rejects on a `$ref` node.
 func overlayCommand(child, parent Command) Command {
 	m := child
 	if parent.Name != "" {
@@ -318,12 +310,10 @@ func overlayCommand(child, parent Command) Command {
 	return m
 }
 
-// composeRef loads a `$ref`'d child spec and grafts its command tree as a composed
-// subtree, applying the overlay model (parent keys on the `$ref` node win) and merging
-// any `commands:` the parent authored next to the `$ref` (additive — the child's own
-// commands delegate to the child; the authored siblings are own/new compositions). The
-// delegation always targets the child's real handler methods. Transitive $refs (a
-// composed child that itself $refs) are handled by composeNestedRef during the walk.
+// composeRef loads a `$ref`'d child spec and grafts its command tree as a composed subtree,
+// applying the overlay model and additively merging any `commands:` the parent authored next
+// to the `$ref`. Delegation always targets the child's real handler methods. Transitive refs
+// are handled by composeNestedRef during the walk.
 func (gp *program) composeRef(c Command, parentPath, base, moduleName string, seen map[string]bool) (rnode, error) {
 	locator, err := locateRef(base, c.Ref)
 	if err != nil {
@@ -344,7 +334,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
 	}
 
-	// Resolve the handler source for the composed subtree (W9). An explicit `handler:`
+	// Resolve the handler source for the composed subtree. An explicit `handler:`
 	// (the package-import passthrough) wins: handlers come from the declared package via
 	// alias.<Convention>(). Otherwise a local/mod:// child auto-delegates to its own
 	// generated cli (alias.Handlers().<Name>()).
@@ -396,15 +386,11 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	return rnode{name: graftName, prefix: prefix, aliases: merged.Aliases, inputs: childRoot.inputs(), help: commandHelp(merged), hidden: merged.Hidden, group: merged.Group, deprecated: merged.Deprecated, deprecatedIdentifiers: merged.DeprecatedIdentifiers, composed: true, children: children}, nil
 }
 
-// composeNestedRef handles a `$ref` encountered *inside* an already-composed subtree
-// (a transitive ref: parent → child → grandchild). The direct child already composed
-// the grandchild and exposes handler methods for it, so the parent does not import the
-// grandchild's cli — it grafts the grandchild's command tree here and lets the normal
-// composed-walk delegate each node to the direct child (delegateMethod =
-// ctx.childPascal + the node's relative path, which matches the child's method names).
-// Parent overlay keys win, mirroring composeRef; any `commands:` authored next to the
-// nested `$ref` are merged additively (they resolve against the spec that holds the
-// nested ref and delegate to the same direct child, which already composed them).
+// composeNestedRef handles a `$ref` inside an already-composed subtree — a transitive
+// parent → child → grandchild ref. The direct child already composed the grandchild and
+// exposes handler methods for it, so the parent grafts the grandchild's tree here and lets the
+// normal composed walk delegate each node back to the direct child. Parent overlay keys win,
+// and any `commands:` next to the nested ref are merged additively.
 func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
 	locator, err := locateRef(base, c.Ref)
 	if err != nil {
@@ -465,11 +451,9 @@ func (gp *program) addImport(alias, path string) {
 	gp.childImports = append(gp.childImports, templateHandlersImport{Alias: alias, Path: path})
 }
 
-// childCmdImport resolves the import path of a composed child's cmd package — the
-// handler package that exposes Handlers() — within the module the child belongs to
-// (the consuming module for a local ref, the external module for a mod:// ref). It
-// reads the child's conf (in childDir) for the cmd package, falling back to the default
-// internal/cmd/<child> convention (named after the child's directory).
+// childCmdImport resolves the import path of a composed child's cmd package — the one
+// exposing Handlers — within the module the child belongs to. It reads the child's conf for
+// the cmd package, falling back to the internal/cmd/<child> convention.
 func childCmdImport(childDir, module string) string {
 	if confPath, err := discoverConf(childDir); err == nil {
 		if cc, err := readConf(confPath); err == nil {
@@ -537,7 +521,7 @@ type genCommand struct {
 	stdinFormat string     // stdin decode format, e.g. "yaml"; "" when no stdin
 	inputs      []fieldDef // InputsFields for this command's <Prefix>Inputs
 
-	// Inline-command passthrough (W9 / D-W9.7): the command's structure + inputs are
+	// Inline-command passthrough: the command's structure + inputs are
 	// generated locally (this is still an own command), but its handler delegates to a
 	// package instead of a generated stub. When passthrough is set the rollup emits
 	// `return delegateAlias.delegateMethod()` and no stub file is seeded.

@@ -28,9 +28,8 @@ func walkCommands(spec *Spec, visit func(c *Command, path string)) {
 	walk(&spec.Command, name)
 }
 
-// allConfigFiles gathers every command's config_files sources across the tree (each
-// command's inputs carry their own, cascading per D-W3.1), flattened for the global
-// BindMeta and the declared-name lints.
+// allConfigFiles gathers every command's config_files sources across the tree, flattened for
+// the global BindMeta and the declared-name lints.
 func allConfigFiles(spec *Spec) []ConfigurationFile {
 	var out []ConfigurationFile
 	walkCommands(spec, func(c *Command, _ string) {

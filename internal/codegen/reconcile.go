@@ -1,11 +1,9 @@
 package codegen
 
-// Reconcile is the first pipeline stage: read + decode the end-user's spec and conf
-// into their in-memory shapes. The spec is REQUIRED; the conf is OPTIONAL and falls
-// back to the default shape. Each reconciled value retains the source format/bytes so a
-// later validation problem can be located back to file:line:col. Reading and path
-// discovery live in reader.go; the embedded schemas the validate stage uses live in
-// schema.go.
+// Reconcile is the first pipeline stage: read and decode the spec and conf into their
+// in-memory shapes. The spec is required; the conf is optional and falls back to the default.
+// Each reconciled value retains its source format and bytes, so a later validation problem can
+// be located back to file:line:col.
 
 import (
 	"fmt"
@@ -31,11 +29,9 @@ type reconciledConf struct {
 	locate sourceLocator // JSON-pointer → source line:col (nil when no file / no positions)
 }
 
-// reconcileDoc is the shared read tail: it reads + decodes the document at resolved into
-// *T, plus its canonical-JSON instance (for schema validation) and a source locator.
-// reconcileSpec and reconcileConf differ only in the decoded type and their
-// required-vs-optional path handling; this is everything they have in common. (bytesToJSON
-// already labels its error "convert <format> to json", so the wrap here only adds the path.)
+// reconcileDoc is the shared read tail: it decodes the document at resolved into *T, plus its
+// canonical-JSON instance for schema validation and a source locator. reconcileSpec and
+// reconcileConf differ only in the decoded type and their required-vs-optional path handling.
 func reconcileDoc[T any](resolved string) (doc *T, instance []byte, locate sourceLocator, err error) {
 	format, data, err := readRaw(resolved)
 	if err != nil {

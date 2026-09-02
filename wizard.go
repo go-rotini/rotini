@@ -7,12 +7,6 @@ import (
 	"maps"
 )
 
-// [Wizard]: sequencing steps into a guided flow with branching and back navigation.
-//
-// It owns no streams and does no asking — a step does that itself, typically with a
-// [Prompt], [Select] or [Confirm] — which keeps the flow pure orchestration and
-// testable with plain functions.
-
 // ErrWizardBack is returned by a step's Ask to move back to the previous step
 // that actually ran (skipped steps are skipped going back too). At the first
 // step it re-asks rather than exiting, so "back" is never a way out.
@@ -36,13 +30,12 @@ type WizardStep struct {
 	When func(answers map[string]string) bool
 }
 
-// Wizard runs a sequence of steps as a guided flow, with branching and back
-// navigation.
+// Wizard sequences steps into a guided flow, with branching and back navigation.
 //
-// It owns no streams and does no asking: a step's Ask does that, typically with a
-// [Prompt], [Select] or [Confirm] the step constructs itself. That keeps the
-// Wizard pure orchestration — testable with plain funcs, and equally usable for a
-// flow whose answers come from somewhere other than a terminal.
+// It owns no streams and does no asking: a step's Ask does that, typically with a [Prompt],
+// [Select] or [Confirm] it constructs itself. That keeps the Wizard pure orchestration —
+// testable with plain funcs, and equally usable for answers that come from somewhere other
+// than a terminal.
 //
 //	answers, err := rotini.NewWizard().
 //	    Step("name", func(ctx context.Context, _ map[string]string) (string, error) {
@@ -63,7 +56,7 @@ type Wizard struct {
 // NewWizard returns an empty flow.
 func NewWizard() *Wizard { return &Wizard{} }
 
-// Add appends a step. It returns the receiver to chain.
+// Add appends a step.
 func (w *Wizard) Add(step WizardStep) *Wizard {
 	if step.Ask != nil && step.Key != "" {
 		w.steps = append(w.steps, step)
@@ -71,19 +64,16 @@ func (w *Wizard) Add(step WizardStep) *Wizard {
 	return w
 }
 
-// Step appends an unconditional step — the common case, without the struct. It
-// returns the receiver to chain.
+// Step appends an unconditional step — the common case, without the struct.
 func (w *Wizard) Step(key string, ask func(ctx context.Context, answers map[string]string) (string, error)) *Wizard {
 	return w.Add(WizardStep{Key: key, Ask: ask})
 }
 
 // Run walks the steps in order and returns the collected answers.
 //
-// A step returning [ErrWizardBack] returns to the previous step that RAN, so
-// going back over a branch that was skipped skips it again. A step returning
-// [ErrWizardCanceled] — or any other error — ends the flow, and the answers
-// gathered so far are returned alongside it, so a caller can still report or
-// persist partial progress.
+// A step returning [ErrWizardBack] returns to the previous step that ran, so going back over a
+// skipped branch skips it again. Any other error ends the flow, with the answers gathered so
+// far returned alongside it so a caller can persist partial progress.
 func (w *Wizard) Run(ctx context.Context) (map[string]string, error) {
 	answers := map[string]string{}
 	var history []int // indexes of the steps that actually ran, for "back"

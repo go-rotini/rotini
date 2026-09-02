@@ -57,11 +57,10 @@ func (e *problem) Error() string {
 // through the aggregated validation error.
 func (e *problem) Unwrap() error { return e.cause }
 
-// locateProblems back-fills source positions onto pointer-shaped problems: a
-// problem whose loc is a JSON-pointer instance location gains "path:line:col"
-// when the document's locator can resolve it. Lint problems with semantic locs
-// ("command app deploy") pass through untouched, as do all problems when the
-// format carries no positions (TOML) — pointer-only is the documented degrade.
+// locateProblems back-fills source positions onto pointer-shaped problems, so a problem whose
+// loc is a JSON-pointer location gains "path:line:col" when the locator can resolve it. Lint
+// problems with semantic locs pass through untouched, as do all problems when the format
+// carries no positions.
 func locateProblems(problems []error, path string, locate sourceLocator) {
 	if locate == nil || path == "" {
 		return

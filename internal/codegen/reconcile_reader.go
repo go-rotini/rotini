@@ -107,11 +107,9 @@ func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) 
 	return out, nil
 }
 
-// bytesToJSON converts one read document to canonical JSON bytes, regardless of
-// the source serialization. It feeds documents to the jsonschema validator,
-// which operates on JSON instances. The raw instance is returned (not a decoded
-// struct) so schema rules like additionalProperties:false still see unknown
-// fields.
+// bytesToJSON converts one read document to canonical JSON bytes, whatever its source
+// serialization, for the jsonschema validator. The raw instance is returned rather than a
+// decoded struct, so rules like additionalProperties:false still see unknown fields.
 func bytesToJSON(format fileFormat, data []byte) ([]byte, error) {
 	var (
 		out []byte

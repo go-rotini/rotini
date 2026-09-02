@@ -6,20 +6,15 @@ import (
 	"strings"
 )
 
-// Command RESOLUTION: turning an argv into the chain of commands it names, plus the
-// flag-token helpers that reading argv requires.
-//
-// Distinct from parser.go, and the distinction is the point: resolution is REQUIRED —
-// dispatch cannot pick a handler without it — while parser.go's [Parser] is an opt-in
-// service that parses and validates a command's declared inputs once dispatch has
-// already chosen it.
+// Command resolution: turning an argv into the chain of commands it names, plus the flag-token
+// helpers reading argv requires. Resolution is required — dispatch cannot pick a handler
+// without it — where parser.go's [Parser] is the opt-in service that parses and validates a
+// command's declared inputs once dispatch has chosen it.
 
-// ResolvedCommand is one node on the invoked command path (root → leaf): the
-// flattened command-tree data the runtime resolved for this invocation. The
-// runtime computes the chain in order to dispatch the correct handler, and
-// exposes it via [Rtx.Chain] so opt-in tooling (the [Parser]) binds inputs
-// against the exact command whose handler ran — including for a statically
-// composed child, whose chain is relative to its own root.
+// ResolvedCommand is one node on the invoked command path, root → leaf: the flattened
+// command-tree data the runtime resolved for this invocation. It is exposed via
+// [Context.Chain] so opt-in tooling binds inputs against the exact command whose handler ran —
+// including a statically composed child, whose chain is relative to its own root.
 type ResolvedCommand struct {
 	Name                  string
 	Handler               string
@@ -55,16 +50,12 @@ func cmdFrame(c CommandDef) ResolvedCommand {
 	}
 }
 
-// resolveChain walks argv against def to find the invoked command path without
-// validating inputs. It descends sub-commands by name/alias, skips flags (and a
-// flag's separate value, so it is never mistaken for a command), and stops at the
-// first positional argument. If a token names a remote/co-located command it
-// returns the chain so far plus a non-nil [RemoteDispatch] the runtime should
-// exec instead of dispatching the chain.
+// resolveChain walks argv against def to find the invoked command path without validating
+// inputs: descend sub-commands by name or alias, skip flags and their separate values, and
+// stop at the first positional. A token naming a remote command returns the chain so far plus
+// a non-nil [RemoteDispatch] to exec instead.
 //
-// Resolution is intentionally lenient — unknown flags, missing values, and bad
-// input are not errors here. Parsing and validation are opt-in, performed by the
-// handler via [Parser.Parse].
+// It is deliberately lenient: unknown flags, missing values and bad input are not errors here.
 func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDispatch) {
 	chain := []ResolvedCommand{rootFrame(def)}
 	if def.Passthrough {
@@ -127,10 +118,9 @@ func findRemote(f ResolvedCommand, tok string) (RemoteDef, bool) {
 	return RemoteDef{}, false
 }
 
-// isFlag reports whether tok is a flag token (e.g. "-h", "--watch", "--config=x").
-// Bare "-" and "--" are not flags. A token that parses as a number (e.g. "-5",
-// "-0.5", "-1e3") is a negative-number argument, not a flag — flag identifiers always
-// have a letter after the dash(es) — so it is excluded here and handled as a positional.
+// isFlag reports whether tok is a flag token. Bare "-" and "--" are not, and neither is a
+// token that parses as a number ("-5", "-1e3"): flag identifiers always have a letter after
+// the dashes, so a negative number is handled as a positional.
 func isFlag(tok string) bool {
 	if len(tok) <= 1 || tok[0] != '-' || tok == "--" {
 		return false

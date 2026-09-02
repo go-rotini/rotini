@@ -8,19 +8,15 @@ import (
 	"github.com/go-rotini/jsonschema"
 )
 
-// Processor is the rotini controller — the value the companion handlers in cmd/rotini
-// construct and drive. It holds the immutable per-process config: the running binary
-// version (so a spec/conf can be checked to target THIS rotini) and the compiled
-// embedded JSON Schemas. It exposes the workflows Generate, Validate, and Initialize.
-//
-// Every workflow runs the same staged pipeline over the end-user's documents, each
-// stage a receiver method:
+// Processor is the rotini controller, holding the immutable per-process config: the running
+// binary version, so a spec can be checked to target this rotini, and the compiled embedded
+// JSON Schemas. It exposes Generate, Validate and Initialize, each running the same pipeline:
 //
 //	reconcile (read + decode)  →  validate (version + schema)  →  lint (rotini rules)  →  generate
 //
-// reconcileSpec/reconcileConf return reconciled VALUES that flow through the later
-// stages, so the Processor itself stays immutable and one instance safely drives many
-// passes (e.g. watch mode re-runs the pipeline on every change).
+// The reconcile stage returns values that flow through the later stages, so the Processor
+// itself stays immutable and one instance safely drives many passes — watch mode re-runs the
+// pipeline on every change.
 type Processor struct {
 	version    string             // running binary version ("vX.Y.Z" / "v0.0.0"; "" → version check skipped)
 	specSchema *jsonschema.Schema // compiled embedded spec JSON Schema
@@ -172,11 +168,9 @@ func failFast(failMode string, rc *reconciledConf) bool {
 
 // ─── the run/watch engine ──────────────────────────────────────────────────────.
 
-// run resolves the spec/conf paths up-front (so watch watches exactly the files read),
-// then drives the shared run/watch engine: each pass reconciles + processes the files
-// fresh (so edits are picked up), stamped with a "[HH:MM:SS] <took>" summary handed to
-// onResult. pass returns the pass's non-fatal warnings (forwarded to onWarnings) and
-// fatal error.
+// run resolves the spec and conf paths up front, so watch watches exactly the files read, then
+// drives the shared run/watch engine. Each pass reconciles and processes the files fresh, so
+// edits are picked up, stamped with a summary handed to onResult.
 func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPath, confPath string) (warnings []error, err error), onResult func(result string, err error), onWarnings func([]error)) error {
 	resolvedSpec, err := resolveSpecPath(specPath)
 	if err != nil {

@@ -6,15 +6,10 @@ import (
 	"time"
 )
 
-// The [Definition] contract: the compiled command tree codegen emits as a Go literal
-// and the runtime dispatches against. Everything in this file is a plain data
-// shape with no behavior — which is what lets the generated file be read as a
-// description of the CLI rather than as code.
-
-// Definition is the compiled command tree for a generated rotini program. The
-// generated package emits it as a Go literal and the rollup passes it to
-// [NewProgram]; the runtime uses it to parse argv, dispatch, and render help and
-// completion. It is data only — behavior lives in the handlers.
+// Definition is the compiled command tree for a generated rotini program: codegen emits it as
+// a Go literal, and the runtime parses argv, dispatches, and renders help and completion
+// against it. Every shape in this file is data only, with no behavior, which is what lets the
+// generated file read as a description of the CLI rather than as code.
 type Definition struct {
 	Name             string
 	Handler          string // ProgramHandlers method for the root command, e.g. "Rotini"
@@ -42,28 +37,23 @@ const (
 	FlagGroupAtLeastOne FlagGroupKind = "at_least_one"
 )
 
-// FlagGroup is a constraint on which of a command's flags may (or must) appear
-// together on the command line. Flags are referenced by their logical Name; "set"
-// means explicitly provided on argv (a default or env/config fallback does not count,
-// matching the convention of cobra/clap). Enforced by the [Parser]; a violation is
-// a usage error.
+// FlagGroup constrains which of a command's flags may, or must, appear together. Flags are
+// referenced by their logical Name, and "set" means explicitly provided on argv — a default or
+// fallback does not count. The [Parser] enforces it; a violation is a usage error.
 type FlagGroup struct {
 	Kind  FlagGroupKind
 	Flags []string // logical flag names that make up the group
 }
 
-// FlagDependency is a conditional cross-flag requirement: when the When flag is
-// explicitly set on argv, every flag in Requires must also be set. Flags are referenced
-// by their logical Name and "set" follows the same explicit-argv convention as
-// [FlagGroup]. Enforced by the [Parser]; a violation is a usage error.
+// FlagDependency is a conditional cross-flag requirement: when the When flag is set on argv,
+// every flag in Requires must be too. "Set" follows the same convention as [FlagGroup].
 type FlagDependency struct {
 	When     string   // the flag whose presence triggers the requirement
 	Requires []string // flags that must also be set when When is set
 }
 
-// RemoteDef describes a remote/co-located sub-command (kubectl/git plugin
-// style): invoking it execs the sibling binary Binary, passing through the
-// remaining arguments.
+// RemoteDef describes a co-located sub-command, kubectl/git plugin style: invoking it execs
+// the sibling Binary with the remaining arguments passed through.
 type RemoteDef struct {
 	Name    string
 	Aliases []string
@@ -72,28 +62,18 @@ type RemoteDef struct {
 	Timeout time.Duration // 0 means no timeout
 }
 
-// BindMeta is the generated, data-only descriptor the default binder ([Binder])
-// consumes to fill the non-argv input channels. It carries document-level concerns
-// that the dispatch-time Definition deliberately omits. The generated package emits it as
-// `var BindMeta = rotini.BindMeta{…}`; main.go passes it to [NewBinder].
+// BindMeta is the generated descriptor the [Binder] consumes to fill the non-argv input
+// channels. It carries the document-level concerns the dispatch-time [Definition] omits.
 type BindMeta struct {
 	ConfigFiles []ConfigFile // per-command config_files sources, each tagged with its Scope; the binder scopes them to the invoked chain (cascade, nearest-wins)
-	// EnvPrefix scopes every DERIVED env-var name (the SNAKE_UPPER projections:
-	// plain env inputs without variable:, envnest bases, flags' env fallbacks)
-	// under "<EnvPrefix>_". Explicit variable: names are exempt, and with a
-	// prefix set the unprefixed conventional names no longer bind. The spec's
-	// document-level env_prefix; "" = no prefix (the default projection).
+	// EnvPrefix scopes every derived env-var name under "<EnvPrefix>_". Explicit variable
+	// names are exempt, and with a prefix set the unprefixed names no longer bind.
 	EnvPrefix string
-	// Sources are custom recon sources (a secrets manager, a remote config
-	// service — anything implementing recon.Source) joined into the Binder's
-	// config precedence AFTER the declared configuration_files: explicit
-	// files beat ambient services; custom sources beat nothing. Appended by
-	// the program's own code (conventionally main.go: meta := cli.BindMeta;
-	// meta.Sources = append(meta.Sources, vaultSource) — codegen never
-	// emits one), they serve config inputs and flags' config fallbacks
-	// alike. Per-input `file:` pins stay configuration_files anchors and
-	// cannot name a custom source. Source names must not collide with
-	// declared file names — the registry rejects duplicates loudly.
+	// Sources are custom recon sources — a secrets manager, a remote config service —
+	// joined into the config precedence after the declared configuration_files, so explicit
+	// files beat ambient services. Codegen never emits one; the program appends its own.
+	// A per-input `file:` pin stays a configuration_files anchor and cannot name a custom
+	// source, and a source name colliding with a declared file is rejected loudly.
 	Sources []recon.Source
 	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
 	// self-contained JSON Schema the binder validates the decoded payload against.
@@ -104,57 +84,48 @@ type BindMeta struct {
 // Exactly one of Path and Discover locates the file (the spec enforces this).
 type ConfigFile struct {
 	Name string // logical name
-	// Scope is the command path ("root", "root/sub", …) this source is declared
-	// on. config_files cascade: a source is in scope for the invoked chain when
-	// its Scope is one of the chain's commands (D-W3.1). "" means UNSCOPED — in
-	// scope for every command (a manually-built BindMeta or a legacy global list);
-	// generated descriptors always set it.
+	// Scope is the command path this source is declared on. Sources cascade: one is in
+	// scope for the invoked chain when its Scope is one of the chain's commands. "" is
+	// unscoped, in scope for every command; generated descriptors always set it.
 	Scope    string
 	Path     string       // fixed file path (may contain ~)
 	Format   string       // "json" | "yaml" | "toml"; "" lets the binder infer from the extension
 	Discover *DiscoverDef // run-time location strategy, instead of a fixed Path
 	PathFrom *PathFromDef // runtime inputs that supply/override the path (spec config_source)
-	// Schema is the self-contained JSON Schema the binder validates the loaded
-	// document against at bind time (the spec entry's `schema:`); "" = none.
-	// The file that actually resolved — fixed, discovered, or
-	// config_source-supplied — is the file validated; an absent optional file
-	// passes vacuously.
+	// Schema is the self-contained JSON Schema the binder validates the loaded document
+	// against at bind time; "" is none. The file that actually resolved is the one
+	// validated, and an absent optional file passes vacuously.
 	Schema string
 }
 
-// PathFromDef names the runtime inputs that supply a [ConfigFile]'s path (the
-// spec's config_source) — the declarative two-phase parse: argv and env are
-// read first, then the file channel opens whatever they pointed at. The path
-// precedence is: the flag explicitly set on argv, then the env variable, then
-// the flag's declared default, then the entry's own path/discover. A path
-// supplied this way must exist — the user explicitly asked for it.
+// PathFromDef names the runtime inputs that supply a [ConfigFile]'s path — the declarative
+// two-phase parse, where argv and env are read first and the file channel then opens whatever
+// they pointed at. Precedence: the flag set on argv, then the env variable, then the flag's
+// default, then the entry's own path or discover. A path supplied this way must exist.
 type PathFromDef struct {
 	Flag string // logical flag name searched across the resolved chain
 	Env  string // environment variable read directly
 }
 
-// DiscoverDef locates a configuration file at run time (the spec's discover:).
-// The strategy orders the directories searched for File; the first directory
-// containing it wins, and a file found nowhere is simply absent.
+// DiscoverDef locates a configuration file at run time. The strategy orders the directories
+// searched for File; the first containing it wins, and a file found nowhere is simply absent.
 type DiscoverDef struct {
 	Strategy string // "walk-up" (working directory up to the filesystem root) | "xdg" ($XDG_CONFIG_HOME/<app>, default ~/.config/<app>)
 	File     string // the file name looked for in each searched directory
 	App      string // the application directory under the XDG config root (xdg only)
 }
 
-// RemoteDiscoveryDef enables kubectl/git/gh-style plugin discovery on a command:
-// an unmatched token execs the sibling binary Prefix+<token>, and `<Prefix>*`
-// executables are offered as completion candidates (unless Hidden). A nil
-// *RemoteDiscoveryDef means discovery is off for that command.
+// RemoteDiscoveryDef enables plugin discovery on a command: an unmatched token execs the
+// sibling binary Prefix+<token>, and `<Prefix>*` executables are offered as completion
+// candidates unless Hidden. A nil pointer means discovery is off for that command.
 type RemoteDiscoveryDef struct {
 	Prefix string // executable-name prefix, e.g. "acme-"
 	Path   string // extra directory to scan, in addition to the host dir and PATH
 	Hidden bool   // dispatch discovered plugins but omit them from completion listings
 }
 
-// CommandDef describes one command node within a [Definition]. Handler is the
-// ProgramHandlers method name the runtime invokes (via reflection) to obtain
-// this command's [Handlers].
+// CommandDef describes one command node within a [Definition]. Handler is the ProgramHandlers
+// method name the runtime invokes to obtain this command's [Handlers].
 type CommandDef struct {
 	Name                  string
 	Aliases               []string
@@ -172,13 +143,11 @@ type CommandDef struct {
 	Passthrough           bool                // every token after this command is a raw positional (no flag parsing)
 }
 
-// Constraints carries the optional JSON-schema-style validation bounds a spec may
-// declare on a flag or argument; the parser enforces them after reconciliation (so a
-// value supplied via env/config is checked too). The numeric bounds are
-// presence-carrying pointers — nil means "unset", so `minimum: 0` is a real,
-// enforced bound ([Ptr] builds one in a hand-authored Definition). The
-// length/count bounds keep the zero-sentinel convention: a 0 minimum is
-// vacuous, and a 0 maximum is not expressible (no real-world demand recorded).
+// Constraints carries the validation bounds a spec may declare on a flag or argument. The
+// parser enforces them after reconciliation, so a value supplied via env or config is checked
+// too. The numeric bounds are presence-carrying pointers — nil is unset, so `minimum: 0` is a
+// real, enforced bound. The length and count bounds keep the zero-sentinel convention: a 0
+// minimum is vacuous and a 0 maximum is not expressible.
 type Constraints struct {
 	Minimum          *float64 // inclusive numeric lower bound; nil = unset
 	Maximum          *float64 // inclusive numeric upper bound; nil = unset
@@ -192,16 +161,14 @@ type Constraints struct {
 	Pattern          string   // regular expression the value must contain (string types); "" = unset
 }
 
-// Ptr returns a pointer to v — sugar for the presence-carrying [Constraints]
-// bounds in a hand-authored [Definition] (generated code uses it too):
+// Ptr returns a pointer to v, for the presence-carrying [Constraints] bounds:
 // Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0.
 //
 //go:fix inline
 func Ptr[T any](v T) *T { return new(v) }
 
-// takesValue reports whether a flag consumes a value token: everything except
-// the presence flags — bool (value form is inline-only) and count (no value at
-// all; each occurrence increments the generated int field).
+// takesValue reports whether a flag consumes a value token — everything but the presence
+// flags, bool (inline value form only) and count.
 func takesValue(fd FlagDef) bool { return fd.Type != "bool" && fd.Type != "count" }
 
 // FlagDef describes a single flag of a command. Name is the logical name and

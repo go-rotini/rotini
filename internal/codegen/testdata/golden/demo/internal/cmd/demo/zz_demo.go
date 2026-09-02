@@ -72,21 +72,17 @@ type DemoBuildInputs struct {
 var BindMeta = rotini.BindMeta{}
 
 // NewProgram builds the program from the generated command tree and the typed
-// ProgramHandlers, delegating to rotini.NewProgram (which takes the handlers
-// as an untyped value). Construct your program with this so the compiler verifies
-// your handlers satisfy ProgramHandlers. The command tree is an unexported
-// implementation detail — you hold a *rotini.Program, never the Definition.
+// ProgramHandlers. Construct your program with this so the compiler verifies your handlers
+// satisfy ProgramHandlers; the command tree stays an unexported implementation detail.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	// BindMeta rides the registry so the per-channel input functions
-	// (rotini.ParseEnv, rotini.ParseFiles, …) need only the Context.
+	// BindMeta rides the registry so the per-channel input functions need only the Context.
 	return rotini.NewProgram(definition, handlers).
 		Bind(rotini.KeyBindMeta, BindMeta)
 }
 
-// handlers is the generated ProgramHandlers implementation: each method wires a
-// command to its handler (an own command's local handler type, or a composed
-// command's delegated package). Program is the ready-to-run program; Handlers()
-// returns a fresh value (e.g. for tests).
+// handlers is the generated ProgramHandlers implementation: each method wires a command to its
+// handler, whether a local type or a composed command's delegated package. Program is the
+// ready-to-run program, and Handlers returns a fresh value.
 type handlers struct{}
 
 var _ ProgramHandlers = (*handlers)(nil)

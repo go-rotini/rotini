@@ -5,30 +5,17 @@ import (
 	"strings"
 )
 
-// The [Suggestor]: string-distance matching over a candidate vocabulary, for turning a
-// mistyped token into "did you mean". Stateless and dependency-free.
-//
-// rotini itself never calls it (Pillar 1 — no suggestions are shipped): a program binds
-// one and applies it to a [ParseError]'s Token and Candidates if it wants them.
-
-// KeySuggestor is the conventional key under which a [Suggestor] is registered in
-// a service registry — used, for example, by rotini, whose generated entrypoint
-// binds the Suggestor under this key and whose handlers retrieve it by it.
+// KeySuggestor is the conventional registry key a [Suggestor] is bound under.
 const KeySuggestor = "suggestor"
 
-// defaultMinScore is the cutoff a [Suggestor] keeps candidates at or above —
-// "comfortably similar" by the configured algorithm, strict enough to avoid
-// suggesting merely-adjacent words.
+// defaultMinScore is the cutoff a [Suggestor] keeps candidates at or above: similar enough to
+// be worth offering, strict enough to skip merely-adjacent words.
 const defaultMinScore = 0.6
 
-// Suggestor turns a possibly-mistyped token and a list of candidate strings into
-// ranked "did you mean" suggestions. It is a pure ranking function — it discovers
-// nothing, prints nothing, and holds no state beyond its configuration. The
-// candidates come from whatever vocabulary the caller has: command names, enum
-// members, map keys, or any []string.
-//
-// Configure it fluently; it ranks by a pluggable algorithm normalized to a
-// similarity score (see [SuggestAlgorithm]):
+// Suggestor turns a possibly-mistyped token and a list of candidates into ranked "did you
+// mean" suggestions. It is a pure ranking function: it discovers nothing, prints nothing, and
+// holds no state beyond its configuration. Candidates come from whatever vocabulary the caller
+// has — command names, enum members, map keys, any []string.
 //
 //	s := rotini.NewSuggestor().
 //		WithAlgorithm(rotini.SuggestAlgorithmJaroWinkler).
@@ -37,18 +24,16 @@ const defaultMinScore = 0.6
 //		WithCaseFold()
 //	hits := s.Suggest("isntall", []string{"install", "uninstall", "list"}) // [install]
 //
-// As a rotini opt-in service it is bound under [KeySuggestor] and consulted by a
-// handler after a parse failure — rotini itself suggests nothing; a
-// rotini.ParseError carries the offending Token and the valid Candidates:
+// rotini itself suggests nothing. A program binds one under [KeySuggestor] and applies it to a
+// [ParseError]'s Token and Candidates if it wants suggestions:
 //
 //	suggestor := rtx.MustGet[*rotini.Suggestor](rotini.KeySuggestor)
 //	if best, ok := suggestor.Closest(parseErr.Token, parseErr.Candidates); ok {
 //		fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
 //	}
 //
-// A configured Suggestor is safe for concurrent use: [Suggestor.Suggest],
-// [Suggestor.Matches], [Suggestor.Closest], and [Suggestor.Score] do not mutate
-// it. Finish configuring (the With* methods) before sharing it across goroutines.
+// A configured Suggestor is safe for concurrent use; finish configuring it before sharing it
+// across goroutines.
 type Suggestor struct {
 	algorithm  SuggestAlgorithm
 	minScore   float64
@@ -57,18 +42,15 @@ type Suggestor struct {
 	normalizer func(string) string
 }
 
-// Match is a scored suggestion returned by [Suggestor.Matches]: the original
-// candidate Value (exactly as passed in) and its similarity Score in [0,1]
-// (1 = identical).
+// Match is a scored suggestion: the original candidate Value and its similarity Score in
+// [0,1], 1 being identical.
 type Match struct {
 	Value string
 	Score float64
 }
 
-// NewSuggestor returns a [Suggestor] ready to bind under a registry key
-// (conventionally [KeySuggestor]), ranking by [SuggestAlgorithmLevenshtein] with a
-// minimum score of 0.6 and at most 3 results. Tune any of it fluently:
-// NewSuggestor().WithAlgorithm(…).WithMinScore(…).WithMaxResults(…).WithCaseFold().
+// NewSuggestor returns a [Suggestor] ranking by [SuggestAlgorithmLevenshtein] with a minimum
+// score of 0.6 and at most 3 results. The With methods return the receiver, so they chain.
 func NewSuggestor() *Suggestor {
 	return &Suggestor{
 		algorithm:  SuggestAlgorithmLevenshtein,
@@ -77,9 +59,8 @@ func NewSuggestor() *Suggestor {
 	}
 }
 
-// WithAlgorithm selects the ranking algorithm (see [SuggestAlgorithm]) and returns
-// the receiver to chain. An unrecognized algorithm is ignored. Default
-// [SuggestAlgorithmLevenshtein].
+// WithAlgorithm selects the ranking algorithm. Default [SuggestAlgorithmLevenshtein]; an
+// unrecognized algorithm is ignored.
 func (s *Suggestor) WithAlgorithm(algorithm SuggestAlgorithm) *Suggestor {
 	if algorithm.Valid() {
 		s.algorithm = algorithm
@@ -87,9 +68,8 @@ func (s *Suggestor) WithAlgorithm(algorithm SuggestAlgorithm) *Suggestor {
 	return s
 }
 
-// WithMinScore sets the smallest similarity score (in [0,1], 1 = identical) a
-// candidate may have and still be suggested, and returns the receiver to chain.
-// Default 0.6. A score outside [0,1] is ignored.
+// WithMinScore sets the smallest similarity score a candidate may have and still be suggested.
+// Default 0.6; a score outside [0,1] is ignored.
 func (s *Suggestor) WithMinScore(score float64) *Suggestor {
 	if score >= 0 && score <= 1 {
 		s.minScore = score
@@ -97,8 +77,8 @@ func (s *Suggestor) WithMinScore(score float64) *Suggestor {
 	return s
 }
 
-// WithMaxResults caps how many suggestions [Suggestor.Suggest] / [Suggestor.Matches]
-// return, and returns the receiver to chain. Default 3. A non-positive n is ignored.
+// WithMaxResults caps how many suggestions [Suggestor.Suggest] / [Suggestor.Matches] return,
+// Default 3. A non-positive n is ignored.
 func (s *Suggestor) WithMaxResults(n int) *Suggestor {
 	if n > 0 {
 		s.maxResults = n
@@ -106,18 +86,16 @@ func (s *Suggestor) WithMaxResults(n int) *Suggestor {
 	return s
 }
 
-// WithCaseFold makes matching case-insensitive (input and candidates are lowered
-// before scoring), and returns the receiver to chain. Off by default.
+// WithCaseFold makes matching case-insensitive (input and candidates are lowered before scoring),
+// Off by default.
 func (s *Suggestor) WithCaseFold() *Suggestor {
 	s.caseFold = true
 	return s
 }
 
-// WithNormalizer sets a preprocessing function applied to both the input and each
-// candidate before scoring (e.g. trim whitespace, strip accents), and returns the
-// receiver to chain. It runs before case-folding. The original candidate strings
-// are still what [Suggestor.Suggest] / [Suggestor.Matches] return. A nil function
-// clears it.
+// WithNormalizer sets a preprocessing function applied to the input and each candidate before
+// scoring, running before case-folding. The original candidate strings are still what
+// [Suggestor.Suggest] and [Suggestor.Matches] return. A nil function clears it.
 func (s *Suggestor) WithNormalizer(normalizer func(string) string) *Suggestor {
 	s.normalizer = normalizer
 	return s
@@ -134,10 +112,8 @@ func (s *Suggestor) normalize(text string) string {
 	return text
 }
 
-// Score returns the configured algorithm's similarity of a and b in [0,1] (1 =
-// identical), after applying the Suggestor's normalization. It scores a single
-// pair; [Suggestor.Suggest] / [Suggestor.Matches] rank a candidate set. A nil
-// receiver returns 0.
+// Score returns the configured algorithm's similarity of a and b in [0,1], after applying the
+// Suggestor's normalization. A nil receiver returns 0.
 func (s *Suggestor) Score(a, b string) float64 {
 	if s == nil {
 		return 0
@@ -145,14 +121,11 @@ func (s *Suggestor) Score(a, b string) float64 {
 	return similarity(s.normalize(a), s.normalize(b), s.algorithm)
 }
 
-// Matches ranks candidates by similarity to input, nearest first, keeping those
-// scoring at least the configured minimum (default 0.6) and at most the configured
-// number of results. Each [Match] carries the ORIGINAL candidate string and its
-// score. Score ties prefer the candidate sharing the longer common prefix with
-// input, then break lexicographically, so the result is deterministic. An empty
-// input yields no matches; empty candidates are skipped and duplicates (after
-// normalization) collapse to the first occurrence; a nil receiver yields nil.
-// Unlike [Suggestor.Suggest], Matches DOES include an exact match (score 1).
+// Matches ranks candidates by similarity to input, nearest first, keeping those at or above
+// the configured minimum and at most the configured number of results. Ties prefer the
+// candidate sharing the longer common prefix with input, then break lexicographically, so the
+// result is deterministic. Empty candidates are skipped and duplicates collapse to the first
+// occurrence. Unlike [Suggestor.Suggest], Matches does include an exact match.
 func (s *Suggestor) Matches(input string, candidates []string) []Match {
 	if s == nil {
 		return nil
@@ -202,10 +175,8 @@ func (s *Suggestor) Matches(input string, candidates []string) []Match {
 	return result
 }
 
-// Suggest is the "did you mean" convenience over [Suggestor.Matches]: it returns
-// just the candidate strings, nearest first. But when input EXACTLY matches a
-// candidate (it wasn't mistyped) it returns nil — there is nothing to suggest. A
-// nil receiver or empty input also yields nil.
+// Suggest returns just the candidate strings from [Suggestor.Matches], nearest first — except
+// that an input exactly matching a candidate was not mistyped, so it yields nil.
 func (s *Suggestor) Suggest(input string, candidates []string) []string {
 	if s == nil {
 		return nil
@@ -223,10 +194,8 @@ func (s *Suggestor) Suggest(input string, candidates []string) []string {
 	return result
 }
 
-// Closest returns the single best suggestion for input and whether one was found
-// — the ergonomic "did you mean X?" form of [Suggestor.Suggest]. Like Suggest, it
-// reports ok=false when input exactly matches a candidate or nothing clears the
-// minimum score.
+// Closest returns the single best suggestion for input. Like [Suggestor.Suggest] it reports
+// ok=false when input exactly matches a candidate or nothing clears the minimum score.
 func (s *Suggestor) Closest(input string, candidates []string) (suggestion string, ok bool) {
 	if hits := s.Suggest(input, candidates); len(hits) > 0 {
 		return hits[0], true
@@ -244,14 +213,11 @@ func commonPrefixLength(a, b string) int {
 	return length
 }
 
-// --- String metrics ---
-//
-// A roster of rune-based nearness algorithms, each normalized to a [0,1]
-// similarity score (1 = identical) that a [Suggestor] ranks by.
+// String metrics: rune-based nearness algorithms, each normalized to a [0,1] similarity score
+// that a [Suggestor] ranks by.
 
-// SuggestAlgorithm selects the string-distance algorithm a [Suggestor] ranks by —
-// a small string enum so it reads clearly in code and config. The package defines
-// the set; it is not user-extensible.
+// SuggestAlgorithm selects the string-distance algorithm a [Suggestor] ranks by. The package
+// defines the set; it is not user-extensible.
 type SuggestAlgorithm string
 
 const (
@@ -312,11 +278,9 @@ func (a SuggestAlgorithm) Valid() bool {
 	}
 }
 
-// similarity normalizes algorithm's metric for a and b to a score in [0,1], where
-// 1 means identical and 0 means maximally dissimilar — so edit-distance and
-// similarity algorithms compare on one scale. An unrecognized algorithm falls back
-// to Levenshtein. It does no case-folding or normalization; a [Suggestor] applies
-// those before calling it.
+// similarity normalizes algorithm's metric for a and b to a score in [0,1], so edit-distance
+// and similarity algorithms compare on one scale. An unrecognized algorithm falls back to
+// Levenshtein. Case-folding and normalization are the caller's.
 func similarity(a, b string, algorithm SuggestAlgorithm) float64 {
 	switch algorithm {
 	case SuggestAlgorithmDamerauLevenshtein:

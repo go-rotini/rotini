@@ -2,13 +2,9 @@ package rotini
 
 import "context"
 
-// The handler contract: the [Handlers] interface every command's handler set
-// implements, and the embeddable no-ops that let a handler declare only the hooks it
-// actually uses.
-
-// Handlers is the lifecycle interface every command's handler set
-// implements. The runtime invokes the hooks in order, sharing one [Context]
-// across the chain; handlers read their typed inputs with [Parser.Parse].
+// Handlers is the lifecycle interface every command's handler set implements. The runtime
+// invokes the hooks in order, sharing one [Context] across the chain. Embed the Default types
+// below to declare only the hooks a command actually uses.
 type Handlers interface {
 	CascadingPreRun(ctx context.Context, rtx *Context)
 	PreRun(ctx context.Context, rtx *Context)

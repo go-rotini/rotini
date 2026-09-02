@@ -64,12 +64,10 @@ type RequestFunc = func(ctx context.Context, params json.RawMessage) (any, error
 // server can stop cleanly on a fatal one.
 type NotifyFunc = func(ctx context.Context, params json.RawMessage) error
 
-// StdioServer runs the binary as a stdin/stdout message server: JSON-RPC 2.0
-// over newline-delimited or Content-Length framing, which is how LSP language
-// servers and MCP servers speak.
-//
-// It is the shape a CLI takes when a tool drives it instead of a human — the same
-// binary, the same handlers, a different transport.
+// StdioServer runs the binary as a stdin/stdout message server: JSON-RPC 2.0 over
+// newline-delimited or Content-Length framing, which is how LSP and MCP servers speak. It is
+// the shape a CLI takes when a tool drives it instead of a human — same binary, same handlers,
+// different transport.
 //
 //	rotini.NewStdioServer(rtx.Stdin, rtx.Stdout).
 //	    WithFraming(rotini.FramingContentLength).
@@ -77,9 +75,9 @@ type NotifyFunc = func(ctx context.Context, params json.RawMessage) error
 //	    Notify("notifications/initialized", func(context.Context, json.RawMessage) error { return nil }).
 //	    Run(ctx)
 //
-// Requests are served ONE AT A TIME, in arrival order: a stdio peer shares one
-// pipe, so concurrent handlers would interleave their writes. A handler that
-// needs to do slow work should hand it to a [Service] and answer immediately.
+// Requests are served one at a time, in arrival order: a stdio peer shares one pipe, so
+// concurrent handlers would interleave their writes. A handler with slow work to do should
+// hand it to a [Service] and answer immediately.
 //
 // The zero value is not usable; start from [NewStdioServer].
 type StdioServer struct {
@@ -102,12 +100,10 @@ func NewStdioServer(in io.Reader, out io.Writer) *StdioServer {
 	}
 }
 
-// WithFraming selects the wire framing (default [FramingLine]). It returns the
-// receiver to chain.
+// WithFraming selects the wire framing (default [FramingLine]).
 func (s *StdioServer) WithFraming(f Framing) *StdioServer { s.framing = f; return s }
 
-// Handle registers the handler for a request method, replacing any prior one. It
-// returns the receiver to chain.
+// Handle registers the handler for a request method, replacing any prior one.
 func (s *StdioServer) Handle(method string, fn RequestFunc) *StdioServer {
 	if fn != nil {
 		s.mu.Lock()
@@ -118,7 +114,7 @@ func (s *StdioServer) Handle(method string, fn RequestFunc) *StdioServer {
 }
 
 // Notify registers the handler for a notification method — a message with no id,
-// which gets no reply. It returns the receiver to chain.
+// which gets no reply.
 func (s *StdioServer) Notify(method string, fn NotifyFunc) *StdioServer {
 	if fn != nil {
 		s.mu.Lock()

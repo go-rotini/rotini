@@ -44,24 +44,18 @@ func (k RemoteErrorKind) String() string {
 	}
 }
 
-// RemoteError reports a rotini-authored failure carrying out a remote/plugin
-// dispatch (NOT the plugin's own non-zero exit, which rotini passes through —
-// the plugin already spoke for itself). It is the remote channel's typed,
-// errors.As-able error, so a funnel can special-case a timeout or a missing
-// plugin without matching the message:
+// RemoteError reports a rotini-authored failure carrying out a remote dispatch — not the
+// plugin's own non-zero exit, which passes through untouched. It is typed so a funnel can
+// special-case a timeout or a missing plugin without matching the message:
 //
 //	var re *rotini.RemoteError
 //	if errors.As(err, &re) && re.Kind == rotini.RemoteTimeout {
 //	    fmt.Fprintf(os.Stderr, "%s timed out after %s\n", re.Name, re.Timeout)
 //	}
 //
-// Category follows D4: a missing binary is the user's typo when DISCOVERED
-// ([CategoryUsage]) and an install/wiring problem when DECLARED
-// ([CategoryInternal]); a spawn failure is [CategoryInternal]; a timeout is
-// deliberately [CategoryNone] — operational, neither party's fault — but still
-// As-able here so a funnel that wants to treat it specially can. The underlying
-// OS/exec Cause stays reachable via errors.As (nil for a synthesized
-// not-found).
+// A missing binary is [CategoryUsage] when discovered (the user's typo) and [CategoryInternal]
+// when declared (an install problem); a spawn failure is [CategoryInternal]; a timeout is
+// deliberately [CategoryNone], operational and neither party's fault, but still As-able here.
 type RemoteError struct {
 	Name    string          // the remote command name (or discovery token)
 	Binary  string          // the plugin binary that was sought or spawned
@@ -93,32 +87,22 @@ func (e *RemoteError) Unwrap() []error {
 	return out
 }
 
-// RemoteDispatch is a resolved remote/co-located sub-command invocation: the
-// plugin binary Def.Binary run with Args (everything after the command name).
-// Dir is an extra directory to search first (from remote_discovery.path),
-// empty for a declared remote command. The default resolver produces one for
-// declared remote_commands and discovered plugins; a custom [Resolver] may
-// return its own in [Resolution.Remote].
+// RemoteDispatch is a resolved remote sub-command invocation: Def.Binary run with Args, with
+// Dir an extra directory to search first (empty for a declared remote command). The default
+// resolver produces one for declared remotes and discovered plugins.
 type RemoteDispatch struct {
 	Def  RemoteDef
 	Args []string
 	Dir  string
-	// Discovered marks a plugin-discovery dispatch (an unmatched token mapped
-	// to <prefix><token>) as opposed to a declared remote command. It decides
-	// the error CATEGORY when the binary cannot be resolved: a discovered
-	// token is the user's typo (CategoryUsage — pair it with a Suggestor in a
-	// custom funnel), while a declared remote's missing binary is an
-	// install/wiring problem (CategoryInternal).
+	// Discovered marks a plugin-discovery dispatch rather than a declared remote command,
+	// which decides the error category when the binary cannot be resolved.
 	Discovered bool
 }
 
-// execRemote locates and runs the co-located plugin binary, passing stdio
-// through, honoring the run context (so a signal/cancellation kills the subprocess)
-// and any timeout, and returning the plugin's exit code. rotini-authored
-// diagnostics (binary not found, timeout, spawn failure) are recorded as errors
-// and routed through the funnel (a plugin's environment is the
-// end-user's, not a rotini fault — see [Program.remoteFailure]); the plugin's
-// own non-zero exit passes through untouched (the plugin already spoke for itself).
+// execRemote locates and runs the co-located plugin binary, passing stdio through, honoring
+// the run context and any timeout, and returning the plugin's exit code. rotini-authored
+// diagnostics are recorded as errors and routed through the funnel; the plugin's own non-zero
+// exit passes through untouched.
 func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatch) (int, error) {
 	path, err := resolveRemoteBinary(r.Def.Binary, r.Dir)
 	if err != nil {
@@ -167,11 +151,9 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 	}
 }
 
-// remoteFailure records a rotini-authored remote dispatch error and reports it
-// through the funnel. A missing / timed-out / unspawnable plugin is
-// ENVIRONMENTAL — the engineer who built this binary cannot control whether the
-// consumer installed the plugin being dispatched to — so it is the end-user's
-// recorded error, not rotini's "should never happen" fault (a panic).
+// remoteFailure records a rotini-authored remote dispatch error and reports it through the
+// funnel. A missing, timed-out or unspawnable plugin is environmental — the author cannot
+// control whether the consumer installed it — so it is a recorded error, not a fault.
 func (p *Program) remoteFailure(ctx context.Context, rtx *Context, re *RemoteError) (int, error) {
 	rtx.RecordError(re)
 	return p.settle(ctx, rtx)

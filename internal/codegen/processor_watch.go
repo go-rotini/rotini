@@ -15,11 +15,9 @@ import (
 // per-invocation entry (Processor.run, which resolves paths and builds the timed pass)
 // lives in processor.go; this file is the engine it drives.
 
-// runOrWatch performs a single timed pass — returning the pass's error when it fails — or,
-// when watch is set, watches the spec and conf and re-runs the pass on each change until
-// interrupted with ctrl-c (SIGINT), routing every pass (success or failure) to onResult. It is
-// the shared engine behind [Generate] and [Validate]; pass supplies the command-specific work
-// and confPath must already be resolved (see resolveConfBesideSpec).
+// runOrWatch performs a single timed pass, or — when watch is set — re-runs it on every change
+// to the spec or conf until interrupted, routing each pass to onResult. It is the shared engine
+// behind Generate and Validate; confPath must already be resolved.
 func runOrWatch(specPath, confPath string, watch bool, pass func() (string, error), onResult func(result string, err error)) error {
 	if watch {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)

@@ -7,12 +7,10 @@ import (
 	"time"
 )
 
-// Scheduler runs tasks on intervals until the context ends.
-//
-// It is [Service] with timers: each task becomes a worker that ticks, so the
-// same rules apply — the first task error stops the rest and is what Run
-// returns, and a canceled context is a graceful stop rather than a failure. A
-// task that should survive its own failures handles them inside its func.
+// Scheduler runs tasks on intervals until the context ends. It is [Service] with timers — each
+// task is a worker that ticks — so the same rules apply: the first task error stops the rest
+// and is what Run returns, and a canceled context is a graceful stop. A task that should
+// survive its own failures handles them inside its func.
 //
 //	rotini.NewScheduler().
 //	    Every("reconcile", time.Minute, reconcile).
@@ -37,7 +35,7 @@ type scheduledTask struct {
 func NewScheduler() *Scheduler { return &Scheduler{} }
 
 // Every registers fn to run every interval. An interval of zero or less is
-// ignored. Nothing runs until [Scheduler.Run]. It returns the receiver to chain.
+// ignored. Nothing runs until [Scheduler.Run].
 func (s *Scheduler) Every(name string, interval time.Duration, fn func(context.Context) error) *Scheduler {
 	if fn != nil && interval > 0 {
 		s.tasks = append(s.tasks, scheduledTask{name: name, interval: interval, fn: fn})
@@ -47,7 +45,7 @@ func (s *Scheduler) Every(name string, interval time.Duration, fn func(context.C
 
 // WithJitter spreads each tick by up to fraction of its interval (0.1 = ±10%), so
 // a fleet of instances started together does not stampede a shared dependency in
-// lockstep. It is clamped to [0, 1). It returns the receiver to chain.
+// lockstep. It is clamped to [0, 1).
 func (s *Scheduler) WithJitter(fraction float64) *Scheduler {
 	switch {
 	case fraction < 0:
@@ -61,7 +59,7 @@ func (s *Scheduler) WithJitter(fraction float64) *Scheduler {
 }
 
 // WithRunAtStart runs every task once immediately instead of waiting out the
-// first interval. It returns the receiver to chain.
+// first interval.
 func (s *Scheduler) WithRunAtStart(enabled bool) *Scheduler { s.runAtStart = enabled; return s }
 
 // Run ticks every task until the context is done or a task fails.

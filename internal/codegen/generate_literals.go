@@ -30,11 +30,9 @@ func writeInputDefsLiteral(b *strings.Builder, in *Inputs) {
 	}
 }
 
-// renderDefinition renders the `var definition = rotini.Definition{…}` literal —
-// the compiled command tree the runtime parses against. It is unexported: end-users
-// hold the *Program (from the generated NewProgram), never the Definition. Emitted into
-// the framework file and gofmt-formatted with the rest of it, so the produced text only
-// needs to be valid Go, not pretty.
+// renderDefinition renders the `var definition = rotini.Definition{…}` literal — the compiled
+// command tree the runtime parses against. It is unexported: end-users hold the *Program, never
+// the Definition. The output is gofmt'd with the rest of the file, so it need only be valid Go.
 func renderDefinition(gp *program) string {
 	var b strings.Builder
 	b.WriteString("var definition = " + rotiniPkgName + ".Definition{\n")
@@ -61,7 +59,7 @@ func renderDefinition(gp *program) string {
 // default binder consumes — the document-level config-file sources. Returns "" when
 // there are none (so a CLI with no configuration_files stays unchanged).
 func renderBindMeta(gp *program) string {
-	// Emitted UNCONDITIONALLY (ergonomics E3-S2): an empty descriptor is the
+	// Emitted UNCONDITIONALLY: an empty descriptor is the
 	// honest zero — handler and main.go code can reference BindMeta uniformly,
 	// and the generated NewProgram binds it under rotini.KeyBindMeta either way.
 	files := gp.configFiles
@@ -387,10 +385,9 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	}
 }
 
-// constraintsLiteral renders a rotini.Constraints{…} literal from a schema's declared
-// numeric/string/array bounds, or "" when none are set. The numeric bounds are
-// presence-carrying: a declared bound (0 included) emits a rotini.Ptr literal;
-// an undeclared one emits nothing. Length/count bounds keep the zero-sentinel
+// constraintsLiteral renders a rotini.Constraints{…} literal from a schema's declared bounds,
+// or "" when none are set. The numeric bounds are presence-carrying: a declared bound, 0
+// included, emits a rotini.Ptr literal. Length and count bounds keep the zero-sentinel
 // convention.
 func constraintsLiteral(schema *InputSchema) string {
 	var parts []string

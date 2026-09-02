@@ -9,12 +9,10 @@ import (
 // stdin) into the generated struct fields, plus the schema→Go type mapping. The Go-
 // literal emission those fields feed into lives in literals.go.
 
-// inputsFields returns the fields of a command's <Prefix>Inputs struct: one per
-// ancestor command (root first, then each intermediate) plus the command itself,
-// in root→leaf order. Each field is named after the command's PascalCase prefix
-// and typed as that prefix's CommandInputs. There is deliberately no struct tag:
-// the binder maps fields to resolved-chain frames by position (aligned at the
-// leaf), so command names can never collide along a path.
+// inputsFields returns the fields of a command's <Prefix>Inputs struct: one per ancestor plus
+// the command itself, in root→leaf order, each named after the command's PascalCase prefix.
+// There is deliberately no struct tag — the binder maps fields to chain frames by position,
+// aligned at the leaf, so command names can never collide along a path.
 func inputsFields(rootPascal, path string) []fieldDef {
 	segments := strings.Split(path, "_")
 	fields := make([]fieldDef, 0, 1+len(segments))
@@ -95,11 +93,10 @@ func constraintTags(schema *InputSchema) string {
 	return strings.Join(parts, " ")
 }
 
-// eachConstraint visits every present validation constraint on schema in a stable
-// order, passing its struct-tag name, its rotini.Constraints field name, and the value
-// rendered two ways: tagVal for a struct tag, litVal for a Go literal. It is the single
-// enumeration both constraintTags (binder struct tags) and constraintsLiteral (the
-// Definition's Constraints{} literal) drive, so the two cannot drift in set or order.
+// eachConstraint visits every present validation constraint on schema in a stable order,
+// passing its tag name, its Constraints field name, and the value rendered for both a struct
+// tag and a Go literal. Both constraintTags and constraintsLiteral drive off it, so the two
+// cannot drift in set or order.
 func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal string)) {
 	if schema == nil {
 		return

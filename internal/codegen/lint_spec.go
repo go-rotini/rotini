@@ -79,13 +79,9 @@ func lintRootCommand(spec *Spec) []error {
 	return problems
 }
 
-// lintDocLevelKeys rejects the two root-command-level keys — env_prefix, schemas —
-// on a NON-root command. The shared Command shape accepts these keys on every node;
-// they are meaningful only on the root command (under the document's `command` key),
-// and codegen reads them only there. Declaring one deeper is a silent no-op, so
-// validate rejects it. The root (spec.Command itself) is exempt. (The document-level
-// `$schema`/`version` keys live on the document, not on Command, so they cannot appear
-// on a sub-command and need no check here.)
+// lintDocLevelKeys rejects env_prefix and schemas on a non-root command. The shared Command
+// shape accepts them on every node, but codegen reads them only on the root, so declaring one
+// deeper would be a silent no-op.
 func lintDocLevelKeys(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -108,14 +104,11 @@ func lintDocLevelKeys(spec *Spec) []error {
 	return problems
 }
 
-// lintRefNodeKeys enforces the $ref OVERLAY model's reject set (W8 / D-W8.2): a
-// `$ref` node composes a child command whose handler is generated against the CHILD's
-// own inputs/output, so the parent cannot overlay handler-coupled keys on the `$ref`
-// node — they would produce a parser/struct the delegated handler does not match. The
-// generator honors only the overlay keys (name/aliases/summary/description/help/group/
-// hidden/deprecated/…) and the additive `commands:`; every other key it cannot honor,
-// so — per rotini's no-silent-ignore invariant — validation rejects it here. (Declare
-// inputs/output/remotes in the child spec instead.)
+// lintRefNodeKeys enforces the $ref overlay model's reject set. A `$ref` node composes a child
+// whose handler is generated against the child's own inputs and output, so a handler-coupled
+// key overlaid on the ref node would produce a parser the delegated handler does not match.
+// The generator honors only the identity and presentation keys plus the additive `commands:`;
+// declare inputs, output and remotes in the child spec instead.
 func lintRefNodeKeys(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -169,14 +162,10 @@ func lintRefNodeKeys(spec *Spec) []error {
 	return problems
 }
 
-// lintHandlerSource enforces where a `handler:` (W9 package-import passthrough) may
-// appear. It is valid on any SUB-command: a `$ref` node (sourcing the handlers a
-// composed external spec can't provide — required for git/raw, an override for
-// local/mod://) OR an inline command (the own-types + delegated-handler hybrid where the
-// command's structure/inputs are generated locally but its handler delegates to the
-// package — D-W9.7). It is NOT valid on the ROOT command: the root is the binary itself
-// and the generator builds its handler directly, with no delegation seam — so, per the
-// no-silently-ignored-key invariant, reject it there rather than drop it.
+// lintHandlerSource enforces where a `handler:` may appear: on any sub-command, whether a
+// `$ref` node or an inline command, but never on the root. The root is the binary itself and
+// the generator builds its handler directly, with no delegation seam, so a `handler:` there
+// would be silently ignored.
 func lintHandlerSource(spec *Spec) []error {
 	var problems []error
 	if spec.Command.Handler != nil {
@@ -188,12 +177,9 @@ func lintHandlerSource(spec *Spec) []error {
 	return problems
 }
 
-// lintRootAliases rejects aliases (and therefore deprecated_identifiers, their
-// subset) on the ROOT command: the root is reached by invoking the binary —
-// argv[0] is not a routing token — so root aliases dispatch nothing and root
-// deprecated_identifiers can never fire. Declare aliases on sub-commands.
-// (Busybox-style multi-call argv[0] dispatch, if ever wanted, will be its own
-// opt-in feature — never implied by root aliases.)
+// lintRootAliases rejects aliases, and therefore deprecated_identifiers, on the root command:
+// the root is reached by invoking the binary, so argv[0] is not a routing token and a root
+// alias would dispatch nothing.
 func lintRootAliases(spec *Spec) []error {
 	var problems []error
 	if len(spec.Command.Aliases) > 0 {
@@ -211,11 +197,9 @@ func lintRootAliases(spec *Spec) []error {
 	return problems
 }
 
-// lintSiblingCollisions rejects duplicate dispatch tokens among one command's
-// children: sub-command names and aliases, plus remote-command names and
-// aliases, all share a single namespace (dispatch tries sub-commands first, so
-// a colliding remote would be silently shadowed). Generate errors on the
-// command/alias subset of this; validate is the gate.
+// lintSiblingCollisions rejects duplicate dispatch tokens among one command's children:
+// sub-command and remote-command names and aliases share one namespace, and dispatch tries
+// sub-commands first, so a colliding remote would be silently shadowed.
 func lintSiblingCollisions(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -402,20 +386,14 @@ func lintEnvNesting(spec *Spec) []error {
 	return problems
 }
 
-// lintConfigFilesScope enforces the config_files name space and physical-file
-// uniqueness ALONG A CHAIN, matching the runtime cascade (D-W3.1). Logical names
-// are how file: pins and config_source target an entry, so a name must be unique
-// within the cascade reaching a command: declaring it twice on one command, or
-// re-declaring an ancestor's name, is an ERROR — the nearer would shadow the
-// farther under nearest-wins, leaving the pin/source ambiguous. Two entries that
-// resolve to the SAME physical file — within one command or across levels of the
-// chain — are a non-fatal WARNING: the nearer silently shadows the farther, so
-// declare the file once. Sibling chains are independent: reusing a name or file
-// on a different branch is fine.
-// ancestorConfigIndex summarizes the config_files an ancestor chain puts in scope:
-// each logical name → the ancestor label that declared it, and each physical
-// location key → a `"name" on label` description. Any match against these is a
-// violation, so first-seen wins (the nearest ancestor isn't special for blame).
+// lintConfigFilesScope enforces config_files name and physical-file uniqueness along a chain,
+// matching the runtime cascade. Logical names are how file: pins and config_source target an
+// entry, so a duplicate within the cascade reaching a command is an error — the nearer would
+// shadow the farther, leaving the pin ambiguous. Two entries resolving to the same physical
+// file are a warning for the same reason. Sibling chains are independent.
+// ancestorConfigIndex summarizes the config_files an ancestor chain puts in scope: each
+// logical name and physical location mapped to the ancestor that declared it. Any match is a
+// violation, so first-seen wins.
 func ancestorConfigIndex(ancestors []*Command) (names, locs map[string]string) {
 	names, locs = map[string]string{}, map[string]string{}
 	for _, a := range ancestors {
@@ -506,14 +484,11 @@ func configFileLocationKey(cf ConfigurationFile) string {
 	return ""
 }
 
-// lintConfigSource enforces config_source's contract: flag/env inputs only,
-// string-typed, naming a config_files entry IN SCOPE (declared on the command or
-// an ancestor — config_files cascade, D-W3.1), with at most one flag and one env
-// input claiming any entry within a chain (a second claim would silently shadow
-// the first). Claiming inputs cascade too, so a claim conflict spans the chain:
-// an ancestor's flag and this command's flag both claiming one entry collide.
-// Sibling chains are independent (a name reused on a different branch is its own
-// entry), so claims are gathered per chain rather than globally.
+// lintConfigSource enforces config_source's contract: flag and env inputs only, string-typed,
+// naming a config_files entry in scope, with at most one flag and one env input claiming an
+// entry within a chain — a second claim would silently shadow the first. Claims cascade, so an
+// ancestor's flag and this command's flag claiming one entry collide. Sibling chains are
+// independent, so claims are gathered per chain.
 func lintConfigSource(spec *Spec) []error {
 	var problems []error
 	walkChains(spec, func(chain []*Command, path string) {
@@ -588,14 +563,11 @@ var constraintNumericFamily = map[string]bool{
 	"integer": true, "number": true,
 }
 
-// lintConstraintApplicability rejects a constraint declared on a type it can
-// never check (production-readiness R1): numeric bounds on non-numeric types
-// (notably duration/time and imported types — see the message), length/pattern
-// on non-strings, item counts on non-collections. Before this rule, such
-// declarations were accepted and silently ignored at parse time. For arrays
-// the per-value constraints apply to the ELEMENT type, matching the runtime.
-// The stdin channel is exempt: its schema validates the piped DOCUMENT with
-// full JSON-Schema semantics, where every keyword is real.
+// lintConstraintApplicability rejects a constraint declared on a type it can never check:
+// numeric bounds on non-numerics, length or pattern on non-strings, item counts on
+// non-collections. For arrays the per-value constraints apply to the element type, matching
+// the runtime. The stdin channel is exempt: its schema validates the piped document with full
+// JSON Schema semantics, where every keyword is real.
 func lintConstraintApplicability(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -632,12 +604,10 @@ func lintConstraintApplicability(spec *Spec) []error {
 	return problems
 }
 
-// lintPassthrough enforces `passthrough: true`'s contract: every token after
-// the command is a raw positional, so the command can own no flag vocabulary
-// and no descent surface (sub-commands, remote commands, discovery), and its
-// last argument must be a variadic []string — the declared receiver of the raw
-// tokens. Without that receiver every forwarded token would be a parse error,
-// which would make the key an accepted lie.
+// lintPassthrough enforces `passthrough: true`'s contract: every token after the command is a
+// raw positional, so the command can own no flag vocabulary and no descent surface, and its
+// last argument must be a variadic []string to receive the raw tokens. Without that receiver
+// every forwarded token would be a parse error.
 func lintPassthrough(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -668,11 +638,10 @@ func lintPassthrough(spec *Spec) []error {
 	return problems
 }
 
-// lintCountFlags enforces `type: count`'s contract: a count flag is an argv
-// presence counter — the flag takes no value and the generated int field is the
-// occurrence tally, computed rather than parsed. It exists on the flag channel
-// only, and every value-shaped key is rejected: there is no value to default,
-// enumerate, constrain, redact, placeholder, or acquire from elsewhere.
+// lintCountFlags enforces `type: count`'s contract: a count flag takes no value and its
+// generated int field is the occurrence tally. It exists on the flag channel only, and every
+// value-shaped key is rejected — there is no value to default, enumerate, constrain, redact or
+// acquire from elsewhere.
 func lintCountFlags(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -722,13 +691,10 @@ func lintCountFlags(spec *Spec) []error {
 	return problems
 }
 
-// lintPatternCompiles rejects a `pattern` constraint that is not a valid Go
-// regular expression. The runtime's constraint check deliberately tolerates a
-// failed compile (a hand-built Definition is the author's problem), which
-// means a spec-declared typo'd pattern would otherwise SILENTLY never enforce
-// — the worst of both worlds for a validation rule. (Patterns inside stdin/
-// config document schemas are exempt here: their rendered JSON Schemas fail
-// loudly at bind time when invalid.)
+// lintPatternCompiles rejects a `pattern` constraint that is not a valid Go regular
+// expression. The runtime deliberately tolerates a failed compile, so a typo'd pattern would
+// otherwise silently never enforce. Patterns inside stdin and config document schemas are
+// exempt: those fail loudly at bind time.
 func lintPatternCompiles(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -749,7 +715,7 @@ func lintPatternCompiles(spec *Spec) []error {
 
 // lintConfigInputFiles enforces file:'s contract: config inputs only, naming a
 // config_files entry IN SCOPE — declared on the command or an ancestor, since
-// config_files cascade (D-W3.1). The input's value is then read from that file
+// config_files cascade. The input's value is then read from that file
 // ONLY (not the merged precedence chain), including its required.
 func lintConfigInputFiles(spec *Spec) []error {
 	var problems []error
@@ -936,11 +902,9 @@ func lintImportConsistency(spec *Spec) []error {
 	return problems
 }
 
-// lintLocalTimeout rejects a `timeout` declared on any command. A timeout is a
-// remote-only, host-side bound on a dispatched binary (set per remote_commands entry,
-// honored by the remote runtime); on a local command it is never honored, so accepting
-// it would be a silent lie. One problem per offending command, in tree order. The
-// remote_commands[].timeout is a separate field and is left untouched.
+// lintLocalTimeout rejects a `timeout` on a command. A timeout is a remote-only, host-side
+// bound set per remote_commands entry; on a local command it is never honored. The
+// remote_commands timeout is a separate field and is left untouched.
 func lintLocalTimeout(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -1005,11 +969,10 @@ func lintFlagDependencies(spec *Spec) []error {
 	return problems
 }
 
-// lintDuplicateFlagIdentifiers rejects a command that declares the same flag identifier
-// twice — a collision the parser would resolve silently (last/first wins), masking the
-// author's intent. Each flag's effective identifiers are its declared ones, or the
-// auto-derived "--<name>" when it declares none, so both explicit ("-o" on two flags)
-// and derived (two flags whose names both yield "--out") collisions are caught.
+// lintDuplicateFlagIdentifiers rejects a command declaring the same flag identifier twice, a
+// collision the parser would resolve silently. A flag's effective identifiers are its declared
+// ones, or the derived "--<name>" when it declares none, so both explicit and derived
+// collisions are caught.
 func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {
@@ -1038,12 +1001,10 @@ func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 	return problems
 }
 
-// lintSchemaRefs rejects an intra-document "$ref": "#/schemas/X" that points to a schema
-// the document doesn't declare — which would otherwise become an "undefined type X"
-// compile error in the generated code instead of a clear spec error. It walks every
-// place a ref can appear (each command's flag/argument/env/config/stdin input schemas and
-// output schema, plus the document-level schemas themselves, recursing into object
-// properties and array items) and offers the closest declared schema name as a suggestion.
+// lintSchemaRefs rejects an intra-document "$ref": "#/schemas/X" pointing at a schema the
+// document does not declare, which would otherwise surface as an "undefined type X" compile
+// error in the generated code. It walks every place a ref can appear and offers the closest
+// declared name as a suggestion.
 func lintSchemaRefs(spec *Spec) []error {
 	declared := map[string]bool{}
 	names := make([]string, 0, len(spec.Command.Schemas))
@@ -1090,14 +1051,11 @@ func lintSchemaRefs(spec *Spec) []error {
 	return problems
 }
 
-// lintHandlerFilenames rejects collisions and malformed overrides in the per-command
-// handler-stub file names. Codegen writes one stub .go per own (inline) command into
-// the cmd package, named by commandStubFilename — a `filename` override when set, else
-// a path-derived, reserved-name-escaped default. Two commands resolving to the same
-// file would have codegen write one over the other; an override that is not a bare
-// "*.go" name, or that is itself a name the go tool reads specially, would silently
-// break the build. Composed ($ref) commands generate no stub here and are skipped — the
-// walk mirrors the generator's own-command derivation so the two agree.
+// lintHandlerFilenames rejects collisions and malformed overrides in the per-command stub file
+// names. Two commands resolving to one file would have codegen write over itself, and an
+// override that is not a bare "*.go" name, or one the go tool reads specially, would silently
+// break the build. Composed commands generate no stub and are skipped; the walk mirrors the
+// generator's own derivation so the two agree.
 func lintHandlerFilenames(spec *Spec) []error {
 	rootName := spec.Command.Name
 	var problems []error
@@ -1140,18 +1098,14 @@ func lintHandlerFilenames(spec *Spec) []error {
 	return problems
 }
 
-// lintSchemaTypes rejects an input `type:` that cannot become a Go type.
+// lintSchemaTypes rejects an input `type:` that cannot become a Go type. The JSON Schema
+// leaves `type` free-form — Go names, JSON Schema names, rotini's aliases, imported types — so
+// no enum can constrain it, and an unresolvable value would otherwise surface as a raw gofmt
+// error over the whole generated file, naming neither the input nor its line.
 //
-// The JSON Schema deliberately leaves `type` free-form — it accepts Go names (int,
-// []string, map[string]int), JSON Schema names (integer, array, object), rotini's own
-// aliases (count, duration, date) and imported types — so no enum can constrain it and
-// nothing else checks it. An unresolvable value therefore used to reach codegen intact
-// and surface as a raw `gofmt: expected ';', found '-'` over the whole generated file,
-// naming neither the input nor its line in the spec.
-//
-// The test is the honest one: resolve the alias, then require the result to parse as a
-// Go TYPE expression. That accepts every legitimate form (including ones rotini has no
-// vocabulary for, like []uuid.UUID) and rejects only what could not compile.
+// The test resolves the alias, then requires the result to parse as a Go type expression: that
+// accepts every legitimate form, including ones rotini has no vocabulary for, and rejects only
+// what could not compile.
 func lintSchemaTypes(spec *Spec) []error {
 	var problems []error
 	walkCommands(spec, func(c *Command, path string) {

@@ -20,17 +20,12 @@ const (
 	AlignCenter
 )
 
-// Table renders rows of cells as aligned columns.
+// Table renders rows of cells as aligned columns, configured by chaining and rendered with
+// [Table.Render] or [Table.Fprint]. Column widths are measured with [Width], so cells carrying
+// ANSI styling align by what the terminal displays rather than by byte length.
 //
-// It is configured by chaining and rendered with [Table.Render] or
-// [Table.Fprint]. Column widths are measured with [Width], so cells carrying
-// ANSI styling align by what the terminal DISPLAYS rather than by byte length.
-//
-// Terminal width is not detected: an unbounded table renders at its natural
-// width, and a program that wants it fitted passes the budget in with
-// [Table.WithWidth] (Pillar 1 — rotini detects nothing on its own; see
-// [DetectProfile] and [IsTerminal] for the opt-in helpers a caller can use to
-// compute one).
+// Terminal width is not detected: an unbounded table renders at its natural width, and a
+// program that wants it fitted passes the budget in with [Table.WithWidth].
 //
 // The zero value is not usable; start from [NewTable].
 type Table struct {
@@ -58,14 +53,13 @@ func (t *Table) Row(cells ...string) *Table {
 }
 
 // WithAlign sets the per-column alignment, left to right. Columns past the end of
-// aligns keep [AlignLeft]. It returns the receiver to chain.
+// aligns keep [AlignLeft].
 func (t *Table) WithAlign(aligns ...Align) *Table {
 	t.aligns = aligns
 	return t
 }
 
-// WithPadding sets the gap between columns in cells (default 2). It returns the
-// receiver to chain.
+// WithPadding sets the gap between columns in cells (default 2).
 func (t *Table) WithPadding(n int) *Table {
 	if n >= 0 {
 		t.pad = n
@@ -75,7 +69,7 @@ func (t *Table) WithPadding(n int) *Table {
 
 // WithWidth bounds the rendered table to n display cells, truncating the widest
 // columns (with a trailing "…") until it fits. Zero — the default — renders at
-// natural width. It returns the receiver to chain.
+// natural width.
 func (t *Table) WithWidth(n int) *Table {
 	if n >= 0 {
 		t.width = n
@@ -85,7 +79,7 @@ func (t *Table) WithWidth(n int) *Table {
 
 // WithStyler renders the header line through styler's named style (default
 // "header"), leaving body cells unstyled. A table without a styler renders plain,
-// so styling stays optional. It returns the receiver to chain.
+// so styling stays optional.
 func (t *Table) WithStyler(styler *Styler) *Table {
 	t.styler = styler
 	if t.headKey == "" {
@@ -95,7 +89,7 @@ func (t *Table) WithStyler(styler *Styler) *Table {
 }
 
 // WithHeaderStyle names the [Styler] key the header line renders through
-// (default "header"). It returns the receiver to chain.
+// (default "header").
 func (t *Table) WithHeaderStyle(key string) *Table {
 	t.headKey = key
 	return t
@@ -231,10 +225,10 @@ func (t *Table) alignOf(i int) Align {
 	return AlignLeft
 }
 
-// truncate shortens text to at most width display cells, marking the cut with a
-// trailing "…" (which itself costs one cell). Styled text is truncated by
-// DISPLAY width; its escape sequences are dropped along with the runes they
-// would have decorated, since a partial sequence would corrupt the terminal.
+// truncate shortens text to at most width display cells, marking the cut with a trailing "…"
+// that itself costs one cell. Styled text is truncated by display width, its escape sequences
+// dropped along with the runes they would have decorated, since a partial sequence would
+// corrupt the terminal.
 func truncate(text string, width int) string {
 	if width <= 0 || Width(text) <= width {
 		return text

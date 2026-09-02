@@ -34,11 +34,9 @@ var confLints = []func(*Conf) []error{
 	lintFeatureKnobs,
 }
 
-// lintPackageTypes rejects a generate.packages array that names the same `type`
-// twice. The JSON Schema enums the legal type values but cannot enforce
-// at-most-once-per-type across array items (uniqueItems compares whole items, not
-// a single field), so the duplicate — which would make a target's destination
-// ambiguous — is caught here.
+// lintPackageTypes rejects a generate.packages array naming the same `type` twice, which would
+// make a target's destination ambiguous. The JSON Schema cannot express it: uniqueItems
+// compares whole items, not one field.
 func lintPackageTypes(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
@@ -78,11 +76,9 @@ func lintFeatureTypes(conf *Conf) []error {
 	return problems
 }
 
-// lintPackageColocation rejects two package targets that write the SAME file but
-// declare DIFFERENT Go packages — the second write would clobber the first with a
-// conflicting `package` clause. This is inherently cross-item (the JSON Schema sees
-// one item at a time), so it lives here. Targets that omit `package` derive it from
-// the directory and never conflict; only explicit disagreement is flagged.
+// lintPackageColocation rejects two package targets that write the same file but declare
+// different Go packages: the second write would clobber the first with a conflicting `package`
+// clause. Targets that omit `package` derive it from the directory and never conflict.
 func lintPackageColocation(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
@@ -124,13 +120,10 @@ func lintEntrypoint(conf *Conf) []error {
 	return nil
 }
 
-// lintFeatureDirs rejects an enabled, EMBEDDING feature whose explicit
-// embed_dir cannot resolve under an explicitly-set cmd package — //go:embed
-// could never reach it, so generate would fail; validate is the gate. Only
-// embed mode (embed: true) is checked: an inline feature writes no embedded
-// file, and template_dir is never embedded (unconstrained). When either side
-// is unset the defaults guarantee nesting (the default embed_dir is
-// <cmd-package>/renders), so there is nothing to check.
+// lintFeatureDirs rejects an enabled embedding feature whose explicit embed_dir cannot resolve
+// under an explicitly-set cmd package, which //go:embed could never reach. Only embed mode is
+// checked: an inline feature writes no embedded file, and template_dir is never embedded. When
+// either side is unset the defaults guarantee nesting.
 func lintFeatureDirs(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
@@ -161,13 +154,10 @@ func lintFeatureDirs(conf *Conf) []error {
 	return problems
 }
 
-// lintFeatureKnobs WARNS (non-fatal) when an ENABLED feature sets a directory knob
-// its mode ignores — upholding rotini's no-silently-ignored-key principle without
-// failing the build, since the override is inert rather than broken: an `embed_dir`
-// without embed mode (inline content writes no embedded file), a `template_dir`
-// without seeding a template, and — for completion, which has no editable template —
-// `template`/`template_dir` at all. Disabled features are left alone (staged config).
-// Warnings route to the funnel (as warnings); validation still passes.
+// lintFeatureKnobs warns when an enabled feature sets a directory knob its mode ignores: an
+// `embed_dir` without embed mode, a `template_dir` without seeding a template, or either on
+// completion, which has no editable template. It warns rather than fails because the override
+// is inert rather than broken. Disabled features are left alone as staged config.
 func lintFeatureKnobs(conf *Conf) []error {
 	if conf.Generate == nil || len(conf.Generate.Features) == 0 {
 		return nil

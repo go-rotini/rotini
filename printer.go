@@ -51,32 +51,24 @@ func ParseFormat(name string) (Format, error) {
 	return "", UsageError(fmt.Errorf("unknown output format %q — want one of %s", name, strings.Join(names, ", ")))
 }
 
-// Printer is the "data out" complement to [Collect]'s "data in": one writer that
-// renders a value in whichever [Format] the invocation asked for, so a handler
-// computes its result once and stays format-agnostic.
-//
-// It pairs with the spec's command `output:` key, which generates the typed
-// <Prefix>Output struct — the spec declares the SHAPE, the Printer renders it,
-// and neither wires a flag: the command declares its own --output and hands the
-// parsed value to [Printer.WithFormat] (Pillar 1).
+// Printer is the "data out" complement to [Collect]'s "data in": one writer that renders a
+// value in whichever [Format] the invocation asked for, so a handler computes its result once
+// and stays format-agnostic. It pairs with the spec's command `output:` key, which generates
+// the typed <Prefix>Output struct. Neither wires a flag: the command declares its own --output
+// and hands the parsed value to [Printer.WithFormat].
 //
 //	out := rotini.NewPrinter(rtx.Stdout).WithFormat(format)
 //	if err := out.Print(result); err != nil { rtx.RecordError(err) }
 //
 // # Ordering
 //
-// A Printer writes IMMEDIATELY, while [Context.RecordSuccess] and friends are
-// reported by the funnel once the lifecycle has settled — after teardown. So a
-// handler that both prints a result and records an outcome sees them in that order,
-// with any PostRun output in between:
+// A Printer writes immediately, while [Context.RecordSuccess] and friends are reported by the
+// funnel after teardown. A handler that both prints a result and records an outcome therefore
+// sees them in that order:
 //
 //	tasks add "write docs"
-//	TITLE: write docs      <- printed by the Printer, during Run
+//	TITLE: write docs      <- printed during Run
 //	task added             <- recorded, reported after teardown
-//
-// That is the intended model — results are data, outcomes are reported once, in one
-// place — but it is worth knowing before wondering why a success line trails the
-// output it describes.
 //
 // The zero value is not usable; start from [NewPrinter].
 type Printer struct {
@@ -94,7 +86,7 @@ func NewPrinter(w io.Writer) *Printer {
 }
 
 // WithFormat selects the output serialization. An empty format is ignored, so a
-// flag left unset keeps the default. It returns the receiver to chain.
+// flag left unset keeps the default.
 func (p *Printer) WithFormat(f Format) *Printer {
 	if f != "" {
 		p.format = f
@@ -103,15 +95,14 @@ func (p *Printer) WithFormat(f Format) *Printer {
 }
 
 // WithIndent sets the indent unit for JSON (default two spaces); an empty string
-// emits compact JSON. It returns the receiver to chain.
+// emits compact JSON.
 func (p *Printer) WithIndent(indent string) *Printer {
 	p.indent = indent
 	return p
 }
 
-// WithStyler passes a [Styler] to the table backend for its header line; other
-// formats ignore it (styling structured output would corrupt it). It returns the
-// receiver to chain.
+// WithStyler passes a [Styler] to the table backend for its header line; other formats ignore it
+// (styling structured output would corrupt it).
 func (p *Printer) WithStyler(styler *Styler) *Printer {
 	p.styler = styler
 	return p
@@ -195,15 +186,13 @@ func (p *Printer) printTable(v any) error {
 	return err
 }
 
-// tableOf builds a Table from a slice of structs or maps, taking the column
-// order from the first element: struct fields in declaration order, map keys
-// sorted (a map has no inherent order, and unstable columns would make output
-// undiffable).
+// tableOf builds a Table from a slice of structs or maps, taking the column order from the
+// first element: struct fields in declaration order, map keys sorted, since unstable columns
+// would make output undiffable.
 //
-// Unlike the text and JSON formats, a table does NOT honor `omitempty`: columns are
-// a property of the table, not of a row, and dropping one because this particular
-// result set left it blank would make two runs of the same command produce
-// differently-shaped output.
+// Unlike the text and JSON formats it does not honor `omitempty`: columns are a property of
+// the table, not of a row, so dropping one because this result set left it blank would make
+// two runs of the same command produce differently-shaped output.
 func (p *Printer) tableOf(v any) (*Table, bool) {
 	rv := reflect.Indirect(reflect.ValueOf(v))
 	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {

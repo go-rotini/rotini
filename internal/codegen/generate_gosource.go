@@ -14,13 +14,10 @@ import (
 // Go-source AST surgery for renderGoFile: regroup a gofmt'd import block into the
 // std / third-party convention.
 
-// groupImports rewrites a Go source file's single gofmt'd import block into the two
-// conventional groups — standard library first, then third-party — separated by a
-// blank line, and re-formats. gofmt sorts imports but never splits std from
-// third-party (that is goimports' job); the templates emit one merged block, so this
-// restores the idiom without taking on the golang.org/x/tools dependency. A file
-// with fewer than two imports, or whose imports already fall in a single group, is
-// returned gofmt'd but otherwise unchanged.
+// groupImports rewrites a file's single gofmt'd import block into the two conventional groups,
+// standard library then third-party, separated by a blank line. gofmt sorts imports but never
+// splits them — that is goimports' job — so this restores the idiom without taking on the
+// x/tools dependency. A file whose imports already fall in one group is returned unchanged.
 func groupImports(src []byte) ([]byte, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)

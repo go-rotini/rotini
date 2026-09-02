@@ -17,13 +17,10 @@ import (
 // kill timer is never the thing that ends the process.
 var ErrShutdownTimeout = InternalError(errors.New("rotini: shutdown timed out"))
 
-// Service runs a set of long-lived workers until the context ends or one of them
-// fails, then shuts them down in order.
-//
-// It is the daemon shape: the runtime already gives a rotini program a
-// SIGINT/SIGTERM trap that cancels the run context (see [Program.WithSignals]),
-// so a handler that builds a Service on its own ctx gets signal-driven graceful
-// shutdown for free.
+// Service runs a set of long-lived workers until the context ends or one of them fails, then
+// shuts them down in order. It is the daemon shape: the runtime's signal trap already cancels
+// the run context, so a handler that builds a Service on its own ctx gets graceful shutdown
+// for free.
 //
 //	svc := rotini.NewService().
 //	    Go("http", serveHTTP).
@@ -31,9 +28,7 @@ var ErrShutdownTimeout = InternalError(errors.New("rotini: shutdown timed out"))
 //	    WithShutdown(closeDB)
 //	if err := svc.Run(ctx); err != nil { rtx.RecordError(err) }
 //
-// Workers are plain funcs returning an error — not registered callbacks — so a
-// failure travels back the normal Go way instead of into a closure that cannot
-// return it.
+// Workers are plain funcs returning an error, so a failure travels back the normal Go way.
 //
 // The zero value is usable: a Service with no workers runs nothing and returns nil.
 type Service struct {
@@ -53,7 +48,7 @@ func NewService() *Service {
 }
 
 // Go registers a worker to run under [Service.Run]. name identifies it in a
-// failure message. Nothing starts until Run. It returns the receiver to chain.
+// failure message. Nothing starts until Run.
 func (s *Service) Go(name string, fn func(context.Context) error) *Service {
 	if fn != nil {
 		s.workers = append(s.workers, serviceWorker{name: name, fn: fn})
@@ -63,7 +58,7 @@ func (s *Service) Go(name string, fn func(context.Context) error) *Service {
 
 // WithShutdown registers a teardown func run after the workers stop. Hooks run in
 // REVERSE registration order, like deferred calls, so a resource is released
-// before whatever it depends on. It returns the receiver to chain.
+// before whatever it depends on.
 func (s *Service) WithShutdown(fn func(context.Context) error) *Service {
 	if fn != nil {
 		s.shutdown = append(s.shutdown, fn)
@@ -73,23 +68,21 @@ func (s *Service) WithShutdown(fn func(context.Context) error) *Service {
 
 // WithShutdownTimeout bounds how long Run waits for workers to stop and for the
 // shutdown hooks to finish (default 10s). Zero or less means wait forever, which
-// only suits a program with its own outer deadline. It returns the receiver to chain.
+// only suits a program with its own outer deadline.
 func (s *Service) WithShutdownTimeout(d time.Duration) *Service {
 	s.timeout = d
 	return s
 }
 
-// Run starts every worker and blocks until the context is done, a worker fails,
-// or all workers have returned.
+// Run starts every worker and blocks until the context is done, a worker fails, or all workers
+// have returned.
 //
-// The FIRST worker error wins: it cancels the others and is what Run returns,
-// wrapped with the worker's name. A worker returning nil has simply finished and
-// does not disturb the rest. Shutdown hooks run in every case — a clean stop, a
-// failure, and a canceled context alike — so cleanup is not conditional on
-// success.
+// The first worker error wins: it cancels the others and is what Run returns, wrapped with the
+// worker's name. A worker returning nil has simply finished. Shutdown hooks run in every case,
+// so cleanup is not conditional on success.
 //
-// A context canceled from outside is a graceful stop, not a failure: Run returns
-// nil for it, and only a worker's own error or [ErrShutdownTimeout] is an error.
+// A context canceled from outside is a graceful stop rather than a failure, so Run returns nil
+// for it; only a worker's own error or [ErrShutdownTimeout] is an error.
 func (s *Service) Run(ctx context.Context) error {
 	if len(s.workers) == 0 {
 		return s.runShutdown(ctx, nil)

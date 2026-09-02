@@ -8,16 +8,10 @@ import (
 	"github.com/go-rotini/recon"
 )
 
-// This file is the à-la-carte input surface: per-channel acquisition
-// (ParseArgv / ParseEnv / ParseFiles / ParseStdin / Defaults), each returning a
-// sparsely-populated Layer over the same generated inputs type, and
-// OverlayInputs, which merges layers where slice order IS precedence
-// (low → high). The one-call Binder.Bind remains the convenience path over the
-// same machinery; these functions exist so a handler can acquire, inspect,
-// reorder, or replace any channel individually. Each derives its
-// configuration from the Context's bound [BindMeta] (the generated NewProgram
-// binds it under [KeyBindMeta]; a standalone Context binds its own, or none
-// for a CLI without config files):
+// The à-la-carte input surface: per-channel acquisition, each returning a sparsely-populated
+// [Layer] over the generated inputs type, and [OverlayInputs], which merges layers where slice
+// order is precedence. [Collect] is the convenience path over the same machinery; these exist
+// so a handler can acquire, inspect, reorder, or replace any channel individually:
 //
 //	defaults, _ := rotini.Defaults[MycliInputs](rtx)
 //	files, _    := rotini.ParseFiles[MycliInputs](rtx)
@@ -26,32 +20,26 @@ import (
 //	inputs, report := rotini.OverlayInputsP(defaults, files, env, argv)
 //	if err := report.Validate(); err != nil { /* handler owns it */ }
 
-// FieldPath identifies one leaf field of a generated inputs struct by its
-// dot-joined Go field path, e.g. "RotiniGenerate.Flags.ConfFilePath" — the
-// names the user reads in their own generated code. Both the channel parsers
-// (which record presence) and the overlay (which copies set fields) derive it
-// from the same type, so the two sides can never disagree.
+// FieldPath identifies one leaf field of a generated inputs struct by its dot-joined Go field
+// path, e.g. "RotiniGenerate.Flags.ConfFilePath". The channel parsers and the overlay derive
+// it from the same type, so the two can never disagree.
 type FieldPath string
 
-// Provenance records which layer supplied a field's value and the raw text it
-// supplied. Raw is pre-redacted for inputs the spec marks secret — a Report can
-// never leak what an error message must not.
+// Provenance records which layer supplied a field's value and the raw text it supplied. Raw is
+// pre-redacted for inputs the spec marks secret.
 type Provenance struct {
 	Layer string // the supplying layer's name: "defaults", "files", "env", "argv", "stdin", or custom
 	Raw   string // the supplied text ("" when non-textual, e.g. a decoded stdin document); "[redacted]" for secrets
 }
 
-// Presence maps each field a layer actually supplied to its provenance —
-// the set-detection that makes overlay precedence real: a layer's zero-valued,
-// absent fields are skipped, never copied.
+// Presence maps each field a layer actually supplied to its provenance. It is what makes
+// overlay precedence real: a layer's absent fields are skipped, never copied.
 type Presence map[FieldPath]Provenance
 
-// Layer is one input channel's view of the inputs type T: the values it
-// supplied (sparsely populated — everything else is T's zero value) and exactly
-// which fields those are. Layers produced by rotini's channel parsers also
-// carry unexported validation data ([Report.Validate] uses it); a hand-built
-// Layer{Name, Values, Set} participates in overlay and provenance but
-// contributes nothing to validation.
+// Layer is one input channel's view of the inputs type T: the values it supplied — everything
+// else is T's zero value — and exactly which fields those are. Layers from rotini's channel
+// parsers also carry unexported data that [Report.Validate] uses; a hand-built Layer
+// participates in overlay and provenance but contributes nothing to validation.
 type Layer[T any] struct {
 	Name   string
 	Values T
@@ -60,10 +48,8 @@ type Layer[T any] struct {
 	core *layerCore // validation data: nil for hand-built layers
 }
 
-// layerCore is the channel parsers' validation payload: the resolved chain and
-// the raw string values per chain scope, in the same store shape the Parser
-// validates, so a merged Report re-uses the exact validation (and error text)
-// of Parser.Parse / Binder.Bind.
+// layerCore is the channel parsers' validation payload, in the same store shape the Parser
+// validates, so a merged Report reuses the exact validation and error text of [Parser.Parse].
 type layerCore struct {
 	chain       []ResolvedCommand
 	store       *parsedInputs
@@ -72,32 +58,25 @@ type layerCore struct {
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
 
-// Collect is the 95% handler's entire input story: every declared channel —
-// argv, environment, configuration files (declared AND custom BindMeta
-// sources), the stdin payload, defaults — acquired, reconciled in the standard
-// precedence (defaults < files < env < argv), and validated, in one call:
+// Collect is the typical handler's entire input story: every declared channel — argv,
+// environment, configuration files, the stdin payload, defaults — acquired, reconciled in the
+// standard precedence (defaults < files < env < argv), and validated, in one call:
 //
 //	inputs, err := rotini.Collect[MycliDeployInputs](rtx)
 //
-// Configuration comes from the Context's bound [BindMeta] ([KeyBindMeta] —
-// the generated NewProgram binds it; a CLI with nothing to declare needs
-// nothing). It is [Binder.Bind] under the hood; errors are the same
-// data-shaped [*ParseError]s. When the answer to "where did this value come
-// from" matters, use [CollectP].
+// It is [Binder.Bind] under the hood, so errors are the same data-shaped [*ParseError]s and
+// [*BindError]s. Use [CollectP] when "where did this value come from" matters.
 func Collect[T any](rtx *Context) (T, error) {
 	var t T
 	err := binderFor(rtx).Bind(rtx, &t)
 	return t, err
 }
 
-// CollectP is [Collect] with provenance: the same reconciled, validated
-// inputs plus the [Report] that answers Winner/History per field. It rides
-// the per-channel layer machinery ([Defaults], [ParseFiles], [ParseEnv],
-// [ParseArgv], [ParseStdin]) overlaid in the standard precedence — the same
-// values Collect produces (pinned by test), at the cost of acquiring each
-// channel separately. Validation failures return the merged inputs AND the
-// report alongside the error, so a funnel can still say which layer supplied
-// the offending value.
+// CollectP is [Collect] with provenance: the same reconciled, validated inputs plus the
+// [Report] answering Winner and History per field. It overlays the per-channel layers in the
+// standard precedence, producing the same values Collect does at the cost of acquiring each
+// channel separately. A validation failure returns the merged inputs and the report alongside
+// the error, so a funnel can still say which layer supplied the offending value.
 func CollectP[T any](rtx *Context) (T, Report, error) {
 	var zero T
 	defaults, err := Defaults[T](rtx)
@@ -126,51 +105,45 @@ func CollectP[T any](rtx *Context) (T, Report, error) {
 
 // ── channel acquisition ──────────────────────────────────────────────────────.
 
-// ParseArgv parses the command line only — flags and positionals across the
-// resolved chain, exactly as supplied: no defaults, no env/config fallback, and
-// no required/enum validation (validate the overlaid result via
-// [Report.Validate], so a required flag satisfied by another layer passes).
-// Parse failures (unknown flag, missing value) are [ParseError]s.
+// ParseArgv parses the command line only — flags and positionals across the resolved chain,
+// exactly as supplied: no defaults, no fallback, and no required or enum validation. Validate
+// the overlaid result with [Report.Validate], so a required flag satisfied by another layer
+// passes. Parse failures are [ParseError]s.
 func ParseArgv[T any](rtx *Context) (Layer[T], error) {
 	var t T
 	set, core, err := argvLayer(rtx, reflect.ValueOf(&t).Elem())
 	return Layer[T]{Name: "argv", Values: t, Set: set, core: core}, err
 }
 
-// ParseEnv acquires the environment channel: every Env input (explicit
-// `variable:` or recon's SNAKE_UPPER projection of its key), plus the env
-// fallback of any flag that declares a recon key. Channel-owned semantics stay
-// in-channel, exactly as in [Binder.Bind]: a required env input missing or a
-// constraint violation is this call's error.
+// ParseEnv acquires the environment channel: every Env input, by its explicit variable or the
+// SNAKE_UPPER projection of its key, plus the env fallback of any flag that declares a recon
+// key. A missing required input or a constraint violation is this call's error.
 func ParseEnv[T any](rtx *Context) (Layer[T], error) {
 	var t T
 	set, core, err := envLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
 	return Layer[T]{Name: "env", Values: t, Set: set, core: core}, err
 }
 
-// ParseFiles acquires the configuration-files channel: every Config input from
-// the BindMeta sources (declared order = precedence), plus the config fallback
-// of any flag that declares a recon key. Channel-owned semantics (required,
-// constraints) are this call's errors, exactly as in [Binder.Bind].
+// ParseFiles acquires the configuration-files channel: every Config input from the BindMeta
+// sources, declared order being precedence, plus the config fallback of any flag that declares
+// a recon key. Required and constraint failures are this call's errors.
 func ParseFiles[T any](rtx *Context) (Layer[T], error) {
 	var t T
 	set, core, err := filesLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
 	return Layer[T]{Name: "files", Values: t, Set: set, core: core}, err
 }
 
-// ParseStdin acquires the stdin channel: the leaf command's typed payload,
-// decoded per its declared format, schema-validated, and honoring required —
-// exactly the [Binder.Bind] stdin step.
+// ParseStdin acquires the stdin channel: the leaf command's typed payload, decoded per its
+// declared format, schema-validated, and honoring required.
 func ParseStdin[T any](rtx *Context) (Layer[T], error) {
 	var t T
 	set, core, err := stdinLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
 	return Layer[T]{Name: "stdin", Values: t, Set: set, core: core}, err
 }
 
-// Defaults synthesizes the spec's declared defaults as an explicit layer —
-// conventionally layer 0 of the overlay, making "no input at all" visible and
-// testable. Flag and argument defaults come from the resolved chain's
-// Definition; env/config input defaults from their recon `default=` tags.
+// Defaults synthesizes the spec's declared defaults as an explicit layer — conventionally
+// layer 0, which makes "no input at all" visible and testable. Flag and argument defaults come
+// from the resolved chain; env and config defaults from their recon tags.
 func Defaults[T any](rtx *Context) (Layer[T], error) {
 	var t T
 	set, core, err := defaultsLayer(rtx, reflect.ValueOf(&t).Elem())
@@ -179,10 +152,9 @@ func Defaults[T any](rtx *Context) (Layer[T], error) {
 
 // ── overlay ──────────────────────────────────────────────────────────────────.
 
-// OverlayInputs merges layers into one inputs value. Slice order is precedence,
-// low → high: a field set by a later layer wins; a field no layer set stays the
-// zero value; an unset layer field never clobbers a lower layer's value
-// (skip-not-zero). Overlaying an empty layer is the identity.
+// OverlayInputs merges layers into one inputs value. Slice order is precedence, low → high: a
+// field set by a later layer wins, a field no layer set stays the zero value, and an unset
+// layer field never clobbers a lower layer's. Overlaying an empty layer is the identity.
 func OverlayInputs[T any](layers ...Layer[T]) T {
 	out, _ := OverlayInputsP(layers...)
 	return out
@@ -219,9 +191,8 @@ func sortedPaths(p Presence) []FieldPath {
 	return out
 }
 
-// copyFieldByPath copies the field at a dot-joined Go field path from src to
-// dst (same type). Unknown segments are skipped — a stale path in a hand-built
-// layer copies nothing rather than panicking.
+// copyFieldByPath copies the field at a dot-joined path from src to dst. Unknown segments are
+// skipped, so a stale path in a hand-built layer copies nothing rather than panicking.
 func copyFieldByPath(dst, src reflect.Value, path FieldPath) {
 	for seg := range strings.SplitSeq(string(path), ".") {
 		if dst.Kind() != reflect.Struct || src.Kind() != reflect.Struct {
@@ -267,12 +238,10 @@ func (r Report) Fields() []FieldPath {
 	return sortedPaths(r.set)
 }
 
-// Validate runs the same declarative checks [Parser.Parse] applies — required,
-// enum, constraints, flag groups, and flag dependencies — over the merged
-// values, with group/dependency "explicitly set" meaning set by the argv layer.
-// Run it after the overlay so a required flag satisfied by any layer passes.
-// It validates the layers' channel data; hand-built layers contribute values
-// but nothing to validate. A Report from no channel layers validates clean.
+// Validate runs the same declarative checks [Parser.Parse] applies — required, enum,
+// constraints, flag groups and dependencies — over the merged values, with "explicitly set"
+// meaning set by the argv layer. Run it after the overlay so a required flag satisfied by any
+// layer passes. Hand-built layers contribute values but nothing to validate.
 func (r Report) Validate() error {
 	if r.chain == nil || r.store == nil {
 		return nil
@@ -286,10 +255,9 @@ func (r Report) Validate() error {
 	return validateFlagDependencies(r.chain, r.store)
 }
 
-// absorb folds one layer's validation core into the report: later layers'
-// flag values replace earlier ones scope-by-scope (matching the overlay), the
-// argv layer contributes positionals and the argv-set record, and the defaults
-// layer contributes its sparse argument defaults.
+// absorb folds one layer's validation core into the report: later layers' flag values replace
+// earlier ones scope by scope, the argv layer contributes positionals and the argv-set record,
+// and the defaults layer contributes its sparse argument defaults.
 func (r *Report) absorb(core *layerCore) {
 	if core == nil {
 		return
@@ -326,9 +294,8 @@ func (r *Report) absorb(core *layerCore) {
 	}
 }
 
-// finalize pads the merged positionals from the defaults layer's sparse
-// argument defaults — exactly the gap rule the Parser applies: fill from the
-// first unsupplied index, stopping at the first index without a default.
+// finalize pads the merged positionals from the defaults layer, applying the Parser's gap
+// rule: fill from the first unsupplied index, stopping at the first index without a default.
 func (r *Report) finalize() {
 	if r.store == nil || r.argDefs == nil || len(r.chain) == 0 {
 		return
@@ -487,11 +454,9 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 	return channelLayer(v, chain, "env", "Env", envReg, flagReg, nil)
 }
 
-// filesLayer acquires the config-files channel (Config structs + flag
-// config-fallbacks) into v. config_source paths are honored here too: the
-// argv+env phase is re-read best-effort to learn where the files channel
-// should look (a malformed argv contributes nothing — ParseArgv owns
-// reporting it).
+// filesLayer acquires the config-files channel into v. config_source paths are honored here
+// too: argv and env are re-read best-effort to learn where the files channel should look, and
+// a malformed argv contributes nothing — [ParseArgv] owns reporting it.
 func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
@@ -509,10 +474,9 @@ func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 	return channelLayer(v, chain, "files", "Config", cfg.merged, cfg.merged, cfg)
 }
 
-// channelLayer is the shared env/files core: recon-bind each command's channel
-// struct (required + defaults are recon's contract), constraint-check provided
-// values, fill flag fallbacks for recon-keyed flags, and record presence for
-// everything the channel actually supplied.
+// channelLayer is the shared env/files core: recon-bind each command's channel struct,
+// constraint-check the provided values, fill flag fallbacks, and record presence for
+// everything the channel supplied.
 func channelLayer(v reflect.Value, chain []ResolvedCommand, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs) (Presence, *layerCore, error) {
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
@@ -534,9 +498,8 @@ func channelLayer(v reflect.Value, chain []ResolvedCommand, layerName, structNam
 	return set, &layerCore{chain: chain, store: store}, nil
 }
 
-// fillChannelStruct binds one command's channel struct (Env/Config/…) from the
-// registry, validates it, and records where each field's value came from. A command
-// that declares no such struct is skipped.
+// fillChannelStruct binds one command's channel struct from the registry, validates it, and
+// records where each field's value came from.
 func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, layerName string, reg *recon.Registry, cfg *cfgRegs) error {
 	cs := ci.FieldByName(structName)
 	if !cs.IsValid() || cs.Kind() != reflect.Struct {
@@ -570,9 +533,8 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 	return nil
 }
 
-// recordChannelField records the provenance of one channel field: which layer supplied
-// it and its raw value, redacted when the input is declared secret. A field pinned to
-// one configuration file (cfgfile) is read from that file's registry alone.
+// recordChannelField records which layer supplied one channel field and its raw value,
+// redacted when the input is secret. A pinned field is read from its own file's registry alone.
 func recordChannelField(set Presence, ci reflect.Value, topName, structName, layerName, fieldName string, reg *recon.Registry, cfg *cfgRegs, nested map[string]bool) {
 	tag := taggedFieldTag(ci, structName, fieldName)
 	body := tag.Get("recon")
@@ -604,9 +566,8 @@ func recordChannelField(set Presence, ci reflect.Value, topName, structName, lay
 	}
 }
 
-// recordFlagFallbacks fills the flags that declare a recon key — a flag whose value
-// may also come from this channel — and records both the provenance and the raw text,
-// so a later argv layer can still override it.
+// recordFlagFallbacks fills the flags that declare a recon key and records their provenance
+// and raw text, so a later argv layer can still override them.
 func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []ResolvedCommand, scope int, topName, layerName string, flagReg *recon.Registry) {
 	eachTaggedField(ci, "Flags", func(fieldName, logical string, f reflect.Value) {
 		key := reconKey(taggedFieldTag(ci, "Flags", fieldName).Get("recon"))
@@ -667,9 +628,8 @@ func layerChain(rtx *Context) ([]ResolvedCommand, error) {
 	return chain, nil
 }
 
-// walkCommandStructs visits each per-command CommandInputs field of a generated
-// inputs struct with its Go field name and chain scope index, aligned at the
-// leaf exactly like bindInputs.
+// walkCommandStructs visits each per-command CommandInputs field with its Go field name and
+// chain scope index, aligned at the leaf exactly like bindInputs.
 func walkCommandStructs(v reflect.Value, chain []ResolvedCommand, visit func(topName string, scope int, ci reflect.Value)) {
 	if v.Kind() != reflect.Struct {
 		return
@@ -717,9 +677,8 @@ func taggedFieldTag(ci reflect.Value, structName, fieldName string) reflect.Stru
 	return f.Tag
 }
 
-// argPresence records presence for the positional-argument fields that
-// received values, mirroring bindArgs' index mapping (a trailing []string
-// absorbs the rest).
+// argPresence records presence for the positional fields that received values, mirroring
+// bindArgs' index mapping.
 func argPresence(set Presence, layerName, topName string, ci reflect.Value, frame ResolvedCommand, args []string) {
 	if len(args) == 0 {
 		return

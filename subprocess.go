@@ -42,12 +42,10 @@ type Line struct {
 	Text   string
 }
 
-// SubprocessError reports that a subprocess failed: it could not be started, or
-// it exited non-zero, or its deadline passed. The [SubprocessError.ExitCode] is
-// the process's own status (-1 when it never ran or was killed).
-//
-// It is categorized [ErrInternal] — a program that shells out owns the command it
-// chose — and carries the underlying *exec.ExitError for [errors.As].
+// SubprocessError reports that a subprocess could not be started, exited non-zero, or passed
+// its deadline. ExitCode is the process's own status, -1 when it never ran or was killed. It
+// is [ErrInternal] — a program that shells out owns the command it chose — and carries the
+// underlying *exec.ExitError for errors.As.
 type SubprocessError struct {
 	Name     string
 	Args     []string
@@ -83,9 +81,9 @@ func firstLine(s string) string {
 	return first
 }
 
-// Subprocess runs an external command with streamed output, environment and
-// working-directory control, and a timeout — the ergonomic [exec.Cmd] wrapper a
-// CLI reaches for when it shells out.
+// Subprocess runs an external command with streamed output, environment and working-directory
+// control, and a timeout — the [exec.Cmd] wrapper a CLI reaches for when it shells out, whose
+// failures quote the child's stderr instead of "exit status 1".
 //
 // The zero value is not usable; start from [NewSubprocess].
 type Subprocess struct {
@@ -106,36 +104,31 @@ func NewSubprocess(name string, args ...string) *Subprocess {
 	return &Subprocess{name: name, args: args, inherit: true}
 }
 
-// WithDir sets the working directory (default: the parent's). It returns the
-// receiver to chain.
+// WithDir sets the working directory (default: the parent's).
 func (s *Subprocess) WithDir(dir string) *Subprocess { s.dir = dir; return s }
 
-// WithEnv adds "KEY=VALUE" entries on top of the inherited environment. It
-// returns the receiver to chain.
+// WithEnv adds "KEY=VALUE" entries on top of the inherited environment.
 func (s *Subprocess) WithEnv(entries ...string) *Subprocess {
 	s.env = append(s.env, entries...)
 	return s
 }
 
 // WithoutParentEnv drops the inherited environment, so the child sees only what
-// [Subprocess.WithEnv] added. It returns the receiver to chain.
+// [Subprocess.WithEnv] added.
 func (s *Subprocess) WithoutParentEnv() *Subprocess { s.inherit = false; return s }
 
-// WithStdin gives the child an input stream (default: no input, so a child that
-// reads stdin sees EOF rather than blocking on the parent's terminal). It returns
-// the receiver to chain.
+// WithStdin gives the child an input stream (default: no input, so a child that reads stdin sees
+// EOF rather than blocking on the parent's terminal).
 func (s *Subprocess) WithStdin(r io.Reader) *Subprocess { s.stdin = r; return s }
 
-// WithStdout streams the child's stdout to w as it is produced. It returns the
-// receiver to chain.
+// WithStdout streams the child's stdout to w as it is produced.
 func (s *Subprocess) WithStdout(w io.Writer) *Subprocess { s.stdout = w; return s }
 
-// WithStderr streams the child's stderr to w as it is produced. It returns the
-// receiver to chain.
+// WithStderr streams the child's stderr to w as it is produced.
 func (s *Subprocess) WithStderr(w io.Writer) *Subprocess { s.stderr = w; return s }
 
 // WithTimeout kills the child if it has not exited within d. Zero — the default —
-// means no deadline beyond the context's. It returns the receiver to chain.
+// means no deadline beyond the context's.
 func (s *Subprocess) WithTimeout(d time.Duration) *Subprocess {
 	if d > 0 {
 		s.timeout = d
@@ -163,12 +156,9 @@ func (s *Subprocess) cmd(ctx context.Context) (*exec.Cmd, context.CancelFunc) {
 	return cmd, cancel
 }
 
-// Run executes the command and returns its exit code. A non-zero exit is BOTH a
-// code and a [*SubprocessError], so a caller can branch on the number or just
-// check the error.
-//
-// Streams not given a writer are captured, so a failure's message can quote the
-// child's stderr instead of the useless "exit status 1".
+// Run executes the command and returns its exit code. A non-zero exit is both a code and a
+// [*SubprocessError], so a caller can branch on the number or just check the error. Streams
+// given no writer are captured, so a failure can quote the child's stderr.
 func (s *Subprocess) Run(ctx context.Context) (int, error) {
 	cmd, cancel := s.cmd(ctx)
 	defer cancel()
@@ -214,20 +204,17 @@ func drain(r io.Reader) {
 	}
 }
 
-// reap waits for a child we deliberately killed, releasing its process entry.
-// The status is meaningless — the kill was ours, and the consumer has stopped
-// iterating — so it is checked and dropped here rather than surfaced to a caller
-// that already moved on.
+// reap waits for a child we deliberately killed, releasing its process entry. The status is
+// meaningless — the kill was ours — so it is dropped rather than surfaced.
 func reap(cmd *exec.Cmd) {
 	if err := cmd.Wait(); err != nil {
 		return
 	}
 }
 
-// Lines runs the command and yields its output one line at a time, tagged with
-// the stream it came from — an iterator rather than a pair of callbacks, so a
-// caller can `break` out, and errors arrive in the loop instead of in a closure
-// that cannot return one.
+// Lines runs the command and yields its output one line at a time, tagged with the stream it
+// came from — an iterator rather than a pair of callbacks, so a caller can break out and
+// errors arrive in the loop rather than in a closure that cannot return one.
 //
 //	for line, err := range proc.Lines(ctx) {
 //	    if err != nil { return err }
@@ -262,11 +249,9 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 		lines := make(chan Line)
 		var wg sync.WaitGroup
 
-		// Scan() returns false for BOTH end-of-stream and a read failure, so the
-		// error has to be checked after the loop — otherwise a line past the 1MB cap
-		// (bufio.ErrTooLong) or an I/O fault would silently truncate the output and
-		// the run would still look successful. First failure wins; it is reported
-		// after the loop, alongside the exit status.
+		// Scan returns false for both end-of-stream and a read failure, so the error must be
+		// checked after the loop: otherwise a line past the 1MB cap, or an I/O fault, would
+		// silently truncate the output and the run would still look successful.
 		var scanOnce sync.Once
 		var scanErr error
 		scan := func(r io.Reader, stream Stream) {
@@ -282,10 +267,9 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 			}
 			if err := sc.Err(); err != nil {
 				scanOnce.Do(func() { scanErr = err })
-				// Ask the child to stop, then keep draining. Cancellation alone is
-				// not enough: it kills the process rotini started, not the rest of a
-				// shell pipeline, and cmd.Wait blocks until the pipe is read to EOF.
-				// A writer with nobody reading would hang the whole call.
+				// Ask the child to stop, then keep draining. Cancellation alone is not
+				// enough: it kills the process rotini started, not the rest of a shell
+				// pipeline, and cmd.Wait blocks until the pipe is read to EOF.
 				stop()
 				drain(r)
 			}

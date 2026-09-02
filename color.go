@@ -35,11 +35,9 @@ const (
 	ANSIColorBrightWhite
 )
 
-// Profile is how much color a terminal can render. It is a CEILING: a [Style]
-// carrying a 24-bit color renders it downsampled to whatever its profile allows, so
-// the same style is safe to reuse across terminals.
-//
-// rotini never sets a profile for you — see [DetectProfile] for the opt-in guess.
+// Profile is how much color a terminal can render. It is a ceiling: a [Style] carrying a
+// 24-bit color renders it downsampled to whatever the profile allows, so the same style is
+// safe to reuse across terminals. rotini never sets one for you — see [DetectProfile].
 type Profile int
 
 // The color profiles, ordered from least to most capable. Each renders a color by

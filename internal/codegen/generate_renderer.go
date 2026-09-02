@@ -1,10 +1,8 @@
 package codegen
 
-// This file owns template parsing and rendering: every generated artifact —
-// seed spec/conf files, the main.go entrypoint, handler stubs and seeds, the
-// handlers rollup, the framework (rotini) file, and the help/man doc pages —
-// renders through here. Reading inputs lives in reader.go; writing outputs
-// lives in writer.go.
+// Template parsing and rendering: every generated artifact — seed spec/conf files, the
+// entrypoint, handler stubs, the handlers rollup, the framework file, and the doc pages —
+// renders through here.
 
 import (
 	"bytes"
@@ -43,11 +41,9 @@ var (
 	templateMarkdown string
 )
 
-// convert transcodes a rendered YAML document to the target serialization.
-// YAML — the authoring format — is returned verbatim; json and jsonc become
-// pretty-printed JSON (a valid JSONC document); toml is transcoded through
-// JSON. Conversion goes through an untyped value, so it carries every field
-// the template declares.
+// convert transcodes a rendered YAML document to the target serialization: YAML is returned
+// verbatim, json and jsonc become pretty-printed JSON, and toml is transcoded through JSON.
+// Conversion goes through an untyped value, so it carries every field the template declares.
 func convert(yamlBytes []byte, target fileFormat) ([]byte, error) {
 	if target == formatYAML {
 		return yamlBytes, nil
@@ -202,10 +198,10 @@ type templateHandlersImport struct {
 type templateHandlersMethod struct {
 	Method         string
 	Composed       bool
-	Passthrough    bool   // W9: delegate via alias.method() instead of alias.Handlers().method()
+	Passthrough    bool   // delegate via alias.method() instead of alias.Handlers().method()
 	HandlerType    string // own commands: the local handler struct name
 	DelegateAlias  string // composed commands: the child import alias
-	DelegateMethod string // composed commands: the child's ProgramHandlers method (or W9 convention)
+	DelegateMethod string // composed commands: the child's ProgramHandlers method, or the convention
 }
 
 // templateInputField is one generated input struct field (flag, argument, env,
@@ -218,11 +214,9 @@ type templateInputField struct {
 	Comment string // optional trailing line-comment ("" for none)
 }
 
-// inputFieldTag assembles a complete struct-tag literal for a generated input
-// field from its fieldDef: the rotini tag plus the optional recon / env /
-// envnest / cfgfile / constraint tags. Constraint is pre-rendered
-// space-separated tags (e.g. `min:"1" max:"65535"`); every part but Tag may
-// be empty.
+// inputFieldTag assembles a generated input field's complete struct-tag literal: the rotini
+// tag plus the optional recon, env, envnest, cfgfile and constraint tags. Every part but Tag
+// may be empty.
 func inputFieldTag(f fieldDef) string {
 	tag := fmt.Sprintf("rotini:%q", f.Tag)
 	if f.Recon != "" {

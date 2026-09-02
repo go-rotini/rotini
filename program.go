@@ -12,21 +12,15 @@ import (
 	"syscall"
 )
 
-// trapSignals are the OS signals rotini's handler traps when signal handling is active —
-// by default whenever the caller supplies no context, and always under [Program.WithSignals]
-// (which may also override the set). It is a package var, not a constant, so a white-box
-// test can swap in a benign signal. The default action on the first signal is a graceful
-// shutdown (cancel the run context + halt the lifecycle so teardown runs); a second signal
-// forces exit with forceExitCode.
+// trapSignals are the signals trapped when signal handling is active. It is a var, not a
+// const, so a white-box test can swap in a benign signal.
 var trapSignals = []os.Signal{os.Interrupt, syscall.SIGTERM}
 
-// forceExitCode is the status a second signal exits with (128 + SIGINT), the
-// conventional "interrupted" code.
+// forceExitCode is the status a second signal exits with (128 + SIGINT).
 const forceExitCode = 130
 
-// signalExitCode maps a trapped signal to its conventional exit status, 128 + signum
-// (SIGINT→130, SIGTERM→143, SIGHUP→129, …). A signal carrying no numeric value falls back
-// to forceExitCode.
+// signalExitCode maps a trapped signal to 128 + signum, falling back to forceExitCode for
+// a signal carrying no numeric value.
 func signalExitCode(s os.Signal) int {
 	if sig, ok := s.(syscall.Signal); ok {
 		return 128 + int(sig)
@@ -34,10 +28,8 @@ func signalExitCode(s os.Signal) int {
 	return forceExitCode
 }
 
-// signalTrapMode resolves whether rotini installs its signal trap, decoupling that choice
-// from context ownership. The zero value is signalAuto — trap iff the caller supplied no
-// context (the historical behavior). [Program.WithoutSignalHandling] forces it off;
-// [Program.WithSignals] forces it on (with a custom signal set).
+// signalTrapMode decides whether rotini installs its signal trap, independently of who owns
+// the context.
 type signalTrapMode int
 
 const (
@@ -46,24 +38,16 @@ const (
 	signalOn                         // WithSignals(...): always trap
 )
 
-// ExitCode returns a context-cancellation cause that tells rotini which process
-// exit code to use when that cancellation halts the run. Pass it to the cancel
-// function of a [Program.WithContext] context (Go 1.21+):
+// ExitCode returns a context-cancellation cause that sets the process exit code used when
+// that cancellation halts the run:
 //
 //	ctx, cancel := context.WithCancelCause(parent)
 //	prog.WithContext(ctx)
 //	cancel(rotini.ExitCode(3)) // exits 3
 //
-// It also composes with timeouts, e.g. exit 124 on a deadline:
-//
-//	ctx, cancel := context.WithTimeoutCause(parent, 5*time.Second, rotini.ExitCode(124))
-//
-// A handler reaches the same cancel function via the registry — bind it in main
-// (`Bind("cancel", cancel)`) and call `rtx.MustGet[context.CancelCauseFunc](// "cancel")(rotini.ExitCode(3))`. Canceling WITHOUT an ExitCode cause (a plain
-// cancel or deadline) still halts cleanly, with the code falling through to the
-// normal resolution (0 unless a handler recorded an error or fault). Cancellation
-// is cooperative — it never preempts a running hook — and teardown always runs.
-// See [Program.WithContext].
+// Canceling without an ExitCode cause still halts cleanly, with the code falling through to
+// the normal resolution. Cancellation never preempts a running hook, and teardown always
+// runs. See [Program.WithContext].
 func ExitCode(code int) error { return exitCodeError{code: code} }
 
 // exitCodeError carries a process exit code as a context-cancellation cause.
@@ -73,10 +57,8 @@ func (e exitCodeError) Error() string {
 	return fmt.Sprintf("rotini: run canceled (exit code %d)", e.code)
 }
 
-// canceledExitCode resolves the exit code recorded when a canceled run context
-// halts the lifecycle: the code carried by the cancellation cause — the caller's
-// cancel (via [ExitCode]) or the default signal trap attach one — or 0 (a clean
-// stop that defers to the normal exit-code resolution) when none was.
+// canceledExitCode returns the code carried by a run context's cancellation cause, or 0 when
+// it carries none.
 func canceledExitCode(ctx context.Context) int {
 	if ec, ok := errors.AsType[exitCodeError](context.Cause(ctx)); ok {
 		return ec.code
@@ -84,17 +66,15 @@ func canceledExitCode(ctx context.Context) int {
 	return 0
 }
 
-// Program is a rotini CLI, ready to run: the compiled command tree ([Definition]),
-// the handlers that implement it, and every configurable seam around them.
+// Program is a rotini CLI ready to run: the compiled command tree ([Definition]), the
+// handlers that implement it, and the seams around them. The generated entrypoint builds one
+// with [NewProgram] and calls [Program.Execute]; streams, the exit action, signal handling,
+// the outcome funnel, and the resolve and lifecycle phases are each optional overrides. Every
+// With method returns the receiver, so they chain.
 //
-// The generated entrypoint builds one with [NewProgram] and calls [Program.Execute].
-// Everything else is optional: streams ([Program.WithStdout] and friends), the exit
-// action ([Program.WithExit]), signal handling, the outcome funnel, and the resolve
-// and lifecycle phases can each be replaced without touching a handler.
-//
-// A Program is reusable. [Program.Run] dispatches one invocation and returns instead
-// of exiting, giving each call a fresh [Context], which is what lets a [REPL], a
-// [StdioServer] or a test drive the same program many times over.
+// A Program is reusable: [Program.Run] dispatches one invocation and returns instead of
+// exiting, giving each call a fresh [Context]. That is what lets a [REPL], a [StdioServer] or
+// a test drive the same program many times.
 //
 // The zero value is not usable; start from [NewProgram].
 type Program struct {
@@ -102,32 +82,24 @@ type Program struct {
 	args      []string
 	def       Definition
 	handlers  any
-	rtx       *Context   // seed registry: Program.Bind lands here, and each run's Context is seeded from it
-	funnelFn  FunnelFunc // the one outcome funnel (all recorded channels); nil → defaultFunnel
-	resolver  Resolver   // resolve phase override; nil → DefaultResolver
-	lifecycle Lifecycle  // run-phase plan override; nil → DefaultLifecycle
+	rtx       *Context   // seed registry: Program.Bind lands here; each run's Context clones it
+	funnelFn  FunnelFunc // nil → defaultFunnel
+	resolver  Resolver   // nil → DefaultResolver
+	lifecycle Lifecycle  // nil → DefaultLifecycle
 	stdin     io.Reader
 	stdout    io.Writer
 	stderr    io.Writer
 	exit      func(int) // terminal action for Execute; defaults to os.Exit
-	// panicForward: when true (default), a recovered panic halts forward progress but lets
-	// teardown still run; when false, a recovered panic hard-stops, skipping remaining teardown.
-	panicForward bool
-	// panicRecover: when true (default), a hook panic is recovered and routed to the funnel; when
-	// false, hooks run unguarded so a panic propagates raw.
-	panicRecover bool
-	// signalMode resolves whether the SIGINT/SIGTERM trap is installed, INDEPENDENTLY of
-	// whether rotini owns the context (signalAuto = trap iff no WithContext). signalSet is the
-	// signals trapped when on; empty falls back to trapSignals.
-	signalMode signalTrapMode
-	signalSet  []os.Signal
+
+	panicForward bool           // does teardown run after a panic? See WithPanicForward.
+	panicRecover bool           // is a panic funneled or re-raised? See WithPanicRecover.
+	signalMode   signalTrapMode // see WithSignals / WithoutSignalHandling
+	signalSet    []os.Signal    // signals trapped when on; empty → trapSignals
 }
 
-// NewProgram wires a generated program's command tree (the generated [Definition]) and
-// its aggregate handler set (the generated ProgramHandlers implementation) to the
-// rotini runtime. handlers is any so the runtime need not import the generated
-// framework package; dispatch resolves the per-command handlers from it at
-// execution time, via the Handler names recorded in def.
+// NewProgram wires a generated command tree and its aggregate handler set to the runtime.
+// handlers is any so the runtime need not import the generated package; dispatch resolves the
+// per-command handlers from it by the Handler names recorded in def.
 func NewProgram(def Definition, handlers any) *Program {
 	return &Program{
 		args:         os.Args[1:],
@@ -143,11 +115,9 @@ func NewProgram(def Definition, handlers any) *Program {
 	}
 }
 
-// WithStdin overrides the program's standard-input stream (defaults to os.Stdin) — the
-// source a handler reads from via [Context.Stdin], and the source the Binder decodes a
-// stdin channel from. Supply a reader (e.g. strings.NewReader) to drive an end-to-end test
-// without piping real os.Stdin, or to embed rotini reading from somewhere else. A nil
-// reader is ignored. It returns the receiver to chain.
+// WithStdin overrides the program's standard input (default os.Stdin) — what a handler reads
+// via [Context.Stdin] and what the Binder decodes a stdin channel from. A nil reader is
+// ignored.
 func (p *Program) WithStdin(r io.Reader) *Program {
 	if r != nil {
 		p.stdin = r
@@ -155,9 +125,8 @@ func (p *Program) WithStdin(r io.Reader) *Program {
 	return p
 }
 
-// WithStdout overrides the program's standard-output stream (defaults to os.Stdout) —
-// the destination for the runtime's own writes (help/completion output, usage). A nil
-// writer is ignored. It returns the receiver to chain.
+// WithStdout overrides the program's standard output (default os.Stdout), where the runtime
+// writes help, completion output and usage. A nil writer is ignored.
 func (p *Program) WithStdout(w io.Writer) *Program {
 	if w != nil {
 		p.stdout = w
@@ -165,9 +134,8 @@ func (p *Program) WithStdout(w io.Writer) *Program {
 	return p
 }
 
-// WithStderr overrides the program's standard-error stream (defaults to os.Stderr) — the
-// destination for the runtime's own diagnostics (dispatch errors, the default funnel). A
-// nil writer is ignored. It returns the receiver to chain.
+// WithStderr overrides the program's standard error (default os.Stderr), where the runtime
+// writes its diagnostics and the default funnel reports. A nil writer is ignored.
 func (p *Program) WithStderr(w io.Writer) *Program {
 	if w != nil {
 		p.stderr = w
@@ -175,11 +143,9 @@ func (p *Program) WithStderr(w io.Writer) *Program {
 	return p
 }
 
-// WithExit overrides the terminal action [Program.Execute] takes with the resolved exit
-// code — defaults to [os.Exit]. Supply a recording function to capture the code without
-// terminating the process (a test), or a custom exit when embedding rotini in a larger
-// program/REPL. If the supplied function returns, Execute returns to its caller. A nil
-// function is ignored. It returns the receiver to chain.
+// WithExit overrides what [Program.Execute] does with the resolved exit code (default
+// [os.Exit]) — supply a recording function to capture the code without terminating. If fn
+// returns, Execute returns to its caller. A nil function is ignored.
 func (p *Program) WithExit(fn func(int)) *Program {
 	if fn != nil {
 		p.exit = fn
@@ -187,36 +153,30 @@ func (p *Program) WithExit(fn func(int)) *Program {
 	return p
 }
 
-// WithPanicForward controls whether teardown runs when a hook panics. The default is true: a
-// panic in a hook halts forward progress (no further setup/PreRun/Run) but every begun setup
-// hook's teardown (PostRun/CascadingPostRun) still runs — cleanup on failure, mirroring how
-// `defer`s run during a panic unwind. Pass false for a HARD STOP: remaining teardown is SKIPPED
-// (as a hard [Context.Exit] would).
+// WithPanicForward controls whether teardown runs when a hook panics. The default, true, halts
+// forward progress but still runs every begun setup hook's teardown, mirroring how defers run
+// during a panic unwind. Pass false to skip the remaining teardown, as a hard [Context.Exit]
+// would.
 //
-// Where the panic ultimately goes — the funnel ([Program.WithFunnel], the default) or raw to
-// the caller — is the separate [Program.WithPanicRecover] knob; the two compose. Keep forward on
-// when teardown must release resources / roll back regardless of a panic; turn it off when a
-// panic means the program is too broken to clean up safely (e.g. a wiring fault). The exit code
-// is never masked to 0. It returns the receiver to chain.
+// Where the panic goes is the separate [Program.WithPanicRecover] knob; the two compose.
 func (p *Program) WithPanicForward(enabled bool) *Program {
 	p.panicForward = enabled
 	return p
 }
 
-// WithPanicRecover controls where a hook panic ultimately goes. The default is true: every hook
-// panic is recovered and routed to the funnel ([Program.WithFunnel]), so consumers of the built
-// CLI never see a raw stack dump. Pass false to re-raise the panic RAW to the caller instead of
-// funneling it — the original value crashes the process (exit 2, unfunneled), plain-Go behavior, for e.g.
-// embedding rotini under your own top-level recover, a crash reporter, or debugging.
+// WithPanicRecover controls where a hook panic goes. The default, true, recovers it and routes
+// it to the funnel, so users of the built CLI never see a raw stack dump. Pass false to re-raise
+// it to the caller instead — for embedding rotini under your own recover, a crash reporter, or
+// debugging.
 //
-// It composes with [Program.WithPanicForward], which still decides teardown:
-//   - recover=false, forward=true  → teardown runs, THEN the panic is re-raised (its stack roots
+// It composes with [Program.WithPanicForward]:
+//   - recover=false, forward=true  → teardown runs, then the panic is re-raised (its stack roots
 //     at the re-raise, not the original site).
-//   - recover=false, forward=false → "panic now": the hook runs unguarded, so the panic
-//     propagates immediately with its ORIGINAL stack, skipping teardown.
+//   - recover=false, forward=false → the hook runs unguarded, so the panic propagates
+//     immediately with its original stack, skipping teardown.
 //
-// Note: rotini can only recover panics in the hook goroutine — a panic in a goroutine a handler
-// spawned crashes regardless. It returns the receiver to chain.
+// Only panics on the hook goroutine can be recovered; one in a goroutine a handler spawned
+// crashes regardless.
 func (p *Program) WithPanicRecover(enabled bool) *Program {
 	p.panicRecover = enabled
 	return p
@@ -230,29 +190,19 @@ func (p *Program) WithArgs(args []string) *Program {
 	return p
 }
 
-// WithContext sets the base [context.Context] threaded to every lifecycle hook (and to
-// the funnel and any remote sub-command exec), so a caller — a server, a test,
-// a parent process — can cancel or time-bound the whole run. A nil context is ignored.
+// WithContext sets the base context threaded to every lifecycle hook, the funnel, and any
+// remote exec, so a caller can cancel or time-bound the whole run. A nil context is ignored.
 //
-// Cancellation is cooperative: it cannot preempt a hook that ignores it (a handler
-// observes it via its ctx.Done()), but once the context is canceled rotini starts no
-// further setup hook (CascadingPreRun), PreRun, or Run — and teardown (PostRun/
-// CascadingPostRun for every begun setup hook) still runs, in reverse. Attach the process
-// exit code to the cancellation with [ExitCode] — e.g. cancel(rotini.ExitCode(3)) via a
-// [context.WithCancelCause]/[context.WithTimeoutCause] function; without one, a canceled
-// run stops cleanly and the exit code falls through to the normal resolution (0 unless a
-// handler recorded an error). A handler can cancel the run by holding this context's cancel
-// function — bind it (`Bind("cancel", cancel)`) and call it, e.g.
-// `rtx.MustGet[context.CancelCauseFunc]("cancel")(rotini.ExitCode(3))` — or, to stop without
-// canceling the context (leaving it live for teardown), use [Context.SignalExit]/[Context.Exit].
+// Cancellation is cooperative — it cannot preempt a hook that ignores it — but once the
+// context is canceled rotini starts no further forward hook, and teardown for every begun
+// setup hook still runs in reverse. Attach the process exit code with [ExitCode]; without one
+// the code falls through to the normal resolution. To stop without canceling the context, use
+// [Context.SignalExit] or [Context.Exit].
 //
-// By default, supplying a context also opts OUT of rotini's signal trap (the caller owns
-// signal handling — e.g. via [signal.NotifyContext] on the context it passes, the
-// recommended path for graceful user-owned shutdown, since the caller then holds the cancel
-// that halts the run). This is the AUTO policy, not a hard coupling: [Program.WithSignals]
-// re-enables the trap on top of a supplied context (rotini derives a cancelable child to
-// drive it), and [Program.WithoutSignalHandling] suppresses the trap without a context. With
-// no WithContext, rotini installs its default trap — see [Program.Execute].
+// Supplying a context also opts out of rotini's signal trap by default, on the assumption that
+// the caller owns signals (typically via [signal.NotifyContext], which leaves it holding the
+// cancel that halts the run). [Program.WithSignals] re-enables the trap on top of a supplied
+// context; [Program.WithoutSignalHandling] suppresses it without one.
 func (p *Program) WithContext(ctx context.Context) *Program {
 	if ctx != nil {
 		p.ctx = ctx
@@ -260,32 +210,24 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 	return p
 }
 
-// WithoutSignalHandling suppresses rotini's default SIGINT/SIGTERM trap WITHOUT requiring
-// the caller to surrender the context: rotini still owns a cancelable run context, but
-// installs no signal.Notify, so the program's own signal handling (in main or a handler) is
-// the only one. It is the seam for "I own signals" in the default (rotini-owned-context)
-// mode — note Go's signal.Notify is ADDITIVE, so without this opt-out a caller's own handler
-// would merely STACK with rotini's (both fire, racing to exit), not replace it.
+// WithoutSignalHandling suppresses rotini's default trap without making the caller surrender
+// the context: rotini still owns a cancelable run context but installs no signal.Notify, so
+// the program's own handling is the only one. It matters because signal.Notify is additive —
+// without this opt-out a caller's handler would stack with rotini's rather than replace it.
 //
-// Caveat: in this mode rotini owns the context and exposes no cancel, so a signal handler set
-// up here has no rotini-provided way to halt the run GRACEFULLY (it would os.Exit itself,
-// skipping teardown). For graceful user-owned shutdown prefer [Program.WithContext] with
-// [signal.NotifyContext], so the caller holds the cancel that halts the run. It returns the
-// receiver to chain.
+// In this mode rotini exposes no cancel, so a handler installed here cannot halt the run
+// gracefully. For that, prefer [Program.WithContext] with [signal.NotifyContext].
 func (p *Program) WithoutSignalHandling() *Program {
 	p.signalMode = signalOff
 	return p
 }
 
-// WithSignals installs rotini's graceful trap for the given signals, INDEPENDENTLY of
-// whether the caller supplied a context — it forces the trap on (the default set is
-// os.Interrupt + syscall.SIGTERM; pass others, e.g. syscall.SIGHUP, to trap them too). When
-// a [Program.WithContext] context is also supplied, rotini derives a cancelable CHILD of it
-// to drive the trap — the caller's context, deadline, and values still flow through, and
-// rotini never cancels the caller's own context (only its child). The action is fixed: the
-// first signal cancels the run context for a graceful halt (teardown runs, exit 128+signum),
-// a second forces exit. An empty signal list is ignored (use [Program.WithoutSignalHandling]
-// to opt out). It returns the receiver to chain.
+// WithSignals forces rotini's graceful trap on for the given signals, whether or not the
+// caller supplied a context. With a supplied context rotini derives a cancelable child to
+// drive the trap, so the caller's context is never canceled. The action is fixed: the first
+// signal cancels the run context for a graceful halt (teardown runs, exit 128+signum), a
+// second forces exit. An empty signal list is ignored — use [Program.WithoutSignalHandling] to
+// opt out.
 func (p *Program) WithSignals(sigs ...os.Signal) *Program {
 	if len(sigs) > 0 {
 		p.signalMode = signalOn
@@ -294,22 +236,18 @@ func (p *Program) WithSignals(sigs ...os.Signal) *Program {
 	return p
 }
 
-// Bind registers a service on the program's registry under key, overwriting any
-// prior binding, and returns the receiver so it chains with [Program.WithFunnel] and
-// [program.WithArgs] before [program.Execute]. It is the dependency-injection
-// seam: bind a real implementation in production or a double in tests, with the
-// same handler code retrieving it via the typed [Get] / [MustGet]. Binding
-// "parser" overrides the default [Parser].
+// Bind registers a service on the program's registry under key, overwriting any prior
+// binding. It is the dependency-injection seam: bind a real implementation in production or a
+// double in tests, and handler code retrieves either through [Context.Get] or
+// [Context.MustGet]. Binding [KeyParser] overrides the default [Parser].
 func (p *Program) Bind(key string, value any) *Program {
 	p.rtx.Bind(key, value)
 	return p
 }
 
-// newRunContext builds the per-invocation [Context]: fresh outcome channels, exit
-// state, and resolved chain, seeded with the services bound via [Program.Bind] and
-// wired to the program's streams. Every [Program.Run] gets its own, which is what
-// makes a Program re-entrant — a long-running host dispatching many argv lines never
-// inherits the previous run's records or exit code.
+// newRunContext builds the per-invocation [Context] — fresh outcome channels and exit state,
+// the services bound via [Program.Bind], and the program's streams. Every run gets its own,
+// which is what makes a Program re-entrant.
 func (p *Program) newRunContext() *Context {
 	rtx := newContext()
 	if p.rtx != nil {
@@ -321,53 +259,44 @@ func (p *Program) newRunContext() *Context {
 	return rtx
 }
 
-// FunnelFunc is the program's single outcome funnel ([Program.WithFunnel]): the
-// runtime calls it once, after the lifecycle (teardown included) settles, with every
-// channel a run recorded — informational messages ([Context.RecordInfo]), successes
-// ([Context.RecordSuccess]), non-fatal warnings ([Context.RecordWarning]), the
-// end-user's errors ([Context.RecordError]), and the panics slice (recovered panics +
-// rotini-detected faults: a wiring mismatch, a resolver fault, a [MustGet] on a missing
-// service — never handler-recordable). Each slice is in recording order; all are
-// PRIVATE (the funnel's parameters are the only way they surface — there is no drainable
-// accessor on rtx). The funnel decides what to print and where, in what order, and the
-// final exit code: it is the LAST authority, so [Context.Exit] inside it OVERRIDES any
-// code the lifecycle set (see [Context.Exit]; [Context.SignalExit] is a no-op here).
+// FunnelFunc is the program's outcome funnel. The runtime calls it once, after the lifecycle
+// and its teardown settle, with every channel the run recorded — infos, successes, warnings,
+// the handler's errors, and the panics slice (recovered panics plus rotini-detected faults,
+// which handlers cannot record). Each slice is in recording order, and these parameters are
+// the only way the records surface.
+//
+// The funnel decides what to print, where, in what order, and the final exit code: it is the
+// last authority, so [Context.Exit] inside it overrides whatever the lifecycle set
+// ([Context.SignalExit] is a no-op here).
 type FunnelFunc func(ctx context.Context, rtx *Context, infos []string, successes []string, warnings []error, errors []error, panics []*PanicError)
 
-// WithFunnel sets the program's outcome funnel — the single place a run's recorded
-// channels (infos / successes / warnings / errors / panics) are reported. The runtime
-// invokes it once per run, after the lifecycle settles, whenever ANY channel recorded
-// something (a clean run with nothing recorded never invokes it). It replaces the four
-// former per-channel funnels: one function receives everything at once, so a CLI controls
-// cross-channel logic, print ordering, and the exit code in one place — see [FunnelFunc].
+// WithFunnel sets the program's outcome funnel — the one place a run's recorded channels are
+// reported. It runs once per run, after the lifecycle settles, whenever any channel recorded
+// something; a clean run never invokes it. See [FunnelFunc].
 //
-// With no funnel set, the default ([Program.defaultFunnel]) prints in the order
-// info → warning → error → panic → success (infos/successes to stdout, the rest to
-// stderr) and applies the exit floor: a recorded error or a panic exits non-zero unless a
-// handler already set a deliberate code. A custom funnel owns the exit entirely (it may
-// even mask a panic to 0 via [Context.Exit]). It returns the receiver so it chains with
-// [Program.Bind].
+// The default prints info → warning → error → panic → success (infos and successes to stdout,
+// the rest to stderr) and applies an exit floor: a recorded error or panic exits non-zero
+// unless a handler already set a deliberate code. A custom funnel owns the exit entirely.
 func (p *Program) WithFunnel(fn FunnelFunc) *Program {
 	p.funnelFn = fn
 	return p
 }
 
-// PanicError is how a panic recovered from a lifecycle hook reaches the funnel
-// ([Program.WithFunnel]) as a panics-slice element: Value is the value passed to panic, Stack is the
-// goroutine stack captured at the recovery point (runtime/debug.Stack) — the
-// information the recover would otherwise discard. Error renders Value alone, so
-// default output stays one line; a funnel that wants the stack asks with errors.As.
+// PanicError carries a panic recovered from a lifecycle hook to the funnel: Value is what was
+// passed to panic, Stack the goroutine stack captured at the recovery point. Error renders
+// Value alone, so default output stays one line; a funnel that wants the stack asks for it
+// with errors.As.
 type PanicError struct {
 	Value any
 	Stack []byte
 }
 
-// Error renders the recovered panic's value as a single line. The captured stack
-// rides along on the type for an errors.As, and is deliberately not printed here.
+// Error renders the panic value as a single line; the captured stack is deliberately not
+// printed.
 func (e *PanicError) Error() string { return fmt.Sprintf("%v", e.Value) }
 
-// Unwrap exposes a panicked error value so errors.Is/errors.As and [CategoryOf]
-// see through the wrapping; it is nil for non-error panic values.
+// Unwrap exposes a panicked error value so errors.Is/As and [CategoryOf] see through it. It
+// is nil for non-error panic values.
 func (e *PanicError) Unwrap() error {
 	if err, ok := e.Value.(error); ok {
 		return err
@@ -375,38 +304,31 @@ func (e *PanicError) Unwrap() error {
 	return nil
 }
 
-// WiringError reports that the generated [Definition] and the handler set are
-// out of sync — a resolved command names a handler method that does not exist,
-// or whose return value does not implement [Handlers]. It is a build-
-// time bug surfaced at run time (always [CategoryInternal]); the structured
-// fields name the offending command and method so a funnel can report it
-// precisely without matching the message:
-//
-//	var we *rotini.WiringError
-//	if errors.As(err, &we) { log.Fatalf("wire %s → %s", we.Command, we.Handler) }
+// WiringError reports that the generated [Definition] and the handler set are out of sync — a
+// resolved command names a handler method that does not exist, or whose return value does not
+// implement [Handlers]. It is a build-time bug surfaced at run time, always
+// [CategoryInternal], and names the offending command and method so a funnel need not match on
+// the message.
 type WiringError struct {
 	Command string // the command whose handler wiring is broken
 	Handler string // the handler method name the Definition referenced
 	Msg     string // the human-readable failure
 }
 
-// Error renders the [Definition]-versus-handlers mismatch as a single line.
+// Error renders the mismatch as a single line.
 func (e *WiringError) Error() string { return e.Msg }
 
-// Unwrap reports [ErrInternal]: a wiring mismatch is always the author's bug,
-// never the end-user's.
+// Unwrap reports [ErrInternal]: a wiring mismatch is the author's bug, never the user's.
 func (e *WiringError) Unwrap() error { return ErrInternal }
 
-// WithResolver overrides the resolve phase — argv to invocation target (the
-// command chain to dispatch, or a remote dispatch, plus the argv the parsers
-// later see). Wrap [DefaultResolver] rather than re-deriving it: a resolver
-// that rewrites tokens (an alias, a shorthand expansion) rewrites argv, hands
-// it to the default, and returns the result — routing and parsing then agree.
-// A resolver error is a resolution-phase fault, routed through the funnel
-// (as a fault), and fails the run. The hidden __complete protocol intercept runs before resolution, and
-// completion candidates walk the Definition — a resolver-only alias is
-// dispatchable but not completable (declare real aliases in the spec for
-// that). A nil resolver is ignored. It returns the receiver to chain.
+// WithResolver overrides the resolve phase — argv to invocation target, plus the argv the
+// parsers later see. Wrap [DefaultResolver] rather than re-deriving it: a resolver that
+// rewrites tokens should rewrite argv, hand it to the default, and return the result, so
+// routing and parsing agree. A resolver error is routed through the funnel as a fault and
+// fails the run.
+//
+// Completion candidates walk the [Definition], so a resolver-only alias is dispatchable but
+// not completable; declare real aliases in the spec for that. A nil resolver is ignored.
 func (p *Program) WithResolver(fn Resolver) *Program {
 	if fn != nil {
 		p.resolver = fn
@@ -414,13 +336,10 @@ func (p *Program) WithResolver(fn Resolver) *Program {
 	return p
 }
 
-// WithLifecycle overrides the run phase's PLAN — which declared hooks run, in
-// what pairing and order (see [Lifecycle] and the contract in [DefaultLifecycle]).
-// The execution semantics around the plan (halt on SignalExit/Exit/panic/
-// signal, balanced reverse unwind of begun steps, teardown-to-completion, the
-// panic funnel, exit codes) are rotini's and stay fixed. Wrap
-// [DefaultLifecycle] to adjust rather than re-derive. A nil lifecycle is
-// ignored. It returns the receiver to chain.
+// WithLifecycle overrides the run phase's plan — which declared hooks run, in what pairing and
+// order (see [Lifecycle] and [DefaultLifecycle]). The semantics around the plan — halting,
+// the balanced reverse unwind, teardown to completion, the panic funnel, exit codes — stay
+// fixed. Wrap [DefaultLifecycle] rather than re-deriving it. A nil lifecycle is ignored.
 func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 	if fn != nil {
 		p.lifecycle = fn
@@ -428,48 +347,36 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 	return p
 }
 
-// Execute resolves the command, runs its lifecycle, and ends with the resulting status
-// code via the program's exit action ([os.Exit] by default; override with
-// [Program.WithExit] to capture the code or embed without terminating).
+// Execute resolves the command, runs its lifecycle, and ends with the resulting status code
+// via the program's exit action ([os.Exit] by default; see [Program.WithExit]).
 //
-// By default (no [Program.WithContext]) Execute installs rotini's signal trap: the first
-// os.Interrupt or syscall.SIGTERM cancels the run context AND halts the lifecycle like
-// [Context.SignalExit] — forward progress stops and every begun teardown hook still runs —
-// exiting 128+signum (130 for SIGINT, 143 for SIGTERM). A second signal forces exit
-// immediately (code 130), skipping any remaining teardown, so a handler stuck ignoring the
-// context can always be interrupted. The trap is independently controllable:
-// [Program.WithoutSignalHandling] suppresses it (rotini still owns the context),
-// [Program.WithSignals] forces it on with a custom signal set (even atop a supplied
-// context), and [Program.WithContext] alone defers signal handling to the caller.
+// With no [Program.WithContext], Execute installs rotini's signal trap: the first
+// os.Interrupt or syscall.SIGTERM halts the lifecycle like [Context.SignalExit] — forward
+// progress stops, every begun teardown hook still runs — and exits 128+signum. A second signal
+// forces exit immediately, so a handler that ignores the context can still be interrupted. See
+// [Program.WithoutSignalHandling] and [Program.WithSignals].
 func (p *Program) Execute() error {
 	code, err := p.Run(p.args)
 	p.exit(code)
 	return err
 }
 
-// Run dispatches ONE invocation of argv and returns its exit code — the re-entrant
-// core [Program.Execute] is built on. It resolves the invoked command (no eager flag
-// parsing — that is the handler's opt-in via [Parser.Parse]), execs a remote
-// sub-command if one was selected, otherwise builds the per-invocation [Context] and
-// dispatches the lifecycle. The only retained protocol intercept is the hidden
-// __complete entry the generated shell scripts invoke.
+// Run dispatches one invocation of argv and returns its exit code — the re-entrant core
+// [Program.Execute] is built on. It resolves the invoked command (flag parsing stays the
+// handler's opt-in via [Parser.Parse]), execs a remote sub-command if one was selected, and
+// otherwise dispatches the lifecycle.
 //
-// Unlike [Program.Execute], Run NEVER ends the process: it returns the code instead of
-// handing it to the exit action. That makes a Program reusable — a REPL, a daemon, or a
-// stdio server can call Run once per line/request, and a test can drive a whole program
-// end to end without trapping os.Exit.
+// Unlike Execute, Run never ends the process, which is what makes a Program reusable: a REPL,
+// a daemon or a test can call it once per line and inspect the code.
 //
-// Each call gets a FRESH [Context]: its own outcome channels, exit code, and resolved
-// chain, so one invocation never inherits the previous one's records or status. The
-// services bound with [Program.Bind] are seeded into every run (a binding made by a
-// handler DURING a run stays local to that run). Stream and signal configuration
-// applies to every call.
+// Each call gets a fresh [Context], so one invocation never inherits the previous one's
+// records or status. Services bound with [Program.Bind] are seeded into every run; one a
+// handler binds mid-run stays local to that run.
 //
-// A note for hosts that dispatch in a LOOP: with no supplied context Run installs
-// rotini's signal trap and tears it down again on every call, which measures around
-// 30µs — irrelevant once per process, but roughly 20x the cost of the dispatch itself
-// when repeated. Prefer [Program.RunContext] (or [Program.WithoutSignalHandling]),
-// which install no trap; that is what [REPL] and [StdioServer] do.
+// For hosts that dispatch in a loop: with no supplied context Run installs and tears down the
+// signal trap on every call, about 30µs — negligible once per process, but roughly 20x the
+// dispatch itself when repeated. Prefer [Program.RunContext] or [Program.WithoutSignalHandling],
+// as [REPL] and [StdioServer] do.
 func (p *Program) Run(argv []string) (int, error) {
 	if p.ctx != nil {
 		return p.runWith(p.ctx, true, argv)
@@ -477,16 +384,12 @@ func (p *Program) Run(argv []string) (int, error) {
 	return p.runWith(context.Background(), false, argv)
 }
 
-// RunContext is [Program.Run] under an explicit context, for THIS invocation only:
-// unlike [Program.WithContext] it does not modify the program, so a host that
-// dispatches many invocations (a REPL, a stdio server) can scope each one without
-// permanently changing how the program handles signals.
+// RunContext is [Program.Run] under an explicit context, for this invocation only. Unlike
+// [Program.WithContext] it does not modify the program, so a host dispatching many invocations
+// can scope each one without permanently changing how the program handles signals.
 //
-// Supplying a context defers signal handling to the caller, exactly as
-// [Program.WithContext] does — override with [Program.WithSignals].
-//
-// ctx must not be nil; a nil context is a wiring mistake and is reported as an
-// [ErrInternal] rather than panicking somewhere deeper.
+// Supplying a context defers signal handling to the caller, as [Program.WithContext] does.
+// ctx must not be nil; a nil context is reported as an [ErrInternal].
 func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
 	if ctx == nil {
 		return 1, InternalError(errors.New("rotini: RunContext called with a nil context"))
@@ -494,8 +397,8 @@ func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
 	return p.runWith(ctx, true, argv)
 }
 
-// runWith is the shared core. hasCtx says whether a context was SUPPLIED (by
-// WithContext or RunContext), which is what decides the default signal trap.
+// runWith is the shared core. hasCtx says whether a context was supplied, which is what
+// decides the default signal trap.
 func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (int, error) {
 	if len(argv) > 0 && argv[0] == completeCommand {
 		rtx := p.newRunContext()
@@ -505,13 +408,8 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		return 0, nil
 	}
 
-	// The effective run context, and whether rotini traps signals — two INDEPENDENT axes (see
-	// [Program.WithSignals] / [Program.WithoutSignalHandling]). rotini's working context is
-	// always a CHILD it can cancel when it must drive the trap: derived from the caller's
-	// context when one was supplied, else from context.Background(). In pure pass-through mode
-	// (a WithContext context, no trap) the caller's context is used as-is, so handlers see
-	// exactly what was passed; rotini still halts on its cancellation by observing ctx.Err().
-	// A canceled run context halts the lifecycle either way — see [Program.dispatch].
+	// Run context and signal trapping are independent axes: signalAuto traps iff the caller
+	// supplied no context, and WithSignals/WithoutSignalHandling override that.
 	ctx := runCtx
 	trap := !hasCtx // signalAuto: trap iff the caller supplied no context
 	switch p.signalMode {
@@ -521,9 +419,9 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		trap = true
 	}
 
-	// Derive a cancelable child only when rotini needs to be the canceler (the trap) or when
-	// it owns the context outright (no supplied context); otherwise the caller's context
-	// passes through untouched.
+	// Derive a cancelable child only when rotini must be the canceler (the trap) or owns the
+	// context outright; otherwise the caller's context passes through untouched, and
+	// cancellation is observed via ctx.Err().
 	var cancel context.CancelCauseFunc
 	if !hasCtx || trap {
 		ctx, cancel = context.WithCancelCause(ctx)
@@ -543,13 +441,13 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		defer close(done)
 		go func() {
 			select {
-			case s := <-sigCh: // first signal → graceful: cancel ctx with the signal's exit code; dispatch then halts the lifecycle
+			case s := <-sigCh: // first signal → cancel with the signal's exit code; dispatch halts the lifecycle
 				cancel(exitCodeError{code: signalExitCode(s)})
 			case <-done:
 				return
 			}
 			select {
-			case <-sigCh: // second signal → force exit, skipping any remaining teardown
+			case <-sigCh: // second signal → force exit, skipping remaining teardown
 				p.exit(forceExitCode)
 			case <-done:
 			}
@@ -564,7 +462,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 
 	res, err := resolve(p.def, argv)
 	if err != nil {
-		// A resolver fault is rotini's domain, not the end-user's → the funnel (as a fault).
+		// A resolver fault is rotini's domain, not the end-user's.
 		rtx.recordFault(asFault(internalUnlessTagged(fmt.Errorf("resolve: %w", err))))
 		return p.settle(ctx, rtx)
 	}
@@ -572,7 +470,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		return p.execRemote(ctx, rtx, res.Remote)
 	}
 	if len(res.Chain) == 0 {
-		// An empty chain is a resolver contract violation → the funnel (as a fault).
+		// An empty chain violates the resolver contract.
 		rtx.recordFault(asFault(InternalError(errors.New("resolver returned an empty chain — the root frame is always resolvable"))))
 		return p.settle(ctx, rtx)
 	}
@@ -585,9 +483,8 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	return p.dispatch(ctx, res.Chain, rtx)
 }
 
-// internalUnlessTagged tags err [CategoryInternal] unless its producer already
-// categorized it — a custom resolver may legitimately raise a usage error (the
-// user's token was the problem), and that classification must survive.
+// internalUnlessTagged tags err [CategoryInternal] unless its producer already categorized it:
+// a custom resolver may legitimately raise a usage error, and that must survive.
 func internalUnlessTagged(err error) error {
 	if CategoryOf(err) != CategoryNone {
 		return err
@@ -595,29 +492,19 @@ func internalUnlessTagged(err error) error {
 	return InternalError(err)
 }
 
-// asFault wraps a rotini-detected fault error (a wiring mismatch, a resolver
-// fault) into a [*PanicError] so it rides the panics channel uniformly with
-// recovered panics. Value holds the error (errors.As/Is and [CategoryOf] see
-// through it); Stack is empty — this is a detected fault, not a real panic
-// (detect-and-route, no stack unwind).
+// asFault wraps a rotini-detected fault so it rides the panics channel alongside recovered
+// panics. Stack is empty: this was detected and routed, never unwound.
 func asFault(err error) *PanicError { return &PanicError{Value: err} }
 
-// settle is the single run tail: after the lifecycle (or an early framework
-// fault) has populated the Context's outcome channels, it hands them ALL to the one
-// funnel — the custom [Program.WithFunnel] or [Program.defaultFunnel] — and resolves
-// the exit code. It is shared by the dispatch tail and the resolve/wiring/remote early
-// returns, so every run path reports through the same funnel.
+// settle is the single run tail: it hands every populated outcome channel to the funnel and
+// resolves the exit code. Both the dispatch tail and the resolve/wiring/remote early returns
+// go through it, so every run path reports the same way.
 //
-// Exit code: a handler's explicit rtx.SignalExit/rtx.Exit carries into the funnel (first
-// non-zero, already in rtx.exitCode). The funnel is the FINAL authority — it runs in the
-// funnel stage where rtx.Exit OVERRIDES that code (a custom funnel may even exit 0 on a
-// panic). The exit floors live in defaultFunnel (a recorded error or a captured fault
-// exits non-zero unless a deliberate code is already set), so a custom funnel that wants
-// other behavior simply does not call into them. rotini holds no named exit-code
-// constants; a CLI that wants other codes sets them in its funnel.
+// A handler's explicit exit code is already in rtx.exitCode when the funnel runs, but the
+// funnel is the final authority — it runs in the funnel stage, where rtx.Exit overrides. The
+// exit floors live in defaultFunnel, so a custom funnel simply does not inherit them.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
-	// Snapshot the private channels once; the records surface only here, as the
-	// slices the funnel receives — there is no public drainable accessor.
+	// Snapshot the private channels once; they surface only as the funnel's arguments.
 	infos := rtx.copyInfos()
 	successes := rtx.copySuccesses()
 	warnings := rtx.copyWarnings()
@@ -637,9 +524,8 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 	return rtx.exitCode, joinOutcome(errs, faults)
 }
 
-// joinOutcome is the error a run returns to its caller (and tests): every
-// recorded error AND every captured fault, so errors.Is/As reach them all. It
-// is nil for a clean run.
+// joinOutcome is the error a run returns to its caller: every recorded error and captured
+// fault, so errors.Is/As reach them all. It is nil for a clean run.
 func joinOutcome(errs []error, faults []*PanicError) error {
 	if len(errs) == 0 && len(faults) == 0 {
 		return nil
@@ -652,14 +538,10 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 	return errors.Join(all...)
 }
 
-// defaultFunnel is the outcome funnel used when the program supplies none. It prints
-// each channel in the order info → warning → error → panic → success — infos and
-// successes to stdout, warnings/errors/faults to stderr (each rotini error type renders a
-// single non-leaky line; a [*PanicError]'s Value is printed, never its Stack — that stays
-// for an errors.As). Then it applies the exit floor: a recorded error or a captured fault
-// exits non-zero (1) UNLESS a handler already set a deliberate code, which it never
-// downgrades. A CLI that wants richer reporting, a different order, or a different code
-// supplies its own [Program.WithFunnel].
+// defaultFunnel prints each channel in the order info → warning → error → panic → success,
+// infos and successes to stdout and the rest to stderr, then applies the exit floor: an error
+// or fault exits 1 unless a handler already set a deliberate code, which it never downgrades.
+// A [*PanicError]'s Stack is never printed — it stays for an errors.As.
 func (p *Program) defaultFunnel(_ context.Context, rtx *Context, infos, successes []string, warnings, errs []error, faults []*PanicError) {
 	for _, s := range infos {
 		fmt.Fprintln(p.stdout, s)
@@ -676,44 +558,30 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, infos, successe
 	for _, s := range successes {
 		fmt.Fprintln(p.stdout, s)
 	}
-	// Exit floor: an error or a fault is non-zero by default, but a deliberate handler
-	// exit (a non-zero rtx.exitCode set during the lifecycle) is never downgraded.
+	// A deliberate handler exit is never downgraded.
 	if rtx.exitCode == 0 && (len(errs) > 0 || len(faults) > 0) {
 		rtx.exitCode = 1
 	}
 }
 
-// dispatch resolves each command in the chain to its [Handlers] (by the
-// recorded Handler method name, via reflection on the aggregate handlers),
-// asks the lifecycle planner for the step plan (the default plan reproduces
-// the contract table in lifecycle.go), and executes it as a balanced, LIFO
-// setup/teardown:
+// dispatch resolves each command in the chain to its [Handlers], asks the lifecycle planner
+// for the step plan, and executes it as a balanced LIFO setup/teardown:
 //
-//   - Forward: each step's Do, in plan order, halting the moment a hook calls
-//     rtx.SignalExit/rtx.Exit or panics (or a trapped signal cancels ctx).
-//   - Unwind: the Undo of every step whose Do BEGAN, in reverse, to
-//     completion — a panic or rtx.SignalExit inside an Undo neither aborts the
-//     rest nor displaces the first failure or exit code; a hard rtx.Exit skips
-//     what remains, and so does a panic when [Program.WithPanicForward] is false.
+//   - Forward: each step's Do in plan order, halting the moment a hook calls SignalExit or
+//     Exit, panics, or a trapped signal cancels ctx.
+//   - Unwind: the Undo of every step whose Do began, in reverse, to completion. A panic or
+//     SignalExit inside an Undo neither aborts the rest nor displaces the first failure; a
+//     hard Exit skips what remains, and so does a panic under WithPanicForward(false).
 //
-// rtx.SignalExit is a clean stop that still runs teardown; rtx.Exit is a hard stop that
-// skips it. A panic anywhere (e.g. the [MustGet] on a missing service) is recovered as a
-// fault and routed once — after teardown — to the funnel, last. By default it does
-// not abort the remaining teardown (cleanup still runs); [Program.WithPanicForward](false)
-// makes a panic a hard stop that skips the rest of teardown.
-//
-// A canceled run context — by the caller of a WithContext context (directly or via a bound
-// cancel a handler calls) or by the default signal trap — is converted into a lifecycle
-// [Context.SignalExit] between forward hooks: forward progress stops, teardown still runs, and
-// the exit code is the cancellation cause's ([ExitCode]) or 0. The conversion happens only on
-// the dispatch goroutine, so rtx state stays single-writer; the canceler only cancels ctx.
+// A recovered panic is routed to the funnel once, after teardown. A canceled run context is
+// converted into a [Context.SignalExit] between forward hooks — teardown still runs, and the
+// exit code is the cancellation cause's or 0. That conversion happens only on the dispatch
+// goroutine, so rtx stays single-writer.
 func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (int, error) {
 	hv := reflect.ValueOf(p.handlers)
 	handlers := make([]Handlers, len(chain))
 	for i, f := range chain {
-		// A wiring failure (generated Definition and handler set out of sync) is
-		// rotini's "this should never have happened" — a detected fault routed to
-		// the funnel (detect-and-route, no literal panic).
+		// A wiring failure is detected and routed as a fault, never panicked.
 		m := hv.MethodByName(f.Handler)
 		if !m.IsValid() {
 			rtx.recordFault(asFault(&WiringError{
@@ -734,29 +602,23 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		handlers[i] = h
 	}
 
-	// The plan: which declared hooks run, paired and ordered. The wiring above
-	// happened first, so a custom lifecycle orders resolved handlers — it
-	// cannot bypass the handler rules.
+	// Wiring happened first, so a custom lifecycle orders already-resolved handlers and cannot
+	// bypass the handler rules.
 	plan := p.lifecycle
 	if plan == nil {
 		plan = DefaultLifecycle
 	}
 	steps := plan(chain, handlers)
 
-	// run wraps every hook so a panic is RECOVERED and the lifecycle stays in control — teardown
-	// can still run and the panic is dealt with once, last. Two independent knobs decide the rest:
-	//   - [Program.WithPanicForward] (default true): does begun-step teardown run after a panic?
-	//   - [Program.WithPanicRecover] (default true): is the panic funneled (true), or
-	//     re-panicked raw to the caller after the lifecycle settles (false)?
-	// The one combination rotini does NOT recover is recover=false AND forward=false — "panic now":
-	// the hook runs unguarded so the panic propagates immediately with its original stack, skipping
-	// teardown. panicked records that a panic stopped forward progress; panicValue holds the first
-	// panic when it will be re-panicked (recover=false, forward=true) instead of funneled.
+	// run wraps every hook so a panic leaves the lifecycle in control. The one combination not
+	// recovered is recover=false and forward=false, where the hook runs unguarded so the panic
+	// propagates with its original stack. panicValue holds the first panic when it will be
+	// re-panicked after teardown rather than funneled.
 	panicked := false
 	var panicValue any
 	run := func(hook func(context.Context, *Context)) {
 		if !p.panicRecover && !p.panicForward {
-			hook(ctx, rtx) // panic now: unguarded, original stack, no teardown
+			hook(ctx, rtx) // unguarded: original stack, no teardown
 			return
 		}
 		defer func() {
@@ -765,18 +627,15 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 				if p.panicRecover {
 					rtx.recordFault(&PanicError{Value: r, Stack: debug.Stack()})
 				} else if panicValue == nil {
-					panicValue = r // re-panicked after teardown
+					panicValue = r
 				}
 			}
 		}()
 		hook(ctx, rtx)
 	}
 
-	// halt reports whether forward progress should stop — after a hook called
-	// rtx.SignalExit/rtx.Exit or panicked, OR after the run context was canceled (by the caller
-	// of a WithContext context or the default signal trap). On cancellation it records the exit
-	// code via rtx.SignalExit — the cancellation cause's code ([ExitCode]) or 0 — so the
-	// cancellation becomes a clean lifecycle stop that still runs teardown.
+	// halt reports whether forward progress should stop. On cancellation it records the cause's
+	// exit code via SignalExit, turning the cancellation into a clean stop that runs teardown.
 	halt := func() bool {
 		if !rtx.stopped && ctx.Err() != nil {
 			rtx.SignalExit(canceledExitCode(ctx))
@@ -784,10 +643,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		return rtx.stopped || panicked
 	}
 
-	// Forward — every step's Do in plan order, halting on rtx.SignalExit/rtx.Exit
-	// (rtx.stopped), a panic, or a signal. began records how far the plan got, so
-	// the unwind covers exactly the begun steps. The final halt() call records the
-	// signal exit code when the last hook returned because the context was canceled.
+	// Forward. began records how far the plan got, so the unwind covers exactly the begun steps.
 	began := 0
 	for _, s := range steps {
 		began++
@@ -797,24 +653,18 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		}
 	}
 
-	// Unwind, reverse — every begun step's Undo, to completion — unless a hard
-	// [Context.Exit] asked to stop now (skipping any teardown still pending), or a panic
-	// occurred and [Program.WithPanicForward] is false (a hard stop on panic). Both guards are
-	// re-checked per step, so an Exit or panic from within a teardown hook stops the rest too.
+	// Unwind. Both guards are re-checked per step, so an Exit or panic from within a teardown
+	// hook stops the rest too.
 	for i := began - 1; i >= 0 && !rtx.exitNow && (p.panicForward || !panicked); i-- {
 		if steps[i].Undo != nil {
 			run(steps[i].Undo)
 		}
 	}
 
-	// Recovery off (recover=false, forward=true): the panic was caught only so teardown could
-	// run; surface it raw now — after teardown — instead of funneling it.
+	// recover=false, forward=true: the panic was caught only so teardown could run.
 	if panicked && !p.panicRecover {
 		panic(panicValue)
 	}
 
-	// settle fires whatever outcome channels this run populated (warnings,
-	// successes, recorded errors, captured faults), in order, once, after
-	// teardown — and resolves the exit code.
 	return p.settle(ctx, rtx)
 }

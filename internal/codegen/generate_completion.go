@@ -10,14 +10,12 @@ import (
 // Shell completion scripts (bash / zsh / fish / powershell).
 // ─────────────────────────────────────────────────────────────────────────────.
 
-// completionScript returns a shell completion script for prog (the installed
-// binary name) and shell. The script delegates to the binary's hidden completion
-// entrypoint (the runtime's __complete intercept), so completions always reflect
-// the live command tree. Supported shells: bash, zsh, fish, powershell.
+// completionScript returns a shell completion script for prog and shell, delegating to the
+// binary's hidden __complete entrypoint so completions always reflect the live command tree.
+// Supported shells: bash, zsh, fish, powershell.
 //
-// It is used at codegen time: when the completion feature is enabled, the
-// generator renders one script per supported shell and embeds it in the cmd
-// package (the runtime then serves the embedded script, never calling this).
+// It runs at codegen time: with the completion feature enabled, the generator renders one
+// script per shell and embeds it in the cmd package.
 func completionScript(prog, shell string) (string, error) {
 	var tmpl string
 	switch shell {

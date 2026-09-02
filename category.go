@@ -5,17 +5,14 @@ import "errors"
 // The error taxonomy: whose fault an error is, and the sentinels every rotini error
 // type unwraps to so a funnel can classify one with a single call.
 
-// Category classifies an error by whose fault it is, so the funnel can decide the
-// exit code and message style from a single call to [CategoryOf] — rather than every CLI
-// re-deriving the taxonomy. rotini tags its
-// OWN errors (a missing service is [CategoryInternal]; a parse/bind failure is
-// [CategoryUsage]); user code tags its domain errors with [UsageError] / [InternalError].
+// Category classifies an error by whose fault it is, so a funnel can decide the exit code and
+// message style from one call to [CategoryOf]. rotini tags its own errors — a missing service
+// is [CategoryInternal], a parse or bind failure [CategoryUsage] — and user code tags its
+// domain errors with [UsageError] or [InternalError].
 //
-// rotini labels; a funnel decides what to do with the label. rotini holds no
-// named exit-code constants and forces no category→code mapping (Pillar 1): its
-// DEFAULT funnel exits 1 for any recorded error or fault (a recorded run never
-// exits 0). A program that wants to map categories to distinct codes does so in
-// its own [Program.WithFunnel] via rtx.Exit.
+// rotini labels; the funnel decides what to do with the label. There are no named exit-code
+// constants and no forced category→code mapping: the default funnel exits 1 for any recorded
+// error or fault, and a program that wants distinct codes maps them in its own funnel.
 type Category int
 
 const (
@@ -41,25 +38,21 @@ func (c Category) String() string {
 	}
 }
 
-// ErrUsage and ErrInternal are the sentinels the categories match on. rotini's own
-// errors wrap the appropriate one, and [CategoryOf] resolves a category by testing an
-// error against them with errors.Is — so a funnel may match either way:
+// ErrUsage and ErrInternal are the sentinels the categories match on, so a funnel may branch
+// either way:
 //
 //	if errors.Is(err, rotini.ErrUsage) { /* usage */ }
 //	switch rotini.CategoryOf(err) { case rotini.CategoryUsage: /* usage */ }
 //
-// Prefer the [UsageError] / [InternalError] constructors over wrapping these with
-// fmt.Errorf("%w", …) directly: the constructors tag the category WITHOUT prepending the
-// sentinel's text to your message.
+// Prefer the [UsageError] and [InternalError] constructors over wrapping these with fmt.Errorf
+// directly: they tag the category without prepending the sentinel's text to your message.
 var (
 	ErrUsage    = errors.New("rotini: usage error")
 	ErrInternal = errors.New("rotini: internal error")
 )
 
-// CategoryOf returns the [Category] an error carries — [CategoryUsage] or
-// [CategoryInternal] when it (or anything it wraps) matches [ErrUsage] / [ErrInternal],
-// else [CategoryNone] (including for a nil error). It is the single classification call a
-// funnel makes:
+// CategoryOf returns the [Category] an error carries, or [CategoryNone] when it matches
+// neither sentinel — the single classification call a funnel makes:
 //
 //	func onError(ctx context.Context, rtx *rotini.Context, err error) {
 //	    switch rotini.CategoryOf(err) {
@@ -81,10 +74,9 @@ func CategoryOf(err error) Category {
 	}
 }
 
-// UsageError tags err as a [CategoryUsage] error — bad input the end-user can correct —
-// without altering its message: the returned error reads exactly like err but matches
-// [ErrUsage] (and so [CategoryOf] reports [CategoryUsage]). errors.Is/As still see through
-// to err. It returns nil when err is nil.
+// UsageError tags err as bad input the end-user can correct, without altering its message: the
+// result reads exactly like err but matches [ErrUsage], and errors.Is/As still see through to
+// err. It returns nil when err is nil.
 //
 //	if id == "" {
 //	    return rotini.UsageError(fmt.Errorf("a widget id is required"))
@@ -102,9 +94,8 @@ func categorize(err, sentinel error) error {
 	return &categorized{err: err, sentinel: sentinel}
 }
 
-// categorized tags an error with a category sentinel via multi-unwrap, so errors.Is finds
-// both the original error and the sentinel — while Error() delegates to the original, so
-// the category adds no text to the message.
+// categorized tags an error with a category sentinel via multi-unwrap, so errors.Is finds both
+// the original error and the sentinel while Error adds no text to the message.
 type categorized struct {
 	err      error
 	sentinel error

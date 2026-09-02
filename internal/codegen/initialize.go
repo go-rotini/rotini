@@ -1,14 +1,10 @@
 package codegen
 
-// This file owns the `rotini initialize` operation: scaffolding a new CLI's
-// seed spec and conf under cmd/<name>/ of the current module, validating
-// them, and running the standard generate over them. The seed is MINIMAL: a
-// root-only spec (no sub-commands or flags) and a conf declaring the entrypoint
-// + packages with every feature off. Init then runs the SAME generate as
-// `rotini generate` (no special init-style path): it writes the entrypoint
-// main.go — which carries the //go:generate directive, so every later regen is
-// just `go generate ./...` — the empty root handler stub, and the codegen files.
-// The author grows the spec/conf from there.
+// `rotini initialize`: scaffolding a new CLI's seed spec and conf under cmd/<name>/, then
+// running the standard generate over them. The seed is minimal — a root-only spec and a conf
+// with every feature off — and generate takes it from there, writing the entrypoint main.go
+// (which carries the //go:generate directive, so every later regen is `go generate ./...`),
+// the empty root stub, and the codegen files.
 
 import (
 	"errors"
@@ -101,11 +97,8 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		return err
 	}
 
-	// Reconcile the just-written seeds, then run the standard generate over them — the
-	// exact same path `rotini generate` runs (no init-special-casing). generate gates on
-	// validation, so this kickstarts the new CLI: it writes the entrypoint main.go (which
-	// carries the //go:generate directive, so every later regen is just `go generate
-	// ./...`), an empty handler stub per command, and the codegen files.
+	// Reconcile the just-written seeds, then run the exact same generate `rotini generate`
+	// runs, with no init special-casing.
 	rs, rc, err := p.reconcile(specPath, confPath)
 	if err != nil {
 		return err

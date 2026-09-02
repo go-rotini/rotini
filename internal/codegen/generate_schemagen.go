@@ -17,16 +17,13 @@ import (
 // only the document-level named schemas and the per-command <Prefix>Output types.
 const outputRootSentinel = "rotiniGeneratedOutputsRoot"
 
-// buildOutputTypes generates the Go type declarations for a program's output
-// types and named schemas as a formatted source fragment (no package clause, no
-// root type) ready to inject into the framework file. It returns "" when the
-// program declares no schemas and no command outputs.
+// buildOutputTypes generates the Go type declarations for a program's output types and named
+// schemas as a formatted source fragment ready to inject into the framework file, or "" when
+// the program declares neither.
 //
-// Every document-level schema becomes a named type, and every command (root + own
-// sub-commands) that declares `output` gets a "<Prefix>Output" type — an alias-like
-// named type when the output is a bare `$ref`, or a struct for an inline shape.
-// Generation reuses jsonschema.GenerateGo (the same engine behind the spec/conf
-// types), so refs, nesting, arrays, and allOf embedding all work.
+// Every document-level schema becomes a named type, and every own command declaring `output`
+// gets a "<Prefix>Output" type. Generation reuses jsonschema.GenerateGo, the same engine
+// behind the spec and conf types, so refs, nesting, arrays and allOf embedding all work.
 func buildOutputTypes(gp *program, pkg string) (string, error) {
 	defs := collectOutputDefs(gp)
 	if len(defs) == 0 {
@@ -115,11 +112,9 @@ type pathFromClaim struct {
 	env  string
 }
 
-// collectPathFrom maps each configuration_files name to the inputs that supply
-// its path (spec config_source), across the whole command tree: a flag claims
-// by logical name; an env input by its variable (explicit `variable:`, else
-// the SNAKE_UPPER projection of its name). Validation guarantees single
-// claims per channel and that the named entry exists.
+// collectPathFrom maps each configuration_files name to the inputs supplying its path, across
+// the whole tree: a flag claims by logical name, an env input by its variable. Validation
+// guarantees single claims per channel and that the named entry exists.
 func collectPathFrom(gp *program) map[string]pathFromClaim {
 	out := map[string]pathFromClaim{}
 	add := func(in *Inputs) {
@@ -146,12 +141,10 @@ func collectPathFrom(gp *program) map[string]pathFromClaim {
 	return out
 }
 
-// contractComment is the TextUnmarshaler nudge emitted as a trailing comment
-// on flag/argument fields whose type comes from an explicit spec `import:` —
-// the contract is enforced by the argv coerce path, and this puts it where the
-// user reads their own generated code. Builtin aliases (duration/time) have
-// their own parsing and get no comment; env/config fields decode via recon, a
-// different path, so they get none either.
+// contractComment is the TextUnmarshaler nudge emitted on flag and argument fields whose type
+// comes from an explicit spec `import:`, putting the contract where the user reads their own
+// generated code. Builtin aliases parse themselves, and env and config fields decode through
+// recon, so neither gets one.
 func contractComment(schema *InputSchema) string {
 	if schema == nil || strings.TrimSpace(schema.Import) == "" {
 		return ""
@@ -172,11 +165,9 @@ func envVarName(e EnvInput, envPrefix string) string {
 	return derived
 }
 
-// collectStdinSchemas builds the per-command stdin validation schemas for BindMeta:
-// each non-composed command that declares a stdin payload maps its "<Prefix>Stdin"
-// type name to a self-contained JSON Schema (the payload schema, plus the document's
-// named schemas as definitions so any "#/schemas/X" refs resolve). The binder
-// validates the decoded payload against it. Returns nil when no command has stdin.
+// collectStdinSchemas builds the per-command stdin validation schemas for BindMeta: each own
+// command declaring a stdin payload maps its "<Prefix>Stdin" type name to a self-contained
+// JSON Schema the binder validates the decoded payload against.
 func collectStdinSchemas(gp *program) map[string]string {
 	out := map[string]string{}
 	add := func(prefix string, in *Inputs) {
@@ -202,11 +193,9 @@ func stdinValidationSchema(stdin *InputSchema, docSchemas map[string]Schema) str
 	return validationSchema(Schema{BaseSchema: stdin.BaseSchema}, docSchemas)
 }
 
-// validationSchema renders a self-contained JSON Schema (as a JSON string) for
-// load-time document validation — the stdin payload and configuration_files
-// entries share it: the declared type/properties/constraints, plus the
-// document's named schemas as `definitions` (so any "#/schemas/X" refs
-// resolve).
+// validationSchema renders a self-contained JSON Schema for load-time document validation,
+// shared by the stdin payload and configuration_files entries: the declared shape plus the
+// document's named schemas as definitions, so any "#/schemas/X" refs resolve.
 func validationSchema(schema Schema, docSchemas map[string]Schema) string {
 	body, ok := schemaToDoc(schema).(map[string]any)
 	if !ok {

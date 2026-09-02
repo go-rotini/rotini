@@ -8,18 +8,16 @@ import (
 	"strings"
 )
 
-// REPL runs a [Program] as an interactive read-eval-print loop: each line the
-// user types is tokenized like a shell command line and dispatched against the
-// SAME [Definition] the binary uses, so every command, flag and handler behaves
-// exactly as it does from the shell.
+// REPL runs a [Program] as an interactive read-eval-print loop: each line is tokenized like a
+// shell command line and dispatched against the same [Definition] the binary uses, so every
+// command, flag and handler behaves exactly as it does from the shell.
 //
-// It rests on [Program.Run], which is re-entrant: each line gets a fresh
-// [Context], so one command's recorded outcomes and exit code never leak into the
-// next. Services bound with [Program.Bind] are seeded into every line.
+// It rests on [Program.Run] being re-entrant: each line gets a fresh [Context], so one
+// command's outcomes and exit code never leak into the next, and services bound with
+// [Program.Bind] are seeded into every line.
 //
-// A REPL never exits the process — a non-zero command is reported and the loop
-// continues, exactly as a shell behaves. It ends when the user types an exit
-// command, at end of input, or when the context is done.
+// A REPL never exits the process — a non-zero command is reported and the loop continues. It
+// ends at an exit command, at end of input, or when the context is done.
 //
 // The zero value is not usable; start from [NewREPL].
 type REPL struct {
@@ -48,26 +46,22 @@ func NewREPL(program *Program) *REPL {
 }
 
 // WithPrompt sets the text written before each read (default "> "). An empty
-// prompt writes nothing, which suits a piped session. It returns the receiver to chain.
+// prompt writes nothing, which suits a piped session.
 func (r *REPL) WithPrompt(prompt string) *REPL { r.prompt = prompt; return r }
 
-// WithInput overrides the line source. It returns the receiver to chain.
+// WithInput overrides the line source.
 func (r *REPL) WithInput(in io.Reader) *REPL { r.in = in; return r }
 
 // WithOutput overrides where the prompt and loop diagnostics are written. It does
-// NOT redirect command output, which goes to the program's own streams. It
-// returns the receiver to chain.
+// NOT redirect command output, which goes to the program's own streams.
 func (r *REPL) WithOutput(out io.Writer) *REPL { r.out = out; return r }
 
 // WithExitCommands replaces the words that end the loop (default exit, quit).
-// Passing none leaves end-of-input and context cancellation as the only exits. It
-// returns the receiver to chain.
+// Passing none leaves end-of-input and context cancellation as the only exits.
 func (r *REPL) WithExitCommands(words ...string) *REPL { r.exits = words; return r }
 
-// WithErrorEcho controls whether a failing command's error is written to the
-// REPL's output (default true). Turn it off when the program's own funnel already
-// reports errors to the same stream, to avoid printing them twice. It returns the
-// receiver to chain.
+// WithErrorEcho controls whether a failing command's error is written to the REPL's output
+// (default true). Turn it off when the program's own funnel already reports to the same stream.
 func (r *REPL) WithErrorEcho(enabled bool) *REPL { r.echoErr = enabled; return r }
 
 // Run reads and dispatches lines until an exit command, end of input, or a done
@@ -148,10 +142,9 @@ func classifyRead(err error) readOutcome {
 	}
 }
 
-// splitArgs tokenizes a command line the way a shell does for the cases a REPL
-// meets: whitespace separates tokens, single and double quotes group them, and a
-// backslash escapes the next character. It is deliberately small — a REPL line is
-// not a shell script, and expansion, globbing and pipelines are not rotini's job.
+// splitArgs tokenizes a command line the way a shell does for the cases a REPL meets:
+// whitespace separates, quotes group, and a backslash escapes the next character. Expansion,
+// globbing and pipelines are deliberately out of scope.
 func splitArgs(line string) []string {
 	var (
 		args    []string
