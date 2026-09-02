@@ -15,6 +15,9 @@ import (
 	"fmt"
 	"strings"
 {{- end}}
+{{- if .ModelsImport}}
+	{{.ModelsImport}}
+{{- end}}
 	{{.RuntimeImport}}
 )
 
@@ -25,6 +28,15 @@ type ProgramHandlers interface {
 }
 
 {{.Definition}}
+{{- if .ModelAliases}}
+
+// The typed inputs live in the models package (conf `generate.packages` type
+// models). These aliases re-export them here, so handler code in this package
+// refers to them unqualified exactly as it would without the split.
+{{- range .ModelAliases}}
+type {{.}} = models.{{.}}
+{{- end}}
+{{- end}}
 {{- range .Blocks}}
 
 {{if .Flags}}

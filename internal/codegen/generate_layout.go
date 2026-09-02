@@ -41,6 +41,22 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 		lay.entrypointFile = path.Base(epFile)
 	}
 
+	// The typed structs live in the cmd file unless a `models` target moves them to
+	// their own package (see GenerateConfig.modelsPkg for why one would).
+	if m := conf.Generate.modelsPkg(); m != nil && m.File != "" {
+		mFile := filepath.ToSlash(m.File)
+		mDir := path.Dir(mFile)
+		lay.modelsPkgName = m.Package
+		if lay.modelsPkgName == "" {
+			lay.modelsPkgName = goPkgName(mDir)
+		}
+		lay.modelsDir = filepath.Join(moduleRoot, filepath.FromSlash(mDir))
+		lay.modelsFile = path.Base(mFile)
+		lay.modelsImport = moduleName + "/" + mDir
+		// Pointing models at the cmd file is a no-op split: same file, same package.
+		lay.splitModels = lay.modelsDir != lay.cmdDir || lay.modelsFile != lay.cmdFile
+	}
+
 	return lay
 }
 
@@ -129,4 +145,11 @@ type layout struct {
 	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
 	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared
 
+	// The OPTIONAL models package (see GenerateConfig.modelsPkg). splitModels is the
+	// one flag the emitters branch on: false keeps the typed structs in the cmd file.
+	modelsDir     string // absolute output dir for the models file
+	modelsFile    string // basename of the generated models file
+	modelsPkgName string // Go package name written atop it
+	modelsImport  string // its import path, for the cmd package's aliases
+	splitModels   bool   // true when models resolves somewhere other than the cmd file
 }

@@ -32,6 +32,9 @@ var (
 	templateHandlerStub string
 	//go:embed templates/rotini.go.tmpl
 	templateRotini string
+
+	//go:embed templates/models.go.tmpl
+	templateModels string
 	//go:embed templates/help.txt.tmpl
 	templateHelp string
 	//go:embed templates/man.txt.tmpl
@@ -278,6 +281,8 @@ type templateRotiniData struct {
 	Methods       []string                 // ProgramHandlers method names, e.g. "RotiniGenerate"
 	RollupMethods []templateHandlersMethod // the generated handlers struct's command→handler methods
 	Definition    string                   // pre-rendered definition var declaration
+	ModelsImport  string                   // models package import line; "" unless the types were split out
+	ModelAliases  []string                 // model type names re-exported here as aliases; empty unless split
 	Blocks        []templateInputBlock
 	OutputTypes   string // pre-rendered output type declarations; "" when none
 	BindMeta      string // pre-rendered bind metadata; "" when none
@@ -287,6 +292,20 @@ type templateRotiniData struct {
 
 func renderRotiniFile(data templateRotiniData) ([]byte, error) {
 	return renderGoFile("rotini", templateRotini, data)
+}
+
+// templateModelsData is the models file: nothing but the typed input and output
+// structs, so the package it declares can be imported from anywhere — including a
+// handler package the cmd package itself imports.
+type templateModelsData struct {
+	Package     string
+	Imports     []string // pre-rendered import lines for the field types
+	Blocks      []templateInputBlock
+	OutputTypes string // pre-rendered output type declarations; "" when none
+}
+
+func renderModelsFile(data templateModelsData) ([]byte, error) {
+	return renderGoFile("models", templateModels, data)
 }
 
 // templateDocHeadings holds the resolved section headings (defaults applied).

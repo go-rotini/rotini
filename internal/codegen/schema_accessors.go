@@ -7,8 +7,9 @@ package codegen
 
 // Package-type discriminators — the `type` values of generate.packages entries.
 const (
-	typeMain = "main" // the binary entrypoint (main.go, create-once)
-	typeCmd  = "cmd"  // the cmd package: editable stubs + the one generated file
+	typeMain   = "main"   // the binary entrypoint (main.go, create-once)
+	typeCmd    = "cmd"    // the cmd package: editable stubs + the one generated file
+	typeModels = "models" // OPTIONAL: the typed input/output structs, in their own package
 )
 
 // packageOf returns the package target with the given type, or nil when absent.
@@ -46,6 +47,14 @@ func (g *GenerateConfig) cmdTarget() *PackageConfig {
 	}
 	panic("codegen: cmd package target missing — applyConfDefaults must run before resolveLayout/emit")
 }
+
+// modelsPkg is the OPTIONAL typed-structs target. When declared, the input and
+// output types are written there instead of into the cmd file, and the cmd package
+// re-exports them as aliases. Its reason to exist is the import cycle a command's
+// `handler:` otherwise creates: the cmd package imports the handler package, so the
+// handler package cannot import cmd back to reach its own input types — but both can
+// import models. nil means the types stay in the cmd file.
+func (g *GenerateConfig) modelsPkg() *PackageConfig { return g.packageOf(typeModels) }
 
 // featureOf returns the derived-output feature with the given type, or nil.
 func (g *GenerateConfig) featureOf(typ string) *Feature {

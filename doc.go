@@ -187,22 +187,29 @@
 // the usual suspects:
 //
 //   - [Collect] is the 95% handler's whole input story: every declared
-//     channel reconciled and validated in one line —
-//     inputs, err := rotini.Collect[DeployInputs](rtx) — and
+//     channel reconciled and validated in one line, into the command's
+//     generated inputs type.
+//
+//     inputs, err := rotini.Collect[DeployInputs](rtx)
+//
 //     [CollectP] adds the provenance [Report] ("where did this value come
 //     from", per field). Both ride the [BindMeta] the generated NewProgram
 //     binds under [KeyBindMeta].
+//
 //   - [Parser] parses and validates the argv channel ALONE against the
 //     resolved chain — GNU/POSIX grammar (clustering, --, =, count flags,
 //     passthrough), typed coercion, enum and constraint checks — failing
 //     with a data-shaped [*ParseError]; [Binder] is Collect's engine, for
 //     callers who want to hold the meta explicitly.
+//
 //   - The per-channel surface ([ParseArgv] / [ParseEnv] / [ParseFiles] /
 //     [ParseStdin] / [Defaults], composed by [OverlayInputs] or
 //     [OverlayInputsP]) acquires channels one at a time for programs that
 //     want custom precedence, with the same [Report].
+//
 //   - [Suggestor] turns a [ParseError]'s unknown token and candidate
 //     vocabulary into "did you mean" suggestions.
+//
 //   - Text styling — a [Style] fluent builder
 //     for SGR styling (16/256/RGB/hex color, with opt-in Profile downsampling),
 //     a Styler registry of named styles (render text by intent — "warning",
@@ -212,6 +219,7 @@
 //     comes out clean. Detection is opt-in — the program decides and feeds the
 //     result in; rotini auto-detects nothing, and there are no
 //     tables/prompts/progress (the deleted UX layer stays deleted).
+//
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve
 //     and orchestration phases wholesale; [FlagValueCompleter] and
 //     [ArgValueCompleter] feed dynamic completion candidates.

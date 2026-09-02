@@ -91,7 +91,7 @@ command:
       description: Generate a cli program from a rotini spec file.
       examples:
         - rotini generate
-        - rotini generate ./path/to/.rotini.json --watch
+        - rotini generate ./path/to/.rotini.spec.json --watch
       footer: Use "rotini help <command>" for more information about a command.
       arguments:
         - name: spec_file_path
@@ -129,7 +129,7 @@ command:
       description: Validate a rotini spec file for correctness.
       examples:
         - rotini validate
-        - rotini val ./path/to/.rotini.yaml
+        - rotini val ./path/to/.rotini.spec.yaml
       footer: Use "rotini help <command>" for more information about a command.
       arguments:
         - name: spec_file_path

@@ -1,26 +1,83 @@
 # go-rotini/rotini
 
-A spec-driven CLI code generator for Go, plus the single `rotini` runtime
-package that generated CLIs import.
+**Declare your CLI in a spec file. rotini checks it, generates the typed Go, and
+ships the rest of the binary.**
 
-`rotini` is two-faced:
+`rotini` is two-faced, and one module serves both faces at one version:
 
-- **As a tool** (`go get -tool github.com/go-rotini/rotini`) it exposes the
-  codegen binary. You invoke `go tool rotini init`, `go tool rotini generate`,
-  `go tool rotini validate`.
-- **As a library** (`go get github.com/go-rotini/rotini`) it exposes the
-  `rotini` package — the slim runtime the generated entrypoint builds a
-  `Program` with and calls `Execute()` on.
+- **As a tool** — `go get -tool github.com/go-rotini/rotini` — it installs the codegen
+  binary: `go tool rotini init`, `generate`, `validate`.
+- **As a library** — `go get github.com/go-rotini/rotini` — it is the runtime your
+  generated code imports and your handlers are written against.
 
-You describe your CLI's commands, flags, and arguments in a `.rotini.spec.*`
-file; `rotini generate` emits the typed framework and wiring; you fill in the
-handler bodies. The runtime injects nothing you didn't declare (no implicit
-`--help`/`--version`/`--color`, no "did you mean") — every convenience is opt-in.
+Because both come from the same module, the tool and the runtime **cannot drift**.
+
+```yaml
+# cmd/todo/.rotini.spec.yaml
+version: 0.0.0
+command:
+  name: todo
+  description: a task list
+  commands:
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          schema: {type: string, required: true}
+      flags:
+        - name: due
+          identifiers: [--due, -d]
+          schema: {type: date}
+```
+
+`go generate ./...` turns that into a typed `TodoAddInputs` struct, the command tree,
+and an editable handler stub. You fill in the body.
+
+## Three things that are actually different
+
+**1. Your CLI is checked before your code exists.** The spec is validated by a JSON
+Schema plus 29 rotini lint rules — a misspelled key, a duplicate flag identifier, a
+config file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each
+is reported with a `file:line:col`, by `rotini validate`, before a line of Go is
+generated. Frameworks that declare the CLI *in Go* can only catch what the compiler
+happens to notice.
+
+**2. One import is the whole binary, not just its front door.** Parsing is the first
+10% of a CLI. rotini also carries the other 90% — and every piece is opt-in, wired only
+because your handler constructed it:
+
+| | |
+|---|---|
+| `Printer` | render a result as text/JSON/YAML/TOML/table off your `--output` flag |
+| `Table` | aligned columns, measured by display width (styling and wide runes align) |
+| `Prompt` `Confirm` `Select` | ask questions; a pipe or CI gets `ErrNotInteractive`, never a hang |
+| `Spinner` `Progress` | live one-line indicators, silent on a non-terminal |
+| `Pager` | `$PAGER`, passing straight through when piped |
+| `Subprocess` | `exec` with env/dir/timeout; streams output as an iterator |
+| `REPL` | run your command tree as an interactive loop |
+| `Service` `Scheduler` | daemon workers and interval tasks with graceful shutdown |
+| `StdioServer` | JSON-RPC 2.0 over stdio — LSP and MCP framing |
+| `Wizard` | multi-step flows with branching and back navigation |
+
+**3. The generated code is small, legible, and yours.** A hello-world CLI generates
+**108 lines** across three files. The machinery is an ordinary import you upgrade with
+`go get -u` — not a vendored copy you must never edit.
+
+## The cost, stated up front
+
+rotini adds a **codegen step**: a tool dependency, a `go generate` pass, and generated
+files in version control. Frameworks driven by struct tags ask for none of that.
+
+That cost is fixed; the benefits scale with the CLI. For a three-command internal
+script, rotini is heavier than it is worth. For a long-lived, multi-command tool with
+config files, environment variables, docs and shell completion to keep in sync, the
+spec becomes the single place all of it is declared — and checked.
 
 ## Install
 
 ```
-go get -tool github.com/go-rotini/rotini@latest
+go get -tool github.com/go-rotini/rotini@latest   # the codegen tool
+go get github.com/go-rotini/rotini@latest         # the runtime
 ```
 
 ## Quickstart
@@ -35,11 +92,11 @@ go tool rotini init todo
 #   cmd/todo/.rotini.spec.yaml   — declare commands / flags / arguments here
 #   cmd/todo/.rotini.conf.yaml   — codegen settings (packages, features)
 #   cmd/todo/main.go             — entrypoint (carries the //go:generate directive)
-#   internal/cmd/todo/           — generated framework + one empty handler stub per command
+#   internal/cmd/todo/           — generated framework + one handler stub per command
 
 go get github.com/go-rotini/rotini   # the runtime the generated code imports
 
-# edit cmd/todo/.rotini.spec.yaml to grow your CLI, then regenerate:
+# grow the CLI by editing the spec, then regenerate:
 go generate ./...                # re-runs `rotini generate` via the directive in main.go
 
 # write your handler bodies in internal/cmd/todo/*.go, then build:
@@ -57,15 +114,28 @@ go build ./cmd/todo
 | `help`       |         | Help for any command.                                           |
 | `version`    |         | Print the tool version.                                         |
 
+## What you declare in a spec
+
+Every way data reaches your CLI is declared, not wired by hand:
+
+- **argv** — flags (typed, clustering, count, repeatable, groups, dependencies) and
+  positional arguments (variadic, passthrough)
+- **environment** — explicit variables, an `env_prefix`, or nested families
+- **configuration files** — a fixed path, a walk-up search, XDG, or a path supplied at
+  run time by a flag or env var (`config_source`)
+- **stdin** — a typed, schema-validated payload, or the `-` and `@file` value sentinels
+- **defaults**, with a documented precedence chain and per-field provenance
+
+`rotini.Collect[T](rtx)` reconciles all of it in one line.
+
 ## Documentation
 
-- The runtime contract — `Program`/`Execute`, the outcome and typed-error model,
-  and the opt-in service registry — lives in the package documentation
-  ([`doc.go`](doc.go)).
-- Exhaustive, annotated schema references for the spec and conf files:
+- **Runtime contract** — `Program`/`Execute`, the lifecycle hooks, the outcome funnel
+  and typed error taxonomy, and the opt-in services: [`doc.go`](doc.go).
+- **Exhaustive, annotated schema references**:
   [`reference/.rotini.spec.yaml`](reference/.rotini.spec.yaml) and
-  [`reference/.rotini.conf.yaml`](reference/.rotini.conf.yaml). Both are validated
-  by the test suite, so they cannot drift from the schemas.
+  [`reference/.rotini.conf.yaml`](reference/.rotini.conf.yaml). Both are validated by
+  the test suite, so they cannot drift from the schemas.
 
 ## Contributing
 

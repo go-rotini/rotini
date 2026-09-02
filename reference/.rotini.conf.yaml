@@ -27,9 +27,9 @@ generate:
   packages:
     # A LIST of generated code targets, one per `type`. Every entry shares three
     # fields:
-    #   type    — REQUIRED. One of: main | cmd. Each type may appear at most ONCE
-    #             (cross-item lint; the schema enums the value but can't bound the
-    #             count).
+    #   type    — REQUIRED. One of: main | cmd | models. Each type may appear at most
+    #             ONCE (cross-item lint; the schema enums the value but can't bound
+    #             the count). `models` is OPTIONAL — see below.
     #   file    — module-root-relative path ending in .go; its parent directory is
     #             the target package directory. `cmd` defaults to
     #             'internal/cmd/<root>/zz_rotini.gen.go'; main has no default.
@@ -40,9 +40,9 @@ generate:
     #
     # The rotini RUNTIME is NOT generated: it is an ordinary library dependency the
     # generated code imports (`go get github.com/go-rotini/rotini`), so no target
-    # here decides where it lands. Everything rotini writes for THIS cli — the typed
-    # inputs, the Definition, the rollup, and the editable handler stubs — lands in
-    # the one `cmd` package.
+    # here decides where it lands. By default everything rotini writes for THIS cli —
+    # the typed inputs, the Definition, the rollup, and the editable handler stubs —
+    # lands in the one `cmd` package.
     - type: main                       # the binary entrypoint (main.go) — CREATE-ONCE:
       file: cmd/acme/main.go           # never overwritten after the first pass. `file`
       package: main                    # is REQUIRED for it to be written (no default dir).

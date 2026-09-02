@@ -11,104 +11,104 @@ This guide walks through creating a new Go project with rotini. If you are addin
 Create a new directory and initialize a Go module.
 
 {{< code title="go mod init" language="text" open="true" collapsible="false" copy="true" >}}
-mkdir mypkg
-cd mypkg
-go mod init mypkg
+mkdir todo
+cd todo
+go mod init github.com/me/todo
 {{< /code >}}
 
-## 2. Install Rotini
+## 2. Install rotini
 
-Rotini can be installed as either a project-scoped tool dependency or a globally-installed binary. Both methods produce the same CLI — the difference is how the version is resolved and whether it is tied to your module.
+rotini is one module with two faces. You need both: the **tool** generates your code, and the **runtime** is what that code imports.
 
 {{< alert type="info" title="NOTE:" >}}
-Rotini enforces strict version alignment between the CLI and your spec file. The rotini binary version must match the `$schema` field declared in your rotini specification and configuration files exactly. If there is a mismatch, `rotini generate` will exit with an error. This guard prevents generated code from quiet divergence and loud breakage.
+Because the tool and the runtime are the same module, `go get -tool` and `go get` resolve to a single `require` line at a single version — they cannot drift apart. rotini also checks the `version:` key in your spec and conf against the binary running `generate`, and refuses a mismatch rather than emitting code from a definition it does not understand.
 {{< /alert >}}
 
-### a. Tool Dependency <small>(recommended)</small>
+### a. Tool dependency <small>(recommended)</small>
 
-Using a <cite>tool dependency[^1]</cite> records the rotini version directly in your `go.mod` under the `tool` directive. This ensures that every developer on the project resolves the same CLI version through the module graph, eliminating version skew across environments. There is no separate installation step — `go tool` fetches and caches the binary automatically.
+A <cite>tool dependency[^1]</cite> records the rotini version in your `go.mod` under the `tool` directive, so every developer resolves the same CLI through the module graph. There is no separate installation step — `go tool` fetches and caches the binary.
 
 {{< code title="go get -tool" language="text" open="true" collapsible="false" copy="true" >}}
 go get -tool github.com/go-rotini/rotini@latest
+go get github.com/go-rotini/rotini@latest
 {{< /code >}}
 
-### b. Global Install
+### b. Global install
 
-Installing rotini globally places the binary in your `GOBIN` directory. This approach is straightforward for prototyping or evaluating rotini across multiple projects, but the installed version is not tracked in your module graph. In a collaborative setting, each developer must independently ensure their installed version matches the project's `$schema` — making version drift a likely source of errors.
+Installing globally places the binary in your `GOBIN`. This suits prototyping across several projects, but the version is not tracked in any module graph, so each developer must keep their binary aligned with each project's `version:` key themselves.
 
 {{< code title="go install" language="text" open="true" collapsible="false" copy="true" >}}
 go install github.com/go-rotini/rotini@latest
 {{< /code >}}
 
-## 3. Initialize Your Project
+## 3. Initialize your project
 
-The `init` command scaffolds the rotini spec file (`.rotini.yaml`) and initial handler stubs for your project. It takes your Go package name as an argument.
+`init` scaffolds the spec, the conf, the entrypoint and a first handler stub, then runs the same `generate` every later pass runs.
 
-{{< code title="go tool" language="text" open="true" collapsible="false" copy="true" >}}
-go tool github.com/go-rotini/rotini@latest init mypkg
+{{< code title="rotini init" language="text" open="true" collapsible="false" copy="true" >}}
+go tool rotini init todo
 {{< /code >}}
 
-{{< code title="go install" language="text" open="true" collapsible="false" copy="true" >}}
-rotini init mypkg
+Your project now contains:
+
+- **`cmd/todo/.rotini.spec.yaml`** — the [specification](/specification): commands, flags, arguments, and every other input channel
+- **`cmd/todo/.rotini.conf.yaml`** — the [configuration](/configuration): where code is written and which features are on
+- **`cmd/todo/main.go`** — the entrypoint, carrying the `//go:generate` directive (create-once: never overwritten)
+- **`internal/cmd/todo/`** — the [generated](/generated) framework file plus one editable handler stub per command
+
+## 4. The development loop
+
+Edit the spec, regenerate, build. The `//go:generate` directive in `main.go` means you never have to remember the command.
+
+{{< code title="workflow" language="sh" open="true" collapsible="false" copy="true" >}}
+# validate the spec without generating (fast; use it in CI)
+go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+
+# regenerate after a spec change
+go generate ./...
+
+# build and run
+go build ./cmd/todo
+./todo --help
 {{< /code >}}
 
-After running `init`, your project will contain:
+## 5. Write a handler
 
-- **`.rotini.yaml`** — the spec file that defines your CLI's commands, flags, and arguments
-- **`internal/cmd/`** — handler stubs where you implement your command logic
-- **`main.go`** — the entry point that wires everything together
+Each command gets one stub, created once and then yours. It implements the five lifecycle hooks; embed the `Default*` types for the ones you do not need.
 
-## 4. Local Development
-
-Rotini uses `go generate` to produce typed Go source from your spec file. The typical development loop is: edit the spec, generate, build, and test.
-
-{{< code title="workflow" language="sh" open="true" collapsible="true" copy="true" >}}
-# run
-go generate ./...
-go run .
-
-# OR
-
-# build
-go generate ./...
-go build -o ./mypkg .
-./mypkg
-
-# OR
-
-# install
-go generate ./...
-go install .
-mypkg
-{{< /code >}}
-
-{{< code title="go example" language="golang" open="true" collapsible="true" copy="true" >}}
-package cmd
+{{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
+package todo
 
 import (
-  "context"
+	"context"
+	"fmt"
 
-  "github.com/go-rotini/rotini/internal/rotini"
+	"github.com/go-rotini/rotini"
 )
 
-type rotiniHandlers struct{}
+var _ rotini.Handlers = (*todoAddHandlers)(nil)
 
-var _ rotini.RotiniHandlers = (*rotiniHandlers)(nil)
-
-func (*rotiniHandlers) CascadingPreRun(ctx context.Context, rtx rotini.RotiniCtx) {
+type todoAddHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
 }
 
-func (*rotiniHandlers) PreRun(ctx context.Context, rtx rotini.RotiniCtx) {
-}
+func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	// One line reconciles every declared channel: argv, env, config files, stdin
+	// and defaults, in the documented precedence order.
+	inputs, err := rotini.Collect[TodoAddInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		return
+	}
 
-func (*rotiniHandlers) Run(ctx context.Context, rtx rotini.RotiniCtx) {
-}
-
-func (*rotiniHandlers) PostRun(ctx context.Context, rtx rotini.RotiniCtx) {
-}
-
-func (*rotiniHandlers) CascadingPostRun(ctx context.Context, rtx rotini.RotiniCtx) {
+	fmt.Fprintln(rtx.Stdout, "added:", inputs.TodoAdd.Arguments.Title)
+	rtx.RecordSuccess("task added")
 }
 {{< /code >}}
+
+`TodoAddInputs` is generated from the spec — you never declare it. A handler does not print its own errors: it **records** them, and the runtime reports them once, after teardown. See [api](/api).
 
 [^1]: Tool directives were added in <a href="https://go.dev/doc/go1.24#tools" target="_blank">Go 1.24</a>

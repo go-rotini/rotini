@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -108,6 +109,7 @@ func (p *program) generate() error {
 		do   func() error
 	}{
 		{"emit schemas", p.emitSchemas},
+		{"emit models file", p.emitModelsFile},
 		{"emit cmd file", p.emitCmdFile},
 		{"emit feature outputs", p.emitFeatures},
 		{"emit handler stubs", p.emitStubs},
@@ -128,6 +130,30 @@ func (p *program) generate() error {
 // generate.schemas), before codegen so an editor $schema= reference resolves even on a
 // pass that later fails. These files are never pruned.
 func (p *program) emitSchemas() error { return writeSchemas(p.conf, p.module.root) }
+
+// emitModelsFile writes the typed input/output structs to their own package when the
+// conf declares a `models` target. Without one this is a no-op and the types stay in
+// the cmd file, which is the default and the common case.
+func (p *program) emitModelsFile() error {
+	if !p.layout.splitModels {
+		return nil
+	}
+	blocks, imports := inputBlocks(p)
+	outputTypes, err := buildOutputTypes(p, p.layout.modelsPkgName)
+	if err != nil {
+		return err
+	}
+	content, err := renderModelsFile(templateModelsData{
+		Package:     p.layout.modelsPkgName,
+		Imports:     renderImports(imports),
+		Blocks:      blocks,
+		OutputTypes: outputTypes,
+	})
+	if err != nil {
+		return err
+	}
+	return writeGeneratedFile(filepath.Join(p.layout.modelsDir, p.layout.modelsFile), content)
+}
 
 // emitCmdFile renders + writes the one generated cmd file (framework + rollup + typed
 // inputs + feature embeds), beside the editable handler stubs.
@@ -310,15 +336,49 @@ func enabledFeatures(conf *Conf) []confFeature {
 // generated and carries a DO NOT EDIT banner; the editable handler stubs are
 // separate create-once files in the same package.
 func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte, error) {
-	own := gp.ownCommands()
+	blocks, imports := inputBlocks(gp)
 
-	blocks := make([]templateInputBlock, 0, len(own))
-	imports := map[string]bool{}
-	noteImport := func(imp string) {
-		if imp != "" {
-			imports[imp] = true
+	// When a models target moved the typed structs to their own package, this file
+	// carries neither them nor their imports — only aliases re-exporting them, so
+	// handler code in this package reads identically either way.
+	var modelsImport string
+	var aliases []string
+	outputTypes := ""
+	if lay.splitModels {
+		modelsImport = "models " + strconv.Quote(lay.modelsImport)
+		aliases = modelAliases(gp, blocks)
+		blocks, imports = nil, nil
+	} else {
+		var err error
+		if outputTypes, err = buildOutputTypes(gp, lay.cmdPkgName); err != nil {
+			return nil, err
 		}
 	}
+
+	return renderRotiniFile(templateRotiniData{
+		Package:       lay.cmdPkgName,
+		RuntimeImport: runtimeImport,
+		Imports:       renderImports(imports),
+		ChildImports:  gp.childImports,
+		Methods:       gp.methods(),
+		RollupMethods: rollupMethods(gp),
+		Definition:    renderDefinition(gp),
+		ModelsImport:  modelsImport,
+		ModelAliases:  aliases,
+		Blocks:        blocks,
+		OutputTypes:   outputTypes,
+		BindMeta:      renderBindMeta(gp),
+		Features:      features,
+		EmbedImport:   anyEmbed(features),
+	})
+}
+
+// inputBlocks assembles the per-command typed-struct blocks and the set of imports
+// their field types need. Shared by the cmd and models files so the two cannot drift.
+func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
+	own := gp.ownCommands()
+	blocks := make([]templateInputBlock, 0, len(own))
+	imports := map[string]bool{}
 	for _, c := range own {
 		blocks = append(blocks, templateInputBlock{
 			Prefix:       c.prefix,
@@ -332,30 +392,32 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		})
 		for _, fs := range [][]fieldDef{c.flags, c.args, c.env, c.config} {
 			for _, f := range fs {
-				noteImport(f.Import)
+				if f.Import != "" {
+					imports[f.Import] = true
+				}
 			}
 		}
 	}
+	return blocks, imports
+}
 
-	outputTypes, err := buildOutputTypes(gp, lay.cmdPkgName)
-	if err != nil {
-		return nil, err
+// modelAliases lists every type the models package declares, so the cmd package can
+// re-export them. The names mirror the models template exactly: the four per-channel
+// structs the template always emits, plus the two aggregates.
+func modelAliases(gp *program, blocks []templateInputBlock) []string {
+	var out []string
+	for _, b := range blocks {
+		out = append(out, b.Prefix+"Flags", b.Prefix+"Arguments")
+		if len(b.Env) > 0 {
+			out = append(out, b.Prefix+"Env")
+		}
+		if len(b.Config) > 0 {
+			out = append(out, b.Prefix+"Config")
+		}
+		out = append(out, b.Prefix+"CommandInputs", b.Prefix+"Inputs")
 	}
-
-	return renderRotiniFile(templateRotiniData{
-		Package:       lay.cmdPkgName,
-		RuntimeImport: runtimeImport,
-		Imports:       renderImports(imports),
-		ChildImports:  gp.childImports,
-		Methods:       gp.methods(),
-		RollupMethods: rollupMethods(gp),
-		Definition:    renderDefinition(gp),
-		Blocks:        blocks,
-		OutputTypes:   outputTypes,
-		BindMeta:      renderBindMeta(gp),
-		Features:      features,
-		EmbedImport:   anyEmbed(features),
-	})
+	out = append(out, outputTypeNames(gp)...)
+	return out
 }
 
 // anyEmbed reports whether any feature emits a //go:embed-backed var (so the

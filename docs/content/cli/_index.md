@@ -4,63 +4,68 @@ title: "cli"
 
 # CLI
 
-The rotini cli framework companion cli has three primary purposes:
-1. `initialize` for scaffolding a go project with rotini files
-2. `validate` for ensuring rotini spec files are valid structures
-3. `generate` for generating go type-safe source code from rotini spec files
+The `rotini` companion CLI is itself built with rotini: its spec lives at `cmd/rotini/.rotini.spec.yaml`, and everything below is its own generated help output.
+
+{{< code title="go get -tool" language="text" open="true" collapsible="false" copy="true" >}}
+go get -tool github.com/go-rotini/rotini@latest
+{{< /code >}}
+
+Invoke it with `go tool rotini <command>`, or install it globally and call `rotini` directly.
 
 ## rotini
 
-The root command or bin for the rotini cli.
-
-{{< code title="$ rotini help" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="$ rotini --help" language="text" open="true" collapsible="false" copy="false" >}}
 The rotini cli framework companion cli.
 
 Find more information at: https://rotini.dev
 
 Usage:
-  rotini <command> [flags]
-         [-v | --version] [-h | --help]
+  rotini <command> <arguments> [flags]
+        [-v | --version] [-h | --help]
 
 Commands:
-  initialize;init     initialize a cli program
-  generate;gen        generate a cli program
-  validate;val        validate a spec file
-  completion          generate shell completion
-  version             print version
-  help                print help
+  initialize;init    scaffold a cli program
+  generate;gen       generate a cli program
+  validate;val       validate a spec file
+  help               print help
+  version            print version
 
 Flags:
-  -v,--version        print version
-  -h,--help           print help
+  --no-styles     disable output styles
+  -v,--version    print version
+  -h,--help       print help
+
+Environment:
+  ROTINI_NO_STYLES    disable output styles
+  CI                  is cli environment
 
 Examples:
   rotini init mycli
-  rotini validate .rotini.yaml
-  rotini generate ./path/to/.rotini.json
+  rotini validate .rotini.spec.yaml
+  rotini generate ./path/to/.rotini.spec.json
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
 
 ## rotini initialize
 
-Scaffolds a new rotini project. Creates the spec file (`.rotini.yaml` or `.rotini.json`), a `main.go` entry point, and initial handler stubs under `internal/cmd/`. The `name` argument sets the root command name written to the spec file — this should match the intended binary name.
+Scaffolds a new CLI: writes the seed spec and conf under `cmd/<name>/`, then runs the same `generate` every later pass runs — producing the entrypoint, the framework file, and one empty handler stub. The `name` argument becomes the root command name and the expected binary name.
 
-Use `--format` to choose between YAML and JSON for the spec file. The `--force` flag allows re-initialization in a directory that already contains rotini files, overwriting any existing generated files.
+The entrypoint is **create-once**: it carries your build metadata, so it is never overwritten. Use `--force` to re-seed the spec and conf.
 
-{{< code title="$ rotini help init" language="text" open="true" collapsible="false" copy="false" >}}
-Initialize a new rotini cli program spec file.
+{{< code title="$ rotini help initialize" language="text" open="true" collapsible="false" copy="false" >}}
+Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, empty handler stubs, codegen) so it is ready to build.
 
 Usage:
-  rotini initialize <name> [--format=yaml|json] [--force] [-h | --help]
+  rotini initialize [name] [flags]
 
 Arguments:
-  name          the root command name written to created spec file (expected binary name)
+  [name]    the root command name written to the created spec file (expected binary name)
 
 Flags:
-  --format      specifiy the created rotini spec file format as yaml or json (default: yaml)
-  --force       forces re-initialization if files exist that init would overwrite
-  -h,--help     print help
+  --format string    the created rotini spec file format (defaults to yaml) [yaml|json|jsonc|toml]
+  --force            force re-initialization if files exist that init would overwrite
+  -h,--help          print help
 
 Examples:
   rotini initialize mycli
@@ -72,92 +77,71 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini generate
 
-Reads a rotini spec file and produces the generated Go source code. By default, it looks for a `.rotini.yaml` or `.rotini.json` file in the current directory. Pass an explicit path to use a different file.
+Compiles a spec + conf into Go: the command tree as a `Definition` literal, the typed input structs, the handlers rollup, any enabled feature outputs, and one editable stub per new command. Generated files that no longer map to a command are pruned.
 
-The `--watch` flag is used to watch the spec file; useful during active development to keep generated code in sync without manually re-running the command directly or through the generate directive with `go generate ./...`.
+`--watch` regenerates on every spec change, which pairs well with a running `go build`.
 
-{{< code title="$ rotini help gen" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="$ rotini help generate" language="text" open="true" collapsible="false" copy="false" >}}
 Generate a cli program from a rotini spec file.
 
 Usage:
-  rotini generate [./path/to/.rotini.yaml] [-w | --watch] [-h | --help]
+  rotini generate [spec_file_path] [flags]
 
 Arguments:
-  file           path to the spec file (default: .rotini.yaml)
+  [spec_file_path]    path to the spec file (default .rotini.spec.yaml)
 
 Flags:
-  -w,--watch     watch a rotini spec file for changes and re-generate
-  -h,--help      print help
+  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)
+  --watch,-w            watch a rotini spec file for changes and re-generate
+  -h,--help             print help
 
 Examples:
   rotini generate
-  rotini generate ./path/to/.rotini.json --watch
+  rotini generate ./path/to/.rotini.spec.json --watch
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
 
 ## rotini validate
 
-Validates a rotini spec file for structural correctness without generating any code. This is useful for CI pipelines or pre-commit checks to catch spec errors early. Like `generate`, it defaults to looking for a `.rotini.yaml` or `.rotini.json` file in the current directory if no path is provided.
+Checks a spec + conf without generating anything — the right thing to run in CI and in a pre-commit hook. It applies the JSON Schema *and* rotini's 29 lint rules, reporting each problem with a `file:line:col`.
 
-{{< code title="$ rotini help val" language="text" open="true" collapsible="false" copy="false" >}}
+`--fail fast` stops at the first problem; the default `collect` reports every problem at once.
+
+{{< code title="$ rotini help validate" language="text" open="true" collapsible="false" copy="false" >}}
 Validate a rotini spec file for correctness.
 
 Usage:
-  rotini validate [./path/to/.rotini.yaml] [-h | --help]
+  rotini validate [spec_file_path] [flags]
 
 Arguments:
-  file          path to the spec file (default: .rotini.yaml)
+  [spec_file_path]    path to the spec file (default .rotini.spec.yaml)
 
 Flags:
-  -h,--help     print help
+  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)
+  --fail string         failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]
+  --watch,-w            watch a rotini spec file for changes and re-generate
+  -h,--help             print help
 
 Examples:
   rotini validate
-  rotini val ./path/to/.rotini.yaml
-
-Use "rotini help <command>" for more information about a command.
-{{< /code >}}
-
-## rotini completion
-
-Generates shell completion scripts for the rotini CLI. Supports zsh, bash, fish, powershell, nushell, and elvish. The output is written to stdout and can be piped to the correct location, evaluated from your shell rc, or run adhoc if your rotini binary version changes frequently or between projects.
-
-{{< code title="$ rotini help completion" language="text" open="true" collapsible="false" copy="false" >}}
-Generate shell completion scripts.
-
-Usage:
-  rotini completion <shell> [-h | --help]
-
-Arguments:
-  shell         the shell to generate completions for (zsh, bash, fish, powershell, nushell, elvish)
-
-Flags:
-  -h,--help     print help
-
-Examples:
-  rotini completion bash
-  rotini completion zsh >> ~/.zshrc (eval "$(rotini completion zsh)")
-  rotini completion fish > ~/.config/fish/completions/rotini.fish
-  rotini completion powershell | Out-String | Invoke-Expression
-  rotini completion nushell | save -f ~/.config/nushell/rotini.nu
-  rotini completion elvish | save -f ~/.config/elvish/lib/rotini.elv
+  rotini val ./path/to/.rotini.spec.yaml
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
 
 ## rotini version
 
-Prints the installed rotini CLI version. Useful for verifying which version is active when debugging `$schema` version mismatches during `generate`.
+Prints the tool version. This is the version checked against the `version:` key in your spec and conf — a mismatch is an error, so generated code never diverges quietly from the definition it came from.
 
 {{< code title="$ rotini help version" language="text" open="true" collapsible="false" copy="false" >}}
 Print the rotini cli version.
 
 Usage:
-  rotini version [-h | --help]
+  rotini version [flags]
 
 Flags:
-  -h,--help     print help
+  -h,--help    print help
 
 Examples:
   rotini version
@@ -167,19 +151,19 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini help
 
-Prints help for the rotini CLI or a specific subcommand. Equivalent to passing `--help` to any command, but allows navigating help for nested commands by name.
+Prints help for any command.
 
-{{< code title="$ rotini help -h" language="text" open="true" collapsible="false" copy="false" >}}
+{{< code title="$ rotini help help" language="text" open="true" collapsible="false" copy="false" >}}
 Print help for a specific command.
 
 Usage:
-  rotini help [command] [-h | --help]
+  rotini help [command...] [flags]
 
 Arguments:
-  command       name of the command to print help for
+  [command...]    name of the command to print help for
 
 Flags:
-  -h,--help     print help
+  -h,--help    print help
 
 Examples:
   rotini help
@@ -188,3 +172,4 @@ Examples:
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
+

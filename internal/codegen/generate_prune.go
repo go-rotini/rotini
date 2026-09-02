@@ -23,6 +23,11 @@ func pruneStubs(gp *program, lay layout, keepList []string) error {
 	if lay.entrypointDir == lay.cmdDir && lay.entrypointFile != "" {
 		protected[lay.entrypointFile] = true
 	}
+	// A models file sharing this directory is generated, not an orphan — without
+	// this it is written and then immediately pruned.
+	if lay.splitModels && lay.modelsDir == lay.cmdDir {
+		protected[lay.modelsFile] = true
+	}
 	for _, c := range gp.own {
 		protected[c.filename] = true
 	}

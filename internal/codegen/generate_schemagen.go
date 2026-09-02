@@ -3,6 +3,7 @@ package codegen
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/go-rotini/jsonschema"
@@ -46,6 +47,19 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 		return "", fmt.Errorf("generate output types: %w", err)
 	}
 	return stripGenerated(string(src), outputRootSentinel), nil
+}
+
+// outputTypeNames lists the top-level type names buildOutputTypes declares, sorted so
+// the generated aliases are deterministic. It reads the same definition set the
+// generator does, so the two cannot disagree about what exists.
+func outputTypeNames(gp *program) []string {
+	defs := collectOutputDefs(gp)
+	out := make([]string, 0, len(defs))
+	for name := range defs {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // eachOwnNode visits every non-composed command node in the resolved tree
