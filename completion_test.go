@@ -449,7 +449,7 @@ func TestComplete_runIntercept(t *testing.T) {
 	out := &bytes.Buffer{}
 	p := NewProgram(completionDef(), &testHandlers{log: new([]string)}).WithArgs([]string{"__complete", "te"})
 	p.stdout, p.stderr = out, &bytes.Buffer{}
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("__complete run = %d, want 0", code)
 	}
 	if got := strings.TrimSpace(out.String()); got != "test" {
@@ -464,7 +464,7 @@ func TestComplete_dynamicViaProgram(t *testing.T) {
 	out := &bytes.Buffer{}
 	p := NewProgram(dynCompletionDef(), dynCompletionHandlers{}).WithArgs([]string{"__complete", "build", "--mode", "s"})
 	p.stdout, p.stderr = out, &bytes.Buffer{}
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("__complete run = %d, want 0", code)
 	}
 	if got := strings.TrimSpace(out.String()); got != "slow" {

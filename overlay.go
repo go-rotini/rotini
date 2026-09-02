@@ -11,10 +11,10 @@ package rotini
 // binds it under [KeyBindMeta]; a standalone Context binds its own, or none
 // for a CLI without config files):
 //
-//	defaults, _ := rotini.Defaults[cmdgen.MycliInputs](rtx)
-//	files, _    := rotini.ParseFiles[cmdgen.MycliInputs](rtx)
-//	env, _      := rotini.ParseEnv[cmdgen.MycliInputs](rtx)
-//	argv, _     := rotini.ParseArgv[cmdgen.MycliInputs](rtx)
+//	defaults, _ := rotini.Defaults[MycliInputs](rtx)
+//	files, _    := rotini.ParseFiles[MycliInputs](rtx)
+//	env, _      := rotini.ParseEnv[MycliInputs](rtx)
+//	argv, _     := rotini.ParseArgv[MycliInputs](rtx)
 //	inputs, report := rotini.OverlayInputsP(defaults, files, env, argv)
 //	if err := report.Validate(); err != nil { /* handler owns it */ }
 
@@ -77,7 +77,7 @@ type layerCore struct {
 // sources), the stdin payload, defaults — acquired, reconciled in the standard
 // precedence (defaults < files < env < argv), and validated, in one call:
 //
-//	inputs, err := rotini.Collect[cmdgen.MycliDeployInputs](rtx)
+//	inputs, err := rotini.Collect[MycliDeployInputs](rtx)
 //
 // Configuration comes from the Context's bound [BindMeta] ([KeyBindMeta] —
 // the generated NewProgram binds it; a CLI with nothing to declare needs

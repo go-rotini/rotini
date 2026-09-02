@@ -142,7 +142,7 @@ func (e *ParseError) Unwrap() error { return ErrUsage }
 //
 //	// a handler
 //	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-//	var in rtg.MycliInputs
+//	var in MycliInputs
 //	err := parser.Parse(rtx, &in)
 type Parser struct{}
 
@@ -153,10 +153,10 @@ func NewParser() *Parser {
 }
 
 // Parse binds the running command's arguments into out — a non-nil pointer to the
-// typed inputs struct rtg emits (e.g. &rtg.MycliInputs{}) — using the resolved
+// typed inputs struct codegen emits (e.g. &MycliInputs{}) — using the resolved
 // command and raw argv on rtx, in the json.Unmarshal style:
 //
-//	var in rtg.MycliInputs
+//	var in MycliInputs
 //	if err := parser.Parse(rtx, &in); err != nil { /* handler owns it */ }
 //
 // It applies declared defaults and validates required/enum, then fills out by

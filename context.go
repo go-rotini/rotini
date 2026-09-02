@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"sync"
 )
@@ -81,6 +82,16 @@ type Context struct {
 	warnings    []error           // warnings recorded this run via [Context.RecordWarning]; handed to the funnel
 	successes   []string          // successes recorded this run via [Context.RecordSuccess]; handed to the funnel
 	faults      []*PanicError     // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); handed to the funnel
+}
+
+// cloneServices returns a snapshot of the registry's bindings. The runtime seeds
+// every run's Context from the Program's registry through it (see
+// [Program.newRunContext]), so a service bound BEFORE the run ([Program.Bind]) is
+// visible to every run, while one bound DURING a run stays local to that run.
+func (rtx *Context) cloneServices() map[string]any {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return maps.Clone(rtx.services)
 }
 
 // newContext returns an empty [Context] with an initialized registry and no
@@ -294,7 +305,7 @@ func (rtx *Context) copyInfos() []string {
 // own channels ([Context.RecordInfo] / [Context.RecordSuccess] /
 // [Context.RecordWarning]).
 //
-//	inputs, err := rotini.Collect[cmdgen.MycliInputs](rtx)
+//	inputs, err := rotini.Collect[MycliInputs](rtx)
 //	if err != nil {
 //	    rtx.RecordError(err)
 //	    rtx.SignalExit(1) // graceful; or rtx.Exit(…) to skip teardown
@@ -446,7 +457,7 @@ func Get[T any](rtx *Context, key string) (T, bool) {
 // inline:
 //
 //	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-//	var in rtg.MycliInputs
+//	var in MycliInputs
 //	err := parser.Parse(rtx, &in)
 func MustGet[T any](rtx *Context, key string) T {
 	v, ok := Get[T](rtx, key)

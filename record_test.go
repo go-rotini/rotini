@@ -137,7 +137,7 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 		p.WithFunnel(func(_ context.Context, _ *Context, _, _ []string, _, errs []error, _ []*PanicError) {
 			fired, funneled, drained = true, errors.Join(errs...), errs
 		})
-		code, _ = p.run(p.args)
+		code, _ = p.Run(p.args)
 		return
 	}
 
@@ -232,7 +232,7 @@ func TestRun_defaultOnError_prints(t *testing.T) {
 				}
 			}}
 			p, _, errb := newTestProgram(h, []string{"run"}) // no WithFunnel → default
-			code, _ := p.run(p.args)
+			code, _ := p.Run(p.args)
 			if code != tc.want {
 				t.Errorf("code = %d, want %d", code, tc.want)
 			}

@@ -19,7 +19,7 @@ type Handlers interface {
 }
 
 // Definition is the compiled command tree for a generated rotini program. The
-// framework package (rtg) emits it as a Go literal and the rollup passes it to
+// generated package emits it as a Go literal and the rollup passes it to
 // [NewProgram]; the runtime uses it to parse argv, dispatch, and render help and
 // completion. It is data only — behavior lives in the handlers.
 type Definition struct {
@@ -81,7 +81,7 @@ type RemoteDef struct {
 
 // BindMeta is the generated, data-only descriptor the default binder ([Binder])
 // consumes to fill the non-argv input channels. It carries document-level concerns
-// that the dispatch-time Definition deliberately omits. The rtg package emits it as
+// that the dispatch-time Definition deliberately omits. The generated package emits it as
 // `var BindMeta = rotini.BindMeta{…}`; main.go passes it to [NewBinder].
 type BindMeta struct {
 	ConfigFiles []ConfigFile // per-command config_files sources, each tagged with its Scope; the binder scopes them to the invoked chain (cascade, nearest-wins)

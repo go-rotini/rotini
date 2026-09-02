@@ -77,7 +77,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 	}}
 
 	p, _, errb := newTestProgram(h, args)
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("run() = %d, want 0 (stderr: %s)", code, errb)
 	}
 
@@ -102,7 +102,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 func TestRun_aliasResolves(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&testHandlers{log: &log}, []string{"r", "bob"})
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("run() = %d, want 0", code)
 	}
 	if !contains(log, "run.Run") {
@@ -117,7 +117,7 @@ func TestRun_aliasResolves(t *testing.T) {
 func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&testHandlers{log: &log}, []string{"ru"}) // typo of "run"
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("run() = %d, want 0 (the root handler runs; it owns input errors)", code)
 	}
 	if !contains(log, "app.Run") {
@@ -128,7 +128,7 @@ func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 func TestRun_exitCodePropagates(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.SignalExit(5) }}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	if code, _ := p.run(p.args); code != 5 {
+	if code, _ := p.Run(p.args); code != 5 {
 		t.Errorf("run() = %d, want 5 (handler called Exit)", code)
 	}
 }
@@ -145,7 +145,7 @@ func TestRun_mustGetRoutesToFunnelPanics(t *testing.T) {
 		rtx.Exit(7)
 	})
 
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	if code != 7 {
 		t.Fatalf("run() = %d, want 7 (the funnel's exit code)", code)
 	}
@@ -171,7 +171,7 @@ func TestRun_defaultFunnelFaultFloorsTo1(t *testing.T) {
 		panic(&ServiceError{Key: "missing"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	if code, _ := p.run(p.args); code != 1 {
+	if code, _ := p.Run(p.args); code != 1 {
 		t.Errorf("run() = %d, want 1 (the default funnel floors a fault)", code)
 	}
 }
@@ -181,7 +181,7 @@ func TestRun_defaultOnPanicPrintsAndFails(t *testing.T) {
 		panic("boom") // a non-error panic value is wrapped before the funnel
 	}}
 	p, _, errb := newTestProgram(h, []string{"run"})
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	if code != 1 {
 		t.Fatalf("run() = %d, want %d (default OnPanic)", code, 1)
 	}
@@ -250,7 +250,7 @@ func runActs(t *testing.T, args []string, actions map[string]act) (int, []string
 	t.Helper()
 	log := []string{}
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: actions}, args)
-	code, _ := p.run(p.args)
+	code, _ := p.Run(p.args)
 	return code, log
 }
 
@@ -332,7 +332,7 @@ func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 		seen = panics[0]
 	})
 
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
@@ -428,7 +428,7 @@ func TestRun_panicRunsTeardownThenFunnelLast(t *testing.T) {
 		log = append(log, "funnel:"+panics[0].Error())
 		rtx.Exit(5)
 	})
-	code, _ := p.run(p.args)
+	code, _ := p.Run(p.args)
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
 		"run.PreRun", "run.Run",
@@ -455,7 +455,7 @@ func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 		calls++
 		rtx.Exit(1)
 	})
-	code, _ := p.run(p.args)
+	code, _ := p.Run(p.args)
 	if !contains(log, "app.CascadingPostRun") {
 		t.Errorf("remaining teardown did not run after a teardown panic: %v", log)
 	}

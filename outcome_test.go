@@ -14,7 +14,7 @@ func TestRun_recordSuccess_defaultToStdout(t *testing.T) {
 		rtx.RecordSuccess("deployed 3 services")
 	}}
 	p, out, _ := newTestProgram(h, []string{"run"})
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	if code != 0 || err != nil {
 		t.Fatalf("run() = (%d, %v), want (0, nil)", code, err)
 	}
@@ -30,7 +30,7 @@ func TestRun_recordInfo_defaultToStdout(t *testing.T) {
 		rtx.RecordInfo("scanning 12 files")
 	}}
 	p, out, _ := newTestProgram(h, []string{"run"})
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	if code != 0 || err != nil {
 		t.Fatalf("run() = (%d, %v), want (0, nil)", code, err)
 	}
@@ -46,7 +46,7 @@ func TestRun_recordWarning_defaultNonFatal(t *testing.T) {
 		rtx.RecordWarning(errors.New("--old is deprecated"))
 	}}
 	p, _, errb := newTestProgram(h, []string{"run"})
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	if code != 0 || err != nil {
 		t.Fatalf("run() = (%d, %v), want (0, nil) — a warning is non-fatal", code, err)
 	}
@@ -74,7 +74,7 @@ func TestRun_funnelReceivesAllChannels(t *testing.T) {
 		rtx.Exit(1)
 	})
 
-	code, _ := p.run(p.args)
+	code, _ := p.Run(p.args)
 	if strings.Join(gotInfos, ",") != "i" || strings.Join(gotSuccesses, ",") != "s" {
 		t.Errorf("infos=%v successes=%v, want [i] [s]", gotInfos, gotSuccesses)
 	}
@@ -95,21 +95,21 @@ func TestRun_exitCode_funnelIsFinalAuthority(t *testing.T) {
 
 	// Default funnel → floors to 1.
 	pd, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
-	if code, _ := pd.run(pd.args); code != 1 {
+	if code, _ := pd.Run(pd.args); code != 1 {
 		t.Errorf("default funnel: code = %d, want 1 (floors)", code)
 	}
 
 	// Custom funnel that sets no code → exits 0 (no floor; the funnel owns the code).
 	pc, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
 	pc.WithFunnel(func(context.Context, *Context, []string, []string, []error, []error, []*PanicError) {})
-	if code, _ := pc.run(pc.args); code != 0 {
+	if code, _ := pc.Run(pc.args); code != 0 {
 		t.Errorf("custom funnel without an exit: code = %d, want 0 (funnel owns the code)", code)
 	}
 
 	// Custom funnel that calls rtx.Exit(7) → that code wins.
 	ps, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
 	ps.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, _ []*PanicError) { rtx.Exit(7) })
-	if code, _ := ps.run(ps.args); code != 7 {
+	if code, _ := ps.Run(ps.args); code != 7 {
 		t.Errorf("custom funnel rtx.Exit(7): code = %d, want 7", code)
 	}
 
@@ -119,7 +119,7 @@ func TestRun_exitCode_funnelIsFinalAuthority(t *testing.T) {
 		rtx.SignalExit(2)
 	}}, []string{"run"})
 	po.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, _ []*PanicError) { rtx.Exit(5) })
-	if code, _ := po.run(po.args); code != 5 {
+	if code, _ := po.Run(po.args); code != 5 {
 		t.Errorf("funnel override: code = %d, want 5 (the funnel is the final authority)", code)
 	}
 }
@@ -132,7 +132,7 @@ func TestRun_faultExit_defaultFloorsButFunnelCanMask(t *testing.T) {
 
 	// Default funnel floors a fault to non-zero.
 	pd, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: panicRun}, []string{"run"})
-	if code, _ := pd.run(pd.args); code == 0 {
+	if code, _ := pd.Run(pd.args); code == 0 {
 		t.Error("default funnel let a panic exit 0; want non-zero (the floor)")
 	}
 
@@ -142,7 +142,7 @@ func TestRun_faultExit_defaultFloorsButFunnelCanMask(t *testing.T) {
 	pc.WithFunnel(func(_ context.Context, _ *Context, _, _ []string, _, _ []error, panics []*PanicError) {
 		sawPanic = len(panics) == 1
 	})
-	if code, _ := pc.run(pc.args); code != 0 || !sawPanic {
+	if code, _ := pc.Run(pc.args); code != 0 || !sawPanic {
 		t.Errorf("custom funnel: (code, sawPanic) = (%d, %v), want (0, true) — the funnel owns the exit", code, sawPanic)
 	}
 }
@@ -156,7 +156,7 @@ func TestRun_errorAndPanic_arriveTogether(t *testing.T) {
 		panic("kaboom")
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	code, err := p.run(p.args) // default funnel
+	code, err := p.Run(p.args) // default funnel
 	if code != 1 {
 		t.Errorf("code = %d, want 1 (any error or fault floors)", code)
 	}
@@ -183,7 +183,7 @@ func TestRun_wiringFaultArrivesAsPanic(t *testing.T) {
 		rtx.Exit(1)
 	})
 
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	if len(gotErrors) != 0 {
 		t.Errorf("errors slice = %v, want empty (a wiring fault is a panic, not an error)", gotErrors)
 	}
@@ -208,7 +208,7 @@ func TestRun_resolverFaultArrivesAsPanic(t *testing.T) {
 		nErrors, nPanics = len(errs), len(panics)
 	})
 
-	if _, _ = p.run(p.args); nErrors != 0 || nPanics != 1 {
+	if _, _ = p.Run(p.args); nErrors != 0 || nPanics != 1 {
 		t.Errorf("(errors, panics) = (%d, %d), want (0, 1) for a resolver fault", nErrors, nPanics)
 	}
 }
@@ -221,7 +221,7 @@ func TestRun_silentRun_doesNotInvokeFunnel(t *testing.T) {
 	p, _, _ := newTestProgram(h, []string{"run"})
 	p.WithFunnel(func(context.Context, *Context, []string, []string, []error, []error, []*PanicError) { fired = true })
 
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	if fired {
 		t.Error("a silent successful run invoked the funnel; want no call")
 	}

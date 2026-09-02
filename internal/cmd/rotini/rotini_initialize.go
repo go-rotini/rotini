@@ -52,4 +52,12 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.SignalExit(1)
 		return
 	}
+
+	// The scaffold imports the rotini runtime but rotini does not touch the user's
+	// go.mod — adding a require is a network operation with a side effect on a file
+	// rotini does not own, so it is reported, not performed. Without this the next
+	// `go build` fails on a missing module with no hint of what to do.
+	fmt.Fprintf(rtx.Stdout, "initialized cmd/%s\n\nNext steps:\n", args.Name)
+	fmt.Fprintln(rtx.Stdout, "  go get github.com/go-rotini/rotini    # the runtime the generated code imports")
+	fmt.Fprintf(rtx.Stdout, "  go build ./cmd/%s\n", args.Name)
 }

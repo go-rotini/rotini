@@ -61,7 +61,7 @@ command:
             type: string
       flags:
         - name: format
-          summary: the created rotini spec file format (defaults to the module conf's initialize.format, else yaml)
+          summary: the created rotini spec file format (defaults to yaml)
           identifiers:
             - --format
           schema:

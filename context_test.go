@@ -135,7 +135,7 @@ func TestContext_ArgsField(t *testing.T) {
 	var got []string
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.Args }}
 	p, _, errb := newTestProgram(h, argv)
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("run() = %d (stderr: %s)", code, errb)
 	}
 	if !reflect.DeepEqual(got, argv) {

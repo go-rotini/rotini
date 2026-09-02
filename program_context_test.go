@@ -36,7 +36,7 @@ func TestProgram_WithContext_threadsToHooks(t *testing.T) {
 	base := context.WithValue(context.Background(), key{}, "v")
 	var got any
 	p := newCtxProgram(ctxRec{run: func(ctx context.Context) { got = ctx.Value(key{}) }}).WithContext(base)
-	if code, _ := p.run(nil); code != 0 {
+	if code, _ := p.Run(nil); code != 0 {
 		t.Fatalf("run exit = %d, want 0", code)
 	}
 	if got != "v" {
@@ -92,7 +92,7 @@ func newLifeProgram(h lifeRec) *Program {
 func TestProgram_WithContext_noCancelRunsFullLifecycle(t *testing.T) {
 	var order []string
 	p := newLifeProgram(lifeRec{order: &order}).WithContext(context.Background())
-	if code, _ := p.run(nil); code != 0 {
+	if code, _ := p.Run(nil); code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
 	want := []string{"CascadingPreRun", "PreRun", "Run", "PostRun", "CascadingPostRun"}
@@ -108,7 +108,7 @@ func TestProgram_WithContext_cancelHaltsForwardRunsTeardown(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { cancel(ExitCode(3)) }}
-	code, err := newLifeProgram(h).WithContext(ctx).run(nil)
+	code, err := newLifeProgram(h).WithContext(ctx).Run(nil)
 	if err != nil {
 		t.Fatalf("run err = %v, want nil (cancel is a clean stop, not an error)", err)
 	}
@@ -127,7 +127,7 @@ func TestProgram_WithContext_cancelWithoutCodeExitsZero(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { cancel() }}
-	code, _ := newLifeProgram(h).WithContext(ctx).run(nil)
+	code, _ := newLifeProgram(h).WithContext(ctx).Run(nil)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 (plain cancel, no ExitCode cause)", code)
 	}
@@ -156,7 +156,7 @@ func TestProgram_handlerCancelsViaBoundCancel(t *testing.T) {
 	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
 		MustGet[context.CancelFunc](rtx, "cancel")()
 	}}
-	code, err := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).run(nil)
+	code, err := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).Run(nil)
 	if err != nil {
 		t.Fatalf("run err = %v, want nil", err)
 	}
@@ -175,7 +175,7 @@ func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
 	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
 		MustGet[context.CancelCauseFunc](rtx, "cancel")(ExitCode(3))
 	}}
-	code, _ := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).run(nil)
+	code, _ := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).Run(nil)
 	if code != 3 {
 		t.Errorf("exit code = %d, want 3 (bound cancel with ExitCode(3))", code)
 	}
@@ -189,7 +189,7 @@ func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
 func TestProgram_panic_default_runsTeardown(t *testing.T) {
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
-	code, _ := newLifeProgram(h).run(nil)
+	code, _ := newLifeProgram(h).Run(nil)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1 (panic → fault)", code)
 	}
@@ -202,7 +202,7 @@ func TestProgram_panic_default_runsTeardown(t *testing.T) {
 func TestProgram_panic_withPanicForwardFalse_skipsTeardown(t *testing.T) {
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
-	code, _ := newLifeProgram(h).WithPanicForward(false).run(nil)
+	code, _ := newLifeProgram(h).WithPanicForward(false).Run(nil)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1 (panic → fault)", code)
 	}
@@ -218,7 +218,7 @@ func TestProgram_withPanicRecoverFalse_forwardTrue_teardownThenRepanic(t *testin
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
 	recovered := func() (r any) {
 		defer func() { r = recover() }()
-		newLifeProgram(h).WithPanicRecover(false).run(nil)
+		newLifeProgram(h).WithPanicRecover(false).Run(nil)
 		return nil
 	}()
 	if recovered != "boom" {
@@ -236,7 +236,7 @@ func TestProgram_withPanicRecoverFalse_forwardFalse_panicsNow(t *testing.T) {
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
 	recovered := func() (r any) {
 		defer func() { r = recover() }()
-		newLifeProgram(h).WithPanicRecover(false).WithPanicForward(false).run(nil)
+		newLifeProgram(h).WithPanicRecover(false).WithPanicForward(false).Run(nil)
 		return nil
 	}()
 	if recovered != "boom" {

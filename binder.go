@@ -26,12 +26,12 @@ const KeyBinder = "binder"
 //
 //	// main.go
 //	rth.Program.
-//	    Bind(rotini.KeyBinder, rotini.NewBinder(rtg.BindMeta)).
+//	    Bind(rotini.KeyBinder, rotini.NewBinder(BindMeta)).
 //	    Execute()
 //
 //	// a handler
 //	binder := rotini.MustGet[*rotini.Binder](rtx, rotini.KeyBinder)
-//	var in rtg.WidgetCreateInputs
+//	var in WidgetCreateInputs
 //	if err := binder.Bind(rtx, &in); err != nil { /* handler owns it */ }
 //
 // Env values fill the generated <Prefix>Env struct (recon's env source maps a
@@ -67,13 +67,13 @@ func binderFor(rtx *Context) *Binder {
 }
 
 // NewBinder returns the default binder, configured from the generated descriptor
-// (the rtg package's BindMeta var) — its configuration_files sources and per-command
+// (the generated package's BindMeta var) — its configuration_files sources and per-command
 // stdin payload schemas.
 func NewBinder(meta BindMeta) *Binder {
 	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas, envPrefix: meta.EnvPrefix, sources: meta.Sources}
 }
 
-// Bind fills out — a non-nil pointer to the typed inputs struct rtg emits — from
+// Bind fills out — a non-nil pointer to the typed inputs struct codegen emits — from
 // every wired channel: argv flags + positional arguments (via the parser), env- and
 // config-file fallbacks for flags that declare them, the pure Env/Config channels,
 // and a leaf command's typed stdin payload. Required/enum/constraint validation of

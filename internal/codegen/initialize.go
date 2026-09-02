@@ -60,9 +60,7 @@ func (p *Processor) initialize(name, format string, force bool) error {
 		return err
 	}
 
-	// The default format comes from the module-root conf's `initialize` block (when
-	// present); an explicit --format overrides it. A project without that conf gets
-	// rotini's built-in default (yaml).
+	// The seed serialization: an explicit --format, else rotini's default (yaml).
 	if format == "" {
 		format = "yaml"
 	}

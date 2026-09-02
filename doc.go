@@ -41,10 +41,9 @@
 // literal, typed per-command input structs, embedded help/man/markdown pages
 // and completion scripts) plus one editable handler stub per command —
 // created once, then owned by you. `rotini init` scaffolds a new CLI as a
-// minimal skeleton — everything is opt-in: `--with help` seeds the -h flags,
-// help command, and wired handlers; `--with version`, `--with completion`,
-// `--with man`, `--with markdown` (or `--with all`) each wire their feature,
-// commands, and handlers the same way.
+// minimal skeleton: a root-only spec, a conf with every feature off, the
+// entrypoint, and one empty handler stub. You grow it from there — each
+// feature (help, completion, man, markdown) is a conf toggle you turn on.
 //
 // # Composition
 //
@@ -61,8 +60,8 @@
 //     instead of a stub — the own-types + delegated-handler hybrid; codegen emits
 //     alias.<Convention>() and seeds no stub. Per-command: there is no subtree
 //     cascade, so an inline sub-command without its own handler: still gets a normal
-//     stub. It pairs with the conf cmd/cmdgen package split — an in-project handler
-//     package can import the generated cmdgen input types directly.
+//     stub. The handler package imports the generated cmd package for its input
+//     types.
 //  3. Local composition — a "$ref" to a sibling spec in the same module. The
 //     child's tree merges in (on an overlapping key the parent wins), and codegen
 //     auto-delegates each composed command to the child's generated package
@@ -188,7 +187,7 @@
 //
 //   - [Collect] is the 95% handler's whole input story: every declared
 //     channel reconciled and validated in one line —
-//     inputs, err := rotini.Collect[cmdgen.DeployInputs](rtx) — and
+//     inputs, err := rotini.Collect[DeployInputs](rtx) — and
 //     [CollectP] adds the provenance [Report] ("where did this value come
 //     from", per field). Both ride the [BindMeta] the generated NewProgram
 //     binds under [KeyBindMeta].

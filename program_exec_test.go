@@ -2,6 +2,8 @@ package rotini
 
 import (
 	"bytes"
+	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -59,5 +61,63 @@ func TestProgram_WithStdout_capturesRuntimeOutput(t *testing.T) {
 
 	if code != 0 || strings.TrimSpace(out.String()) != "run" {
 		t.Errorf("__complete via Execute: out=%q code=%d, want out=%q code=0", out.String(), code, "run")
+	}
+}
+
+// TestProgram_Run_isReentrant proves the contract [Program.Run] exists for: a Program is
+// reusable across invocations (the REPL / daemon / stdio-server case). Each call gets a
+// fresh Context, so neither the recorded outcomes nor the exit code of one run leak into
+// the next.
+func TestProgram_Run_isReentrant(t *testing.T) {
+	var n int
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		n++
+		if n == 1 { // only the FIRST run fails
+			rtx.RecordError(errors.New("first run failed"))
+			rtx.SignalExit(3)
+		}
+	}}
+	p, _, errb := newTestProgram(h, nil)
+
+	if code, _ := p.Run([]string{"run", "x"}); code != 3 {
+		t.Fatalf("run 1 code = %d, want 3", code)
+	}
+	if !strings.Contains(errb.String(), "first run failed") {
+		t.Errorf("run 1 stderr = %q, want the recorded error", errb.String())
+	}
+
+	errb.Reset()
+	code, err := p.Run([]string{"run", "x"})
+	if code != 0 || err != nil {
+		t.Errorf("run 2 = (%d, %v), want (0, nil) — run 1's exit code and errors must not carry over", code, err)
+	}
+	if errb.String() != "" {
+		t.Errorf("run 2 stderr = %q, want empty — run 1's records must not be re-reported", errb.String())
+	}
+}
+
+// TestProgram_Run_seedsBoundServicesPerRun pins the registry half of the re-entrancy
+// contract: services bound with [Program.Bind] reach EVERY run, while a binding a handler
+// makes DURING a run is local to that run.
+func TestProgram_Run_seedsBoundServicesPerRun(t *testing.T) {
+	var seeded, leaked []bool
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		_, ok := Get[string](rtx, "seeded")
+		seeded = append(seeded, ok)
+		_, ok = Get[string](rtx, "per-run")
+		leaked = append(leaked, ok)
+		rtx.Bind("per-run", "bound during this run")
+	}}
+	p, _, _ := newTestProgram(h, nil)
+	p.Bind("seeded", "bound before any run")
+
+	p.Run([]string{"run", "x"})
+	p.Run([]string{"run", "x"})
+
+	if want := []bool{true, true}; !slices.Equal(seeded, want) {
+		t.Errorf("Program.Bind visibility = %v, want %v — a seeded service reaches every run", seeded, want)
+	}
+	if want := []bool{false, false}; !slices.Equal(leaked, want) {
+		t.Errorf("in-run Bind visibility = %v, want %v — a run's own binding must not leak forward", leaked, want)
 	}
 }

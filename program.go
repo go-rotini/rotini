@@ -90,7 +90,7 @@ type Program struct {
 	args      []string
 	def       Definition
 	handlers  any
-	rtx       *Context   // pre-seeded registry; user Bind calls land here
+	rtx       *Context   // seed registry: Program.Bind lands here, and each run's Context is seeded from it
 	funnelFn  FunnelFunc // the one outcome funnel (all recorded channels); nil → defaultFunnel
 	resolver  Resolver   // resolve phase override; nil → DefaultResolver
 	lifecycle Lifecycle  // run-phase plan override; nil → DefaultLifecycle
@@ -111,8 +111,8 @@ type Program struct {
 	signalSet  []os.Signal
 }
 
-// NewProgram wires a generated program's command tree (the rtg [Definition]) and
-// its aggregate handler set (the rtg ProgramHandlers implementation) to the
+// NewProgram wires a generated program's command tree (the generated [Definition]) and
+// its aggregate handler set (the generated ProgramHandlers implementation) to the
 // rotini runtime. handlers is any so the runtime need not import the generated
 // framework package; dispatch resolves the per-command handlers from it at
 // execution time, via the Handler names recorded in def.
@@ -293,6 +293,22 @@ func (p *Program) Bind(key string, value any) *Program {
 	return p
 }
 
+// newRunContext builds the per-invocation [Context]: fresh outcome channels, exit
+// state, and resolved chain, seeded with the services bound via [Program.Bind] and
+// wired to the program's streams. Every [Program.Run] gets its own, which is what
+// makes a Program re-entrant — a long-running host dispatching many argv lines never
+// inherits the previous run's records or exit code.
+func (p *Program) newRunContext() *Context {
+	rtx := newContext()
+	if p.rtx != nil {
+		if svcs := p.rtx.cloneServices(); svcs != nil {
+			rtx.services = svcs
+		}
+	}
+	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
+	return rtx
+}
+
 // FunnelFunc is the program's single outcome funnel ([Program.WithFunnel]): the
 // runtime calls it once, after the lifecycle (teardown included) settles, with every
 // channel a run recorded — informational messages ([Context.RecordInfo]), successes
@@ -411,21 +427,32 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 // [Program.WithSignals] forces it on with a custom signal set (even atop a supplied
 // context), and [Program.WithContext] alone defers signal handling to the caller.
 func (p *Program) Execute() error {
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	p.exit(code)
 	return err
 }
 
-// run is the testable core of Execute: it resolves the invoked command (no eager
-// flag parsing — that is the handler's opt-in via [Parse]), execs a remote
-// sub-command if one was selected, otherwise builds the per-invocation [Rtx] and
-// dispatches the lifecycle. It returns the process exit code instead of calling
-// os.Exit. The only retained protocol intercept is the hidden __complete entry
-// the generated shell scripts invoke.
-func (p *Program) run(argv []string) (int, error) {
+// Run dispatches ONE invocation of argv and returns its exit code — the re-entrant
+// core [Program.Execute] is built on. It resolves the invoked command (no eager flag
+// parsing — that is the handler's opt-in via [Parser.Parse]), execs a remote
+// sub-command if one was selected, otherwise builds the per-invocation [Context] and
+// dispatches the lifecycle. The only retained protocol intercept is the hidden
+// __complete entry the generated shell scripts invoke.
+//
+// Unlike [Program.Execute], Run NEVER ends the process: it returns the code instead of
+// handing it to the exit action. That makes a Program reusable — a REPL, a daemon, or a
+// stdio server can call Run once per line/request, and a test can drive a whole program
+// end to end without trapping os.Exit.
+//
+// Each call gets a FRESH [Context]: its own outcome channels, exit code, and resolved
+// chain, so one invocation never inherits the previous one's records or status. The
+// services bound with [Program.Bind] are seeded into every run (a binding made by a
+// handler DURING a run stays local to that run). Stream and signal configuration
+// applies to every call.
+func (p *Program) Run(argv []string) (int, error) {
 	if len(argv) > 0 && argv[0] == completeCommand {
-		p.rtx.Stdin, p.rtx.Stdout, p.rtx.Stderr = p.stdin, p.stdout, p.stderr
-		for _, c := range complete(p.def, argv[1:], p.handlers, p.rtx) {
+		rtx := p.newRunContext()
+		for _, c := range complete(p.def, argv[1:], p.handlers, rtx) {
 			fmt.Fprintln(p.stdout, c)
 		}
 		return 0, nil
@@ -491,13 +518,7 @@ func (p *Program) run(argv []string) (int, error) {
 	if resolve == nil {
 		resolve = DefaultResolver
 	}
-	rtx := p.rtx
-	if rtx == nil {
-		rtx = newContext()
-	}
-	rtx.Stdin = p.stdin
-	rtx.Stdout = p.stdout
-	rtx.Stderr = p.stderr
+	rtx := p.newRunContext()
 
 	res, err := resolve(p.def, argv)
 	if err != nil {

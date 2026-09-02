@@ -18,7 +18,7 @@ func runLogged(t *testing.T, args []string, configure func(*Program)) ([]string,
 	if configure != nil {
 		configure(p)
 	}
-	code, _ := p.run(p.args)
+	code, _ := p.Run(p.args)
 	if errb.Len() > 0 {
 		t.Logf("stderr: %s", errb)
 	}
@@ -59,7 +59,7 @@ func TestWithResolver_alias(t *testing.T) {
 		return DefaultResolver(def, argv)
 	})
 
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("run() = %d, want 0 (stderr: %s)", code, errb)
 	}
 	if want := []string{
@@ -83,7 +83,7 @@ func TestWithResolver_error(t *testing.T) {
 	p.WithResolver(func(Definition, []string) (Resolution, error) {
 		return Resolution{}, errors.New("routing table on fire")
 	})
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	// A resolver error is a resolution-phase fault routed to OnPanic; the default
 	// exits 1 (the returned err still carries the internal category).
 	if code != 1 || err == nil {
@@ -104,7 +104,7 @@ func TestWithResolver_error(t *testing.T) {
 	p2.WithResolver(func(Definition, []string) (Resolution, error) {
 		return Resolution{}, UsageError(errors.New("bad token"))
 	})
-	_, err2 := p2.run(p2.args)
+	_, err2 := p2.Run(p2.args)
 	if CategoryOf(err2) != CategoryUsage {
 		t.Errorf("CategoryOf = %v, want usage — the resolver's own tag must survive", CategoryOf(err2))
 	}
@@ -130,7 +130,7 @@ func TestWithFunnel_categorySwitch(t *testing.T) {
 			rtx.Exit(1)
 		}
 	})
-	if code, _ := p.run(p.args); code != 70 {
+	if code, _ := p.Run(p.args); code != 70 {
 		t.Errorf("run() = %d, want %d via the category switch", code, 70)
 	}
 }
@@ -140,7 +140,7 @@ func TestWithFunnel_categorySwitch(t *testing.T) {
 func TestRun_wiringError(t *testing.T) {
 	p, _, _ := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.def = Definition{Name: "app", Handler: "Nope"} // no such handler method
-	_, err := p.run(p.args)
+	_, err := p.Run(p.args)
 	var we *WiringError
 	if !errors.As(err, &we) {
 		t.Fatalf("err is not a *WiringError: %T (%v)", err, err)
@@ -158,7 +158,7 @@ func TestWithResolver_emptyChain(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.WithResolver(func(Definition, []string) (Resolution, error) { return Resolution{}, nil })
 	// An empty chain is a resolver fault → OnPanic; the default exits 1.
-	if code, err := p.run(p.args); code != 1 || err == nil {
+	if code, err := p.Run(p.args); code != 1 || err == nil {
 		t.Errorf("run() = (%d, %v), want (1, an empty-chain error)", code, err)
 	}
 	if !strings.Contains(errb.String(), "empty chain") {
@@ -175,7 +175,7 @@ func TestWithResolver_customRemote(t *testing.T) {
 	})
 	// Not flagged Discovered → a declared remote → a missing binary is recorded
 	// as an error → OnError; the default exits 1.
-	if code, _ := p.run(p.args); code != 1 {
+	if code, _ := p.Run(p.args); code != 1 {
 		t.Errorf("run() = %d, want 1 for an unresolvable remote binary", code)
 	}
 	if errb.Len() == 0 {
@@ -230,7 +230,7 @@ func TestWithLifecycle_customPlanKeepsUnwindContract(t *testing.T) {
 	var log []string
 	p, _, errb := newTestProgram(&haltHandlers{log: &log}, []string{"run"})
 	p.WithLifecycle(DefaultLifecycle) // explicitly seamed; the engine owns halting/unwind
-	code, err := p.run(p.args)
+	code, err := p.Run(p.args)
 	if code != 1 || err == nil {
 		t.Fatalf("run() = (%d, %v), want (1, the panic via OnPanic)", code, err)
 	}
@@ -281,7 +281,7 @@ func TestPanicError(t *testing.T) {
 			got = panics[0]
 			rtx.Exit(1)
 		})
-		if code, _ := p.run(p.args); code != 1 {
+		if code, _ := p.Run(p.args); code != 1 {
 			t.Fatalf("run() = %d, want the funnel's exit 1", code)
 		}
 		return got
