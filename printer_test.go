@@ -202,3 +202,46 @@ func TestPrinter_unsupportedFormatIsInternal(t *testing.T) {
 		t.Errorf("an unreachable format must be an internal error, got %v", err)
 	}
 }
+
+// omitempty is honored consistently by the per-record formats: a zero field tagged
+// omitempty is absent from JSON and from text alike, so one value does not render
+// three different ways depending on the flag the user passed.
+func TestPrinter_omitemptyIsConsistentAcrossRecordFormats(t *testing.T) {
+	type row struct {
+		Name  string `json:"name"`
+		Owner string `json:"owner,omitempty"`
+		Count int    `json:"count,omitempty"`
+	}
+	v := row{Name: "x"} // Owner and Count are zero
+
+	for _, f := range []Format{FormatJSON, FormatText} {
+		got := printed(t, f, v)
+		if strings.Contains(strings.ToLower(got), "owner") {
+			t.Errorf("%s rendered an omitempty zero field:\n%s", f, got)
+		}
+		if !strings.Contains(strings.ToLower(got), "name") {
+			t.Errorf("%s dropped a populated field:\n%s", f, got)
+		}
+	}
+	// A field WITHOUT omitempty still renders when zero — the tag is the contract.
+	type plain struct {
+		Name  string `json:"name"`
+		Owner string `json:"owner"`
+	}
+	if got := printed(t, FormatText, plain{Name: "x"}); !strings.Contains(got, "OWNER") {
+		t.Errorf("text dropped a zero field that is NOT omitempty:\n%s", got)
+	}
+}
+
+// A table keeps every column regardless: columns are a property of the table, not of
+// a row, so two runs of the same command produce the same shape.
+func TestPrinter_tableKeepsColumnsRegardlessOfOmitempty(t *testing.T) {
+	type row struct {
+		Name  string `json:"name"`
+		Owner string `json:"owner,omitempty"`
+	}
+	got := printed(t, FormatTable, []row{{Name: "a"}, {Name: "b"}})
+	if !strings.Contains(got, "OWNER") {
+		t.Errorf("table dropped a column because this result set left it blank:\n%s", got)
+	}
+}

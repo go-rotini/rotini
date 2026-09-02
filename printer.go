@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -61,6 +62,21 @@ func ParseFormat(name string) (Format, error) {
 //
 //	out := rotini.NewPrinter(rtx.Stdout).WithFormat(format)
 //	if err := out.Print(result); err != nil { rtx.RecordError(err) }
+//
+// # Ordering
+//
+// A Printer writes IMMEDIATELY, while [Context.RecordSuccess] and friends are
+// reported by the funnel once the lifecycle has settled — after teardown. So a
+// handler that both prints a result and records an outcome sees them in that order,
+// with any PostRun output in between:
+//
+//	tasks add "write docs"
+//	TITLE: write docs      <- printed by the Printer, during Run
+//	task added             <- recorded, reported after teardown
+//
+// That is the intended model — results are data, outcomes are reported once, in one
+// place — but it is worth knowing before wondering why a success line trails the
+// output it describes.
 //
 // The zero value is not usable; start from [NewPrinter].
 type Printer struct {
@@ -171,6 +187,11 @@ func (p *Printer) printTable(v any) error {
 // order from the first element: struct fields in declaration order, map keys
 // sorted (a map has no inherent order, and unstable columns would make output
 // undiffable).
+//
+// Unlike the text and JSON formats, a table does NOT honor `omitempty`: columns are
+// a property of the table, not of a row, and dropping one because this particular
+// result set left it blank would make two runs of the same command produce
+// differently-shaped output.
 func (p *Printer) tableOf(v any) (*Table, bool) {
 	rv := reflect.Indirect(reflect.ValueOf(v))
 	if rv.Kind() != reflect.Slice && rv.Kind() != reflect.Array {
@@ -331,9 +352,27 @@ func structPairs(rv reflect.Value) []pair {
 		if !f.IsExported() {
 			continue
 		}
+		// Honor `omitempty` the way the JSON encoder does, so one value renders
+		// consistently whichever format the invocation asked for.
+		if omitEmpty(f) && rv.Field(i).IsZero() {
+			continue
+		}
 		out = append(out, pair{fieldColumnName(f), scalarText(rv.Field(i))})
 	}
 	return out
+}
+
+// omitEmpty reports whether a field's json or rotini tag carries the omitempty
+// option.
+func omitEmpty(f reflect.StructField) bool {
+	for _, tag := range []string{"json", "rotini"} {
+		if v, ok := f.Tag.Lookup(tag); ok {
+			if slices.Contains(strings.Split(v, ",")[1:], "omitempty") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func mapPairs(rv reflect.Value) []pair {

@@ -91,6 +91,7 @@ func MustGet
 func NewBinder
 func NewConfirm
 func NewContextFor
+func NewKey
 func NewPager
 func NewParser
 func NewPrinter
@@ -134,7 +135,9 @@ method Confirm.WithRetries
 method Context.Bind
 method Context.BindIfAbsent
 method Context.Chain
+method Context.Command
 method Context.Exit
+method Context.Path
 method Context.RecordError
 method Context.RecordInfo
 method Context.RecordSuccess
@@ -146,6 +149,12 @@ method DefaultCascadingPreRun.CascadingPreRun
 method DefaultPostRun.PostRun
 method DefaultPreRun.PreRun
 method Deprecation.Error
+method Key.BindTo
+method Key.Get
+method Key.MustGet
+method Key.Name
+method Key.Provide
+method Key.String
 method Pager.Page
 method Pager.WithCommand
 method Pager.WithEnabled
@@ -339,6 +348,7 @@ type Format
 type Framing
 type FunnelFunc
 type Handlers
+type Key
 type Layer
 type Lifecycle
 type LifecycleStep

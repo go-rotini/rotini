@@ -167,19 +167,24 @@ func renderMainFile(pkg, pkgAlias, extension string) ([]byte, error) {
 	})
 }
 
-// templateHandlerData is the per-command handler stub context: every generated
-// command gets an empty stub (the end-user wires it). RuntimeImport is the
-// emitted-runtime import line (the stub references rotini.Context / rotini.Handlers).
+// templateHandlerData is the per-command handler stub context. The stub is
+// create-once and then the user's, so it is written to be the shape worth copying:
+// the Default* hooks embedded rather than overridden, and Run showing the
+// Collect-then-RecordError idiom against this command's own generated inputs type.
 type templateHandlerData struct {
 	Package       string
 	HandlersType  string
+	InputsType    string // the generated inputs type Collect decodes into
+	Invocation    string // how a user types the command, e.g. "rotini generate"
 	RuntimeImport string
 }
 
-func renderHandlerStubFile(pkg, handlersType, runtimeImport string) ([]byte, error) {
+func renderHandlerStubFile(pkg, handlersType, inputsType, invocation, runtimeImport string) ([]byte, error) {
 	return renderGoFile("handler", templateHandlerStub, templateHandlerData{
 		Package:       pkg,
 		HandlersType:  handlersType,
+		InputsType:    inputsType,
+		Invocation:    invocation,
 		RuntimeImport: runtimeImport,
 	})
 }

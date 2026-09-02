@@ -179,6 +179,25 @@
 // renders help for [ParseError.Command], logs, or redacts. Suggestion is the
 // program's call, never the framework's (Pillar 1).
 //
+// # Sharing dependencies between handlers
+//
+// The store, client or logger every handler needs rides the same registry, reached by
+// a TYPED key so the name and the type cannot drift apart:
+//
+//	// declared once, beside the thing it names
+//	var StoreKey = rotini.NewKey[Store]("store")
+//
+//	// main.go — the value's type is checked here, where it is supplied
+//	tasks.StoreKey.Provide(cmd.Program, tasks.NewStore()).Execute()
+//
+//	// any handler — no string, no type assertion, no miss check
+//	store := tasks.StoreKey.MustGet(rtx)
+//
+// A handler that needs to know WHICH command it is — for a log line, an audit record,
+// or an error message — asks the context: [Context.Command] is the resolved leaf and
+// [Context.Path] is the canonical invocation ("tasks add"), with the full chain and
+// the tokens the user actually typed in [Context.Chain].
+//
 // # Opt-in services
 //
 // Everything else is a value a handler fetches from the registry —

@@ -121,6 +121,7 @@ func resolveTree(spec *Spec, specPath, moduleName string) (*program, error) {
 	}
 	gp.root = genCommand{
 		prefix:      gp.rootPascal,
+		invocation:  gp.rootName,
 		handler:     lowerFirst(gp.rootPascal) + "Handlers",
 		filename:    commandStubFilename(root.Name, "", root.Filename),
 		flags:       flagFields(root.inputs()),
@@ -193,6 +194,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 		} else {
 			gc := genCommand{
 				prefix:      prefix,
+				invocation:  gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
 				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
 				filename:    commandStubFilename(gp.rootName, path, c.Filename),
 				flags:       flagFields(c.inputs()),
@@ -524,6 +526,7 @@ type fieldDef struct {
 // sub-command) that the renderers consume.
 type genCommand struct {
 	prefix      string // PascalCase type prefix, e.g. "RotiniGenerate"
+	invocation  string // how a user types it, e.g. "rotini generate"
 	handler     string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
 	filename    string // handler stub file name, e.g. "rotini_generate.go"
 	flags       []fieldDef

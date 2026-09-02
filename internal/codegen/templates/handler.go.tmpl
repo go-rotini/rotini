@@ -9,29 +9,34 @@ import (
 
 var _ rotini.Handlers = (*{{.HandlersType}})(nil)
 
-type {{.HandlersType}} struct{
+// {{.HandlersType}} implements `{{.Invocation}}`.
+//
+// The four embedded types are no-op implementations of the hooks this command does
+// not use, so only Run is written below. Implement any of them by declaring a method
+// with the same name — CascadingPreRun and CascadingPostRun run for every command in
+// the chain, PreRun/Run/PostRun only for this one.
+type {{.HandlersType}} struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
 	rotini.DefaultPostRun
 	rotini.DefaultCascadingPostRun
 }
 
-func (*{{.HandlersType}}) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "{{.HandlersType}} CascadingPreRun")
-}
-
-func (*{{.HandlersType}}) PreRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "{{.HandlersType}} PreRun")
-}
-
+// Run performs `{{.Invocation}}`.
+//
+// Collect reconciles every input channel the spec declares for this command — argv
+// flags and arguments, environment variables, configuration files and defaults — into
+// the generated {{.InputsType}} type, validated, in the documented precedence.
+//
+// A handler does not print its own errors: it RECORDS them, and the runtime reports
+// them once, after teardown, with the right exit code.
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "{{.HandlersType}} Run")
-}
+	inputs, err := rotini.Collect[{{.InputsType}}](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		return
+	}
 
-func (*{{.HandlersType}}) PostRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "{{.HandlersType}} PostRun")
-}
-
-func (*{{.HandlersType}}) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "{{.HandlersType}} CascadingPostRun")
+	// TODO: replace this with the command's work.
+	fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "{{.Invocation}}", inputs)
 }

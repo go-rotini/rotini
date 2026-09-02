@@ -6,6 +6,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"strings"
 	"sync"
 )
 
@@ -187,6 +188,40 @@ func (rtx *Context) Chain() []ResolvedCommand {
 	return rtx.chain
 }
 
+// Command returns the command this invocation resolved to — the leaf of the chain,
+// the one whose Run is executing. It is the answer to "which command am I?", which
+// help text, audit logs and error messages all want:
+//
+//	rtx.RecordError(fmt.Errorf("%s: %w", rtx.Command().Name, err))
+//
+// For a bare root invocation it is the root command. The full chain, including each
+// ancestor and the argv token that matched it, is [Context.Chain].
+func (rtx *Context) Command() ResolvedCommand {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.chain) == 0 {
+		return ResolvedCommand{}
+	}
+	return rtx.chain[len(rtx.chain)-1]
+}
+
+// Path returns the invoked command path, space-joined — "tasks add" for a
+// sub-command, "tasks" for a bare root invocation.
+//
+// The names are CANONICAL, not the tokens the user typed: an invocation through an
+// alias reports the real command name, so a path is stable to log, compare and
+// aggregate on. [Context.Chain] carries each frame's Matched token when what the user
+// actually typed is what you need.
+func (rtx *Context) Path() string {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	names := make([]string, 0, len(rtx.chain))
+	for _, c := range rtx.chain {
+		names = append(names, c.Name)
+	}
+	return strings.Join(names, " ")
+}
+
 // Value returns the service bound under key, or nil if none is bound — the raw
 // accessor, mirroring [context.Context.Value]. Callers type-assert to the expected
 // type, using the comma-ok form to handle an unbound (or wrong-type) service:
@@ -365,6 +400,9 @@ func (rtx *Context) RecordWarning(warn error) {
 // funnel receives the recorded messages as a slice once the run settles.
 // Recording a success does not by itself set the exit code (a clean run is
 // already 0). An empty msg is ignored.
+// Recorded outcomes are reported by the funnel AFTER the lifecycle settles, so they
+// appear after anything a handler wrote directly to [Context.Stdout] during Run (a
+// [Printer]'s output, say). See the Ordering section on [Printer].
 func (rtx *Context) RecordSuccess(msg string) {
 	if rtx == nil || msg == "" {
 		return

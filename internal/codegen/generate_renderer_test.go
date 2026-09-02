@@ -20,8 +20,9 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 	if _, err := renderMainFile("example.com/app/internal/cmd/app", "cli", "yaml"); err != nil {
 		t.Errorf("main: %v", err)
 	}
-	// Every command — including help/version/completion — gets the same empty stub.
-	if _, err := renderHandlerStubFile("cli", "appSubHandlers", `rotini "example.com/app/internal/cmd/app/rotini"`); err != nil {
+	// Every command — including help/version/completion — gets the same stub shape,
+	// carrying its own inputs type and invocation.
+	if _, err := renderHandlerStubFile("cli", "appSubHandlers", "AppSubInputs", "app sub", `"github.com/go-rotini/rotini"`); err != nil {
 		t.Errorf("handler stub: %v", err)
 	}
 }

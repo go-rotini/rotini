@@ -9,6 +9,12 @@ import (
 
 var _ rotini.Handlers = (*demoBuildHandlers)(nil)
 
+// demoBuildHandlers implements `demo build`.
+//
+// The four embedded types are no-op implementations of the hooks this command does
+// not use, so only Run is written below. Implement any of them by declaring a method
+// with the same name — CascadingPreRun and CascadingPostRun run for every command in
+// the chain, PreRun/Run/PostRun only for this one.
 type demoBuildHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
@@ -16,22 +22,21 @@ type demoBuildHandlers struct {
 	rotini.DefaultCascadingPostRun
 }
 
-func (*demoBuildHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "demoBuildHandlers CascadingPreRun")
-}
-
-func (*demoBuildHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "demoBuildHandlers PreRun")
-}
-
+// Run performs `demo build`.
+//
+// Collect reconciles every input channel the spec declares for this command — argv
+// flags and arguments, environment variables, configuration files and defaults — into
+// the generated DemoBuildInputs type, validated, in the documented precedence.
+//
+// A handler does not print its own errors: it RECORDS them, and the runtime reports
+// them once, after teardown, with the right exit code.
 func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "demoBuildHandlers Run")
-}
+	inputs, err := rotini.Collect[DemoBuildInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		return
+	}
 
-func (*demoBuildHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "demoBuildHandlers PostRun")
-}
-
-func (*demoBuildHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintln(rtx.Stdout, "demoBuildHandlers CascadingPostRun")
+	// TODO: replace this with the command's work.
+	fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "demo build", inputs)
 }

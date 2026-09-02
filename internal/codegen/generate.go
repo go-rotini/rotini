@@ -455,7 +455,7 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		content, err := renderHandlerStubFile(lay.cmdPkgName, c.handler, runtimeImport)
+		content, err := renderHandlerStubFile(lay.cmdPkgName, c.handler, c.prefix+"Inputs", c.invocation, runtimeImport)
 		if err != nil {
 			return err
 		}
