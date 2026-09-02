@@ -202,8 +202,8 @@ func TestStream_String(t *testing.T) {
 // without a final Err() check silently truncates. Lines caps a line at 1MB, so a
 // longer one must surface as an error rather than as a short, successful-looking run.
 func TestSubprocess_linesReportsScanFailure(t *testing.T) {
-	// One line of 2MB, no newline until the end — past the scanner's cap.
-	script := "printf 'x%.0s' $(seq 1 2000000); echo"
+	// One 2MB line, no newline until the end — past the scanner's 1MB cap.
+	script := `head -c 2000000 /dev/zero | tr '\0' 'x'; echo`
 
 	var got []Line
 	var runErr error

@@ -205,6 +205,15 @@ func (s *Subprocess) Output(ctx context.Context) (string, error) {
 	return strings.TrimRight(out.String(), "\n"), err
 }
 
+// drain reads the rest of r and discards it, so a child is never left blocked writing
+// to a pipe nobody reads — which would hang cmd.Wait. Used only once the stream is
+// already known to be unusable, so the discarded bytes are of no value.
+func drain(r io.Reader) {
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		return
+	}
+}
+
 // reap waits for a child we deliberately killed, releasing its process entry.
 // The status is meaningless — the kill was ours, and the consumer has stopped
 // iterating — so it is checked and dropped here rather than surfaced to a caller
@@ -273,6 +282,12 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 			}
 			if err := sc.Err(); err != nil {
 				scanOnce.Do(func() { scanErr = err })
+				// Ask the child to stop, then keep draining. Cancellation alone is
+				// not enough: it kills the process rotini started, not the rest of a
+				// shell pipeline, and cmd.Wait blocks until the pipe is read to EOF.
+				// A writer with nobody reading would hang the whole call.
+				stop()
+				drain(r)
 			}
 		}
 		wg.Add(2)
@@ -288,20 +303,23 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 			}
 		}
 
-		if err := cmd.Wait(); err != nil {
-			code := cmd.ProcessState.ExitCode()
-			if _, isExit := errors.AsType[*exec.ExitError](err); !isExit {
-				code = -1
-			}
-			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: code, Cause: err})
-			return
-		}
-		// The command succeeded but its output did not arrive intact — which the
-		// consumer must be told, since it just finished a loop that looked complete.
+		waitErr := cmd.Wait()
+
+		// A scan failure outranks the wait error: the output is incomplete, and the
+		// non-zero status is usually just the kill that failure triggered. Reporting
+		// "signal: killed" would hide the reason.
 		if scanErr != nil {
 			yield(Line{}, &SubprocessError{
 				Name: s.name, Args: s.args, ExitCode: cmd.ProcessState.ExitCode(), Cause: scanErr,
 			})
+			return
+		}
+		if waitErr != nil {
+			code := cmd.ProcessState.ExitCode()
+			if _, isExit := errors.AsType[*exec.ExitError](waitErr); !isExit {
+				code = -1
+			}
+			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: code, Cause: waitErr})
 		}
 	}
 }
