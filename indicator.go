@@ -336,7 +336,8 @@ func (p *Progress) render() string {
 		fmt.Fprintf(&b, " eta %s", eta.Round(time.Second))
 	}
 	if p.message != "" {
-		b.WriteString(" " + p.message)
+		b.WriteString(" ")
+		b.WriteString(p.message)
 	}
 	return b.String()
 }

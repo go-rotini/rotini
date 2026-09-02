@@ -364,7 +364,8 @@ func (s *Select) Ask(ctx context.Context) (int, string, error) {
 func (s *Select) menu() string {
 	var b strings.Builder
 	if s.label != "" {
-		b.WriteString(s.label + "\n")
+		b.WriteString(s.label)
+		b.WriteString("\n")
 	}
 	for i, opt := range s.options {
 		marker := " "

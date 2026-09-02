@@ -165,7 +165,19 @@ func (p *Printer) printMarshaled(v any, marshal func(any) ([]byte, error), name 
 	if out == "" {
 		return nil
 	}
-	if _, err := io.WriteString(p.w, out+"\n"); err != nil {
+	if err := writeLine(p.w, out); err != nil {
+		return err
+	}
+	return nil
+}
+
+// writeLine writes text followed by a newline, without copying text to append one
+// byte — the rendered output can be large.
+func writeLine(w io.Writer, text string) error {
+	if _, err := io.WriteString(w, text); err != nil {
+		return fmt.Errorf("rotini: write output: %w", err)
+	}
+	if _, err := io.WriteString(w, "\n"); err != nil {
 		return fmt.Errorf("rotini: write output: %w", err)
 	}
 	return nil
@@ -301,8 +313,8 @@ func (p *Printer) printText(v any) error {
 	if out == "" {
 		return nil
 	}
-	if _, err := io.WriteString(p.w, out+"\n"); err != nil {
-		return fmt.Errorf("rotini: write output: %w", err)
+	if err := writeLine(p.w, out); err != nil {
+		return err
 	}
 	return nil
 }

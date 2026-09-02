@@ -118,11 +118,15 @@ func (t *Table) Fprint(w io.Writer) (int, error) {
 	if out == "" {
 		return 0, nil
 	}
-	n, err := io.WriteString(w, out+"\n")
+	n, err := io.WriteString(w, out)
 	if err != nil {
 		return n, fmt.Errorf("rotini: write table: %w", err)
 	}
-	return n, nil
+	m, err := io.WriteString(w, "\n")
+	if err != nil {
+		return n + m, fmt.Errorf("rotini: write table: %w", err)
+	}
+	return n + m, nil
 }
 
 // lines renders each row into a single padded line.
