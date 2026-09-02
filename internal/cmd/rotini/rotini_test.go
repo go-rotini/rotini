@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"bytes"
+	"errors"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -402,3 +403,11 @@ func TestCLI_unknownHelpTopic(t *testing.T) {
 		t.Errorf("an unknown help topic was neither reported nor non-zero:\nout=%s\nerr=%s", out.String(), errb.String())
 	}
 }
+
+// ── test sentinels ──────────────────────────────────────────.
+
+// Sentinels the CLI tests inject through the codegen doubles.
+var (
+	errBadSpec  = errors.New("spec is broken")
+	errAdvisory = errors.New("an advisory warning")
+)

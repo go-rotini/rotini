@@ -115,3 +115,56 @@ func TestProblem_ErrorAndUnwrap(t *testing.T) {
 		t.Error("a problem with no cause must unwrap to nil")
 	}
 }
+
+// ── version + fail-mode ─────────────────────────────────────.
+
+func TestVersionProblem(t *testing.T) {
+	cases := []struct {
+		name        string
+		doc, binary string
+		wantProblem bool
+	}{
+		{"match", "1.2.3", "1.2.3", false},
+		{"match with v prefix", "1.2.3", "v1.2.3", false},
+		{"mismatch", "1.0.0", "2.0.0", true},
+		{"doc empty skips", "", "2.0.0", false},
+		{"binary empty skips", "1.0.0", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := versionProblem("spec", tc.doc, tc.binary)
+			if (got != nil) != tc.wantProblem {
+				t.Errorf("versionProblem(%q,%q) problem=%v, want %v", tc.doc, tc.binary, got != nil, tc.wantProblem)
+			}
+			if got != nil && got.loc != "version" {
+				t.Errorf("version problem loc = %q, want \"version\"", got.loc)
+			}
+		})
+	}
+}
+
+func TestFailFast(t *testing.T) {
+	confFail := func(mode string) *reconciledConf {
+		return &reconciledConf{conf: &Conf{Validate: &ValidateConfig{Fail: mode}}}
+	}
+	cases := []struct {
+		name     string
+		failMode string
+		rc       *reconciledConf
+		want     bool
+	}{
+		{"flag override fast wins", "fast", confFail("collect"), true},
+		{"flag override collect", "collect", confFail("fast"), false},
+		{"conf fast", "", confFail("fast"), true},
+		{"conf collect", "", confFail("collect"), false},
+		{"no override, no conf validate", "", &reconciledConf{conf: &Conf{}}, false},
+		{"defaulted conf", "", &reconciledConf{conf: &Conf{}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := failFast(tc.failMode, tc.rc); got != tc.want {
+				t.Errorf("failFast(%q, ...) = %v, want %v", tc.failMode, got, tc.want)
+			}
+		})
+	}
+}

@@ -1,9 +1,53 @@
 package codegen
 
 import (
+	"maps"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// TestLintRegistryCompleteness guards the lint_spec.go / lint_conf.go split: if a rule
+// is accidentally dropped while relocating funcs, the count regresses.
+func TestLintRegistryCompleteness(t *testing.T) {
+	if got := len(specLints); got != 29 {
+		t.Errorf("len(specLints) = %d, want 29 (a rule was dropped or added — update intentionally)", got)
+	}
+	if got := len(confLints); got != 6 {
+		t.Errorf("len(confLints) = %d, want 6", got)
+	}
+}
+
+// TestConstraintNumericFamilyMatchesRuntime guards the hand-copied constraintNumericFamily
+// (codegen cannot import the runtime's unexported numericFamily) against silent drift by
+// extracting the runtime's set from its source. The runtime is the module's root package,
+// two levels up from internal/codegen.
+func TestConstraintNumericFamilyMatchesRuntime(t *testing.T) {
+	parser, err := os.ReadFile(filepath.Join("..", "..", "parser.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(parser)
+	start := strings.Index(body, "var numericFamily = map[string]bool{")
+	if start < 0 {
+		t.Fatal("numericFamily literal not found in runtime parser.go")
+	}
+	block := body[start : start+strings.Index(body[start:], "}")]
+	runtimeSet := map[string]bool{}
+	for _, m := range regexp.MustCompile(`"(\w+)":\s*true`).FindAllStringSubmatch(block, -1) {
+		runtimeSet[m[1]] = true
+	}
+	if len(runtimeSet) == 0 {
+		t.Fatal("extracted no keys from runtime numericFamily")
+	}
+	if !maps.Equal(runtimeSet, constraintNumericFamily) {
+		t.Errorf("constraintNumericFamily drifted from runtime numericFamily:\n runtime=%v\n codegen=%v", runtimeSet, constraintNumericFamily)
+	}
+}
+
+// ── schema-type rule ────────────────────────────────────────.
 
 // specWithFlagType builds a minimal spec whose one flag carries the given type (and
 // optional import), for exercising lintSchemaTypes in isolation.

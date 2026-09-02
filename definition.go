@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// The data-only [Definition] contract: the compiled command tree codegen emits as a Go
-// literal and the runtime dispatches against. Everything in this file is a plain data
+// The [Definition] contract: the compiled command tree codegen emits as a Go literal
+// and the runtime dispatches against. Everything in this file is a plain data
 // shape with no behavior — which is what lets the generated file be read as a
 // description of the CLI rather than as code.
 

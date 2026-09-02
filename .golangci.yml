@@ -191,7 +191,7 @@ linters:
       - path: overlay\.go
         linters:
           - errcheck
-      - path: types\.go
+      - path: definition\.go
         linters:
           - embeddedstructfieldcheck
           - gocheckcompilerdirectives
