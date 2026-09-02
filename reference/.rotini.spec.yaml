@@ -1,0 +1,665 @@
+# .rotini.spec.yaml — EXHAUSTIVE REFERENCE
+# ---------------------------------------------------------------------------
+# Demonstrates every key and shape accepted by internal/schema-spec.json.
+# This is a documentation artifact, not a buildable program: a handful of keys
+# are mutually exclusive, context-only, or deliberately invalid — each is
+# called out inline. Keys shown commented-out are valid in the schema but would
+# fail rotini validation or need an external file to resolve.
+#
+# STATUS LEGEND (the point of this file — what to trust, what to work on):
+#   (no marker)        — implemented, linted, tested; the shape is FIRM.
+#   ⚠ PARTIAL / CAVEAT — implemented, with a DELIBERATE, documented limitation
+#                        or a semantic worth knowing before relying on it.
+#   ✘ NOT IMPLEMENTED  — the schema accepts it, but no codebase consumer
+#                        exists yet. NONE REMAIN: the spec-fidelity effort
+#                        (ROTINI_SPEC_FIDELITY_PLAN.md, complete 2026-06-12)
+#                        resolved every one. The marker is kept for future
+#                        audits — any new ✘ is a new work item by definition.
+# ---------------------------------------------------------------------------
+
+# ===========================================================================
+# THE CHANNEL INVENTORY — every way data comes into a rotini CLI (E1).
+# This is the map the rest of this file navigates:
+#
+#   CHANNEL              SPEC SURFACE                      RUNTIME CARRIER
+#   argv flags           inputs.flags (+count, groups,     Parser / Binder
+#                        dependencies, from:)
+#   argv positionals     inputs.arguments (+variadic,      Parser / Binder
+#                        passthrough)
+#   value sentinels      from: [file] (@path),             resolved inside parse
+#                        from: [stdin] (-)
+#   environment          inputs.env (variable:/derived,    Binder
+#                        env_prefix scoping, nesting)
+#   flag env fallbacks   flag key: → SNAKE_UPPER var       Binder
+#   config files         config_files (path /       Binder
+#                        walk-up / xdg / config_source;
+#                        per-input file: pins; key: paths)
+#   stdin payload        stdin: (format + schema)          Binder
+#   defaults             default: on any input             Parser / Binder
+#
+# Custom sources (secrets managers, remote config — anything implementing
+# recon.Source) join via the BindMeta.Sources seam (ergonomics E3-S4: after
+# the declared files — explicit beats ambient) rather than as spec channels. Decided non-channels: response
+# files, built-in keychains, URL config paths, interactive prompts.
+# ===========================================================================
+
+# REQUIRED. URL whose /tags/<x.y.z>/ segment must match the rotini binary version.
+# (The guard is skipped when the binary's version is unknown, or when the URL is
+# not the recognized refs/tags form — so dev builds and forks aren't blocked.)
+# REQUIRED. The rotini version this spec targets; a mismatch with the rotini
+# binary running validate/generate is an error.
+version: 0.0.0
+
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+
+# Document-level prefix for every DERIVED env-var name (ENV-06): the SNAKE_UPPER
+# projections — plain env inputs without `variable:` (input `home` → ACME_HOME),
+# envnest bases without `variable:`, and flags' env fallbacks (key `server.port`
+# → ACME_SERVER_PORT). Explicit `variable:` names are EXEMPT (already exact).
+# With a prefix declared, unprefixed conventional names no longer bind — the
+# derived namespace is scoped. UPPER_SNAKE, no trailing _ (rotini adds it).
+# ===========================================================================
+# command — THE ROOT COMMAND (the binary itself). Every key below belongs to a
+# command; the root is just the outermost one.
+# ===========================================================================
+command:
+  env_prefix: ACME
+
+  # ===========================================================================
+  # THE DOCUMENT IS THE ROOT COMMAND (W3 reshape — commands all the way down).
+  # There is no `command:` wrapper: the root command's keys sit directly at the
+  # document top level (name, doc-fields, the input channels, commands, …),
+  # alongside the three document-level keys above ($schema, env_prefix, schemas)
+  # which are valid only here on the root. The root MUST use `name` (never `$ref`).
+  # ===========================================================================
+  name: acme # routing name; for the root, the binary name
+
+  # aliases: [ac]
+  # deprecated_identifiers: [ac]
+  #   ^ INVALID on the ROOT — rotini validation REJECTS both (spec-fidelity F3):
+  #     the root is reached by invoking the binary (argv[0] is not a routing
+  #     token), so root aliases dispatch nothing and a deprecated root alias
+  #     could never be detected. Declare them on sub-commands — see `build`
+  #     below. (Busybox-style multi-call argv[0] dispatch, if ever wanted,
+  #     would be its own opt-in feature, never implied by root aliases.)
+
+  # timeout: 10s
+  #   ^ INVALID on a (local) command — rotini validation REJECTS it. A timeout is
+  #     remote-only; set it on a remote_commands[] entry instead. Shown here only
+  #     because the schema recognizes the key (to give a targeted error).
+
+  # --- structured doc-fields: used to GENERATE the help page ---------------
+  # STYLING (E6): any doc-field (description, header, footer, summary, the
+  # verbatim help/man/markdown pages) MAY carry ANSI/SGR escapes — a YAML
+  # double-quoted scalar with \e for ESC, e.g. "\e[1mBold\e[0m". The HELP page
+  # keeps them (it is the terminal surface); rotini STRIPS them from generated
+  # man and markdown pages, and from completion summaries on the wire, at
+  # generate time (they carry no legitimate SGR). Honor a no-styles signal at
+  # print time with rotini.StripStyles (see the companion CLI's --no-styles).
+  summary: Acme multi-tool # one-liner shown in the PARENT's command list
+  description: | # long block atop this command's generated page
+    The acme command is a kitchen-sink example that exercises every spec key
+    so you can see each one's placement and shape in context.
+  usage:
+    acme [global flags] <command> [args] # usage-line override (else derived:
+    # invocation + <command> + decorated args + [flags])
+  header: "Acme — a reference CLI" # text rendered above the description block
+  footer: "Docs: https://example.com/acme" # text rendered at the page bottom
+  examples: # rendered one per line
+    - acme build ./app --release
+    - acme --verbose status
+  headings: # section-heading overrides (any unset → default)
+    usage: USAGE
+    commands: SUBCOMMANDS
+    arguments: ARGUMENTS
+    flags: OPTIONS
+    environment: ENVIRONMENT
+    configuration: CONFIGURATION
+    cascading: "Global Flags:" # rendered verbatim — keep the trailing ':'
+    examples: EXAMPLES
+
+  # NOTE: `help` (verbatim help page) and `man` (verbatim man page) are escape
+  # hatches that OVERRIDE the structured fields above. They are demonstrated on
+  # the `verbatim` and `build` sub-commands below so the root can show the
+  # structured fields taking effect.
+
+  # --- man-page-only fields ------------------------------------------------
+  exit_status: # rendered as the man page's EXIT STATUS
+    - code: 0
+      summary: Success.
+    - code: 1 # rotini's default: ANY recorded error or fault exits 1
+      summary: Error. # (rotini holds NO exit-code constants; handlers own exits)
+    - code: 70 # example only — a code THIS cli's own funnel chooses to
+      summary: Internal error. # emit for internal faults (not a rotini default)
+  see_also: # rendered as the man page's SEE ALSO
+    - acme-build(1)
+    - https://example.com/acme
+
+  # --- presentation / codegen knobs ----------------------------------------
+  hidden:
+    false # true → omitted from the parent's command list
+    # AND from completion; it still dispatches
+  group:
+    core # bucket under a heading in the parent's list
+    # (groups appear in first-declaration order)
+  deprecated: "Prefer the new 'acme2'." # annotate as deprecated in the parent's list
+  filename:
+    acme_root.go # override the generated handler-stub file name
+    # (names colliding with Go's special files —
+    # _test/GOOS/GOARCH — get a trailing '_' escape)
+
+  # --- output: opt-in typed struct (wires NO flag, triggers NO rendering) ---
+  # Deliberately data-only (Pillar 1): rotini generates <Prefix>Output for the
+  # handler to use however it likes — no --output flag, no rendering.
+  output: # an inline Schema (string-array `required`)...
+    type: object
+    required: [id, name]
+    properties:
+      id: { type: string }
+      name: { type: string }
+      tags: { type: array, items: { type: string } }
+
+  # --- inputs for THIS command ---------------------------------------------
+  flags:
+    # FlagInput: every key
+    - name: verbose
+      identifiers: [--verbose, -v] # CLI forms (minItems 1); '--<name>' if omitted
+      summary: Enable verbose logging.
+      hidden:
+        false # hidden flags parse but are omitted from
+        # help AND completion candidates
+      cascading:
+        true # ⚠ PRESENTATION-ONLY by design: advertises the
+        # flag on every descendant's help page. The
+        # PARSER resolves ancestor flags chain-wide
+        # regardless — cascading changes docs, not parsing.
+      schema:
+        type: bool # Go name; JSON-Schema 'boolean' is equivalent
+        default: false
+      # Grammar notes (all firm, conformance-tested): bools are presence=true
+      # with the value form inline-only (--verbose=false); short flags cluster
+      # POSIX-style (-vd, -n5); everything after `--` is positional; bare `-`
+      # and negative numbers are values, never flags.
+
+    - name: loud # type: count — an argv presence COUNTER
+      identifiers: [--loud, -l] # (FLAG-12): the generated field is an int
+      summary: Crank it up, per occurrence.
+      schema:
+        type:
+          count # -lll → 3 (clustering included); no value
+          # is ever consumed — an inline value
+          # (--loud=2) is a parse error, and every
+          # value-shaped key (default, enum,
+          # constraints, from, key, …) is REJECTED:
+          # the tally is computed, never parsed
+
+    - name: format
+      identifiers: [--format, -f]
+      summary: Output format.
+      schema:
+        type: string
+        enum:
+          [json, yaml, table] # allowed values — validated over the FULLY
+          # reconciled value (an env/config-supplied
+          # value is enum-checked too)
+        default: table
+        placeholder:
+          FORMAT # flag rows show `--format FORMAT` instead
+          # of `--format string` (the Go type token)
+      # ⚠ CAVEAT: a repeated SCALAR flag is last-wins (pinned by FLAG-11);
+      #   only '[]…' and map types accumulate.
+
+    - name: retries # no identifiers → '--retries' auto-derived
+      schema:
+        type: int # 'integer' equivalent
+        default: 3
+        minimum: 1 # inclusive numeric bounds (numeric types only)
+        maximum: 10
+      # ZERO BOUNDS (F4 fallback REVERSED by R2-S7): bounds are now
+      # presence-carrying (*float64 end to end — schema type allows null),
+      # so `minimum: 0` / `maximum: 0` are REAL, ENFORCED bounds. The old
+      # document-wide rejection is gone. Zero COUNT bounds (minItems/
+      # minLength: 0) still mean exactly what absence means.
+
+    - name: delta # exclusive bounds + multipleOf (R2-S7):
+      schema: # strict inequalities and JSON-Schema
+        type: int # multiple-of semantics, numeric-family
+        minimum: 0 # only, per-element on repeatables —
+        multipleOf:
+          5 # `minimum: 0` here is enforced (>= 0),
+          # and every value must divide by 5
+
+    - name: rate2
+      schema:
+        type: float64
+        exclusiveMinimum: 0 # strictly positive — the idiom this
+        exclusiveMaximum: 1 # key exists for — and strictly < 1
+
+    - name: ratio
+      schema:
+        type: float64 # 'number' equivalent
+        nullable: true # generated as *float64; nil when not provided
+        minimum: 0.1
+        maximum: 1
+
+    - name: title
+      schema:
+        type: string
+        pattern: "^[a-z][a-z0-9-]*$" # SUBSTRING semantics (JSON Schema): matches
+        minLength: 1 # anywhere unless anchored — use ^…$ for a
+        maxLength: 32 # full match. String types only (R1 lint).
+
+    - name: tag # '[]…' makes a flag repeatable (→ slice)
+      identifiers: [--tag, -t]
+      schema:
+        type: "[]string"
+        minItems: 0 # item-count constraints (array/repeatable;
+        maxItems: 20 # a zero count bound ≡ unset, harmless).
+        items:
+          { type: string } # element schema. Per-VALUE constraints
+          # (minimum/pattern/length) apply to each
+          # element of a repeatable input (R1).
+
+    - name: port # `items:` drives the ELEMENT type: this
+      schema: # generates []int, each occurrence coerced
+        type: array # (--port 80 --port 443 → [80, 443])
+        items: { type: int }
+
+    - name: wait # builtin aliases work as elements too:
+      schema: # []time.Duration, "time" import auto-added
+        type: array
+        items: { type: duration }
+
+    - name: label # a map flag is repeatable: --label k=v --label a=b
+      schema:
+        type:
+          map[string]string # typed values: each v coerced to the element
+          # type ('map'/'object' → map[string]any)
+
+    - name: set # helm-style nested assignment (OPT-IN, because
+      summary: Override a config value. # '.' is a legal plain map key)
+      schema:
+        type: map # dotted_keys requires map[string]any
+        dotted_keys: true # --set image.tag=v2 → set[image][tag]="v2"
+        properties: # declared key paths feed COMPLETION: the shell
+          image: # offers "image.tag=", "image.pullPolicy=",
+            type: object # "replicas=" up to the '='
+            properties:
+              tag: { type: string }
+              pullPolicy: { type: string }
+          replicas: { type: int }
+
+    - name: id # third-party Go type, backed by an import path
+      schema:
+        type: uuid.UUID
+        import: github.com/google/uuid
+      # ⚠ CONTRACT (documented, not a gap — spec-fidelity F5): a non-builtin
+      #   type must implement encoding.TextUnmarshaler — that method is its
+      #   parser and validator. uuid.UUID does. A type that doesn't (e.g.
+      #   net/url.URL) generates fine but errors LOUDLY at parse time; rotini
+      #   cannot check this at validate time (it would mean type-checking
+      #   foreign Go packages). The generated flag/argument field carries a
+      #   trailing reminder comment, and the schema's `type` docs state the
+      #   contract — including its element-wise application to arrays.
+
+    - name: peer # aliased import form: 'alias path' (avoids a clash)
+      schema:
+        type: nip.Addr # netip.Addr implements TextUnmarshaler
+        import: nip net/netip
+
+    - name: ttl
+      schema:
+        type:
+          duration # rotini builtin alias (no import needed);
+          # time/datetime/date → time.Time (RFC 3339).
+          # NOTE: minimum/maximum on a duration are
+          # REJECTED (R1) — duration bounds are not
+          # supported; validate in the handler or wrap
+          # the value in a TextUnmarshaler type.
+
+    - name: spec # @file values (FLAG-06 / SEC-01): with
+      summary: Widget spec, inline or from a file.
+      schema: # 'file' in from:, a value starting with '@'
+        type: string # resolves to that file's trimmed contents
+        from:
+          [value, file] # at PARSE time (enum/constraints/provenance
+          # see the resolved text). 'value' is implicit —
+          # listing it is documentation. Without from:,
+          # '@' is an ordinary character.
+      # ⚠ CAVEATS (all by design, test-locked): resolved text is whitespace-
+      #   trimmed; declared defaults and env/config fallbacks stay LITERAL
+      #   (sentinels are argv grammar); an unreadable @file is a usage error;
+      #   completion offers nothing for an '@' partial (shell file fallback).
+
+    - name: token
+      summary: API token.
+      deprecated: "Use --api-key instead." # flag-level deprecation message
+      identifiers: [--token, --tok]
+      deprecated_identifiers:
+        [--tok] # subset of identifiers flagged deprecated;
+        # Parser.Deprecations reports USE of them (data
+        # only — the handler decides warn/fail/ignore)
+      schema:
+        type: string
+        secret: true # redacted in provenance/error output
+        required:
+          true # boolean `required` (this is an InputSchema);
+          # satisfiable from ANY channel (env/config
+          # fallback counts), validated post-reconcile
+        key:
+          acme.token # config-key fallback: argv > $ACME_TOKEN
+          # (SNAKE_UPPER of the key) > config files
+        from:
+          [value, file] # secret + from:[file] = the blessed
+          # token-file idiom (--token @/run/secret)
+
+    - name: config # CFG-01/ENV-03 — the two-phase bootstrap:
+      summary: Path to the main config file.
+      schema:
+        type: string
+        config_source:
+          app-config # this flag SUPPLIES the path of the named
+          # config_files entry. Precedence for
+          # the path: explicit argv > the env claimant
+          # below > this flag's default > the entry's
+          # own path/discover. A path supplied this way
+          # MUST exist (the user asked for it) — unlike
+          # a declared path, missing then errors.
+
+  arguments:
+    # ArgumentInput: every key
+    - name: target
+      summary: Build target path.
+      schema:
+        type: string
+        required: true
+        default: "."
+        placeholder:
+          TARGET # display token in help/man/usage: the
+          # usage line reads `<TARGET>` (the <>/[]
+          # decoration still applies). Presentation
+          # only — parsing/field untouched.
+    - name: extras # a trailing '[]…' argument is variadic (derived);
+      hidden: true # `items:` typed variadics work here too ([]int)
+      deprecated: "No longer used."
+      schema:
+        type: "[]string"
+
+  # --- config_files: per-command, CASCADING config-file SOURCES (W3/D-W3.1) ---
+  # A command's effective sources = the UNION along the invoked chain (root →
+  # leaf); only chain-scoped files load (off-branch files are never read).
+  # Names unique within a chain (collision = error); the same physical file at
+  # two levels = warning. Key-collision precedence: nearest command wins.
+  # Exactly ONE of `path` / `discover` locates each entry (lint). The `config:`
+  # inputs below pin to these by `file:` (this command or any ancestor).
+  config_files:
+    - name: app-config # logical name (referenced by config: inputs)
+      path:
+        ~/.config/acme/config.yaml # '~' expands to home; a missing declared
+        # path is simply absent (no error)
+      format:
+        yaml # json|yaml|toml|jsonc|dotenv; OMITTED =
+        # inferred from the extension. dotenv keys
+        # stay VERBATIM (key: API_ENDPOINT — CFG-08)
+      schema: # load-time validation (F1): the loaded doc
+        type: object # is validated at BIND time before any read;
+        required: [server] # a non-conforming file is a loud error. No
+        properties: # typed struct is generated — typed access
+          server: # IS the config: inputs channel (F0-D1).
+            type: object
+            properties:
+              port: { type: integer }
+
+    - name: project # CFG-03 — walk-up discovery: search the cwd
+      format: yaml # upward to the fs root; NEAREST dir wins
+      discover:
+        strategy: walk-up
+        file: .acme.yaml
+
+    - name: user # CFG-02 — xdg: $XDG_CONFIG_HOME/acme
+      format: yaml # (default ~/.config/acme); `app` required
+      discover: # for xdg, rejected for walk-up (lint)
+        strategy: xdg
+        app: acme
+        file: config.yaml
+
+  config:
+    # ConfigInput: every key
+    - name: port
+      summary: Server port loaded from a config file.
+      hidden: false
+      deprecated: "Set it via --port."
+      schema:
+        type: int
+        file:
+          app-config # PINS this input to that one entry: the value
+          # (and its `required`) is read from THAT file
+          # ONLY — a key present in another file does not
+          # satisfy it. Omit `file` to read through the
+          # declared precedence chain (first hit wins).
+        key: server.port # dotted key path within the file
+        default: 8080
+
+  env:
+    # EnvInput: every key
+    - name: home
+      summary: Home directory override.
+      hidden: false
+      deprecated: "Use XDG paths."
+      schema:
+        type: string
+        variable: ACME_HOME # explicit env var (else SNAKE_UPPER of name)
+        required: false
+      # ⚠ Presence semantics (pinned ENV-05): an EMPTY-string variable counts
+      #   as set; only an unset variable falls through to lower layers.
+
+    - name: http # ENV-04 — a variable FAMILY aggregated into
+      summary: HTTP client overrides. # one nested map input:
+      schema:
+        type: map # nesting requires map[string]any, env-only,
+        nesting: "__" # and no default. ACME_HTTP__RETRY__MAX=9
+        variable:
+          ACME_HTTP # → http = {retry: {max: "9"}} (the variable
+          # is the family PREFIX here; segments are
+          # lowercased; leaf values stay strings)
+
+    - name: config_path # an env input may ALSO claim a config entry
+      summary: Config file path override.
+      schema:
+        type: string
+        config_source:
+          app-config # at most one flag + one env claimant per
+          # entry (lint-enforced); the flag wins
+
+  stdin:
+    # StdinSpec: every key
+    format: json # json | yaml | jsonc | toml (default: json)
+    schema:
+      type: object
+      required: true # error when stdin is empty
+      properties:
+        payload: { type: string }
+    # ⚠ SINGLE-CONSUMER RULE (lint-enforced): a command with a stdin channel
+    #   cannot also declare a from:[stdin] flag (nor may two flags claim
+    #   stdin) — see the `apply` sub-command for the flag-sentinel form.
+    # Channel notes: auto-detected when stdin is a pipe/redirect (never blocks
+    # on a TTY); decoded payload is validated against this schema before
+    # binding; malformed payloads error loudly.
+
+  flag_groups:
+    # FlagGroup: kind + flags (flags minItems 2)
+    - kind: mutually_exclusive # mutually_exclusive | required_together | one_of | at_least_one
+      flags: [format, verbose]
+    - kind: one_of
+      flags: [tag, label]
+    # ⚠ "set" means EXPLICITLY set on argv: a default, env, or config-supplied
+    #   value does not trip (or satisfy) a group rule. Same for dependencies.
+
+  flag_dependencies:
+    # FlagDependency: when + requires (requires minItems 1)
+    - when: token # when '--token' is explicitly set...
+      requires: [title] # ...'--title' must also be set
+
+  # --- sub-commands (inline or composed via $ref) --------------------------
+  commands:
+    - name: build
+      aliases: [b, bld] # extra names that dispatch to this command
+      deprecated_identifiers:
+        [bld] # subset of `aliases` flagged as deprecated;
+        # Parser.Deprecations reports invocation VIA
+        # a deprecated alias (data only)
+      summary: Build the project.
+      description: Compiles and links the project.
+      group: core
+      flags:
+        - name: release
+          schema: { type: bool, default: false }
+      man: | # verbatim MAN page; OVERRIDES man-template rendering
+        ACME-BUILD(1)
+
+        NAME
+            acme build - build the project
+      # verbatim MARKDOWN reference page; OVERRIDES markdown-template rendering
+      # (the markdown feature's escape, mirroring help/man — note: inside a
+      # block scalar everything is content, comments included)
+      markdown: |
+        # acme build
+
+        Compiles and links the project.
+
+    - name: apply # STDIN-01 — the kubectl pattern, as a FLAG
+      summary: Apply a manifest. # sentinel (vs. the root's stdin CHANNEL):
+      flags:
+        - name: file
+          identifiers: [--file, -f]
+          summary: Manifest path, or '-' for stdin.
+          schema:
+            type: string
+            from:
+              [value, stdin] # `-f -` reads the pipe (empty pipe = usage
+              # error, never a hang); `-f path` stays a
+              # literal path (process substitution
+              # /dev/fd/N works as a plain path)
+
+    - name: verbatim
+      summary: A command with a hand-written help page.
+      # `help` = exact, verbatim help page. OVERRIDES description/usage/header/
+      # footer/examples/headings. `summary` is still used in the parent's list.
+      help: |
+        acme verbatim — does a thing
+
+        Usage:
+          acme verbatim [flags]
+
+        This entire block is printed byte-for-byte.
+
+    - name: typed
+      summary: Uses a reusable named schema for its output.
+      output:
+        $ref: "#/schemas/Widget" # reference a document-level schema by name
+
+    - name: exec # passthrough (ARG-09) — the wrapper-CLI
+      summary: Run a wrapped command. # case: every token after `exec` binds as
+      passthrough:
+        true # a raw positional (no flag parsing, no
+        # unknown-flag errors, no `--` needed; a
+      arguments: # literal `--` forwards too). Ancestor
+        - name: cmdline # flags BEFORE the token parse normally.
+          summary: The wrapped command line, verbatim.
+          schema:
+            type:
+              "[]string" # lint-enforced contract: no flags, no
+              # sub-commands, no remotes/discovery, and
+              # the LAST argument is a variadic []string
+              # (the raw-token receiver). Completion
+              # offers nothing past the boundary.
+
+    # - $ref: ./other.rotini.spec.yaml # COMPOSE another spec's root as a sub-command.
+    #   name: imported                 # optional: rename the grafted sub-command.
+    #   ^ `$ref` (compose) and `name` (inline) are the two ways to declare a
+    #     Command. Commented out because it needs an external file to resolve.
+    #
+    # COMPOSITION TAXONOMY — where a command's spec + handler code come from. Six
+    # modes, wholly-owned → wholly-remote (see also Package rotini's `# Composition`):
+    #   1. Standalone        — `name:` + an own generated handler stub (every leaf
+    #                          above). The default.
+    #   2. Inline +          — `name:` (own inputs/structure generated locally, exactly
+    #      passthrough         like Standalone) plus a `handler:` that sources the handler
+    #                          CODE from a package — the own-types + delegated-handler
+    #                          hybrid. No stub is seeded. Per-command, no subtree cascade:
+    #                          an inline sub-command without its own `handler:` still gets
+    #                          a normal stub. Pairs with the conf `cmd`/`cmdgen` package
+    #                          split (an in-project handler package can import the
+    #                          generated `cmdgen` input types directly).
+    #   3. Local `$ref`      — `$ref: ./sibling.spec.yaml` (same module). The child's
+    #                          tree merges in (parent keys win on overlap); codegen
+    #                          auto-delegates to the child's package (child.Handlers().X()).
+    #   4. Module `$ref`     — `$ref: mod://<module>@<version>/<path>`, resolved via the
+    #                          Go module cache, pinned by go.sum; handlers auto-delegate
+    #                          from THAT module's package (cross-module, no extra wiring).
+    #   5. External `$ref`   — `$ref: git::<url>@<ref>/<path>` or raw `https://…`. Not a
+    #      + passthrough       Go package, so `rotini mod` fetches + pins it (revision +
+    #                          content hash) into .rotini.lock + .rotini/cache/ (codegen
+    #                          reads that hermetically, never the network). With no package
+    #                          to auto-delegate to, the node MUST carry a `handler:` —
+    #                          `handler: { import: deploycli github.com/acme/clis/rth,
+    #                          convention: Deploy }` — whose package exports
+    #                          `<Convention>() rotini.Handlers` per command; codegen
+    #                          delegates `deploycli.Deploy()`. (A `handler:` also OVERRIDES
+    #                          the auto-delegation on a local/module `$ref`, and works on
+    #                          an inline command — see mode 2. Valid on any sub-command,
+    #                          not the root.)
+    #   6. Remote command    — a sibling binary dispatched at RUNTIME, not composed at
+    #                          codegen: see `remote_commands` / `remote_discovery` below.
+    # Every composed spec (3–5) MUST declare a `$schema` that EXACTLY matches the
+    # generating version; `rotini validate` follows refs and collision-checks the whole
+    # assembled tree (duplicate name / cycle / missing ref caught before codegen).
+
+  # --- remote (co-located plugin) sub-commands -----------------------------
+  remote_commands:
+    # RemoteCommandSpec: every key
+    - name: deploy # dispatches the sibling binary 'acme-deploy'
+      aliases: [dep]
+      summary: Deploy via the acme-deploy plugin.
+      # description: …
+      #   ^ REMOVED (spec-fidelity F2): a remote command's long-form docs belong
+      #     to the remote binary itself (`acme deploy --help` passes through —
+      #     rotini deliberately does not intercept). `summary` is the only
+      #     rotini-owned surface a remote has. The key is now schema-INVALID.
+      timeout:
+        1m30s # host-side timeout, Go duration (remote-only).
+        # A missing declared-remote binary is a
+        # CategoryInternal error; a timeout is
+        # CategoryNone (operational) — both recorded
+        # and routed through the WithOnErrorFn funnel.
+
+  # --- plugin auto-discovery (kubectl/git/gh style) ------------------------
+  remote_discovery:
+    # RemoteDiscovery: every key (presence enables discovery)
+    prefix: acme- # default: '<binary>-'
+    path: /usr/local/lib/acme/plugins # extra scan dir (besides host dir + PATH)
+    hidden: false # when true, discovered plugins skip completion
+    # A discovered token with no matching binary is a CategoryUsage error (the
+    # user's typo — pair with a Suggestor in a custom funnel).
+
+  # ===========================================================================
+  # schemas — document-level reusable named schemas, referenced via
+  # "$ref": "#/schemas/<Name>" (in `output`, input `schema`, nested properties…)
+  # ===========================================================================
+  schemas:
+    Widget:
+      type: object
+      required: [id]
+      properties:
+        id: { type: string }
+        size: { type: integer, minimum: 0 } # zero bounds are real since R2-S7
+        kind: { type: string, enum: [a, b, c] }
+        parts:
+          type: array
+          items: { $ref: "#/schemas/Widget" } # recursive reference
+    # ⚠ CONTRACT (documented, not a gap — spec-fidelity F5): a named schema used
+    #   via `items: { $ref: … }` on an argv flag generates a []Widget field, but
+    #   argv elements can only be PARSED if the named type implements
+    #   encoding.TextUnmarshaler — named schemas are primarily for `output` and
+    #   `stdin` shapes, which DECODE documents rather than parse argv text. The
+    #   schema's `type` docs now state this element-wise rule.

@@ -63,8 +63,9 @@ go build ./cmd/todo
   and the opt-in service registry — lives in the package documentation
   ([`doc.go`](doc.go)).
 - Exhaustive, annotated schema references for the spec and conf files:
-  [`.docs/.rotini.spec.yaml`](../.docs/.rotini.spec.yaml) and
-  [`.docs/.rotini.conf.yaml`](../.docs/.rotini.conf.yaml).
+  [`reference/.rotini.spec.yaml`](reference/.rotini.spec.yaml) and
+  [`reference/.rotini.conf.yaml`](reference/.rotini.conf.yaml). Both are validated
+  by the test suite, so they cannot drift from the schemas.
 
 ## Contributing
 

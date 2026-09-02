@@ -18,8 +18,8 @@
 //
 // The package rests on four pillars, and this tour reads in their order:
 // declare → generate → run → opt in. The companion CLI (cmd/rotini, built
-// with rotini itself) is the worked example; the .docs reference files in
-// the repository show every spec and conf key with commentary.
+// with rotini itself) is the worked example; the annotated reference files under
+// reference/ show every spec and conf key with commentary.
 //
 // # Declare
 //

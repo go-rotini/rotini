@@ -241,3 +241,45 @@ func TestFindModule(t *testing.T) {
 		t.Errorf("findModule(no module line) = %v, want a no-module-path error", err)
 	}
 }
+
+// TestSourceLocators covers position resolution for every format that carries
+// positions: a validation problem must be able to name file:line:col, not just the
+// JSON pointer, in JSON/JSONC and TOML as well as YAML.
+func TestSourceLocators(t *testing.T) {
+	cases := []struct {
+		name    string
+		locator func([]byte) sourceLocator
+		doc     string
+		pointer string
+		line    int
+	}{
+		{"jsonc", jsoncLocator, "{\n  \"version\": \"0.0.0\",\n  \"command\": {\n    \"name\": \"demo\"\n  }\n}", "/command/name", 4},
+		{"json-via-jsonc", jsoncLocator, "{\n  \"version\": \"0.0.0\",\n  \"command\": {\"name\": \"demo\"}\n}", "/command/name", 3},
+		{"toml", tomlLocator, "version = \"0.0.0\"\n\n[command]\nname = \"demo\"\n", "/command/name", 4},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			line, col, ok := tc.locator([]byte(tc.doc))("/command/name")
+			if !ok {
+				t.Fatalf("%s locator could not resolve %s", tc.name, tc.pointer)
+			}
+			if line != tc.line || col <= 0 {
+				t.Errorf("%s locator = line %d col %d, want line %d and a positive column", tc.name, line, col, tc.line)
+			}
+		})
+	}
+}
+
+// TestSourceLocators_degradeCleanly pins the failure contract: an unparseable
+// document or an unresolvable pointer reports "no position" rather than erroring or
+// returning a bogus one — a problem then renders pointer-only.
+func TestSourceLocators_degradeCleanly(t *testing.T) {
+	for name, locator := range map[string]func([]byte) sourceLocator{"jsonc": jsoncLocator, "toml": tomlLocator} {
+		if _, _, ok := locator([]byte("<<<not a document>>>"))("/command/name"); ok {
+			t.Errorf("%s locator resolved a position in an unparseable document", name)
+		}
+		if _, _, ok := locator([]byte("{}"))("/nope/missing"); ok {
+			t.Errorf("%s locator resolved a position for an absent pointer", name)
+		}
+	}
+}
