@@ -145,6 +145,7 @@ func (p *program) emitModelsFile() error {
 		Imports:     renderImports(imports),
 		Blocks:      blocks,
 		OutputTypes: outputTypes,
+		Header:      p.layout.modelsHeader,
 	})
 	if err != nil {
 		return err
@@ -351,6 +352,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 
 	return renderRotiniFile(templateRotiniData{
 		Package:       lay.cmdPkgName,
+		Header:        lay.cmdHeader,
 		RuntimeImport: runtimeImport,
 		Imports:       renderImports(imports),
 		ChildImports:  gp.childImports,
@@ -432,11 +434,12 @@ func anyEmbed(features []templateFeature) bool {
 // only when the file does not already exist: stubs are user-editable and never overwritten.
 // Composed commands have no stub here; their handlers live in the child's package.
 //
-// initStyle, which only `rotini initialize` sets, seeds the root and the top-level
-// help/version commands from the wired init templates instead of the empty stub, so a fresh
-// CLI ships with working -h/--help and -v/--version. To opt out, delete those files and run a
-// normal generate.
+// The stub is seeded from what the spec and conf already say (see stubBody), so a command
+// that declares --help, --version, or is the conventional `help` command starts connected to
+// the pages and services codegen just produced instead of starting with a TODO that
+// reimplements them.
 func writeHandlerStubs(gp *program, lay layout) error {
+	helpOn := featureEnabled(gp.conf, "help")
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
 			continue // inline-passthrough: the package owns the handler, no stub seeded
@@ -447,7 +450,7 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("stat %s: %w", path, err)
 		}
-		content, err := renderHandlerStubFile(lay.cmdPkgName, c.handler, c.prefix+"Inputs", c.invocation, runtimeImport)
+		content, err := renderHandlerStubFile(stubBody(gp, c, lay.cmdPkgName, lay.cmdHeader, helpOn))
 		if err != nil {
 			return err
 		}
@@ -456,6 +459,99 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		}
 	}
 	return nil
+}
+
+// featureEnabled reports whether the conf turns on the named generate feature.
+func featureEnabled(conf *Conf, kind string) bool {
+	for _, f := range enabledFeatures(conf) {
+		if f.desc.name == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// helpVarPrefix returns the help feature's embed-var prefix, so a seeded stub names the same
+// var the feature renderer emits rather than assuming it.
+func helpVarPrefix(conf *Conf) string {
+	for _, f := range enabledFeatures(conf) {
+		if f.desc.name == "help" {
+			return f.desc.varPrefix
+		}
+	}
+	return ""
+}
+
+// commandName returns the command's own name — the last token of its invocation.
+func commandName(invocation string) string {
+	if i := strings.LastIndex(invocation, " "); i >= 0 {
+		return invocation[i+1:]
+	}
+	return invocation
+}
+
+// boolFlagField returns the Go field name of this command's bool flag with the given logical
+// name, or "" when it declares none. fieldDef.Tag holds the logical name the spec gave the
+// input — what inputFieldTag later renders as `rotini:"…"`.
+func boolFlagField(c genCommand, logical string) string {
+	for _, f := range c.flags {
+		if f.GoType == "bool" && f.Tag == logical {
+			return f.Field
+		}
+	}
+	return ""
+}
+
+// variadicStringArgField returns the Go field name of this command's single []string
+// argument, or "" unless it has exactly one argument and that argument is []string.
+func variadicStringArgField(c genCommand) string {
+	if len(c.args) != 1 || c.args[0].GoType != "[]string" {
+		return ""
+	}
+	return c.args[0].Field
+}
+
+// stubBody assembles the handler stub's context, deciding which seeded body the command gets.
+//
+// Everything is derived from declarations that already exist; nothing is inferred about what
+// the author meant. A --help flag only wires up when the help feature actually generated a
+// page to print, and the `help`/`version` command bodies are recognized by the conventional
+// name plus the shape that makes the body possible — a variadic path argument, no arguments
+// at all. Anything else gets the TODO stub, unchanged.
+func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) templateHandlerData {
+	d := templateHandlerData{
+		Package:       pkg,
+		HandlersType:  c.handler,
+		InputsType:    c.prefix + "Inputs",
+		Invocation:    c.invocation,
+		Prefix:        c.prefix,
+		RuntimeImport: runtimeImport,
+		Header:        cmdHeader,
+	}
+	if helpOn {
+		d.HelpVar = helpVarPrefix(gp.conf) + c.prefix
+		d.HelpFlag = boolFlagField(c, "help")
+	}
+	d.VersionFlag = boolFlagField(c, "version")
+
+	isRoot := c.prefix == gp.root.prefix
+	switch name := commandName(c.invocation); {
+	case name == "help" && !isRoot && helpOn:
+		d.HelpPathArg = variadicStringArgField(c)
+	case name == "version" && !isRoot && len(c.args) == 0:
+		d.VersionOnly = true
+	case isRoot && helpOn && len(c.args) == 0 && len(gp.own)+len(gp.composed) > 0:
+		// A root that only dispatches: bare invocation shows its own help, as every
+		// CLI does, rather than printing an empty inputs struct.
+		d.PrintHelpWhenBare = true
+	}
+
+	// Collect only when the seeded body actually reads an input. A version command that
+	// prints one string has nothing to reconcile, and an unused `inputs` would not
+	// compile — the stub has to be correct Go the moment it is written.
+	d.NeedsInputs = d.HelpFlag != "" || d.VersionFlag != "" || d.HelpPathArg != "" ||
+		(!d.VersionOnly && !d.PrintHelpWhenBare)
+	return d
 }
 
 // writeEntrypoint writes the binary's main.go to the conf-declared entrypoint package,
@@ -474,7 +570,7 @@ func writeEntrypoint(lay layout, extension string) error {
 	}
 	// The generated package is imported aliased as "cmd" so the reference never
 	// collides with the rotini runtime package (also named "rotini").
-	content, err := renderMainFile(lay.cmdImport, "cmd", extension)
+	content, err := renderMainFile(lay.mainHeader, lay.cmdImport, "cmd", extension)
 	if err != nil {
 		return err
 	}

@@ -4,11 +4,11 @@ package codegen
 
 // Schema for a Rotini CLI definition spec file. The document wraps a top-level `version` and a single root `command` (the CLI's root command); from there the tree is commands all the way down. `env_prefix` and `schemas` are root-command-level keys valid only on the root command (under `command`), and `$schema` is an optional document-level editor-tooling key.
 type Spec struct {
-	// Optional URL identifying the rotini spec schema, for editor tooling only. The binary-version check reads the top-level `version` key, not this. Editors that prefer a local file can instead point a `# yaml-language-server: $schema=<path>` comment at the schema written via the conf's `generate.schemas.spec.path`.
+	// Optional URI identifying the rotini spec schema, for editor tooling ONLY — rotini itself never fetches it, and the binary-version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. Editors that prefer a comment can use `# yaml-language-server: $schema=<path>` instead of this key.
 	Schema string `json:"$schema,omitempty"`
 	// The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/arguments/env/config/config_files/stdin) and sub-commands. The root must use 'name' (not '$ref'). The root-command-level keys `env_prefix` and `schemas` live here.
 	Command Command `json:"command"`
-	// The rotini schema version this spec targets (X.Y.Z). Checked against the installed rotini binary's version; a mismatch is a validation error. This — not the optional `$schema` URL — is the source of the binary-version check.
+	// The MINIMUM rotini this spec requires (X.Y.Z) — the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. Two cases are errors: a rotini OLDER than this (it may not know keys the spec uses) and a different MAJOR (an incompatible feature set). The check is skipped when the binary carries no parseable version (a dev build). This — not the optional `$schema` URL — is the source of the check.
 	Version string `json:"version"`
 }
 
@@ -59,7 +59,7 @@ type BaseSchema struct {
 	Pattern string `json:"pattern,omitempty"`
 	// Property schemas for an object shape. Used by document shapes (output, stdin payloads, named schemas) — and, on a map-typed FLAG, the declared property names feed shell completion's key vocabulary (dotted paths when dotted_keys is set, offered up to the '=').
 	Properties map[string]Schema `json:"properties,omitempty"`
-	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. 'count' (FLAG inputs only) declares a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv → 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, …) is rejected — the tally is computed, never parsed. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.) The contract applies element-wise to arrays: 'array' with items naming a non-builtin type — including items: { $ref: "#/schemas/X" }, which generates a named-type slice — parses argv elements only if that Go type implements encoding.TextUnmarshaler. Named schemas are primarily for 'output' and 'stdin' document shapes, which DECODE structured documents rather than parse argv text.
+	// The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. 'count' (FLAG inputs only) declares a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv → 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, …) is rejected — the tally is computed, never parsed. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). 'existingfile' and 'existingdir' are string-valued PATH types: the generated field is a plain string, and rotini checks at parse time that the path exists and is that kind of thing, so a bad path is a usage error naming the flag the user typed rather than an *os.PathError three layers into a handler. The check is existence and kind ONLY — expanding '~', cleaning, following symlinks and deciding whether a missing file should be created are policy, and policy belongs to the handler. For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.) The contract applies element-wise to arrays: 'array' with items naming a non-builtin type — including items: { $ref: "#/schemas/X" }, which generates a named-type slice — parses argv elements only if that Go type implements encoding.TextUnmarshaler. Named schemas are primarily for 'output' and 'stdin' document shapes, which DECODE structured documents rather than parse argv text.
 	Type string `json:"type,omitempty"`
 }
 
@@ -89,7 +89,7 @@ type Command struct {
 	EnvPrefix string `json:"env_prefix,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
 	Examples []string `json:"examples,omitempty"`
-	// Exit codes this command documents, rendered as an EXIT STATUS section in the man page. Data only: rotini sets no exit code itself (handlers own exits via rtx.Exit), so this section is whatever you declare. Ignored when 'man' (verbatim) is set.
+	// Exit codes this command documents, rendered as an EXIT STATUS section in the man page. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code. So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.SignalExit) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
 	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
 	// Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go'), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 	Filename string `json:"filename,omitempty"`
@@ -155,7 +155,7 @@ type ConfigInput struct {
 }
 
 type ConfigurationFile struct {
-	// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared config_files order remains precedence order.
+	// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set.
 	Discover *ConfigurationFileDiscover `json:"discover,omitempty"`
 	// Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) — declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
 	Format string `json:"format,omitempty"`
@@ -167,13 +167,15 @@ type ConfigurationFile struct {
 	Schema *Schema `json:"schema,omitempty"`
 }
 
-// Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or 'discover' must be set. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent (same as a missing fixed path). Declared config_files order remains precedence order.
+// A run-time location strategy for a configuration file, instead of a fixed 'path'. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent, the same as a missing fixed path. Declared config_files order remains precedence order.
 type ConfigurationFileDiscover struct {
-	// The application directory under the XDG config root (xdg strategy only, required there).
+	// The application directory under the XDG config root — the '<app>' in $XDG_CONFIG_HOME/<app>. REQUIRED by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. Both are enforced by rotini validation rather than by this schema, deliberately: a JSON Schema if/then can only say "missing required property", where lintConfigurationFiles says which strategy needs it and what it is for.
 	App string `json:"app,omitempty"`
 	// The file name to look for in each searched directory (e.g. '.acme.toml', 'config.yaml').
 	File string `json:"file"`
-	// 'walk-up': search from the working directory upward to the filesystem root (project-local config, git-style). 'xdg': search $XDG_CONFIG_HOME/<app> (default ~/.config/<app>), the conventional per-user location.
+	// 'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached — project-local config, git-style. On Windows the walk stops at the drive root.
+	//
+	// 'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>. XDG-LITERAL ON EVERY PLATFORM, Windows and macOS included: rotini deliberately does NOT substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere and a dotfiles repository works unchanged across machines. A tool that wants the platform-native location per OS declares a fixed 'path' instead.
 	Strategy string `json:"strategy"`
 }
 
@@ -220,6 +222,10 @@ type FlagInput struct {
 	Deprecated string `json:"deprecated,omitempty"`
 	// CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
+	// Group label that buckets this flag under its own heading in generated help, exactly as a command's 'group' buckets it in the Commands list: flags sharing a group appear together, groups appear in the order their first member is declared, and ungrouped flags fall under the default Flags heading.
+	//
+	// PRESENTATION ONLY — parsing, precedence and the generated field are untouched. It is for the command with twenty flags, where one undifferentiated wall is the difference between a help page someone reads and one they skim past. Not to be confused with 'flag_groups', which is cross-flag VALIDATION and shares nothing but the word.
+	Group string `json:"group,omitempty"`
 	// When true, the flag is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
 	// CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is auto-derived.
@@ -263,6 +269,10 @@ type HelpHeadings struct {
 // Extended schema for input definitions (flags, arguments, env vars, config values, stdin). Inherits all BaseSchema fields and adds input-level metadata. The 'required' field here is a boolean indicating whether this input must be provided — unlike Schema where 'required' is a string array of property names.
 type InputSchema struct {
 	BaseSchema
+	// Declarative shell-completion hint for this input's VALUE — the case between a static `enum` and writing a Go FlagValueCompleter, which is 'this is a file': the commonest value shape there is, and the one that until now required code.
+	//
+	// Flags and arguments only. The hint reaches the shell as a directive on the last line of the hidden __complete output, and each generated script translates it into that shell's own path completion. A dynamic completer still wins when it answers — this is the fallback, not a ceiling.
+	Complete *InputSchemaComplete `json:"complete,omitempty"`
 	// Flag and env inputs only: names a config_files entry whose file PATH this input supplies — the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist — unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry.
 	ConfigSource string `json:"config_source,omitempty"`
 	// Default value applied when the input is not provided
@@ -275,6 +285,12 @@ type InputSchema struct {
 	From []string `json:"from,omitempty"`
 	// Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; recon resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).
 	Key string `json:"key,omitempty"`
+	// BOOL FLAGS only: also accept a `--no-<name>` form for every LONG identifier, which sets the flag false. `--color` with negatable declares `--no-color` too.
+	//
+	// It exists for the direction a plain bool cannot express: turning something OFF for one run when a default, a config file or an environment variable already turned it on. Short identifiers get no negated form — `-no-c` is not a thing, and inventing `-C` is not rotini's call.
+	//
+	// A declared identifier always wins over a derived negated one, so an author who genuinely declares `--no-cache` on another flag keeps it. The negated form takes no value: `--no-color=true` is a parse error rather than a riddle. The generated field is the same single bool either way, and `--[no-]color` is how it renders in help.
+	Negatable bool `json:"negatable,omitempty"`
 	// Env inputs only, map-typed ('map'/'object' → map[string]any): the separator that aggregates a FAMILY of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the SNAKE_UPPER of the input's name. With name: http, variable: ACME_HTTP, nesting: "__" — ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: "30", retry: {max: "9"}} (segments lowercased; values are strings). 'required: true' errors when no matching variables exist. 'default:' is rejected — seed defaults in code or config instead.
 	Nesting string `json:"nesting,omitempty"`
 	// Display name for this input's VALUE in generated help/man/usage — `--file <PATH>` instead of the Go type token, `<PATH>` instead of the argument's name. Pure presentation: parsing, completion, and the generated field are untouched. Conventionally UPPERCASE or <angle-bracketed>.
@@ -283,8 +299,22 @@ type InputSchema struct {
 	Required bool `json:"required,omitempty"`
 	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag. rotini ships no interactive secret prompt (the UX layer is deliberately out of scope): a handler wanting one reads rtx.Stdin with any prompt library; for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 	Secret bool `json:"secret,omitempty"`
-	// Environment variable name (env inputs only)
+	// The EXACT environment variable this input reads, instead of the name rotini would derive. Valid on env inputs and on FLAGS (as a flag's env fallback); rejected on arguments, config inputs and stdin, which have no environment channel.
+	//
+	// Exempt from `env_prefix` either way: an explicitly named variable is already exact, and prefixing it would silently make it a different variable.
+	//
+	// On a flag it also opts the flag into the fallback chain (argv > env > config > default), keyed by the flag's own name unless `key:` names one — so `--token` with `variable: GITHUB_TOKEN` reads that variable directly, where before the only spelling was a config `key: github.token` whose SNAKE_UPPER happened to match. Because the flag now has a key, a configuration file defining that key supplies it too; declare `key:` to control what that key is.
 	Variable string `json:"variable,omitempty"`
+}
+
+// Declarative shell-completion hint for this input's VALUE — the case between a static `enum` and writing a Go FlagValueCompleter, which is 'this is a file': the commonest value shape there is, and the one that until now required code.
+//
+// Flags and arguments only. The hint reaches the shell as a directive on the last line of the hidden __complete output, and each generated script translates it into that shell's own path completion. A dynamic completer still wins when it answers — this is the fallback, not a ceiling.
+type InputSchemaComplete struct {
+	// Narrows kind 'file' to these suffixes, written WITHOUT a leading dot ('yaml', 'json'). Omitted offers every file. Rejected on the other kinds, which have no extensions to filter.
+	Extensions []string `json:"extensions,omitempty"`
+	// 'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete NOTHING — which is NOT the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that default is file completion; 'none' suppresses it, so an opaque value (a container id, an API resource name) stops a shell offering the contents of the current directory as if they were plausible answers.
+	Kind string `json:"kind"`
 }
 
 type RemoteCommandSpec struct {
@@ -316,7 +346,11 @@ type Schema struct {
 }
 
 type StdinSpec struct {
-	// Serialization the piped stdin payload is decoded from (into the generated <Prefix>Stdin type). Defaults to json.
+	// How the piped stdin payload is read.
+	//
+	// The four DOCUMENT formats — json, yaml, jsonc, toml — decode it into the generated <Prefix>Stdin struct, validated against the declared schema. Defaults to json.
+	//
+	// The two RAW formats are for the grep/jq/fmt family, whose stdin is not a document: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). Both require the schema's type to match — 'string' for text, '[]string' or 'array' for lines — and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Before they existed, a command whose input is plain text could not declare its stdin channel at all: it read rtx.Stdin directly, which appears in no help page and no completion.
 	Format string `json:"format,omitempty"`
 	// Type definition for stdin content. Set required: true in schema to error when stdin is empty.
 	Schema *InputSchema `json:"schema,omitempty"`

@@ -14,10 +14,17 @@
 #                        item by definition.
 # ---------------------------------------------------------------------------
 
-# REQUIRED. The rotini version this conf targets; a mismatch with the rotini
-# binary running validate/generate is an error. (Point an editor at the schema
-# with a `# yaml-language-server: $schema=<path>` comment — see generate.schemas.)
+# REQUIRED. The MINIMUM rotini this conf requires. Any binary of the same major
+# at or beyond it is accepted, so a patch or minor upgrade does not force an edit
+# here; an older binary, or a different major, is an error. Skipped for a dev
+# build with no version stamped in.
 version: 0.0.0
+
+# OPTIONAL, and for your EDITOR only — rotini never fetches it. Any URI works; the
+# released form points at a tag (note the 'v'). `generate.schemas.conf.file` below
+# writes a local copy you can point at instead. A
+# `# yaml-language-server: $schema=<path>` comment does the same job.
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v0.0.0/schema-conf.json
 
 # ===========================================================================
 # generate — controls `rotini generate`: where code is written (packages) and

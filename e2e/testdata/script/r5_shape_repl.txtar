@@ -1,0 +1,130 @@
+# R5 — the REPL shape, driven by a real pipe.
+#
+# repl_test.go covers the loop in-process. This drives a REAL binary with a REAL stdin pipe,
+# which is the only way to see what a user sees: quoting, the exit word, EOF, and — the
+# property the whole shape rests on — a failing command NOT killing the loop.
+
+gomodinit example.com/shell
+
+exec rotini generate cmd/shell/.rotini.spec.yaml --config cmd/shell/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o shell$exe ./cmd/shell
+
+# Several commands, then the exit word. Each dispatch gets a fresh Context, so nothing from
+# one line leaks into the next.
+stdin lines.txt
+exec ./shell$exe
+stdout 'echo: hello'
+stdout 'echo: two words'
+stdout 'echo: quoted phrase'
+
+# A failing command is reported and the loop CONTINUES — the line after it still runs.
+stdin with-failure.txt
+exec ./shell$exe
+stdout 'still alive'
+
+# EOF ends the loop cleanly, with no exit word and no error.
+stdin eof.txt
+exec ./shell$exe
+stdout 'echo: last'
+
+-- lines.txt --
+echo hello
+echo two words
+echo "quoted phrase"
+quit
+-- with-failure.txt --
+nosuchcommand
+echo still alive
+quit
+-- eof.txt --
+echo last
+-- cmd/shell/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: shell
+  summary: a REPL
+  description: Runs its own command tree as an interactive loop.
+  commands:
+    - name: echo
+      summary: echo the arguments
+      arguments:
+        - name: words
+          schema:
+            type: '[]string'
+-- cmd/shell/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/shell/zz_shell.go
+      package: shell
+-- internal/cmd/shell/shell.go --
+package shell
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shellHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*shellHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/shell/shell_echo.go --
+package shell
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shellEchoHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*shellEchoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[ShellEchoInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "echo: %s\n", strings.Join(in.ShellEcho.Arguments.Words, " "))
+}
+-- cmd/shell/main.go --
+package main
+
+import (
+	"context"
+	"os"
+
+	"github.com/go-rotini/rotini"
+
+	shell "example.com/shell/internal/cmd/shell"
+)
+
+// The REPL shape: one Program, dispatched once per typed line. Run is re-entrant, so each
+// line gets a fresh Context while the Parser bound here reaches all of them.
+func main() {
+	p := shell.Program.Bind(rotini.KeyParser, rotini.NewParser())
+	repl := rotini.NewREPL(p).
+		WithPrompt("").
+		WithInput(os.Stdin).
+		WithOutput(os.Stdout).
+		WithExitCommands("quit", "exit").
+		WithErrorEcho(true)
+	if err := repl.Run(context.Background()); err != nil {
+		os.Exit(1)
+	}
+}

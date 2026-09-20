@@ -274,7 +274,8 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 	exec := func(onRun func(rtx *Context)) (log []string, code int, funneled error, drained []error, fired bool) {
 		h := &testHandlers{log: &log, onRun: onRun}
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithFunnel(func(_ context.Context, _ *Context, _, _ []string, _, errs []error, _ []*PanicError) {
+		p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+			errs := out.Errors
 			fired, funneled, drained = true, errors.Join(errs...), errs
 		})
 		code, _ = p.Run(p.args)

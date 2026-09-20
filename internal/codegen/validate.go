@@ -47,22 +47,87 @@ func (p *Processor) validateConf(rc *reconciledConf) []error {
 	return problems
 }
 
-// versionProblem reports a document whose `version` targets a different rotini than the
-// running binary: codegen and validation are reliable only when the two match. It is skipped
-// when the binary version is unknown (a dev build) or the document declares none.
+// semver is a document's or binary's X.Y.Z, with any -prerelease/+build suffix discarded.
+type semver struct{ major, minor, patch int }
+
+// parseSemver reads a leading X.Y.Z, tolerating a "v" prefix and ignoring anything after the
+// patch number (a "-rc.1" or "+build" suffix). ok is false for anything else — a dev build
+// stamped "dev", an empty string — which the version check treats as "unknown, do not judge".
+func parseSemver(v string) (semver, bool) {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	parts := strings.Split(v, ".")
+	if len(parts) != 3 {
+		return semver{}, false
+	}
+	var out [3]int
+	for i, p := range parts {
+		if p == "" {
+			return semver{}, false
+		}
+		n := 0
+		for _, r := range p {
+			if r < '0' || r > '9' {
+				return semver{}, false
+			}
+			n = n*10 + int(r-'0')
+		}
+		out[i] = n
+	}
+	return semver{major: out[0], minor: out[1], patch: out[2]}, true
+}
+
+// String renders the version back as X.Y.Z.
+func (v semver) String() string { return fmt.Sprintf("%d.%d.%d", v.major, v.minor, v.patch) }
+
+// olderThan reports whether v precedes w.
+func (v semver) olderThan(w semver) bool {
+	if v.major != w.major {
+		return v.major < w.major
+	}
+	if v.minor != w.minor {
+		return v.minor < w.minor
+	}
+	return v.patch < w.patch
+}
+
+// versionProblem reports a document this rotini cannot be trusted to process.
+//
+// A document's `version` is a MINIMUM, not an equality: it says "I use the rotini feature set
+// as of X.Y.Z". Any binary of the same major that is at least that version accepts it, so a
+// patch or minor upgrade never forces an edit to a single spec or conf in a fleet. Two cases
+// are still errors, because in both the binary genuinely cannot be relied on:
+//
+//   - the binary is OLDER than the document — the document may use keys it does not know, and
+//     the schema would reject them with a confusing "unknown property" instead of the truth;
+//   - the majors differ — by definition a different, incompatible feature set.
+//
+// It is skipped whenever either side is not a parseable X.Y.Z: a dev build with no version
+// stamped in, or a document that declares none. Judging an unknown is worse than not judging.
 func versionProblem(kind, docVersion, binaryVersion string) *problem {
-	want := strings.TrimPrefix(binaryVersion, "v")
-	if want == "" {
+	bin, ok := parseSemver(binaryVersion)
+	if !ok {
 		return nil
 	}
-	got := strings.TrimPrefix(docVersion, "v")
-	if got == "" {
+	doc, ok := parseSemver(docVersion)
+	if !ok {
 		return nil
 	}
-	if got != want {
+
+	switch {
+	case doc.major != bin.major:
 		return &problem{
 			kind: kind, loc: "version",
-			msg: fmt.Sprintf("targets rotini version %s but this rotini is %s — update the version (or your rotini install) so they match", got, want),
+			msg: fmt.Sprintf("targets rotini %s but this rotini is %s — major version %d and %d are different, incompatible feature sets; install rotini %d.x or migrate this document to %d.x",
+				doc, bin, doc.major, bin.major, doc.major, bin.major),
+		}
+	case bin.olderThan(doc):
+		return &problem{
+			kind: kind, loc: "version",
+			msg: fmt.Sprintf("targets rotini %s but this rotini is %s — this rotini is older than the document requires; upgrade it (go get -tool github.com/go-rotini/rotini@latest), or lower the version to %s if the document does not use anything newer",
+				doc, bin, bin),
 		}
 	}
 	return nil

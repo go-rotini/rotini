@@ -1,0 +1,31 @@
+# The completion hint describes a value typed on the COMMAND LINE, so it belongs to flags and
+# arguments. Elsewhere — or on a flag that takes no value — it would be silently ignored.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # A bool takes no value, so there is nothing to complete.
+    - name: force
+      identifiers:
+        - --force
+      schema:
+        type: bool
+        complete:
+          kind: file
+    # extensions narrow FILES; with kind directory they mean nothing.
+    - name: out
+      identifiers:
+        - --out
+      schema:
+        type: string
+        complete:
+          kind: directory
+          extensions:
+            - yaml
+  env:
+    # No shell is doing the typing here.
+    - name: region
+      schema:
+        type: string
+        complete:
+          kind: file

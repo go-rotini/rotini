@@ -17,6 +17,12 @@ func lintComposedTree(spec *Spec, specPath string) []error {
 	if !specHasRefs(spec) {
 		return nil
 	}
+	// A root that is not itself valid cannot be composed from, and lintRootCommand has
+	// already said so — in a positioned message. Running the composer anyway would restate
+	// it unpositioned, so the reader sees one cause reported twice.
+	if spec.Command.Name == "" || spec.Command.Ref != "" {
+		return nil
+	}
 	root, name, err := findModule()
 	if err != nil {
 		return nil // no module: a composed CLI can't generate here anyway; not validate's error to raise

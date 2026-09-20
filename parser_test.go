@@ -1802,3 +1802,249 @@ func TestUsageError_categorizedAsUsage(t *testing.T) {
 		t.Error("a usage error must not match ErrInternal")
 	}
 }
+
+// negatableDef is a command with one negatable bool flag defaulting to on, plus a genuinely
+// declared --no-cache on a DIFFERENT flag, so the precedence between a declared identifier
+// and a derived negated one is exercised rather than assumed.
+func negatableDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"--color", "-c"}, Type: "bool", Negatable: true, Default: "true"},
+			{Name: "verify", Identifiers: []string{"--verify"}, Type: "bool", Negatable: true},
+		},
+	}
+}
+
+type negatableInputs struct {
+	App struct {
+		Flags struct {
+			Color  bool `rotini:"color"`
+			Verify bool `rotini:"verify"`
+		}
+		Arguments struct{}
+	}
+}
+
+// TestParse_negatableBool covers the direction a plain bool cannot express: turning something
+// off for one run when a default, a config file or an environment variable already turned it
+// on. Without it, an author can only ever say "on".
+func TestParse_negatableBool(t *testing.T) {
+	cases := []struct {
+		name         string
+		argv         []string
+		color        bool
+		verify       bool
+		wantErr      string
+		wantErrToken string
+	}{
+		{name: "the default stands", argv: nil, color: true},
+		{name: "the positive form", argv: []string{"--color"}, color: true},
+		{name: "the negated form sets false", argv: []string{"--no-color"}, color: false},
+		{name: "negating a flag that was off leaves it off", argv: []string{"--no-verify"}, color: true},
+		{name: "positive then negated: last wins", argv: []string{"--color", "--no-color"}, color: false},
+		{name: "negated then positive: last wins", argv: []string{"--no-color", "--color"}, color: true},
+		{name: "the short form has no negated spelling", argv: []string{"-c"}, color: true},
+		{
+			// Short flags have no negated spelling, so "-no-c" is read as a POSIX
+			// cluster (-n -o -c) and fails on the first unknown letter. The point is
+			// that rotini does not invent one, not which token the cluster blames.
+			name:    "a negated short form is not invented",
+			argv:    []string{"-no-c"},
+			wantErr: "unknown flag",
+		},
+		{
+			name:    "the negated form takes no value",
+			argv:    []string{"--no-color=true"},
+			wantErr: "negated form and takes no value",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var in negatableInputs
+			rtx := NewContextFor(negatableDef(), tc.argv)
+			err := NewParser().Parse(rtx, &in)
+
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
+				}
+				if tc.wantErrToken != "" {
+					var pe *ParseError
+					if !errors.As(err, &pe) || pe.Token != tc.wantErrToken {
+						t.Errorf("ParseError token = %v, want %q", err, tc.wantErrToken)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if in.App.Flags.Color != tc.color {
+				t.Errorf("color = %v, want %v", in.App.Flags.Color, tc.color)
+			}
+			if in.App.Flags.Verify != tc.verify {
+				t.Errorf("verify = %v, want %v", in.App.Flags.Verify, tc.verify)
+			}
+		})
+	}
+}
+
+// TestParse_declaredIdentifierBeatsNegatedForm: an author who genuinely declares --no-cache
+// keeps it, even when another flag's negatable would derive the same token. Silently shadowing
+// a declared identifier is the one outcome that must not happen.
+func TestParse_declaredIdentifierBeatsNegatedForm(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "cache", Identifiers: []string{"--cache"}, Type: "bool", Negatable: true},
+			{Name: "nocache", Identifiers: []string{"--no-cache"}, Type: "string"},
+		},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Cache   bool   `rotini:"cache"`
+				Nocache string `rotini:"nocache"`
+			}
+			Arguments struct{}
+		}
+	}
+	rtx := NewContextFor(def, []string{"--no-cache", "hello"})
+	if err := NewParser().Parse(rtx, &in); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if in.App.Flags.Nocache != "hello" {
+		t.Errorf("the declared --no-cache did not win: nocache=%q cache=%v", in.App.Flags.Nocache, in.App.Flags.Cache)
+	}
+}
+
+// TestParse_negatedFormIsSuggestable: the negated spelling joins the flag vocabulary a
+// ParseError carries, so a Suggestor can offer it for a near miss.
+func TestParse_negatedFormIsSuggestable(t *testing.T) {
+	var in negatableInputs
+	rtx := NewContextFor(negatableDef(), []string{"--no-colour"})
+	err := NewParser().Parse(rtx, &in)
+
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error = %v, want a *ParseError", err)
+	}
+	if !slices.Contains(pe.Candidates, "--no-color") {
+		t.Errorf("candidates %v do not include the negated form", pe.Candidates)
+	}
+	if got := NewSuggestor().Suggest(pe.Token, pe.Candidates); !slices.Contains(got, "--no-color") {
+		t.Errorf("suggestions %v do not offer --no-color for %q", got, pe.Token)
+	}
+}
+
+// TestParse_pathTypes covers existingfile / existingdir: a value that is not there, or is the
+// wrong kind of thing, is a usage error at PARSE time naming the flag the user typed —
+// instead of an *os.PathError surfacing three layers into a handler, naming only a path.
+func TestParse_pathTypes(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "real.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "absent.txt")
+
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "config", Identifiers: []string{"--config"}, Type: "existingfile"},
+			{Name: "out", Identifiers: []string{"--out"}, Type: "existingdir"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config"`
+				Out    string `rotini:"out"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	cases := []struct {
+		name    string
+		argv    []string
+		wantErr string
+	}{
+		{name: "an existing file passes", argv: []string{"--config", file}},
+		{name: "an existing directory passes", argv: []string{"--out", dir}},
+		{name: "a missing file is named", argv: []string{"--config", missing}, wantErr: "no such file"},
+		{name: "a missing directory says directory", argv: []string{"--out", missing}, wantErr: "no such directory"},
+		{name: "a directory is not a file", argv: []string{"--config", dir}, wantErr: "is a directory, not a file"},
+		{name: "a file is not a directory", argv: []string{"--out", file}, wantErr: "is not a directory"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var in inputs
+			err := NewParser().Parse(NewContextFor(def, tc.argv), &in)
+
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("parse: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
+			}
+			// It is the user's mistake, so it classifies as usage — not internal.
+			if CategoryOf(err) != CategoryUsage {
+				t.Errorf("category = %v, want CategoryUsage", CategoryOf(err))
+			}
+			// The message names the flag, so the user knows which one to fix.
+			var pe *ParseError
+			if !errors.As(err, &pe) || !strings.Contains(pe.Msg, "--") {
+				t.Errorf("message %q does not name the flag", err)
+			}
+		})
+	}
+}
+
+// TestParse_pathTypeKeepsStringBounds: a path is still a string, so its declared pattern and
+// length bounds apply. Skipping them would silently ignore a declared constraint, which is
+// the single failure mode rotini's validation exists to prevent.
+func TestParse_pathTypeKeepsStringBounds(t *testing.T) {
+	dir := t.TempDir()
+	yaml := filepath.Join(dir, "conf.yaml")
+	text := filepath.Join(dir, "conf.txt")
+	for _, p := range []string{yaml, text} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{
+			Name: "config", Identifiers: []string{"--config"}, Type: "existingfile",
+			Constraints: Constraints{Pattern: `\.ya?ml$`},
+		}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	var ok inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--config", yaml}), &ok); err != nil {
+		t.Fatalf("a .yaml path matching the pattern: %v", err)
+	}
+
+	var bad inputs
+	err := NewParser().Parse(NewContextFor(def, []string{"--config", text}), &bad)
+	if err == nil {
+		t.Fatal("a path that exists but violates the pattern was accepted — the constraint was ignored")
+	}
+	if !strings.Contains(err.Error(), `must match \.ya?ml$`) {
+		t.Errorf("error = %v, want it to quote the pattern it violated", err)
+	}
+}

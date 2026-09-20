@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:4:3: command demo: flag_dependencies references unknown flag "cert" — it has no matching entry in this command's flags

@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:4:3: command demo: flag "force": minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf apply to numeric types only, not bool — the bound would be silently ignored
+spec: .rotini.spec.yaml:4:3: command demo: flag "retries": minLength/maxLength/pattern apply to string types only, not int — the constraint would be silently ignored

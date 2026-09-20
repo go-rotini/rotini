@@ -1,5 +1,7 @@
 package codegen
 
+import "fmt"
+
 // Package-wide spec tree-traversal and input/schema enumeration helpers, shared by the
 // lint rules, the generator, and validation. Kept in one place so a rule, the composer,
 // or a derivation never re-implements the same recursive walk.
@@ -8,62 +10,69 @@ package codegen
 // display path — "root/child/grandchild", using a child's $ref segment when it has
 // no name (and "(root)" for an unnamed root). The rules call this instead of each
 // re-defining the same recursive walk.
+//
+// Use [walkCommandsAt] when the rule reports a problem: it supplies the JSON pointer that
+// gives the message a file:line:col.
 func walkCommands(spec *Spec, visit func(c *Command, path string)) {
-	var walk func(c *Command, path string)
-	walk = func(c *Command, path string) {
-		visit(c, path)
+	walkCommandsAt(spec, func(c *Command, path, _ string) { visit(c, path) })
+}
+
+// rootPointer is the JSON pointer of the document's root command.
+const rootPointer = "/command"
+
+// walkCommandsAt is [walkCommands] plus each command's JSON pointer ("/command",
+// "/command/commands/0/commands/2"), which [locateProblems] resolves to a line and column in
+// the file the author actually wrote.
+//
+// Every rule that reports a problem uses this: a message naming "command demo/build" makes a
+// reader search for it, and the same message at .rotini.spec.yaml:41:7 does not. The pointer
+// addresses the COMMAND, not the offending key inside it, which is one hop coarser than a
+// schema violation's pointer and costs each rule nothing to carry.
+func walkCommandsAt(spec *Spec, visit func(c *Command, path, ptr string)) {
+	var walk func(c *Command, path, ptr string)
+	walk = func(c *Command, path, ptr string) {
+		visit(c, path, ptr)
 		for i := range c.Commands {
 			child := &c.Commands[i]
 			seg := child.Name
 			if seg == "" {
 				seg = child.Ref
 			}
-			walk(child, path+"/"+seg)
+			walk(child, path+"/"+seg, fmt.Sprintf("%s/commands/%d", ptr, i))
 		}
 	}
 	name := spec.Command.Name
 	if name == "" {
 		name = "(root)"
 	}
-	walk(&spec.Command, name)
+	walk(&spec.Command, name, rootPointer)
 }
 
-// allConfigFiles gathers every command's config_files sources across the tree, flattened for
-// the global BindMeta and the declared-name lints.
-func allConfigFiles(spec *Spec) []ConfigurationFile {
-	var out []ConfigurationFile
-	walkCommands(spec, func(c *Command, _ string) {
-		if c.inputs() != nil {
-			out = append(out, c.inputs().ConfigFiles...)
-		}
-	})
-	return out
-}
-
-// walkChains visits every command paired with its ancestor chain (root → command,
-// the command last). It is the chain-aware counterpart of walkCommands, for rules
-// that must reason about what's in scope via the cascade (config_files, file: pins).
-func walkChains(spec *Spec, visit func(chain []*Command, path string)) {
-	var walk func(c *Command, ancestors []*Command, path string)
-	walk = func(c *Command, ancestors []*Command, path string) {
+// walkChainsAt visits every command paired with its ancestor chain (root → command, the
+// command last) and its JSON pointer. It is the chain-aware counterpart of [walkCommandsAt],
+// for rules that must reason about what is in scope via the cascade (config_files, file:
+// pins).
+func walkChainsAt(spec *Spec, visit func(chain []*Command, path, ptr string)) {
+	var walk func(c *Command, ancestors []*Command, path, ptr string)
+	walk = func(c *Command, ancestors []*Command, path, ptr string) {
 		chain := make([]*Command, len(ancestors)+1) // fresh slice → no sibling clobber across recursion
 		copy(chain, ancestors)
 		chain[len(ancestors)] = c
-		visit(chain, path)
+		visit(chain, path, ptr)
 		for i := range c.Commands {
 			child := &c.Commands[i]
 			seg := child.Name
 			if seg == "" {
 				seg = child.Ref
 			}
-			walk(child, chain, path+"/"+seg)
+			walk(child, chain, path+"/"+seg, fmt.Sprintf("%s/commands/%d", ptr, i))
 		}
 	}
 	name := spec.Command.Name
 	if name == "" {
 		name = "(root)"
 	}
-	walk(&spec.Command, nil, name)
+	walk(&spec.Command, nil, name, rootPointer)
 }
 
 // chainConfigNames is the set of config_files logical names in scope for a chain —

@@ -4,6 +4,10 @@ title: "configuration"
 
 # Configuration File
 
+{{< alert type="info" title="EVERY KEY:" >}}
+This page is the tour. [**The conf reference**](reference/) is the complete list — every key, rendered from the schema itself, so it cannot drift from what `rotini validate` accepts.
+{{< /alert >}}
+
 The `.rotini.conf.*` file controls **codegen**, not your CLI's behavior. Where generated code is written, which derived outputs are produced, and how validation reports problems. Same four formats as the spec.
 
 {{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}

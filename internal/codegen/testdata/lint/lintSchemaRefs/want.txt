@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:4:3: command demo output: $ref "#/schemas/Reslt" points to an undeclared schema (no "Reslt" under the document-level "schemas"); did you mean "Result"?

@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:5:3: command demo: flag "force": sets complete but its type is bool, which takes no value — there is nothing to complete
+spec: .rotini.spec.yaml:5:3: command demo: flag "out": sets complete.extensions with kind "directory" — extensions narrow files, so they apply to kind "file" only
+spec: .rotini.spec.yaml:5:3: command demo: env "region": sets complete, which describes a value typed on the command line — only flags and arguments are, so here it would be silently ignored

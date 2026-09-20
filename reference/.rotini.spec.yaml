@@ -43,14 +43,17 @@
 # files, built-in keychains, URL config paths, interactive prompts.
 # ===========================================================================
 
-# REQUIRED. URL whose /tags/<x.y.z>/ segment must match the rotini binary version.
-# (The guard is skipped when the binary's version is unknown, or when the URL is
-# not the recognized refs/tags form — so dev builds and forks aren't blocked.)
-# REQUIRED. The rotini version this spec targets; a mismatch with the rotini
-# binary running validate/generate is an error.
+# REQUIRED. The rotini version this spec targets. rotini accepts any binary of the
+# same MAJOR that is at least this version, so a patch or minor upgrade does not
+# force an edit here; an older binary, or a different major, is an error. The check
+# is skipped when the binary's version is unknown (a dev build).
 version: 0.0.0
 
-$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-spec.json
+# OPTIONAL, and for your EDITOR only — rotini never fetches it, and it takes no part
+# in the version check above. Any URI works. The released form points at a tag (note
+# the 'v', matching the git tag); `generate.schemas.spec.file` in the conf writes a
+# local copy you can point at instead, which is what an offline or forked setup does.
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v0.0.0/schema-spec.json
 
 # Document-level prefix for every DERIVED env-var name (ENV-06): the SNAKE_UPPER
 # projections — plain env inputs without `variable:` (input `home` → ACME_HOME),
@@ -270,6 +273,64 @@ command:
         type: array
         items: { type: duration }
 
+    - name: manifest # COMPLETION HINT: between a static `enum` and writing a
+      summary: Manifest to apply. # Go FlagValueCompleter sits "this is a file" — the
+      identifiers: # commonest value shape there is. The hint rides the
+        - --manifest # last line of __complete's output as a directive each
+      schema: # generated script turns into its own path completion.
+        type: string
+        complete:
+          kind: file # file | directory | none
+          extensions: # narrows `file`; no leading dot
+            - yaml
+            - yml
+        # `none` is NOT the same as declaring no hint: with no hint the
+        # shell applies its own default (files, in bash and zsh), and
+        # `none` SUPPRESSES it — so an opaque id stops a shell offering
+        # the current directory as if it held plausible answers.
+        # A dynamic FlagValueCompleter still wins when it answers.
+
+    - name: cert # GROUPED: buckets this flag under its own heading in
+      summary: TLS certificate. # generated help, exactly as a command's `group` buckets
+      group: TLS Options # it in the Commands list. Groups appear in the order
+      identifiers: # their first member is declared; ungrouped flags fall
+        - --cert # under the default Flags heading.
+      schema: # PRESENTATION ONLY — not to be confused with
+        type: string # `flag_groups`, which is cross-flag VALIDATION.
+
+    - name: from-file # PATH TYPE: the field is a plain string, and rotini
+      summary: Read input from a file. # checks at PARSE time that it exists and is a
+      identifiers: # file — so a typo is a usage error naming the
+        - --from-file # flag, not an *os.PathError deep in a handler.
+      schema:
+        type: existingfile # 'existingdir' is the directory counterpart
+        pattern: '\.ya?ml$' # a path is still a string: bounds still apply
+        # Existence and KIND only. Expanding '~', cleaning, following
+        # symlinks, creating a missing file — all policy, all yours.
+
+    - name: color # NEGATABLE: --color and --no-color, one bool field.
+      summary: Colorize output. # The only way to express "off for THIS run" when a
+      identifiers: # default, a config file or an env var already said on.
+        - --color # Long forms only; -no-c is not a thing, and rotini
+        - -c # will not invent -C on your behalf.
+      schema:
+        type: bool # bool only — there is nothing else to set false
+        default: true
+        negatable: true # help renders the pair as `--[no-]color`
+        # A declared identifier always beats a derived negated one, and
+        # `--no-color=true` is a parse error rather than a riddle.
+
+    - name: api-token # A flag may name its own env variable, instead of
+      summary: API token. # taking the SNAKE_UPPER of a config key it does not
+      identifiers: # otherwise want. EXEMPT from env_prefix: it is exact.
+        - --api-token
+      schema:
+        type: string
+        secret: true # redacted in provenance and error output
+        variable: GITHUB_TOKEN # argv > $GITHUB_TOKEN > config > default
+        # Declaring `variable:` opts the flag into the fallback chain,
+        # keyed by its own name; add `key:` to control that key.
+
     - name: label # a map flag is repeatable: --label k=v --label a=b
       schema:
         type:
@@ -473,7 +534,19 @@ command:
 
   stdin:
     # StdinSpec: every key
-    format: json # json | yaml | jsonc | toml (default: json)
+    format: json # DOCUMENT formats: json | yaml | jsonc | toml (default
+      # json) decode into the generated <Prefix>Stdin struct,
+      # validated against the schema below.
+      #
+      # RAW formats, for the grep/jq/fmt family whose stdin is
+      # not a document:
+      #   text   → the whole payload as one *string
+      #   lines  → *[]string, split on newlines (a trailing
+      #            newline adds no empty element)
+      # Both bind the payload DIRECTLY, so the schema's type
+      # must be the type it becomes — string / []string — and
+      # no <Prefix>Stdin struct is generated. Nil vs empty stays
+      # distinguishable: the field is a pointer either way.
     schema:
       type: object
       required: true # error when stdin is empty

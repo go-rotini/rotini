@@ -2,9 +2,19 @@
 package main
 
 import (
+	"github.com/go-rotini/rotini"
+
 	cmd "example.com/demo/internal/cmd/demo"
 )
 
+// version is what `--version` reports. Stamp it at build time:
+//
+//	go build -ldflags "-X main.version=1.2.3" ./cmd/...
+var version = "0.0.0"
+
 func main() {
-	cmd.Program.Execute()
+	cmd.Program.
+		Bind(rotini.KeyVersion, version).
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
 }

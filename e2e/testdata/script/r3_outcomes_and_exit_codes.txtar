@@ -1,0 +1,229 @@
+# R3 — the outcome funnel, from outside: which stream, and which exit code.
+#
+# The campaign is right that these are the two rules most likely to be subtly wrong, and they
+# are the two an in-process test can fake. Only a real process shows a real exit code through
+# os.Exit and the default trap.
+
+gomodinit example.com/out
+
+exec rotini generate cmd/out/.rotini.spec.yaml --config cmd/out/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o out$exe ./cmd/out
+
+# A clean run that records nothing is silent, and exits 0.
+wantexit 0 ./out$exe quiet
+exec ./out$exe quiet
+! stdout .
+! stderr .
+
+# Infos and successes go to STDOUT; warnings and errors go to STDERR. A funnel that
+# transposed the two would still "work", which is why this is asserted by stream.
+exec ./out$exe note
+stdout 'an informational note'
+stdout 'it worked'
+! stderr .
+
+# A warning is non-fatal: stderr, but exit 0. The exit floor must not react to it.
+wantexit 0 ./out$exe warn
+exec ./out$exe warn
+stderr 'Warning: a deprecation'
+! stdout .
+
+# A recorded error floors the exit code at exactly 1, and prints on stderr.
+wantexit 1 ./out$exe fail
+! exec ./out$exe fail
+stderr 'Error: the work did not work'
+! stdout .
+
+# A handler's deliberate code is never DOWNGRADED by the floor: 3 stays 3.
+wantexit 3 ./out$exe code
+! exec ./out$exe code
+stderr 'Error: a specific failure'
+
+# A panic is recovered, reported once after teardown, and never leaks a stack to the user.
+! exec ./out$exe boom
+stderr 'Fatal Error'
+! stderr 'goroutine'
+
+# Teardown still runs on a graceful stop, and its output precedes the funnel's.
+! exec ./out$exe stop
+stderr 'Error: stopping'
+stdout 'teardown ran'
+
+-- cmd/out/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: out
+  summary: outcome demo
+  description: One sub-command per funnel path.
+  commands:
+    - name: quiet
+      summary: records nothing
+    - name: note
+      summary: records an info and a success
+    - name: warn
+      summary: records a warning
+    - name: fail
+      summary: records an error
+    - name: code
+      summary: records an error and sets its own code
+    - name: boom
+      summary: panics
+    - name: stop
+      summary: records an error after teardown runs
+-- cmd/out/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: main
+      file: cmd/out/main.go
+    - type: cmd
+      file: internal/cmd/out/zz_out.go
+      package: out
+-- internal/cmd/out/out.go --
+package out
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type outHandlers struct{ base }
+
+func (*outHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/out/out_quiet.go --
+package out
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type outQuietHandlers struct{ base }
+
+func (*outQuietHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/out/out_note.go --
+package out
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type outNoteHandlers struct{ base }
+
+func (*outNoteHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.RecordInfo("an informational note")
+	rtx.RecordSuccess("it worked")
+}
+-- internal/cmd/out/out_warn.go --
+package out
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type outWarnHandlers struct{ base }
+
+func (*outWarnHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.RecordWarning(errors.New("a deprecation"))
+}
+-- internal/cmd/out/out_fail.go --
+package out
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type outFailHandlers struct{ base }
+
+func (*outFailHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.RecordError(errors.New("the work did not work"))
+}
+-- internal/cmd/out/out_code.go --
+package out
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type outCodeHandlers struct{ base }
+
+func (*outCodeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.RecordError(errors.New("a specific failure"))
+	rtx.SignalExit(3)
+}
+-- internal/cmd/out/out_boom.go --
+package out
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type outBoomHandlers struct{ base }
+
+func (*outBoomHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	panic("handler exploded")
+}
+-- internal/cmd/out/out_stop.go --
+package out
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type outStopHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*outStopHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {}
+
+func (*outStopHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.RecordError(errors.New("stopping"))
+	rtx.SignalExit(1)
+}
+
+// PostRun is teardown: a graceful stop still runs it, and the funnel reports afterwards.
+func (*outStopHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "teardown ran")
+}
+-- cmd/out/main.go --
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	out "example.com/out/internal/cmd/out"
+)
+
+func main() {
+	out.Program.
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}

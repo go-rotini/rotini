@@ -1,0 +1,69 @@
+# R8 — the upgrade path: what the version guard does, and what it deliberately does not.
+#
+# Audit F-05. The guard used to demand EXACT equality between a document's `version:` and the
+# binary's, which meant every rotini patch release invalidated every spec and conf in every
+# project until each was hand-edited. This script is the rule that replaced it: `version:` is
+# a MINIMUM, and only a binary that is older, or a different major, is an error.
+#
+# The rotini under test reports 1.2.3.
+
+gomodinit example.com/ver
+
+# Exactly the binary's version: accepted, the obvious case.
+exec rotini validate same.spec.yaml --config same.conf.yaml
+
+# OLDER than the binary, same major: accepted. This is the whole point — a project pinned at
+# 1.0.0 keeps working when the tool moves to 1.2.3, with no edit to any document.
+exec rotini validate older.spec.yaml --config older.conf.yaml
+! stderr .
+
+# NEWER than the binary: rejected, because this rotini may not know the keys the document
+# uses, and a schema error about an "unknown property" would blame the wrong thing.
+! exec rotini validate newer.spec.yaml --config same.conf.yaml
+stderr 'older than the document requires'
+stderr 'upgrade'
+
+# A different major: rejected in both directions, and the message says which way.
+! exec rotini validate major.spec.yaml --config same.conf.yaml
+stderr 'different, incompatible feature sets'
+
+# The guard reads `version:`, never the optional $schema URL — an editor pointer is editor
+# tooling and takes no part in the check, even when it names a different tag.
+exec rotini validate schemaurl.spec.yaml --config same.conf.yaml
+! stderr .
+
+-- same.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/ver/zz_ver.go
+      package: ver
+-- older.conf.yaml --
+version: 1.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/ver/zz_ver.go
+      package: ver
+-- same.spec.yaml --
+version: 1.2.3
+command:
+  name: ver
+-- older.spec.yaml --
+version: 1.0.0
+command:
+  name: ver
+-- newer.spec.yaml --
+version: 1.9.0
+command:
+  name: ver
+-- major.spec.yaml --
+version: 2.0.0
+command:
+  name: ver
+-- schemaurl.spec.yaml --
+version: 1.2.3
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v9.9.9/schema-spec.json
+command:
+  name: ver

@@ -1,0 +1,90 @@
+# R0 — regenerating changes nothing, and never touches what the author owns.
+#
+# This is the operation every upgrade performs, and the only one that can destroy work.
+# UPGRADING.md promises: the generated file is rewritten every pass, while the handler stub
+# and main.go are created once and then never touched again. This script is that promise.
+
+gomodinit example.com/demo
+
+exec rotini init demo
+exec go mod tidy
+exec go build ./...
+
+# Replace the seeded stub with an author's own implementation, and main.go with an edited
+# entrypoint — exactly the two files a real project diverges in first.
+cp authored-handler.go.txt internal/cmd/demo/demo.go
+cp authored-main.go.txt cmd/demo/main.go
+exec go build ./...
+
+# Snapshot the generated file (as .txt so `go build ./...` does not try to compile it).
+cp internal/cmd/demo/zz_rotini.go generated-before.txt
+
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+
+# 1. The generated file is byte-identical: a second pass over an unchanged spec is a no-op,
+#    so an upgrade's diff shows only what actually changed.
+cmp internal/cmd/demo/zz_rotini.go generated-before.txt
+
+# 2. The authored files survived byte for byte. Nothing was merged, reformatted or reseeded.
+cmp internal/cmd/demo/demo.go authored-handler.go.txt
+cmp cmd/demo/main.go authored-main.go.txt
+
+# 3. And the result still builds and runs.
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe
+stdout 'my own implementation'
+
+-- authored-handler.go.txt --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*demoHandlers)(nil)
+
+// demoHandlers is what an author's stub looks like once they have replaced the seeded body:
+// the embeds kept, Run rewritten. Regenerating must not touch a byte of it.
+type demoHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rotini.Collect[DemoInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	if inputs.Demo.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, HelpDemo)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, "my own implementation")
+}
+-- authored-main.go.txt --
+//go:generate go tool rotini generate ./.rotini.spec.yaml --config ./.rotini.conf.yaml
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	demo "example.com/demo/internal/cmd/demo"
+)
+
+// An author's entrypoint: their own build metadata and their own bindings. Create-once means
+// regeneration leaves every line of this alone.
+var version = "9.9.9"
+
+func main() {
+	demo.Program.
+		Bind(rotini.KeyVersion, version).
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}

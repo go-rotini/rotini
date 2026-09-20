@@ -8,32 +8,18 @@ generate:
   packages:
     - type: main
       file: cmd/{{.Package}}/main.go
-      keep: []
     - type: cmd
       file: internal/cmd/{{.Package}}/zz_rotini.go
-      keep: []
   features:
+    # help is on so `{{.Package}} --help` works from the first build. The other three
+    # are opt-in; flip `enabled` to turn one on.
     - type: help
-      enabled: false
-      embed: false
-      embed_dir: internal/cmd/{{.Package}}/renders
-      template_dir: internal/cmd/{{.Package}}/templates
+      enabled: true
     - type: completion
       enabled: false
-      embed: false
-      embed_dir: internal/cmd/{{.Package}}/renders
-      template_dir: internal/cmd/{{.Package}}/templates
     - type: man
       enabled: false
-      embed: true
-      embed_dir: internal/cmd/{{.Package}}/renders
-      template: true
-      template_dir: internal/cmd/{{.Package}}/templates
     - type: markdown
       enabled: false
-      embed: true
-      embed_dir: internal/cmd/{{.Package}}/renders
-      template: true
-      template_dir: internal/cmd/{{.Package}}/templates
 validate:
   fail: collect

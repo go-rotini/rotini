@@ -1,0 +1,9 @@
+# Sub-commands and remote commands share one dispatch namespace.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: build
+    - name: ship
+      aliases:
+        - build

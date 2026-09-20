@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:7:7: the $ref node composing "./child.spec.yaml": sets "flags" on a $ref node — a composed command delegates to the child's handler (built against the child's own inputs/output), so "flags" cannot be overlaid here; declare it in the child spec instead

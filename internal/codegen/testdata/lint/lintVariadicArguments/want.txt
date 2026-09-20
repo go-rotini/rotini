@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:4:3: command demo: argument "paths" is variadic but not last — it would absorb every remaining positional, so later arguments could never bind

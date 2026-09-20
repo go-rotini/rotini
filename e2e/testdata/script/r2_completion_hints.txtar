@@ -1,0 +1,176 @@
+# R2 — the declarative completion hint, over the real __complete wire.
+#
+# Between a static `enum` and writing a Go FlagValueCompleter sits the commonest value shape
+# there is — "this is a file" — and until this key it was expressible only in code. The hint
+# rides the last line of __complete's output as a directive each generated script translates
+# into that shell's own path completion.
+
+gomodinit example.com/hints
+
+exec rotini generate cmd/hints/.rotini.spec.yaml --config cmd/hints/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o hints$exe ./cmd/hints
+
+# A file flag, narrowed to extensions.
+exec ./hints$exe __complete --config ''
+stdout '^:rotini:file yaml yml$'
+
+# The inline form asks the same question.
+exec ./hints$exe __complete '--config='
+stdout '^:rotini:file yaml yml$'
+
+# Directories only.
+exec ./hints$exe __complete --out ''
+stdout '^:rotini:directory$'
+
+# An opaque value suppresses the shell's file fallback — which is NOT the same as
+# declaring no hint, where the shell applies its own default.
+exec ./hints$exe __complete --id ''
+stdout '^:rotini:none$'
+
+exec ./hints$exe __complete --plain ''
+! stdout ':rotini:'
+
+# A static enum still comes through as candidates, with the directive absent.
+exec ./hints$exe __complete --format ''
+stdout '^json$'
+stdout '^yaml$'
+! stdout ':rotini:'
+
+# A positional's hint works the same way.
+exec ./hints$exe __complete open ''
+stdout '^:rotini:file$'
+
+# The generated scripts must actually handle the directive rather than offering it as a
+# candidate — a user would otherwise be shown a line of punctuation.
+exec rotini generate cmd/hints/.rotini.spec.yaml --config completion.conf.yaml
+grep ':rotini:' internal/cmd/hints/renders/completion_bash.txt
+grep ':rotini:' internal/cmd/hints/renders/completion_zsh.txt
+grep ':rotini:' internal/cmd/hints/renders/completion_fish.txt
+grep ':rotini:' internal/cmd/hints/renders/completion_powershell.txt
+
+-- completion.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: main
+      file: cmd/hints/main.go
+    - type: cmd
+      file: internal/cmd/hints/zz_hints.go
+      package: hints
+  features:
+    - type: completion
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/hints/renders
+-- cmd/hints/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: hints
+  summary: completion hints
+  flags:
+    - name: config
+      summary: config file
+      identifiers:
+        - --config
+      schema:
+        type: string
+        complete:
+          kind: file
+          extensions:
+            - yaml
+            - yml
+    - name: out
+      summary: output directory
+      identifiers:
+        - --out
+      schema:
+        type: string
+        complete:
+          kind: directory
+    - name: id
+      summary: an opaque identifier
+      identifiers:
+        - --id
+      schema:
+        type: string
+        complete:
+          kind: none
+    - name: plain
+      summary: no hint at all
+      identifiers:
+        - --plain
+      schema:
+        type: string
+    - name: format
+      summary: a static vocabulary
+      identifiers:
+        - --format
+      schema:
+        type: string
+        enum:
+          - json
+          - yaml
+  commands:
+    - name: open
+      summary: open a file
+      arguments:
+        - name: path
+          schema:
+            type: string
+            complete:
+              kind: file
+-- cmd/hints/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: main
+      file: cmd/hints/main.go
+    - type: cmd
+      file: internal/cmd/hints/zz_hints.go
+      package: hints
+-- internal/cmd/hints/hints.go --
+package hints
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type hintsHandlers struct{ base }
+
+func (*hintsHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/hints/hints_open.go --
+package hints
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type hintsOpenHandlers struct{ base }
+
+func (*hintsOpenHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- cmd/hints/main.go --
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	hints "example.com/hints/internal/cmd/hints"
+)
+
+func main() {
+	hints.Program.
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}

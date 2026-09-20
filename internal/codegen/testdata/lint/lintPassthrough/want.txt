@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:6:7: command demo/exec: passthrough: the command declares flags, but a passthrough command parses none — its tokens are raw positionals
+spec: .rotini.spec.yaml:6:7: command demo/exec: passthrough: declare a variadic []string as the last argument — the receiver of the raw tokens

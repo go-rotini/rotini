@@ -10,13 +10,15 @@ import (
 	"testing"
 )
 
-// This file is the in-process tier of the input conformance suite (the
-// business-like input matrix of .docs/ROTINI_INPUT_BEHAVIOR.md, encoded as
-// code). `make test-conformance` runs it. Each matrix ID appears exactly once
-// across the whole suite — most here, and the handful that only a real
-// process can witness (exit codes, auto-detected pipes, the no-pipe sentinel)
-// in the acceptance tier (acceptance_test.go); TestConformance_matrixComplete
-// enforces the exactly-once split.
+// This file is the in-process tier of the input conformance suite: the input
+// matrix, encoded as code. `make test-conformance` runs it.
+//
+// TestConformance_matrixComplete below holds the canonical ID list; that list,
+// plus each case's own comment, IS the matrix definition — there is no separate
+// prose document to keep in sync. Every ID appears exactly once across the whole
+// suite: most here, and the handful only a real process can witness (exit codes,
+// auto-detected pipes, the no-pipe sentinel) in the acceptance tier
+// (acceptance_test.go). TestConformance_matrixComplete enforces that split.
 
 // ── the acme fixture ─────────────────────────────────────────────────────────
 //

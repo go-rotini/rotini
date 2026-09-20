@@ -26,15 +26,15 @@ NAME
 
 {{end -}}
 {{- range .CommandGroups}}{{if .Title}}{{upper .Title}}{{else}}COMMANDS{{end}}
-{{range .Commands}}    {{.Name}}{{with .Aliases}};{{join . ";"}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .Commands}}    {{.Name}}{{with .Aliases}}, {{join . ", "}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Arguments}}ARGUMENTS
 {{range .}}    {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
-{{- with .Flags}}OPTIONS
-{{range .}}    {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{- range .FlagGroups}}{{if .Title}}{{upper .Title}}{{else}}OPTIONS{{end}}
+{{range .Flags}}    {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Environment}}ENVIRONMENT

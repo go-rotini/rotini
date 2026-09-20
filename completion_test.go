@@ -688,3 +688,91 @@ func TestComplete_nestedRemote(t *testing.T) {
 		t.Errorf("complete past nested remote = %v, want nil", got)
 	}
 }
+
+// completionHintDef declares one input per hint kind, plus the two shapes that must produce
+// none: a bool (no value to complete) and a flag NAME being typed.
+func completionHintDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "config", Identifiers: []string{"--config"}, Type: "string",
+				Complete: Completion{Kind: "file", Extensions: []string{"yaml", "yml"}}},
+			{Name: "out", Identifiers: []string{"--out"}, Type: "string",
+				Complete: Completion{Kind: "directory"}},
+			{Name: "id", Identifiers: []string{"--id"}, Type: "string",
+				Complete: Completion{Kind: "none"}},
+			{Name: "plain", Identifiers: []string{"--plain"}, Type: "string"},
+			{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
+		},
+		Commands: []CommandDef{{
+			Name: "open", Handler: "AppOpen",
+			Arguments: []ArgDef{{Name: "path", Type: "string", Complete: Completion{Kind: "file"}}},
+		}},
+	}
+}
+
+// TestCompletionHint covers the declarative hint — the case between a static enum and writing
+// a Go completer, which is "this is a file". It is the commonest value shape there is, and
+// before this key the only way to say it was code.
+func TestCompletionHint(t *testing.T) {
+	cases := []struct {
+		name  string
+		words []string
+		want  string
+	}{
+		{"a file flag, separate word", []string{"--config", ""}, ":rotini:file yaml yml"},
+		{"a file flag, inline form", []string{"--config="}, ":rotini:file yaml yml"},
+		{"a directory flag", []string{"--out", ""}, ":rotini:directory"},
+		{"an opaque value suppresses the shell's default", []string{"--id", ""}, ":rotini:none"},
+		{"a flag with no hint leaves the shell alone", []string{"--plain", ""}, ""},
+		{"a bool takes no value", []string{"--force", ""}, ""},
+		{"a flag NAME being typed is not a path", []string{"--con"}, ""},
+		{"a positional with a hint", []string{"open", ""}, ":rotini:file"},
+		{"a bare word that could still be a sub-command", []string{""}, ""},
+		{"nothing after the terminator", []string{"--", ""}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := completionHint(completionHintDef(), tc.words); got != tc.want {
+				t.Errorf("completionHint(%q) = %q, want %q", tc.words, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCompletionHint_isSeparableFromCandidates: the directive rides the same stream as the
+// candidates, so it has to be unmistakable — a shell script that treated it as a candidate
+// would offer the user a line of punctuation.
+func TestCompletionHint_isSeparableFromCandidates(t *testing.T) {
+	def := completionHintDef()
+	for _, words := range [][]string{{""}, {"--"}, {"--config", ""}, {"open", ""}} {
+		for _, c := range complete(def, words, nil, nil) {
+			if strings.HasPrefix(c, completionDirectivePrefix) {
+				t.Errorf("candidate %q collides with the directive prefix", c)
+			}
+		}
+	}
+	if d := completionHint(def, []string{"--config", ""}); !strings.HasPrefix(d, completionDirectivePrefix) {
+		t.Errorf("directive %q does not carry the prefix a script matches on", d)
+	}
+}
+
+// TestCompletionHint_noneIsNotTheSameAsEmpty pins the distinction the key exists for: with no
+// hint the shell applies its own default (file completion, in bash and zsh), and "none"
+// suppresses it. Collapsing the two would make an opaque identifier offer the user the
+// contents of the current directory as if they were plausible answers.
+func TestCompletionHint_noneIsNotTheSameAsEmpty(t *testing.T) {
+	def := completionHintDef()
+	none := completionHint(def, []string{"--id", ""})
+	unset := completionHint(def, []string{"--plain", ""})
+
+	if none == unset {
+		t.Fatalf("kind none and no hint both produced %q — the shell cannot tell them apart", none)
+	}
+	if none != ":rotini:none" {
+		t.Errorf("none = %q, want the explicit suppression directive", none)
+	}
+	if unset != "" {
+		t.Errorf("no hint = %q, want empty so the shell applies its own default", unset)
+	}
+}

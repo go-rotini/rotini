@@ -1,0 +1,74 @@
+# The release-fidelity gate — "Mode A" in the e2e campaign.
+#
+# Every other job in this repository tests the WORKING TREE: the e2e tier wires each scratch
+# module to it with a `replace`, and the unit tiers import it directly. None of them can see a
+# missing //go:embed asset, a template left out of the module, a broken `tool` directive, or a
+# $schema URL that does not resolve at the tag — because none of them ever installs the
+# PUBLISHED module.
+#
+# Mode B can be green while Mode A is broken, so this runs against what was actually published.
+name: Release fidelity
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Published version to verify (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  install-and-use:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: stable
+
+      # Deliberately NOT actions/checkout: this job must not have the source tree available,
+      # or a mistake could resolve against it instead of the module cache.
+      - name: Scaffold a scratch module and use the published tool
+        shell: bash
+        env:
+          VERSION: ${{ github.event.inputs.version || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fidelity" && cd "$RUNNER_TEMP/fidelity"
+          go mod init example.com/fidelity
+
+          # The real user path: one module, two faces, one version.
+          go get -tool "github.com/go-rotini/rotini@${VERSION}"
+          go get "github.com/go-rotini/rotini@${VERSION}"
+
+          go tool rotini init fidelity
+          go mod tidy
+          go build ./...
+
+          # The seeded CLI must be usable, not merely compilable — the failure that
+          # motivated the e2e tier was a scaffold that built and whose --help exited 1.
+          go build -o fidelity ./cmd/fidelity
+          ./fidelity --help
+          ./fidelity version
+          ./fidelity help version
+
+      - name: The published $schema URL must resolve
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        env:
+          VERSION: ${{ github.event.inputs.version || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          for schema in schema-spec.json schema-conf.json; do
+            url="https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/${VERSION}/${schema}"
+            echo "→ $url"
+            # An editor following this URL gets a 404 in silence, so the gate is here.
+            curl -fsSL "$url" | head -c 200 > /dev/null
+          done

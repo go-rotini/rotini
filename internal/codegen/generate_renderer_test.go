@@ -17,13 +17,48 @@ func TestSmokeRenderSeedFiles(t *testing.T) {
 }
 
 func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
-	if _, err := renderMainFile("example.com/app/internal/cmd/app", "cli", "yaml"); err != nil {
+	if _, err := renderMainFile("", "example.com/app/internal/cmd/app", "cli", "yaml"); err != nil {
 		t.Errorf("main: %v", err)
 	}
-	// Every command — including help/version/completion — gets the same stub shape,
-	// carrying its own inputs type and invocation.
-	if _, err := renderHandlerStubFile("cli", "appSubHandlers", "AppSubInputs", "app sub", `"github.com/go-rotini/rotini"`); err != nil {
-		t.Errorf("handler stub: %v", err)
+	// Every seeded body the template can emit has to render AND compile-format. The
+	// plain stub is the default; the rest are what stubBody selects when the spec and
+	// conf already declare what the body needs.
+	base := templateHandlerData{
+		Package:       "cli",
+		HandlersType:  "appSubHandlers",
+		InputsType:    "AppSubInputs",
+		Invocation:    "app sub",
+		Prefix:        "AppSub",
+		RuntimeImport: `"github.com/go-rotini/rotini"`,
+	}
+	bodies := map[string]func(d templateHandlerData) templateHandlerData{
+		"plain": func(d templateHandlerData) templateHandlerData { return d },
+		"help flag": func(d templateHandlerData) templateHandlerData {
+			d.HelpVar, d.HelpFlag = "HelpAppSub", "Help"
+			return d
+		},
+		"version flag": func(d templateHandlerData) templateHandlerData { d.VersionFlag = "Version"; return d },
+		"help command": func(d templateHandlerData) templateHandlerData {
+			d.HelpVar, d.HelpPathArg = "HelpAppSub", "Command"
+			return d
+		},
+		"version cmd": func(d templateHandlerData) templateHandlerData { d.VersionOnly = true; return d },
+		"bare root help": func(d templateHandlerData) templateHandlerData {
+			d.HelpVar, d.PrintHelpWhenBare = "HelpApp", true
+			return d
+		},
+		"all flags": func(d templateHandlerData) templateHandlerData {
+			d.HelpVar, d.HelpFlag, d.VersionFlag = "HelpAppSub", "Help", "Version"
+			return d
+		},
+	}
+	for name, mutate := range bodies {
+		t.Run(name, func(t *testing.T) {
+			// renderGoFile gofmts, so a body that does not parse fails here.
+			if _, err := renderHandlerStubFile(mutate(base)); err != nil {
+				t.Errorf("handler stub: %v", err)
+			}
+		})
 	}
 }
 

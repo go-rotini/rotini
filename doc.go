@@ -29,9 +29,11 @@
 //
 // `rotini generate` compiles the spec into a framework file — the [Definition] literal, typed
 // per-command input structs, embedded help/man/markdown pages and completion scripts — plus
-// one handler stub per command, created once and then yours. `rotini init` scaffolds a new CLI
-// as a root-only spec, a conf with every feature off, an entrypoint and one empty stub; each
-// feature is a conf toggle you turn on from there.
+// one handler stub per command, created once and then yours. `rotini init` scaffolds a working
+// CLI — a spec declaring -h/--help, -v/--version and the conventional help and version
+// commands, a conf with the help feature on and the other three off, an entrypoint, and a stub
+// per command already wired to the pages and services codegen produced. Every line of it is
+// yours to delete; the remaining features are conf toggles you turn on from there.
 //
 // # Composition
 //
@@ -75,8 +77,8 @@
 // # Outcomes
 //
 // A run reports through one funnel ([Program.WithFunnel]), handed all five recorded channels
-// at once, fired once after the lifecycle settles. A handler does not print — it records, and
-// the runtime reports:
+// at once as an [Outcome], fired once after the lifecycle settles. A handler does not print —
+// it records, and the runtime reports:
 //
 //   - [Context.RecordInfo] — neutral informational output.
 //   - [Context.RecordSuccess] — what went right.
@@ -191,6 +193,8 @@
 // A rotini binary is not always a one-shot command. These run the same program in a different
 // shape, all resting on [Program.Run] being re-entrant — each dispatch gets a fresh [Context],
 // so nothing leaks between invocations while services bound once up front reach all of them.
+// Run is also safe to call CONCURRENTLY once configuration is done; the handlers value and the
+// program's streams stay shared, so a concurrent host synchronizes those. See [Program.Run].
 //
 //   - [REPL] runs a [Program] as an interactive loop, dispatching each typed line against the
 //     same [Definition] the binary uses. A failing command is reported and the loop continues.

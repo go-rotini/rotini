@@ -1,0 +1,198 @@
+# R1 — the precedence ladder, proven from outside the binary.
+#
+# defaults < config file < environment < argv. The conformance matrix proves this in-process
+# against hand-written structs; this proves it for a binary CODEGEN actually produced, which
+# is the gap that matters — a swap in generated tags would pass every other tier.
+
+gomodinit example.com/prec
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# 1. Nothing supplied — the declared config path does not exist, so the channel is absent
+#    and the declared default wins.
+exec ./app$exe
+stdout 'port=8080'
+stdout 'region=default-region'
+
+# 2. A config file beats the default.
+exec ./app$exe --conf app.yaml
+stdout 'port=9090'
+
+# 3. The environment beats the config file.
+env APP_SERVER_PORT=7070
+exec ./app$exe --conf app.yaml
+stdout 'port=7070'
+
+# 4. argv beats everything.
+exec ./app$exe --conf app.yaml --port 6060
+stdout 'port=6060'
+
+# Env still loses to argv even with no config file in play.
+exec ./app$exe --port 5050
+stdout 'port=5050'
+
+env APP_SERVER_PORT=
+env APP_REGION=eu-west
+exec ./app$exe
+stdout 'region=eu-west'
+
+# A value that violates a declared constraint is a usage error naming the input, on stderr.
+env APP_SERVER_PORT=
+env APP_REGION=
+! exec ./app$exe --port 99999
+stderr 'port'
+! stdout 'port=99999'
+
+# A flag can name its own environment variable (schema `variable:`) instead of taking the
+# SNAKE_UPPER of a config key it does not otherwise want. The named variable is EXEMPT from
+# env_prefix — it is already exact — so this is GITHUB_TOKEN, not APP_GITHUB_TOKEN.
+env GITHUB_TOKEN=from-the-env
+exec ./app$exe
+stdout 'token=from-the-env'
+
+# The prefixed spelling must NOT bind: an explicitly named variable is exact.
+env GITHUB_TOKEN=
+env APP_GITHUB_TOKEN=wrong
+exec ./app$exe
+stdout 'token= '
+
+# argv still beats it.
+env GITHUB_TOKEN=from-the-env
+exec ./app$exe --token from-argv
+stdout 'token=from-argv'
+
+# A negatable bool expresses the direction a plain bool cannot: turning something OFF for one
+# run when a default or the environment already turned it on. Both forms appear in help as
+# one row.
+env GITHUB_TOKEN=
+exec ./app$exe
+stdout 'color=true'
+
+exec ./app$exe --no-color
+stdout 'color=false'
+
+exec ./app$exe --color
+stdout 'color=true'
+
+# Last one wins, in both directions.
+exec ./app$exe --no-color --color
+stdout 'color=true'
+exec ./app$exe --color --no-color
+stdout 'color=false'
+
+# The negated form carries no value — that would be two answers to one question.
+! exec ./app$exe --no-color=true
+stderr 'negated form'
+
+exec ./app$exe --help
+stdout '--\[no-\]color'
+
+-- app.yaml --
+server:
+  port: 9090
+-- cmd/app/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: app
+  summary: precedence demo
+  description: Proves defaults < file < env < argv.
+  env_prefix: APP
+  config_files:
+    # A declared path that does not exist is simply absent, which is what makes step 1
+    # below a clean "nothing supplied". --conf then points the channel at a real file.
+    - name: appconf
+      path: ./absent.yaml
+  flags:
+    - name: help
+      summary: print help
+      identifiers:
+        - -h
+        - --help
+      schema:
+        type: bool
+    - name: conf
+      summary: path to the config file
+      identifiers:
+        - --conf
+      schema:
+        type: string
+        config_source: appconf
+    - name: color
+      summary: colorize output
+      identifiers:
+        - --color
+      schema:
+        type: bool
+        default: true
+        negatable: true
+    - name: token
+      summary: an API token, read from an exactly-named variable
+      identifiers:
+        - --token
+      schema:
+        type: string
+        secret: true
+        variable: GITHUB_TOKEN
+    - name: port
+      summary: the port to listen on
+      identifiers:
+        - --port
+      schema:
+        type: int
+        key: server.port
+        default: 8080
+        minimum: 1
+        maximum: 65535
+  env:
+    - name: region
+      summary: the deployment region
+      schema:
+        type: string
+        default: default-region
+-- cmd/app/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*appHandlers)(nil)
+
+type appHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[AppInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	if in.App.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, HelpApp)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "port=%d region=%s token=%s color=%v\n",
+		in.App.Flags.Port, in.App.Env.Region, in.App.Flags.Token, in.App.Flags.Color)
+}

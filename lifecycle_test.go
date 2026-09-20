@@ -120,7 +120,8 @@ func TestWithFunnel_categorySwitch(t *testing.T) {
 		rtx.RecordError(InternalError(errors.New("boom")))
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, errs []error, _ []*PanicError) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+		errs := out.Errors
 		switch CategoryOf(errors.Join(errs...)) {
 		case CategoryUsage:
 			rtx.Exit(1)
@@ -277,7 +278,8 @@ func TestPanicError(t *testing.T) {
 		t.Helper()
 		var got error
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, panics []*PanicError) {
+		p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+			panics := out.Panics
 			got = panics[0]
 			rtx.Exit(1)
 		})

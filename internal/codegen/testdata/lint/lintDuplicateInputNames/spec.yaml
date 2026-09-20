@@ -1,0 +1,15 @@
+# One Go field per logical name: a duplicate would emit an uncompilable struct.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: out
+      identifiers:
+        - --out
+      schema:
+        type: string
+    - name: out
+      identifiers:
+        - --output
+      schema:
+        type: string

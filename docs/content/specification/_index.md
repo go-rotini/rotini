@@ -9,7 +9,17 @@ The `.rotini.spec.*` file is your CLI, as data. It is written in **YAML, JSON, J
 Two top-level keys: `version` (checked against the rotini binary running `generate`) and `command` (the root command — the binary itself). Everything else is a command key, because **rotini is commands all the way down**: the root is just the outermost one.
 
 {{< alert type="info" title="EDITOR SUPPORT:" >}}
-Point your editor at the schema and every key is completed and checked as you type. `rotini generate` writes the schema into your project when the conf's `generate.schemas` block asks it to; then add `# yaml-language-server: $schema=./.rotini-schema.spec.json` as the first line of your spec.
+Point your editor at the schema and every key is completed and checked as you type. Either add a `$schema` key to the spec —
+
+```yaml
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json
+```
+
+— or, for an offline or forked setup, have `rotini generate` write the schema into your project with the conf's `generate.schemas` block and point at that copy instead, either with `$schema` or a `# yaml-language-server: $schema=<path>` comment on the first line.
+{{< /alert >}}
+
+{{< alert type="info" title="EVERY KEY:" >}}
+This page is the tour. [**The spec reference**](reference/) is the complete list — every key, every constraint, rendered from the schema itself, so it cannot drift from what `rotini validate` accepts.
 {{< /alert >}}
 
 ## A worked example
@@ -94,7 +104,7 @@ Every way data reaches your CLI is declared. `rotini.Collect[T]` reconciles all 
 `rotini validate` is the gate, and it runs before any code is generated:
 
 - the **JSON Schema** rejects what it can express — unknown keys, wrong types, bad patterns — and your editor shows it inline
-- **29 lint rules** reject what a schema cannot: duplicate flag identifiers across a chain, a `config_source` naming a file that does not exist, a `$ref` cycle, a `count` flag carrying a default, an input whose `type` is not a Go type, a variadic argument that is not last
+- **33 lint rules** reject what a schema cannot: duplicate flag identifiers across a chain, a `config_source` naming a file that does not exist, a `$ref` cycle, a `count` flag carrying a default, an input whose `type` is not a Go type, a variadic argument that is not last
 
 Problems are reported with a `file:line:col` in YAML, JSON and JSONC — and in TOML.
 

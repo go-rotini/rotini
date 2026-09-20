@@ -1,0 +1,207 @@
+# R6 — local composition, two levels deep.
+#
+# Composition is rotini's biggest architectural bet and the thing no competitor offers, and it
+# was the least-covered part of the codebase: composeNestedRef (parent -> child -> grandchild)
+# sat at 0.0%. This script is a three-spec tree assembled by $ref, built, and dispatched to
+# every node — which needs no network, only three files in one module.
+
+gomodinit example.com/compose
+
+# Each composed spec is its own CLI with its own generated package, which is the point: a
+# child is a complete rotini program the parent grafts in.
+exec rotini generate cmd/grand/.rotini.spec.yaml --config cmd/grand/.rotini.conf.yaml
+exec rotini generate cmd/child/.rotini.spec.yaml --config cmd/child/.rotini.conf.yaml
+exec rotini generate cmd/root/.rotini.spec.yaml --config cmd/root/.rotini.conf.yaml
+
+exec go mod tidy
+exec go build -o root$exe ./cmd/root
+
+# The parent's help lists the composed child, using the overlay summary the PARENT declared,
+# not the child's own — the overlay model in one assertion.
+exec ./root$exe --help
+stdout 'child'
+stdout 'as the parent describes it'
+
+# Dispatch reaches every level, and each node runs its OWN handler — the handler that lives
+# in the composed child's package, not one the parent regenerated.
+exec ./root$exe child
+stdout 'child ran'
+
+exec ./root$exe child grand
+stdout 'grand ran'
+
+# The grandchild's own flags parse through two composition boundaries.
+exec ./root$exe child grand --loud
+stdout 'grand ran loudly'
+
+-- internal/cmd/grand/grand.go --
+package grand
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*grandHandlers)(nil)
+
+type grandHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*grandHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[GrandInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	if in.Grand.Flags.Loud {
+		fmt.Fprintln(rtx.Stdout, "grand ran loudly")
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, "grand ran")
+}
+-- internal/cmd/child/child.go --
+package child
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*childHandlers)(nil)
+
+type childHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*childHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "child ran")
+}
+-- internal/cmd/root/root.go --
+package root
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*rootHandlers)(nil)
+
+type rootHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*rootHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[RootInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	if in.Root.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, HelpRoot)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, HelpRoot)
+}
+-- cmd/root/main.go --
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	root "example.com/compose/internal/cmd/root"
+)
+
+func main() {
+	root.Program.
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}
+-- cmd/grand/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: grand
+  summary: the grandchild
+  description: Two levels down.
+  flags:
+    - name: loud
+      summary: be loud
+      identifiers:
+        - --loud
+      schema:
+        type: bool
+-- cmd/grand/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/grand/zz_grand.go
+      package: grand
+  features:
+    - type: help
+      enabled: true
+-- cmd/child/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: child
+  summary: the child, as the child describes itself
+  description: One level down.
+  commands:
+    - $ref: ../grand/.rotini.spec.yaml
+-- cmd/child/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/child/zz_child.go
+      package: child
+  features:
+    - type: help
+      enabled: true
+-- cmd/root/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: root
+  summary: the root
+  description: A tree assembled from three specs.
+  flags:
+    - name: help
+      summary: print help
+      identifiers:
+        - -h
+        - --help
+      schema:
+        type: bool
+  commands:
+    # The overlay: the parent's summary wins over the child's own.
+    - $ref: ../child/.rotini.spec.yaml
+      summary: as the parent describes it
+-- cmd/root/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: main
+      file: cmd/root/main.go
+    - type: cmd
+      file: internal/cmd/root/zz_root.go
+      package: root
+  features:
+    - type: help
+      enabled: true

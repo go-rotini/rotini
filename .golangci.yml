@@ -200,6 +200,12 @@ linters:
         linters:
           - embeddedstructfieldcheck
           - gocheckcompilerdirectives
+      # generate_completion.go is almost entirely SHELL source held in Go string
+      # literals, so Go prose linters read it as prose it is not: fish's block
+      # terminators are a row of "end" lines, not a duplicated word.
+      - path: internal/codegen/generate_completion\.go
+        linters:
+          - dupword
       - path: cmd/
         linters:
           - wrapcheck

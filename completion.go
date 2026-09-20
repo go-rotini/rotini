@@ -489,3 +489,93 @@ func withDescription(name, summary string) string {
 	}
 	return name + "\t" + summary
 }
+
+// completionDirectivePrefix marks the directive line in __complete's output. A candidate could
+// in principle start with a colon, so the marker is a word no plausible value begins with.
+//
+// The protocol is private between a generated script and the binary from the same generate
+// pass, which is what makes it safe to extend (see COMPATIBILITY.md).
+const completionDirectivePrefix = ":rotini:"
+
+// completionHint returns the directive line for the word being completed, or "" when the input
+// declares no hint and the shell should apply its own default.
+//
+//	:rotini:file            complete file paths
+//	:rotini:file yaml yml   complete file paths with these extensions
+//	:rotini:directory       complete directories only
+//	:rotini:none            complete NOTHING — suppress the shell's file fallback
+//
+// It answers the same question complete() does — which input's value is being typed — and is
+// kept separate so the candidate list stays a plain list of strings.
+func completionHint(def Definition, words []string) string {
+	if len(words) == 0 {
+		return ""
+	}
+	partial := words[len(words)-1]
+	context := words[:len(words)-1]
+
+	cc := walkContext(def, context)
+	if cc.remote {
+		return "" // the remote binary owns its own argument surface
+	}
+	cur := cc.chain[len(cc.chain)-1]
+	if cur.Passthrough || cc.afterTerminator {
+		return ""
+	}
+
+	// "--flag <TAB>": the word is the preceding flag's value.
+	if name, ok := pendingValueFlag(context); ok {
+		if fd, _, found := findFlag(cc.chain, name); found && takesValue(fd) {
+			return directiveFor(fd.Complete)
+		}
+		return ""
+	}
+
+	// "--flag=<TAB>": the word carries its own flag.
+	if strings.HasPrefix(partial, "-") {
+		if name, _, hasInline := splitFlag(partial); hasInline {
+			if fd, _, found := findFlag(cc.chain, name); found && takesValue(fd) {
+				return directiveFor(fd.Complete)
+			}
+		}
+		return "" // a flag NAME is being typed; paths are not candidates
+	}
+
+	// Otherwise the word binds to a positional — but only once dispatch can no longer
+	// descend, since before that it may still be a sub-command name.
+	if cc.positionals == 0 && len(dispatchableNames(cur)) > 0 {
+		return ""
+	}
+	if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
+		return directiveFor(ad.Complete)
+	}
+	return ""
+}
+
+// positionalAt returns the argument the next positional binds to, a trailing variadic
+// absorbing everything past the declared end.
+func positionalAt(args []ArgDef, idx int) (ArgDef, bool) {
+	if idx < len(args) {
+		return args[idx], true
+	}
+	if len(args) > 0 && args[len(args)-1].Variadic {
+		return args[len(args)-1], true
+	}
+	return ArgDef{}, false
+}
+
+// directiveFor renders one Completion as its wire line, or "" for the zero value.
+func directiveFor(c Completion) string {
+	switch c.Kind {
+	case "file":
+		if len(c.Extensions) == 0 {
+			return completionDirectivePrefix + "file"
+		}
+		return completionDirectivePrefix + "file " + strings.Join(c.Extensions, " ")
+	case "directory":
+		return completionDirectivePrefix + "directory"
+	case "none":
+		return completionDirectivePrefix + "none"
+	}
+	return ""
+}

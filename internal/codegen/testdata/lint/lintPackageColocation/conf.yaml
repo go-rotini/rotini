@@ -1,0 +1,11 @@
+# Two targets writing one file with different package clauses: the second clobbers
+# the first.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+    - type: models
+      file: internal/cmd/demo/zz_demo.go
+      package: models

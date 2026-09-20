@@ -2,8 +2,10 @@ package rotini
 
 import (
 	"encoding"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"math"
 	"os"
 	"reflect"
@@ -297,7 +299,7 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int, addFlag func(int, FlagDef, string) error) (int, error) {
 	name, inline, hasInline := splitFlag(tok)
 
-	fdef, idx, ok := findFlagIndex(chain, name)
+	fdef, idx, negated, ok := findFlagMatch(chain, name)
 	if !ok {
 		if isShortCluster(name) {
 			return parseCluster(chain, name[1:], inline, hasInline, argv, i, addFlag)
@@ -309,6 +311,19 @@ func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int,
 			Token:      name,
 			Candidates: chainFlagIdentifiers(chain),
 		}
+	}
+
+	// A negated form IS the value: "--no-color" means false, and "--no-color=x" would be
+	// asking two questions at once, so it is rejected rather than guessed at.
+	if negated {
+		if hasInline {
+			return 0, &ParseError{
+				Kind: ParseKindInvalidValue,
+				Msg:  fmt.Sprintf("flag %q is the negated form and takes no value — use %q to set one", name, "--"+fdef.Name),
+				Flag: name,
+			}
+		}
+		return 0, addFlag(idx, fdef, "false")
 	}
 
 	value, next, err := flagTokenValue(fdef, name, inline, hasInline, argv, i)
@@ -511,11 +526,68 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 		switch {
 		case isNumericType(elem):
 			err = checkNumericBounds(label, c, v, secret)
+		case isPathType(elem):
+			// A path is still a string, so its declared length and pattern bounds
+			// apply — `pattern: '\.ya?ml$'` on a config path is a reasonable thing to
+			// want, and skipping them here would silently ignore a declared
+			// constraint, which is the one outcome validation exists to prevent.
+			if err = checkStringBounds(label, c, v, secret); err == nil {
+				err = checkPathExists(label, elem, v)
+			}
 		case elem == "string":
 			err = checkStringBounds(label, c, v, secret)
 		}
 		if err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// isPathType reports whether typ is one of the two filesystem types, whose contract is
+// "this path exists, and is the right kind of thing". The generated field is a plain string;
+// the type name is what tells the parser to check it.
+func isPathType(typ string) bool { return typ == "existingfile" || typ == "existingdir" }
+
+// checkPathExists enforces an existingfile/existingdir type at PARSE time, where the message
+// can name the flag the user typed, rather than three layers into a handler as an *os.PathError
+// naming only a path.
+//
+// It is deliberately only an existence-and-kind check. Expanding "~", cleaning, resolving
+// symlinks and deciding whether a missing file should be created are POLICY, and policy
+// belongs to the handler; whether a path is there is a fact.
+func checkPathExists(label, typ, value string) error {
+	info, err := os.Stat(value)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		noun := "file"
+		if typ == "existingdir" {
+			noun = "directory"
+		}
+		return &ParseError{
+			Kind: ParseKindInvalidValue,
+			Msg:  fmt.Sprintf("%s: no such %s: %q", label, noun, value),
+			Flag: label,
+		}
+	case err != nil:
+		// Non-leaky: a permission or I/O failure names the path and the problem in
+		// rotini's own words, never the raw OS error text.
+		return &ParseError{
+			Kind: ParseKindInvalidValue,
+			Msg:  fmt.Sprintf("%s: cannot read %q", label, value),
+			Flag: label,
+		}
+	case typ == "existingfile" && info.IsDir():
+		return &ParseError{
+			Kind: ParseKindInvalidValue,
+			Msg:  fmt.Sprintf("%s: %q is a directory, not a file", label, value),
+			Flag: label,
+		}
+	case typ == "existingdir" && !info.IsDir():
+		return &ParseError{
+			Kind: ParseKindInvalidValue,
+			Msg:  fmt.Sprintf("%s: %q is not a directory", label, value),
+			Flag: label,
 		}
 	}
 	return nil
@@ -891,14 +963,45 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 // findFlagIndex searches the chain leaf→root for a flag whose identifiers include name,
 // returning its definition and the owning command's chain index.
 func findFlagIndex(chain []ResolvedCommand, name string) (FlagDef, int, bool) {
+	f, i, _, ok := findFlagMatch(chain, name)
+	return f, i, ok
+}
+
+// findFlagMatch is findFlagIndex plus whether name matched a NEGATED form ("--no-color" for a
+// negatable "--color"). A declared identifier always wins over a negated one, so an author who
+// genuinely declares "--no-cache" keeps it.
+func findFlagMatch(chain []ResolvedCommand, name string) (def FlagDef, idx int, negated, ok bool) {
 	for i, v := range slices.Backward(chain) {
 		for _, f := range v.Flags {
 			if slices.Contains(f.Identifiers, name) {
-				return f, i, true
+				return f, i, false, true
 			}
 		}
 	}
-	return FlagDef{}, -1, false
+	for i, v := range slices.Backward(chain) {
+		for _, f := range v.Flags {
+			if f.Negatable && slices.Contains(negatedIdentifiers(f), name) {
+				return f, i, true, true
+			}
+		}
+	}
+	return FlagDef{}, -1, false, false
+}
+
+// negatedIdentifiers returns the "--no-<x>" form of each LONG identifier of a negatable flag.
+// Short identifiers get none: "-no-c" is not a thing, and "-C" would be an invention rotini
+// has no business making on the author's behalf.
+func negatedIdentifiers(f FlagDef) []string {
+	if !f.Negatable {
+		return nil
+	}
+	var out []string
+	for _, id := range f.Identifiers {
+		if name, ok := strings.CutPrefix(id, "--"); ok {
+			out = append(out, "--no-"+name)
+		}
+	}
+	return out
 }
 
 // childCommandNames is the dispatchable vocabulary of a command's visible children, for a
@@ -927,6 +1030,7 @@ func chainFlagIdentifiers(chain []ResolvedCommand) []string {
 		for _, f := range v.Flags {
 			if !f.Hidden {
 				ids = append(ids, f.Identifiers...)
+				ids = append(ids, negatedIdentifiers(f)...)
 			}
 		}
 	}

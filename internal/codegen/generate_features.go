@@ -290,6 +290,8 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			})
 		}
 	}
+	// After the flag rows exist, not before: grouping reads d.Flags.
+	d.FlagGroups = groupFlags(d.Flags)
 	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(remotes) > 0)
 	return d
 }
@@ -349,6 +351,28 @@ func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
 	return groups
 }
 
+// groupFlags buckets flag rows by Group, the same way groupCommands buckets commands:
+// first-appearance order, and an ungrouped bucket with an empty Title that the template heads
+// with its default Flags heading. A command declaring no flag groups therefore renders exactly
+// one bucket — identical output to before the key existed.
+func groupFlags(rows []templateDocFlagRow) []templateDocFlagGroup {
+	if len(rows) == 0 {
+		return nil
+	}
+	idx := map[string]int{}
+	var groups []templateDocFlagGroup
+	for _, r := range rows {
+		i, ok := idx[r.Group]
+		if !ok {
+			i = len(groups)
+			idx[r.Group] = i
+			groups = append(groups, templateDocFlagGroup{Title: r.Group})
+		}
+		groups[i].Flags = append(groups[i].Flags, r)
+	}
+	return groups
+}
+
 // snakeUpper converts a logical name to the conventional SCREAMING_SNAKE_CASE env-var
 // form: word boundaries are '-'/'_'/' ' and lower→upper case transitions.
 func snakeUpper(name string) string {
@@ -373,8 +397,9 @@ func snakeUpper(name string) string {
 // section and the Cascading section it contributes to its descendants).
 func flagRow(f FlagInput) templateDocFlagRow {
 	return templateDocFlagRow{
-		Identifiers: flagIdentifiers(f),
+		Identifiers: displayIdentifiers(f),
 		Summary:     f.Summary,
+		Group:       f.Group,
 		Type:        flagDisplayType(f.Schema),
 		Required:    f.Schema != nil && f.Schema.Required,
 		Default:     schemaDefaultString(f.Schema),
@@ -464,6 +489,26 @@ func enumOf(schema *InputSchema) []string {
 		return nil
 	}
 	return schema.Enum
+}
+
+// displayIdentifiers is how a flag reads in generated help. A negatable flag renders its long
+// forms as "--[no-]color" — one row for the pair, which is what every CLI that has the feature
+// does and what makes the negated form discoverable at all. Short forms are untouched: they
+// have no negated spelling.
+func displayIdentifiers(f FlagInput) []string {
+	ids := flagIdentifiers(f)
+	if f.Schema == nil || !f.Schema.Negatable {
+		return ids
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if name, ok := strings.CutPrefix(id, "--"); ok {
+			out = append(out, "--[no-]"+name)
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
 }
 
 // flagIdentifiers returns a flag's CLI identifiers, deriving "--<name>" when none

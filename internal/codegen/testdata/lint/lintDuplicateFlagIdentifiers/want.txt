@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:5:3: command demo: flag identifier "-o" is declared by both "out" and "owner"

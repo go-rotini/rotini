@@ -1,3 +1,49 @@
 version: {{.Version}}
 command:
   name: {{.Package}}
+  summary: TODO — one line, shown next to this command in a parent's command list
+  description: TODO — the long description at the top of `{{.Package}} --help`
+  footer: Use "{{.Package}} help <command>" for more information about a command.
+  flags:
+    - name: help
+      summary: print help
+      identifiers:
+        - -h
+        - --help
+      schema:
+        type: bool
+    - name: version
+      summary: print version
+      identifiers:
+        - -v
+        - --version
+      schema:
+        type: bool
+  commands:
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema:
+            type: '[]string'
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+    - name: version
+      summary: print version
+      description: Print the {{.Package}} version.
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool

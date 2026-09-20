@@ -27,13 +27,62 @@ type {{.HandlersType}} struct {
 // Collect reconciles every input channel the spec declares for this command into the
 // generated {{.InputsType}}, validated, in the documented precedence. A handler does not print
 // its own errors: it records them, and the runtime reports them once, after teardown.
+//
+// This file was created once and is now yours — rotini never overwrites it. Delete anything
+// below you do not want.
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
+{{- if .NeedsInputs}}
 	inputs, err := rotini.Collect[{{.InputsType}}](rtx)
 	if err != nil {
 		rtx.RecordError(err)
+		rtx.SignalExit(1)
 		return
 	}
+{{- end}}
+{{- if .HelpFlag}}
+
+	// The spec declares a --help flag on this command, and the conf has the help
+	// feature on, so the generated page is in scope.
+	if inputs.{{.Prefix}}.Flags.{{.HelpFlag}} {
+		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+		rtx.SignalExit(0)
+		return
+	}
+{{- end}}
+{{- if .VersionFlag}}
+
+	// rotini.KeyVersion is the conventional registry key for the program's version;
+	// the entrypoint binds it from whatever the binary was built with.
+	if inputs.{{.Prefix}}.Flags.{{.VersionFlag}} {
+		version, _ := rtx.Get[string](rotini.KeyVersion)
+		fmt.Fprintln(rtx.Stdout, version)
+		rtx.SignalExit(0)
+		return
+	}
+{{- end}}
+{{- if .HelpPathArg}}
+
+	// Resolve the generated help page for the requested command path; no path is the
+	// root's own page.
+	page, err := Help(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, page)
+{{- else if .VersionOnly}}
+
+	version, _ := rtx.Get[string](rotini.KeyVersion)
+	fmt.Fprintln(rtx.Stdout, version)
+{{- else if .PrintHelpWhenBare}}
+
+	// Nothing to do yet: show this command's own help rather than an empty run.
+	fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+	rtx.SignalExit(1)
+{{- else}}
 
 	// TODO: replace this with the command's work.
 	fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "{{.Invocation}}", inputs)
+{{- end}}
 }

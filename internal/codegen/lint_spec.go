@@ -63,6 +63,10 @@ var specLints = []func(*Spec) []error{
 	lintPassthrough,
 	lintPatternCompiles,
 	lintSchemaTypes,
+	lintVariable,
+	lintNegatable,
+	lintStdinFormat,
+	lintComplete,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -71,10 +75,10 @@ var specLints = []func(*Spec) []error{
 func lintRootCommand(spec *Spec) []error {
 	var problems []error
 	if spec.Command.Ref != "" {
-		problems = append(problems, &problem{kind: "spec", loc: "(root)", msg: "the root command cannot use $ref — compose child specs as sub-commands instead"})
+		problems = append(problems, &problem{kind: "spec", ptr: rootPointer, loc: "(root)", msg: "the root command cannot use $ref — compose child specs as sub-commands instead"})
 	}
 	if spec.Command.Name == "" {
-		problems = append(problems, &problem{kind: "spec", loc: "(root)", msg: "the root command must have a name (it is the binary name)"})
+		problems = append(problems, &problem{kind: "spec", ptr: rootPointer, loc: "(root)", msg: "the root command must have a name (it is the binary name)"})
 	}
 	return problems
 }
@@ -84,13 +88,13 @@ func lintRootCommand(spec *Spec) []error {
 // deeper would be a silent no-op.
 func lintDocLevelKeys(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c == &spec.Command {
 			return // the root: these keys belong here
 		}
 		add := func(key string) {
 			problems = append(problems, &problem{
-				kind: "spec", loc: "command " + path,
+				kind: "spec", ptr: ptr, loc: "command " + path,
 				msg: fmt.Sprintf("sets %s, a root-command-level key valid only on the root command — remove it (codegen reads it only at the root, so here it is silently ignored)", key),
 			})
 		}
@@ -111,14 +115,19 @@ func lintDocLevelKeys(spec *Spec) []error {
 // declare inputs, output and remotes in the child spec instead.
 func lintRefNodeKeys(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c.Ref == "" {
 			return
 		}
+		// A $ref node with no overlay `name:` has the ref path as its path segment, which
+		// reads as nonsense ("demo/./child.spec.yaml"). Name it for what it is.
 		loc := "command " + path
+		if c.Name == "" {
+			loc = fmt.Sprintf("the $ref node composing %q", c.Ref)
+		}
 		reject := func(key string) {
 			problems = append(problems, &problem{
-				kind: "spec", loc: loc,
+				kind: "spec", ptr: ptr, loc: loc,
 				msg: fmt.Sprintf("sets %q on a $ref node — a composed command delegates to the child's handler (built against the child's own inputs/output), so %q cannot be overlaid here; declare it in the child spec instead", key, key),
 			})
 		}
@@ -170,7 +179,7 @@ func lintHandlerSource(spec *Spec) []error {
 	var problems []error
 	if spec.Command.Handler != nil {
 		problems = append(problems, &problem{
-			kind: "spec", loc: "(root)",
+			kind: "spec", ptr: rootPointer, loc: "(root)",
 			msg: "sets handler: on the root command — handler: passthrough is supported on sub-commands only (a $ref node or an inline command), not the root",
 		})
 	}
@@ -184,13 +193,13 @@ func lintRootAliases(spec *Spec) []error {
 	var problems []error
 	if len(spec.Command.Aliases) > 0 {
 		problems = append(problems, &problem{
-			kind: "spec", loc: "(root)",
+			kind: "spec", ptr: rootPointer, loc: "(root)",
 			msg: "the root command cannot declare aliases — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
 		})
 	}
 	if len(spec.Command.DeprecatedIdentifiers) > 0 {
 		problems = append(problems, &problem{
-			kind: "spec", loc: "(root)",
+			kind: "spec", ptr: rootPointer, loc: "(root)",
 			msg: "the root command cannot declare deprecated_identifiers — with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
 		})
 	}
@@ -202,7 +211,7 @@ func lintRootAliases(spec *Spec) []error {
 // sub-commands first, so a colliding remote would be silently shadowed.
 func lintSiblingCollisions(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		claimedBy := map[string]string{} // token -> the sibling that first claimed it
 		claim := func(owner string, tokens ...string) {
 			for _, tok := range tokens {
@@ -211,9 +220,9 @@ func lintSiblingCollisions(spec *Spec) []error {
 				}
 				if prev, dup := claimedBy[tok]; dup {
 					problems = append(problems, &problem{
-						kind: "spec",
-						loc:  "command " + path,
-						msg:  fmt.Sprintf("dispatch token %q is claimed by both %q and %q", tok, prev, owner),
+						kind: "spec", ptr: ptr,
+						loc: "command " + path,
+						msg: fmt.Sprintf("dispatch token %q is claimed by both %q and %q", tok, prev, owner),
 					})
 					continue
 				}
@@ -241,7 +250,7 @@ func lintSiblingCollisions(spec *Spec) []error {
 // error instead of a gofmt failure at generate time).
 func lintDuplicateInputNames(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c.inputs() == nil {
 			return
 		}
@@ -253,9 +262,9 @@ func lintDuplicateInputNames(spec *Spec) []error {
 			key := channel + "\x00" + name
 			if _, dup := seen[key]; dup {
 				problems = append(problems, &problem{
-					kind: "spec",
-					loc:  "command " + path,
-					msg:  fmt.Sprintf("%s %q is declared twice — each %s needs a unique name", channel, name, channel),
+					kind: "spec", ptr: ptr,
+					loc: "command " + path,
+					msg: fmt.Sprintf("%s %q is declared twice — each %s needs a unique name", channel, name, channel),
 				})
 				return
 			}
@@ -270,7 +279,7 @@ func lintDuplicateInputNames(spec *Spec) []error {
 // anything declared after it could never bind.
 func lintVariadicArguments(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c.inputs() == nil {
 			return
 		}
@@ -280,9 +289,9 @@ func lintVariadicArguments(spec *Spec) []error {
 			}
 			if strings.HasPrefix(getSchemaType(a.Schema), "[]") {
 				problems = append(problems, &problem{
-					kind: "spec",
-					loc:  "command " + path,
-					msg:  fmt.Sprintf("argument %q is variadic but not last — it would absorb every remaining positional, so later arguments could never bind", a.Name),
+					kind: "spec", ptr: ptr,
+					loc: "command " + path,
+					msg: fmt.Sprintf("argument %q is variadic but not last — it would absorb every remaining positional, so later arguments could never bind", a.Name),
 				})
 			}
 		}
@@ -296,7 +305,7 @@ func lintVariadicArguments(spec *Spec) []error {
 // map[string]string has nowhere to hang a subtree.
 func lintDottedKeys(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || !schema.DottedKeys {
 				return
@@ -304,17 +313,17 @@ func lintDottedKeys(spec *Spec) []error {
 			loc := "command " + path
 			if channel != "flag" {
 				problems = append(problems, &problem{
-					kind: "spec",
-					loc:  loc,
-					msg:  fmt.Sprintf("%s %q sets dotted_keys, which applies to flags only", channel, name),
+					kind: "spec", ptr: ptr,
+					loc: loc,
+					msg: fmt.Sprintf("%s %q sets dotted_keys, which applies to flags only", channel, name),
 				})
 				return
 			}
 			if t := getSchemaType(schema); t != "map[string]any" {
 				problems = append(problems, &problem{
-					kind: "spec",
-					loc:  loc,
-					msg:  fmt.Sprintf("flag %q sets dotted_keys but its type is %s — dotted keys need 'map' (map[string]any) to nest into", name, t),
+					kind: "spec", ptr: ptr,
+					loc: loc,
+					msg: fmt.Sprintf("flag %q sets dotted_keys but its type is %s — dotted keys need 'map' (map[string]any) to nest into", name, t),
 				})
 			}
 		})
@@ -328,25 +337,35 @@ func lintDottedKeys(spec *Spec) []error {
 // uniqueness is chain-scoped and lives in lintConfigFilesScope.
 func lintConfigurationFiles(spec *Spec) []error {
 	var problems []error
-	add := func(name, msg string) {
-		problems = append(problems, &problem{kind: "spec", loc: "config_files " + name, msg: msg})
-	}
-	for _, cf := range allConfigFiles(spec) {
-		switch {
-		case cf.Path == "" && cf.Discover == nil:
-			add(cf.Name, "needs a location — set 'path' or 'discover'")
-		case cf.Path != "" && cf.Discover != nil:
-			add(cf.Name, "sets both 'path' and 'discover' — exactly one locates the file")
+	// Walked per command rather than over the flattened allConfigFiles, so each entry
+	// carries the pointer that places the message on the line the author wrote.
+	walkCommandsAt(spec, func(c *Command, _, ptr string) {
+		if c.inputs() == nil {
+			return
 		}
-		if d := cf.Discover; d != nil {
-			if d.Strategy == "xdg" && d.App == "" {
-				add(cf.Name, "discover strategy 'xdg' needs 'app' (the directory under the XDG config root)")
+		for i, cf := range c.inputs().ConfigFiles {
+			at := fmt.Sprintf("%s/config_files/%d", ptr, i)
+			add := func(msg string) {
+				problems = append(problems, &problem{
+					kind: "spec", ptr: at, loc: "config_files " + cf.Name, msg: msg,
+				})
 			}
-			if d.Strategy == "walk-up" && d.App != "" {
-				add(cf.Name, "discover strategy 'walk-up' does not use 'app' — remove it (it would be silently ignored)")
+			switch {
+			case cf.Path == "" && cf.Discover == nil:
+				add("needs a location — set 'path' or 'discover'")
+			case cf.Path != "" && cf.Discover != nil:
+				add("sets both 'path' and 'discover' — exactly one locates the file")
+			}
+			if d := cf.Discover; d != nil {
+				if d.Strategy == "xdg" && d.App == "" {
+					add("discover strategy 'xdg' needs 'app' (the directory under the XDG config root)")
+				}
+				if d.Strategy == "walk-up" && d.App != "" {
+					add("discover strategy 'walk-up' does not use 'app' — remove it (it would be silently ignored)")
+				}
 			}
 		}
-	}
+	})
 	return problems
 }
 
@@ -356,7 +375,7 @@ func lintConfigurationFiles(spec *Spec) []error {
 // seed defaults in code or config instead).
 func lintEnvNesting(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		loc := "command " + path
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.Nesting == "" {
@@ -364,20 +383,20 @@ func lintEnvNesting(spec *Spec) []error {
 			}
 			if channel != "env" {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("%s %q sets nesting, which applies to env inputs only", channel, name),
 				})
 				return
 			}
 			if t := getSchemaType(schema); t != "map[string]any" {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("env %q sets nesting but its type is %s — a variable family needs 'map' (map[string]any) to nest into", name, t),
 				})
 			}
 			if schema.Default != nil {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("env %q sets both nesting and default — a nested family has no single default; seed defaults in code or config instead", name),
 				})
 			}
@@ -423,7 +442,7 @@ func ancestorConfigIndex(ancestors []*Command) (names, locs map[string]string) {
 
 func lintConfigFilesScope(spec *Spec) []error {
 	var problems []error
-	walkChains(spec, func(chain []*Command, path string) {
+	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
 		cmd := chain[len(chain)-1]
 		if cmd.inputs() == nil {
 			return
@@ -436,12 +455,12 @@ func lintConfigFilesScope(spec *Spec) []error {
 			switch {
 			case ownName[cf.Name]:
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("config_files %q is declared twice — logical names identify entries (file: pins, config_source) and must be unique", cf.Name),
 				})
 			case ancestorName[cf.Name] != "":
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("config_files %q shadows the entry declared on ancestor %s — names cascade and must be unique along the chain (a file: pin or config_source would be ambiguous); rename one", cf.Name, ancestorName[cf.Name]),
 				})
 			}
@@ -454,12 +473,12 @@ func lintConfigFilesScope(spec *Spec) []error {
 			switch {
 			case ownLoc[key] != "":
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc, sev: severityWarning,
+					kind: "spec", ptr: ptr, loc: loc, sev: severityWarning,
 					msg: fmt.Sprintf("config_files %q and %q resolve to the same file — the later shadows the earlier (nearest-wins); declare it once", ownLoc[key], cf.Name),
 				})
 			case ancestorLoc[key] != "":
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc, sev: severityWarning,
+					kind: "spec", ptr: ptr, loc: loc, sev: severityWarning,
 					msg: fmt.Sprintf("config_files %q resolves to the same file as %s — the nearer shadows it (nearest-wins); declare it once", cf.Name, ancestorLoc[key]),
 				})
 			}
@@ -491,7 +510,7 @@ func configFileLocationKey(cf ConfigurationFile) string {
 // independent, so claims are gathered per chain.
 func lintConfigSource(spec *Spec) []error {
 	var problems []error
-	walkChains(spec, func(chain []*Command, path string) {
+	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
 		cmd := chain[len(chain)-1]
 		declared := chainConfigNames(chain)
 		loc := "command " + path
@@ -519,21 +538,21 @@ func lintConfigSource(spec *Spec) []error {
 			target := schema.ConfigSource
 			if channel != "flag" && channel != "env" {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("%s %q sets config_source, which applies to flag and env inputs only", channel, name),
 				})
 				return
 			}
 			if !declared[target] {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("%s %q names config_source %q, which is not a config_files entry in scope (declared on this command or an ancestor)", channel, name, target),
 				})
 				return
 			}
 			if t := getSchemaType(schema); t != "string" {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("%s %q sets config_source but its type is %s — a file path is a string", channel, name, t),
 				})
 			}
@@ -542,7 +561,7 @@ func lintConfigSource(spec *Spec) []error {
 			}
 			if prev, dup := claims[target][channel]; dup {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("%s %q claims config_source %q, already claimed by %s %q — one %s per entry", channel, name, target, channel, prev, channel),
 				})
 				return
@@ -570,7 +589,7 @@ var constraintNumericFamily = map[string]bool{
 // JSON Schema semantics, where every keyword is real.
 func lintConstraintApplicability(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		loc := "command " + path
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if channel == "stdin" || schema == nil {
@@ -579,7 +598,7 @@ func lintConstraintApplicability(spec *Spec) []error {
 			typ := getSchemaType(schema)
 			elem := strings.TrimPrefix(typ, "[]")
 			add := func(msg string) {
-				problems = append(problems, &problem{kind: "spec", loc: loc,
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
 			}
 			numericBounds := schema.Minimum != nil || schema.Maximum != nil ||
@@ -592,7 +611,7 @@ func lintConstraintApplicability(spec *Spec) []error {
 				}
 				add(fmt.Sprintf("minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf apply to numeric types only, not %s — the bound would be silently ignored%s", typ, hint))
 			}
-			if (schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "") && elem != "string" {
+			if (schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "") && !stringValued(elem) {
 				add(fmt.Sprintf("minLength/maxLength/pattern apply to string types only, not %s — the constraint would be silently ignored", typ))
 			}
 			if (schema.MinItems != 0 || schema.MaxItems != 0) &&
@@ -604,18 +623,26 @@ func lintConstraintApplicability(spec *Spec) []error {
 	return problems
 }
 
+// stringValued reports whether a declared type's VALUE is a string, and so carries string
+// bounds. That is "string" itself plus the path types, whose generated field is a plain
+// string — a `pattern: '\.ya?ml$'` on a config path is a reasonable thing to want, and the
+// parser enforces it alongside the existence check.
+func stringValued(elem string) bool {
+	return elem == "string" || elem == "existingfile" || elem == "existingdir"
+}
+
 // lintPassthrough enforces `passthrough: true`'s contract: every token after the command is a
 // raw positional, so the command can own no flag vocabulary and no descent surface, and its
 // last argument must be a variadic []string to receive the raw tokens. Without that receiver
 // every forwarded token would be a parse error.
 func lintPassthrough(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if !c.Passthrough {
 			return
 		}
 		add := func(msg string) {
-			problems = append(problems, &problem{kind: "spec", loc: "command " + path,
+			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
 				msg: "passthrough: " + msg})
 		}
 		if c.inputs() != nil && len(c.inputs().Flags) > 0 {
@@ -644,13 +671,13 @@ func lintPassthrough(spec *Spec) []error {
 // acquire from elsewhere.
 func lintCountFlags(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.Type != "count" {
 				return
 			}
 			add := func(msg string) {
-				problems = append(problems, &problem{kind: "spec", loc: "command " + path,
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
 					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
 			}
 			if channel != "flag" {
@@ -684,7 +711,159 @@ func lintCountFlags(spec *Spec) []error {
 			}
 			if len(bad) > 0 {
 				sort.Strings(bad)
-				add(fmt.Sprintf("a count flag has no value to resolve — %s do(es) not apply (the int field is the occurrence tally)", strings.Join(bad, ", ")))
+				add(fmt.Sprintf("a count flag has no value to resolve, so %s cannot apply — remove them (the generated int field is the occurrence tally)", strings.Join(bad, ", ")))
+			}
+		})
+	})
+	return problems
+}
+
+// lintVariable enforces variable:'s channel scope. It names the exact environment variable an
+// input reads, so it applies to the two channels that HAVE an environment: env inputs, and
+// flags (whose env fallback it pins). On an argument, a config input or stdin there is no
+// environment to name, and the key would be silently ignored — which is the one thing
+// validation exists to prevent.
+//
+// It was documented as env-only and enforced nowhere, so until now it was accepted and
+// ignored on every other channel.
+func lintVariable(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Variable == "" {
+				return
+			}
+			if channel == "env" || channel == "flag" {
+				return
+			}
+			problems = append(problems, &problem{
+				kind: "spec", ptr: ptr, loc: "command " + path,
+				msg: fmt.Sprintf("%s %q sets variable, which names an environment variable — only env inputs and flags (as a flag's env fallback) read one, so here it would be silently ignored", channel, name),
+			})
+		})
+	})
+	return problems
+}
+
+// lintNegatable enforces negatable:'s contract. The negated form sets the flag FALSE, so the
+// flag has to be a bool with something to set: not a count (which has no value), not any other
+// type, and not on a channel with no command line. It also needs a long identifier to derive
+// "--no-<x>" from — a flag with only a short one would declare a negated form that does not
+// exist.
+func lintNegatable(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		for _, f := range c.Flags {
+			if f.Schema == nil || !f.Schema.Negatable {
+				continue
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("flag %q: %s", f.Name, msg)})
+			}
+			if t := f.Schema.Type; t != "bool" && t != "boolean" {
+				add(fmt.Sprintf("sets negatable but its type is %s — the negated form sets a bool false, so it applies to bool flags only", displayType(t)))
+				continue
+			}
+			if !slices.ContainsFunc(flagIdentifiers(f), func(id string) bool { return strings.HasPrefix(id, "--") }) {
+				add("sets negatable but declares no long identifier — the negated form is derived as \"--no-<name>\", so there is nothing to derive it from")
+			}
+		}
+		// A negated form must not collide with a real identifier on the same command, or
+		// one of the two would silently never match.
+		declared := map[string]string{}
+		for _, f := range c.Flags {
+			for _, id := range flagIdentifiers(f) {
+				declared[id] = f.Name
+			}
+		}
+		for _, f := range c.Flags {
+			if f.Schema == nil || !f.Schema.Negatable {
+				continue
+			}
+			for _, id := range flagIdentifiers(f) {
+				if !strings.HasPrefix(id, "--") {
+					continue
+				}
+				neg := "--no-" + strings.TrimPrefix(id, "--")
+				if owner, clash := declared[neg]; clash {
+					problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+						msg: fmt.Sprintf("flag %q is negatable, deriving %q, which flag %q already declares — one of the two would never match", f.Name, neg, owner)})
+				}
+			}
+		}
+	})
+	return problems
+}
+
+// displayType renders a declared type for a message, naming an omitted one rather than
+// printing an empty string the reader has to interpret.
+func displayType(t string) string {
+	if t == "" {
+		return "unset (string by default)"
+	}
+	return t
+}
+
+// lintStdinFormat enforces the raw stdin formats' contract. 'text' binds the whole payload as
+// one string and 'lines' binds it as []string, so the declared schema type has to be the type
+// the payload actually becomes — otherwise codegen would emit a field the binder cannot fill,
+// and the mismatch would surface at run time as a wiring error instead of here.
+//
+// The four document formats are unconstrained: their payload decodes into the generated
+// <Prefix>Stdin struct, whose shape IS the schema.
+func lintStdinFormat(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		if c.Stdin == nil || c.Stdin.Schema == nil || !rawStdinFormat(c.Stdin.Format) {
+			return
+		}
+		typ := getSchemaType(c.Stdin.Schema)
+		add := func(want string) {
+			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+				msg: fmt.Sprintf("stdin format %q binds the payload as %s, but the schema declares %s — declare %s, or use a document format (json/yaml/jsonc/toml) to decode into a typed payload instead",
+					c.Stdin.Format, want, displayType(typ), want)})
+		}
+		switch c.Stdin.Format {
+		case "text":
+			if typ != "string" {
+				add("string")
+			}
+		case "lines":
+			if typ != "[]string" && typ != "array" {
+				add("[]string")
+			}
+		}
+	})
+	return problems
+}
+
+// lintComplete enforces the completion hint's scope. It describes what a value typed on the
+// COMMAND LINE is, so it belongs to flags and arguments; on env, config or stdin there is no
+// shell doing the typing and the key would be silently ignored. `extensions` narrows files,
+// so it is meaningless on the other kinds. A flag that takes no value (bool, count) has no
+// value to complete at all.
+func lintComplete(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Complete == nil || schema.Complete.Kind == "" {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
+			}
+			if channel != "flag" && channel != "argument" {
+				add("sets complete, which describes a value typed on the command line — only flags and arguments are, so here it would be silently ignored")
+				return
+			}
+			if t := getSchemaType(schema); channel == "flag" && (t == "bool" || t == "boolean" || t == "count") {
+				add(fmt.Sprintf("sets complete but its type is %s, which takes no value — there is nothing to complete", t))
+				return
+			}
+			if len(schema.Complete.Extensions) > 0 && schema.Complete.Kind != "file" {
+				add(fmt.Sprintf("sets complete.extensions with kind %q — extensions narrow files, so they apply to kind \"file\" only", schema.Complete.Kind))
 			}
 		})
 	})
@@ -697,14 +876,14 @@ func lintCountFlags(spec *Spec) []error {
 // exempt: those fail loudly at bind time.
 func lintPatternCompiles(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if channel == "stdin" || schema == nil || schema.Pattern == "" {
 				return
 			}
 			if _, err := regexp.Compile(schema.Pattern); err != nil {
 				problems = append(problems, &problem{
-					kind: "spec", loc: "command " + path,
+					kind: "spec", ptr: ptr, loc: "command " + path,
 					msg: fmt.Sprintf("%s %q: pattern %q does not compile (%v) — it would silently never enforce", channel, name, schema.Pattern, err),
 				})
 			}
@@ -719,7 +898,7 @@ func lintPatternCompiles(spec *Spec) []error {
 // ONLY (not the merged precedence chain), including its required.
 func lintConfigInputFiles(spec *Spec) []error {
 	var problems []error
-	walkChains(spec, func(chain []*Command, path string) {
+	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
 		cmd := chain[len(chain)-1]
 		declared := chainConfigNames(chain)
 		loc := "command " + path
@@ -729,14 +908,14 @@ func lintConfigInputFiles(spec *Spec) []error {
 			}
 			if channel != "config" {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("%s %q sets file:, which applies to config inputs only", channel, name),
 				})
 				return
 			}
 			if !declared[schema.File] {
 				problems = append(problems, &problem{
-					kind: "spec", loc: loc,
+					kind: "spec", ptr: ptr, loc: loc,
 					msg: fmt.Sprintf("config %q pins file %q, which is not a config_files entry in scope (declared on this command or an ancestor)", name, schema.File),
 				})
 			}
@@ -751,7 +930,7 @@ func lintConfigInputFiles(spec *Spec) []error {
 // stdin: channel or another from:stdin flag on the same command.
 func lintFrom(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		loc := "command " + path
 		stdinClaim := "" // what already claimed this command's stdin
 		if c.inputs() != nil && c.inputs().Stdin != nil {
@@ -763,25 +942,25 @@ func lintFrom(spec *Spec) []error {
 			}
 			if channel != "flag" {
 				problems = append(problems, &problem{
-					kind: "spec",
-					loc:  loc,
-					msg:  fmt.Sprintf("%s %q sets from:, which applies to flags only", channel, name),
+					kind: "spec", ptr: ptr,
+					loc: loc,
+					msg: fmt.Sprintf("%s %q sets from:, which applies to flags only", channel, name),
 				})
 				return
 			}
 			if t := getSchemaType(schema); t == "bool" {
 				problems = append(problems, &problem{
-					kind: "spec",
-					loc:  loc,
-					msg:  fmt.Sprintf("flag %q sets from: but is bool — a bool takes no value to resolve", name),
+					kind: "spec", ptr: ptr,
+					loc: loc,
+					msg: fmt.Sprintf("flag %q sets from: but is bool — a bool takes no value to resolve", name),
 				})
 			}
 			if slices.Contains(schema.From, "stdin") {
 				if stdinClaim != "" {
 					problems = append(problems, &problem{
-						kind: "spec",
-						loc:  loc,
-						msg:  fmt.Sprintf("flag %q declares from: stdin but %s already consumes stdin — stdin has one consumer", name, stdinClaim),
+						kind: "spec", ptr: ptr,
+						loc: loc,
+						msg: fmt.Sprintf("flag %q declares from: stdin but %s already consumes stdin — stdin has one consumer", name, stdinClaim),
 					})
 					return
 				}
@@ -798,7 +977,7 @@ func lintFrom(spec *Spec) []error {
 // reported as deprecated, silently voiding the annotation.
 func lintDeprecatedIdentifiers(spec *Spec) []error {
 	var problems []error
-	subset := func(path, owner string, declared, deprecated []string, vocab string) {
+	subset := func(path, ptr, owner string, declared, deprecated []string, vocab string) {
 		known := map[string]bool{}
 		for _, d := range declared {
 			known[d] = true
@@ -806,15 +985,15 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 		for _, d := range deprecated {
 			if !known[d] {
 				msg := fmt.Sprintf("%s deprecated_identifiers entry %q is not one of its %s — it could never be reported as deprecated", owner, d, vocab)
-				problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: didYouMean(msg, d, declared)})
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path, msg: didYouMean(msg, d, declared)})
 			}
 		}
 	}
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		for i := range c.Commands {
 			child := &c.Commands[i]
 			if len(child.DeprecatedIdentifiers) > 0 {
-				subset(path, fmt.Sprintf("sub-command %q", child.Name), child.Aliases, child.DeprecatedIdentifiers, "aliases")
+				subset(path, ptr, fmt.Sprintf("sub-command %q", child.Name), child.Aliases, child.DeprecatedIdentifiers, "aliases")
 			}
 		}
 		if c.inputs() == nil {
@@ -822,7 +1001,7 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 		}
 		for _, f := range c.inputs().Flags {
 			if len(f.DeprecatedIdentifiers) > 0 {
-				subset(path, fmt.Sprintf("flag %q", f.Name), flagIdentifiers(f), f.DeprecatedIdentifiers, "identifiers")
+				subset(path, ptr, fmt.Sprintf("flag %q", f.Name), flagIdentifiers(f), f.DeprecatedIdentifiers, "identifiers")
 			}
 		}
 	})
@@ -834,16 +1013,16 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 // unbounded despite the declared limit.
 func lintRemoteTimeouts(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		for _, r := range c.RemoteCommands {
 			if r.Timeout == "" {
 				continue
 			}
 			if d, err := time.ParseDuration(r.Timeout); err != nil || d <= 0 {
 				problems = append(problems, &problem{
-					kind: "spec",
-					loc:  "command " + path,
-					msg:  fmt.Sprintf("remote_commands %q timeout %q is not a positive Go duration (e.g. \"10s\", \"1m30s\")", r.Name, r.Timeout),
+					kind: "spec", ptr: ptr,
+					loc: "command " + path,
+					msg: fmt.Sprintf("remote_commands %q timeout %q is not a positive Go duration (e.g. \"10s\", \"1m30s\")", r.Name, r.Timeout),
 				})
 			}
 		}
@@ -867,7 +1046,7 @@ func lintImportConsistency(spec *Spec) []error {
 		}
 		byType[typ][imp] = true
 	}
-	walkCommands(spec, func(c *Command, _ string) {
+	walkCommandsAt(spec, func(c *Command, _, ptr string) {
 		eachInputSchema(c.inputs(), func(_, _ string, s *InputSchema) {
 			if s != nil {
 				walkSchemaImports(s.BaseSchema, record)
@@ -893,6 +1072,8 @@ func lintImportConsistency(spec *Spec) []error {
 		}
 		sort.Strings(list)
 		problems = append(problems, &problem{
+			// No ptr: the problem is about a type declared in two or more places, so
+			// there is no single node to point at. The message names both imports.
 			kind: "spec",
 			loc:  "type " + typ,
 			msg:  "declared with conflicting imports (" + strings.Join(list, ", ") + "); a type must have one backing package",
@@ -907,12 +1088,12 @@ func lintImportConsistency(spec *Spec) []error {
 // remote_commands timeout is a separate field and is left untouched.
 func lintLocalTimeout(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if strings.TrimSpace(c.Timeout) != "" {
 			problems = append(problems, &problem{
-				kind: "spec",
-				loc:  "command " + path,
-				msg:  "timeout is not supported on a local command — it is a remote-only, host-side bound with no effect here; set it on a remote_commands entry's timeout instead",
+				kind: "spec", ptr: ptr,
+				loc: "command " + path,
+				msg: "timeout is not supported on a local command — it is a remote-only, host-side bound with no effect here; set it on a remote_commands entry's timeout instead",
 			})
 		}
 	})
@@ -924,7 +1105,7 @@ func lintLocalTimeout(spec *Spec) []error {
 // at runtime). One problem per bad reference, in tree order.
 func lintFlagGroups(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c.inputs() == nil || len(c.inputs().FlagGroups) == 0 {
 			return
 		}
@@ -933,7 +1114,7 @@ func lintFlagGroups(spec *Spec) []error {
 			for _, name := range g.Flags {
 				if !known[name] {
 					msg := fmt.Sprintf("flag_groups (%s) references unknown flag %q — it has no matching entry in this command's flags", g.Kind, name)
-					problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: didYouMean(msg, name, ordered)})
+					problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 				}
 			}
 		}
@@ -946,14 +1127,14 @@ func lintFlagGroups(spec *Spec) []error {
 // could never be satisfied), masking a typo.
 func lintFlagDependencies(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c.inputs() == nil || len(c.inputs().FlagDependencies) == 0 {
 			return
 		}
 		known, ordered := flagNames(c)
 		report := func(name string) {
 			msg := fmt.Sprintf("flag_dependencies references unknown flag %q — it has no matching entry in this command's flags", name)
-			problems = append(problems, &problem{kind: "spec", loc: "command " + path, msg: didYouMean(msg, name, ordered)})
+			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 		}
 		for _, dep := range c.inputs().FlagDependencies {
 			if !known[dep.When] {
@@ -975,7 +1156,7 @@ func lintFlagDependencies(spec *Spec) []error {
 // collisions are caught.
 func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		if c.inputs() == nil {
 			return
 		}
@@ -988,9 +1169,9 @@ func lintDuplicateFlagIdentifiers(spec *Spec) []error {
 			for _, id := range flagIdentifiers(f) {
 				if prev, dup := claimedBy[id]; dup {
 					problems = append(problems, &problem{
-						kind: "spec",
-						loc:  "command " + path,
-						msg:  fmt.Sprintf("flag identifier %q is declared by both %q and %q", id, prev, f.Name),
+						kind: "spec", ptr: ptr,
+						loc: "command " + path,
+						msg: fmt.Sprintf("flag identifier %q is declared by both %q and %q", id, prev, f.Name),
 					})
 					continue
 				}
@@ -1014,7 +1195,7 @@ func lintSchemaRefs(spec *Spec) []error {
 	}
 	var problems []error
 	reported := map[string]bool{}
-	checkAt := func(loc string) func(BaseSchema) {
+	checkAt := func(loc, at string) func(BaseSchema) {
 		return func(b BaseSchema) {
 			name := refTypeName(b.Ref)
 			if name == "" || declared[name] {
@@ -1026,10 +1207,10 @@ func lintSchemaRefs(spec *Spec) []error {
 			}
 			reported[key] = true
 			msg := fmt.Sprintf("$ref %q points to an undeclared schema (no %q under the document-level \"schemas\")", b.Ref, name)
-			problems = append(problems, &problem{kind: "spec", loc: loc, msg: didYouMean(msg, name, names)})
+			problems = append(problems, &problem{kind: "spec", ptr: at, loc: loc, msg: didYouMean(msg, name, names)})
 		}
 	}
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, s *InputSchema) {
 			if s == nil {
 				return
@@ -1038,15 +1219,15 @@ func lintSchemaRefs(spec *Spec) []error {
 			if name != "" {
 				loc += " " + name
 			}
-			walkSchemaRefs(s.BaseSchema, checkAt(loc))
+			walkSchemaRefs(s.BaseSchema, checkAt(loc, ptr))
 		})
 		if c.Output != nil {
-			walkSchemaRefs(c.Output.BaseSchema, checkAt("command "+path+" output"))
+			walkSchemaRefs(c.Output.BaseSchema, checkAt("command "+path+" output", ptr))
 		}
 	})
 	for name := range spec.Command.Schemas {
 		s := spec.Command.Schemas[name]
-		walkSchemaRefs(s.BaseSchema, checkAt("schema "+name))
+		walkSchemaRefs(s.BaseSchema, checkAt("schema "+name, rootPointer+"/schemas/"+name))
 	}
 	return problems
 }
@@ -1060,21 +1241,21 @@ func lintHandlerFilenames(spec *Spec) []error {
 	rootName := spec.Command.Name
 	var problems []error
 	byFile := map[string]string{} // stub file name -> the command path that first produced it
-	var walk func(c *Command, path, display string)
-	walk = func(c *Command, path, display string) {
+	var walk func(c *Command, path, display, ptr string)
+	walk = func(c *Command, path, display, ptr string) {
 		if ov := c.Filename; ov != "" {
 			switch {
 			case strings.ContainsAny(ov, `/\`):
-				problems = append(problems, &problem{kind: "spec", loc: "command " + display, msg: fmt.Sprintf("filename %q must be a bare file name with no directory", ov)})
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + display, msg: fmt.Sprintf("filename %q must be a bare file name with no directory", ov)})
 			case !strings.HasSuffix(ov, ".go"):
-				problems = append(problems, &problem{kind: "spec", loc: "command " + display, msg: fmt.Sprintf("filename %q must end in \".go\"", ov)})
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + display, msg: fmt.Sprintf("filename %q must end in \".go\"", ov)})
 			case reservedTrailingToken(strings.TrimSuffix(ov, ".go")):
-				problems = append(problems, &problem{kind: "spec", loc: "command " + display, msg: fmt.Sprintf("filename %q would be read specially by the go tool (a _test.go test file, or a GOOS/GOARCH build constraint) — choose another name", ov)})
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + display, msg: fmt.Sprintf("filename %q would be read specially by the go tool (a _test.go test file, or a GOOS/GOARCH build constraint) — choose another name", ov)})
 			}
 		}
 		fn := commandStubFilename(rootName, path, c.Filename)
 		if prev, dup := byFile[fn]; dup {
-			problems = append(problems, &problem{kind: "spec", loc: "command " + display, msg: fmt.Sprintf("generates handler file %q, already used by command %q", fn, prev)})
+			problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + display, msg: fmt.Sprintf("generates handler file %q, already used by command %q", fn, prev)})
 		} else {
 			byFile[fn] = display
 		}
@@ -1087,14 +1268,14 @@ func lintHandlerFilenames(spec *Spec) []error {
 			if path != "" {
 				childPath = path + "_" + child.Name
 			}
-			walk(child, childPath, display+"/"+child.Name)
+			walk(child, childPath, display+"/"+child.Name, fmt.Sprintf("%s/commands/%d", ptr, i))
 		}
 	}
 	display := rootName
 	if display == "" {
 		display = "(root)"
 	}
-	walk(&spec.Command, "", display)
+	walk(&spec.Command, "", display, rootPointer)
 	return problems
 }
 
@@ -1108,13 +1289,13 @@ func lintHandlerFilenames(spec *Spec) []error {
 // what could not compile.
 func lintSchemaTypes(spec *Spec) []error {
 	var problems []error
-	walkCommands(spec, func(c *Command, path string) {
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
 			if schema == nil || schema.Type == "" {
 				return
 			}
 			add := func(msg string) {
-				problems = append(problems, &problem{kind: "spec", loc: "command " + path,
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
 					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
 			}
 			resolved := jsonSchemaTypeToGo(schema.Type)

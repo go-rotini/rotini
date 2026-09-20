@@ -35,19 +35,30 @@ func flagFields(in *Inputs) []fieldDef {
 	for _, f := range in.Flags {
 		fields = append(fields, fieldDef{
 			Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name,
-			Import: fieldImport(f.Schema), Recon: flagReconKey(f.Schema),
+			Import: fieldImport(f.Schema), Recon: flagReconKey(f.Name, f.Schema),
+			EnvVar:  envVarOf(f.Schema),
 			Comment: contractComment(f.Schema),
 		})
 	}
 	return fields
 }
 
-// flagReconKey is a flag's reconciliation key — its config key (schema.key) — when
-// the flag declares a config fallback, else "" (an argv-only flag, no recon tag).
-// The binder reconciles such a flag argv > env (SNAKE_UPPER of the key) > config > default.
-func flagReconKey(schema *InputSchema) string {
-	if schema != nil && schema.Key != "" {
+// flagReconKey is a flag's reconciliation key, which is what opts it into the fallback chain
+// (argv > env > config > default). An argv-only flag has none and gets no recon tag.
+//
+// `key:` names it outright. `variable:` alone also opts in, keyed by the flag's own name —
+// the same default a config input uses — with the env variable pinned to the declared name
+// rather than derived. That is what lets --token read GITHUB_TOKEN without inventing a config
+// key called github.token, which was the only way to spell it before.
+func flagReconKey(name string, schema *InputSchema) string {
+	if schema == nil {
+		return ""
+	}
+	if schema.Key != "" {
 		return schema.Key
+	}
+	if schema.Variable != "" {
+		return name
 	}
 	return ""
 }
@@ -196,14 +207,28 @@ func reconTag(key string, schema *InputSchema) string {
 	return strings.Join(parts, ",")
 }
 
-// stdinTypeExpr returns the Go type for a command's Stdin field — "*<Prefix>Stdin"
-// when the command declares a typed stdin payload, else "" (no Stdin field).
+// stdinTypeExpr returns the Go type for a command's Stdin field: "*<Prefix>Stdin" for a
+// document payload, and the pointed-to scalar for a RAW one — "*string" for text, "*[]string"
+// for lines. "" when the command declares no stdin.
+//
+// A pointer either way, so "nothing was piped" stays distinguishable from "an empty payload
+// was piped", which for a filter is a real difference.
 func stdinTypeExpr(prefix string, in *Inputs) string {
 	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
 		return ""
 	}
+	switch in.Stdin.Format {
+	case "text":
+		return "*string"
+	case "lines":
+		return "*[]string"
+	}
 	return "*" + prefix + "Stdin"
 }
+
+// rawStdinFormat reports whether a stdin format binds the payload directly rather than
+// decoding it into a generated struct.
+func rawStdinFormat(format string) bool { return format == "text" || format == "lines" }
 
 // stdinFormatExpr returns the value of a command's `stdin:"<format>[,required]"`
 // struct tag: the decode format (defaulting to json), with ",required" appended
@@ -273,6 +298,8 @@ func jsonSchemaTypeToGo(t string) string {
 		return "map[string]any"
 	case "count":
 		return "int" // presence counter: the field tallies occurrences (-vvv → 3)
+	case "existingfile", "existingdir":
+		return "string" // the VALUE is a path; the type name is what makes the parser check it
 	case "duration":
 		return "time.Duration"
 	case "time", "datetime", "date":

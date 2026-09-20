@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -12,8 +13,8 @@ import (
 // TestLintRegistryCompleteness guards the lint_spec.go / lint_conf.go split: if a rule
 // is accidentally dropped while relocating funcs, the count regresses.
 func TestLintRegistryCompleteness(t *testing.T) {
-	if got := len(specLints); got != 29 {
-		t.Errorf("len(specLints) = %d, want 29 (a rule was dropped or added — update intentionally)", got)
+	if got := len(specLints); got != 33 {
+		t.Errorf("len(specLints) = %d, want 33 (a rule was dropped or added — update intentionally)", got)
 	}
 	if got := len(confLints); got != 6 {
 		t.Errorf("len(confLints) = %d, want 6", got)
@@ -131,6 +132,45 @@ func TestLintSchemaTypes_qualifiedNeedsImport(t *testing.T) {
 	for _, alias := range []string{"duration", "time", "date", "datetime"} {
 		if problems := lintSchemaTypes(specWithFlagType(alias, "")); len(problems) != 0 {
 			t.Errorf("alias %q wrongly demanded an import: %v", alias, problems)
+		}
+	}
+}
+
+// TestDocumentedLintCountsMatchTheRegistry keeps the numbers in the prose true.
+//
+// "29 lint rules" was written into README.md, the CLI docs page and the specification page,
+// and stayed there while four rules were added — three separate claims, all wrong, none
+// checkable. A count in prose is a fact about the code, so the code checks it.
+func TestDocumentedLintCountsMatchTheRegistry(t *testing.T) {
+	root := filepath.Join("..", "..")
+	claims := []struct {
+		path string
+		n    int
+	}{
+		{filepath.Join(root, "README.md"), len(specLints)},
+		{filepath.Join(root, "docs", "content", "cli", "_index.md"), len(specLints)},
+		{filepath.Join(root, "docs", "content", "specification", "_index.md"), len(specLints)},
+	}
+	countRe := regexp.MustCompile(`(\d+)\s+(?:rotini\s+)?(?:spec\s+)?lint rules`)
+
+	for _, c := range claims {
+		body, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Errorf("read %s: %v", c.path, err)
+			continue
+		}
+		matches := countRe.FindAllStringSubmatch(string(body), -1)
+		if len(matches) == 0 {
+			continue // the document stopped quoting a number, which is also fine
+		}
+		for _, m := range matches {
+			got, err := strconv.Atoi(m[1])
+			if err != nil {
+				continue
+			}
+			if got != c.n {
+				t.Errorf("%s says %d lint rules; the registry has %d", c.path, got, c.n)
+			}
 		}
 	}
 }

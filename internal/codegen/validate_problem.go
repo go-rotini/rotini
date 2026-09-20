@@ -24,8 +24,13 @@ const (
 // the document and a human-readable message, tagged by document kind ("spec"/"conf")
 // and severity (error by default; warning for non-fatal advisories).
 type problem struct {
-	kind  string
-	loc   string
+	kind string
+	loc  string
+	// ptr is the JSON pointer of the thing the problem is about, when the rule knows it.
+	// A schema violation's loc IS a pointer and needs none; a lint rule's loc is a human
+	// label ("command demo/build"), so it carries the pointer here instead and keeps the
+	// label for the message. Either way locateProblems turns it into a file:line:col.
+	ptr   string
 	pos   string // "path:line:col" in the original source; "" degrades to loc-only
 	msg   string
 	sev   severity // zero value = error
@@ -57,21 +62,31 @@ func (e *problem) Error() string {
 // through the aggregated validation error.
 func (e *problem) Unwrap() error { return e.cause }
 
-// locateProblems back-fills source positions onto pointer-shaped problems, so a problem whose
-// loc is a JSON-pointer location gains "path:line:col" when the locator can resolve it. Lint
-// problems with semantic locs pass through untouched, as do all problems when the format
-// carries no positions.
+// locateProblems back-fills source positions, so a problem that knows where it came from gains
+// "path:line:col". Two shapes qualify: a schema violation, whose loc IS a JSON pointer, and a
+// lint problem carrying one in ptr beside its human label. A problem with neither passes
+// through untouched, as do all problems when the source format carries no positions.
+//
+// A pointer that no longer resolves (a rule addressing a node the locator cannot find)
+// degrades to a message without a position rather than failing — a lint problem worth
+// reporting is still worth reporting unplaced.
 func locateProblems(problems []error, path string, locate sourceLocator) {
 	if locate == nil || path == "" {
 		return
 	}
 	for _, e := range problems {
 		p := &problem{}
-		ok := errors.As(e, &p)
-		if !ok || !strings.HasPrefix(p.loc, "/") {
+		if !errors.As(e, &p) {
 			continue
 		}
-		if line, col, ok := locate(p.loc); ok {
+		ptr := p.ptr
+		if ptr == "" && strings.HasPrefix(p.loc, "/") {
+			ptr = p.loc
+		}
+		if ptr == "" {
+			continue
+		}
+		if line, col, ok := locate(ptr); ok {
 			p.pos = fmt.Sprintf("%s:%d:%d", path, line, col)
 		}
 	}

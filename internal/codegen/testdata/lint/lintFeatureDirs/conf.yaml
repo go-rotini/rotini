@@ -1,0 +1,13 @@
+# //go:embed cannot reach outside the package it is written in, so an embed_dir
+# outside the cmd package could never resolve.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    - type: help
+      enabled: true
+      embed: true
+      embed_dir: docs/renders

@@ -1,0 +1,17 @@
+# A constraint declared on a type that can never check it would be silently ignored.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: force
+      identifiers:
+        - --force
+      schema:
+        type: bool
+        minimum: 1
+    - name: retries
+      identifiers:
+        - --retries
+      schema:
+        type: int
+        minLength: 3

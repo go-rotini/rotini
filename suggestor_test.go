@@ -244,3 +244,40 @@ func TestSimilarity_normalizesEveryAlgorithmToUnitInterval(t *testing.T) {
 		}
 	}
 }
+
+// FuzzSuggest drives every suggestion algorithm with arbitrary input against an arbitrary
+// candidate vocabulary. The Suggestor is the one battery that runs over a token a stranger
+// typed, and nine string-distance implementations are a lot of index arithmetic to leave
+// unfuzzed — a panic on a multi-byte rune or an empty candidate would surface as a crash
+// while the user was already having a bad time.
+//
+// The contract is total: for any input, every algorithm returns without panicking, and never
+// suggests something that was not a candidate.
+func FuzzSuggest(f *testing.F) {
+	for _, seed := range []struct{ token, vocab string }{
+		{"instal", "install,uninstall,list"},
+		{"", "a,b"},
+		{"x", ""},
+		{"日本語", "日本,語"},
+		{"--conf", "--config,--confirm"},
+		{strings.Repeat("a", 64), "a,aa,aaa"},
+	} {
+		f.Add(seed.token, seed.vocab)
+	}
+
+	f.Fuzz(func(t *testing.T, token, vocab string) {
+		candidates := strings.Split(vocab, ",")
+		known := map[string]bool{}
+		for _, c := range candidates {
+			known[c] = true
+		}
+		for _, algo := range Algorithms() {
+			s := NewSuggestor().WithAlgorithm(algo)
+			for _, got := range s.Suggest(token, candidates) {
+				if !known[got] {
+					t.Fatalf("algorithm %v suggested %q, which is not a candidate", algo, got)
+				}
+			}
+		}
+	})
+}

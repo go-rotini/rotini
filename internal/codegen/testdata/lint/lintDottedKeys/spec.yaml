@@ -1,0 +1,11 @@
+# dotted_keys is flag-only grammar and needs map[string]any to nest into.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: label
+      identifiers:
+        - --label
+      schema:
+        type: map[string]string
+        dotted_keys: true

@@ -36,7 +36,7 @@ and an editable handler stub. You fill in the body.
 ## Three things that are actually different
 
 **1. Your CLI is checked before your code exists.** The spec is validated by a JSON
-Schema plus 29 rotini lint rules — a misspelled key, a duplicate flag identifier, a
+Schema plus 33 rotini lint rules — a misspelled key, a duplicate flag identifier, a
 config file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each
 is reported with a `file:line:col`, by `rotini validate`, before a line of Go is
 generated. Frameworks that declare the CLI *in Go* can only catch what the compiler
@@ -148,6 +148,16 @@ Every way data reaches your CLI is declared, not wired by hand:
   [`reference/.rotini.spec.yaml`](reference/.rotini.spec.yaml) and
   [`reference/.rotini.conf.yaml`](reference/.rotini.conf.yaml). Both are validated by
   the test suite, so they cannot drift from the schemas.
+- **Editor support** — point your spec's `$schema` at a released schema and every key is
+  completed and checked as you type:
+
+  ```yaml
+  $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json
+  ```
+
+  Offline or forked? `generate.schemas` in the conf writes a local copy to point at instead.
+- **What a version number promises** — [`COMPATIBILITY.md`](COMPATIBILITY.md).
+- **Taking a new version** — [`UPGRADING.md`](UPGRADING.md).
 
 ## Contributing
 

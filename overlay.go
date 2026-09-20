@@ -445,7 +445,7 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 
 	// Flag env-fallbacks read the plain env projection of the recon key, the
 	// same source order reconcileFlags gives them.
-	flagReg, err := recon.New(recon.WithSource(flagEnvSource(b.envPrefix)))
+	flagReg, err := recon.New(recon.WithSource(flagEnvSource(v, b.envPrefix)))
 	if err != nil {
 		return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
 	}

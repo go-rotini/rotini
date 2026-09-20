@@ -1,0 +1,12 @@
+# A ref to an undeclared schema would surface as "undefined type" in generated code.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    Result:
+      type: object
+      properties:
+        ok:
+          type: bool
+  output:
+    $ref: '#/schemas/Reslt'

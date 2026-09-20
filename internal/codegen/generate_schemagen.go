@@ -91,7 +91,7 @@ func collectOutputDefs(gp *program) map[string]any {
 	// its stdin InputSchema (only the BaseSchema part — required/default/etc. are
 	// input metadata, not JSON-schema type structure).
 	addStdin := func(prefix string, in *Inputs) {
-		if in != nil && in.Stdin != nil && in.Stdin.Schema != nil {
+		if in != nil && in.Stdin != nil && in.Stdin.Schema != nil && !rawStdinFormat(in.Stdin.Format) {
 			defs[prefix+"Stdin"] = schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema})
 		}
 	}

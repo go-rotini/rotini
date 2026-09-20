@@ -24,10 +24,27 @@ lives under `internal/`, the runtime surface in the package root.
 4. Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages (e.g., `feat:`, `fix:`, `test:`, `docs:`).
 
 If your change alters generated output, update the golden fixtures under
-`internal/testdata/` (and the help goldens) and confirm the diff is intentional.
-If it changes the spec or conf schema, keep `internal/schema-spec.json` /
-`internal/schema-conf.json` and the example references in `.docs/.rotini.spec.yaml`
-/ `.docs/.rotini.conf.yaml` in sync.
+`internal/codegen/testdata/` (the `golden/` module and the `help/` pages) and confirm
+the diff is intentional. If it changes the spec or conf schema, keep
+`internal/codegen/schema-spec.json` / `internal/codegen/schema-conf.json`, the
+root-level published copies (`schema-spec.json` / `schema-conf.json`, which a release
+tag serves as the `$schema` URL), and the annotated references in
+`reference/.rotini.spec.yaml` / `reference/.rotini.conf.yaml` in sync.
+`TestReferenceDocsValidate` and `TestPublishedSchemasInSync` fail until they are.
+
+If you add a lint rule, add its fixture directory under
+`internal/codegen/testdata/lint/<ruleName>/` — `TestLintFixturesComplete` fails until
+every rule in the registry has one, and `TestLintProblemsArePositioned` until the rule
+reports a `file:line:col`.
+
+The docs site's reference pages are GENERATED from the schemas, so a schema description
+is the only place that key is documented. After editing one:
+
+```bash
+go test ./internal/codegen -run SchemaDocs -update-schema-docs
+```
+
+`TestSchemaDocsInSync` fails until you do.
 
 ## Linting
 
@@ -38,10 +55,12 @@ make lint
 ## Testing
 
 ```bash
-make test              # unit tests with coverage
-make test-acceptance   # end-to-end scenarios (init scaffolding, generate, $ref composition)
+make test              # every test in the module, with coverage
+make test-conformance  # the in-process input-conformance matrix
+make test-acceptance   # the process tier: real exit codes, pipes, __complete, signals
+make test-e2e          # testscript rigs: spec -> generate -> build -> RUN the binary
 make test-bench        # benchmarks
-make test-fuzz         # fuzz tests (parser / spec decoding; 60s per fuzzer)
+make test-fuzz         # fuzz targets (60s each; see FUZZ_TARGETS in the Makefile)
 make test-mutation     # mutation tests (long-running, ~18 min)
 make test-race         # tests with the race detector
 make rotini-build      # build the codegen binary
@@ -50,6 +69,15 @@ make rotini-install    # regenerate (go generate ./...) and install the tool
 
 `make all` runs the full chain. `test-mutation` is slow; it's usually run on its
 own rather than in a tight edit loop.
+
+The tiers are cumulative, and each proves something the one before it cannot:
+`test` covers units and codegen goldens, `test-conformance` covers every input
+channel in-process, `test-acceptance` covers what only a real process shows (exit
+codes, pipes, signals), and `test-e2e` covers what only a real *user module* shows —
+that generated code not merely compiles but behaves.
+
+Planning documents live in a sibling repository at `../.docs`, deliberately outside
+this module so they are not published with it.
 
 ## Pull Requests
 

@@ -1,0 +1,147 @@
+# R1 — the raw stdin formats: the grep/jq/fmt family, whose stdin is not a document.
+#
+# Before `text` and `lines`, a filter could not DECLARE its stdin channel at all: the four
+# formats were json/yaml/jsonc/toml, so a plain-text consumer read rtx.Stdin directly — which
+# appears in no help page, in no completion, and in no validation.
+
+gomodinit example.com/filter
+
+exec rotini generate cmd/filter/.rotini.spec.yaml --config cmd/filter/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o filter$exe ./cmd/filter
+
+# text: the whole payload, as one string. Interior whitespace is content and survives.
+stdin payload.txt
+exec ./filter$exe upper
+stdout 'HELLO  WORLD'
+
+# lines: split on newlines, and a trailing newline adds no empty element.
+stdin three.txt
+exec ./filter$exe count
+stdout 'lines=3'
+
+# Nothing piped leaves the payload nil, which a filter can tell from an empty one.
+exec ./filter$exe count
+stdout 'lines=none'
+
+# A required payload that is empty is a usage error, not a silent nil.
+stdin empty.txt
+! exec ./filter$exe upper
+stderr 'required stdin payload is empty'
+
+-- payload.txt --
+hello  world
+-- three.txt --
+alpha
+beta
+gamma
+-- empty.txt --
+-- cmd/filter/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: filter
+  summary: text filters
+  commands:
+    - name: upper
+      summary: upper-case the whole payload
+      stdin:
+        format: text
+        schema:
+          type: string
+          required: true
+    - name: count
+      summary: count the piped lines
+      stdin:
+        format: lines
+        schema:
+          type: '[]string'
+-- cmd/filter/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: main
+      file: cmd/filter/main.go
+    - type: cmd
+      file: internal/cmd/filter/zz_filter.go
+      package: filter
+-- internal/cmd/filter/filter.go --
+package filter
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type filterHandlers struct{ base }
+
+func (*filterHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/filter/filter_upper.go --
+package filter
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterUpperHandlers struct{ base }
+
+func (*filterUpperHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[FilterUpperInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	// The payload is a *string: nil means nothing was piped.
+	fmt.Fprintln(rtx.Stdout, strings.ToUpper(*in.FilterUpper.Stdin))
+}
+-- internal/cmd/filter/filter_count.go --
+package filter
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type filterCountHandlers struct{ base }
+
+func (*filterCountHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[FilterCountInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	if in.FilterCount.Stdin == nil {
+		fmt.Fprintln(rtx.Stdout, "lines=none")
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "lines=%d\n", len(*in.FilterCount.Stdin))
+}
+-- cmd/filter/main.go --
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	filter "example.com/filter/internal/cmd/filter"
+)
+
+func main() {
+	filter.Program.
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}

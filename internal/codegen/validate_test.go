@@ -118,17 +118,43 @@ func TestProblem_ErrorAndUnwrap(t *testing.T) {
 
 // ── version + fail-mode ─────────────────────────────────────.
 
+// TestVersionProblem pins the compatibility rule a document's `version` expresses: a
+// MINIMUM, not an equality. The exact-match rule this replaced meant every rotini patch
+// release invalidated every spec and conf in every project until each was hand-edited —
+// the whole table below, rows 3 through 6, used to be errors.
 func TestVersionProblem(t *testing.T) {
 	cases := []struct {
 		name        string
 		doc, binary string
 		wantProblem bool
 	}{
-		{"match", "1.2.3", "1.2.3", false},
-		{"match with v prefix", "1.2.3", "v1.2.3", false},
-		{"mismatch", "1.0.0", "2.0.0", true},
+		{"exact match", "1.2.3", "1.2.3", false},
+		{"v prefix on the binary", "1.2.3", "v1.2.3", false},
+
+		// Same major, binary at or ahead of the document: the point of the change.
+		{"binary a patch ahead", "1.2.3", "1.2.9", false},
+		{"binary a minor ahead", "1.2.3", "1.4.0", false},
+		{"binary far ahead, same major", "1.0.0", "1.99.99", false},
+		{"document at zero, binary ahead", "0.0.0", "0.4.1", false},
+
+		// Binary behind the document: it may not know the keys the document uses.
+		{"binary a patch behind", "1.2.3", "1.2.2", true},
+		{"binary a minor behind", "1.4.0", "1.2.9", true},
+
+		// Different majors, either direction.
+		{"document major behind", "1.0.0", "2.0.0", true},
+		{"document major ahead", "2.0.0", "1.9.9", true},
+
+		// Unknown on either side is never judged.
 		{"doc empty skips", "", "2.0.0", false},
 		{"binary empty skips", "1.0.0", "", false},
+		{"dev build skips", "1.0.0", "dev", false},
+		{"non-semver doc skips", "not-a-version", "1.0.0", false},
+
+		// Pre-release and build metadata are ignored, not rejected.
+		{"binary prerelease of the same version", "1.2.3", "1.2.3-rc.1", false},
+		{"binary prerelease ahead", "1.2.3", "1.3.0-rc.1", false},
+		{"binary build metadata", "1.2.3", "1.2.3+deadbeef", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -136,10 +162,47 @@ func TestVersionProblem(t *testing.T) {
 			if (got != nil) != tc.wantProblem {
 				t.Errorf("versionProblem(%q,%q) problem=%v, want %v", tc.doc, tc.binary, got != nil, tc.wantProblem)
 			}
-			if got != nil && got.loc != "version" {
+			if got == nil {
+				return
+			}
+			if got.loc != "version" {
 				t.Errorf("version problem loc = %q, want \"version\"", got.loc)
 			}
+			// The message has to say which way the mismatch runs and what to do about
+			// it — "they do not match" leaves the reader to guess which side to change.
+			for _, want := range []string{tc.doc, tc.binary} {
+				if !strings.Contains(got.msg, strings.TrimPrefix(want, "v")) {
+					t.Errorf("message %q does not name %q", got.msg, want)
+				}
+			}
+			if !strings.Contains(got.msg, "upgrade") && !strings.Contains(got.msg, "install") {
+				t.Errorf("message %q does not say what to do: %q", tc.name, got.msg)
+			}
 		})
+	}
+}
+
+// TestParseSemver covers the shapes versionProblem must not choke on.
+func TestParseSemver(t *testing.T) {
+	ok := map[string]semver{
+		"1.2.3":          {1, 2, 3},
+		"v1.2.3":         {1, 2, 3},
+		"0.0.0":          {0, 0, 0},
+		"10.20.30":       {10, 20, 30},
+		"1.2.3-rc.1":     {1, 2, 3},
+		"1.2.3+build.99": {1, 2, 3},
+		" 1.2.3 ":        {1, 2, 3},
+	}
+	for in, want := range ok {
+		got, valid := parseSemver(in)
+		if !valid || got != want {
+			t.Errorf("parseSemver(%q) = %v,%v; want %v,true", in, got, valid, want)
+		}
+	}
+	for _, in := range []string{"", "dev", "1.2", "1.2.3.4", "1.2.x", "a.b.c", "1..3", "-1.2.3"} {
+		if got, valid := parseSemver(in); valid {
+			t.Errorf("parseSemver(%q) = %v,true; want not ok", in, got)
+		}
 	}
 }
 

@@ -292,9 +292,10 @@ func TestCLI_aliases(t *testing.T) {
 	}
 }
 
-// TestResolveVersion covers the version-resolution rules: a build-info version wins
-// over the -ldflags default when the binary was installed by module path, and either
-// way the leading "v" and any pre-release suffix are trimmed to a bare X.Y.Z.
+// TestResolveVersion covers the version-resolution rules: a build-info RELEASE version wins
+// over the -ldflags default (the `go install pkg@v1.2.3` path), a pseudo-version or "(devel)"
+// does not count as one, and either way the leading "v" and any pre-release suffix are
+// trimmed to a bare X.Y.Z.
 func TestResolveVersion(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -308,6 +309,17 @@ func TestResolveVersion(t *testing.T) {
 		{"a devel build falls back to ldflags", "1.2.3", "(devel)", "1.2.3"},
 		{"pre-release suffix is trimmed", "v1.2.3-rc1+meta", "", "1.2.3"},
 		{"an unparseable version passes through", "not-a-version", "", "not-a-version"},
+
+		// A PSEUDO-version is not a release. This is the case the e2e tier caught: a
+		// release pipeline stamps -X main.version=1.4.2, the checkout is untagged so the
+		// go tool records v0.0.0-<timestamp>-<hash>, and the old unanchored matcher read
+		// its leading "v0.0.0" as a release — so the binary reported 0.0.0 and its own
+		// version guard then rejected every correctly-versioned spec in the project.
+		{"a pseudo-version is not a release", "1.4.2", "v0.0.0-20260901233311-3ef400c2a629", "1.4.2"},
+		{"a pseudo-version off a tag is not a release", "1.4.2", "v1.3.0-0.20260901233311-3ef400c2a629", "1.4.2"},
+		{"an empty build-info version falls back", "1.4.2", "", "1.4.2"},
+		{"a real tag still wins", "0.0.0", "v1.9.4", "1.9.4"},
+		{"a tagged pre-release wins and is trimmed", "0.0.0", "v2.0.0-rc.1", "2.0.0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

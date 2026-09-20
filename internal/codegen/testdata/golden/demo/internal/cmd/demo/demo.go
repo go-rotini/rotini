@@ -27,10 +27,14 @@ type demoHandlers struct {
 // Collect reconciles every input channel the spec declares for this command into the
 // generated DemoInputs, validated, in the documented precedence. A handler does not print
 // its own errors: it records them, and the runtime reports them once, after teardown.
+//
+// This file was created once and is now yours — rotini never overwrites it. Delete anything
+// below you do not want.
 func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[DemoInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
+		rtx.SignalExit(1)
 		return
 	}
 

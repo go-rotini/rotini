@@ -1,0 +1,12 @@
+# A count flag has no value: every value-shaped key is meaningless on it.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: verbose
+      identifiers:
+        - -v
+      schema:
+        type: count
+        default: 1
+        required: true

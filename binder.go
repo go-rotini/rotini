@@ -165,10 +165,21 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 	}
 	if len(data) == 0 {
 		if required {
-			return usageBind(channelStdin, "", fmt.Sprintf("required stdin payload is empty — pipe a %s document", format), nil)
+			noun := "document"
+			if isRawStdinFormat(format) {
+				noun = "payload"
+			}
+			return usageBind(channelStdin, "", fmt.Sprintf("required stdin payload is empty — pipe a %s %s", format, noun), nil)
 		}
 		return nil // nothing piped → leave Stdin nil
 	}
+
+	// A RAW format binds the payload itself — the grep/jq/fmt family, whose stdin is not a
+	// document and has no shape to decode into.
+	if isRawStdinFormat(format) {
+		return bindRawStdin(sf, format, data)
+	}
+
 	codec, ok := recon.DefaultCodecs().ByName(format)
 	if !ok {
 		return internalBind(channelStdin, "", fmt.Sprintf("unsupported stdin format %q", format), nil)
@@ -201,6 +212,45 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 	}
 	sf.Set(ptr)
 	return nil
+}
+
+// isRawStdinFormat reports whether format binds stdin directly instead of decoding it.
+func isRawStdinFormat(format string) bool { return format == "text" || format == "lines" }
+
+// bindRawStdin sets a raw stdin field from the piped bytes: the whole payload as one string
+// for "text", or its newline-separated lines for "lines".
+//
+// The payload is trimmed of its trailing newline only — leading and interior whitespace is
+// content, and a filter that had it stripped could not do its job. A final newline adds no
+// empty element, since a payload ending in one is two lines, not three.
+func bindRawStdin(sf reflect.Value, format string, data []byte) error {
+	payload := strings.TrimSuffix(string(data), "\n")
+	payload = strings.TrimSuffix(payload, "\r")
+
+	switch format {
+	case "text":
+		if sf.Type().Elem().Kind() != reflect.String {
+			return internalBind(channelStdin, "", "stdin format text needs a string payload type", nil)
+		}
+		p := reflect.New(sf.Type().Elem())
+		p.Elem().SetString(payload)
+		sf.Set(p)
+		return nil
+	case "lines":
+		elem := sf.Type().Elem()
+		if elem.Kind() != reflect.Slice || elem.Elem().Kind() != reflect.String {
+			return internalBind(channelStdin, "", "stdin format lines needs a []string payload type", nil)
+		}
+		lines := strings.Split(payload, "\n")
+		for i := range lines {
+			lines[i] = strings.TrimSuffix(lines[i], "\r") // CRLF input stays usable
+		}
+		p := reflect.New(elem)
+		p.Elem().Set(reflect.ValueOf(lines).Convert(elem))
+		sf.Set(p)
+		return nil
+	}
+	return internalBind(channelStdin, "", fmt.Sprintf("unsupported raw stdin format %q", format), nil)
 }
 
 // parseStdinTag splits a `stdin:"<format>[,required]"` tag into its format and required marker.
@@ -242,7 +292,7 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 		return err
 	}
 	srcs := make([]recon.Source, 0, 2+len(files))
-	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, argv)), flagEnvSource(b.envPrefix))
+	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, argv)), flagEnvSource(v, b.envPrefix))
 	srcs = append(srcs, files...)
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
@@ -739,12 +789,43 @@ func envSources(v reflect.Value, envPrefix string) []recon.Source {
 }
 
 // flagEnvSource is the env source flag fallbacks read: the SNAKE_UPPER projection of each
-// recon key, scoped under env_prefix when one is declared.
-func flagEnvSource(envPrefix string) recon.Source {
-	if envPrefix == "" {
-		return recon.NewOSEnvSource()
+// recon key, scoped under env_prefix when one is declared — with any flag that named its own
+// variable (schema `variable:`) pinned to that exact name instead.
+//
+// An explicitly named variable is EXEMPT from env_prefix, the same rule env inputs follow: it
+// is already exact, and prefixing it would silently make it a different variable. Without
+// this, a flag's env fallback could only be the derived SNAKE_UPPER of its config `key:`, so
+// binding --token to GITHUB_TOKEN meant inventing a config key named github.token — two
+// unrelated namespaces conflated to name one variable.
+func flagEnvSource(v reflect.Value, envPrefix string) recon.Source {
+	opts := []recon.EnvOption{recon.WithEnvVars(flagExplicitEnv(v))}
+	if envPrefix != "" {
+		opts = append(opts, recon.WithEnvPrefix(envPrefix+"_"))
 	}
-	return recon.NewOSEnvSource(recon.WithEnvPrefix(envPrefix + "_"))
+	return recon.NewOSEnvSource(opts...)
+}
+
+// flagExplicitEnv collects the recon-key → explicit-variable mapping from every Flags field
+// carrying an `env:"<VAR>"` tag, the flag-channel counterpart of [envExplicit].
+func flagExplicitEnv(v reflect.Value) map[string]string {
+	m := map[string]string{}
+	if v.Kind() != reflect.Struct {
+		return m
+	}
+	for _, ci := range v.Fields() {
+		flags := commandFlags(ci)
+		if !flags.IsValid() {
+			continue
+		}
+		ft := flags.Type()
+		for j := range flags.NumField() {
+			vr := ft.Field(j).Tag.Get("env")
+			if key := reconKey(ft.Field(j).Tag.Get("recon")); vr != "" && key != "" {
+				m[key] = vr
+			}
+		}
+	}
+	return m
 }
 
 // fillEnvNested fills each nested env input of one Env struct from its variable family: with

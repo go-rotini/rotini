@@ -248,6 +248,9 @@ func flagDefsLiteral(in *Inputs) string {
 		if len(f.DeprecatedIdentifiers) > 0 {
 			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
 		}
+		if f.Schema != nil && f.Schema.Negatable {
+			b.WriteString(", Negatable: true")
+		}
 		if f.Schema != nil && f.Schema.DottedKeys {
 			b.WriteString(", DottedKeys: true")
 		}
@@ -257,7 +260,21 @@ func flagDefsLiteral(in *Inputs) string {
 		if f.Schema != nil && len(f.Schema.From) > 0 {
 			b.WriteString(", From: " + goStringSlice(f.Schema.From))
 		}
+		b.WriteString(completionLiteral(f.Schema))
 	})
+}
+
+// completionLiteral renders an input's `complete:` hint as the Completion field of its
+// generated FlagDef/ArgDef literal, or "" when it declares none.
+func completionLiteral(schema *InputSchema) string {
+	if schema == nil || schema.Complete == nil || schema.Complete.Kind == "" {
+		return ""
+	}
+	out := ", Complete: rotini.Completion{Kind: " + strconv.Quote(schema.Complete.Kind)
+	if len(schema.Complete.Extensions) > 0 {
+		out += ", Extensions: " + goStringSlice(schema.Complete.Extensions)
+	}
+	return out + "}"
 }
 
 // keyPaths flattens a map flag's declared properties into the key vocabulary
@@ -299,6 +316,7 @@ func argDefsLiteral(in *Inputs) string {
 			b.WriteString(", Variadic: true")
 		}
 		writeSchemaCommon(b, a.Schema)
+		b.WriteString(completionLiteral(a.Schema))
 		if a.Hidden {
 			b.WriteString(", Hidden: true")
 		}

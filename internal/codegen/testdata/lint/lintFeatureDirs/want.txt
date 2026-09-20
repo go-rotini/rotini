@@ -1,0 +1,1 @@
+conf: .rotini.conf.yaml:10:7: generate.features.help.embed_dir: "docs/renders" must resolve under the cmd package "internal/cmd/demo" so //go:embed can reach it

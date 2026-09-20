@@ -1,11 +1,14 @@
-# yaml-language-server: $schema=./.rotini-schema.conf.json
+# yaml-language-server: $schema=../../schema-conf.json
 version: 0.0.0
 generate:
+  # rotini publishes its own schemas at the MODULE ROOT, so a release tag serves them
+  # at raw.githubusercontent.com/.../refs/tags/<tag>/schema-spec.json — the URL a user's
+  # `$schema` key points at. TestPublishedSchemasInSync guards the copies.
   schemas:
     spec:
-      file: cmd/rotini/.rotini-schema.spec.json
+      file: schema-spec.json
     conf:
-      file: cmd/rotini/.rotini-schema.conf.json
+      file: schema-conf.json
   packages:
     - type: main
       file: cmd/rotini/main.go

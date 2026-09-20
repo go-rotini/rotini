@@ -19,7 +19,41 @@ func (p *Processor) lintConf(rc *reconciledConf) []error {
 	for _, rule := range confLints {
 		problems = append(problems, rule(rc.conf)...)
 	}
+	locateProblems(problems, rc.path, rc.locate) // same file:line:col contract as the spec rules
 	return problems
+}
+
+// packagePointer and featurePointer address one entry of the conf's generate arrays, so a
+// conf problem lands on the line the author wrote rather than on a dotted label they have to
+// go find. The index is the array position, which is how the document is actually shaped.
+// A negative index means "not found", which yields no pointer rather than an unresolvable
+// one — an unplaced problem is still worth reporting.
+func packagePointer(i int) string {
+	if i < 0 {
+		return ""
+	}
+	return fmt.Sprintf("/generate/packages/%d", i)
+}
+
+func featurePointer(i int) string {
+	if i < 0 {
+		return ""
+	}
+	return fmt.Sprintf("/generate/features/%d", i)
+}
+
+// featureIndex returns the array position of the named feature, or -1 when the conf declares
+// none — the rules below report against an entry, so they need where it sits.
+func featureIndex(conf *Conf, name string) int {
+	if conf.Generate == nil {
+		return -1
+	}
+	for i, f := range conf.Generate.Features {
+		if f.Type == name {
+			return i
+		}
+	}
+	return -1
 }
 
 // confLints is the ordered set of conf rules run after the conf is schema-valid,
@@ -43,10 +77,10 @@ func lintPackageTypes(conf *Conf) []error {
 	}
 	var problems []error
 	seen := map[string]bool{}
-	for _, p := range conf.Generate.Packages {
+	for i, p := range conf.Generate.Packages {
 		if seen[p.Type] {
 			problems = append(problems, &problem{
-				kind: "conf", loc: "generate.packages",
+				kind: "conf", ptr: packagePointer(i), loc: "generate.packages",
 				msg: fmt.Sprintf("type %q is declared more than once — each package type may appear at most once", p.Type),
 			})
 		}
@@ -64,10 +98,10 @@ func lintFeatureTypes(conf *Conf) []error {
 	}
 	var problems []error
 	seen := map[string]bool{}
-	for _, f := range conf.Generate.Features {
+	for i, f := range conf.Generate.Features {
 		if seen[f.Type] {
 			problems = append(problems, &problem{
-				kind: "conf", loc: "generate.features",
+				kind: "conf", ptr: featurePointer(i), loc: "generate.features",
 				msg: fmt.Sprintf("type %q is declared more than once — each feature type may appear at most once", f.Type),
 			})
 		}
@@ -85,13 +119,13 @@ func lintPackageColocation(conf *Conf) []error {
 	}
 	var problems []error
 	byFile := map[string]string{} // file → first explicit package seen
-	for _, p := range conf.Generate.Packages {
+	for i, p := range conf.Generate.Packages {
 		if p.File == "" || p.Package == "" {
 			continue
 		}
 		if prev, ok := byFile[p.File]; ok && prev != p.Package {
 			problems = append(problems, &problem{
-				kind: "conf", loc: "generate.packages",
+				kind: "conf", ptr: packagePointer(i), loc: "generate.packages",
 				msg: fmt.Sprintf("file %q is targeted by package %q and %q — targets sharing a file must declare the same package", p.File, prev, p.Package),
 			})
 			continue
@@ -111,8 +145,16 @@ func lintEntrypoint(conf *Conf) []error {
 	}
 	ep := conf.Generate.mainPkg()
 	if ep.File == "" && len(ep.Keep) > 0 {
+		mainAt := -1
+		for i, p := range conf.Generate.Packages {
+			if p.Type == "main" {
+				mainAt = i
+				break
+			}
+		}
 		return []error{&problem{
 			kind: "conf",
+			ptr:  packagePointer(mainAt),
 			loc:  "generate.packages.main.keep",
 			msg:  "has no effect without generate.packages.main.file — the entrypoint is only written, and its directory pruned, when file is set",
 		}}
@@ -142,6 +184,7 @@ func lintFeatureDirs(conf *Conf) []error {
 		if dir != cmdDir && !strings.HasPrefix(dir, cmdDir+"/") {
 			problems = append(problems, &problem{
 				kind: "conf",
+				ptr:  featurePointer(featureIndex(conf, name)),
 				loc:  "generate.features." + name + ".embed_dir",
 				msg:  fmt.Sprintf("%q must resolve under the cmd package %q so //go:embed can reach it", f.EmbedDir, cmdDir),
 			})
@@ -165,7 +208,8 @@ func lintFeatureKnobs(conf *Conf) []error {
 	var problems []error
 	warn := func(name, key, msg string) {
 		problems = append(problems, &problem{
-			kind: "conf", loc: "generate.features." + name + "." + key,
+			kind: "conf", ptr: featurePointer(featureIndex(conf, name)),
+			loc: "generate.features." + name + "." + key,
 			sev: severityWarning, msg: msg,
 		})
 	}

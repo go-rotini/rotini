@@ -256,7 +256,7 @@ func TestGenerateFeatures_inline(t *testing.T) {
 		"Usage:",      // an un-overridden heading keeps its default colon
 		"the acme control cli",
 		"acme <command> [flags]",
-		"deploy;dep",            // name + alias
+		"deploy, dep",           // name + alias
 		"--config,-c string",    // typed flag row
 		"ACME_TOKEN string",     // env input row
 		"https://api.acme.test", // config default
@@ -353,4 +353,59 @@ func slicesContains(list []string, want string) bool {
 func readEmittedIfExists(dir, rel string) (string, error) {
 	b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
 	return string(b), err
+}
+
+// TestFlagGroups covers the `group:` key on a flag — the presentational bucketing that turns a
+// command with twenty flags from one undifferentiated wall into a page someone reads.
+//
+// The properties that matter are the ones a reader would notice: groups appear in
+// first-declared order, ungrouped flags keep the default heading, and a command that declares
+// no groups renders exactly what it rendered before the key existed.
+func TestFlagGroups(t *testing.T) {
+	rows := []templateDocFlagRow{
+		{Identifiers: []string{"--verbose"}},
+		{Identifiers: []string{"--cert"}, Group: "TLS"},
+		{Identifiers: []string{"--out"}, Group: "Output"},
+		{Identifiers: []string{"--key"}, Group: "TLS"},
+		{Identifiers: []string{"--quiet"}},
+	}
+	groups := groupFlags(rows)
+
+	if len(groups) != 3 {
+		t.Fatalf("got %d buckets, want 3 (ungrouped, TLS, Output)", len(groups))
+	}
+	// First-declared order, and the ungrouped bucket is titled "" so each template heads
+	// it with its own default.
+	want := []struct {
+		title string
+		flags []string
+	}{
+		{"", []string{"--verbose", "--quiet"}},
+		{"TLS", []string{"--cert", "--key"}},
+		{"Output", []string{"--out"}},
+	}
+	for i, w := range want {
+		if groups[i].Title != w.title {
+			t.Errorf("bucket %d title = %q, want %q", i, groups[i].Title, w.title)
+		}
+		var got []string
+		for _, f := range groups[i].Flags {
+			got = append(got, f.Identifiers[0])
+		}
+		if !slices.Equal(got, w.flags) {
+			t.Errorf("bucket %q = %v, want %v", w.title, got, w.flags)
+		}
+	}
+
+	// No groups declared → one bucket, in declaration order: identical to the old output.
+	plain := groupFlags([]templateDocFlagRow{
+		{Identifiers: []string{"--a"}}, {Identifiers: []string{"--b"}},
+	})
+	if len(plain) != 1 || plain[0].Title != "" || len(plain[0].Flags) != 2 {
+		t.Errorf("an ungrouped command should render one untitled bucket, got %+v", plain)
+	}
+
+	if groupFlags(nil) != nil {
+		t.Error("no flags should yield no buckets, so the section is omitted entirely")
+	}
 }

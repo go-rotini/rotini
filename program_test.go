@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -241,7 +243,12 @@ func TestRun_funnelReceivesAllChannels(t *testing.T) {
 		rtx.RecordError(UsageError(errors.New("e")))
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, infos, successes []string, warnings, errs []error, panics []*PanicError) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+		infos := out.Infos
+		successes := out.Successes
+		warnings := out.Warnings
+		errs := out.Errors
+		panics := out.Panics
 		gotInfos, gotSuccesses, gotWarnings, gotErrors, gotPanics = infos, successes, warnings, errs, panics
 		rtx.Exit(1)
 	})
@@ -273,14 +280,14 @@ func TestRun_exitCode_funnelIsFinalAuthority(t *testing.T) {
 
 	// Custom funnel that sets no code → exits 0 (no floor; the funnel owns the code).
 	pc, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
-	pc.WithFunnel(func(context.Context, *Context, []string, []string, []error, []error, []*PanicError) {})
+	pc.WithFunnel(func(context.Context, *Context, Outcome) {})
 	if code, _ := pc.Run(pc.args); code != 0 {
 		t.Errorf("custom funnel without an exit: code = %d, want 0 (funnel owns the code)", code)
 	}
 
 	// Custom funnel that calls rtx.Exit(7) → that code wins.
 	ps, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
-	ps.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, _ []*PanicError) { rtx.Exit(7) })
+	ps.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(7) })
 	if code, _ := ps.Run(ps.args); code != 7 {
 		t.Errorf("custom funnel rtx.Exit(7): code = %d, want 7", code)
 	}
@@ -290,7 +297,7 @@ func TestRun_exitCode_funnelIsFinalAuthority(t *testing.T) {
 		rtx.RecordError(errors.New("boom"))
 		rtx.SignalExit(2)
 	}}, []string{"run"})
-	po.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, _ []*PanicError) { rtx.Exit(5) })
+	po.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(5) })
 	if code, _ := po.Run(po.args); code != 5 {
 		t.Errorf("funnel override: code = %d, want 5 (the funnel is the final authority)", code)
 	}
@@ -311,7 +318,8 @@ func TestRun_faultExit_defaultFloorsButFunnelCanMask(t *testing.T) {
 	// A custom funnel that sets no code masks the fault to 0 (it owns the exit).
 	pc, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: panicRun}, []string{"run"})
 	var sawPanic bool
-	pc.WithFunnel(func(_ context.Context, _ *Context, _, _ []string, _, _ []error, panics []*PanicError) {
+	pc.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+		panics := out.Panics
 		sawPanic = len(panics) == 1
 	})
 	if code, _ := pc.Run(pc.args); code != 0 || !sawPanic {
@@ -347,7 +355,9 @@ func TestRun_wiringFaultArrivesAsPanic(t *testing.T) {
 	var seen *PanicError
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
 	p.def = Definition{Name: "app", Handler: "Nope"} // no such handler method
-	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, errs []error, panics []*PanicError) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+		errs := out.Errors
+		panics := out.Panics
 		gotErrors = errs
 		if len(panics) > 0 {
 			seen = panics[0]
@@ -376,7 +386,9 @@ func TestRun_resolverFaultArrivesAsPanic(t *testing.T) {
 	p.WithResolver(func(Definition, []string) (Resolution, error) {
 		return Resolution{}, errors.New("routing table on fire")
 	})
-	p.WithFunnel(func(_ context.Context, _ *Context, _, _ []string, _, errs []error, panics []*PanicError) {
+	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+		errs := out.Errors
+		panics := out.Panics
 		nErrors, nPanics = len(errs), len(panics)
 	})
 
@@ -391,7 +403,7 @@ func TestRun_silentRun_doesNotInvokeFunnel(t *testing.T) {
 	fired := false
 	h := &testHandlers{log: new([]string)} // onRun nil → a clean run
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(context.Context, *Context, []string, []string, []error, []error, []*PanicError) { fired = true })
+	p.WithFunnel(func(context.Context, *Context, Outcome) { fired = true })
 
 	code, err := p.Run(p.args)
 	if fired {
@@ -716,7 +728,8 @@ func TestRun_mustGetRoutesToFunnelPanics(t *testing.T) {
 		panic(&ServiceError{Key: "no-such-service"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, panics []*PanicError) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+		panics := out.Panics
 		seen = panics[0]
 		rtx.Exit(7)
 	})
@@ -841,7 +854,8 @@ func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 	var log []string
 	var seen *PanicError
 	p, _, _ := newTestProgram(&panicThenHardExit{log: &log}, []string{"run"})
-	p.WithFunnel(func(_ context.Context, _ *Context, _, _ []string, _, _ []error, panics []*PanicError) {
+	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+		panics := out.Panics
 		seen = panics[0]
 	})
 
@@ -910,7 +924,8 @@ func TestRun_panicRunsTeardownThenFunnelLast(t *testing.T) {
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "Run", do: func(*Context) { panic("boom") }},
 	}}, []string{"run"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, panics []*PanicError) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+		panics := out.Panics
 		log = append(log, "funnel:"+panics[0].Error())
 		rtx.Exit(5)
 	})
@@ -937,7 +952,7 @@ func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 		"run": {at: "PostRun", do: func(*Context) { panic("teardown-boom") }},
 	}}, []string{"run"})
 	calls := 0
-	p.WithFunnel(func(_ context.Context, rtx *Context, _, _ []string, _, _ []error, _ []*PanicError) {
+	p.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) {
 		calls++
 		rtx.Exit(1)
 	})
@@ -950,5 +965,216 @@ func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 	}
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)
+	}
+}
+
+// errOutcomeTest is a stand-in error for the Outcome predicate table.
+var errOutcomeTest = errors.New("outcome test")
+
+// TestOutcome_EmptyAndFailed pins the two predicates the runtime and the default funnel key
+// on, so a custom funnel can rely on them meaning exactly what the engine means.
+func TestOutcome_EmptyAndFailed(t *testing.T) {
+	cases := []struct {
+		name        string
+		out         Outcome
+		empty, fail bool
+	}{
+		{"zero value", Outcome{}, true, false},
+		{"info only", Outcome{Infos: []string{"x"}}, false, false},
+		{"success only", Outcome{Successes: []string{"x"}}, false, false},
+		{"warning only", Outcome{Warnings: []error{errOutcomeTest}}, false, false},
+		{"error", Outcome{Errors: []error{errOutcomeTest}}, false, true},
+		{"panic", Outcome{Panics: []*PanicError{{Value: "boom"}}}, false, true},
+		{"warning does not fail", Outcome{Infos: []string{"i"}, Warnings: []error{errOutcomeTest}}, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.out.Empty(); got != tc.empty {
+				t.Errorf("Empty() = %v, want %v", got, tc.empty)
+			}
+			if got := tc.out.Failed(); got != tc.fail {
+				t.Errorf("Failed() = %v, want %v", got, tc.fail)
+			}
+		})
+	}
+}
+
+// TestFunnel_receivesEveryChannelByName is the reason Outcome is a struct: a funnel reads
+// each channel by name, so the two []string channels and the two []error channels cannot be
+// transposed by a call site that gets the order wrong.
+func TestFunnel_receivesEveryChannelByName(t *testing.T) {
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		rtx.RecordInfo("an info")
+		rtx.RecordSuccess("a success")
+		rtx.RecordWarning(errors.New("a warning"))
+		rtx.RecordError(errors.New("an error"))
+	}}
+	p, _, _ := newTestProgram(h, []string{"run"})
+
+	var got Outcome
+	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) { got = out })
+	if _, err := p.Run(p.args); err == nil {
+		t.Fatal("run recorded an error, want it returned")
+	}
+
+	for _, c := range []struct {
+		channel string
+		n       int
+		first   string
+	}{
+		{"Infos", len(got.Infos), first(got.Infos)},
+		{"Successes", len(got.Successes), first(got.Successes)},
+		{"Warnings", len(got.Warnings), firstErr(got.Warnings)},
+		{"Errors", len(got.Errors), firstErr(got.Errors)},
+	} {
+		if c.n != 1 {
+			t.Errorf("%s: got %d entries, want 1", c.channel, c.n)
+		}
+	}
+	if first(got.Infos) != "an info" || first(got.Successes) != "a success" {
+		t.Errorf("string channels transposed: infos=%q successes=%q", got.Infos, got.Successes)
+	}
+	if firstErr(got.Warnings) != "a warning" || firstErr(got.Errors) != "an error" {
+		t.Errorf("error channels transposed: warnings=%v errors=%v", got.Warnings, got.Errors)
+	}
+	if len(got.Panics) != 0 {
+		t.Errorf("Panics = %v, want empty", got.Panics)
+	}
+}
+
+func first(s []string) string {
+	if len(s) == 0 {
+		return ""
+	}
+	return s[0]
+}
+
+func firstErr(e []error) string {
+	if len(e) == 0 {
+		return ""
+	}
+	return e[0].Error()
+}
+
+// syncWriter serializes writes, standing in for the concurrency-safe writer a program driving
+// concurrent runs must supply.
+type syncWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (s *syncWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
+}
+
+// concurrentHandlers is a handler set with NO shared mutable state, so this test measures
+// rotini's own concurrency safety rather than the shared recording fixture's. That split is
+// the contract itself: rotini gives each run its own Context, but the handlers value passed
+// to NewProgram is shared across runs, so handler state is the author's to protect.
+type concurrentHandlers struct{ seen chan string }
+
+func (c *concurrentHandlers) App() Handlers    { return &concurrentHandler{} }
+func (c *concurrentHandlers) AppRun() Handlers { return &concurrentHandler{seen: c.seen} }
+
+type concurrentHandler struct {
+	DefaultCascadingPreRun
+	DefaultPreRun
+	DefaultPostRun
+	DefaultCascadingPostRun
+	seen chan string
+}
+
+func (h *concurrentHandler) Run(_ context.Context, rtx *Context) {
+	if h.seen == nil {
+		return
+	}
+	// A service bound once, before any run, must be visible to every run.
+	if v, ok := rtx.Get[string]("shared"); !ok || v != "bound once" {
+		h.seen <- "missing shared service"
+		return
+	}
+	rtx.RecordInfo("ran") // into this run's own context; nothing may leak across runs
+	h.seen <- rtx.Path()
+}
+
+// TestRun_concurrentDispatch pins what doc.go promises: Run is not merely re-entrant (the
+// REPL's requirement — one dispatch after another) but safe to call CONCURRENTLY once
+// configuration is done, which is what a StdioServer author will assume when a peer
+// pipelines requests. Each run gets its own Context with its own records, while services
+// bound before the runs reach all of them.
+//
+// It runs under -race in CI; without that this test proves much less.
+func TestRun_concurrentDispatch(t *testing.T) {
+	const runs = 32
+
+	// Concurrent runs SHARE the program's streams, so the writer has to be safe for
+	// concurrent use. os.Stdout is; a bytes.Buffer is not. That requirement is part of the
+	// contract, and it is why this test wraps its buffers rather than passing them raw.
+	seen := make(chan string, runs)
+	p := NewProgram(testDef(), &concurrentHandlers{seen: seen}).
+		WithStdout(&syncWriter{w: new(bytes.Buffer)}).
+		WithStderr(&syncWriter{w: new(bytes.Buffer)}).
+		WithExit(func(int) {})
+	p.Bind("shared", "bound once")
+
+	// Signal trapping is per-run: every concurrent run would install its own handler and
+	// all of them would observe one signal. A concurrent driver therefore supplies its own
+	// context, which is exactly what doc.go tells it to do.
+	ctx := context.Background()
+
+	var wg sync.WaitGroup
+	for range runs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			code, err := p.RunContext(ctx, []string{"run"})
+			if err != nil {
+				t.Errorf("concurrent run: %v", err)
+			}
+			if code != 0 {
+				t.Errorf("concurrent run exited %d, want 0", code)
+			}
+		}()
+	}
+	wg.Wait()
+	close(seen)
+
+	n := 0
+	for path := range seen {
+		if path != "app run" {
+			t.Errorf("a run resolved to %q, want \"app run\"", path)
+		}
+		n++
+	}
+	if n != runs {
+		t.Errorf("%d runs dispatched, want %d", n, runs)
+	}
+}
+
+// TestRun_recordsDoNotLeakBetweenRuns is the other half of re-entrancy: run N+1 must see none
+// of run N's records. The REPL and StdioServer shapes both depend on it.
+func TestRun_recordsDoNotLeakBetweenRuns(t *testing.T) {
+	var got []Outcome
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		rtx.RecordError(errors.New("one error per run"))
+	}}
+	p, _, _ := newTestProgram(h, []string{"run"})
+	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) { got = append(got, out) })
+
+	for range 3 {
+		if _, err := p.Run(p.args); err == nil {
+			t.Fatal("each run records an error, want it returned")
+		}
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("funnel fired %d times, want 3", len(got))
+	}
+	for i, out := range got {
+		if len(out.Errors) != 1 {
+			t.Errorf("run %d saw %d errors, want exactly its own 1 — records leaked", i+1, len(out.Errors))
+		}
 	}
 }

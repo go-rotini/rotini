@@ -184,10 +184,39 @@ type FlagDef struct {
 	Secret                bool     // when true, the value is redacted in usage/validation error output
 	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen
 	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Parser.Deprecations] reports when used
-	DottedKeys            bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
-	KeyPaths              []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
-	From                  []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
+	// Negatable adds a "--no-<x>" form for every long identifier of a bool flag, which sets
+	// it false. It is how an author expresses "turn this off for one run" when a default, a
+	// config file or an environment variable already turned it on — the direction a plain
+	// bool cannot express at all.
+	Negatable  bool
+	DottedKeys bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
+	KeyPaths   []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
+	From       []string // extra acquisition modes (spec from:): "file" resolves @path values, "stdin" resolves a bare "-"
+	// Complete is the declarative shell-completion hint for this flag's value (spec
+	// complete:). The zero value means no hint.
+	Complete Completion
 	Constraints
+}
+
+// Completion is a declarative hint about what an input's VALUE is, for the shell to complete.
+//
+// It covers the case between a static Enum and a [FlagValueCompleter]: "this is a file", which
+// is the commonest value shape there is and the one that previously required writing Go. The
+// hint reaches the shell as a directive on the last line of the hidden __complete output, and
+// each generated script translates it into that shell's own path completion.
+//
+// A dynamic completer still wins when it answers — the hint is the fallback, not a ceiling.
+type Completion struct {
+	// Kind is "file", "directory", or "none". Empty means no hint: the shell applies its
+	// own default, which for bash and zsh is file completion.
+	//
+	// "none" is not the same as empty. It SUPPRESSES the shell's default, which is how an
+	// opaque identifier — a container id, an API resource name — stops a shell offering
+	// the contents of the current directory as if they were plausible values.
+	Kind string
+	// Extensions narrows Kind "file" to these suffixes, written without a dot
+	// ("yaml", "json"). Empty offers every file.
+	Extensions []string
 }
 
 // ArgDef describes a single positional argument of a command. Variadic is true
@@ -199,6 +228,8 @@ type ArgDef struct {
 	Variadic bool
 	Default  string
 	Enum     []string
+	// Complete is the declarative shell-completion hint for this argument's value.
+	Complete Completion
 	Secret   bool // when true, the value is redacted in usage/validation error output
 	Hidden   bool // omitted from completion candidates (it still parses); help omission happens at codegen
 	Constraints

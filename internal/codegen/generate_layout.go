@@ -30,12 +30,14 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 		cmdPkgName: cmdPkgName,
 		cmdFile:    path.Base(cmdFile),
 		cmdImport:  moduleName + "/" + cmdPkgDir,
+		cmdHeader:  cmd.Header,
 	}
 
 	if ep := conf.Generate.mainPkg(); ep != nil && ep.File != "" {
 		epFile := filepath.ToSlash(ep.File)
 		lay.entrypointDir = filepath.Join(moduleRoot, filepath.FromSlash(path.Dir(epFile)))
 		lay.entrypointFile = path.Base(epFile)
+		lay.mainHeader = ep.Header
 	}
 
 	// The typed structs live in the cmd file unless a `models` target moves them to
@@ -50,6 +52,7 @@ func resolveLayout(conf *Conf, moduleRoot, moduleName string) layout {
 		lay.modelsDir = filepath.Join(moduleRoot, filepath.FromSlash(mDir))
 		lay.modelsFile = path.Base(mFile)
 		lay.modelsImport = moduleName + "/" + mDir
+		lay.modelsHeader = m.Header
 		// Pointing models at the cmd file is a no-op split: same file, same package.
 		lay.splitModels = lay.modelsDir != lay.cmdDir || lay.modelsFile != lay.cmdFile
 	}
@@ -124,6 +127,13 @@ type layout struct {
 	cmdPkgName string // cmd package name, e.g. "mycli"
 	cmdFile    string // basename of the single generated file (framework + rollup), e.g. "zz_rotini.gen.go"
 	cmdImport  string // cmd package import path (the entrypoint's Program import)
+
+	// cmdHeader, mainHeader and modelsHeader are each target's conf-declared `header:` —
+	// a license block, a copyright line, a //go:build constraint — written verbatim above
+	// rotini's own generated-code line on every file that target produces.
+	cmdHeader    string
+	mainHeader   string
+	modelsHeader string
 
 	entrypointDir  string // absolute output dir for the entrypoint main.go; "" when no entrypoint declared
 	entrypointFile string // entrypoint file name, e.g. "main.go"; "" when no entrypoint declared

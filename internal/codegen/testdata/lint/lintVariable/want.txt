@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:8:3: command demo: argument "target" sets variable, which names an environment variable — only env inputs and flags (as a flag's env fallback) read one, so here it would be silently ignored
+spec: .rotini.spec.yaml:8:3: command demo: config "timeout" sets variable, which names an environment variable — only env inputs and flags (as a flag's env fallback) read one, so here it would be silently ignored

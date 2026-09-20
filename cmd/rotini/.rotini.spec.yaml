@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=./.rotini-schema.spec.json
+# yaml-language-server: $schema=../../schema-spec.json
 version: 0.0.0
 command:
   name: rotini
@@ -156,7 +156,7 @@ command:
               - fast
               - collect
         - name: watch
-          summary: watch a rotini spec file for changes and re-generate
+          summary: watch a rotini spec file for changes and re-validate
           identifiers:
             - --watch
             - -w

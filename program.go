@@ -259,16 +259,61 @@ func (p *Program) newRunContext() *Context {
 	return rtx
 }
 
+// KeyVersion is the well-known registry key for the program's version string — the one
+// convention rotini offers for a value every CLI has and no framework should invent. Nothing
+// binds it: the entrypoint does, from whatever it was built with, and a handler reads it back.
+//
+//	// main.go
+//	var version = "0.0.0" // go build -ldflags "-X main.version=1.2.3"
+//	cmd.Program.Bind(rotini.KeyVersion, version).Execute()
+//
+//	// the version command's handler
+//	v, _ := rtx.Get[string](rotini.KeyVersion)
+//
+// Like [KeyParser] and the rest, it is a plain string so an untyped [Context.Bind] reaches it;
+// wrap it in a [Key] if you prefer the type carried with the name.
+const KeyVersion = "version"
+
+// Outcome is everything a run recorded, handed to the funnel in one value. Each slice is in
+// recording order, and this struct is the only way the records surface — [Context] keeps them
+// private so nothing can read a partial run.
+//
+// It is a struct rather than five parameters for two reasons, both of which matter to code
+// that will be written against a frozen v1: at a call site the channels are named, so Infos
+// and Successes (both []string) and Warnings and Errors (both []error) cannot be silently
+// transposed; and a channel added later is an additive field rather than a breaking change to
+// every custom funnel in existence.
+type Outcome struct {
+	// Infos are [Context.RecordInfo] messages: neutral output, no bearing on the exit code.
+	Infos []string
+	// Successes are [Context.RecordSuccess] messages.
+	Successes []string
+	// Warnings are [Context.RecordWarning] values: non-fatal, never raising the exit code.
+	Warnings []error
+	// Errors are [Context.RecordError] values — the end user's own failures.
+	Errors []error
+	// Panics are recovered panics and rotini-detected faults. There is no record call for
+	// these: the lifecycle captures them, so a handler cannot fake or suppress one.
+	Panics []*PanicError
+}
+
+// Empty reports whether the run recorded nothing at all — a silent success. The runtime skips
+// the funnel entirely in that case, so a funnel never sees an empty Outcome.
+func (o Outcome) Empty() bool {
+	return len(o.Infos)+len(o.Successes)+len(o.Warnings)+len(o.Errors)+len(o.Panics) == 0
+}
+
+// Failed reports whether the run recorded an error or a panic — what the default funnel's
+// exit floor keys on.
+func (o Outcome) Failed() bool { return len(o.Errors) > 0 || len(o.Panics) > 0 }
+
 // FunnelFunc is the program's outcome funnel. The runtime calls it once, after the lifecycle
-// and its teardown settle, with every channel the run recorded — infos, successes, warnings,
-// the handler's errors, and the panics slice (recovered panics plus rotini-detected faults,
-// which handlers cannot record). Each slice is in recording order, and these parameters are
-// the only way the records surface.
+// and its teardown settle, with everything the run recorded (see [Outcome]).
 //
 // The funnel decides what to print, where, in what order, and the final exit code: it is the
 // last authority, so [Context.Exit] inside it overrides whatever the lifecycle set
 // ([Context.SignalExit] is a no-op here).
-type FunnelFunc func(ctx context.Context, rtx *Context, infos []string, successes []string, warnings []error, errors []error, panics []*PanicError)
+type FunnelFunc func(ctx context.Context, rtx *Context, out Outcome)
 
 // WithFunnel sets the program's outcome funnel — the one place a run's recorded channels are
 // reported. It runs once per run, after the lifecycle settles, whenever any channel recorded
@@ -377,6 +422,24 @@ func (p *Program) Execute() error {
 // signal trap on every call, about 30µs — negligible once per process, but roughly 20x the
 // dispatch itself when repeated. Prefer [Program.RunContext] or [Program.WithoutSignalHandling],
 // as [REPL] and [StdioServer] do.
+//
+// # Concurrency
+//
+// Run is safe to call concurrently once the program is configured — every With* option and
+// [Program.Bind] must happen before the first run, since none of them is synchronized. Each
+// concurrent run has its own [Context], so records, exit state and mid-run bindings never
+// cross between them.
+//
+// Two things stay SHARED, and a concurrent host owns both:
+//
+//   - The handlers value given to [NewProgram]. rotini calls its methods from each run's
+//     goroutine, so mutable handler state needs its own synchronization.
+//   - The program's streams. os.Stdout is safe for concurrent writes; an unguarded
+//     bytes.Buffer in a test is not.
+//
+// Signal trapping is per-run: with no supplied context, every concurrent run installs its own
+// handler and all of them observe one signal. A concurrent host passes its own context
+// ([Program.RunContext]) or turns the trap off, which is what [StdioServer] does.
 func (p *Program) Run(argv []string) (int, error) {
 	if p.ctx != nil {
 		return p.runWith(p.ctx, true, argv)
@@ -404,6 +467,12 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		rtx := p.newRunContext()
 		for _, c := range complete(p.def, argv[1:], p.handlers, rtx) {
 			fmt.Fprintln(p.stdout, c)
+		}
+		// The declarative hint, when the input being completed declares one, goes last:
+		// a generated script reads the final line and translates it into that shell's
+		// own path completion.
+		if d := completionHint(p.def, argv[1:]); d != "" {
+			fmt.Fprintln(p.stdout, d)
 		}
 		return 0, nil
 	}
@@ -504,24 +573,26 @@ func asFault(err error) *PanicError { return &PanicError{Value: err} }
 // funnel is the final authority — it runs in the funnel stage, where rtx.Exit overrides. The
 // exit floors live in defaultFunnel, so a custom funnel simply does not inherit them.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
-	// Snapshot the private channels once; they surface only as the funnel's arguments.
-	infos := rtx.copyInfos()
-	successes := rtx.copySuccesses()
-	warnings := rtx.copyWarnings()
-	errs := rtx.copyErrors()
-	faults := rtx.copyFaults()
+	// Snapshot the private channels once; they surface only as the funnel's argument.
+	out := Outcome{
+		Infos:     rtx.copyInfos(),
+		Successes: rtx.copySuccesses(),
+		Warnings:  rtx.copyWarnings(),
+		Errors:    rtx.copyErrors(),
+		Panics:    rtx.copyFaults(),
+	}
 
 	// A clean run that recorded nothing never invokes the funnel.
-	if len(infos)+len(successes)+len(warnings)+len(errs)+len(faults) > 0 {
+	if !out.Empty() {
 		fn := p.funnelFn
 		if fn == nil {
 			fn = p.defaultFunnel
 		}
 		rtx.funnelStage = true // rtx.Exit now overrides; rtx.SignalExit is a no-op
-		fn(ctx, rtx, infos, successes, warnings, errs, faults)
+		fn(ctx, rtx, out)
 		rtx.funnelStage = false
 	}
-	return rtx.exitCode, joinOutcome(errs, faults)
+	return rtx.exitCode, joinOutcome(out.Errors, out.Panics)
 }
 
 // joinOutcome is the error a run returns to its caller: every recorded error and captured
@@ -542,24 +613,24 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 // infos and successes to stdout and the rest to stderr, then applies the exit floor: an error
 // or fault exits 1 unless a handler already set a deliberate code, which it never downgrades.
 // A [*PanicError]'s Stack is never printed — it stays for an errors.As.
-func (p *Program) defaultFunnel(_ context.Context, rtx *Context, infos, successes []string, warnings, errs []error, faults []*PanicError) {
-	for _, s := range infos {
+func (p *Program) defaultFunnel(_ context.Context, rtx *Context, out Outcome) {
+	for _, s := range out.Infos {
 		fmt.Fprintln(p.stdout, s)
 	}
-	for _, w := range warnings {
+	for _, w := range out.Warnings {
 		fmt.Fprintf(p.stderr, "Warning: %s\n", w.Error())
 	}
-	for _, e := range errs {
+	for _, e := range out.Errors {
 		fmt.Fprintf(p.stderr, "Error: %s\n", e.Error())
 	}
-	for _, pe := range faults {
+	for _, pe := range out.Panics {
 		fmt.Fprintf(p.stderr, "Fatal Error: %v\n", pe)
 	}
-	for _, s := range successes {
+	for _, s := range out.Successes {
 		fmt.Fprintln(p.stdout, s)
 	}
 	// A deliberate handler exit is never downgraded.
-	if rtx.exitCode == 0 && (len(errs) > 0 || len(faults) > 0) {
+	if rtx.exitCode == 0 && out.Failed() {
 		rtx.exitCode = 1
 	}
 }
