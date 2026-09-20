@@ -138,39 +138,72 @@ func TestLintSchemaTypes_qualifiedNeedsImport(t *testing.T) {
 
 // TestDocumentedLintCountsMatchTheRegistry keeps the numbers in the prose true.
 //
-// "29 lint rules" was written into README.md, the CLI docs page and the specification page,
-// and stayed there while four rules were added — three separate claims, all wrong, none
-// checkable. A count in prose is a fact about the code, so the code checks it.
+// "29 lint rules" was written into README.md, the home page, the CLI page and the
+// specification page, and stayed there while four rules were added — four separate claims,
+// all wrong, none checkable. A count in prose is a fact about the code, so the code checks it.
+//
+// It scans EVERY published document rather than a list someone has to remember to extend,
+// because the list is the thing that went stale the first time.
 func TestDocumentedLintCountsMatchTheRegistry(t *testing.T) {
-	root := filepath.Join("..", "..")
-	claims := []struct {
-		path string
-		n    int
-	}{
-		{filepath.Join(root, "README.md"), len(specLints)},
-		{filepath.Join(root, "docs", "content", "cli", "_index.md"), len(specLints)},
-		{filepath.Join(root, "docs", "content", "specification", "_index.md"), len(specLints)},
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
 	}
-	countRe := regexp.MustCompile(`(\d+)\s+(?:rotini\s+)?(?:spec\s+)?lint rules`)
+	// Normalized before matching — emphasis stripped, whitespace collapsed — so the pattern
+	// does not depend on where someone put the asterisks. See the same note in
+	// TestDocumentedSeedSizeMatchesReality, where anticipating one phrasing let a stale
+	// claim through.
+	countRe := regexp.MustCompile(`(\d+) (?:rotini )?(?:spec )?lint rules`)
+	normalize := func(body []byte) string {
+		return strings.Join(strings.Fields(strings.ReplaceAll(string(body), "*", "")), " ")
+	}
 
-	for _, c := range claims {
-		body, err := os.ReadFile(c.path)
+	checked := 0
+	for _, path := range publishedMarkdown(t, root) {
+		body, err := os.ReadFile(path)
 		if err != nil {
-			t.Errorf("read %s: %v", c.path, err)
+			t.Errorf("read %s: %v", path, err)
 			continue
 		}
-		matches := countRe.FindAllStringSubmatch(string(body), -1)
-		if len(matches) == 0 {
-			continue // the document stopped quoting a number, which is also fine
-		}
-		for _, m := range matches {
+		for _, m := range countRe.FindAllStringSubmatch(normalize(body), -1) {
 			got, err := strconv.Atoi(m[1])
 			if err != nil {
 				continue
 			}
-			if got != c.n {
-				t.Errorf("%s says %d lint rules; the registry has %d", c.path, got, c.n)
+			checked++
+			if got != len(specLints) {
+				rel, _ := filepath.Rel(root, path)
+				t.Errorf("%s says %d lint rules; the registry has %d", rel, got, len(specLints))
 			}
 		}
 	}
+	if checked == 0 {
+		t.Error("no document quotes a lint-rule count — if that is deliberate, delete this test")
+	}
+}
+
+// publishedMarkdown lists the documents a reader actually sees: the repository's own top-level
+// markdown and every page of the docs site. Generated pages are skipped — they are rendered
+// from the schemas and cannot drift by hand.
+func publishedMarkdown(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	for _, name := range []string{"README.md", "COMPATIBILITY.md", "UPGRADING.md", "CONTRIBUTING.md"} {
+		out = append(out, filepath.Join(root, name))
+	}
+	content := filepath.Join(root, "docs", "content")
+	err := filepath.WalkDir(content, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(p, ".md") || d.Name() == "reference.md" {
+			return nil
+		}
+		out = append(out, p)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", content, err)
+	}
+	return out
 }

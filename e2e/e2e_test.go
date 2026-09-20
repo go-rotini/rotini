@@ -1,3 +1,5 @@
+//go:build !mutation
+
 // Package e2e is rotini's outside-in tier: each test is a script that drives the REAL rotini
 // binary through a user's whole path — write a spec, generate, build, and then RUN the binary
 // and assert what it printed and what it exited with.
@@ -64,9 +66,12 @@ func rotiniBin(t *testing.T) string {
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
-	// The version is stamped so a script can assert it, and so the spec/conf version guard
-	// has something real to compare against.
-	cmd := exec.Command("go", "build", "-ldflags", "-X main.version=1.2.3", "-o", bin, "./cmd/rotini")
+	// Deliberately UNSTAMPED, so it reports the same version `go tool rotini` does when a
+	// script runs `go generate` — that path compiles rotini from the replace and cannot be
+	// stamped, and a mismatch between the two would fire the version guard on documents
+	// `rotini init` had just seeded. A script that needs a real version builds its own
+	// stamped binary (see r8_version_guard).
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/rotini")
 	cmd.Dir = repoRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build rotini: %v\n%s", err, out)
@@ -152,12 +157,16 @@ func TestScripts(t *testing.T) {
 			// gomodinit writes a go.mod wired to this working tree, which every script
 			// needs before it can build anything.
 			"gomodinit": func(ts *testscript.TestScript, neg bool, args []string) {
-				if neg || len(args) != 1 {
-					ts.Fatalf("usage: gomodinit <module-path>")
+				if neg || len(args) < 1 || len(args) > 2 {
+					ts.Fatalf("usage: gomodinit <module-path> [rotini-version]")
+				}
+				version := "v0.0.0"
+				if len(args) == 2 {
+					version = args[1]
 				}
 				ts.Check(os.WriteFile(
 					filepath.Join(ts.MkAbs("."), "go.mod"),
-					[]byte(gomod(args[0], ts.Getenv("ROTINI_ROOT"))),
+					[]byte(gomod(args[0], version, ts.Getenv("ROTINI_ROOT"))),
 					0o600,
 				))
 			},
@@ -167,17 +176,29 @@ func TestScripts(t *testing.T) {
 	})
 }
 
-// gomod is the go.mod every script starts from: rotini required at a placeholder version and
-// replaced with the working tree.
-func gomod(module, root string) string {
+// gomod is the go.mod every script starts from: rotini required at a placeholder version,
+// declared as a TOOL, and replaced with the working tree.
+//
+// The tool directive is what `go tool rotini` and therefore `go generate ./...` resolve
+// through — the seeded main.go carries a //go:generate line that calls it, so a module
+// without it cannot run the loop the docs describe. `go get -tool` writes the same line;
+// here the replace points it at the working tree instead of a published version.
+//
+// The required VERSION is what a rotini built through this module reports: build info names
+// the module version, and that outranks any -ldflags stamp (which is the right precedence —
+// `go install pkg@v1.2.3` must report v1.2.3). A script that needs a particular version asks
+// for it here rather than trying to stamp a build it does not control.
+func gomod(module, version, root string) string {
 	return fmt.Sprintf(`module %s
 
 go 1.27
 
-require github.com/go-rotini/rotini v0.0.0
+require github.com/go-rotini/rotini %s
 
-replace github.com/go-rotini/rotini => %s
-`, module, strings.ReplaceAll(root, `\`, `/`))
+tool github.com/go-rotini/rotini/cmd/rotini
+
+replace github.com/go-rotini/rotini %s => %s
+`, module, version, version, strings.ReplaceAll(root, `\`, `/`))
 }
 
 // goEnv reads one `go env` value, preferring an already-set environment variable. Resolved

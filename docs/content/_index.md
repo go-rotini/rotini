@@ -31,7 +31,7 @@ command:
 
 ### 1. Your CLI is checked before your code exists
 
-The spec is validated by a JSON Schema plus 29 rotini lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
+The spec is validated by a JSON Schema plus 33 rotini lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
 
 A framework that declares the CLI *in Go* can only catch what the compiler happens to notice.
 
@@ -43,7 +43,9 @@ See [batteries](/batteries).
 
 ### 3. The generated code is small, legible, and yours
 
-A hello-world CLI generates **108 lines** across three files — readable in one sitting, reviewable in a diff. The machinery is an ordinary import you upgrade with `go get -u`, not a vendored copy you must never edit.
+`rotini init` generates **342 lines across 5 files** — and those five files are a CLI that already answers `--help`, `--version`, `help <command>` and `version`, because the seeded spec declares them and the seeded handlers are wired to the pages codegen just produced. Readable in one sitting, reviewable in a diff, and every line of it yours to delete.
+
+The machinery is an ordinary import you upgrade with `go get -u`, not a vendored copy you must never edit.
 
 ## The cost, stated up front
 

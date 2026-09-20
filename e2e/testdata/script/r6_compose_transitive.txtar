@@ -135,7 +135,7 @@ func main() {
 		Execute()
 }
 -- cmd/grand/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: grand
   summary: the grandchild
@@ -148,7 +148,7 @@ command:
       schema:
         type: bool
 -- cmd/grand/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: cmd
@@ -158,7 +158,7 @@ generate:
     - type: help
       enabled: true
 -- cmd/child/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: child
   summary: the child, as the child describes itself
@@ -166,7 +166,7 @@ command:
   commands:
     - $ref: ../grand/.rotini.spec.yaml
 -- cmd/child/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: cmd
@@ -176,7 +176,7 @@ generate:
     - type: help
       enabled: true
 -- cmd/root/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: root
   summary: the root
@@ -194,7 +194,7 @@ command:
     - $ref: ../child/.rotini.spec.yaml
       summary: as the parent describes it
 -- cmd/root/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: main

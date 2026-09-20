@@ -50,7 +50,7 @@ grep ':rotini:' internal/cmd/hints/renders/completion_fish.txt
 grep ':rotini:' internal/cmd/hints/renders/completion_powershell.txt
 
 -- completion.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: main
@@ -64,7 +64,7 @@ generate:
       embed: true
       embed_dir: internal/cmd/hints/renders
 -- cmd/hints/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: hints
   summary: completion hints
@@ -121,7 +121,7 @@ command:
             complete:
               kind: file
 -- cmd/hints/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: main

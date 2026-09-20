@@ -37,7 +37,7 @@ beta
 gamma
 -- empty.txt --
 -- cmd/filter/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: filter
   summary: text filters
@@ -56,7 +56,7 @@ command:
         schema:
           type: '[]string'
 -- cmd/filter/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: main

@@ -40,7 +40,7 @@ quit
 -- eof.txt --
 echo last
 -- cmd/shell/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: shell
   summary: a REPL
@@ -53,7 +53,7 @@ command:
           schema:
             type: '[]string'
 -- cmd/shell/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: cmd

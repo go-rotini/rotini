@@ -13,6 +13,11 @@ type Handlers interface {
 	CascadingPostRun(ctx context.Context, rtx *Context)
 }
 
+// The four Default* types below have empty method bodies, so `go tool cover` reports them at
+// 0.0% forever: there are no statements to count. TestDefaultHooksAreNoOps executes all four
+// regardless — "does nothing, safely, including with a nil context" is a real contract, since
+// every generated stub embeds them.
+
 // DefaultCascadingPreRun is an embeddable no-op [Handlers.CascadingPreRun].
 type DefaultCascadingPreRun struct{}
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1184,5 +1185,134 @@ func TestKeyBinder_ignoresUnusableBindings(t *testing.T) {
 				t.Error("an unusable KeyBinder binding produced a nil binder instead of the default")
 			}
 		})
+	}
+}
+
+// ── raw stdin formats (text / lines) ─────────────────────────────────────────
+//
+// The grep/jq/fmt family, whose stdin is not a document. Before these formats a command
+// consuming plain text could not declare its stdin channel at all: it read rtx.Stdin
+// directly, which appears in no help page, no completion and no validation.
+
+type tbTextCmd struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *string `stdin:"text"`
+}
+type tbTextInputs struct{ App tbTextCmd }
+
+type tbLinesCmd struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *[]string `stdin:"lines"`
+}
+type tbLinesInputs struct{ App tbLinesCmd }
+
+type tbTextReqCmd struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *string `stdin:"text,required"`
+}
+type tbTextReqInputs struct{ App tbTextReqCmd }
+
+func TestBinder_stdinText(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"a single line loses its trailing newline", "hello world\n", "hello world"},
+		{"no trailing newline is fine", "hello world", "hello world"},
+		{"interior newlines are content", "a\nb\nc\n", "a\nb\nc"},
+		{"interior whitespace is content", "  two  spaces  \n", "  two  spaces  "},
+		{"a CRLF line ending is handled", "hello\r\n", "hello"},
+		{"only the LAST newline goes", "a\n\n", "a\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+			rtx.Stdin = strings.NewReader(tc.body)
+
+			var in tbTextInputs
+			if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+				t.Fatalf("Bind: %v", err)
+			}
+			if in.App.Stdin == nil {
+				t.Fatal("the payload is nil, but something was piped")
+			}
+			if *in.App.Stdin != tc.want {
+				t.Errorf("payload = %q, want %q", *in.App.Stdin, tc.want)
+			}
+		})
+	}
+}
+
+func TestBinder_stdinLines(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"three lines", "alpha\nbeta\ngamma\n", []string{"alpha", "beta", "gamma"}},
+		// A trailing newline is a terminator, not a separator: "a\nb\n" is two lines.
+		{"a trailing newline adds no empty element", "a\nb\n", []string{"a", "b"}},
+		{"no trailing newline", "a\nb", []string{"a", "b"}},
+		{"a blank interior line is a line", "a\n\nb\n", []string{"a", "", "b"}},
+		{"one line", "only\n", []string{"only"}},
+		{"CRLF input stays usable", "a\r\nb\r\n", []string{"a", "b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+			rtx.Stdin = strings.NewReader(tc.body)
+
+			var in tbLinesInputs
+			if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+				t.Fatalf("Bind: %v", err)
+			}
+			if in.App.Stdin == nil {
+				t.Fatal("the payload is nil, but something was piped")
+			}
+			if !slices.Equal(*in.App.Stdin, tc.want) {
+				t.Errorf("payload = %q, want %q", *in.App.Stdin, tc.want)
+			}
+		})
+	}
+}
+
+// TestBinder_rawStdinNilVsEmpty: the payload is a POINTER so a filter can tell "nothing was
+// piped" from "an empty payload was piped" — for a filter that is a real difference, and it is
+// why the field is not a plain string.
+func TestBinder_rawStdinNilVsEmpty(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	rtx.Stdin = strings.NewReader("")
+
+	var in tbTextInputs
+	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Stdin != nil {
+		t.Errorf("nothing piped left a non-nil payload %q", *in.App.Stdin)
+	}
+}
+
+// TestBinder_rawStdinRequired: `required: true` on a raw payload rejects an empty stdin, with
+// a usage-class message naming the format rather than a nil the handler dereferences.
+func TestBinder_rawStdinRequired(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	rtx.Stdin = strings.NewReader("")
+
+	var in tbTextReqInputs
+	err := NewBinder(BindMeta{}).Bind(rtx, &in)
+	if err == nil {
+		t.Fatal("an empty required stdin payload was accepted")
+	}
+	if !errors.Is(err, ErrUsage) {
+		t.Errorf("category = %v, want usage — an empty pipe is the caller's doing", CategoryOf(err))
+	}
+	for _, want := range []string{"required", "text"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message %q does not mention %q", err, want)
+		}
 	}
 }

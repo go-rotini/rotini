@@ -104,6 +104,7 @@ func goBuild(t *testing.T, dir string) (string, error) {
 // package — which already imports the handler package. If this test ever stops
 // failing, the cycle was solved some other way and the models target may be moot.
 func TestModels_withoutTargetTheHandlerCycles(t *testing.T) {
+	skipUnlessCompiling(t)
 	dir := modelsModule(t, `version: 0.0.0
 generate:
   packages:
@@ -124,6 +125,7 @@ generate:
 // TestModels_targetBreaksTheCycle is the fix: with the types in their own package,
 // cmd and handlers both import models, and models imports neither.
 func TestModels_targetBreaksTheCycle(t *testing.T) {
+	skipUnlessCompiling(t)
 	dir := modelsModule(t, `version: 0.0.0
 generate:
   packages:

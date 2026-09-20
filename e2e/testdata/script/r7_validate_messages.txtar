@@ -44,19 +44,19 @@ exec rotini validate ok.spec.yaml --config ok.conf.yaml
 ! stderr .
 
 -- ok.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: cmd
       file: internal/cmd/bad/zz_bad.go
       package: bad
 -- ok.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: bad
   summary: a valid document
 -- dup.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: bad
   flags:
@@ -71,12 +71,12 @@ command:
       schema:
         type: string
 -- unknown.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: bad
   bogus_key: nope
 -- badtype.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: bad
   flags:
@@ -86,14 +86,14 @@ command:
       schema:
         type: 'not a go type!'
 -- timeout.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: bad
   commands:
     - name: build
       timeout: 10s
 -- many.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: bad
   flags:

@@ -17,6 +17,7 @@ import (
 // was emitted per-project, each package got its own incompatible rotini.Context and this
 // could not compile.
 func TestGenerateCompose_localRef(t *testing.T) {
+	skipUnlessCompiling(t)
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)

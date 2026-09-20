@@ -93,7 +93,7 @@ stdout '--\[no-\]color'
 server:
   port: 9090
 -- cmd/app/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: app
   summary: precedence demo
@@ -152,7 +152,7 @@ command:
         type: string
         default: default-region
 -- cmd/app/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: main

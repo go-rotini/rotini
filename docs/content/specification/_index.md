@@ -89,15 +89,23 @@ Every way data reaches your CLI is declared. `rotini.Collect[T]` reconciles all 
 
 | Channel | Spec surface |
 |---|---|
-| argv flags | `flags` — typed, clustering, `count`, repeatable, `cascading` |
+| argv flags | `flags` — typed, clustering, `count`, repeatable, `negatable`, `cascading` |
 | argv positionals | `arguments` — variadic, `passthrough` |
 | value sentinels | `from: [file]` (`@path`), `from: [stdin]` (`-`) |
-| environment | `env`, `env_prefix`, or a nested family via `nesting` |
+| environment | `env`, `env_prefix`, a nested family via `nesting`, or an exact `variable` |
+| **a flag's own env variable** | `variable:` on a flag — `--token` reads `$GITHUB_TOKEN`, exempt from `env_prefix` |
 | configuration files | `config_files` — a fixed `path`, `walk-up`, or `xdg` |
 | **config path from a flag or env var** | `config_source` — the declarative two-phase parse |
 | configuration values | `config` — read by dotted `key`, optionally pinned to one `file` |
-| stdin | `stdin` — a typed, schema-validated payload |
+| stdin | `stdin` — a typed, schema-validated payload, or raw `text` / `lines` for a filter |
 | defaults | `schema.default` on any input |
+
+Two more things an input can declare, neither of them a channel:
+
+| | |
+|---|---|
+| what the value IS | `type: existingfile` / `existingdir` — checked at parse time, so a bad path names the flag you typed instead of surfacing as an `*os.PathError` inside a handler |
+| what a SHELL should offer for it | `complete: {kind: file, extensions: [yaml]}` — or `kind: none`, which suppresses the shell's file fallback so an opaque id stops offering the current directory |
 
 ## Validation
 

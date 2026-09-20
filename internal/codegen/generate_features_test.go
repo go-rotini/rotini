@@ -219,6 +219,7 @@ func readEmitted(t *testing.T, dir, rel string) string {
 // RENDERED help contents, which is where most of the doc pipeline (headings, grouping,
 // usage derivation, flag rows, cascading flags, env/config sections) actually runs.
 func TestGenerateFeatures_inline(t *testing.T) {
+	skipUnlessCompiling(t)
 	dir, files := emitFeatureModule(t, featureConfInline)
 
 	for _, f := range files {
@@ -291,6 +292,7 @@ func TestGenerateFeatures_inline(t *testing.T) {
 // output files under embed_dir sourced via //go:embed, and the editable *.tmpl seeded
 // into template_dir that the doc pages then render from.
 func TestGenerateFeatures_embed(t *testing.T) {
+	skipUnlessCompiling(t)
 	dir, files := emitFeatureModule(t, featureConfEmbed)
 
 	for _, want := range []string{
@@ -419,9 +421,7 @@ func TestFlagGroups(t *testing.T) {
 // any are: help, man and markdown emit a path-keyed resolver that uses strings.Join, and
 // completion — keyed by shell — does not.
 func TestFeatureCombinations_compile(t *testing.T) {
-	if testing.Short() {
-		t.Skip("compiles a generated module per combination; skipped under -short")
-	}
+	skipUnlessCompiling(t)
 	const spec = `version: 0.0.0
 command:
   name: acme

@@ -33,7 +33,7 @@ stdout 'shutdown: flush'
 ! stderr 'Error'
 
 -- cmd/daemon/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: daemon
   summary: a long-running service
@@ -41,7 +41,7 @@ command:
     - name: serve
       summary: run workers until interrupted
 -- cmd/daemon/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: cmd

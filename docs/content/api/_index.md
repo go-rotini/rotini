@@ -64,9 +64,22 @@ merged  := rotini.OverlayInputs(argv, env)
 A handler does not print its results or its errors. It **records** them, and the runtime reports them once, after teardown, through a single funnel. A generated handler therefore carries zero reporting code — and a program that wants different reporting changes one function instead of every command.
 {{< /alert >}}
 
-Five channels reach the funnel: infos, successes, warnings, errors, and panics (recovered panics plus rotini-detected faults — there is no record call for those). The default funnel prints each with a severity label and applies a conservative exit floor: a recorded error exits non-zero unless a deliberate code was already set, which it never downgrades.
+Five channels reach the funnel, together in one `Outcome`: `Infos`, `Successes`, `Warnings`, `Errors`, and `Panics` (recovered panics plus rotini-detected faults — there is no record call for those). The default funnel prints each with a severity label and applies a conservative exit floor: a recorded error exits non-zero unless a deliberate code was already set, which it never downgrades.
 
 `WithFunnel` replaces all of it, receiving every channel at once so cross-channel logic, print order and the exit code live in one place.
+
+{{< code title="a custom funnel" language="golang" open="true" collapsible="false" copy="true" >}}
+cmd.Program.WithFunnel(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+    for _, e := range out.Errors {
+        fmt.Fprintf(rtx.Stderr, "%s: %v\n", rtx.Path(), e)
+    }
+    if out.Failed() {
+        rtx.Exit(2) // the funnel is the final authority on the exit code
+    }
+}).Execute()
+{{< /code >}}
+
+The channels arrive as a struct rather than as five parameters for a reason that matters to code written against a frozen v1: the two `[]string` channels and the two `[]error` channels cannot be silently transposed at a call site, and a sixth channel added later is an additive field instead of a breaking change to every custom funnel in existence.
 
 ## Errors
 

@@ -51,7 +51,7 @@ stderr 'Error: stopping'
 stdout 'teardown ran'
 
 -- cmd/out/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: out
   summary: outcome demo
@@ -72,7 +72,7 @@ command:
     - name: stop
       summary: records an error after teardown runs
 -- cmd/out/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: main

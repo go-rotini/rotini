@@ -20,6 +20,13 @@ key in each is a minimum, not a pin (see COMPATIBILITY.md). If validation compla
 binary is older than your document, you upgraded the runtime and not the tool, or the other
 way round — they are one module and must be at one version.
 
+The version `rotini version` reports comes from the binary's **build info**, which through
+`go tool` is the version in your `go.mod`. So the tool version and your `require` line are the
+same fact, and there is nothing separate to keep aligned. (A build from source may stamp one
+in with `-ldflags "-X main.version=…"`; that applies only when build info carries no release
+version — a development build or a pseudo-version — because a real module version is the
+better answer.)
+
 ## What regenerating touches
 
 This is the part worth knowing precisely, because it is the only operation that can destroy

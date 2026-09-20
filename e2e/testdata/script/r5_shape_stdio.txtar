@@ -42,12 +42,12 @@ stdout 'needs a name'
 -- line-apierror.txt --
 {"jsonrpc":"2.0","id":3,"method":"echo","params":{}}
 -- cmd/rpc/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: rpc
   summary: a JSON-RPC server over stdio
 -- cmd/rpc/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: cmd

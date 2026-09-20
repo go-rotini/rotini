@@ -10,6 +10,10 @@
 #
 # PowerShell is included deliberately: rotini SHIPS a powershell script, so it is either tested
 # or it should not be shipped.
+#
+# Each shell's block is conditional on that shell existing, so this rig degrades rather than
+# failing on a machine without fish. CI installs all four on ubuntu and macos (see the e2e job
+# in .github/workflows/ci.yml), so the coverage there is real rather than skipped.
 
 gomodinit example.com/shells
 
@@ -118,7 +122,7 @@ $directive = $lines | Where-Object { $_ -like ':rotini:*' } | Select-Object -Las
 if (-not $directive) { throw "no directive for a file-valued flag" }
 Write-Output "OK: pwsh separated the directive"
 -- cmd/app/.rotini.spec.yaml --
-version: 1.2.3
+version: 0.0.0
 command:
   name: app
   summary: a CLI with completion
@@ -140,7 +144,7 @@ command:
     - name: status
       summary: show status
 -- cmd/app/.rotini.conf.yaml --
-version: 1.2.3
+version: 0.0.0
 generate:
   packages:
     - type: main
