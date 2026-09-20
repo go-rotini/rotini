@@ -352,6 +352,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 
 	return renderRotiniFile(templateRotiniData{
 		Package:       lay.cmdPkgName,
+		PathResolvers: hasPathResolver(features),
 		Header:        lay.cmdHeader,
 		RuntimeImport: runtimeImport,
 		Imports:       renderImports(imports),
@@ -459,6 +460,18 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		}
 	}
 	return nil
+}
+
+// hasPathResolver reports whether any enabled feature emits a resolver keyed by COMMAND PATH
+// (help, man, markdown) rather than by shell (completion). Only those use strings.Join, so
+// only those justify importing "strings" into the generated file.
+func hasPathResolver(features []templateFeature) bool {
+	for _, f := range features {
+		if !f.PerShell {
+			return true
+		}
+	}
+	return false
 }
 
 // featureEnabled reports whether the conf turns on the named generate feature.

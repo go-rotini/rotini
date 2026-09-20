@@ -409,3 +409,74 @@ func TestFlagGroups(t *testing.T) {
 		t.Error("no flags should yield no buckets, so the section is omitted entirely")
 	}
 }
+
+// TestFeatureCombinations_compile: every subset of the four features has to produce a module
+// that COMPILES. The golden tests cover one combination, which is how a program with only the
+// completion feature on ended up importing "strings" and never using it — the generated file
+// did not build, and no test in the repo turned that feature on alone.
+//
+// The imports the generated file needs depend on WHICH features are on, not merely on whether
+// any are: help, man and markdown emit a path-keyed resolver that uses strings.Join, and
+// completion — keyed by shell — does not.
+func TestFeatureCombinations_compile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("compiles a generated module per combination; skipped under -short")
+	}
+	const spec = `version: 0.0.0
+command:
+  name: acme
+  summary: a cli
+  description: A cli.
+  commands:
+    - name: deploy
+      summary: deploy it
+`
+	all := []string{"help", "completion", "man", "markdown"}
+
+	// Every non-empty subset, plus the empty one: 16 in total.
+	for mask := range 1 << len(all) {
+		var on []string
+		for i, name := range all {
+			if mask&(1<<i) != 0 {
+				on = append(on, name)
+			}
+		}
+		label := "none"
+		if len(on) > 0 {
+			label = strings.Join(on, "+")
+		}
+
+		t.Run(label, func(t *testing.T) {
+			repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+			if err != nil {
+				t.Fatal(err)
+			}
+			conf := `version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/acme/zz_acme.go
+      package: acme
+`
+			if len(on) > 0 {
+				conf += "  features:\n"
+				for _, name := range on {
+					conf += "    - type: " + name + "\n      enabled: true\n"
+				}
+			}
+
+			dir := t.TempDir()
+			writeTestFile(t, dir, "go.mod", "module example.com/acme\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
+			writeTestFile(t, dir, ".rotini.spec.yaml", spec)
+			writeTestFile(t, dir, ".rotini.conf.yaml", conf)
+			t.Chdir(dir)
+
+			if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}); err != nil {
+				t.Fatalf("generate with %s: %v", label, err)
+			}
+			if out, err := goBuild(t, dir); err != nil {
+				t.Fatalf("go build with features %s:\n%s", label, out)
+			}
+		})
+	}
+}

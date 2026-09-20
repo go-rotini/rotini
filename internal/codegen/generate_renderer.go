@@ -310,7 +310,12 @@ type templateRotiniData struct {
 	OutputTypes   string // pre-rendered output type declarations; "" when none
 	BindMeta      string // pre-rendered bind metadata; "" when none
 	Features      []templateFeature
-	EmbedImport   bool   // emit `import _ "embed"` — only when some feature uses //go:embed
+	EmbedImport   bool // emit `import _ "embed"` — only when some feature uses //go:embed
+	// PathResolvers is true when some feature emits a path-keyed resolver — help, man or
+	// markdown — which is what needs "strings". Completion is keyed by SHELL and does not,
+	// so a program with only the completion feature on would otherwise import strings and
+	// not use it, and the generated file would not compile.
+	PathResolvers bool
 	Header        string // the target's conf-declared `header:`; "" for none
 }
 

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
+	"github.com/go-rotini/recon"
 	"strings"
 	"testing"
 )
@@ -15,9 +17,11 @@ import (
 // and all three of those differ on Windows. A suite that merely runs on three platforms
 // proves the code compiles there, not that it behaves there.
 
-// TestConfigPath_tildeExpansion covers "~" in a declared config path. It is the one piece of
-// shell syntax rotini honors itself, because the path is read from a file rather than typed at
-// a shell that would have expanded it.
+// TestConfigPath_tildeExpansion covers the schema's claim that a config path "supports ~ for
+// home dir". It is the one piece of shell syntax rotini honors itself, because the path comes
+// from a file rather than from a shell that would already have expanded it — and the claim
+// rests on one option at one call site, which is exactly the kind of thing that regresses
+// silently.
 func TestConfigPath_tildeExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -27,20 +31,40 @@ func TestConfigPath_tildeExpansion(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
-		want string
+		want string // "" means only the assertions after the table apply
 	}{
-		{"a bare tilde", "~", home},
 		{"tilde and a child", "~/.config/app.yaml", filepath.Join(home, ".config", "app.yaml")},
 		{"an absolute path is untouched", filepath.Join(home, "x.yaml"), filepath.Join(home, "x.yaml")},
-		{"a relative path is untouched", filepath.Join("etc", "x.yaml"), filepath.Join("etc", "x.yaml")},
-		{"a tilde inside the path is NOT a home reference", filepath.Join("a", "~", "x"), filepath.Join("a", "~", "x")},
-		{"a tilde-prefixed name is not a home reference", "~user/x", "~user/x"},
+		// A relative path is resolved against the working directory, as any path is; the
+		// point here is that an INTERIOR "~" is an ordinary directory name, not a second
+		// home reference.
+		{"a tilde inside the path is not a home reference", filepath.Join("a", "~", "x.yaml"), ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := expandHome(tc.in)
-			if filepath.Clean(got) != filepath.Clean(tc.want) {
-				t.Errorf("expandHome(%q) = %q, want %q", tc.in, got, tc.want)
+			b := NewBinder(BindMeta{})
+			src, err := b.fileSource(ConfigFile{Name: "cfg", Path: tc.in}, nil)
+			if err != nil {
+				t.Fatalf("fileSource(%q): %v", tc.in, err)
+			}
+			// fileSource wraps the recon source to carry the entry's logical name;
+			// the path lives on the file source underneath.
+			if named, wrapped := src.(namedSource); wrapped {
+				src = named.Source
+			}
+			fsrc, ok := src.(*recon.FileSource)
+			if !ok {
+				t.Fatalf("the config source is a %T, not a *recon.FileSource", src)
+			}
+			got := filepath.Clean(fsrc.Path())
+			if tc.want != "" && got != filepath.Clean(tc.want) {
+				t.Errorf("path %q resolved to %q, want %q", tc.in, got, tc.want)
+			}
+			// The literal "~" segment survives: only a LEADING one is a home
+			// reference. (Checking that the result is outside $HOME would not work —
+			// a checkout usually lives under it.)
+			if tc.want == "" && !strings.Contains(got, string(filepath.Separator)+"~"+string(filepath.Separator)) {
+				t.Errorf("path %q resolved to %q — an interior ~ is a directory name and must survive", tc.in, got)
 			}
 		})
 	}

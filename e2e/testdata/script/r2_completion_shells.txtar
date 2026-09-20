@@ -1,0 +1,212 @@
+# R2 — the generated completion scripts, actually executed by the shells they target.
+#
+# The campaign asks for bash, zsh and fish to be driven BY HAND, because the
+# description-after-tab wire format differs per shell and nothing else in the project tests
+# them live. Hand-driving does not survive the campaign; this does.
+#
+# Each shell sources the script rotini generated and invokes the completion function directly,
+# which is what pressing TAB does. A script with a syntax error, a stray directive line leaking
+# through as a candidate, or a shell-specific quoting mistake fails here.
+#
+# PowerShell is included deliberately: rotini SHIPS a powershell script, so it is either tested
+# or it should not be shipped.
+
+gomodinit example.com/shells
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# The scripts are generated as completion_<shell>.txt; each shell wants its own extension.
+cp internal/cmd/app/renders/completion_bash.txt completion_bash.sh
+cp internal/cmd/app/renders/completion_zsh.txt completion_zsh.sh
+cp internal/cmd/app/renders/completion_fish.txt completion_fish.fish
+cp internal/cmd/app/renders/completion_powershell.txt completion_powershell.ps1
+
+# Sanity: the binary answers the protocol the scripts speak.
+exec ./app$exe __complete ''
+stdout 'deploy'
+exec ./app$exe __complete --config ''
+stdout '^:rotini:file yaml yml$'
+
+[exec:bash] exec bash drive-bash.sh
+[exec:bash] stdout 'CANDIDATES: deploy status'
+[exec:bash] ! stdout ':rotini:'
+
+[exec:zsh] exec zsh drive-zsh.sh
+[exec:zsh] stdout 'OK: zsh script parsed'
+
+[exec:fish] exec fish drive-fish.sh
+[exec:fish] stdout 'CANDIDATES: .*deploy'
+[exec:fish] stdout 'CANDIDATES: .*status'
+[exec:fish] ! stdout ':rotini:'
+
+# PowerShell reads a config file under $HOME at startup, and testscript hands every script a
+# $HOME that does not exist. Point it at the work directory — last, so nothing above is
+# affected by the change.
+[exec:pwsh] env HOME=$WORK
+[exec:pwsh] env DOTNET_CLI_HOME=$WORK
+[exec:pwsh] env POWERSHELL_TELEMETRY_OPTOUT=1
+[exec:pwsh] exec pwsh -NoProfile -File drive-pwsh.ps1
+[exec:pwsh] stdout 'CANDIDATES: deploy status'
+[exec:pwsh] ! stdout ':rotini:'
+
+-- drive-bash.sh --
+# Source the generated script and call its completion function the way TAB does.
+set -e
+export PATH="$PWD:$PATH"
+source ./completion_bash.sh
+
+COMP_WORDS=(app "")
+COMP_CWORD=1
+_app_complete
+echo "CANDIDATES: ${COMPREPLY[@]}"
+
+# A directive must never reach the user as a candidate.
+COMP_WORDS=(app --config "")
+COMP_CWORD=2
+COMPREPLY=()
+_app_complete
+for c in "${COMPREPLY[@]}"; do
+    case "$c" in
+        :rotini:*) echo "LEAKED: $c"; exit 1 ;;
+    esac
+done
+echo "OK: bash handled the directive"
+-- drive-zsh.sh --
+# zsh's _describe needs a live completion system, so the meaningful check without one is
+# that the generated script PARSES as zsh and defines the function it registers.
+set -e
+export PATH="$PWD:$PATH"
+autoload -Uz compinit 2>/dev/null || true
+zsh -n ./completion_zsh.sh
+echo "OK: zsh script parsed"
+-- drive-fish.sh --
+# `complete -C` asks fish for the completions of a command line non-interactively — the real
+# path, including fish's own `commandline` calls, which only work inside that context.
+set -x PATH $PWD $PATH
+source ./completion_fish.fish
+
+set -l out (complete -C "app ")
+echo "CANDIDATES: "(string join ' ' (for l in $out; string split -f1 \t -- $l; end))
+
+for l in $out
+    if string match -q ':rotini:*' -- $l
+        echo "LEAKED: $l"
+        exit 1
+    end
+end
+echo "OK: fish separated the directive"
+-- drive-pwsh.ps1 --
+# PowerShell has no way to invoke a registered native completer directly without a live
+# host, so this exercises the same split the script performs: run __complete, separate the
+# directive from the candidates, and confirm neither contaminates the other.
+$ErrorActionPreference = 'Stop'
+$exe = Join-Path $PWD 'app'
+if ($IsWindows) { $exe += '.exe' }
+
+# The script itself must parse as PowerShell.
+$null = [System.Management.Automation.Language.Parser]::ParseFile(
+    (Join-Path $PWD 'completion_powershell.ps1'), [ref]$null, [ref]$null)
+
+$lines = @(& $exe __complete '')
+$candidates = $lines | Where-Object { $_ -notlike ':rotini:*' } | ForEach-Object { ($_ -split "`t", 2)[0] }
+Write-Output ("CANDIDATES: " + ($candidates -join ' '))
+
+$lines = @(& $exe __complete '--config' '')
+$directive = $lines | Where-Object { $_ -like ':rotini:*' } | Select-Object -Last 1
+if (-not $directive) { throw "no directive for a file-valued flag" }
+Write-Output "OK: pwsh separated the directive"
+-- cmd/app/.rotini.spec.yaml --
+version: 1.2.3
+command:
+  name: app
+  summary: a CLI with completion
+  flags:
+    - name: config
+      summary: config file
+      identifiers:
+        - --config
+      schema:
+        type: string
+        complete:
+          kind: file
+          extensions:
+            - yaml
+            - yml
+  commands:
+    - name: deploy
+      summary: deploy it
+    - name: status
+      summary: show status
+-- cmd/app/.rotini.conf.yaml --
+version: 1.2.3
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+  features:
+    - type: completion
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/app/renders
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type appHandlers struct{ base }
+
+func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/app/app_deploy.go --
+package app
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type appDeployHandlers struct{ base }
+
+func (*appDeployHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/app/app_status.go --
+package app
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type appStatusHandlers struct{ base }
+
+func (*appStatusHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- cmd/app/main.go --
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	app "example.com/shells/internal/cmd/app"
+)
+
+func main() {
+	app.Program.
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}
