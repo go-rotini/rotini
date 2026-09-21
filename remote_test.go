@@ -189,3 +189,99 @@ func TestRun_remoteTimeout(t *testing.T) {
 		t.Errorf("stderr = %q, want 'timed out'", errb)
 	}
 }
+
+// TestRemoteBinaryPath covers the doctor seam: asking, from outside, whether a remote
+// sub-command would actually resolve.
+//
+// It exists because the obvious way to answer that — exec.LookPath — is wrong. Dispatch looks
+// NEXT TO THE HOST BINARY first (the git/kubectl convention), then in the discovery path for a
+// discovered plugin, then on PATH. A doctor built on LookPath reports every conventionally
+// installed plugin as missing, which is what example-plug's `plugins` command did before this.
+func TestRemoteBinaryPath(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// The discovery path holds both; neither sits next to the test binary or on PATH.
+	write("app-found")
+	write("app-only")
+
+	cmd := ResolvedCommand{
+		Name: "app",
+		Remotes: []RemoteDef{
+			{Name: "found", Binary: "app-found", Aliases: []string{"f"}},
+			{Name: "gone", Binary: "app-gone-nothing-here"},
+		},
+		Discovery: &RemoteDiscoveryDef{Prefix: "app-", Path: dir},
+	}
+
+	t.Run("a declared remote does NOT see the discovery path", func(t *testing.T) {
+		// app-found exists only in the discovery path, and a declared remote is not
+		// searched there — dispatch would fail too, so the doctor must agree.
+		if p, ok := RemoteBinaryPath(cmd, "found"); ok {
+			t.Errorf("declared remote resolved to %q via the discovery path", p)
+		}
+	})
+	t.Run("a discovered token does", func(t *testing.T) {
+		p, ok := RemoteBinaryPath(cmd, "only")
+		if !ok {
+			t.Fatal("app-only is in the discovery path and did not resolve")
+		}
+		if filepath.Dir(p) != dir {
+			t.Errorf("resolved to %q, want it under %q", p, dir)
+		}
+	})
+	t.Run("a declared remote with no binary anywhere", func(t *testing.T) {
+		if _, ok := RemoteBinaryPath(cmd, "gone"); ok {
+			t.Error("a remote with no binary reported as resolvable")
+		}
+	})
+	t.Run("an unknown name with no discovery", func(t *testing.T) {
+		if _, ok := RemoteBinaryPath(ResolvedCommand{Name: "app"}, "whatever"); ok {
+			t.Error("a command with no remotes and no discovery resolved something")
+		}
+	})
+	t.Run("an alias answers identically to its remote", func(t *testing.T) {
+		// "f" is an alias of "found". Both take the DECLARED path, so neither sees the
+		// discovery path — an alias that resolved differently from its own remote would
+		// make the doctor disagree with dispatch.
+		byName, okName := RemoteBinaryPath(cmd, "found")
+		byAlias, okAlias := RemoteBinaryPath(cmd, "f")
+		if byName != byAlias || okName != okAlias {
+			t.Errorf("alias gave (%q, %t), name gave (%q, %t)", byAlias, okAlias, byName, okName)
+		}
+	})
+}
+
+// TestRun_remoteHonorsProgramStdin covers the third stream.
+//
+// execRemote wired the child's stdout and stderr from the Program — honoring
+// [Program.WithStdout] and [Program.WithStderr] — and then set cmd.Stdin = os.Stdin, reaching
+// around [Program.WithStdin] to the process. Two streams redirected and one not is invisible
+// until something actually feeds a plugin: a test, a REPL wrapping one, a host embedding the
+// CLI. example-plug's suite could dispatch to a real plugin and could not give it input.
+//
+// The default is unaffected — p.stdin IS os.Stdin unless replaced — so an interactive plugin
+// still receives the terminal, which exec.Cmd passes through as a raw fd for an *os.File.
+func TestRun_remoteHonorsProgramStdin(t *testing.T) {
+	writeFakeBinary(t, "app-cat", "#!/bin/sh\nwc -l\n")
+	def := Definition{
+		Name:           "app",
+		Handler:        "App",
+		RemoteCommands: []RemoteDef{{Name: "cat", Binary: "app-cat"}},
+	}
+
+	p, out, errb := remoteProgram(def, []string{"cat"})
+	p.stdin = strings.NewReader("alpha\nbeta\ngamma\n")
+
+	if code, _ := p.Run(p.args); code != 0 {
+		t.Fatalf("run = %d, want 0 (stderr: %s)", code, errb)
+	}
+	if got := strings.TrimSpace(out.String()); got != "3" {
+		t.Errorf("the plugin read %q lines from stdin, want 3 — the Program's stdin was not passed through", got)
+	}
+}

@@ -119,6 +119,10 @@ linters:
         - "io\\.Closer"
       ignore-sig-regexps:
         - "io\\.Writer\\)\\.Write"
+        # The counterpart of the Write entry above: an io.Reader's own Read error is
+        # already the most specific thing there is to return, and wrapping it would hide
+        # io.EOF behind prose that every caller then has to unwrap again.
+        - "io\\.Reader\\)\\.Read"
         - "\\(\\*os\\.PathError\\)"
       ignore-package-globs:
         - "strconv"

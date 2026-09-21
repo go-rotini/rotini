@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -169,5 +170,30 @@ func TestStyler_SetProfile(t *testing.T) {
 
 	if got := s.Render("danger", "x"); !strings.Contains(got, "91") {
 		t.Errorf("rendered %q, want the 16-color downsample (91)", got)
+	}
+}
+
+// TestProfile_String covers the label a program prints when it reports what it detected.
+//
+// Without it a doctor line reads "detected profile: 3", which is the shape of an answer
+// without being one. Every other enum rotini asks a program to surface — Category, ParseKind,
+// RemoteErrorKind, Stream — already renders itself; Profile was the omission.
+func TestProfile_String(t *testing.T) {
+	t.Parallel()
+	cases := map[Profile]string{
+		ProfileNoColor:   "no-color",
+		ProfileANSI16:    "ansi16",
+		ProfileANSI256:   "ansi256",
+		ProfileTrueColor: "truecolor",
+		Profile(99):      "unknown",
+	}
+	for profile, want := range cases {
+		if got := profile.String(); got != want {
+			t.Errorf("Profile(%d).String() = %q, want %q", int(profile), got, want)
+		}
+		// fmt must reach String rather than printing the underlying int.
+		if got := fmt.Sprintf("%v", profile); got != want {
+			t.Errorf("%%v of Profile(%d) = %q, want %q", int(profile), got, want)
+		}
 	}
 }

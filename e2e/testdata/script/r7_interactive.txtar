@@ -1,0 +1,170 @@
+# R7 — the interactive shelf, driven from a pipe.
+#
+# A terminal is the one environment these pieces are NOT tested in here, and that is
+# deliberate: a tty hides the defect this script exists for.
+#
+# Every Prompt/Confirm/Select used to wrap its reader in its OWN bufio.Reader. The first read
+# filled that private buffer with everything available — the answers to every later question —
+# returned one line, and dropped the rest when it went out of scope. The second component saw
+# EOF and reported "not interactive" with three answers still sitting in the pipe.
+#
+# At a terminal it works perfectly, because a tty hands over one line at a time and there is
+# never a surplus to lose. So rotini's own Wizard could not drive rotini's own prompts anywhere
+# a human was not typing: not under a pipe, not in a test, not in CI.
+#
+# Hence: one binary, several questions, one pipe.
+
+gomodinit example.com/ask
+
+exec rotini generate cmd/ask/.rotini.spec.yaml --config cmd/ask/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o ask$exe ./cmd/ask
+
+# Four answers, three different component kinds, one stream.
+stdin answers.txt
+exec ./ask$exe setup
+stdout 'name=widget'
+stdout 'size=large'
+stdout 'confirmed=true'
+stdout 'note=ship it'
+
+# No input at all is a named error, not a hang and not a silent default.
+stdin empty.txt
+! exec ./ask$exe setup
+! stdout 'name='
+stderr 'not interactive'
+
+# The indicators write NOTHING to a pipe: no escapes, no carriage returns. An indicator that
+# animated into a log would fill it with cursor moves, and one that erased lines it had not
+# written would corrupt output some other process produced.
+exec ./ask$exe work
+cmp stdout work-expected.txt
+
+-- empty.txt --
+-- answers.txt --
+widget
+large
+y
+ship it
+-- work-expected.txt --
+done 3
+-- cmd/ask/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: ask
+  summary: asks several questions
+  commands:
+    - name: setup
+      summary: ask four questions in a row
+    - name: work
+      summary: run indicators
+-- cmd/ask/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/ask/main.go
+    - type: cmd
+      file: internal/cmd/ask/zz_ask.go
+      package: ask
+-- internal/cmd/ask/ask.go --
+package ask
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type askHandlers struct{ base }
+
+func (*askHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/ask/ask_setup.go --
+package ask
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type askSetupHandlers struct{ base }
+
+// Run asks four questions with four separately constructed components over ONE stream, which
+// is exactly the shape a Wizard produces.
+func (*askSetupHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	name, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).WithLabel("Name").Ask(ctx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	_, size, err := rotini.NewSelect(rtx.Stdin, rtx.Stdout, "small", "large").WithLabel("Size").Ask(ctx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	ok, err := rotini.NewConfirm(rtx.Stdin, rtx.Stdout).WithLabel("Sure?").Ask(ctx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	note, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).WithLabel("Note").Ask(ctx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "\nname=%s size=%s confirmed=%t note=%s\n", name, size, ok, note)
+}
+-- internal/cmd/ask/ask_work.go --
+package ask
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+type askWorkHandlers struct{ base }
+
+func (*askWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	s := rotini.NewSpinner(rtx.Stdout).WithMessage("working").WithInterval(5 * time.Millisecond)
+	s.Start(ctx)
+	s.Message("still working")
+	s.Stop()
+
+	p := rotini.NewProgress(rtx.Stdout, 3).WithMessage("stepping")
+	for range 3 {
+		p.Add(1)
+	}
+	p.Done()
+
+	fmt.Fprintf(rtx.Stdout, "done %d\n", p.Current())
+}
+-- cmd/ask/main.go --
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	ask "example.com/ask/internal/cmd/ask"
+)
+
+func main() {
+	ask.Program.
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}

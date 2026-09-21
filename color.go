@@ -50,6 +50,25 @@ const (
 	ProfileTrueColor
 )
 
+// String renders the profile as a short, stable label. It is here because a Profile is a
+// DETECTED value: the first thing a program does with one is report it in a doctor or a
+// --debug line, and "3" answers nothing. Every other rotini enum a program prints —
+// [Category], [ParseKind], [RemoteErrorKind], [Stream] — does the same.
+func (p Profile) String() string {
+	switch p {
+	case ProfileANSI16:
+		return "ansi16"
+	case ProfileANSI256:
+		return "ansi256"
+	case ProfileTrueColor:
+		return "truecolor"
+	case ProfileNoColor:
+		return "no-color"
+	default:
+		return "unknown"
+	}
+}
+
 type color interface {
 	sgr(profile Profile, background bool) string
 }

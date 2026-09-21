@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -125,7 +126,15 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 	}
 
 	cmd := exec.CommandContext(ctx, path, r.Args...)
-	cmd.Stdin = os.Stdin
+	// All three streams come from the Program, not from the process. Stdin used to read
+	// os.Stdin directly while stdout and stderr honored [Program.WithStdout]/[WithStderr],
+	// so a host that redirected input — a test, a REPL feeding a plugin, an embedding
+	// program — had two streams wired and the third reaching around it.
+	//
+	// The default is unchanged: p.stdin IS os.Stdin unless a caller replaced it, and
+	// exec.Cmd hands an *os.File to the child as a raw descriptor, so an interactive
+	// plugin still gets the real terminal.
+	cmd.Stdin = p.stdin
 	cmd.Stdout = p.stdout
 	cmd.Stderr = p.stderr
 
@@ -159,24 +168,69 @@ func (p *Program) remoteFailure(ctx context.Context, rtx *Context, re *RemoteErr
 	return p.settle(ctx, rtx)
 }
 
+// RemoteBinaryPath reports the executable the named remote sub-command of cmd would run, and
+// whether it resolves at all. It searches exactly where dispatch searches, in the same order,
+// which is the entire reason it exists.
+//
+// A plugin host's first extra command is always a doctor — "what is installed, what is
+// missing" — and without this it has to reimplement rotini's search order from the outside.
+// That order is three steps, two of which depend on the remote's KIND: a declared remote looks
+// next to the host binary and on PATH, while a discovered one also looks in the configured
+// discovery path. Reaching for exec.LookPath, which is the obvious thing, reports every plugin
+// installed beside the host binary as missing — the git/kubectl convention and the first
+// location rotini tries.
+//
+// name may be a declared remote's name or one of its aliases, or a discovered plugin's token.
+// It returns "", false when cmd declares no such remote and has no discovery to fall back on.
+//
+// Like [DiscoveredPlugins], this touches the filesystem on every call and answers about right
+// now: a plugin installed after it returns false will still dispatch.
+func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool) {
+	var binary, dir string
+	switch rd, ok := findRemote(cmd, name); {
+	case ok:
+		binary = rd.Binary // declared: no discovery path, per resolveChain
+	case cmd.Discovery != nil:
+		binary, dir = cmd.Discovery.Prefix+name, cmd.Discovery.Path
+	default:
+		return "", false
+	}
+	path, err := resolveRemoteBinary(binary, dir)
+	if err != nil {
+		return "", false
+	}
+	return path, true
+}
+
 // resolveRemoteBinary finds the plugin binary: first adjacent to the running
 // executable (the git/kubectl convention), then in dir (the remote_discovery.path,
 // when set), then anywhere on PATH.
+//
+// dir is empty for a DECLARED remote command — remote_discovery.path configures discovery,
+// and a declared remote is part of the CLI's published interface, expected to be installed
+// the conventional way. The failure message says which locations were actually searched, and
+// only those: it used to name the discovery path unconditionally, so a user whose plugin sat
+// in that very directory was told rotini had looked there and not found it.
 func resolveRemoteBinary(name, dir string) (string, error) {
+	searched := []string{}
 	if exe, err := os.Executable(); err == nil {
-		if p, ok := executableAt(filepath.Dir(exe), name); ok {
+		exeDir := filepath.Dir(exe)
+		if p, ok := executableAt(exeDir, name); ok {
 			return p, nil
 		}
+		searched = append(searched, "next to the binary "+exeDir)
 	}
 	if dir != "" {
 		if p, ok := executableAt(dir, name); ok {
 			return p, nil
 		}
+		searched = append(searched, "the discovery path "+dir)
 	}
 	if p, err := exec.LookPath(name); err == nil {
 		return p, nil
 	}
-	return "", fmt.Errorf("%q not found (looked next to the binary, in the discovery path, and on PATH)", name)
+	searched = append(searched, "PATH")
+	return "", fmt.Errorf("%q not found — searched %s", name, strings.Join(searched, ", then "))
 }
 
 // executableAt reports the path dir/name when it exists as a non-directory file.

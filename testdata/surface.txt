@@ -285,6 +285,7 @@ func ParseFiles
 func ParseFormat
 func ParseStdin
 func Ptr
+func RemoteBinaryPath
 func Strip
 func UsageError
 func Width
@@ -349,6 +350,7 @@ method Printer.WithFormat
 method Printer.WithIndent
 method Printer.WithStyler
 method Printer.WithWidth
+method Profile.String
 method Program.Bind
 method Program.Execute
 method Program.Run

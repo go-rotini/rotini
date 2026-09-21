@@ -1,7 +1,6 @@
 package rotini
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -32,13 +31,68 @@ const defaultRetries = 2
 
 // asker is the reader/writer pair and cancellable line read shared by Prompt,
 // Confirm and Select.
+//
+// It holds an io.ByteReader rather than a *bufio.Reader, and that is not a detail. Each
+// Prompt/Confirm/Select is constructed separately, so wrapping the stream in a fresh
+// bufio.Reader gave each one a PRIVATE buffer: the first read filled it with everything
+// available — the answers to every later question — returned one line, and dropped the rest
+// when it went out of scope. The next component saw EOF.
+//
+// A terminal hides it completely, because a tty hands over one line at a time and there is
+// never a surplus to lose. Everywhere else — a pipe, a test, CI, a [Wizard] running rotini's
+// own prompts — asking a second question was impossible.
+//
+// So an asker consumes exactly the bytes of the line it returns. A reader that is already
+// buffered (a *bufio.Reader, strings.Reader, bytes.Buffer) is used as-is, which keeps its
+// buffering and lets several askers share it; anything else is read one byte at a time, which
+// costs a syscall per character of a human's answer and is the price of not stealing input
+// that belongs to the next question — or to a subprocess.
 type asker struct {
-	in  *bufio.Reader
+	in  io.ByteReader
 	out io.Writer
 }
 
 func newAsker(in io.Reader, out io.Writer) asker {
-	return asker{in: bufio.NewReader(in), out: out}
+	if br, ok := in.(io.ByteReader); ok {
+		return asker{in: br, out: out}
+	}
+	return asker{in: byteAtATime{in}, out: out}
+}
+
+// byteAtATime adapts an io.Reader to io.ByteReader without buffering ahead.
+type byteAtATime struct{ r io.Reader }
+
+func (b byteAtATime) ReadByte() (byte, error) {
+	if b.r == nil {
+		return 0, io.EOF
+	}
+	var buf [1]byte
+	for {
+		n, err := b.r.Read(buf[:])
+		if n > 0 {
+			return buf[0], nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		// n == 0 with a nil error is legal and means nothing yet; try again.
+	}
+}
+
+// readLineFrom accumulates bytes up to and including the first newline, returning the line
+// without its terminator. A stream ending without one yields what it had, with io.EOF.
+func readLineFrom(in io.ByteReader) (string, error) {
+	var b strings.Builder
+	for {
+		c, err := in.ReadByte()
+		if err != nil {
+			return b.String(), err
+		}
+		if c == '\n' {
+			return b.String(), nil
+		}
+		b.WriteByte(c)
+	}
 }
 
 // readLine reads one line, honoring ctx: the read runs on its own goroutine so a canceled
@@ -52,7 +106,7 @@ func (a asker) readLine(ctx context.Context) (string, error) {
 	}
 	ch := make(chan result, 1)
 	go func() {
-		line, err := a.in.ReadString('\n')
+		line, err := readLineFrom(a.in)
 		ch <- result{line, err}
 	}()
 

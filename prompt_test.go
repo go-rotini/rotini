@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -248,3 +249,95 @@ func TestSelect_noOptionsIsUsageError(t *testing.T) {
 		t.Errorf("empty Select = %v, want a usage error", err)
 	}
 }
+
+// TestAskers_shareOneStream is the regression test for the defect that made rotini's own
+// [Wizard] unable to drive rotini's own prompts.
+//
+// Each Prompt/Confirm/Select used to wrap the reader in its OWN bufio.Reader. The first read
+// filled that private buffer with everything available — the answers to every later question —
+// returned one line, and dropped the rest. The next component saw EOF and reported
+// ErrNotInteractive with two answers still sitting in the pipe.
+//
+// A terminal hid it perfectly: a tty delivers one line at a time, so there is never a surplus
+// to lose. Every other way of supplying input was broken.
+func TestAskers_shareOneStream(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("three prompts", func(t *testing.T) {
+		t.Parallel()
+		in := strings.NewReader("alpha\nbeta\ngamma\n")
+		for _, want := range []string{"alpha", "beta", "gamma"} {
+			got, err := NewPrompt(in, io.Discard).Ask(ctx)
+			if err != nil || got != want {
+				t.Fatalf("read %q (err %v), want %q", got, err, want)
+			}
+		}
+	})
+
+	t.Run("mixed kinds, which is what a wizard does", func(t *testing.T) {
+		t.Parallel()
+		in := strings.NewReader("myproject\n3\ny\nn\n")
+
+		name, err := NewPrompt(in, io.Discard).Ask(ctx)
+		if err != nil || name != "myproject" {
+			t.Fatalf("prompt: %q, %v", name, err)
+		}
+		idx, choice, err := NewSelect(in, io.Discard, "a", "b", "c").Ask(ctx)
+		if err != nil || idx != 2 || choice != "c" {
+			t.Fatalf("select: %d/%q, %v", idx, choice, err)
+		}
+		yes, err := NewConfirm(in, io.Discard).Ask(ctx)
+		if err != nil || !yes {
+			t.Fatalf("confirm 1: %t, %v", yes, err)
+		}
+		no, err := NewConfirm(in, io.Discard).Ask(ctx)
+		if err != nil || no {
+			t.Fatalf("confirm 2: %t, %v", no, err)
+		}
+	})
+
+	t.Run("an unbuffered reader is not over-consumed either", func(t *testing.T) {
+		t.Parallel()
+		// An io.Reader that is NOT an io.ByteReader takes the byte-at-a-time path. The
+		// bytes after the first line must still be there for the next asker — and for
+		// anything else reading the same stream, such as a subprocess.
+		in := unbufferedReader{strings.NewReader("one\ntwo\n")}
+		first, err := NewPrompt(in, io.Discard).Ask(ctx)
+		if err != nil || first != "one" {
+			t.Fatalf("first: %q, %v", first, err)
+		}
+		rest, err := io.ReadAll(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(rest) != "two\n" {
+			t.Errorf("the stream holds %q after one line was read, want %q", rest, "two\n")
+		}
+	})
+
+	t.Run("a final line with no newline still reads", func(t *testing.T) {
+		t.Parallel()
+		in := strings.NewReader("first\nlast-without-newline")
+		if got, _ := NewPrompt(in, io.Discard).Ask(ctx); got != "first" {
+			t.Fatalf("first = %q", got)
+		}
+		got, err := NewPrompt(in, io.Discard).Ask(ctx)
+		if err != nil || got != "last-without-newline" {
+			t.Errorf("last = %q (err %v)", got, err)
+		}
+	})
+
+	t.Run("a truly empty stream is still not interactive", func(t *testing.T) {
+		t.Parallel()
+		if _, err := NewPrompt(strings.NewReader(""), io.Discard).Ask(ctx); !errors.Is(err, ErrNotInteractive) {
+			t.Errorf("err = %v, want ErrNotInteractive", err)
+		}
+	})
+}
+
+// unbufferedReader hides strings.Reader's ReadByte, forcing the byte-at-a-time path — the one
+// an *os.File takes.
+type unbufferedReader struct{ r io.Reader }
+
+func (u unbufferedReader) Read(p []byte) (int, error) { return u.r.Read(p) }
