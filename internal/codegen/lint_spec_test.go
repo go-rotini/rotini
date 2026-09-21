@@ -13,8 +13,8 @@ import (
 // TestLintRegistryCompleteness guards the lint_spec.go / lint_conf.go split: if a rule
 // is accidentally dropped while relocating funcs, the count regresses.
 func TestLintRegistryCompleteness(t *testing.T) {
-	if got := len(specLints); got != 33 {
-		t.Errorf("len(specLints) = %d, want 33 (a rule was dropped or added — update intentionally)", got)
+	if got := len(specLints); got != 34 {
+		t.Errorf("len(specLints) = %d, want 34 (a rule was dropped or added — update intentionally)", got)
 	}
 	if got := len(confLints); got != 6 {
 		t.Errorf("len(confLints) = %d, want 6", got)

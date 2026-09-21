@@ -183,7 +183,7 @@ func emitFeatureModule(t *testing.T, conf string) (dir string, files []string) {
 		if e != nil {
 			t.Errorf("Generate reported: %v", e)
 		}
-	}); err != nil {
+	}, func([]error) {}); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 
@@ -471,11 +471,67 @@ generate:
 			writeTestFile(t, dir, ".rotini.conf.yaml", conf)
 			t.Chdir(dir)
 
-			if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}); err != nil {
+			if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}, func([]error) {}); err != nil {
 				t.Fatalf("generate with %s: %v", label, err)
 			}
 			if out, err := goBuild(t, dir); err != nil {
 				t.Fatalf("go build with features %s:\n%s", label, out)
+			}
+		})
+	}
+}
+
+// TestHelpPage_fallsBackToSummary pins the prose a command's own help page leads with.
+//
+// A command that declares only a `summary:` used to render a page with no prose at all — the
+// summary appeared in its PARENT's command list and nowhere on its own page, so `cli help sub`
+// answered every question about a command except what it does. man carries the summary in its
+// NAME line and markdown renders it outright, so help was the only one dropping it.
+//
+// Both directions matter: the fallback must not displace a real description.
+func TestHelpPage_fallsBackToSummary(t *testing.T) {
+	t.Parallel()
+	tmpl, err := parseDocTemplate("help", templateHelp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name       string
+		data       templateHelpData
+		wantFirst  string
+		wantAbsent string
+	}{
+		{
+			name:      "summary only",
+			data:      templateHelpData{Summary: "build a container image", Invocation: "app image", UsageDerived: "app image"},
+			wantFirst: "build a container image",
+		},
+		{
+			name:       "a description wins",
+			data:       templateHelpData{Summary: "the short one", Description: "The long one.", Invocation: "app image", UsageDerived: "app image"},
+			wantFirst:  "The long one.",
+			wantAbsent: "the short one",
+		},
+		{
+			name:      "neither leaves the page prose-free",
+			data:      templateHelpData{Invocation: "app image", UsageDerived: "app image"},
+			wantFirst: "Usage:",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			tt.data.Headings.Usage = "Usage:"
+			page, err := renderDocText(tmpl, tt.data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, _, _ := strings.Cut(page, "\n")
+			if first != tt.wantFirst {
+				t.Errorf("page leads with %q, want %q\n--- page ---\n%s", first, tt.wantFirst, page)
+			}
+			if tt.wantAbsent != "" && strings.Contains(page, tt.wantAbsent) {
+				t.Errorf("page contains %q, which the description should have displaced\n%s", tt.wantAbsent, page)
 			}
 		})
 	}

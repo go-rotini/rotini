@@ -1164,7 +1164,8 @@ type runInputs struct {
 func bindStore[T any](store *parsedInputs) T {
 	var out T
 	chain := make([]ResolvedCommand, len(store.scopes))
-	_ = bindInputs(reflect.ValueOf(&out).Elem(), store, chain)
+	v := reflect.ValueOf(&out).Elem()
+	_ = bindInputs(v, store, chain, frameAnchor(v, chain, false))
 	return out
 }
 

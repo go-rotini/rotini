@@ -41,13 +41,23 @@ work.
 | an editable template under `template_dir` | **seeded once when missing, then never touched.** |
 | rendered output under `embed_dir` (`help_*.txt`, `man_*.txt`, `markdown_*.md`, `completion_*.txt`) | rewritten, and pruned per feature. |
 | the schema files named by `generate.schemas` | overwritten from the embedded copies, never pruned. |
-| anything else in the cmd package | left alone unless it is an orphaned stub — see below. |
+| anything else in the cmd package | **left alone.** Pruning removes only files rotini wrote — see below. |
 
-### Pruning, and the one way to lose work
+### Pruning
 
 The generator prunes handler stubs in the cmd package that no longer correspond to a command
-in the spec. That is how renaming or deleting a command cleans up after itself, and it is the
-one path that can delete code you wrote:
+in the spec. That is how renaming or deleting a command cleans up after itself.
+
+**Only files rotini wrote are candidates.** A generated stub carries a marker —
+`var _ rotini.Handlers = (*xHandlers)(nil)` — and that marker is what makes it prunable. A
+helper you put beside your handlers is never touched, whatever it is named; neither is a stub
+you adopted and edited past recognition. Every prune is reported:
+
+```
+Note: pruned demo_ship.go — its command is no longer in the spec
+```
+
+What can still surprise you:
 
 - **Renaming a command** (or changing its `filename:`) orphans the old stub. Regenerating
   deletes it and seeds a new, empty one. **Move your handler body first**, or recover it from

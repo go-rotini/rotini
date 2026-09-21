@@ -383,3 +383,46 @@ func TestRun_defaultOnError_prints(t *testing.T) {
 		})
 	}
 }
+
+// TestContext_Failed covers the one bit of outcome state a teardown hook can read.
+//
+// A PostRun that owns a transaction has to choose commit or rollback, and before Failed there
+// was no way to ask: Context had five Record* methods and no reader, while the Outcome that
+// answers the question reaches the funnel only after every teardown has already run. A program
+// had to keep its own parallel "did we fail" flag, which a panic would not set.
+func TestContext_Failed(t *testing.T) {
+	t.Parallel()
+	t.Run("a clean run has not failed", func(t *testing.T) {
+		t.Parallel()
+		rtx := &Context{}
+		rtx.RecordInfo("working")
+		rtx.RecordSuccess("done")
+		rtx.RecordWarning(errors.New("a warning is not a failure"))
+		if rtx.Failed() {
+			t.Error("Failed() = true after only infos, successes and warnings")
+		}
+	})
+	t.Run("a recorded error is a failure", func(t *testing.T) {
+		t.Parallel()
+		rtx := &Context{}
+		rtx.RecordError(errors.New("boom"))
+		if !rtx.Failed() {
+			t.Error("Failed() = false after RecordError")
+		}
+	})
+	t.Run("a fault is a failure, with no error recorded", func(t *testing.T) {
+		t.Parallel()
+		rtx := &Context{}
+		rtx.recordFault(&PanicError{Value: "boom"})
+		if !rtx.Failed() {
+			t.Error("Failed() = false after a panic — the case a rollback most needs")
+		}
+	})
+	t.Run("a nil context has not failed", func(t *testing.T) {
+		t.Parallel()
+		var rtx *Context
+		if rtx.Failed() {
+			t.Error("Failed() = true on a nil context")
+		}
+	})
+}

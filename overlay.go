@@ -72,6 +72,36 @@ func Collect[T any](rtx *Context) (T, error) {
 	return t, err
 }
 
+// CollectRoot is [Collect] for a cascading hook on the ROOT command.
+//
+// An inputs type binds to the END of the command chain: field i of an n-field struct takes
+// chain[len(chain)-n+i]. A handler collecting the type generated for its own command is always
+// right, and a composed child's handler is right too — its short type counts back from the leaf
+// and lands on its own frames, whatever tree it was mounted into.
+//
+// A root command's CascadingPreRun and CascadingPostRun are the one place that rule cannot
+// serve. They run for EVERY invocation, so they cannot name the leaf's type; and their own
+// type, collected from a deeper run, would count back from the leaf and land on some
+// descendant. That is not a theoretical mismatch — it is how a root hook reading its own
+// --verbose or --trace silently gets false:
+//
+//	// mig db status is running; MigInputs has one field, the chain has three frames,
+//	// so Mig lands on `status` and every field comes back zero.
+//	in, _ := rotini.Collect[MigInputs](rtx)   // WRONG from a root hook
+//	in, _ := rotini.CollectRoot[MigInputs](rtx) // reads the root's own frame
+//
+// The binder now rejects the first form rather than filling it with zeros, so this is a
+// compiler-less mistake that reports itself. Use CollectRoot only where the leaf's type is
+// genuinely unavailable — a root cascading hook. Everywhere else [Collect] is correct and
+// says less.
+//
+// The stdin payload is not bound: stdin has exactly one consumer and it is the leaf.
+func CollectRoot[T any](rtx *Context) (T, error) {
+	var t T
+	err := binderFor(rtx).BindRoot(rtx, &t)
+	return t, err
+}
+
 // CollectP is [Collect] with provenance: the same reconciled, validated inputs plus the
 // [Report] answering Winner and History per field. It overlays the per-channel layers in the
 // standard precedence, producing the same values Collect does at the cost of acquiring each
@@ -330,7 +360,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := bindInputs(v, store, chain); err != nil {
+	if err := bindInputs(v, store, chain, frameAnchor(v, chain, false)); err != nil {
 		return nil, nil, err
 	}
 
@@ -364,7 +394,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 	// Flag defaults bind through the same store machinery as parsed values.
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	applyDefaults(chain, store)
-	if err := bindInputs(v, store, chain); err != nil {
+	if err := bindInputs(v, store, chain, frameAnchor(v, chain, false)); err != nil {
 		return nil, nil, err
 	}
 

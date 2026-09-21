@@ -103,7 +103,9 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	if err != nil {
 		return err
 	}
-	return p.validateAndEmit(rs, rc)
+	// A fresh scaffold has nothing to prune, so its notices are always empty.
+	_, err = p.validateAndEmit(rs, rc)
+	return err
 }
 
 // normalizeFormat resolves the requested format name to its fileFormat,

@@ -42,10 +42,28 @@ const bashCompletionTemplate = `# bash completion for PROG
 # A final ":rotini:<directive>" line is the spec's declarative completion hint
 # for the value being typed — file, directory, or none. It is handled here rather
 # than offered as a candidate.
+
+# compopt does not exist in bash 3.2, which is /bin/bash on every macOS. Calling it there is
+# "command not found" — harmless inside a completion (nothing checks the status) but a failure
+# anywhere the script is driven under 'set -e', and worth saying out loud rather than hiding
+# behind a redirect. The directives still work without it; only bash's own file fallback stays
+# on for a "none" value, which is the most a 3.2 user can get.
+_PROG_compopt() {
+    type compopt >/dev/null 2>&1 && compopt "$@" 2>/dev/null
+    return 0
+}
+
 _PROG_complete() {
-    local args line IFS=$'\n' directive="" ext exts
+    local args line directive="" ext exts
+    # Slice COMP_WORDS BEFORE narrowing IFS. bash 3.2 — which is /bin/bash on every macOS —
+    # collapses "${array[@]:offset:length}" into ONE IFS-joined element whenever IFS does not
+    # contain a space, so with IFS=$'\n' set first this produced a single argument and every
+    # completion past the first word silently offered nothing.
     args=("${COMP_WORDS[@]:1:$COMP_CWORD}")
     COMPREPLY=()
+    # Now narrow it: the binary separates candidates by newline, and a candidate (a file name,
+    # a summary) may contain spaces.
+    local IFS=$'\n'
     for line in $(PROG __complete "${args[@]}" 2>/dev/null); do
         case "$line" in
             ":rotini:"*) directive="${line#:rotini:}" ;;
@@ -56,22 +74,22 @@ _PROG_complete() {
     case "$directive" in
         none)
             # An opaque value: suppress bash's default file fallback entirely.
-            compopt +o default 2>/dev/null
+            _PROG_compopt +o default
             ;;
         directory)
-            compopt -o dirnames 2>/dev/null
-            COMPREPLY+=($(compgen -d -- "${COMP_WORDS[$COMP_CWORD]}"))
+            _PROG_compopt -o dirnames
+            COMPREPLY+=($(compgen -d -- "${COMP_WORDS[$COMP_CWORD]}")) || true
             ;;
         file)
-            compopt -o filenames 2>/dev/null
-            COMPREPLY+=($(compgen -f -- "${COMP_WORDS[$COMP_CWORD]}"))
+            _PROG_compopt -o filenames
+            COMPREPLY+=($(compgen -f -- "${COMP_WORDS[$COMP_CWORD]}")) || true
             ;;
         file\ *)
-            compopt -o filenames 2>/dev/null
+            _PROG_compopt -o filenames
             exts="${directive#file }"
-            COMPREPLY+=($(compgen -d -- "${COMP_WORDS[$COMP_CWORD]}"))
+            COMPREPLY+=($(compgen -d -- "${COMP_WORDS[$COMP_CWORD]}")) || true
             for ext in $exts; do
-                COMPREPLY+=($(compgen -f -X "!*.$ext" -- "${COMP_WORDS[$COMP_CWORD]}"))
+                COMPREPLY+=($(compgen -f -X "!*.$ext" -- "${COMP_WORDS[$COMP_CWORD]}")) || true
             done
             ;;
     esac
@@ -85,7 +103,12 @@ const zshCompletionTemplate = `#compdef PROG
 _PROG() {
     local -a lines pairs exts
     local line name desc directive=""
-    lines=(${(f)"$(PROG __complete ${words[2,$CURRENT]} 2>/dev/null)"})
+    # "${(@)words[...]}" — not ${words[...]}. An unquoted slice DROPS the empty element,
+    # and the current word is empty in the commonest case of all: the cursor sitting after
+    # "PROG hash --algorithm ". The binary would then be asked to complete "--algorithm"
+    # itself and would offer the flag again instead of its values. (@) inside quotes keeps
+    # every element, empties included.
+    lines=(${(f)"$(PROG __complete "${(@)words[2,$CURRENT]}" 2>/dev/null)"})
     for line in $lines; do
         # A final ":rotini:<directive>" line is the spec's declarative hint for the
         # value being typed — file, directory, or none — not a candidate.
@@ -115,7 +138,13 @@ compdef _PROG PROG
 
 const fishCompletionTemplate = `# fish completion for PROG
 function __PROG_raw
-    set -l tokens (commandline -opc) (commandline -ct)
+    # An unquoted (commandline -ct) yields NO element when the current token is empty, which
+    # is exactly the case that matters — the cursor after "PROG hash --algorithm ". The
+    # binary would see only the flag and offer it again. Quoting forces one element, empty
+    # or not, so the trailing word always reaches __complete.
+    set -l cur (commandline -ct)
+    set -l tokens (commandline -opc)
+    set -a tokens "$cur"
     PROG __complete $tokens[2..-1] 2>/dev/null
 end
 

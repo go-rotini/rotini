@@ -241,6 +241,7 @@ func Algorithms
 func CategoryOf
 func Collect
 func CollectP
+func CollectRoot
 func DefaultLifecycle
 func DefaultResolver
 func Defaults
@@ -291,6 +292,7 @@ method ArgValueCompleter.CompleteArgValue
 method BindError.Error
 method BindError.Unwrap
 method Binder.Bind
+method Binder.BindRoot
 method Category.String
 method Confirm.Ask
 method Confirm.WithAffirmative
@@ -303,6 +305,7 @@ method Context.BindIfAbsent
 method Context.Chain
 method Context.Command
 method Context.Exit
+method Context.Failed
 method Context.Get
 method Context.MustGet
 method Context.Path

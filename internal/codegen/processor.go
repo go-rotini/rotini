@@ -47,7 +47,9 @@ func NewProcessor(version string) *Processor {
 // program — once, or on every spec/conf change in watch mode until interrupted (ctrl-c).
 // onGenerate (may be nil) receives a "[HH:MM:SS] <took>" summary and each pass's error;
 // without watch the single pass's error is returned so the caller can treat it as failed.
-func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error)) error {
+// onNotices (may be nil) receives what the pass removed — mirroring Validate's warnings
+// channel, because a file deleted without a word is how work gets lost.
+func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error {
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
 	}
@@ -56,9 +58,9 @@ func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate f
 		if err != nil {
 			return nil, err
 		}
-		return nil, p.validateAndEmit(rs, rc) // generate surfaces no warnings of its own
+		return p.validateAndEmit(rs, rc)
 	}
-	return p.run(specPath, confPath, watch, pass, onGenerate, nil)
+	return p.run(specPath, confPath, watch, pass, onGenerate, onNotices)
 }
 
 // Validate runs the validate workflow: reconcile → validate + lint, once or on every
@@ -143,16 +145,23 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 
 // validateAndEmit is the gate-then-emit step: validation must pass (the gate — invalid input
 // never reaches codegen), then the conf defaults are applied and the program emitted.
-func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) error {
+// validateAndEmit validates then emits, returning any NOTICES the emit produced — today, the
+// orphaned stubs it pruned, which the caller reports rather than deleting them silently.
+func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) ([]error, error) {
 	if _, err := p.validateDocuments(rs, rc, ""); err != nil {
-		return err
+		return nil, err
 	}
 	applyConfDefaults(rc.conf, rs.spec.Command.Name)
 	prog, err := resolveProgram(rs.spec, rc.conf, rs.path)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return prog.generate()
+	err = prog.generate()
+	notices := make([]error, 0, len(prog.pruned))
+	for _, name := range prog.pruned {
+		notices = append(notices, fmt.Errorf("pruned %s — its command is no longer in the spec", name))
+	}
+	return notices, err
 }
 
 // failFast reports whether validation stops at the first problem: the --fail override

@@ -31,7 +31,7 @@ command:
 
 ### 1. Your CLI is checked before your code exists
 
-The spec is validated by a JSON Schema plus 33 rotini lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
+The spec is validated by a JSON Schema plus 34 rotini lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
 
 A framework that declares the CLI *in Go* can only catch what the compiler happens to notice.
 

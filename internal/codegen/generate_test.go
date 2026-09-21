@@ -82,7 +82,7 @@ func modelsModule(t *testing.T, conf, handlerImport, qualifier string) string {
 	writeTestFile(t, dir, "handlers/deploy.go", modelsHandler(handlerImport, qualifier))
 	t.Chdir(dir)
 
-	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}); err != nil {
+	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}, func([]error) {}); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	return dir
@@ -208,7 +208,7 @@ generate:
 		t.Fatalf("the models file was pruned from the cmd directory: %v", err)
 	}
 	// Regenerating must not delete it either — pruning runs on every pass.
-	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}); err != nil {
+	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}, func([]error) {}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := readEmittedIfExists(dir, "internal/cmd/cyc/zz_models.go"); err != nil {
@@ -285,7 +285,7 @@ func emitInModule(t *testing.T, spec, conf string) map[string]string {
 		if e != nil {
 			cbErr = e
 		}
-	}); err != nil {
+	}, func([]error) {}); err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
 	if cbErr != nil {
@@ -361,7 +361,7 @@ func TestGenerateIdempotent(t *testing.T) {
 	t.Chdir(dir)
 
 	gen := func() map[string]string {
-		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}); err != nil {
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}, func([]error) {}); err != nil {
 			t.Fatalf("Generate: %v", err)
 		}
 		return collectGoFiles(t, dir)
@@ -525,7 +525,7 @@ generate:
 	writeTestFile(t, dir, ".rotini.conf.yaml", conf)
 	t.Chdir(dir)
 
-	err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {})
+	err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}, func([]error) {})
 	if err == nil {
 		t.Fatal("a header that is not valid Go generated successfully, want a gofmt failure")
 	}
@@ -541,4 +541,99 @@ func firstLines(s string, n int) string {
 		lines = lines[:n]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// TestPrune_sparesHandWrittenFiles pins the fix for a data-loss bug found by writing a real
+// CLI against rotini: pruning used to remove EVERY unprotected .go file in the cmd package.
+//
+// The obvious place for a registry key shared by three handlers is a file beside them:
+//
+//	// internal/cmd/taskr/keys.go
+//	var StoreKey = rotini.NewKey[*store.Store]("store")
+//
+// The next `go generate` deleted it, silently, and the build failed with `undefined: StoreKey`
+// in five files. `keep:` was the documented remedy, and its own description says it is
+// "intended to stay empty in steady state".
+//
+// Pruning now removes only files rotini WROTE — identified by the marker every generated stub
+// carries — and reports each one.
+func TestPrune_sparesHandWrittenFiles(t *testing.T) {
+	const spec = `version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: build
+    - name: ship
+`
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
+	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
+	t.Chdir(dir)
+
+	gen := func(t *testing.T) []error {
+		t.Helper()
+		var notices []error
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false,
+			func(string, error) {}, func(n []error) { notices = append(notices, n...) }); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return notices
+	}
+	gen(t)
+
+	cmdDir := filepath.Join(dir, "internal", "cmd", "demo")
+	helpers := map[string]string{
+		// The exact case that lost work: a key beside the handlers that use it.
+		"keys.go": "package demo\n\nvar StoreKey = \"store\"\n",
+		// A name that LOOKS like a stub for a command that does not exist. Only the
+		// marker decides, so this survives too.
+		"demo_helpers.go": "package demo\n\nfunc helper() string { return \"x\" }\n",
+	}
+	for name, body := range helpers {
+		writeTestFile(t, cmdDir, name, body)
+	}
+
+	// Regenerating over an unchanged spec must touch none of them.
+	if notices := gen(t); len(notices) != 0 {
+		t.Errorf("an unchanged spec reported %v, want nothing pruned", notices)
+	}
+	for name, want := range helpers {
+		got, err := os.ReadFile(filepath.Join(cmdDir, name))
+		if err != nil {
+			t.Errorf("%s was deleted by generate: %v", name, err)
+			continue
+		}
+		if string(got) != want {
+			t.Errorf("%s was rewritten by generate", name)
+		}
+	}
+
+	// An ORPHANED STUB is still pruned — that is the feature — and is now reported.
+	writeTestFile(t, dir, ".rotini.spec.yaml", `version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: build
+`)
+	notices := gen(t)
+	if _, err := os.Stat(filepath.Join(cmdDir, "demo_ship.go")); !os.IsNotExist(err) {
+		t.Error("the stub for a removed command was not pruned")
+	}
+	if len(notices) != 1 || !strings.Contains(notices[0].Error(), "demo_ship.go") {
+		t.Errorf("notices = %v, want one naming demo_ship.go — deleting a file is not silent", notices)
+	}
+	for name := range helpers {
+		if _, err := os.Stat(filepath.Join(cmdDir, name)); err != nil {
+			t.Errorf("%s was deleted while pruning an unrelated stub: %v", name, err)
+		}
+	}
+
+	// A stub whose marker the author deleted is theirs now, and survives.
+	writeTestFile(t, cmdDir, "demo_build.go", "package demo\n\n// mine now\n")
+	writeTestFile(t, dir, ".rotini.spec.yaml", "version: 0.0.0\ncommand:\n  name: demo\n")
+	gen(t)
+	if _, err := os.Stat(filepath.Join(cmdDir, "demo_build.go")); err != nil {
+		t.Error("a file whose generated marker was removed should be treated as hand-written")
+	}
 }

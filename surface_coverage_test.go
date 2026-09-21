@@ -6,8 +6,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/recon"
 )
 
 // Every exported symbol is frozen at v1, so every exported symbol has to have been executed
@@ -477,6 +480,46 @@ func TestReconBind_unrecognizedCause(t *testing.T) {
 	}
 }
 
+// TestReconBind_rootPathIsNamedByChannel pins how a failure about the payload AS A WHOLE is
+// phrased. recon reports an empty Path for a document-level problem — a JSON stdin payload
+// missing its own required property, say — and the message used to interpolate that empty
+// string into the per-input noun:
+//
+//	Error: stdin field "": missing required property "name"
+//
+// A reader then hunts for a field called "", while the real subject sits in the detail behind
+// an empty pair of quotes. An empty path now falls back to the channel's own name, and a
+// NON-empty one is untouched, which is the half a naive fix would break.
+func TestReconBind_rootPathIsNamedByChannel(t *testing.T) {
+	root, field := recon.Path{}, recon.Path{"tags"}
+	cases := []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{"validation at the root", &recon.ValidationError{Path: root, Msg: `missing required property "name"`}, `stdin: missing required property "name"`},
+		{"validation on a field", &recon.ValidationError{Path: field, Msg: "value is not of type array"}, `stdin field "tags": value is not of type array`},
+		{"missing required at the root", &recon.MissingRequiredError{Path: root}, "stdin is required"},
+		{"missing required on a field", &recon.MissingRequiredError{Path: field}, `stdin field "tags" is required`},
+		{"coercion at the root", &recon.CoercionError{Path: root, Target: "int"}, "stdin: expected int"},
+		{"empty value at the root", &recon.EmptyValueError{Path: root}, "stdin must not be empty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var be *BindError
+			if !errors.As(reconBind(channelStdin, tc.cause), &be) {
+				t.Fatalf("reconBind did not return a *BindError for %T", tc.cause)
+			}
+			if be.Msg != tc.want {
+				t.Errorf("message = %q, want %q", be.Msg, tc.want)
+			}
+			if strings.Contains(be.Msg, `""`) {
+				t.Errorf("message %q names an empty input", be.Msg)
+			}
+		})
+	}
+}
+
 // TestPrinter_textMapIsSorted covers mapPairs, the text-format path for a map. A map has no
 // order, so unsorted output would make `--output text` undiffable between runs — the kind of
 // bug that only shows up in someone's CI.
@@ -506,5 +549,68 @@ func TestPrinter_textMapIsSorted(t *testing.T) {
 		if again := render(); again != got {
 			t.Fatalf("text map rendering is not stable:\n%s\nvs\n%s", got, again)
 		}
+	}
+}
+
+// TestTrimAcquiredPayload_oneRuleForBothPaths pins that bytes rotini reads on the user's
+// behalf are trimmed by ONE rule, whichever declared spelling asked for them.
+//
+// They were not. The stdin channel dropped a single trailing line ending; the argv value
+// sentinels used strings.TrimSpace. Piping "  hello  \n" through `stdin: {format: text}`
+// yielded "  hello  ", and through `--input -` with `from: [stdin]` yielded "hello" — same
+// bytes, same framework, two values. The sentinel's rule also ate the trailing newline of
+// every `@`-read file, so a hashing tool silently reported the digest of n-1 bytes.
+func TestTrimAcquiredPayload_oneRuleForBothPaths(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, in, want string }{
+		{"one trailing newline goes", "hello\n", "hello"},
+		{"a CRLF ending goes whole", "hello\r\n", "hello"},
+		{"only ONE ending goes", "hello\n\n", "hello\n"},
+		{"leading whitespace is content", "  hello", "  hello"},
+		{"interior whitespace is content", "a  b", "a  b"},
+		{"trailing spaces are content", "hello  ", "hello  "},
+		{"spaces before the ending survive", "  hello  \n", "  hello  "},
+		{"no ending, nothing to do", "hello", "hello"},
+		{"empty stays empty", "", ""},
+		{"a lone newline empties", "\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := trimAcquiredPayload(tc.in); got != tc.want {
+				t.Errorf("trimAcquiredPayload(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// The property that actually matters: both entry points agree. resolveFlagValue reads
+	// the sentinel side; bindRawStdin reads the channel side.
+	const payload = "  hello  \n"
+	dir := t.TempDir()
+	file := filepath.Join(dir, "value.txt")
+	if err := os.WriteFile(file, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fd := FlagDef{Name: "input", Identifiers: []string{"-i"}, From: []string{"file", "stdin"}}
+
+	fromFile, err := resolveFlagValue(fd, "@"+file, nil)
+	if err != nil {
+		t.Fatalf("resolveFlagValue(@file): %v", err)
+	}
+	fromStdin, err := resolveFlagValue(fd, "-", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("resolveFlagValue(-): %v", err)
+	}
+	var channel *string
+	sf := reflect.ValueOf(&channel).Elem()
+	if err := bindRawStdin(sf, "text", []byte(payload)); err != nil {
+		t.Fatalf("bindRawStdin: %v", err)
+	}
+
+	if fromFile != fromStdin || fromFile != *channel {
+		t.Errorf("the three acquisition paths disagree: @file=%q -=%q channel=%q", fromFile, fromStdin, *channel)
+	}
+	if *channel != "  hello  " {
+		t.Errorf("payload = %q, want %q — leading and trailing spaces are content", *channel, "  hello  ")
 	}
 }

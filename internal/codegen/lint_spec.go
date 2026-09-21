@@ -67,6 +67,7 @@ var specLints = []func(*Spec) []error{
 	lintNegatable,
 	lintStdinFormat,
 	lintComplete,
+	lintDefaultScalar,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -868,6 +869,46 @@ func lintComplete(spec *Spec) []error {
 		})
 	})
 	return problems
+}
+
+// lintDefaultScalar rejects a `default:` that is not a scalar.
+//
+// A default is carried to the runtime as ONE string and coerced through the input's type, so
+// there is no representation for a multi-value default. Written as a YAML list it used to
+// reach the generated code as Go's own `%v` rendering — `default: [a, b]` became the literal
+// default `"[a b]"`, a single element spelled with brackets — which is mangling, not
+// ignoring, and the one outcome validation exists to prevent.
+func lintDefaultScalar(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Default == nil {
+				return
+			}
+			switch schema.Default.(type) {
+			case string, bool, float64, int, int64, nil:
+				return
+			}
+			problems = append(problems, &problem{
+				kind: "spec", ptr: ptr, loc: "command " + path,
+				msg: fmt.Sprintf("%s %q: default must be a single scalar value, not %s — a default is carried as one string and coerced through the input's type, so a repeatable input has no way to declare several. Seed the multi-value default in the handler, or have the user repeat the flag",
+					channel, name, defaultKindName(schema.Default)),
+			})
+		})
+	})
+	return problems
+}
+
+// defaultKindName names a rejected default's shape for the message, so the author can see
+// which of their keys is the problem rather than deducing it.
+func defaultKindName(v any) string {
+	switch v.(type) {
+	case []any:
+		return "a list"
+	case map[string]any:
+		return "a map"
+	}
+	return fmt.Sprintf("%T", v)
 }
 
 // lintPatternCompiles rejects a `pattern` constraint that is not a valid Go regular

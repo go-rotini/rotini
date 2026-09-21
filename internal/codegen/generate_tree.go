@@ -62,6 +62,17 @@ type composedCmd struct {
 	delegateAlias  string
 	delegateMethod string
 	passthrough    bool
+
+	// The composed command's own declared inputs, kept so its typed structs can be emitted
+	// when an OWN command sits beneath it. A composed node normally needs none — it
+	// delegates to the child's handler, which uses the child package's types. But a
+	// `commands:` authored beside a `$ref` is grafted in as an own command of the PARENT,
+	// and its <Prefix>Inputs names every ancestor, composed ones included. Without these
+	// the parent emits a field whose type nothing declares and the package does not build.
+	flags  []fieldDef
+	args   []fieldDef
+	env    []fieldDef
+	config []fieldDef
 }
 
 // composeCtx threads composition state down a composed subtree.
@@ -186,6 +197,10 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				delegateAlias:  ctx.alias,
 				delegateMethod: ctx.childPascal + toPascalCase(rel),
 				passthrough:    ctx.passthrough,
+				flags:          flagFields(c.inputs()),
+				args:           argFields(c.inputs()),
+				env:            envFields(c.inputs(), gp.envPrefix),
+				config:         configFields(c.inputs()),
 			})
 		} else {
 			gc := genCommand{
@@ -348,7 +363,11 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	default:
 		alias = identAlias(childRoot.Name)
 		delegateRoot = toPascalCase(childRoot.Name)
-		gp.addImport(alias, childCmdImport(rr.dir, rr.module))
+		imp := childCmdImport(rr.dir, rr.module)
+		if err := checkImportableAcrossModules(imp, rr.module, moduleName, c.Ref); err != nil {
+			return rnode{}, err
+		}
+		gp.addImport(alias, imp)
 	}
 
 	// Overlay the parent's $ref-node keys onto the child (parent wins when present).
@@ -362,7 +381,13 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	}
 	prefix := gp.rootPascal + toPascalCase(composeRootPath)
 
-	gp.composed = append(gp.composed, composedCmd{prefix: prefix, delegateAlias: alias, delegateMethod: delegateRoot, passthrough: passthrough})
+	gp.composed = append(gp.composed, composedCmd{
+		prefix: prefix, delegateAlias: alias, delegateMethod: delegateRoot, passthrough: passthrough,
+		flags:  flagFields(childRoot.inputs()),
+		args:   argFields(childRoot.inputs()),
+		env:    envFields(childRoot.inputs(), gp.envPrefix),
+		config: configFields(childRoot.inputs()),
+	})
 
 	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough}
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
@@ -463,6 +488,41 @@ func childCmdImport(childDir, module string) string {
 		}
 	}
 	return module + "/internal/cmd/" + filepath.Base(childDir)
+}
+
+// checkImportableAcrossModules rejects a composed child whose generated package the consumer
+// could never import — a cross-module path with an `internal/` element.
+//
+// Go's internal rule makes such a package importable only from inside the dependency's own
+// tree, and a consuming module is never inside it. Left to the compiler, the failure lands as
+//
+//	use of internal package example.com/specsuite/internal/cmd/scan not allowed
+//
+// pointing at a line in a GENERATED file, after a successful validate and a successful
+// generate, in a project the author did not write that line into.
+//
+// It matters more than it looks: rotini's own scaffold puts the cmd package at
+// internal/cmd/<name>, which is the right default for an application and exactly wrong for a
+// module meant to be composed. A module author following the defaults publishes a CLI nobody
+// can graft, and finds out from someone else's build.
+//
+// Same-module (local $ref) composition is unaffected — internal/ is the right place there.
+func checkImportableAcrossModules(importPath, childModule, consumingModule, ref string) error {
+	if childModule == "" || childModule == consumingModule {
+		return nil // a local ref shares the consumer's module; internal/ is fine
+	}
+	for seg := range strings.SplitSeq(importPath, "/") {
+		if seg != "internal" {
+			continue
+		}
+		return fmt.Errorf(
+			"compose %q: the composed CLI's package %q is internal to %q, so this module cannot import it"+
+				" — a spec published for others to compose must put its generated package outside internal/,"+
+				" so set the cmd package's `file:` in that project's .rotini.conf.yaml to a non-internal path"+
+				" (e.g. scancli/zz_rotini.go) and release it again",
+			ref, importPath, childModule)
+	}
+	return nil
 }
 
 // identAlias derives a valid, reasonably unique Go import alias from a command

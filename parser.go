@@ -159,7 +159,7 @@ func NewParser() *Parser {
 // It returns a [*ParseError] when out is not a non-nil pointer, a flag is unknown or missing
 // its value, a required input is absent, or a value falls outside a declared enum.
 func (p *Parser) Parse(rtx *Context, out any) error {
-	store, chain, err := p.parseBind(rtx, out)
+	store, chain, err := p.parseBind(rtx, out, false)
 	if err != nil {
 		return err
 	}
@@ -222,7 +222,7 @@ func (p *Parser) Deprecations(rtx *Context) []Deprecation {
 // [validate]'s job. It is the shared front half of [Parser.Parse] and of the [Binder], which
 // reconciles env and config fallbacks into the store before validating, so a required input is
 // satisfiable from any source. It returns the store and chain for that deferred pass.
-func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedCommand, error) {
+func (p *Parser) parseBind(rtx *Context, out any, atRoot bool) (*parsedInputs, []ResolvedCommand, error) {
 	if p == nil {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil parser"}
 	}
@@ -241,7 +241,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := bindInputs(rv.Elem(), store, chain); err != nil {
+	if err := bindInputs(rv.Elem(), store, chain, frameAnchor(rv.Elem(), chain, atRoot)); err != nil {
 		return nil, nil, err
 	}
 	return store, chain, nil
@@ -880,9 +880,9 @@ func plural(word string, n int) string {
 
 // resolveFlagValue applies a flag's declared acquisition modes to one argv-supplied value.
 // With "file", a value starting with '@' becomes the named file's contents; with "stdin", a
-// value of exactly "-" becomes the piped stdin, which must not be empty. Resolved text is
-// whitespace-trimmed and then flows through the same coercion and validation as a literal
-// value. Without the matching mode, '@' and '-' are ordinary characters, and defaults and
+// value of exactly "-" becomes the piped stdin, which must not be empty. Resolved text has one
+// trailing line ending removed (see trimAcquiredPayload — the same rule the stdin channel
+// uses) and then flows through the same coercion and validation as a literal value. Without the matching mode, '@' and '-' are ordinary characters, and defaults and
 // fallbacks never resolve — sentinels are argv grammar.
 func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error) {
 	switch {
@@ -895,7 +895,7 @@ func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error)
 				Flag: flagLabel(fd), Token: value,
 			}
 		}
-		return strings.TrimSpace(string(data)), nil
+		return trimAcquiredPayload(string(data)), nil
 	case value == "-" && slices.Contains(fd.From, "stdin"):
 		data, err := readStdin(stdin)
 		if err != nil {
@@ -908,7 +908,7 @@ func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error)
 				Flag: flagLabel(fd),
 			}
 		}
-		return strings.TrimSpace(string(data)), nil
+		return trimAcquiredPayload(string(data)), nil
 	}
 	return value, nil
 }
@@ -1041,13 +1041,15 @@ func chainFlagIdentifiers(chain []ResolvedCommand) []string {
 // root→leaf order. Fields bind to the tail of the chain aligned at the leaf, so each command's
 // inputs come from the right frame however deep it was reached; extra parent frames from a
 // statically-composed subtree simply go unbound.
-func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand) error {
+func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand, offset int) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
-	offset := len(p.scopes) - v.NumField()
-	if offset < 0 {
-		return nil // the struct names more commands than the chain has frames
+	if offset < 0 || offset+v.NumField() > len(p.scopes) {
+		return nil // the struct does not fit the chain at this anchor
+	}
+	if err := checkChainAlignment(v, chain, offset); err != nil {
+		return err
 	}
 	for i := range v.NumField() {
 		if err := bindCommandInputs(v.Field(i), p.scopes[offset+i], chain[offset+i]); err != nil {
@@ -1055,6 +1057,102 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand) error
 		}
 	}
 	return nil
+}
+
+// frameAnchor is the chain index that field 0 of an inputs struct maps to.
+//
+// LEAF-anchored is the default and the only one generated code ever needs: a handler collects
+// the type generated for its own command, and the chain ends at that command. It is also what
+// makes composition work — a composed child's type knows its own root, not the tree it was
+// mounted into, so counting back from the leaf is the only alignment available.
+//
+// ROOT-anchored exists for one case that leaf-anchoring cannot express: a cascading hook on the
+// ROOT command, which runs for every invocation and therefore cannot know the leaf's type, but
+// legitimately wants its own command's flags. See [CollectRoot].
+func frameAnchor(v reflect.Value, chain []ResolvedCommand, atRoot bool) int {
+	if atRoot {
+		return 0
+	}
+	if v.Kind() != reflect.Struct {
+		return 0
+	}
+	return len(chain) - v.NumField()
+}
+
+// checkChainAlignment rejects an inputs struct that does not describe the running command.
+//
+// Fields map to chain frames by position, aligned at the LEAF — field i of an n-field struct
+// takes chain[len(chain)-n+i]. That is what lets a composed child's handler collect its own
+// short type (GrandInputs has one field; the chain is root→child→grand) without knowing which
+// parent tree it was mounted into.
+//
+// The cost is that a SHORTER type always aligns against something. Collecting an ancestor's
+// type from a deeper run — Collect[MigInputs] while `mig db status` runs — mapped Mig onto the
+// status frame and filled it from status's flags. The compiler is happy, the binder is happy,
+// and every field comes back zero (or, if the two commands happen to share a flag name, comes
+// back holding the WRONG command's value, which is worse). There is no signal at all.
+//
+// The test is DISJOINTNESS, not containment: a field that declares flags, landing on a frame
+// that declares flags, sharing not one name between them, is not describing that command.
+// Containment would be the stronger claim and is wrong — a hand-built struct may carry fields
+// for flags a particular Definition omits, and those simply stay zero. Overlap of even one
+// name means the struct is talking about this command, which is all that is being asked.
+//
+// Only flags are checked. They are named and unordered, so a mismatch is unambiguous;
+// positional arguments carry no names to compare.
+func checkChainAlignment(v reflect.Value, chain []ResolvedCommand, offset int) error {
+	for i := range v.NumField() {
+		flags := commandFlags(v.Field(i))
+		if !flags.IsValid() || flags.NumField() == 0 {
+			continue
+		}
+		frame := chain[offset+i]
+		if len(frame.Flags) == 0 {
+			continue // nothing to disagree with
+		}
+		declared, shared := 0, 0
+		ft := flags.Type()
+		for j := range flags.NumField() {
+			name := ft.Field(j).Tag.Get("rotini")
+			if name == "" {
+				continue
+			}
+			declared++
+			if _, ok := findFlagDef(frame.Flags, name); ok {
+				shared++
+			}
+		}
+		if declared == 0 || shared > 0 {
+			continue
+		}
+		return &ParseError{
+			Kind: ParseKindInternal,
+			Msg: fmt.Sprintf(
+				"rotini: %s does not describe the running command %q: its %s field maps to %q, and the two share no flag. "+
+					"An inputs type binds to the END of the command chain, so a handler collects the type generated for ITS OWN "+
+					"command; an ancestor's type cannot be collected from a deeper command",
+				displayTypeName(v.Type()), pathOf(chain), v.Type().Field(i).Name, frame.Name),
+		}
+	}
+	return nil
+}
+
+// displayTypeName names a type for an error message, falling back to its string form for an
+// anonymous struct.
+func displayTypeName(t reflect.Type) string {
+	if n := t.Name(); n != "" {
+		return n
+	}
+	return t.String()
+}
+
+// pathOf renders a resolved chain as the command path the user typed.
+func pathOf(chain []ResolvedCommand) string {
+	names := make([]string, len(chain))
+	for i, f := range chain {
+		names[i] = f.Name
+	}
+	return strings.Join(names, " ")
 }
 
 // bindCommandInputs fills a <Cmd>CommandInputs struct's Flags and Arguments.

@@ -13,7 +13,10 @@ import (
 // pruneStubs removes handler .go files in the cmd package that no longer correspond to an own
 // command, preserving the generated cli file, the keep list, and any test files. When the
 // entrypoint shares the cmd package, its create-once main.go is protected too.
-func pruneStubs(gp *program, lay layout, keepList []string) error {
+//
+// Only files rotini itself could have WRITTEN are candidates — see stubLooksGenerated. A
+// hand-written helper in the same package is never touched, whatever it is called.
+func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)) error {
 	protected := map[string]bool{
 		gp.root.filename: true,
 		lay.cmdFile:      true,
@@ -32,13 +35,13 @@ func pruneStubs(gp *program, lay layout, keepList []string) error {
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
-	return pruneGoDir(lay.cmdDir, protected)
+	return pruneGoDir(lay.cmdDir, protected, onPrune)
 }
 
 // pruneEntrypoint removes orphaned .go files in the entrypoint directory, honoring its `keep`
 // list; main.go itself is create-once and always protected. It is a no-op when no entrypoint
 // is declared, or when it shares the cmd package directory, which pruneStubs already covers.
-func pruneEntrypoint(lay layout, keepList []string) error {
+func pruneEntrypoint(lay layout, keepList []string, onPrune func(string)) error {
 	if lay.entrypointDir == "" || lay.entrypointDir == lay.cmdDir {
 		return nil
 	}
@@ -46,12 +49,21 @@ func pruneEntrypoint(lay layout, keepList []string) error {
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true
 	}
-	return pruneGoDir(lay.entrypointDir, protected)
+	return pruneGoDir(lay.entrypointDir, protected, onPrune)
 }
 
-// pruneGoDir removes every non-test .go file in dir whose base name is not in the
-// protected set. Sub-directories and *_test.go files are never touched.
-func pruneGoDir(dir string, protected map[string]bool) error {
+// pruneGoDir removes the ORPHANED GENERATED STUBS in dir: non-test .go files that are not
+// protected AND that rotini itself wrote. Sub-directories and *_test.go files are never
+// touched, and neither is anything a human wrote.
+//
+// The "rotini wrote it" test is the point. Pruning used to remove every unprotected .go file,
+// so a helper placed beside the handlers that use it — the obvious home for a shared
+// registry key — was deleted by the next `go generate`, silently, with the build failure as
+// the first sign anything had happened. `keep:` was the remedy, and its own description says
+// it is "intended to stay empty".
+//
+// Every pruned file is reported through onPrune. Removing a file is not a silent operation.
+func pruneGoDir(dir string, protected map[string]bool, onPrune func(string)) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("read dir %s: %w", dir, err)
@@ -64,11 +76,40 @@ func pruneGoDir(dir string, protected map[string]bool) error {
 		if protected[name] {
 			continue
 		}
-		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+		path := filepath.Join(dir, name)
+		generated, err := stubLooksGenerated(path)
+		if err != nil {
+			return err
+		}
+		if !generated {
+			continue // a hand-written file: not rotini's to remove
+		}
+		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("prune %s: %w", name, err)
+		}
+		if onPrune != nil {
+			onPrune(name)
 		}
 	}
 	return nil
+}
+
+// stubMarker is the line every generated handler stub is written with (see
+// templates/handler.go.tmpl). Its presence is what identifies a file as one rotini created,
+// and an author who deletes the line has said the file is theirs.
+const stubMarker = "var _ rotini.Handlers = ("
+
+// stubLooksGenerated reports whether path is a handler stub rotini wrote. A file that cannot
+// be read is treated as NOT generated: the safe answer when deleting is "leave it".
+func stubLooksGenerated(path string) (bool, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read %s to decide whether it is a generated stub: %w", path, err)
+	}
+	return strings.Contains(string(body), stubMarker), nil
 }
 
 // pruneFeatureOutputs removes each enabled feature's orphaned pages — those for commands no

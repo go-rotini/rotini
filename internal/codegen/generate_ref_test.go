@@ -119,3 +119,52 @@ func TestLoadRef_refusesExternal(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckImportableAcrossModules guards the one composition failure that reaches the user as
+// a Go compiler error in a file they did not write.
+//
+// A mod:// child's generated package is imported by the consumer. Under internal/ that import
+// is illegal across module boundaries, and nothing before `go build` says so — validate passes,
+// generate passes, and the build fails with "use of internal package … not allowed" pointing
+// at a generated line.
+//
+// It is not a corner case: rotini's own scaffold writes the cmd package to internal/cmd/<name>,
+// which is the right default for an application and exactly wrong for a spec meant to be
+// composed, so a module author following the defaults publishes a CLI nobody can graft.
+func TestCheckImportableAcrossModules(t *testing.T) {
+	t.Parallel()
+	const consumer = "example.com/app"
+	tests := []struct {
+		name         string
+		importPath   string
+		childModule  string
+		wantRejected bool
+	}{
+		{"cross-module internal is rejected", "example.com/specs/internal/cmd/scan", "example.com/specs", true},
+		{"cross-module nested internal is rejected", "example.com/specs/a/internal/b/scan", "example.com/specs", true},
+		{"cross-module non-internal is fine", "example.com/specs/scancli", "example.com/specs", false},
+		{"SAME module internal is fine — a local $ref", "example.com/app/internal/cmd/child", consumer, false},
+		{"a local ref carries no module", "example.com/app/internal/cmd/child", "", false},
+		{"a segment merely containing 'internal' is fine", "example.com/specs/internals/scan", "example.com/specs", false},
+		{"...including as a suffix", "example.com/specs/cmdinternal/scan", "example.com/specs", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := checkImportableAcrossModules(tt.importPath, tt.childModule, consumer, "mod://x@v1/spec.yaml")
+			switch {
+			case tt.wantRejected && err == nil:
+				t.Errorf("%q was accepted; the consumer's build would fail on it", tt.importPath)
+			case !tt.wantRejected && err != nil:
+				t.Errorf("%q was rejected: %v", tt.importPath, err)
+			case tt.wantRejected:
+				// The message has to name the fix, not just the problem.
+				for _, want := range []string{tt.importPath, tt.childModule, "outside internal/"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("message does not mention %q:\n%v", want, err)
+					}
+				}
+			}
+		})
+	}
+}

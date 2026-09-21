@@ -52,6 +52,13 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 			}
 			fmt.Fprintln(rtx.Stdout, result)
 		},
+		// Anything the pass removed. Generating is not supposed to be destructive, so
+		// on the rare occasion it is, it says so.
+		func(notices []error) {
+			for _, n := range notices {
+				fmt.Fprintln(rtx.Stderr, "Note:", n)
+			}
+		},
 	)
 
 	if err != nil {

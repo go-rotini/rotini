@@ -73,7 +73,13 @@ func NewBinder(meta BindMeta) *Binder {
 //
 // It returns the first error: a [*ParseError] from the argv channel or a [*BindError] from the
 // others, both categorized and non-leaky, with the recon cause reachable via errors.As.
-func (b *Binder) Bind(rtx *Context, out any) error {
+func (b *Binder) Bind(rtx *Context, out any) error { return b.bind(rtx, out, false) }
+
+// BindRoot is [Binder.Bind] with the inputs struct anchored at the ROOT of the command chain
+// rather than at the leaf. See [CollectRoot] for why that exists and when to reach for it.
+func (b *Binder) BindRoot(rtx *Context, out any) error { return b.bind(rtx, out, true) }
+
+func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 	if b == nil {
 		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil binder"}
 	}
@@ -83,7 +89,7 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 	}
 
 	// 1. argv → Flags + Arguments, without validation: step 3 checks the reconciled store.
-	store, chain, err := b.parser.parseBind(rtx, out)
+	store, chain, err := b.parser.parseBind(rtx, out, atRoot)
 	if err != nil {
 		return err
 	}
@@ -94,7 +100,8 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
-	if err := b.reconcileFlags(v, chain, rtx.Args, store, overrides); err != nil {
+	anchor := frameAnchor(v, chain, atRoot)
+	if err := b.reconcileFlags(v, chain, rtx.Args, store, overrides, anchor); err != nil {
 		return err
 	}
 
@@ -132,7 +139,11 @@ func (b *Binder) Bind(rtx *Context, out any) error {
 		return err
 	}
 
-	// 5. stdin → the leaf command's typed payload.
+	// 5. stdin → the leaf command's typed payload. A root-anchored bind is explicitly NOT
+	//    the leaf, and stdin has exactly one consumer, so it is left alone.
+	if atRoot {
+		return nil
+	}
 	return b.fillStdin(rtx, v)
 }
 
@@ -217,6 +228,25 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 // isRawStdinFormat reports whether format binds stdin directly instead of decoding it.
 func isRawStdinFormat(format string) bool { return format == "text" || format == "lines" }
 
+// trimAcquiredPayload is THE rule for trimming bytes rotini read on the user's behalf — the
+// stdin channel and the argv value sentinels (`--flag @file`, `--flag -`) alike: one trailing
+// line ending, and nothing else.
+//
+// It is one function because the two paths had two rules. The channel trimmed a single
+// trailing newline while the sentinels used strings.TrimSpace, so the same bytes read two
+// declared ways produced two values — `txt upper < pad.txt` kept "  hello  " and
+// `txt hash --input - < pad.txt` hashed "hello". The sentinel's rule also silently dropped
+// the trailing newline of any file `@`-read, which for a hashing or signing tool is wrong
+// output rather than a wrong-looking one.
+//
+// One trailing line ending is the part that is unambiguously an artifact of how the value was
+// DELIVERED — an editor's final newline, a shell heredoc's — rather than part of the value.
+// Leading and interior whitespace is content. A value that genuinely needs its trailing
+// whitespace is not a string flag; that is what the stdin channel's document formats are for.
+func trimAcquiredPayload(s string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
+}
+
 // bindRawStdin sets a raw stdin field from the piped bytes: the whole payload as one string
 // for "text", or its newline-separated lines for "lines".
 //
@@ -224,8 +254,7 @@ func isRawStdinFormat(format string) bool { return format == "text" || format ==
 // content, and a filter that had it stripped could not do its job. A final newline adds no
 // empty element, since a payload ending in one is two lines, not three.
 func bindRawStdin(sf reflect.Value, format string, data []byte) error {
-	payload := strings.TrimSuffix(string(data), "\n")
-	payload = strings.TrimSuffix(payload, "\r")
+	payload := trimAcquiredPayload(string(data))
 
 	switch format {
 	case "text":
@@ -282,17 +311,16 @@ func readStdin(r io.Reader) ([]byte, error) {
 // config files. A flag present in no source keeps what the Parser bound, and argv-only flags
 // are untouched. Each reconciled value is written back into store so the deferred validate
 // pass sees it as present.
-func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv []string, store *parsedInputs, overrides map[string]string) error {
+func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv []string, store *parsedInputs, overrides map[string]string, offset int) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
-	offset := len(chain) - v.NumField()
 	files, err := b.fileSources(b.chainConfigFiles(chain), overrides)
 	if err != nil {
 		return err
 	}
 	srcs := make([]recon.Source, 0, 2+len(files))
-	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, argv)), flagEnvSource(v, b.envPrefix))
+	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, argv, offset)), flagEnvSource(v, b.envPrefix))
 	srcs = append(srcs, files...)
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
@@ -362,10 +390,9 @@ func hasReconFlags(v reflect.Value) bool {
 
 // flagOverrides maps the canonical key of every fallback flag explicitly set on argv to its
 // value — the highest-precedence reconciliation layer.
-func flagOverrides(v reflect.Value, chain []ResolvedCommand, argv []string) map[string]any {
+func flagOverrides(v reflect.Value, chain []ResolvedCommand, argv []string, offset int) map[string]any {
 	m := map[string]any{}
-	offset := len(chain) - v.NumField()
-	if offset < 0 {
+	if offset < 0 || offset+v.NumField() > len(chain) {
 		return m
 	}
 	for i := range v.NumField() {
@@ -1174,7 +1201,16 @@ func reconBind(channel string, err error) error {
 	if err == nil {
 		return nil
 	}
-	noun := channelNoun(channel)
+	// A failure can name a field, or it can be about the payload AS A WHOLE — a document
+	// whose own required property is missing reports an EMPTY path. Naming that `stdin field
+	// ""` is worse than saying nothing: the reader looks for a field called "" and the real
+	// subject, which the detail already names, is buried behind an empty pair of quotes.
+	label := func(path string) string {
+		if path == "" {
+			return channelDesc(channel)
+		}
+		return fmt.Sprintf("%s %q", channelNoun(channel), path)
+	}
 	var ce *recon.CoercionError
 	var mre *recon.MissingRequiredError
 	var ve *recon.ValidationError
@@ -1182,16 +1218,16 @@ func reconBind(channel string, err error) error {
 	switch {
 	case errors.As(err, &ce):
 		return usageBind(channel, ce.Path.String(),
-			fmt.Sprintf("%s %q: expected %s", noun, ce.Path.String(), cleanType(ce.Target)), err)
+			fmt.Sprintf("%s: expected %s", label(ce.Path.String()), cleanType(ce.Target)), err)
 	case errors.As(err, &mre):
 		return usageBind(channel, mre.Path.String(),
-			fmt.Sprintf("%s %q is required", noun, mre.Path.String()), err)
+			fmt.Sprintf("%s is required", label(mre.Path.String())), err)
 	case errors.As(err, &ve):
 		return usageBind(channel, ve.Path.String(),
-			fmt.Sprintf("%s %q: %s", noun, ve.Path.String(), ve.Msg), err)
+			fmt.Sprintf("%s: %s", label(ve.Path.String()), ve.Msg), err)
 	case errors.As(err, &eve):
 		return usageBind(channel, eve.Path.String(),
-			fmt.Sprintf("%s %q must not be empty", noun, eve.Path.String()), err)
+			fmt.Sprintf("%s must not be empty", label(eve.Path.String())), err)
 	default:
 		return usageBind(channel, "", fmt.Sprintf("could not read %s input", channelDesc(channel)), err)
 	}

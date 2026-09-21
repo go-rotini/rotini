@@ -140,7 +140,7 @@ generate:
 `)
 	t.Chdir(dir)
 
-	err := NewProcessor("0.0.0").Generate("a/.rotini.spec.yaml", "a/.rotini.conf.yaml", false, func(string, error) {})
+	err := NewProcessor("0.0.0").Generate("a/.rotini.spec.yaml", "a/.rotini.conf.yaml", false, func(string, error) {}, func([]error) {})
 	if err == nil {
 		t.Fatal("a cyclic $ref generated successfully, want an error")
 	}
@@ -170,7 +170,7 @@ func composeModuleStaged(t *testing.T, files map[string]string) map[string]strin
 	for _, name := range []string{"grand", "child", "root"} {
 		spec := "cmd/" + name + "/.rotini.spec.yaml"
 		conf := "cmd/" + name + "/.rotini.conf.yaml"
-		if err := NewProcessor("0.0.0").Generate(spec, conf, false, func(string, error) {}); err != nil {
+		if err := NewProcessor("0.0.0").Generate(spec, conf, false, func(string, error) {}, func([]error) {}); err != nil {
 			t.Fatalf("generate %s: %v", name, err)
 		}
 	}

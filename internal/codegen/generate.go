@@ -18,7 +18,7 @@ import (
 // GenerateFn is the signature of [Processor.Generate]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double.
-type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error)) error
+type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error
 
 // Generated programs reference the rotini runtime package under this name in
 // rendered literals (the Definition, BindMeta, …); the templates hardcode the
@@ -35,6 +35,10 @@ const runtimeImport = `"github.com/go-rotini/rotini"`
 // the output layout, and the module it is written into. It is the spine of the generate stage
 // — resolveProgram builds it, and its generate method runs the emit steps in order.
 type program struct {
+	// pruned names the orphaned generated stubs this pass removed, surfaced to the caller
+	// as notices. Deleting a file the author can see is not a silent operation.
+	pruned []string
+
 	// inputs — the validated spec + conf and where the spec was read from.
 	spec     *Spec
 	conf     *Conf
@@ -199,13 +203,14 @@ func (p *program) prune() error {
 	if p.layout.entrypointDir != "" && p.layout.entrypointDir == p.layout.cmdDir {
 		cmdKeep = append(append([]string{}, cmdKeep...), mainKeep...)
 	}
-	if err := pruneStubs(p, p.layout, cmdKeep); err != nil {
+	note := func(name string) { p.pruned = append(p.pruned, name) }
+	if err := pruneStubs(p, p.layout, cmdKeep, note); err != nil {
 		return err
 	}
 	if err := pruneFeatureOutputs(p.layout, p.conf.Generate.cmdTarget().Keep, p.featureOutputs); err != nil {
 		return err
 	}
-	return pruneEntrypoint(p.layout, mainKeep)
+	return pruneEntrypoint(p.layout, mainKeep, note)
 }
 
 // resolveFeatures resolves the enabled doc/completion features into the blocks embedded
@@ -376,6 +381,14 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 	own := gp.ownCommands()
 	blocks := make([]templateInputBlock, 0, len(own))
 	imports := map[string]bool{}
+	emitted := make(map[string]bool, len(own)) // prefixes whose structs this file declares
+	wanted := map[string]bool{}                // prefixes some <Prefix>Inputs names as a field type
+	for _, c := range own {
+		emitted[c.prefix] = true
+		for _, f := range c.inputs {
+			wanted[strings.TrimSuffix(f.GoType, "CommandInputs")] = true
+		}
+	}
 	for _, c := range own {
 		blocks = append(blocks, templateInputBlock{
 			Prefix:       c.prefix,
@@ -395,6 +408,36 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 			}
 		}
 	}
+
+	// A composed node declares no <Prefix>Inputs of its own — it delegates to the child's
+	// handler, which uses the child package's types. But an own command grafted BENEATH one
+	// (a `commands:` authored beside the `$ref`) names every ancestor in its own
+	// <Prefix>Inputs, so the composed ancestor's <Prefix>CommandInputs has to exist here too.
+	// Emitting it for every composed node would fill the file with types nothing references,
+	// so only the ones actually named are emitted.
+	for _, c := range gp.composed {
+		if !wanted[c.prefix] || emitted[c.prefix] {
+			continue
+		}
+		emitted[c.prefix] = true
+		blocks = append(blocks, templateInputBlock{
+			Prefix:    c.prefix,
+			Flags:     toTemplateFields(c.flags),
+			Arguments: toTemplateFields(c.args),
+			Env:       toTemplateFields(c.env),
+			Config:    toTemplateFields(c.config),
+			// No InputsFields: nothing collects a composed command's inputs through the
+			// parent — its handler lives in the child package and uses the child's type.
+		})
+		for _, fs := range [][]fieldDef{c.flags, c.args, c.env, c.config} {
+			for _, f := range fs {
+				if f.Import != "" {
+					imports[f.Import] = true
+				}
+			}
+		}
+	}
+
 	return blocks, imports
 }
 
@@ -411,7 +454,13 @@ func modelAliases(gp *program, blocks []templateInputBlock) []string {
 		if len(b.Config) > 0 {
 			out = append(out, b.Prefix+"Config")
 		}
-		out = append(out, b.Prefix+"CommandInputs", b.Prefix+"Inputs")
+		out = append(out, b.Prefix+"CommandInputs")
+		// A composed ancestor's block declares no <Prefix>Inputs — nothing collects one
+		// through the parent — so there is nothing to re-export. Emitting the alias anyway
+		// names a type the models package does not define.
+		if len(b.InputsFields) > 0 {
+			out = append(out, b.Prefix+"Inputs")
+		}
 	}
 	out = append(out, outputTypeNames(gp)...)
 	return out

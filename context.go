@@ -380,6 +380,40 @@ func (rtx *Context) copyFaults() []*PanicError {
 	return out
 }
 
+// Failed reports whether this invocation has recorded an error or suffered a fault SO FAR.
+//
+// It exists for teardown. A PostRun or CascadingPostRun that owns a resource has exactly one
+// decision to make — commit or roll back, keep or discard, publish or delete — and it cannot
+// make it without knowing whether the work it was bracketing succeeded:
+//
+//	func (*migrateHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+//	    if rtx.Failed() {
+//	        tx.Rollback()
+//	        return
+//	    }
+//	    tx.Commit()
+//	}
+//
+// The [Outcome] a funnel receives answers the same question, but a funnel runs AFTER every
+// teardown has finished — the right place to report a failure and much too late to undo one.
+//
+// It is deliberately one bit and not the errors themselves. A teardown that could read them
+// would be tempted to print them, and the whole point of the funnel is that a run reports its
+// outcome exactly once, in one place, after everything has settled. Faults count: a panic in
+// the bracketed work is a failure, and a rollback is even more clearly right there.
+//
+// Read from a forward hook it is also meaningful — an earlier hook in the chain may already
+// have recorded an error — but the answer only grows over a run, so a false is never a promise
+// about what comes next.
+func (rtx *Context) Failed() bool {
+	if rtx == nil {
+		return false
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return len(rtx.recorded) > 0 || len(rtx.faults) > 0
+}
+
 // recordFault appends a recovered panic or detected fault. Unexported on purpose: faults are
 // the lifecycle's to capture, never a handler's to record.
 func (rtx *Context) recordFault(pe *PanicError) {

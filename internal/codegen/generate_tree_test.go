@@ -66,7 +66,7 @@ generate:
 	for _, cli := range []string{"child", "parent"} {
 		spec := "cmd/" + cli + "/.rotini.spec.yaml"
 		conf := "cmd/" + cli + "/.rotini.conf.yaml"
-		if err := NewProcessor("0.0.0").Generate(spec, conf, false, func(string, error) {}); err != nil {
+		if err := NewProcessor("0.0.0").Generate(spec, conf, false, func(string, error) {}, func([]error) {}); err != nil {
 			t.Fatalf("Generate %s: %v", cli, err)
 		}
 	}

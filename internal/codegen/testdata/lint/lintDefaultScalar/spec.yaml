@@ -1,0 +1,42 @@
+# A default is carried to the runtime as ONE string and coerced through the input's type, so
+# there is no representation for a multi-value default. Written as a list it used to reach the
+# generated code as Go's `%v` rendering — mangled, not ignored.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: order
+      identifiers:
+        - --order
+      schema:
+        type: '[]string'
+        default:
+          - defaults
+          - files
+          - argv
+    - name: labels
+      identifiers:
+        - --labels
+      schema:
+        type: map
+        default:
+          team: core
+    # Scalars of every kind are fine, and must stay fine.
+    - name: retries
+      identifiers:
+        - --retries
+      schema:
+        type: int
+        default: 3
+    - name: force
+      identifiers:
+        - --force
+      schema:
+        type: bool
+        default: false
+    - name: name
+      identifiers:
+        - --name
+      schema:
+        type: string
+        default: anonymous

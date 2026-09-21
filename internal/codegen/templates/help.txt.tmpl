@@ -30,7 +30,12 @@
 {{- with .Header}}{{.}}
 
 {{end -}}
-{{- with .Description}}{{.}}
+{{- /* Prose: the description, or the summary when there is no description. Without the
+       fallback a command declaring only a summary renders a page that never says what it
+       does — the summary appears in its PARENT's command list and nowhere on its own page.
+       man carries it in NAME and markdown renders it outright; help was the odd one out. */ -}}
+{{- $prose := .Description}}{{if not $prose}}{{$prose = .Summary}}{{end -}}
+{{- with $prose}}{{.}}
 
 {{end -}}
 {{- $usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}

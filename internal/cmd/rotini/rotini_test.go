@@ -66,7 +66,7 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 			p, out, _ := newTestCLI(t)
 			// Binding doubles that fail the test proves --help short-circuits before
 			// any codegen work is attempted.
-			p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error)) error {
+			p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
 				t.Error("--help ran the generate work")
 				return nil
 			}))
@@ -110,7 +110,7 @@ func TestCLI_generateDelegatesItsArguments(t *testing.T) {
 	var gotWatch bool
 
 	p, out, _ := newTestCLI(t)
-	p.Bind("generate", codegen.GenerateFn(func(spec, conf string, watch bool, onGenerate func(string, error)) error {
+	p.Bind("generate", codegen.GenerateFn(func(spec, conf string, watch bool, onGenerate func(string, error), _ func([]error)) error {
 		gotSpec, gotConf, gotWatch = spec, conf, watch
 		onGenerate("generated ok", nil)
 		return nil
@@ -139,7 +139,7 @@ func TestCLI_generateDelegatesItsArguments(t *testing.T) {
 // A codegen failure is recorded and exits non-zero, rather than being swallowed.
 func TestCLI_generateFailureIsReported(t *testing.T) {
 	p, _, errb := newTestCLI(t)
-	p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error)) error {
+	p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
 		return rotini.UsageError(errBadSpec)
 	}))
 
@@ -277,7 +277,7 @@ func TestCLI_aliases(t *testing.T) {
 		t.Run(tc.alias, func(t *testing.T) {
 			var ran bool
 			p, _, _ := newTestCLI(t)
-			p.Bind("generate", func(string, string, bool, func(string, error)) error { ran = true; return nil })
+			p.Bind("generate", func(string, string, bool, func(string, error), func([]error)) error { ran = true; return nil })
 			p.Bind("validate", func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
 			p.Bind("initialize", func(string, string, bool) error { ran = true; return nil })
 

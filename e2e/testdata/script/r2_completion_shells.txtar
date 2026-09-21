@@ -11,6 +11,13 @@
 # PowerShell is included deliberately: rotini SHIPS a powershell script, so it is either tested
 # or it should not be shipped.
 #
+# MULTI-TOKEN completion is asserted POSITIVELY here, and that is the point. This script used
+# to drive `app --config <TAB>` and assert only that no ":rotini:" directive leaked into the
+# candidates. All three shell scripts were meanwhile truncating the tokens they sent the
+# binary, so the candidate list came back EMPTY — nothing leaked, the test passed, and
+# completion was broken for every word after the first in bash, zsh and fish alike. An
+# assertion that something is absent is satisfied by a script that produces nothing at all.
+#
 # Each shell's block is conditional on that shell existing, so this rig degrades rather than
 # failing on a machine without fish. CI installs all four on ubuntu and macos (see the e2e job
 # in .github/workflows/ci.yml), so the coverage there is real rather than skipped.
@@ -35,6 +42,8 @@ stdout '^:rotini:file yaml yml$'
 
 [exec:bash] exec bash drive-bash.sh
 [exec:bash] stdout 'CANDIDATES: deploy status'
+[exec:bash] stdout 'ENUM: json text yaml'
+[exec:bash] stdout 'DEEP: json text yaml'
 [exec:bash] ! stdout ':rotini:'
 
 [exec:zsh] exec zsh drive-zsh.sh
@@ -43,6 +52,8 @@ stdout '^:rotini:file yaml yml$'
 [exec:fish] exec fish drive-fish.sh
 [exec:fish] stdout 'CANDIDATES: .*deploy'
 [exec:fish] stdout 'CANDIDATES: .*status'
+[exec:fish] stdout 'ENUM: .*json'
+[exec:fish] stdout 'ENUM: .*text'
 [exec:fish] ! stdout ':rotini:'
 
 # PowerShell reads a config file under $HOME at startup, and testscript hands every script a
@@ -77,6 +88,23 @@ for c in "${COMPREPLY[@]}"; do
     esac
 done
 echo "OK: bash handled the directive"
+
+# The token-preservation check: everything after the first word must reach the binary. bash
+# 3.2 (which IS /bin/bash on macOS) collapses "${arr[@]:off:len}" to one element when IFS
+# holds no space, so with IFS narrowed too early this asks the binary to complete the single
+# token "--format " and comes back empty.
+COMP_WORDS=(app --format "")
+COMP_CWORD=2
+COMPREPLY=()
+_app_complete
+echo "ENUM: ${COMPREPLY[@]}"
+
+# And a THIRD word, so a one-off fencepost cannot pass either.
+COMP_WORDS=(app deploy --format "")
+COMP_CWORD=3
+COMPREPLY=()
+_app_complete
+echo "DEEP: ${COMPREPLY[@]}"
 -- drive-zsh.sh --
 # zsh's _describe needs a live completion system, so the meaningful check without one is
 # that the generated script PARSES as zsh and defines the function it registers.
@@ -100,6 +128,12 @@ for l in $out
         exit 1
     end
 end
+# The same token-preservation check. An unquoted (commandline -ct) contributes NO element
+# when the current token is empty, which truncates the line to "app --format" and makes fish
+# offer the flag again instead of its values.
+set -l enum (complete -C "app --format ")
+echo "ENUM: "(string join ' ' (for l in $enum; string split -f1 \t -- $l; end))
+
 echo "OK: fish separated the directive"
 -- drive-pwsh.ps1 --
 # PowerShell has no way to invoke a registered native completer directly without a live
@@ -138,6 +172,16 @@ command:
           extensions:
             - yaml
             - yml
+    - name: format
+      summary: output format
+      identifiers:
+        - --format
+      schema:
+        type: string
+        enum:
+          - json
+          - text
+          - yaml
   commands:
     - name: deploy
       summary: deploy it

@@ -1,0 +1,250 @@
+# R6b — the two composition shapes that did not compile.
+#
+# r6_compose_transitive covers parent → child → grandchild. This covers the two things a real
+# monorepo CLI (example-suite) reached for on top of it, both of which produced a package that
+# did not build:
+#
+#   1. a `commands:` authored BESIDE a `$ref`, which the overlay model merges additively onto
+#      the composed child's subtree. The merged command belongs to the PARENT, so the parent
+#      generates its stub and its types — and its <Prefix>Inputs names every ancestor, the
+#      COMPOSED one included. The parent emitted no type for a composed node, so it emitted a
+#      field of type MonoBuildCommandInputs that nothing declared.
+#
+#   2. the `models` package target, which is what makes handler-code passthrough possible at
+#      all (the cmd package imports the handler package, so the handler cannot import cmd back
+#      for its inputs). It surfaced the same dangling type one layer further out, plus an
+#      alias re-exporting a type the models package did not define.
+#
+# Both failed at `go build`, after a clean validate and a clean generate, in generated code.
+
+gomodinit example.com/merged
+
+exec rotini generate cmd/child/.rotini.spec.yaml --config cmd/child/.rotini.conf.yaml
+exec rotini generate cmd/root/.rotini.spec.yaml --config cmd/root/.rotini.conf.yaml
+exec go mod tidy
+
+# The assertion that matters is that this compiles at all.
+exec go build -o root$exe ./cmd/root
+
+# The composed ancestor's type exists in the models package, so the merged command can name it.
+grep 'type RootChildCommandInputs struct' internal/models/zz_models.go
+grep 'Target string' internal/models/zz_models.go
+
+# ...and there is NO empty RootChildInputs: nothing collects a composed command's inputs
+# through the parent, so the type would have no fields and no consumer.
+! grep 'type RootChildInputs struct' internal/models/zz_models.go
+! grep 'RootChildInputs = models' internal/cmd/root/zz_root.go
+
+# The child keeps its own commands, and the parent's merged one sits beside them.
+exec ./root$exe help child
+stdout 'build it'
+stdout 'added by the parent'
+
+# The merged command runs from the PARENT's package and reads the COMPOSED command's flag.
+exec ./root$exe child extra
+stdout 'extra: target=all'
+exec ./root$exe child --target api extra
+stdout 'extra: target=api'
+
+# The child's own command still runs from the CHILD's package.
+exec ./root$exe child make
+stdout 'child made all'
+
+# A summary-only command's help page says what it does, rather than opening at Usage.
+exec ./root$exe help child make
+stdout '^build it$'
+
+-- cmd/child/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: child
+  summary: the child CLI
+  description: A separate CLI with its own flags.
+  flags:
+    - name: target
+      summary: what to act on
+      identifiers: ["-t", "--target"]
+      schema:
+        type: string
+        default: all
+    - name: help
+      summary: print help
+      identifiers: ["-h", "--help"]
+      schema:
+        type: bool
+  commands:
+    - name: make
+      summary: build it
+-- cmd/child/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/child/zz_child.go
+      package: child
+  features:
+    - type: help
+      enabled: true
+-- cmd/root/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: root
+  summary: the parent
+  flags:
+    - name: help
+      summary: print help
+      identifiers: ["-h", "--help"]
+      schema:
+        type: bool
+  commands:
+    - $ref: ../child/.rotini.spec.yaml
+      # Merged additively onto the child's subtree. This command is the PARENT's: its stub
+      # and its types are generated here, not in the child.
+      commands:
+        - name: extra
+          summary: added by the parent
+    - name: help
+      summary: print help
+      arguments:
+        - name: command
+          summary: the command path
+          schema:
+            type: '[]string'
+-- cmd/root/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/root/main.go
+    - type: cmd
+      file: internal/cmd/root/zz_root.go
+      package: root
+    - type: models
+      file: internal/models/zz_models.go
+      package: models
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/child/child.go --
+package child
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type childHandlers struct{ base }
+
+func (*childHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/child/child_make.go --
+package child
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type childMakeHandlers struct{ base }
+
+func (*childMakeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[ChildMakeInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "child made %s\n", in.Child.Flags.Target)
+}
+-- internal/cmd/root/root.go --
+package root
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type rbase struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type rootHandlers struct{ rbase }
+
+func (*rootHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/root/root_child_extra.go --
+package root
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type rootChildExtraHandlers struct{ rbase }
+
+// Run reads RootChild.Flags.Target — the COMPOSED command's flag, declared in the child's
+// spec, reached from a handler in the parent's package that imports nothing of the child's.
+func (*rootChildExtraHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[RootChildExtraInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "extra: target=%s\n", in.RootChild.Flags.Target)
+}
+-- internal/cmd/root/root_help.go --
+package root
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type rootHelpHandlers struct{ rbase }
+
+func (*rootHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[RootHelpInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	page, err := Help(in.RootHelp.Arguments.Command...)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.SignalExit(1)
+		return
+	}
+	fmt.Fprintln(rtx.Stdout, page)
+}
+-- cmd/root/main.go --
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	root "example.com/merged/internal/cmd/root"
+)
+
+func main() {
+	root.Program.
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}

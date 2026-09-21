@@ -59,12 +59,14 @@ type {{.Prefix}}CommandInputs struct {
 	Stdin     {{.StdinType}} `stdin:"{{.StdinFormat}}"`
 {{- end}}
 }
+{{- if .InputsFields}}
 
 type {{.Prefix}}Inputs struct {
 {{- range .InputsFields}}
 	{{.Field}} {{.GoType}}
 {{- end}}
 }
+{{- end}}
 {{- end}}
 {{with .OutputTypes}}
 {{.}}

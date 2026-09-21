@@ -126,7 +126,9 @@ Text written at the very top of every Go file this target produces — the gener
 
 array of string`
 
-Package-relative paths (e.g. 'helpers.go') that pruning must never remove, even when they do not correspond to a command in the spec. The editable per-feature templates and test files are always kept automatically. Intended to stay empty in steady state.
+Package-relative paths (e.g. 'helpers.go') that pruning must never remove.
+
+You rarely need it: pruning only ever removes files ROTINI WROTE — an orphaned handler stub, identified by the generated marker it carries — and reports each one. A file you wrote is never a candidate, whatever it is named, and neither are test files or the editable per-feature templates. Reach for 'keep' when you have adopted a generated stub as your own AND kept its marker, or to protect a rendered output file under an embed_dir.
 
 ### `package`
 

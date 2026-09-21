@@ -236,11 +236,7 @@ func flagDefsLiteral(in *Inputs) string {
 		if f.Summary != "" {
 			b.WriteString(", Summary: " + strconv.Quote(f.Summary))
 		}
-		defType := getSchemaType(f.Schema)
-		if f.Schema != nil && f.Schema.Type == "count" {
-			defType = "count" // the parser needs the count semantics; the FIELD is int
-		}
-		b.WriteString(", Type: " + strconv.Quote(defType))
+		b.WriteString(", Type: " + strconv.Quote(definitionType(f.Schema)))
 		writeSchemaCommon(b, f.Schema)
 		if f.Hidden {
 			b.WriteString(", Hidden: true")
@@ -310,7 +306,7 @@ func argDefsLiteral(in *Inputs) string {
 		return ""
 	}
 	return sliceLiteral("ArgDef", in.Arguments, func(b *strings.Builder, a ArgumentInput) {
-		typ := getSchemaType(a.Schema)
+		typ := definitionType(a.Schema)
 		b.WriteString("Name: " + strconv.Quote(a.Name) + ", Type: " + strconv.Quote(typ))
 		if strings.HasPrefix(typ, "[]") {
 			b.WriteString(", Variadic: true")
@@ -416,6 +412,40 @@ func constraintsLiteral(schema *InputSchema) string {
 		return ""
 	}
 	return rotiniPkgName + ".Constraints{" + strings.Join(parts, ", ") + "}"
+}
+
+// definitionType resolves an input schema to the type string carried on the emitted
+// FlagDef/ArgDef, which is NOT always the field's Go type. A few declared names carry
+// PARSE-TIME semantics that the Go type erases:
+//
+//   - `count` tallies occurrences; the field is an int
+//   - `existingfile`/`existingdir` are checked for existence and kind; the field is a string
+//
+// Run those through jsonSchemaTypeToGo and the parser sees "int"/"string" and does nothing —
+// the declared behavior silently never fires. The Definition keeps the declared name; the
+// struct field keeps the Go type (goFieldType, which is getSchemaType-based, still applies).
+func definitionType(schema *InputSchema) string {
+	if schema == nil || schema.Ref != "" {
+		return getSchemaType(schema)
+	}
+	if parserSignificantType(schema.Type) {
+		return schema.Type
+	}
+	// An array's ELEMENT can be parser-significant too: the parser checks each value of a
+	// repeatable input against the element type, so `[]existingfile` has to reach it whole.
+	if t := getSchemaType(schema); strings.HasPrefix(t, "[]") && schema.Items != nil &&
+		schema.Items.Ref == "" && parserSignificantType(schema.Items.Type) {
+		return "[]" + schema.Items.Type
+	}
+	return getSchemaType(schema)
+}
+
+// parserSignificantType reports whether a declared type name means something to the parser
+// that its Go type would erase. Keep in sync with the parser's own isPathType and its count
+// handling — schema_consumers_test.go asserts every schema type name has a consumer, and
+// TestDefinitionTypePreservesParserSemantics pins this set.
+func parserSignificantType(t string) bool {
+	return t == "count" || t == "existingfile" || t == "existingdir"
 }
 
 // getSchemaType resolves an input schema to the Definition's type string,
