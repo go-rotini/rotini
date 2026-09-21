@@ -2,7 +2,10 @@ package codegen
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/go-rotini/jsonschema"
 )
@@ -153,7 +156,148 @@ func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) [
 		if loc == "" {
 			loc = "/"
 		}
-		problems = append(problems, &problem{kind: kind, loc: loc, msg: ve.Message})
+		problems = append(problems, &problem{kind: kind, loc: loc, msg: humanizeSchemaError(ve)})
 	}
 	return problems
+}
+
+// humanizeSchemaError renders a schema violation in rotini's vocabulary instead of JSON
+// Schema's, for the two failures whose stock wording says nothing to the person who caused
+// them — and which happen to be the two mistakes everyone makes first:
+//
+//	/command/summry: schema is false; nothing matches   ->  unknown key "summry" on a command
+//	/command: no anyOf branch matched                   ->  a command needs either "name" or "$ref"
+//
+// Everything else the validator says is already plain ("value is not of type array", "missing
+// required property \"version\""), so it passes through untouched. rotini's own lint rules set
+// the bar — they name the command, the input and the rule, and say why it matters — and these
+// two were the only messages in the tool that failed it.
+//
+// Both readings are DERIVED, not hardcoded: the key comes from the instance pointer, the noun
+// from the schema definition the keyword failed in, and the choice from the anyOf branches'
+// own required-property causes. A schema change carries them along. The dispatch is on
+// ve.Keyword, which the validator documents as the stable machine-readable classification —
+// never on its message text.
+func humanizeSchemaError(ve *jsonschema.ValidationError) string {
+	switch ve.Keyword {
+	case "false":
+		// additionalProperties:false renders as a "false" schema for the offending key.
+		key := pointerLeaf(ve.InstanceLocation)
+		if key == "" {
+			break
+		}
+		if noun := definitionNoun(ve.KeywordLocation); noun != "" {
+			return fmt.Sprintf("unknown key %q on %s", key, noun)
+		}
+		return fmt.Sprintf("unknown key %q", key)
+	case "type":
+		// "value is not of type array" names the expectation and not the thing — so in
+		// isolation, in a log or an editor's error list, it says which shape was wanted
+		// without saying of what.
+		if key := pointerLeaf(ve.InstanceLocation); key != "" {
+			if want, ok := strings.CutPrefix(ve.Message, "value is not of type "); ok {
+				return fmt.Sprintf("%q must be of type %s", key, want)
+			}
+		}
+	case "anyOf":
+		// Every branch failed. In rotini's schemas an anyOf is a choice between required
+		// keys, so the branches' causes name the choice exactly.
+		keys := requiredChoices(ve.Causes)
+		if len(keys) < 2 {
+			break
+		}
+		noun := definitionNoun(ve.KeywordLocation)
+		if noun == "" {
+			noun = "this value"
+		}
+		return fmt.Sprintf("%s needs either %s", noun, quotedOrList(keys))
+	}
+	return ve.Message
+}
+
+// pointerLeaf is the last segment of a JSON pointer ("/command/summry" -> "summry"), with
+// pointer escapes undone. "" for the root pointer.
+func pointerLeaf(pointer string) string {
+	i := strings.LastIndex(pointer, "/")
+	if i < 0 || i == len(pointer)-1 {
+		return ""
+	}
+	seg := pointer[i+1:]
+	seg = strings.ReplaceAll(seg, "~1", "/")
+	return strings.ReplaceAll(seg, "~0", "~")
+}
+
+// definitionNoun turns a schema keyword location into the English noun for the shape that
+// failed: "#/definitions/Command/anyOf" -> "a command", "#/definitions/FlagInput/..." ->
+// "a flag input". "" when the location names no definition.
+func definitionNoun(keywordLocation string) string {
+	segs := strings.Split(strings.TrimPrefix(keywordLocation, "#/"), "/")
+	for i, seg := range segs {
+		if (seg == "definitions" || seg == "$defs") && i+1 < len(segs) {
+			return "a " + splitCamel(segs[i+1])
+		}
+	}
+	return ""
+}
+
+// splitCamel turns a PascalCase schema definition name into lowercase words:
+// "RemoteCommandSpec" -> "remote command spec".
+func splitCamel(name string) string {
+	var b strings.Builder
+	for i, r := range name {
+		if i > 0 && unicode.IsUpper(r) {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(unicode.ToLower(r))
+	}
+	return b.String()
+}
+
+// requiredChoices collects the property each failed anyOf branch was missing, in branch order
+// and deduped — the choice the author actually has.
+func requiredChoices(causes []jsonschema.ValidationError) []string {
+	var keys []string
+	for i := range causes {
+		c := &causes[i]
+		if c.Keyword != "required" {
+			return nil // not a required-key choice; say nothing rather than guess
+		}
+		key := betweenQuotes(c.Message)
+		if key == "" {
+			return nil
+		}
+		if !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+// betweenQuotes extracts the first double-quoted run from s, or "".
+func betweenQuotes(s string) string {
+	_, rest, ok := strings.Cut(s, `"`)
+	if !ok {
+		return ""
+	}
+	inner, _, ok := strings.Cut(rest, `"`)
+	if !ok {
+		return ""
+	}
+	return inner
+}
+
+// quotedOrList renders keys as `"a" or "b"` / `"a", "b" or "c"`.
+func quotedOrList(keys []string) string {
+	quoted := make([]string, len(keys))
+	for i, k := range keys {
+		quoted[i] = strconv.Quote(k)
+	}
+	switch len(quoted) {
+	case 1:
+		return quoted[0]
+	case 2:
+		return quoted[0] + " or " + quoted[1]
+	default:
+		return strings.Join(quoted[:len(quoted)-1], ", ") + " or " + quoted[len(quoted)-1]
+	}
 }

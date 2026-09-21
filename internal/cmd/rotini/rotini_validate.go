@@ -64,10 +64,35 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	)
 
 	if err != nil {
-		rtx.RecordError(err)
+		// Record each problem SEPARATELY, the way the warnings above already are. The
+		// validator joins its findings into one error, and a funnel printing
+		// "Error: %s" then marks only the first line of it — so a three-problem report
+		// had one line starting "Error:" and two that were prefix-identical to the
+		// informational "spec: <path>" banner. `grep '^Error:'` found one problem in
+		// three, and an editor parsing the output could not tell a finding from a header.
+		for _, problem := range flatten(err) {
+			rtx.RecordError(problem)
+		}
 		rtx.SignalExit(1)
 		return
 	}
 
 	rtx.SignalExit(0)
+}
+
+// flatten expands an errors.Join tree into its leaves, so each validation problem is recorded
+// as its own outcome. A non-joined error is its own only leaf.
+func flatten(err error) []error {
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return []error{err}
+	}
+	var out []error
+	for _, e := range joined.Unwrap() {
+		out = append(out, flatten(e)...)
+	}
+	if len(out) == 0 {
+		return []error{err}
+	}
+	return out
 }

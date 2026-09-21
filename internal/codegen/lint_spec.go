@@ -1,6 +1,8 @@
 package codegen
 
 import (
+	"strconv"
+
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -195,13 +197,15 @@ func lintRootAliases(spec *Spec) []error {
 	if len(spec.Command.Aliases) > 0 {
 		problems = append(problems, &problem{
 			kind: "spec", ptr: rootPointer, loc: "(root)",
-			msg: "the root command cannot declare aliases — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
+			msg: fmt.Sprintf("the root command cannot declare aliases (%s) — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
+				quotedList(spec.Command.Aliases)),
 		})
 	}
 	if len(spec.Command.DeprecatedIdentifiers) > 0 {
 		problems = append(problems, &problem{
 			kind: "spec", ptr: rootPointer, loc: "(root)",
-			msg: "the root command cannot declare deprecated_identifiers — with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
+			msg: fmt.Sprintf("the root command cannot declare deprecated_identifiers (%s) — with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
+				quotedList(spec.Command.DeprecatedIdentifiers)),
 		})
 	}
 	return problems
@@ -220,10 +224,17 @@ func lintSiblingCollisions(spec *Spec) []error {
 					continue
 				}
 				if prev, dup := claimedBy[tok]; dup {
+					// When the two claimants have the same name, saying they are
+					// "claimed by both X and X" is accurate and tells the reader
+					// nothing — the mistake is simply a repeated name, so say that.
+					msg := fmt.Sprintf("dispatch token %q is claimed by both %q and %q", tok, prev, owner)
+					if prev == owner {
+						msg = fmt.Sprintf("two sibling commands are both named %q", tok)
+					}
 					problems = append(problems, &problem{
 						kind: "spec", ptr: ptr,
 						loc: "command " + path,
-						msg: fmt.Sprintf("dispatch token %q is claimed by both %q and %q", tok, prev, owner),
+						msg: msg,
 					})
 					continue
 				}
@@ -1394,4 +1405,14 @@ func isQualifiedType(expr ast.Expr) bool {
 	default:
 		return false
 	}
+}
+
+// quotedList renders tokens as a comma-separated quoted list, so a message names the offending
+// values rather than only the rule they broke.
+func quotedList(tokens []string) string {
+	quoted := make([]string, len(tokens))
+	for i, t := range tokens {
+		quoted[i] = strconv.Quote(t)
+	}
+	return strings.Join(quoted, ", ")
 }

@@ -182,3 +182,87 @@ func TestService_emptyServiceStillRunsShutdown(t *testing.T) {
 		t.Error("an empty service skipped its shutdown hooks")
 	}
 }
+
+// TestService_shutdownHookOverrunIsATimeout covers the half of the shutdown budget that did
+// not report the sentinel named after it.
+//
+// WithShutdownTimeout is documented to bound "how long Run waits for workers to stop AND for
+// the shutdown hooks to finish", but only the worker half produced ErrShutdownTimeout. A hook
+// that ran past the budget returned whatever it happened to return — typically ctx.Err(),
+// which is plain context.DeadlineExceeded — so a caller running a service under its own
+// deadline could not distinguish a dirty teardown from a bounded run ending normally. That
+// ambiguity is what made example-daemon report a cut-off shutdown as a success.
+func TestService_shutdownHookOverrunIsATimeout(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a hook that overruns reports the timeout", func(t *testing.T) {
+		t.Parallel()
+		var ran []string
+		err := NewService().
+			WithShutdownTimeout(40*time.Millisecond).
+			Go("w", func(ctx context.Context) error { return nil }).
+			// Registered first, so it runs LAST — after the slow one has already
+			// exhausted the budget. It must still run: a cut-short budget is not a
+			// licence to skip teardown.
+			WithShutdown(func(context.Context) error { ran = append(ran, "flush"); return nil }).
+			WithShutdown(func(ctx context.Context) error {
+				<-ctx.Done()
+				ran = append(ran, "slow")
+				return ctx.Err()
+			}).
+			Run(context.Background())
+
+		if !errors.Is(err, ErrShutdownTimeout) {
+			t.Errorf("err = %v, want it to match ErrShutdownTimeout", err)
+		}
+		// The detail survives alongside the sentinel.
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("err = %v, want the hook's own cause to remain reachable", err)
+		}
+		if len(ran) != 2 || ran[0] != "slow" || ran[1] != "flush" {
+			t.Errorf("hooks ran %v, want [slow flush] — reverse order, both of them", ran)
+		}
+	})
+
+	t.Run("hooks that finish in time report nothing", func(t *testing.T) {
+		t.Parallel()
+		err := NewService().
+			WithShutdownTimeout(time.Second).
+			Go("w", func(ctx context.Context) error { return nil }).
+			WithShutdown(func(context.Context) error { return nil }).
+			Run(context.Background())
+		if err != nil {
+			t.Errorf("err = %v, want nil", err)
+		}
+	})
+
+	t.Run("a hook's own failure is not a timeout", func(t *testing.T) {
+		t.Parallel()
+		boom := errors.New("boom")
+		err := NewService().
+			WithShutdownTimeout(time.Second).
+			Go("w", func(ctx context.Context) error { return nil }).
+			WithShutdown(func(context.Context) error { return boom }).
+			Run(context.Background())
+		if !errors.Is(err, boom) {
+			t.Errorf("err = %v, want it to wrap the hook's error", err)
+		}
+		if errors.Is(err, ErrShutdownTimeout) {
+			t.Errorf("a hook failing promptly was reported as a timeout: %v", err)
+		}
+	})
+
+	t.Run("a worker's failure still wins", func(t *testing.T) {
+		t.Parallel()
+		boom := errors.New("disk full")
+		err := NewService().
+			WithShutdownTimeout(30*time.Millisecond).
+			Go("w", func(ctx context.Context) error { return boom }).
+			WithShutdown(func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }).
+			Run(context.Background())
+		// The worker is the cause; a teardown cut short is usually its consequence.
+		if !errors.Is(err, boom) {
+			t.Errorf("err = %v, want the worker's error", err)
+		}
+	})
+}

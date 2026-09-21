@@ -37,7 +37,6 @@ func NewREPL(program *Program) *REPL {
 		program: program,
 		prompt:  "> ",
 		exits:   []string{"exit", "quit"},
-		echoErr: true,
 	}
 	if program != nil {
 		r.in, r.out = program.stdin, program.stdout
@@ -60,8 +59,18 @@ func (r *REPL) WithOutput(out io.Writer) *REPL { r.out = out; return r }
 // Passing none leaves end-of-input and context cancellation as the only exits.
 func (r *REPL) WithExitCommands(words ...string) *REPL { r.exits = words; return r }
 
-// WithErrorEcho controls whether a failing command's error is written to the REPL's output
-// (default true). Turn it off when the program's own funnel already reports to the same stream.
+// WithErrorEcho controls whether a failing command's error is written to the REPL's output.
+//
+// It is OFF by default, because a rotini program already reports its own failures: the default
+// funnel prints every recorded error, and a custom funnel almost always does too. With the echo
+// on as well, every error in a session appeared twice — once from the funnel on stderr, once
+// from the REPL on stdout — which in a terminal is the same destination:
+//
+//	syncd> Error: unknown command "nosuchcommand" for "syncd"
+//	       unknown command "nosuchcommand" for "syncd"
+//
+// Turn it on for a program whose funnel is deliberately silent, or one whose funnel writes
+// somewhere the person at the prompt cannot see.
 func (r *REPL) WithErrorEcho(enabled bool) *REPL { r.echoErr = enabled; return r }
 
 // Run reads and dispatches lines until an exit command, end of input, or a done

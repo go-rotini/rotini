@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -211,6 +212,9 @@ func lintReport(failure error, warnings []error) string {
 // the promise silently: lintImportConsistency reports a type declared with conflicting
 // imports in two or more places, so there is no single node — the message names both imports
 // instead. Anything else reporting without a position is a regression.
+// lineColRe matches the full position promise: file:line:col.
+var lineColRe = regexp.MustCompile(`\.rotini\.(spec|conf)\.yaml:\d+:\d+`)
+
 func TestLintProblemsArePositioned(t *testing.T) {
 	unpositionable := map[string]string{
 		"lintImportConsistency": "reports a conflict across two or more declarations",
@@ -234,11 +238,17 @@ func TestLintProblemsArePositioned(t *testing.T) {
 				if line == "" {
 					continue
 				}
-				positioned := strings.Contains(line, ".rotini.spec.yaml:") ||
-					strings.Contains(line, ".rotini.conf.yaml:")
+				// EVERY problem names its file — a message without one is unusable
+				// from a Makefile or against several documents.
+				if !strings.Contains(line, ".rotini.spec.yaml") && !strings.Contains(line, ".rotini.conf.yaml") {
+					t.Errorf("%s names no file at all:\n%s", rule, line)
+				}
+				// A line:col is the stronger promise, and a few rules genuinely cannot
+				// make it: a conflict ACROSS declarations has no single node to point at.
+				positioned := lineColRe.MatchString(line)
 				if why, ok := unpositionable[rule]; ok {
 					if positioned {
-						t.Errorf("%s is listed as unpositionable (%s) but now reports a position — remove it from the list:\n%s", rule, why, line)
+						t.Errorf("%s is listed as unpositionable (%s) but now reports a line:col — remove it from the list:\n%s", rule, why, line)
 					}
 					continue
 				}

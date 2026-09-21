@@ -1,1 +1,1 @@
-spec: type uuid.UUID: declared with conflicting imports (example.com/fork/uuid, github.com/google/uuid); a type must have one backing package
+spec: .rotini.spec.yaml: type uuid.UUID: declared with conflicting imports (example.com/fork/uuid, github.com/google/uuid); a type must have one backing package

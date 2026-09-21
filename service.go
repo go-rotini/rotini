@@ -12,9 +12,15 @@ import (
 // [Service]: the daemon shape — long-lived workers supervised until the context ends
 // or one fails, with shutdown hooks that run in every case. [Scheduler] is built on it.
 
-// ErrShutdownTimeout reports that a service's workers did not stop within the
-// shutdown budget. The service returns rather than hanging, so a supervisor's own
-// kill timer is never the thing that ends the process.
+// ErrShutdownTimeout reports that a service did not tear itself down within the shutdown
+// budget — either its workers did not stop, or its shutdown hooks did not finish. The budget
+// covers both halves (see [Service.WithShutdownTimeout]) and so does this error, because the
+// question a caller is asking is the same one in both cases: did teardown complete, or is this
+// process exiting with work possibly unflushed? A supervisor acts on that, not on which half
+// ran long.
+//
+// The service returns rather than hanging, so a supervisor's own kill timer is never the thing
+// that ends the process.
 var ErrShutdownTimeout = InternalError(errors.New("rotini: shutdown timed out"))
 
 // Service runs a set of long-lived workers until the context ends or one of them fails, then
@@ -155,6 +161,21 @@ func (s *Service) runShutdown(ctx context.Context, prior error) error {
 			first = fmt.Errorf("rotini: service shutdown: %w", err)
 		}
 	}
+	// The budget applies to the hooks as well as to the workers, so overrunning it here is
+	// the condition ErrShutdownTimeout names. Without this it was reported only for the
+	// worker half: a hook that ran long returned whatever it happened to return — usually
+	// ctx.Err(), which is plain context.DeadlineExceeded — so a caller could not tell a
+	// dirty teardown from a bounded run reaching its own deadline normally, and the one
+	// question the sentinel exists to answer had a typed answer for half the budget.
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if first != nil {
+			first = fmt.Errorf("%w: %w", ErrShutdownTimeout, first)
+		} else {
+			first = ErrShutdownTimeout
+		}
+	}
+	// A worker's own failure still wins: it is the cause, and a teardown cut short is
+	// usually its consequence.
 	if prior != nil {
 		return prior
 	}

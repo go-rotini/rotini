@@ -83,11 +83,15 @@ func locateProblems(problems []error, path string, locate sourceLocator) {
 		if ptr == "" && strings.HasPrefix(p.loc, "/") {
 			ptr = p.loc
 		}
-		if ptr == "" {
+		if line, col, ok := locate(ptr); ptr != "" && ok {
+			p.pos = fmt.Sprintf("%s:%d:%d", path, line, col)
 			continue
 		}
-		if line, col, ok := locate(ptr); ok {
-			p.pos = fmt.Sprintf("%s:%d:%d", path, line, col)
-		}
+		// No line:col — the document ROOT has no position of its own, and a rule may
+		// address a node the locator cannot find. Name the file anyway: a problem without
+		// a line is inconvenient, and one without a file name is unusable, especially from
+		// a Makefile or against several documents. `version:` missing from a spec used to
+		// report as "spec: /: missing required property" and name nothing at all.
+		p.pos = path
 	}
 }

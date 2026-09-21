@@ -170,3 +170,84 @@ func TestREPL_requiresAProgramAndInput(t *testing.T) {
 		t.Errorf("REPL with no input = %v, want a usage error", err)
 	}
 }
+
+// TestREPL_errorEchoDefaultsOff pins the pairing of two defaults that used not to compose.
+//
+// rotini's default funnel prints every recorded error, and the REPL's echo defaulted to on, so
+// an out-of-the-box program in an out-of-the-box REPL printed each failure twice — once on
+// stderr from the funnel, once on stdout from the echo, which in a terminal is one destination.
+// The knob's own doc pointed at the right idea with the wrong test ("the same stream"): stream
+// identity is not what matters, whether the funnel already reports is.
+func TestREPL_errorEchoDefaultsOff(t *testing.T) {
+	t.Parallel()
+	failing := errors.New("that did not work")
+
+	newProgram := func(out, errOut *bytes.Buffer, input string) *Program {
+		def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "boom", Handler: "AppBoom"}}}
+		p := NewProgram(def, &echoHandlers{fail: failing})
+		p.stdout, p.stderr = out, errOut
+		p.stdin = strings.NewReader(input)
+		return p
+	}
+
+	t.Run("off by default: the funnel reports, the REPL does not repeat it", func(t *testing.T) {
+		t.Parallel()
+		var out, errOut bytes.Buffer
+		if err := NewREPL(newProgram(&out, &errOut, "boom\nexit\n")).WithPrompt("").Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(errOut.String(), failing.Error()); n != 1 {
+			t.Errorf("the funnel reported %d times, want 1: %q", n, errOut.String())
+		}
+		if strings.Contains(out.String(), failing.Error()) {
+			t.Errorf("the REPL echoed an error the funnel had already reported: %q", out.String())
+		}
+	})
+
+	t.Run("on when asked: for a program whose funnel is silent", func(t *testing.T) {
+		t.Parallel()
+		var out, errOut bytes.Buffer
+		p := newProgram(&out, &errOut, "boom\nexit\n").
+			WithFunnel(func(context.Context, *Context, Outcome) {}) // says nothing
+		if err := NewREPL(p).WithPrompt("").WithErrorEcho(true).Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), failing.Error()) {
+			t.Errorf("with a silent funnel and the echo on, nothing was reported: %q", out.String())
+		}
+	})
+
+	t.Run("a failing command never ends the session", func(t *testing.T) {
+		t.Parallel()
+		var out, errOut bytes.Buffer
+		if err := NewREPL(newProgram(&out, &errOut, "boom\nboom\nexit\n")).WithPrompt("").Run(context.Background()); err != nil {
+			t.Fatalf("a failing command ended the loop: %v", err)
+		}
+		if n := strings.Count(errOut.String(), failing.Error()); n != 2 {
+			t.Errorf("ran %d commands after the first failure, want both: %q", n, errOut.String())
+		}
+	})
+}
+
+// echoHandlers fails on `boom` and does nothing otherwise.
+type echoHandlers struct {
+	DefaultCascadingPreRun
+	DefaultPreRun
+	DefaultPostRun
+	DefaultCascadingPostRun
+	fail error
+}
+
+func (h *echoHandlers) Run(ctx context.Context, rtx *Context) {}
+func (h *echoHandlers) App() Handlers                         { return h }
+func (h *echoHandlers) AppBoom() Handlers                     { return &boomHandlers{fail: h.fail} }
+
+type boomHandlers struct {
+	DefaultCascadingPreRun
+	DefaultPreRun
+	DefaultPostRun
+	DefaultCascadingPostRun
+	fail error
+}
+
+func (h *boomHandlers) Run(ctx context.Context, rtx *Context) { rtx.RecordError(h.fail) }
