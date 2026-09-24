@@ -50,6 +50,7 @@ type rnode struct {
 	passthrough           bool                // every token after this command is a raw positional
 	composed              bool                // grafted from a $ref'd child (its types live in the child's cmd)
 	remotes               []RemoteCommandSpec // co-located remote sub-commands declared on this command
+	pluginPath            string              // extra directory searched for BOTH this command's remote kinds
 	children              []rnode
 }
 
@@ -121,6 +122,7 @@ func resolveTree(spec *Spec, specPath, moduleName string) (*program, error) {
 		rootHelp:        commandHelp(root),
 		rootOutput:      root.Output,
 		rootDiscovery:   root.RemoteDiscovery,
+		rootPluginPath:  root.PluginPath,
 		rootPassthrough: root.Passthrough,
 		schemas:         spec.Command.Schemas,
 		configFiles:     allScopedConfigFiles(spec),
@@ -249,6 +251,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			passthrough:           c.Passthrough,
 			composed:              ctx.composed,
 			remotes:               c.RemoteCommands,
+			pluginPath:            c.PluginPath,
 			children:              children,
 		})
 	}

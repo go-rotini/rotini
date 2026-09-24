@@ -6,7 +6,7 @@ title: "generated"
 
 rotini generates **what is yours** and imports **what is ours**. Your CLI's shape — its command tree, typed inputs, and help text — is unique to your project, so it is written into your repo where you can read it, diff it, and own it. The machinery is an ordinary versioned import.
 
-`rotini init` generates **342 lines across 5 files** — and they are a CLI that already
+`rotini init` generates **356 lines across 5 files** — and they are a CLI that already
 answers `--help`, `--version`, `help <command>` and `version`, because the seeded spec
 declares them and the seeded handlers are wired to the pages codegen just produced. Nothing
 is injected at run time; every line is in your repo, and every line is yours to delete.

@@ -34,8 +34,12 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 {{- if .NeedsInputs}}
 	inputs, err := rotini.Collect[{{.InputsType}}](rtx)
 	if err != nil {
+		// Record, then Halt. Halt stops the chain WITHOUT claiming an exit code, so the
+		// funnel decides what an input failure costs. Halting matters as much as
+		// recording: without it the next hook collects the same inputs, hits the same
+		// validation and records the same error again.
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.Halt()
 		return
 	}
 {{- end}}
@@ -67,7 +71,7 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	page, err := Help(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.Halt()
 		return
 	}
 	fmt.Fprintln(rtx.Stdout, page)
@@ -78,6 +82,8 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 {{- else if .PrintHelpWhenBare}}
 
 	// Nothing to do yet: show this command's own help rather than an empty run.
+	// SignalExit here, not Halt: "invoked with no sub-command" is a deliberate non-zero
+	// verdict, so the code is the point rather than an artifact of stopping.
 	fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
 	rtx.SignalExit(1)
 {{- else}}

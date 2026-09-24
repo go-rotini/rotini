@@ -194,9 +194,14 @@ func TestRun_remoteTimeout(t *testing.T) {
 // sub-command would actually resolve.
 //
 // It exists because the obvious way to answer that — exec.LookPath — is wrong. Dispatch looks
-// NEXT TO THE HOST BINARY first (the git/kubectl convention), then in the discovery path for a
-// discovered plugin, then on PATH. A doctor built on LookPath reports every conventionally
-// installed plugin as missing, which is what example-plug's `plugins` command did before this.
+// NEXT TO THE HOST BINARY first (the git/kubectl convention), then in the command's
+// PluginPath, then on PATH. A doctor built on LookPath reports every conventionally installed
+// plugin as missing, which is what example-plug's `plugins` command did before this.
+//
+// The PluginPath half is the same for both kinds of remote, and deliberately so: the path
+// used to live on RemoteDiscovery, where only DISCOVERED plugins could reach it, so an author
+// had no way to say where a DECLARED remote lived. They are the same binaries in the same
+// directory; configuring that twice, or only for one of them, was the accident.
 func TestRemoteBinaryPath(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string) string {
@@ -216,23 +221,35 @@ func TestRemoteBinaryPath(t *testing.T) {
 			{Name: "found", Binary: "app-found", Aliases: []string{"f"}},
 			{Name: "gone", Binary: "app-gone-nothing-here"},
 		},
-		Discovery: &RemoteDiscoveryDef{Prefix: "app-", Path: dir},
+		Discovery: &RemoteDiscoveryDef{Prefix: "app-"}, PluginPath: dir,
 	}
 
-	t.Run("a declared remote does NOT see the discovery path", func(t *testing.T) {
-		// app-found exists only in the discovery path, and a declared remote is not
-		// searched there — dispatch would fail too, so the doctor must agree.
-		if p, ok := RemoteBinaryPath(cmd, "found"); ok {
-			t.Errorf("declared remote resolved to %q via the discovery path", p)
-		}
-	})
-	t.Run("a discovered token does", func(t *testing.T) {
-		p, ok := RemoteBinaryPath(cmd, "only")
+	t.Run("a declared remote sees the plugin path", func(t *testing.T) {
+		p, ok := RemoteBinaryPath(cmd, "found")
 		if !ok {
-			t.Fatal("app-only is in the discovery path and did not resolve")
+			t.Fatal("app-found is in the plugin path and did not resolve")
 		}
 		if filepath.Dir(p) != dir {
 			t.Errorf("resolved to %q, want it under %q", p, dir)
+		}
+	})
+	t.Run("a discovered token sees the same directory", func(t *testing.T) {
+		p, ok := RemoteBinaryPath(cmd, "only")
+		if !ok {
+			t.Fatal("app-only is in the plugin path and did not resolve")
+		}
+		if filepath.Dir(p) != dir {
+			t.Errorf("resolved to %q, want it under %q", p, dir)
+		}
+	})
+	t.Run("with no plugin path, neither kind sees it", func(t *testing.T) {
+		bare := cmd
+		bare.PluginPath = ""
+		if p, ok := RemoteBinaryPath(bare, "found"); ok {
+			t.Errorf("declared remote resolved to %q with no PluginPath set", p)
+		}
+		if p, ok := RemoteBinaryPath(bare, "only"); ok {
+			t.Errorf("discovered token resolved to %q with no PluginPath set", p)
 		}
 	})
 	t.Run("a declared remote with no binary anywhere", func(t *testing.T) {
@@ -246,9 +263,8 @@ func TestRemoteBinaryPath(t *testing.T) {
 		}
 	})
 	t.Run("an alias answers identically to its remote", func(t *testing.T) {
-		// "f" is an alias of "found". Both take the DECLARED path, so neither sees the
-		// discovery path — an alias that resolved differently from its own remote would
-		// make the doctor disagree with dispatch.
+		// "f" is an alias of "found": an alias that resolved differently from its own
+		// remote would make the doctor disagree with dispatch.
 		byName, okName := RemoteBinaryPath(cmd, "found")
 		byAlias, okAlias := RemoteBinaryPath(cmd, "f")
 		if byName != byAlias || okName != okAlias {

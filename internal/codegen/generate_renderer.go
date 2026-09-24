@@ -8,6 +8,7 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/format"
 	"strings"
@@ -453,7 +454,7 @@ func parseDocTemplate(name, text string) (*template.Template, error) {
 func renderDocText(tmpl *template.Template, data templateHelpData) (string, error) {
 	var buffer bytes.Buffer
 	if err := tmpl.Execute(&buffer, sanitizeDocData(data)); err != nil {
-		return "", fmt.Errorf("execute %s template: %w", tmpl.Name(), err)
+		return "", errors.New(templateFailure(tmpl.Name(), err))
 	}
 
 	return tidy(tabAlign(buffer.String())), nil
@@ -606,4 +607,37 @@ func indentLines(n int, s string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// templateFailure rewrites text/template's execution error for an EDITABLE template — the one
+// a `template: true` feature seeds for an author to customize, and therefore the one whose
+// errors an author actually reads.
+//
+// Left alone, a bad field reference opens with this package's own "execute <file> template:"
+// prefix, repeats the word that ends it, restates the same file a third time inside an
+// `executing "<file>" at <.Field>` clause it has already located, and finishes at
+// `in type codegen.templateHelpData` — a rotini-INTERNAL Go type the author cannot look up
+// anywhere. What it withholds is the one useful reply: the fields that DO exist are listed in
+// the template's own header comment. The test pins the exact input and output.
+//
+//	help.txt.tmpl:78:2: can't evaluate field NoSuchField — the fields available to this
+//	template are listed in the comment at the top of help.txt.tmpl
+func templateFailure(name string, err error) string {
+	msg := strings.TrimPrefix(err.Error(), "template: ")
+	// text/template restates the file and the expression it has already located:
+	//   help.txt.tmpl:78:2: executing "help.txt.tmpl" at <.X>: can't evaluate field X
+	// Keep the position it found; drop the restatement.
+	if head, after, ok := strings.Cut(msg, `executing "`); ok {
+		if _, detail, found := strings.Cut(after, ": "); found {
+			msg = head + detail
+		}
+	}
+	// Drop the internal data type, which is an implementation detail of this package.
+	if before, _, ok := strings.Cut(msg, " in type codegen."); ok {
+		msg = before
+	}
+	if strings.Contains(msg, "can't evaluate field") {
+		return fmt.Sprintf("%s — the fields available to this template are listed in the comment at the top of %s", msg, name)
+	}
+	return msg
 }

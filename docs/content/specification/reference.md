@@ -354,6 +354,12 @@ This command's output shape, as a JSON-schema type. rotini generates a typed '<P
 
 When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no remote commands or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
 
+### `plugin_path`
+
+`string`
+
+Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+
 ### `remote_commands`
 
 array of [`RemoteCommandSpec`](#remotecommandspec)
@@ -832,12 +838,6 @@ Auto-expose external '<prefix>*' executables as remote sub-commands (kubectl/git
 `boolean` · default `false`
 
 When true, discovered plugins still dispatch but are omitted from completion listings.
-
-### `path`
-
-`string`
-
-Extra directory to scan for plugins, in addition to the host binary's directory and PATH.
 
 ### `prefix`
 

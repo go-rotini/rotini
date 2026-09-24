@@ -331,7 +331,7 @@ func discoveredFor(cmd ResolvedCommand) ([]string, []error) {
 			declared[a] = true
 		}
 	}
-	all, problems := discoverPlugins(d)
+	all, problems := discoverPlugins(d, cmd.PluginPath)
 	var out []string
 	for _, plugin := range all {
 		if !declared[plugin] {
@@ -405,9 +405,10 @@ func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string
 }
 
 // discoverPlugins lists the post-prefix names of `<prefix>*` executables found next to the
-// host binary, in d.Path, and on PATH, deduped and sorted. It also returns any errors scanning
-// d.Path; failures scanning the incidental locations are ignored as normal.
-func discoverPlugins(d *RemoteDiscoveryDef) ([]string, []error) {
+// host binary, in pluginPath, and on PATH, deduped and sorted. It also returns any errors
+// scanning pluginPath — the author-configured location, where a failure is a real
+// misconfiguration; failures scanning the incidental locations are ignored as normal.
+func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]string, []error) {
 	if d.Prefix == "" {
 		return nil, nil
 	}
@@ -441,8 +442,8 @@ func discoverPlugins(d *RemoteDiscoveryDef) ([]string, []error) {
 	if exe, err := os.Executable(); err == nil {
 		scan(filepath.Dir(exe), false)
 	}
-	if d.Path != "" {
-		scan(d.Path, true) // the author-configured path: a scan failure is a real diagnostic
+	if pluginPath != "" {
+		scan(pluginPath, true) // the author-configured path: a scan failure is a real diagnostic
 	}
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir != "" {

@@ -1,6 +1,8 @@
 package codegen
 
 import (
+	"errors"
+
 	"strings"
 	"testing"
 )
@@ -327,5 +329,53 @@ func TestSanitizeDocData_copies(t *testing.T) {
 	}
 	if out.Examples[0] != "kept\tintact" {
 		t.Errorf("examples should be untouched, got %q", out.Examples[0])
+	}
+}
+
+// TestTemplateFailure covers the error an author of an EDITABLE template reads.
+//
+// `template: true` seeds help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl for customisation, so
+// these are the only template errors a rotini USER ever sees — every other template in the
+// package is rotini's own and its errors are rotini's bugs. text/template's stock wording names
+// the file three times, says "template:" twice, and ends by naming `codegen.templateHelpData`,
+// an internal Go type the author cannot look up. It also withholds the one useful reply: the
+// available fields are listed in the template's own header comment.
+func TestTemplateFailure(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "an unknown field points at the field list, not at a Go type",
+			in:   `template: help.txt.tmpl:78:2: executing "help.txt.tmpl" at <.NoSuchField>: can't evaluate field NoSuchField in type codegen.templateHelpData`,
+			want: `help.txt.tmpl:78:2: can't evaluate field NoSuchField — the fields available to this template are listed in the comment at the top of help.txt.tmpl`,
+		},
+		{
+			name: "another execution failure keeps its position and loses the noise",
+			in:   `template: help.txt.tmpl:12:5: executing "help.txt.tmpl" at <index .Flags 9>: error calling index: index out of range`,
+			want: `help.txt.tmpl:12:5: error calling index: index out of range`,
+		},
+		{
+			name: "a message with no restatement is passed through",
+			in:   `template: help.txt.tmpl:3: unexpected EOF`,
+			want: `help.txt.tmpl:3: unexpected EOF`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := templateFailure("help.txt.tmpl", errors.New(tt.in))
+			if got != tt.want {
+				t.Errorf("got  %q\nwant %q", got, tt.want)
+			}
+			// The bar from E-23: no Go internals in a message an author reads.
+			for _, leak := range []string{"codegen.", "in type ", "template: template:"} {
+				if strings.Contains(got, leak) {
+					t.Errorf("leaks %q: %s", leak, got)
+				}
+			}
+		})
 	}
 }

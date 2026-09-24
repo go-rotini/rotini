@@ -123,6 +123,8 @@ type Command struct {
 	Output *Schema `json:"output,omitempty"`
 	// When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no remote commands or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
 	Passthrough bool `json:"passthrough,omitempty"`
+	// Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+	PluginPath string `json:"plugin_path,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery.
@@ -332,8 +334,6 @@ type RemoteCommandSpec struct {
 type RemoteDiscovery struct {
 	// When true, discovered plugins still dispatch but are omitted from completion listings.
 	Hidden bool `json:"hidden,omitempty"`
-	// Extra directory to scan for plugins, in addition to the host binary's directory and PATH.
-	Path string `json:"path,omitempty"`
 	// Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-').
 	Prefix string `json:"prefix,omitempty"`
 }

@@ -101,6 +101,7 @@ field CommandDef.Handler
 field CommandDef.Hidden
 field CommandDef.Name
 field CommandDef.Passthrough
+field CommandDef.PluginPath
 field CommandDef.Remotes
 field CommandDef.Summary
 field Completion.Extensions
@@ -135,6 +136,7 @@ field Definition.Flags
 field Definition.Handler
 field Definition.Name
 field Definition.Passthrough
+field Definition.PluginPath
 field Definition.RemoteCommands
 field Deprecation.Identifier
 field Deprecation.Kind
@@ -145,6 +147,7 @@ field DiscoverDef.Strategy
 field FlagDef.Complete
 field FlagDef.Constraints
 field FlagDef.Default
+field FlagDef.Defaults
 field FlagDef.DeprecatedIdentifiers
 field FlagDef.DottedKeys
 field FlagDef.Enum
@@ -198,7 +201,6 @@ field RemoteDef.Name
 field RemoteDef.Summary
 field RemoteDef.Timeout
 field RemoteDiscoveryDef.Hidden
-field RemoteDiscoveryDef.Path
 field RemoteDiscoveryDef.Prefix
 field RemoteDispatch.Args
 field RemoteDispatch.Def
@@ -224,6 +226,7 @@ field ResolvedCommand.Handler
 field ResolvedCommand.Matched
 field ResolvedCommand.Name
 field ResolvedCommand.Passthrough
+field ResolvedCommand.PluginPath
 field ResolvedCommand.Remotes
 field ServiceError.Key
 field SubprocessError.Args
@@ -308,6 +311,7 @@ method Context.Command
 method Context.Exit
 method Context.Failed
 method Context.Get
+method Context.Halt
 method Context.MustGet
 method Context.Path
 method Context.RecordError

@@ -812,17 +812,36 @@ func formatNum(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
 
 // applyDefaults fills in declared flag and trailing-argument defaults for inputs
 // the user did not provide, so handlers and required-checks see them.
+// flagDefaults is the occurrences a flag's declared default seeds when the user supplied
+// none: every element of Defaults for a repeatable input, or the single Default. Both empty
+// means the flag has no default and is left unset, which is how "absent" stays distinguishable
+// from "explicitly empty".
+//
+// Default wins when both are set, so a Definition that somehow carries both is not ambiguous.
+// The spec cannot produce that — a default is a scalar or a list, never both — but a
+// hand-built Definition can.
+func flagDefaults(fd FlagDef) []string {
+	if fd.Default != "" {
+		return []string{fd.Default}
+	}
+	if len(fd.Defaults) == 0 {
+		return nil
+	}
+	return slices.Clone(fd.Defaults)
+}
+
 func applyDefaults(chain []ResolvedCommand, store *parsedInputs) {
 	for i, f := range chain {
 		for _, fd := range f.Flags {
-			if fd.Default == "" {
+			seed := flagDefaults(fd)
+			if len(seed) == 0 {
 				continue
 			}
 			if store.scopes[i].flags == nil {
 				store.scopes[i].flags = map[string][]string{}
 			}
 			if _, ok := store.scopes[i].flags[fd.Name]; !ok {
-				store.scopes[i].flags[fd.Name] = []string{fd.Default}
+				store.scopes[i].flags[fd.Name] = seed
 			}
 		}
 	}

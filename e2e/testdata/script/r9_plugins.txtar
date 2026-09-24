@@ -54,6 +54,19 @@ stderr 'host-sync: refused'
 exec bin/host$exe extra one
 stdout 'host-extra got: one'
 
+# ── the plugin path serves BOTH kinds ────────────────────────────────────────
+# host-vendored is a DECLARED remote whose binary lives only in plugin_path — nowhere near
+# the host binary and not on PATH. Before the path was promoted off remote_discovery, this
+# was simply not expressible.
+exec go build -o extra-plugins/host-vendored$exe ./plugins/vendored
+exec bin/host$exe vendored one two
+stdout 'host-vendored got: one two'
+
+# ...and a DISCOVERED plugin in the same directory works the same way.
+exec go build -o extra-plugins/host-found$exe ./plugins/extra
+exec bin/host$exe found alpha
+stdout 'host-extra got: alpha'
+
 # ── the shadowing rule ───────────────────────────────────────────────────────
 # host-status exists, and `status` is one of the host's own commands. Dropping a binary on
 # PATH must not take over a CLI's published interface.
@@ -70,15 +83,15 @@ stderr 'not found'
 wantexit 2 bin/host$exe nosuchthing
 stderr 'not found'
 
-# The failure message names the places actually searched — and NOT the discovery path for a
-# declared remote, which is never consulted for one. It used to claim it had looked there.
+# The failure message names the places actually searched, and now BOTH kinds search the same
+# three: next to the binary, the plugin path, then PATH. The message used to claim it had
+# looked in a discovery path it never consulted for a declared remote.
 ! exec bin/host$exe absent
 stderr 'next to the binary'
-! stderr 'discovery path'
-
-# ...while a discovered token IS searched there, so its message says so.
+stderr 'the plugin path'
 ! exec bin/host$exe nosuchthing
-stderr 'the discovery path'
+stderr 'next to the binary'
+stderr 'the plugin path'
 
 # ── the timeout ──────────────────────────────────────────────────────────────
 # Found, started, ran long: neither party's fault. CategoryNone, which the host's funnel
@@ -102,9 +115,14 @@ version: 0.0.0
 command:
   name: host
   summary: a plugin host
+  # ONE directory for this command's plugin binaries, searched for BOTH the declared
+  # remote_commands below and anything remote_discovery finds. It used to live under
+  # remote_discovery, where only discovered plugins could reach it — so an author had no way
+  # to say where a DECLARED remote lived, and the not-found message named a directory that
+  # had never been searched for it.
+  plugin_path: ./extra-plugins
   remote_discovery:
     prefix: host-
-    path: ./extra-plugins
   remote_commands:
     - name: sync
       summary: sync via a plugin
@@ -113,6 +131,8 @@ command:
       timeout: 200ms
     - name: absent
       summary: declared, never installed
+    - name: vendored
+      summary: declared, installed only in plugin_path
   commands:
     - name: status
       summary: the host's own status command
@@ -254,6 +274,16 @@ import (
 )
 
 func main() { fmt.Printf("host-extra got: %s\n", strings.Join(os.Args[1:], " ")) }
+-- plugins/vendored/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() { fmt.Printf("host-vendored got: %s\n", strings.Join(os.Args[1:], " ")) }
 -- plugins/shadow/main.go --
 package main
 

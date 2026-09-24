@@ -56,6 +56,7 @@ type program struct {
 	rootHelp        cmdHelp             // root command's flattened help fields
 	rootOutput      *Schema             // root command's output type (nil when unset)
 	rootDiscovery   *RemoteDiscovery    // root command's plugin discovery (nil = off)
+	rootPluginPath  string              // root command's extra plugin directory (both remote kinds)
 	rootPassthrough bool                // root command's passthrough (raw positionals)
 	schemas         map[string]Schema   // document-level named schemas (for output codegen)
 	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)

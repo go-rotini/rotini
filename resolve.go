@@ -27,7 +27,11 @@ type ResolvedCommand struct {
 	Commands              []CommandDef
 	Remotes               []RemoteDef
 	Discovery             *RemoteDiscoveryDef
-	Passthrough           bool
+	// PluginPath is the extra directory this command's plugin binaries may live in, searched
+	// for BOTH declared remotes and discovered plugins — they are the same binaries in the
+	// same place. Empty means only the host binary's directory and PATH are searched.
+	PluginPath  string
+	Passthrough bool
 }
 
 func rootFrame(def Definition) ResolvedCommand {
@@ -36,7 +40,7 @@ func rootFrame(def Definition) ResolvedCommand {
 		Flags: def.Flags, Arguments: def.Arguments,
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Remotes: def.RemoteCommands, Discovery: def.Discovery,
-		Passthrough: def.Passthrough,
+		PluginPath: def.PluginPath, Passthrough: def.Passthrough,
 	}
 }
 
@@ -46,7 +50,7 @@ func cmdFrame(c CommandDef) ResolvedCommand {
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Remotes: c.Remotes, Discovery: c.Discovery,
-		Passthrough: c.Passthrough,
+		PluginPath: c.PluginPath, Passthrough: c.Passthrough,
 	}
 }
 
@@ -91,14 +95,16 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDisp
 			continue
 		}
 		if rd, ok := findRemote(cur, tok); ok {
-			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...)}
+			// The plugin path applies to a DECLARED remote too: an author who says where
+			// this command's plugins live means it for all of them.
+			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: cur.PluginPath}
 		}
 		// Plugin discovery: at a discovery-enabled command, an unmatched token is
 		// dispatched to the sibling executable <prefix><token> (kubectl-plugin style).
 		// The binary is resolved (and any error reported) at exec time.
 		if d := cur.Discovery; d != nil {
 			rd := RemoteDef{Name: tok, Binary: d.Prefix + tok}
-			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: d.Path, Discovered: true}
+			return chain, &RemoteDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: cur.PluginPath, Discovered: true}
 		}
 		break // first positional argument; stop descending
 	}

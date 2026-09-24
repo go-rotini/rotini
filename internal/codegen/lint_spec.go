@@ -896,14 +896,34 @@ func lintDefaultScalar(spec *Spec) []error {
 			if schema == nil || schema.Default == nil {
 				return
 			}
-			switch schema.Default.(type) {
+			switch v := schema.Default.(type) {
 			case string, bool, float64, int, int64, nil:
+				return
+			case []any, map[string]any:
+				// A multi-value default seeds one occurrence per element (or per
+				// `key=value` pair), which only means something for an input that can
+				// hold several.
+				if repeatableSchema(schema) {
+					if bad := nonScalarElement(v); bad != "" {
+						problems = append(problems, &problem{
+							kind: "spec", ptr: ptr, loc: "command " + path,
+							msg: fmt.Sprintf("%s %q: every element of a multi-value default must be a scalar, and one is %s — each element is seeded as one occurrence and coerced through the input's element type, so there is nowhere for a nested list or map to go",
+								channel, name, bad),
+						})
+					}
+					return
+				}
+				problems = append(problems, &problem{
+					kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q: a multi-value default needs a repeatable type, and this one is %q — each element is seeded as a separate occurrence, which a single-valued input has nowhere to put. Declare the type as a list (e.g. '[]string') or a map, or give a single scalar default",
+						channel, name, displayType(schema.Type)),
+				})
 				return
 			}
 			problems = append(problems, &problem{
 				kind: "spec", ptr: ptr, loc: "command " + path,
-				msg: fmt.Sprintf("%s %q: default must be a single scalar value, not %s — a default is carried as one string and coerced through the input's type, so a repeatable input has no way to declare several. Seed the multi-value default in the handler, or have the user repeat the flag",
-					channel, name, defaultKindName(schema.Default)),
+				msg: fmt.Sprintf("%s %q: default must be a scalar, or a list for a repeatable input — not %s. A default is seeded as argv occurrences and coerced through the input's type, and there is no spelling that turns a %s into one",
+					channel, name, defaultKindName(schema.Default), defaultKindName(schema.Default)),
 			})
 		})
 	})
@@ -1415,4 +1435,34 @@ func quotedList(tokens []string) string {
 		quoted[i] = strconv.Quote(t)
 	}
 	return strings.Join(quoted, ", ")
+}
+
+// repeatableSchema reports whether an input can hold several values — a list or map type, the
+// only shapes a per-occurrence default means anything for.
+func repeatableSchema(schema *InputSchema) bool {
+	t := schema.Type
+	return strings.HasPrefix(t, "[]") || t == "array" ||
+		t == "map" || t == "object" || strings.HasPrefix(t, "map[")
+}
+
+// nonScalarElement names the kind of the first non-scalar element of a multi-value default,
+// or "" when every element is a scalar.
+func nonScalarElement(v any) string {
+	var items []any
+	switch x := v.(type) {
+	case []any:
+		items = x
+	case map[string]any:
+		for _, e := range x {
+			items = append(items, e)
+		}
+	}
+	for _, it := range items {
+		switch it.(type) {
+		case string, bool, float64, int, int64, nil:
+			continue
+		}
+		return defaultKindName(it)
+	}
+	return ""
 }

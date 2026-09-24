@@ -426,3 +426,73 @@ func TestContext_Failed(t *testing.T) {
 		}
 	})
 }
+
+// TestContext_Halt covers stopping the lifecycle without claiming an exit code.
+//
+// Before Halt, SignalExit was the only way to stop, and it does two jobs at once. A program
+// whose funnel owns exit codes therefore wrote a meaningless number purely to halt — and
+// because the number then looked redundant, deleting it read as tidying while silently
+// removing the halt. That is how one bad flag came to be reported three times in
+// example-lifecycle, with a fourth misleading error from a hook whose setup had been skipped.
+func TestContext_Halt(t *testing.T) {
+	t.Parallel()
+
+	t.Run("stops without claiming a code", func(t *testing.T) {
+		t.Parallel()
+		rtx := &Context{}
+		rtx.Halt()
+		if !rtx.stopped {
+			t.Error("Halt did not stop forward progress")
+		}
+		if rtx.exitCode != 0 {
+			t.Errorf("Halt claimed exit code %d; the verdict is the funnel's", rtx.exitCode)
+		}
+		if rtx.exitNow {
+			t.Error("Halt skipped teardown; that is Exit's job")
+		}
+	})
+
+	t.Run("does not displace a code already signalled", func(t *testing.T) {
+		t.Parallel()
+		rtx := &Context{}
+		rtx.SignalExit(3)
+		rtx.Halt()
+		if rtx.exitCode != 3 {
+			t.Errorf("exitCode = %d, want 3 — Halt must not clear a deliberate code", rtx.exitCode)
+		}
+	})
+
+	t.Run("a later SignalExit still sets the code", func(t *testing.T) {
+		t.Parallel()
+		rtx := &Context{}
+		rtx.Halt()
+		rtx.SignalExit(2)
+		if rtx.exitCode != 2 {
+			t.Errorf("exitCode = %d, want 2", rtx.exitCode)
+		}
+	})
+
+	t.Run("a recorded error still decides the verdict", func(t *testing.T) {
+		t.Parallel()
+		rtx := &Context{}
+		rtx.RecordError(errors.New("boom"))
+		rtx.Halt()
+		if !rtx.Failed() {
+			t.Error("Halt discarded the recorded failure")
+		}
+		if rtx.exitCode != 0 {
+			t.Errorf("Halt pre-empted the funnel with %d", rtx.exitCode)
+		}
+	})
+
+	t.Run("no-op in the funnel and on a nil context", func(t *testing.T) {
+		t.Parallel()
+		rtx := &Context{funnelStage: true}
+		rtx.Halt()
+		if rtx.stopped {
+			t.Error("Halt stopped a lifecycle that had already finished")
+		}
+		var nilRtx *Context
+		nilRtx.Halt() // must not panic
+	})
+}

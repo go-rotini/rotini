@@ -199,6 +199,39 @@ func (rtx *Context) Value(key string) any {
 	return rtx.services[key]
 }
 
+// Halt stops the lifecycle's forward progress WITHOUT claiming an exit code, leaving the
+// verdict to whatever else the run records and to the funnel. Teardown is unaffected: every
+// PostRun and CascadingPostRun whose paired setup hook began still runs, in reverse.
+//
+// It is the honest spelling of the commonest stop there is — a handler that has recorded an
+// error and has nothing further to do:
+//
+//	if err != nil {
+//	    rtx.RecordError(err)
+//	    rtx.Halt()          // the funnel decides what this costs
+//	    return
+//	}
+//
+// [Context.SignalExit] does two jobs at once — set the code AND stop — so a program that
+// centralizes its exit policy in a funnel had to write a number it did not mean purely to
+// stop, and explain in a comment that the number was a lie. Worse, the number then reads as
+// redundant: deleting it looks like tidying and silently removes the halt, so the next hook
+// collects the same inputs, hits the same validation and records the same error again. That
+// is not hypothetical — it is how one bad flag came to be reported three times, with a
+// fourth misleading error on top, while this example was being written.
+//
+// Halt claims nothing, so it cannot be mistaken for policy and cannot be deleted as
+// redundant. Reach for [Context.SignalExit] when the code IS the point (a filter reporting
+// "no match" as 1), and [Context.Exit] when pending teardown must not run.
+//
+// Like SignalExit it is a no-op inside the funnel, where the lifecycle has already run.
+func (rtx *Context) Halt() {
+	if rtx == nil || rtx.funnelStage {
+		return
+	}
+	rtx.stopped = true
+}
+
 // SignalExit records the program's exit code and stops the lifecycle's forward progress.
 // Teardown is unaffected: every PostRun and CascadingPostRun whose paired setup hook began
 // still runs, in reverse. The first non-zero code wins, so a later SignalExit cannot change

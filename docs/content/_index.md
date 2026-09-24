@@ -43,7 +43,7 @@ See [batteries](/batteries).
 
 ### 3. The generated code is small, legible, and yours
 
-`rotini init` generates **342 lines across 5 files** — and those five files are a CLI that already answers `--help`, `--version`, `help <command>` and `version`, because the seeded spec declares them and the seeded handlers are wired to the pages codegen just produced. Readable in one sitting, reviewable in a diff, and every line of it yours to delete.
+`rotini init` generates **356 lines across 5 files** — and those five files are a CLI that already answers `--help`, `--version`, `help <command>` and `version`, because the seeded spec declares them and the seeded handlers are wired to the pages codegen just produced. Readable in one sitting, reviewable in a diff, and every line of it yours to delete.
 
 The machinery is an ordinary import you upgrade with `go get -u`, not a vendored copy you must never edit.
 

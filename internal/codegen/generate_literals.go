@@ -51,6 +51,9 @@ func renderDefinition(gp *program) string {
 	if dl := discoveryLiteral(gp.rootName, gp.rootDiscovery); dl != "" {
 		b.WriteString("Discovery: " + dl + ",\n")
 	}
+	if gp.rootPluginPath != "" {
+		b.WriteString("PluginPath: " + strconv.Quote(gp.rootPluginPath) + ",\n")
+	}
 	b.WriteString("}\n")
 	return b.String()
 }
@@ -179,9 +182,6 @@ func discoveryLiteral(host string, d *RemoteDiscovery) string {
 	}
 	var b strings.Builder
 	b.WriteString("&" + rotiniPkgName + ".RemoteDiscoveryDef{Prefix: " + strconv.Quote(prefix))
-	if d.Path != "" {
-		b.WriteString(", Path: " + strconv.Quote(d.Path))
-	}
 	if d.Hidden {
 		b.WriteString(", Hidden: true")
 	}
@@ -373,6 +373,9 @@ func rnodesLiteral(host string, nodes []rnode) string {
 		if dl := discoveryLiteral(host, n.discovery); dl != "" {
 			b.WriteString("Discovery: " + dl + ",\n")
 		}
+		if n.pluginPath != "" {
+			b.WriteString("PluginPath: " + strconv.Quote(n.pluginPath) + ",\n")
+		}
 	})
 }
 
@@ -385,7 +388,11 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	if schema.Required {
 		b.WriteString(", Required: true")
 	}
-	if d := defaultString(schema.Default); d != "" {
+	// A list default emits Defaults (one seeded occurrence per element); anything else
+	// emits the single Default. They are never both set from a spec.
+	if list := defaultList(schema.Default); len(list) > 0 {
+		b.WriteString(", Defaults: " + goStringSlice(list))
+	} else if d := defaultString(schema.Default); d != "" {
 		b.WriteString(", Default: " + strconv.Quote(d))
 	}
 	if len(schema.Enum) > 0 {
@@ -489,6 +496,38 @@ func goStringSlice(ss []string) string {
 }
 
 // defaultString renders an input's decoded default value as a string.
+// defaultList renders a multi-value default as the argv occurrences it seeds: one per list
+// element, or one `key=value` per map entry. nil when the default is a scalar, or nil when the default is not a
+// list. Each element becomes one seeded occurrence, so the elements are stringified
+// individually rather than the list being stringified as a whole — which is what produced
+// `Default: "[a b c]"`, a single flag value spelled like Go debug output.
+func defaultList(v any) []string {
+	switch x := v.(type) {
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, it := range x {
+			out = append(out, defaultString(it))
+		}
+		return out
+	case map[string]any:
+		// A MAP-typed flag is repeatable too: it takes `key=value` pairs, so its default
+		// is written as a mapping and seeded as those same pairs. Sorted by key, because
+		// a generated literal must be byte-stable across runs and Go map order is not.
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make([]string, 0, len(keys))
+		for _, k := range keys {
+			out = append(out, k+"="+defaultString(x[k]))
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 func defaultString(v any) string {
 	switch x := v.(type) {
 	case nil:

@@ -22,7 +22,7 @@ func TestComplete_discoversPlugins(t *testing.T) {
 	def := Definition{
 		Name: "acme", Handler: "App",
 		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}}, // collides with acme-bar
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
 	got := complete(def, []string{""}, nil, nil)
@@ -62,7 +62,7 @@ func TestDiscoveredPlugins(t *testing.T) {
 		// "ext"/"x" remote shadows nothing discovered here.
 		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}},
 		Remotes:   []RemoteDef{{Name: "ext", Aliases: []string{"x"}, Binary: "acme-ext"}},
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
 	got := DiscoveredPlugins(cmd)
@@ -92,7 +92,7 @@ func TestDiscoveryDiagnostics(t *testing.T) {
 	// A bad CONFIGURED path is a real diagnostic.
 	bad := ResolvedCommand{
 		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: filepath.Join(t.TempDir(), "no-such-subdir")},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: filepath.Join(t.TempDir(), "no-such-subdir"),
 	}
 	problems := DiscoveryDiagnostics(bad)
 	if len(problems) != 1 {
@@ -109,7 +109,7 @@ func TestDiscoveryDiagnostics(t *testing.T) {
 	// A clean configured path reports no problems.
 	clean := ResolvedCommand{
 		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: t.TempDir()},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: t.TempDir(),
 	}
 	if probs := DiscoveryDiagnostics(clean); probs != nil {
 		t.Errorf("clean path produced diagnostics: %v", probs)
@@ -127,7 +127,7 @@ func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(t.TempDir(), "missing-path-entry"))
 	cmd := ResolvedCommand{
 		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, // no configured Path
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, // no configured PluginPath
 	}
 	if probs := DiscoveryDiagnostics(cmd); probs != nil {
 		t.Errorf("a bad $PATH entry was reported as a diagnostic: %v", probs)
@@ -146,7 +146,7 @@ func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	}
 	def := Definition{
 		Name: "acme", Handler: "App",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 	rtx := NewContextFor(def, nil) // what the runtime hands a handler
 	chain := rtx.Chain()

@@ -20,6 +20,7 @@ type Definition struct {
 	Commands         []CommandDef
 	RemoteCommands   []RemoteDef         // co-located plugin sub-commands (Model 3)
 	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on the root command (nil = off)
+	PluginPath       string              // extra directory searched for BOTH declared remotes and discovered plugins
 	Passthrough      bool                // every token after the program name is a raw positional (no flag parsing)
 }
 
@@ -120,7 +121,6 @@ type DiscoverDef struct {
 // candidates unless Hidden. A nil pointer means discovery is off for that command.
 type RemoteDiscoveryDef struct {
 	Prefix string // executable-name prefix, e.g. "acme-"
-	Path   string // extra directory to scan, in addition to the host dir and PATH
 	Hidden bool   // dispatch discovered plugins but omit them from completion listings
 }
 
@@ -140,6 +140,7 @@ type CommandDef struct {
 	Commands              []CommandDef
 	Remotes               []RemoteDef         // co-located remote binaries dispatched as sub-commands of this command
 	Discovery             *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
+	PluginPath            string              // extra directory searched for BOTH this command's declared remotes and its discovered plugins
 	Passthrough           bool                // every token after this command is a raw positional (no flag parsing)
 }
 
@@ -174,12 +175,21 @@ func takesValue(fd FlagDef) bool { return fd.Type != "bool" && fd.Type != "count
 // FlagDef describes a single flag of a command. Name is the logical name and
 // matches the `rotini:"<name>"` tag on the corresponding generated input field.
 type FlagDef struct {
-	Name                  string
-	Identifiers           []string // CLI forms, e.g. {"--loud", "-l"}
-	Summary               string   // one-line description (completion candidates carry it as "identifier\tsummary")
-	Type                  string   // resolved Go type, e.g. "bool", "string", "[]string", "int", "time.Duration"
-	Required              bool
-	Default               string
+	Name        string
+	Identifiers []string // CLI forms, e.g. {"--loud", "-l"}
+	Summary     string   // one-line description (completion candidates carry it as "identifier\tsummary")
+	Type        string   // resolved Go type, e.g. "bool", "string", "[]string", "int", "time.Duration"
+	Required    bool
+	Default     string
+	// Defaults is the multi-value default for a REPEATABLE input (a `[]…` or map type):
+	// each element is seeded as one occurrence, exactly as if the user had repeated the
+	// flag. It is used only when Default is empty, and only when the input is unset from
+	// every channel — a default never merges with a supplied value.
+	//
+	// It exists because Default is one string: before it, a repeatable flag could not
+	// express a multi-value default at all, and the only advice was to seed it in the
+	// handler, which is the one thing declaring inputs in a spec exists to avoid.
+	Defaults              []string
 	Enum                  []string
 	Secret                bool     // when true, the value is redacted in usage/validation error output
 	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen

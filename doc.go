@@ -65,7 +65,7 @@
 // The generated entrypoint builds a [Program] with [NewProgram] and calls [Program.Execute]:
 // resolve the invoked command from argv, run its [Handlers] hooks, and exit. Each invocation
 // carries a [Context] — the argv, the resolved chain, the program's streams, and the service
-// registry. Exits are deliberate ([Context.SignalExit], [Context.Exit]), and a recorded error,
+// registry. Stopping is deliberate ([Context.Halt], [Context.SignalExit], [Context.Exit]), and a recorded error,
 // recovered panic or detected fault is reported once, after teardown, through the outcome
 // funnel.
 //
@@ -88,8 +88,24 @@
 //     captures them, and the funnel receives them as its panics slice.
 //
 // Recording is non-halting: a handler records any number of times across any hook, then stops
-// independently with [Context.SignalExit] or [Context.Exit], or simply returns. The funnel
-// fires only when some channel is non-empty, so a run that records nothing is a silent success.
+// independently, or simply returns. The funnel fires only when some channel is non-empty, so a
+// run that records nothing is a silent success.
+//
+// There are three ways to stop, and which one to reach for is decided by whether the exit code
+// is the point:
+//
+//   - [Context.Halt] stops forward progress and claims NO code, leaving the verdict to what the
+//     run recorded and to the funnel. This is the commonest stop — a handler that has recorded
+//     an error and has nothing further to do — and the one to prefer when a program centralizes
+//     its exit policy in a funnel.
+//   - [Context.SignalExit] stops AND claims a code, for when the number is the point: a filter
+//     reporting "no match" as 1, a wrapper passing a child's status through.
+//   - [Context.Exit] stops immediately and skips pending teardown, for when remaining cleanup
+//     must not run.
+//
+// Halting matters as much as recording. A hook that records a failure and returns without
+// stopping lets the next hook collect the same inputs, hit the same validation and record the
+// same error again.
 //
 // The default funnel prints info → warning → error → panic → success, infos and successes to
 // stdout and the rest to stderr, then applies the exit floor: a recorded error or fault exits

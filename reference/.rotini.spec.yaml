@@ -705,11 +705,16 @@ command:
         # CategoryNone (operational) — both recorded
         # and routed through the WithOnErrorFn funnel.
 
+  # --- where this command's plugin binaries live ---------------------------
+  # Searched for BOTH remote_commands (declared) and remote_discovery (found):
+  # they are the same binaries in the same place. Order is fixed for both —
+  # next to the host binary, then here, then PATH.
+  plugin_path: /usr/local/lib/acme/plugins
+
   # --- plugin auto-discovery (kubectl/git/gh style) ------------------------
   remote_discovery:
     # RemoteDiscovery: every key (presence enables discovery)
     prefix: acme- # default: '<binary>-'
-    path: /usr/local/lib/acme/plugins # extra scan dir (besides host dir + PATH)
     hidden: false # when true, discovered plugins skip completion
     # A discovered token with no matching binary is a CategoryUsage error (the
     # user's typo — pair with a Suggestor in a custom funnel).

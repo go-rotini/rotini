@@ -116,7 +116,7 @@ func TestResolveChain_discoversPlugin(t *testing.T) {
 	def := Definition{
 		Name: "acme", Handler: "App",
 		Commands:  []CommandDef{{Name: "cluster", Handler: "AcmeCluster"}},
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: "/opt/acme/plugins"},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: "/opt/acme/plugins",
 	}
 
 	// A declared sub-command still wins over discovery.

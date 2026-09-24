@@ -2049,3 +2049,101 @@ func TestParse_pathTypeKeepsStringBounds(t *testing.T) {
 		t.Errorf("error = %v, want it to quote the pattern it violated", err)
 	}
 }
+
+// TestParse_multiValueDefaults covers the capability a repeatable input did not have: a
+// default with more than one value in it.
+//
+// A default is carried as argv occurrences, and FlagDef.Default is ONE string — so before
+// Defaults, `default: [a, b]` had no representation. It stringified into a single mangled
+// element (`"[a b c]"`, Go's %v), which is why lintDefaultScalar rejected it outright and told
+// the author to seed the value in the handler instead. That advice worked and pushed a
+// declared default back into hand-written Go, which is the thing declaring inputs exists to
+// avoid.
+func TestParse_multiValueDefaults(t *testing.T) {
+	t.Parallel()
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string", Defaults: []string{"latest", "stable"}},
+			{Name: "label", Identifiers: []string{"--label"}, Type: "map[string]string", Defaults: []string{"team=core", "tier=1"}},
+			{Name: "port", Identifiers: []string{"--port"}, Type: "[]int", Defaults: []string{"80", "443"}},
+			{Name: "plain", Identifiers: []string{"--plain"}, Type: "string", Default: "one"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Tag   []string          `rotini:"tag"`
+				Label map[string]string `rotini:"label"`
+				Port  []int             `rotini:"port"`
+				Plain string            `rotini:"plain"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	t.Run("every element is seeded when the flag is unset", func(t *testing.T) {
+		t.Parallel()
+		var in inputs
+		if err := NewParser().Parse(NewContextFor(def, nil), &in); err != nil {
+			t.Fatal(err)
+		}
+		f := in.App.Flags
+		if !slices.Equal(f.Tag, []string{"latest", "stable"}) {
+			t.Errorf("Tag = %q, want [latest stable]", f.Tag)
+		}
+		if !slices.Equal(f.Port, []int{80, 443}) {
+			t.Errorf("Port = %v, want [80 443] — elements coerce through the element type", f.Port)
+		}
+		if f.Label["team"] != "core" || f.Label["tier"] != "1" {
+			t.Errorf("Label = %v, want team=core tier=1", f.Label)
+		}
+		if f.Plain != "one" {
+			t.Errorf("Plain = %q — a scalar default still works", f.Plain)
+		}
+	})
+
+	t.Run("a supplied value REPLACES the default rather than adding to it", func(t *testing.T) {
+		t.Parallel()
+		var in inputs
+		rtx := NewContextFor(def, []string{"--tag", "mine"})
+		if err := NewParser().Parse(rtx, &in); err != nil {
+			t.Fatal(err)
+		}
+		// Merging would make the default impossible to opt out of, which is the whole
+		// reason a default is a fallback rather than a seed.
+		if !slices.Equal(in.App.Flags.Tag, []string{"mine"}) {
+			t.Errorf("Tag = %q, want [mine] — a default must not merge with a supplied value", in.App.Flags.Tag)
+		}
+		// ...and the flags the user did not touch still take theirs.
+		if !slices.Equal(in.App.Flags.Port, []int{80, 443}) {
+			t.Errorf("Port = %v, want its default", in.App.Flags.Port)
+		}
+	})
+
+	t.Run("repeating the flag still accumulates", func(t *testing.T) {
+		t.Parallel()
+		var in inputs
+		rtx := NewContextFor(def, []string{"--tag", "a", "--tag", "b"})
+		if err := NewParser().Parse(rtx, &in); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(in.App.Flags.Tag, []string{"a", "b"}) {
+			t.Errorf("Tag = %q, want [a b]", in.App.Flags.Tag)
+		}
+	})
+
+	t.Run("a scalar Default wins over Defaults", func(t *testing.T) {
+		t.Parallel()
+		// The spec cannot produce both — a default is a scalar or a list, never both —
+		// but a hand-built Definition can, so the precedence is pinned rather than left
+		// to map order.
+		both := FlagDef{Name: "x", Default: "scalar", Defaults: []string{"a", "b"}}
+		if got := flagDefaults(both); !slices.Equal(got, []string{"scalar"}) {
+			t.Errorf("flagDefaults = %q, want [scalar]", got)
+		}
+		if got := flagDefaults(FlagDef{Name: "x"}); got != nil {
+			t.Errorf("flagDefaults with no default = %q, want nil — absent stays absent", got)
+		}
+	})
+}

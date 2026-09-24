@@ -186,12 +186,14 @@ func (p *Program) remoteFailure(ctx context.Context, rtx *Context, re *RemoteErr
 // Like [DiscoveredPlugins], this touches the filesystem on every call and answers about right
 // now: a plugin installed after it returns false will still dispatch.
 func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool) {
-	var binary, dir string
+	// The plugin path applies to both kinds, so it is read once rather than per branch.
+	dir := cmd.PluginPath
+	var binary string
 	switch rd, ok := findRemote(cmd, name); {
 	case ok:
-		binary = rd.Binary // declared: no discovery path, per resolveChain
+		binary = rd.Binary
 	case cmd.Discovery != nil:
-		binary, dir = cmd.Discovery.Prefix+name, cmd.Discovery.Path
+		binary = cmd.Discovery.Prefix + name
 	default:
 		return "", false
 	}
@@ -206,11 +208,14 @@ func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool) {
 // executable (the git/kubectl convention), then in dir (the remote_discovery.path,
 // when set), then anywhere on PATH.
 //
-// dir is empty for a DECLARED remote command — remote_discovery.path configures discovery,
-// and a declared remote is part of the CLI's published interface, expected to be installed
-// the conventional way. The failure message says which locations were actually searched, and
-// only those: it used to name the discovery path unconditionally, so a user whose plugin sat
-// in that very directory was told rotini had looked there and not found it.
+// dir is the command's PluginPath, and it is the same for both kinds of remote — a declared
+// one and a discovered one are the same binaries in the same place. It used to belong to
+// remote_discovery, where only discovered plugins could reach it, so a declared remote could
+// be installed only next to the host binary or on PATH.
+//
+// The failure message names the locations actually searched, and only those. It used to list
+// all three unconditionally, so a user whose plugin sat in a directory rotini had never
+// consulted for that remote was told it had looked there and come up empty.
 func resolveRemoteBinary(name, dir string) (string, error) {
 	searched := []string{}
 	if exe, err := os.Executable(); err == nil {
@@ -224,7 +229,7 @@ func resolveRemoteBinary(name, dir string) (string, error) {
 		if p, ok := executableAt(dir, name); ok {
 			return p, nil
 		}
-		searched = append(searched, "the discovery path "+dir)
+		searched = append(searched, "the plugin path "+dir)
 	}
 	if p, err := exec.LookPath(name); err == nil {
 		return p, nil

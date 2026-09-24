@@ -33,8 +33,12 @@ type demoHandlers struct {
 func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[DemoInputs](rtx)
 	if err != nil {
+		// Record, then Halt. Halt stops the chain WITHOUT claiming an exit code, so the
+		// funnel decides what an input failure costs. Halting matters as much as
+		// recording: without it the next hook collects the same inputs, hits the same
+		// validation and records the same error again.
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.Halt()
 		return
 	}
 
