@@ -83,7 +83,7 @@ command:
         format: yaml
 {{< /code >}}
 
-## The channel inventory
+## Input channels
 
 Every way data reaches your CLI is declared. `rotini.Collect[T]` reconciles all of it in one call, in a documented precedence order.
 
@@ -98,7 +98,7 @@ Every way data reaches your CLI is declared. `rotini.Collect[T]` reconciles all 
 | **config path from a flag or env var** | `config_source` — the declarative two-phase parse |
 | configuration values | `config` — read by dotted `key`, optionally pinned to one `file` |
 | stdin | `stdin` — a typed, schema-validated payload, or raw `text` / `lines` for a filter |
-| defaults | `schema.default` on any input |
+| defaults | `schema.default` — a scalar, or a **list** on a repeatable input (`[]string`, a map), seeded as one occurrence per element |
 
 Two more things an input can declare, neither of them a channel:
 
@@ -126,11 +126,11 @@ A command can be pulled in from another spec instead of being written inline:
 | Inline + passthrough | `name:` plus `handler: {import, convention}` — own types, delegated handler code |
 | Local `$ref` | `$ref: ../child/.rotini.spec.yaml` — same module; auto-delegates to the child's package |
 | Module `$ref` | `$ref: mod://example.com/m@v1.2.3/cli/.rotini.spec.yaml` — read from the Go module cache, pinned by `go.sum` |
-| Remote command | `remote_commands` / `remote_discovery` — dispatch to a sibling binary at run time, `git`-style |
+| Remote command | `remote_commands` (declared) / `remote_discovery` (found) — dispatch to a sibling **binary** at run time, `git`-style. `plugin_path` says where those binaries live, for both kinds |
 
 `git::` and raw `https://` refs are **refused**: rotini has no fetcher, so codegen never reaches the network.
 
-## The exhaustive reference
+## Full reference
 
 Every key, every shape, with commentary — and validated by the test suite, so it cannot drift from the schema:
 

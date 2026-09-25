@@ -6,7 +6,7 @@ title: "docs"
 
 This guide walks through creating a new Go project with rotini. If you are adding rotini to an existing project, skip to step 2.
 
-## 1. Go Module Setup
+## 1. Set up the module
 
 Create a new directory and initialize a Go module.
 
@@ -24,24 +24,28 @@ rotini is one module with two faces. You need both: the **tool** generates your 
 Because the tool and the runtime are the same module, `go get -tool` and `go get` resolve to a single `require` line at a single version — they cannot drift apart. rotini also checks the `version:` key in your spec and conf against the binary running `generate`, and refuses a mismatch rather than emitting code from a definition it does not understand.
 {{< /alert >}}
 
-### a. Tool dependency <small>(recommended)</small>
+### As a tool dependency <small>(recommended)</small>
 
 A <cite>tool dependency[^1]</cite> records the rotini version in your `go.mod` under the `tool` directive, so every developer resolves the same CLI through the module graph. There is no separate installation step — `go tool` fetches and caches the binary.
 
-{{< code title="go get -tool" language="text" open="true" collapsible="false" copy="true" >}}
-go get -tool github.com/go-rotini/rotini@latest
-go get github.com/go-rotini/rotini@latest
+{{< code title="go get" language="text" open="true" collapsible="false" copy="true" >}}
+go get -tool github.com/go-rotini/rotini/cmd/rotini@latest   # the tool
+go get github.com/go-rotini/rotini@latest                    # the runtime
 {{< /code >}}
 
-### b. Global install
+{{< alert type="warning" title="THE TWO PATHS DIFFER:" >}}
+The tool is the **command** at `.../rotini/cmd/rotini`; the runtime is the **module root**. `-tool` takes a package path and the root is a library, so `go get -tool github.com/go-rotini/rotini` fails with `not a main package`. Same module, same version, two package paths.
+{{< /alert >}}
+
+### As a global binary
 
 Installing globally places the binary in your `GOBIN`. This suits prototyping across several projects, but the version is not tracked in any module graph, so each developer must keep their binary aligned with each project's `version:` key themselves.
 
 {{< code title="go install" language="text" open="true" collapsible="false" copy="true" >}}
-go install github.com/go-rotini/rotini@latest
+go install github.com/go-rotini/rotini/cmd/rotini@latest
 {{< /code >}}
 
-## 3. Initialize your project
+## 3. Initialize the project
 
 `init` scaffolds the spec, the conf, the entrypoint and a first handler stub, then runs the same `generate` every later pass runs.
 

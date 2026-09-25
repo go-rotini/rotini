@@ -5,8 +5,8 @@ ships the rest of the binary.**
 
 `rotini` is two-faced, and one module serves both faces at one version:
 
-- **As a tool** — `go get -tool github.com/go-rotini/rotini` — it installs the codegen
-  binary: `go tool rotini init`, `generate`, `validate`.
+- **As a tool** — `go get -tool github.com/go-rotini/rotini/cmd/rotini` — it installs the
+  codegen binary: `go tool rotini init`, `generate`, `validate`.
 - **As a library** — `go get github.com/go-rotini/rotini` — it is the runtime your
   generated code imports and your handlers are written against.
 
@@ -88,8 +88,8 @@ spec becomes the single place all of it is declared — and checked.
 Requires **Go 1.27** or later.
 
 ```
-go get -tool github.com/go-rotini/rotini@latest   # the codegen tool
-go get github.com/go-rotini/rotini@latest         # the runtime
+go get -tool github.com/go-rotini/rotini/cmd/rotini@latest   # the codegen tool
+go get github.com/go-rotini/rotini@latest                    # the runtime
 ```
 
 (Your own module may still declare an older Go version — calling rotini's generic
@@ -100,7 +100,7 @@ methods does not require 1.27 in the caller, only declaring them does.)
 ```bash
 mkdir todo && cd todo
 go mod init github.com/me/todo
-go get -tool github.com/go-rotini/rotini@latest
+go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
 
 go tool rotini init todo
 # Scaffolds:

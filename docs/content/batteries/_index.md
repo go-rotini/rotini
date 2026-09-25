@@ -10,7 +10,7 @@ Parsing is the first 10% of a CLI. rotini carries the other 90% in the same impo
 Two rules hold across every battery. **Configuration chains** — `New*(…).WithX(…).WithY(…)` — because one package cannot hold eight different package-level `WithTimeout` functions. And **every battery degrades safely when there is no terminal**: prompts fail fast instead of hanging, indicators stay silent instead of smearing a CI log with carriage returns, and the pager passes text straight through.
 {{< /alert >}}
 
-## Data out
+## Printing output
 
 ### Printer
 
@@ -128,15 +128,19 @@ A rotini binary is not always a one-shot command. These run the **same program**
 
 ### REPL
 
-Each typed line is tokenized like a shell command line and dispatched against the **same command tree** the binary uses, so every command, flag and handler behaves identically. A failing command is reported and the loop continues.
+Each typed line is tokenized like a shell command line and dispatched against the **same command tree** the binary uses, so every command, flag and handler behaves identically. A failing command never ends the session.
+
+State that should survive a command is bound on the **Program** with `Provide`, so every line sees it; state that should not goes on the **Context**, which is fresh each line.
 
 {{< code title="repl" language="golang" open="true" collapsible="false" copy="true" >}}
 rotini.NewREPL(Program).WithPrompt("todo> ").Run(ctx)
 {{< /code >}}
 
+The program's funnel already reports a failing command, so the REPL adds nothing of its own. `WithErrorEcho(true)` turns on a second report for a program whose funnel is deliberately silent.
+
 ### Service and Scheduler
 
-`Service` runs long-lived workers until the context ends or one fails, with shutdown hooks that run in reverse order **in every case** — clean stop, failure, and cancellation alike. Because the runtime already cancels the run context on SIGINT/SIGTERM, a handler that builds a Service on its own `ctx` gets signal-driven graceful shutdown for free.
+`Service` runs long-lived workers until the context ends or one fails, with shutdown hooks that run in reverse order **in every case** — clean stop, failure, and cancellation alike. The budget covers both halves of teardown: workers that will not stop and hooks that overrun both surface as `ErrShutdownTimeout`, so a supervisor can tell "finished" from "exited with work possibly unflushed". Because the runtime already cancels the run context on SIGINT/SIGTERM, a handler that builds a Service on its own `ctx` gets signal-driven graceful shutdown for free.
 
 `Scheduler` is `Service` with timers, so it inherits exactly those semantics.
 
@@ -185,7 +189,7 @@ answers, err := rotini.NewWizard().
 
 Going back over a branch that was skipped skips it again — the flow does not resurface a question it already decided was irrelevant.
 
-## What rotini deliberately does not ship
+## What rotini does not ship
 
 | Need | Use |
 |---|---|

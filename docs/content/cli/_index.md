@@ -7,7 +7,7 @@ title: "cli"
 The `rotini` companion CLI is itself built with rotini: its spec lives at `cmd/rotini/.rotini.spec.yaml`, and everything below is its own generated help output.
 
 {{< code title="go get -tool" language="text" open="true" collapsible="false" copy="true" >}}
-go get -tool github.com/go-rotini/rotini@latest
+go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
 {{< /code >}}
 
 Invoke it with `go tool rotini <command>`, or install it globally and call `rotini` directly.

@@ -38,9 +38,37 @@ One per invocation, passed to every hook.
 | `rtx.Args` | the raw argv |
 | `rtx.Chain()` | the resolved command path, root → leaf |
 | `rtx.Stdin` `rtx.Stdout` `rtx.Stderr` | the program's streams — write through these, never `os.Std*`, and your handler tests cleanly |
+| `rtx.Command()` / `rtx.Path()` | the command being run, and its full path |
 | `rtx.Bind` / `rtx.Get[T]` / `rtx.MustGet[T]` | the service registry (generic methods, Go 1.27) |
 | `rtx.RecordInfo` / `RecordSuccess` / `RecordWarning` / `RecordError` | outcomes |
-| `rtx.SignalExit(code)` / `rtx.Exit(code)` | stop, gracefully or immediately |
+| `rtx.Failed()` | has anything failed so far — the one bit a teardown needs |
+| `rtx.Halt()` / `rtx.SignalExit(code)` / `rtx.Exit(code)` | stop — see below |
+
+### Stopping
+
+Three ways, chosen by whether the exit code is the point:
+
+| | |
+|---|---|
+| `Halt()` | stop, claim **no** code. The verdict is left to what the run recorded and to the funnel. This is the common case — a handler that recorded an error and has nothing more to do. |
+| `SignalExit(n)` | stop **and** claim a code, for when the number is the point: a filter reporting "no match" as 1, a wrapper passing a child's status through. |
+| `Exit(n)` | stop immediately and **skip** pending teardown, for when remaining cleanup must not run. |
+
+All three leave teardown intact except `Exit`. Halting matters as much as recording: a hook that records a failure and returns *without* stopping lets the next hook collect the same inputs, hit the same validation, and record the same error again.
+
+`Failed()` is what makes a teardown decision possible — commit or roll back, keep or discard:
+
+{{< code title="the decision a teardown exists to make" language="golang" open="true" collapsible="false" copy="true" >}}
+func (*migrateHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	if rtx.Failed() { // panics count, which is the case a hand-kept flag misses
+		tx.Rollback()
+		return
+	}
+	tx.Commit()
+}
+{{< /code >}}
+
+The `Outcome` a funnel receives answers the same question — but a funnel runs *after* every teardown has finished, which is the right place to report a failure and far too late to undo one.
 
 ## Input
 
@@ -57,6 +85,19 @@ argv, _ := rotini.ParseArgv[TodoAddInputs](rtx)
 env,  _ := rotini.ParseEnv[TodoAddInputs](rtx)
 merged  := rotini.OverlayInputs(argv, env)
 {{< /code >}}
+
+An inputs type binds to the **end** of the command chain: field *i* of an *n*-field struct takes `chain[len(chain)-n+i]`. A handler collecting the type generated for its own command is always right — and so is a composed child's handler, whose shorter type counts back from the leaf and lands on its own frames whatever tree it was grafted into.
+
+The one place that rule cannot serve is a **cascading hook on the root command**: it runs for every invocation, so it cannot name the leaf's type, and its own type would count back from the leaf and land on some descendant. `CollectRoot` anchors at the root instead.
+
+{{< code title="a root cascading hook reading its own flags" language="golang" open="true" collapsible="false" copy="true" >}}
+func (*rootHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.CollectRoot[MycliInputs](rtx) // not Collect
+	...
+}
+{{< /code >}}
+
+Collecting an ancestor's type with plain `Collect` from a deeper command is rejected rather than silently filled with zeros.
 
 ## Outcomes
 
@@ -94,8 +135,50 @@ Every class is both `errors.Is`-able against the `ErrUsage` / `ErrInternal` sent
 
 rotini ships **no opinions on top**: no automatic "did you mean", no help dump on error. A program that wants either writes its own funnel.
 
-## Opt-in services
+## Plugins
 
-Nothing is wired unless the generated code — or you — binds it. `KeyParser`, `KeyBinder`, `KeySuggestor`, `KeyStyler` and `KeyBindMeta` name the usual suspects: `Parser` (argv alone), `Binder` (`Collect`'s engine), `Suggestor` (string-distance matching), and `Style`/`Styler` (SGR styling by intent, with `Strip`, `Width` and `Hyperlink`).
+A sub-command can be **another binary**. Declare it in the spec and rotini locates it, passes all three streams through, honours a timeout, and returns the plugin's own exit code untouched.
+
+Two kinds, and the difference decides whose fault a missing binary is:
+
+| | in help when missing? | missing means | category |
+|---|---|---|---|
+| `remote_commands` — **declared** | yes; it is published interface | a broken install | `CategoryInternal` |
+| `remote_discovery` — **discovered** `yourcli-*` | no; it appears only when present | a typo | `CategoryUsage` |
+
+A timeout is neither party's fault, so it is `CategoryNone` — still reachable with `errors.As` as a `*RemoteError` whose `Kind` is `RemoteTimeout`.
+
+Both kinds search the same three places in the same order: next to the host binary (the git/kubectl convention), then the command's `plugin_path`, then `PATH`.
+
+{{< code title="what rotini hands you, and what you render" language="golang" open="true" collapsible="false" copy="true" >}}
+root := rtx.Chain()[0]
+
+rotini.DiscoveredPlugins(root)      // tokens found now, minus any shadowing a real command
+rotini.DiscoveryDiagnostics(root)   // why the configured plugin_path could not be scanned
+rotini.RemoteBinaryPath(root, name) // would this resolve, and to what — searched as dispatch searches
+{{< /code >}}
+
+rotini renders none of it. Generated help lists the **declared** remotes, because those are known at build time; a handler that wants to list what is installed *now* asks for it. `RemoteBinaryPath` exists because `exec.LookPath` only sees `PATH` — it reports every conventionally installed plugin as missing.
+
+A discovered plugin may never shadow a declared command, so dropping a binary on `PATH` cannot take over part of a CLI's published interface.
+
+## Services
+
+Nothing is wired unless the generated code — or you — binds it. `KeyParser`, `KeyBinder`, `KeySuggestor`, `KeyStyler`, `KeyBindMeta` and `KeyVersion` name the built-ins: `Parser` (argv alone), `Binder` (`Collect`'s engine), `Suggestor` (string-distance matching), `Style`/`Styler` (SGR styling by intent, with `Strip`, `Width` and `Hyperlink`), and the version string `--version` reports.
+
+Your own services use a **typed key**, so the registry string and the type it was bound as cannot drift apart and a handler needs neither a literal nor an assertion:
+
+{{< code title="a typed key" language="golang" open="true" collapsible="false" copy="true" >}}
+// declared once, beside the thing it names
+var StoreKey = rotini.NewKey[*Store]("store")
+
+// main.go — the type is checked here, where the value is supplied
+StoreKey.Provide(cmd.Program, NewStore()).Execute()
+
+// any handler — no string, no assertion, no comma-ok
+store := StoreKey.MustGet(rtx)
+{{< /code >}}
+
+`Provide` binds program-wide, so every invocation sees it — including every line of a REPL session. `BindTo` binds on one `Context`, for something a hook computes per run.
 
 Detection is opt-in too: `DetectProfile`, `IsTerminal` and `EnvNoColor` exist, but nothing calls them for you — the program decides and feeds the result in.

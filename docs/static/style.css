@@ -752,20 +752,25 @@ li::marker {
 
 .rotini_text {
   font-family: "Poppins", sans-serif;
-  font-size: 5rem;
+  /* Scales with the viewport rather than sitting at a fixed size: at 5rem the wordmark
+     already crowded a narrow phone, and the cap keeps it from dominating a wide desktop. */
+  font-size: clamp(3.25rem, 12vw, 6.5rem);
   font-weight: 900;
   color: var(--title-4);
+  /* Offsets in em, not px, so the cascade keeps its proportions at every size — in px the
+     layers would bunch up as the type grew and the depth effect would flatten out. */
   text-shadow:
-    -2px -2px 0 var(--title-3),
-    -4px -4px 0 var(--title-3),
-    -6px -6px 0 var(--title-3),
-    -8px -8px 0 var(--title-2),
-    -10px -10px 0 var(--title-2),
-    -12px -12px 0 var(--title-2),
-    -14px -14px 0 var(--title-1);
+    -0.025em -0.025em 0 var(--title-3),
+    -0.05em -0.05em 0 var(--title-3),
+    -0.075em -0.075em 0 var(--title-3),
+    -0.1em -0.1em 0 var(--title-2),
+    -0.125em -0.125em 0 var(--title-2),
+    -0.15em -0.15em 0 var(--title-2),
+    -0.175em -0.175em 0 var(--title-1);
   line-height: 1;
   text-align: center;
-  padding: 60px 0 60px 20px;
+  /* Left/top padding clears the cascade, which grows up and to the left with the type. */
+  padding: clamp(40px, 6vw, 70px) 0 clamp(40px, 5vw, 60px) 0.2em;
 }
 
 .site_menu {
@@ -906,6 +911,13 @@ li::marker {
   display: none;
 }
 
+/* The nav panel's rows have no list element of their own, so one wraps them — see the
+   note on .toc_menu_list for why the sizing goes on the wrapper and not on the rows. */
+.menu_panel_inner {
+  width: max-content;
+  min-width: 100%;
+}
+
 .menu_panel_active {
   display: block;
   max-height: 330px;
@@ -990,6 +1002,14 @@ li::marker {
 
 .toc_menu_list {
   padding: 10px 0;
+  /* A scroll container sizes its children to the VISIBLE width, so every row stopped at
+     the original right edge once the panel scrolled. Sizing each ROW to its own content
+     does not fix it either: a SHORT row then falls back to min-width:100% — still the
+     visible width — while the panel's scroll width is set by the LONGEST row. So the
+     inner list is sized to max-content (the widest row) and the rows fill it, which makes
+     every row the same width and that width the full scroll width. */
+  width: max-content;
+  min-width: 100%;
 }
 
 .toc_menu_item {
@@ -1559,3 +1579,144 @@ h2 + .blog_post {
   color: var(--syn-inserted);
 }
 
+
+/* ─── landing page ──────────────────────────────────────────────────────────
+   Used only by content/_index.md. Everything here is built from the existing
+   tokens, so it follows the light/dark switch without a second palette. */
+
+:root {
+  /* The two halves of the tagline are one statement, so they share ONE size rather than
+     each carrying its own — they cannot drift apart, at any width. Clamped because the
+     beats line is uppercase and letter-spaced, so it runs wider than its character count
+     suggests and would otherwise overflow a narrow phone. */
+  --hero-line: clamp(1.05rem, 3.6vw, 1.35rem);
+}
+
+.hero_tagline {
+  text-align: center;
+  font-size: var(--hero-line);
+  line-height: 1.5;
+  color: var(--foreground-light);
+  max-width: 46rem;
+  margin: -20px auto 14px;
+  padding: 0 16px;
+  line-height: 1.45;
+}
+
+/* The three beats under the couplet. Monospace and letter-spaced so it reads as a cadence
+   rather than a third sentence, and picks up the terminal voice the rest of the site uses. */
+.hero_beats {
+  text-align: center;
+  font-family: "JetBrains Mono", monospace;
+  /* DERIVED from the tagline's size, not set on its own, so the two still scale together —
+     but a notch smaller. Set to the same number it read larger than the line above it:
+     uppercase has no ascender/descender variation and every glyph fills the cap height, so
+     letter-spaced caps carry more visual weight than their nominal size. The 0.9 is that
+     optical correction, not a change of heart about the two matching. */
+  font-size: calc(var(--hero-line) * 0.9);
+  /* em, so the tracking scales with the derived size instead of tightening as it grows. */
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 0 auto 26px;
+  padding: 0 16px;
+}
+
+.hero_sub {
+  text-align: center;
+  color: var(--foreground-dark);
+  max-width: 44rem;
+  margin: 0 auto 28px;
+  padding: 0 16px;
+  font-size: 0.95rem;
+}
+
+.hero_actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+  margin: 0 0 12px;
+  padding: 0 16px;
+}
+
+.hero_actions a {
+  display: inline-block;
+  padding: 9px 20px;
+  border: 1px solid var(--border);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 14px;
+  line-height: 1;
+  text-decoration: none;
+  color: var(--foreground-main);
+  background: var(--background-alt);
+  /* One width for all three, so they read as a set rather than three sizes. Measured in
+     ch — the advance of the button's OWN monospace font — so it tracks the font-size above
+     instead of being a pixel value that silently stops fitting. box-sizing is border-box
+     globally, so this span covers the 40px of padding and 2px of border as well: 15ch
+     leaves room for a label of 10 characters, against 9 for the longest one here. */
+  min-width: 15ch;
+  text-align: center;
+}
+
+.hero_actions a:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.hero_actions a.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+.hero_actions a.primary:hover {
+  filter: brightness(1.12);
+  color: var(--accent-fg);
+}
+
+/* The feature grid: a scannable index of the surface, one card per idea. */
+.feature_grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+  gap: 14px;
+  margin: 26px 0;
+}
+
+.feature_card {
+  border: 1px solid var(--border);
+  background: var(--background-alt);
+  padding: 16px 18px;
+}
+
+.feature_card h3 {
+  margin: 0 0 6px;
+  font-size: 0.95rem;
+  font-family: "JetBrains Mono", monospace;
+  color: var(--accent);
+}
+
+.feature_card p {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--foreground-dark);
+}
+
+.feature_card code {
+  font-size: 0.85em;
+}
+
+/* Two panes side by side — a spec and what it becomes. Stacks when narrow. */
+.split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  align-items: start;
+  margin: 20px 0;
+}
+
+.split > * {
+  min-width: 0;
+}
