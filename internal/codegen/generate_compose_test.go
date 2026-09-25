@@ -149,6 +149,18 @@ generate:
 	}
 }
 
+// stageOrder is the dependency order the staged generate walks: deepest child first, root
+// last, restricted to the specs the caller actually supplied.
+func stageOrder(files map[string]string) []string {
+	var out []string
+	for _, name := range []string{"grand", "child", "root"} {
+		if _, ok := files["cmd/"+name+"/.rotini.spec.yaml"]; ok {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // composeModuleStaged generates each composed spec in dependency order (grandchild, child,
 // root), which is the order a real project's `go generate ./...` produces, then returns
 // everything emitted.
@@ -167,7 +179,7 @@ func composeModuleStaged(t *testing.T, files map[string]string) map[string]strin
 	}
 	t.Chdir(dir)
 
-	for _, name := range []string{"grand", "child", "root"} {
+	for _, name := range stageOrder(files) {
 		spec := "cmd/" + name + "/.rotini.spec.yaml"
 		conf := "cmd/" + name + "/.rotini.conf.yaml"
 		if err := NewProcessor("0.0.0").Generate(spec, conf, false, func(string, error) {}, func([]error) {}); err != nil {
@@ -183,4 +195,155 @@ func keysOf(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// ── a composed child's BindMeta ──────────────────────────────────────────────
+
+// TestCompose_adoptsChildBindMeta covers the two channels composition used to drop.
+//
+// The umbrella's descriptor was built from its OWN document, so a child's config_files and
+// env_prefix stopped existing the moment it was grafted: `child show` read the configuration
+// file and `root kid show` did not, with nothing to notice. The e2e tier proves the resulting
+// BINARY binds; this proves the descriptor it binds from.
+func TestCompose_adoptsChildBindMeta(t *testing.T) {
+	emitted := composeModuleStaged(t, bindMetaTree(`version: 0.0.0
+command:
+  name: root
+  summary: an umbrella declaring no channels of its own
+  commands:
+    - $ref: ../child/.rotini.spec.yaml
+      name: kid
+`))
+
+	root := emitted["internal/cmd/root/zz_root.go"]
+
+	// The child's prefix, adopted: the umbrella declares none.
+	if !strings.Contains(root, `EnvPrefix: "APP"`) {
+		t.Errorf("the composed child's env_prefix was not adopted:\n%s", root)
+	}
+
+	// The child's source, RE-SCOPED to where the graft sits. "kid" is the overlay name, not
+	// the child's own root name, which is why this cannot be a straight copy.
+	if !strings.Contains(root, `Scope: "root/kid"`) {
+		t.Errorf("the composed child's config source was not re-scoped to root/kid:\n%s", root)
+	}
+	if strings.Contains(root, `Scope: "child"`) {
+		t.Error("the child's own scope survived the graft; the binder matches Scope against the INVOKED chain")
+	}
+}
+
+// TestCompose_ownEnvPrefixWinsOverAdopted: an umbrella that names a prefix has made a choice,
+// and adopting one from a child behind its back would rename its own variables.
+func TestCompose_ownEnvPrefixWinsOverAdopted(t *testing.T) {
+	emitted := composeModuleStaged(t, bindMetaTree(`version: 0.0.0
+command:
+  name: root
+  summary: an umbrella with a prefix of its own
+  env_prefix: ROOT
+  commands:
+    - $ref: ../child/.rotini.spec.yaml
+      name: kid
+`))
+
+	root := emitted["internal/cmd/root/zz_root.go"]
+	if !strings.Contains(root, `EnvPrefix: "ROOT"`) {
+		t.Errorf("the umbrella's own env_prefix did not win:\n%s", root)
+	}
+}
+
+// TestCompose_conflictingEnvPrefixesAreReported: two children, two prefixes, one descriptor.
+// Picking a winner would silently rename the loser's variables, so the author is asked.
+func TestCompose_conflictingEnvPrefixesAreReported(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/compose\n\ngo 1.26\n")
+	for _, c := range []struct{ name, prefix string }{{"one", "ONE"}, {"two", "TWO"}} {
+		writeTestFile(t, dir, "cmd/"+c.name+"/.rotini.spec.yaml", `version: 0.0.0
+command:
+  name: `+c.name+`
+  summary: a child with its own prefix
+  env_prefix: `+c.prefix+`
+  env:
+    - name: token
+      schema:
+        type: string
+`)
+		writeTestFile(t, dir, "cmd/"+c.name+"/.rotini.conf.yaml", `version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/`+c.name+`/zz_`+c.name+`.go
+      package: `+c.name+`
+`)
+	}
+	writeTestFile(t, dir, "cmd/root/.rotini.spec.yaml", `version: 0.0.0
+command:
+  name: root
+  summary: an umbrella composing two disagreeing children
+  commands:
+    - $ref: ../one/.rotini.spec.yaml
+    - $ref: ../two/.rotini.spec.yaml
+`)
+	writeTestFile(t, dir, "cmd/root/.rotini.conf.yaml", `version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/root/zz_root.go
+      package: root
+`)
+	t.Chdir(dir)
+
+	for _, name := range []string{"one", "two"} {
+		if err := NewProcessor("0.0.0").Generate("cmd/"+name+"/.rotini.spec.yaml", "cmd/"+name+"/.rotini.conf.yaml", false, func(string, error) {}, func([]error) {}); err != nil {
+			t.Fatalf("generate %s: %v", name, err)
+		}
+	}
+
+	err := NewProcessor("0.0.0").Generate("cmd/root/.rotini.spec.yaml", "cmd/root/.rotini.conf.yaml", false, func(string, error) {}, func([]error) {})
+	if err == nil {
+		t.Fatal("two children with different env_prefix values generated successfully, want an error")
+	}
+	// The message has to name both prefixes and say what to do, or it is a riddle.
+	for _, want := range []string{"ONE", "TWO", "env_prefix", "root"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+}
+
+// bindMetaTree is a child that declares both channels, plus whichever root spec the caller
+// wants composed on top of it.
+func bindMetaTree(rootSpec string) map[string]string {
+	return map[string]string{
+		"cmd/child/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: child
+  summary: a CLI declaring its own configuration sources
+  env_prefix: APP
+  config_files:
+    - name: project
+      discover:
+        strategy: walk-up
+        file: .apprc.yaml
+  env:
+    - name: endpoint
+      schema:
+        type: string
+        default: https://example.test
+`,
+		"cmd/child/.rotini.conf.yaml": `version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/child/zz_child.go
+      package: child
+`,
+		"cmd/root/.rotini.spec.yaml": rootSpec,
+		"cmd/root/.rotini.conf.yaml": `version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/root/zz_root.go
+      package: root
+`,
+	}
 }

@@ -214,7 +214,7 @@ Config-value inputs for this command, bound by key from an in-scope config_files
 
 array of [`ConfigurationFile`](#configurationfile)
 
-Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins.
+Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins. COMPOSITION: a $ref'd child's sources travel with its command tree, re-scoped to the path the graft occupies, so `parent child cmd` reads what `child cmd` reads without the parent re-declaring anything.
 
 ### `deprecated`
 
@@ -244,7 +244,7 @@ Environment-variable inputs for this command
 
 `string`
 
-Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator).
+Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the binder reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix).
 
 ### `examples`
 

@@ -196,14 +196,17 @@ type templateHandlerData struct {
 	// `help` taking a variadic path — so the stub starts connected rather than starting with
 	// a TODO that reimplements what codegen just generated. Nothing here is injected at run
 	// time; it is starter code in a create-once file the author owns and may delete.
-	HelpVar           string // generated help page var for this command, e.g. "HelpRotini"; "" when the help feature is off
-	HelpFlag          string // Go field of this command's bool `help` flag; "" when there is none (or no HelpVar)
-	VersionFlag       string // Go field of this command's bool `version` flag; "" when there is none
-	Header            string // the target's conf-declared `header:`; "" for none
-	HelpPathArg       string // Go field of the variadic path argument on a command named `help`; "" otherwise
-	VersionOnly       bool   // a command named `version` whose whole job is to print it
-	PrintHelpWhenBare bool   // a dispatcher root: sub-commands, no own arguments, help feature on
-	NeedsInputs       bool   // the seeded body reads an input, so the stub calls Collect
+	HelpVar             string // generated help page var for this command, e.g. "HelpRotini"; "" when the help feature is off
+	HelpFlag            string // Go field of this command's bool `help` flag; "" when there is none (or no HelpVar)
+	HelpFlagName        string // that flag's logical name, for the comment explaining the ordering
+	AnswerBeforeCollect bool   // this command answers help/version from argv, ahead of Collect's validation
+	UsesInputs          bool   // the seeded body reads `inputs`; when false Collect still runs, for its validation
+	VersionFlag         string // Go field of this command's bool `version` flag; "" when there is none
+	Header              string // the target's conf-declared `header:`; "" for none
+	HelpPathArg         string // Go field of the variadic path argument on a command named `help`; "" otherwise
+	VersionOnly         bool   // a command named `version` whose whole job is to print it
+	PrintHelpWhenBare   bool   // a dispatcher root: sub-commands, no own arguments, help feature on
+	NeedsInputs         bool   // the seeded body reads an input, so the stub calls Collect
 }
 
 func renderHandlerStubFile(data templateHandlerData) ([]byte, error) {

@@ -1,0 +1,173 @@
+# R6c — a composed child's BindMeta travels with its command tree.
+#
+# Composition's whole claim is that `parent child cmd` runs what `child cmd` runs. It held for
+# argv and broke, silently, for two channels: a child's `config_files` and its `env_prefix`
+# were read from the PARENT's document when the umbrella's descriptor was built, so a child
+# that declared either got neither once composed. `child show` read .apprc.yaml; `parent child
+# show` — the same handler, the same generated package — did not, with no error anywhere.
+#
+# The umbrella below declares NO env_prefix and NO config_files. Everything it binds through
+# those two channels, it adopted from the child it grafted.
+
+gomodinit example.com/bindmeta
+
+exec rotini generate cmd/child/.rotini.spec.yaml --config cmd/child/.rotini.conf.yaml
+exec rotini generate cmd/root/.rotini.spec.yaml --config cmd/root/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o child$exe ./cmd/child
+exec go build -o root$exe ./cmd/root
+
+# The descriptor itself: the child's source, re-scoped to where the graft actually sits.
+# "kid" is the overlay name, not the child's own root name, which is why this cannot be a
+# straight copy of the child's Scope.
+grep 'EnvPrefix: "APP"' internal/cmd/root/zz_root.go
+grep 'Scope: "root/kid"' internal/cmd/root/zz_root.go
+
+# 1. Nothing supplied: the declared default, both ways.
+exec ./child$exe show
+stdout 'region=default-region endpoint=https://example.test'
+exec ./root$exe kid show
+stdout 'region=default-region endpoint=https://example.test'
+
+# 2. The configuration file, found by walking up from the working directory. This is the case
+#    that was broken: the child read it and the umbrella did not.
+exec ./child$exe show
+stdout 'region=default-region'
+cp apprc.yaml .apprc.yaml
+exec ./child$exe show
+stdout 'region=from-the-file'
+exec ./root$exe kid show
+stdout 'region=from-the-file'
+rm .apprc.yaml
+
+# 3. The environment, under the prefix the CHILD declared. `endpoint` is an env input that
+#    names no variable of its own, so APP_ENDPOINT exists only because env_prefix came across
+#    with the graft.
+env APP_ENDPOINT=from-the-env
+exec ./child$exe show
+stdout 'endpoint=from-the-env'
+exec ./root$exe kid show
+stdout 'endpoint=from-the-env'
+
+# 4. And argv still beats the file, through either binary.
+cp apprc.yaml .apprc.yaml
+exec ./child$exe show --region from-argv
+stdout 'region=from-argv'
+exec ./root$exe kid show --region from-argv
+stdout 'region=from-argv'
+
+-- apprc.yaml --
+api:
+  region: from-the-file
+-- cmd/child/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: child
+  summary: a CLI that declares its own configuration sources
+  env_prefix: APP
+  config_files:
+    - name: project
+      discover:
+        strategy: walk-up
+        file: .apprc.yaml
+  flags:
+    - name: region
+      summary: the deployment region
+      identifiers:
+        - --region
+      schema:
+        type: string
+        key: api.region
+        default: default-region
+    - name: help
+      summary: print help
+      identifiers:
+        - -h
+        - --help
+      schema:
+        type: bool
+  env:
+    - name: endpoint
+      summary: the api endpoint
+      schema:
+        type: string
+        default: https://example.test
+  commands:
+    - name: show
+      summary: print what resolved
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+-- cmd/child/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/child/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/child/zz_child.go
+      package: child
+validate:
+  fail: collect
+-- cmd/root/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: root
+  summary: an umbrella that declares no channels of its own
+  flags:
+    - name: help
+      summary: print help
+      identifiers:
+        - -h
+        - --help
+      schema:
+        type: bool
+  commands:
+    - $ref: ../child/.rotini.spec.yaml
+      name: kid
+-- cmd/root/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/root/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/root/zz_root.go
+      package: root
+validate:
+  fail: collect
+-- internal/cmd/child/child_show.go --
+package child
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*childShowHandlers)(nil)
+
+type childShowHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*childShowHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[ChildShowInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.Halt()
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "region=%s endpoint=%s\n", in.Child.Flags.Region, in.Child.Env.Endpoint)
+}

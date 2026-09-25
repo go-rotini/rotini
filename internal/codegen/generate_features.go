@@ -300,13 +300,8 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 // schema.variable, else the snake-upper form of its logical name (mirroring the
 // binder's default key→env-var derivation, e.g. "apiKey" → "API_KEY").
 func envVarLabel(e EnvInput, envPrefix string) string {
-	if e.Schema != nil && e.Schema.Variable != "" {
-		return e.Schema.Variable // explicit: exempt from env_prefix
-	}
-	if envPrefix != "" {
-		return envPrefix + "_" + snakeUpper(e.Name)
-	}
-	return snakeUpper(e.Name)
+	// One derivation, shared with the `env:` tag the binder pins — see [envVarFor].
+	return envVarName(e, envPrefix)
 }
 
 // configLocation is where a config input is read from, for display: "<file>.<key>"

@@ -27,16 +27,20 @@ func inputsFields(rootPascal, path string) []fieldDef {
 // flagFields returns the <Prefix>Flags struct fields for a command's inputs: the
 // argv flags. The env/config channels are their own structs (envFields/configFields);
 // a flag with an env/config *fallback* still lives here and is reconciled by the binder.
-func flagFields(in *Inputs) []fieldDef {
+func flagFields(in *Inputs, envPrefix string) []fieldDef {
 	if in == nil {
 		return nil
 	}
 	fields := make([]fieldDef, 0, len(in.Flags))
 	for _, f := range in.Flags {
+		key := flagReconKey(f.Name, f.Schema)
 		fields = append(fields, fieldDef{
 			Field: toPascalCase(f.Name), GoType: goFieldType(f.Schema), Tag: f.Name,
-			Import: fieldImport(f.Schema), Recon: flagReconKey(f.Name, f.Schema),
-			EnvVar:  envVarOf(f.Schema),
+			Import: fieldImport(f.Schema), Recon: key,
+			// A flag's env fallback is pinned, not derived at bind time — the same
+			// reason env inputs are; see [envVarFor]. An argv-only flag has no recon
+			// key and so no env fallback to name.
+			EnvVar:  flagEnvVar(f.Schema, key, envPrefix),
 			Comment: contractComment(f.Schema),
 		})
 	}
@@ -73,7 +77,9 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 	for _, e := range in.Env {
 		fd := fieldDef{
 			Field: toPascalCase(e.Name), GoType: goFieldType(e.Schema), Tag: e.Name,
-			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema), EnvVar: envVarOf(e.Schema),
+			Import: fieldImport(e.Schema), Recon: reconTag(e.Name, e.Schema),
+			// Always pinned, explicit or derived — never left for recon to re-derive.
+			EnvVar:     envVarName(e, envPrefix),
 			Constraint: constraintTags(e.Schema),
 		}
 		// A nested input's variable is a family PREFIX, not the value's own env
@@ -147,6 +153,19 @@ func envVarOf(schema *InputSchema) string {
 		return schema.Variable
 	}
 	return ""
+}
+
+// flagEnvVar is a flag's pinned env-fallback variable: its explicit `variable:` when declared
+// (exempt from env_prefix, because it is already exact), else the name derived from the recon
+// key that opted it into the fallback chain. An argv-only flag has no key and no variable.
+func flagEnvVar(schema *InputSchema, reconKey, envPrefix string) string {
+	if v := envVarOf(schema); v != "" {
+		return v
+	}
+	if reconKey == "" {
+		return ""
+	}
+	return envVarFor(reconKey, envPrefix)
 }
 
 // configFields returns the <Prefix>Config struct fields: one per pure config-file

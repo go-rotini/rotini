@@ -367,6 +367,8 @@ One codebase can ship several binaries that share command implementations. A par
 
 `acme db migrate` and the standalone `acme-db migrate` then run the same handler, because they *are* the same handler. Inputs bind to the **end** of the command chain, so a child's generated type lands on its own frames whichever tree it was grafted into.
 
+A child's **input channels come with it**, not just its commands. `config_files` and `env_prefix` declared on the child travel with the graft — its configuration sources re-scoped to where the graft sits — so the parent re-declares nothing and both binaries read the same file and the same variables. A parent that declares its own `env_prefix` wins; two children that disagree are rejected at generate time, because one descriptor carries one prefix.
+
 To keep the handlers in a package other CLIs import, point the command at it. If that package also needs the generated input types, declare a `models` target so the structs live somewhere both packages can import — the cmd package imports the handler package, so the handler package cannot import it back:
 
 {{< code title="handler package + models target" language="yaml" open="true" collapsible="false" copy="true" >}}

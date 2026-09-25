@@ -235,6 +235,7 @@ const goldenSpec = `version: 0.0.0
 command:
   name: demo
   description: a demo cli
+  env_prefix: DEMO
   flags:
     - name: verbose
       summary: verbose output
@@ -244,6 +245,15 @@ command:
     - name: home
       summary: home dir
       schema: {type: string, variable: DEMO_HOME}
+    # Two DERIVED names, deliberately: one with an underscore, one camelCase. Both used to
+    # be printed in help and bound from nothing, because help, codegen and the binder each
+    # derived the variable differently. The golden now pins the tag the binder reads.
+    - name: base_url
+      summary: an env input whose name carries an underscore
+      schema: {type: string}
+    - name: apiKey
+      summary: a camelCase env input
+      schema: {type: string}
   commands:
     - name: build
       summary: build the target
@@ -256,6 +266,12 @@ command:
           summary: output path
           identifiers: [--out, -o]
           schema: {type: string}
+        # A flag whose env fallback is derived from a recon key with an underscore inside a
+        # segment — the same defect on the flag channel.
+        - name: sort-by
+          summary: ordering
+          identifiers: [--sort-by]
+          schema: {type: string, key: build.sort_by}
 `
 
 const goldenConf = `version: 0.0.0

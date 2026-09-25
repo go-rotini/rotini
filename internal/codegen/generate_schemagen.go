@@ -152,13 +152,31 @@ func contractComment(schema *InputSchema) string {
 	return "// parsed via its encoding.TextUnmarshaler (see the spec schema's `type` docs)"
 }
 
-// envVarName is an env input's environment variable: the explicit `variable:`
-// when declared, else the SNAKE_UPPER projection of its name (recon's default).
+// envVarName is an env input's environment variable: the explicit `variable:` when declared,
+// else the derived name [envVarFor] builds from its logical name.
 func envVarName(e EnvInput, envPrefix string) string {
 	if v := envVarOf(e.Schema); v != "" {
 		return v // explicit variable: exempt from env_prefix — already exact
 	}
-	derived := strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(e.Name))
+	return envVarFor(e.Name, envPrefix)
+}
+
+// envVarFor derives the environment variable a recon key binds to under envPrefix — the ONE
+// place that derivation happens.
+//
+// It used to happen in three: this function's old body, [envVarLabel] for the help page, and
+// recon's own SnakeUpperTransform inside the binder. They disagreed, and a reader had no way
+// to tell. An input named "base_url" under env_prefix MUSAK was PRINTED in help as
+// MUSAK_BASE_URL and BOUND from nothing at all, because recon's inverse projection splits on
+// every underscore and so read MUSAK_BASE_URL back as the two-segment path base/url, which
+// never met the one-segment key. "apiKey" had the same disagreement the other way: help said
+// API_KEY, the binder read APIKEY.
+//
+// The cure is not a fourth spelling. It is emitting the name this function returns into the
+// generated field's `env:` tag, so the binder PINS it — exempt from any prefix, both
+// directions — instead of re-deriving it. Help and the binder then read one fact.
+func envVarFor(key, envPrefix string) string {
+	derived := snakeUpper(strings.ReplaceAll(key, ".", "_"))
 	if envPrefix != "" {
 		return envPrefix + "_" + derived
 	}

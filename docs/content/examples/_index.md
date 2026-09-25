@@ -4,7 +4,7 @@ title: "examples"
 
 # Examples
 
-Ten CLIs, written the way you would write one — spec first, then conf, then `rotini generate`, then handler bodies — each built around a different part of the framework. They exist to answer a question the test suite cannot: what does a *real* rotini program look like once it stops being a tutorial.
+Eleven CLIs, written the way you would write one — spec first, then conf, then `rotini generate`, then handler bodies — each built around a different part of the framework. They exist to answer a question the test suite cannot: what does a *real* rotini program look like once it stops being a tutorial.
 
 Use them as shapes to copy. Each entry below says what the CLI is, what it looks like from the command line, and which part of rotini it leans on.
 
@@ -114,6 +114,32 @@ handlers/health/              one implementation, referenced by all four
 {{< /code >}}
 
 Its test suite is the interesting part: every case asserts that the composed result is **byte-identical** to the standalone one, because that equality is the feature. See [sharing handlers between CLIs](/guides#share-handlers-between-clis).
+
+### `musak` — a music catalogue over a real API
+
+Where `acme` composes four binaries, this one does it with a **network** in the middle — the place composition usually stops being free. Three child CLIs over the public iTunes Search API, one HTTP client, one shared `search` command, and no key or account to make it run.
+
+{{< code title="four binaries, one client" language="text" open="true" collapsible="false" copy="false" >}}
+musak songs   search · show · preview
+      albums  search · show · tracks
+      artists search · show · albums · top
+      about                                  the umbrella's own command
+
+handlers/search/   ONE search command, run by all four
+itunes/            the HTTP client
+{{< /code >}}
+
+The three children differ in exactly one value — the API's `entity` — so they share one handler. Each binds its own identity in its own root hook, which is why the sharing works under the umbrella as well as standalone:
+
+{{< code title="internal/cmd/albums/musak-albums.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func (*musakAlbumsHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	// BindTo, not Provide: per-invocation, so `musak albums search` followed by
+	// `musak songs search` in one process cannot inherit the wrong entity.
+	musak.EntityKey.BindTo(rtx, itunes.EntityAlbum)
+}
+{{< /code >}}
+
+Its test suite never touches the network: an `httptest.Server` speaks the API's shape, and the client is pointed at it through the same `MUSAK_ENDPOINT` env input a user would use.
 
 ### `plug` — a CLI whose commands are other programs
 

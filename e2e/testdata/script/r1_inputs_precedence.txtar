@@ -63,6 +63,49 @@ env GITHUB_TOKEN=from-the-env
 exec ./app$exe --token from-argv
 stdout 'token=from-argv'
 
+# A DERIVED variable name must be the one help prints, and it must actually bind.
+#
+# It did not. Help rendered env_prefix + SNAKE_UPPER(name) while the binder let recon derive
+# the name at bind time from the recon key — and recon's inverse projection splits on EVERY
+# underscore, so APP_BASE_URL was read back as the two-segment path base/url and never met the
+# one-segment input base_url. The variable help told you to set did nothing, silently. The
+# same disagreement hit camelCase the other way: help said APP_API_KEY, the binder read
+# APP_APIKEY.
+#
+# Codegen now emits the exact name into the field's `env:` tag, so the binder PINS it in both
+# directions instead of re-deriving it. These four cases are the ones that were broken.
+env GITHUB_TOKEN=
+env APP_GITHUB_TOKEN=
+
+# An env input whose NAME carries an underscore.
+env APP_BASE_URL=from-underscore
+exec ./app$exe
+stdout 'base=from-underscore'
+env APP_BASE_URL=
+
+# A camelCase env input: one word to a reader, two to SNAKE_UPPER.
+env APP_API_KEY=from-camel
+exec ./app$exe
+stdout 'key=from-camel'
+env APP_API_KEY=
+
+# The spelling recon used to derive must NOT bind — help never offered it.
+env APP_APIKEY=wrong
+exec ./app$exe
+stdout 'key= '
+env APP_APIKEY=
+
+# A FLAG's env fallback, derived from a recon key with an underscore INSIDE a segment.
+env APP_SERVER_SORT_BY=title
+exec ./app$exe
+stdout 'sort=title'
+env APP_SERVER_SORT_BY=
+
+# Whatever help prints is what binds — the property, not four examples of it.
+exec ./app$exe --help
+stdout 'APP_BASE_URL'
+stdout 'APP_API_KEY'
+
 # A negatable bool expresses the direction a plain bool cannot: turning something OFF for one
 # run when a default or the environment already turned it on. Both forms appear in help as
 # one row.
@@ -145,12 +188,27 @@ command:
         default: 8080
         minimum: 1
         maximum: 65535
+    - name: sort-by
+      summary: ordering, whose env fallback is derived from its config key
+      identifiers:
+        - --sort-by
+      schema:
+        type: string
+        key: server.sort_by
   env:
     - name: region
       summary: the deployment region
       schema:
         type: string
         default: default-region
+    - name: base_url
+      summary: an env input whose name carries an underscore
+      schema:
+        type: string
+    - name: apiKey
+      summary: a camelCase env input
+      schema:
+        type: string
 -- cmd/app/.rotini.conf.yaml --
 version: 0.0.0
 generate:
@@ -193,6 +251,7 @@ func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		fmt.Fprintln(rtx.Stdout, HelpApp)
 		return
 	}
-	fmt.Fprintf(rtx.Stdout, "port=%d region=%s token=%s color=%v\n",
-		in.App.Flags.Port, in.App.Env.Region, in.App.Flags.Token, in.App.Flags.Color)
+	fmt.Fprintf(rtx.Stdout, "port=%d region=%s token=%s color=%v base=%s key=%s sort=%s\n",
+		in.App.Flags.Port, in.App.Env.Region, in.App.Flags.Token, in.App.Flags.Color,
+		in.App.Env.BaseUrl, in.App.Env.ApiKey, in.App.Flags.SortBy)
 }

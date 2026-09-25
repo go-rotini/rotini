@@ -22,6 +22,7 @@ var definition = rotini.Definition{
 			Summary: "build the target",
 			Flags: []rotini.FlagDef{
 				{Name: "out", Identifiers: []string{"--out", "-o"}, Summary: "output path", Type: "string"},
+				{Name: "sort-by", Identifiers: []string{"--sort-by"}, Summary: "ordering", Type: "string"},
 			},
 			Arguments: []rotini.ArgDef{
 				{Name: "target", Type: "string"},
@@ -37,7 +38,9 @@ type DemoFlags struct {
 type DemoArguments struct{}
 
 type DemoEnv struct {
-	Home string `rotini:"home" recon:"home" env:"DEMO_HOME"`
+	Home    string `rotini:"home" recon:"home" env:"DEMO_HOME"`
+	BaseUrl string `rotini:"base_url" recon:"base_url" env:"DEMO_BASE_URL"`
+	ApiKey  string `rotini:"apiKey" recon:"apiKey" env:"DEMO_API_KEY"`
 }
 
 type DemoCommandInputs struct {
@@ -51,7 +54,8 @@ type DemoInputs struct {
 }
 
 type DemoBuildFlags struct {
-	Out string `rotini:"out"`
+	Out    string `rotini:"out"`
+	SortBy string `rotini:"sort-by" recon:"build.sort_by" env:"DEMO_BUILD_SORT_BY"`
 }
 
 type DemoBuildArguments struct {
@@ -69,7 +73,9 @@ type DemoBuildInputs struct {
 }
 
 // BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.
-var BindMeta = rotini.BindMeta{}
+var BindMeta = rotini.BindMeta{
+	EnvPrefix: "DEMO",
+}
 
 // NewProgram builds the program from the generated command tree and the typed
 // ProgramHandlers. Construct your program with this so the compiler verifies your handlers

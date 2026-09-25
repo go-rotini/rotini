@@ -1,0 +1,104 @@
+# R0 — a command's own --help outranks its own required inputs.
+#
+# `mycli grab --help` used to answer
+#   Error: missing required input: <what>
+# because the seeded stub called Collect — which validates — and returned on its error before
+# it reached the `if inputs.…Flags.Help` branch three lines below. The user asked NOT to run
+# the command and was told off for not supplying what running it would need.
+#
+# The stub now answers help from ParseArgv, which applies no required or enum validation, and
+# does it BEFORE Collect. This script is that ordering, from outside the binary, on a command
+# that has a required argument — the only shape where the two orders differ.
+
+gomodinit example.com/helped
+
+exec rotini generate cmd/mycli/.rotini.spec.yaml --config cmd/mycli/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o mycli$exe ./cmd/mycli
+
+# The case that was broken, in both spellings, and on the command that has the required input.
+exec ./mycli$exe grab --help
+stdout 'a command with a required argument'
+! stdout 'missing required'
+exec ./mycli$exe grab -h
+stdout 'a command with a required argument'
+
+# --version is the same shape and was broken the same way.
+exec ./mycli$exe grab --version
+stdout '0\.0\.0'
+
+# Without the flag, the required input is still required — answering help must not have
+# turned validation off.
+! exec ./mycli$exe grab
+stderr 'missing required input'
+
+# And the command still runs when it is given what it needs.
+exec ./mycli$exe grab thing
+stdout 'thing'
+
+# An unknown flag is still reported. Answering help early must not swallow a parse error:
+# the root's own body prints a page and reads no inputs, and it STILL has to validate.
+! exec ./mycli$exe --nope
+stderr 'nope'
+! exec ./mycli$exe grab thing --nope
+stderr 'nope'
+
+-- cmd/mycli/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: mycli
+  summary: help outranks validation
+  flags:
+    - name: help
+      summary: print help
+      identifiers:
+        - -h
+        - --help
+      schema:
+        type: bool
+    - name: version
+      summary: print version
+      identifiers:
+        - -v
+        - --version
+      schema:
+        type: bool
+  commands:
+    - name: grab
+      summary: a command with a required argument
+      arguments:
+        - name: what
+          summary: required
+          schema:
+            type: string
+            required: true
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+        - name: version
+          summary: print version
+          identifiers:
+            - -v
+            - --version
+          schema:
+            type: bool
+-- cmd/mycli/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/mycli/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/mycli/zz_mycli.go
+      package: mycli
+  features:
+    - type: help
+      enabled: true
+validate:
+  fail: collect

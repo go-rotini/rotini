@@ -61,6 +61,7 @@ type program struct {
 	schemas         map[string]Schema   // document-level named schemas (for output codegen)
 	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
 	envPrefix       string              // document-level env_prefix for DERIVED env-var names
+	adoptedPrefixes map[string]string   // env_prefix → child root name, from composed children (see resolveEnvPrefix)
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -597,6 +598,16 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 	}
 	d.VersionFlag = boolFlagField(c, "version")
 
+	// A flag that says "do not run this command" has to be answered before the command's
+	// own inputs are validated, or a command with a required argument can never print its
+	// own help page: Collect reports the missing argument and the handler returns before it
+	// reaches the check. See the template.
+	d.AnswerBeforeCollect = d.HelpFlag != "" || d.VersionFlag != ""
+	d.HelpFlagName = "help"
+	if d.HelpFlag == "" {
+		d.HelpFlagName = "version"
+	}
+
 	isRoot := c.prefix == gp.root.prefix
 	switch name := commandName(c.invocation); {
 	case name == "help" && !isRoot && helpOn:
@@ -609,11 +620,15 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		d.PrintHelpWhenBare = true
 	}
 
-	// Collect only when the seeded body actually reads an input. A version command that
-	// prints one string has nothing to reconcile, and an unused `inputs` would not
-	// compile — the stub has to be correct Go the moment it is written.
+	// Collect runs whenever the command has something to validate — it is what reports an
+	// unknown flag, and dropping it for a body that only prints a page would swallow that.
+	//
+	// UsesInputs is the narrower question: does the body READ the result? Help and version
+	// are answered from ParseArgv above, so a root that only prints its own page validates
+	// and discards, which is why the call binds to `_` rather than to an unused variable.
 	d.NeedsInputs = d.HelpFlag != "" || d.VersionFlag != "" || d.HelpPathArg != "" ||
 		(!d.VersionOnly && !d.PrintHelpWhenBare)
+	d.UsesInputs = d.HelpPathArg != "" || (!d.VersionOnly && !d.PrintHelpWhenBare)
 	return d
 }
 

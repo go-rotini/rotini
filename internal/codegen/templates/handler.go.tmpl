@@ -31,8 +31,37 @@ type {{.HandlersType}} struct {
 // This file was created once and is now yours — rotini never overwrites it. Delete anything
 // below you do not want.
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
+{{- if .AnswerBeforeCollect}}
+	// Answered BEFORE Collect, from argv alone.
+	//
+	// ParseArgv reads the command line with no defaults, no fallback and — the point here —
+	// no required or enum validation. Collect validates, so asking it first means
+	// `{{.Invocation}} --{{.HelpFlagName}}` reports a missing argument instead of printing the page:
+	// the user asked NOT to run the command, and was told off for not supplying what
+	// running it would need.
+	if argv, err := rotini.ParseArgv[{{.InputsType}}](rtx); err == nil {
+{{- if .HelpFlag}}
+		if argv.Values.{{.Prefix}}.Flags.{{.HelpFlag}} {
+			fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+			rtx.SignalExit(0)
+			return
+		}
+{{- end}}
+{{- if .VersionFlag}}
+		// rotini.KeyVersion is the conventional registry key for the program's version;
+		// the entrypoint binds it from whatever the binary was built with.
+		if argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
+			version, _ := rtx.Get[string](rotini.KeyVersion)
+			fmt.Fprintln(rtx.Stdout, version)
+			rtx.SignalExit(0)
+			return
+		}
+{{- end}}
+	}
+{{- end}}
 {{- if .NeedsInputs}}
-	inputs, err := rotini.Collect[{{.InputsType}}](rtx)
+
+	{{if .UsesInputs}}inputs, err{{else}}_, err{{end}} := rotini.Collect[{{.InputsType}}](rtx)
 	if err != nil {
 		// Record, then Halt. Halt stops the chain WITHOUT claiming an exit code, so the
 		// funnel decides what an input failure costs. Halting matters as much as
@@ -40,27 +69,6 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		// validation and records the same error again.
 		rtx.RecordError(err)
 		rtx.Halt()
-		return
-	}
-{{- end}}
-{{- if .HelpFlag}}
-
-	// The spec declares a --help flag on this command, and the conf has the help
-	// feature on, so the generated page is in scope.
-	if inputs.{{.Prefix}}.Flags.{{.HelpFlag}} {
-		fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
-		rtx.SignalExit(0)
-		return
-	}
-{{- end}}
-{{- if .VersionFlag}}
-
-	// rotini.KeyVersion is the conventional registry key for the program's version;
-	// the entrypoint binds it from whatever the binary was built with.
-	if inputs.{{.Prefix}}.Flags.{{.VersionFlag}} {
-		version, _ := rtx.Get[string](rotini.KeyVersion)
-		fmt.Fprintln(rtx.Stdout, version)
-		rtx.SignalExit(0)
 		return
 	}
 {{- end}}

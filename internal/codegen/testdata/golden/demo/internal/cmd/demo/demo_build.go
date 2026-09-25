@@ -31,6 +31,7 @@ type demoBuildHandlers struct {
 // This file was created once and is now yours — rotini never overwrites it. Delete anything
 // below you do not want.
 func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+
 	inputs, err := rotini.Collect[DemoBuildInputs](rtx)
 	if err != nil {
 		// Record, then Halt. Halt stops the chain WITHOUT claiming an exit code, so the

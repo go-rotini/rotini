@@ -3,8 +3,10 @@ package codegen
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -109,7 +111,27 @@ func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
 	return out
 }
 
+// resolveTree resolves a spec into the program codegen emits from.
+//
+// It runs the resolution TWICE when the document declares no env_prefix of its own and a
+// composed child supplies one. Every generated env-var name is derived from the prefix while
+// the tree is being built, but a child's prefix is only discovered by composing it — so the
+// first pass finds the prefix and the second builds with it. A document that declares its own
+// prefix, or composes nothing, resolves once.
 func resolveTree(spec *Spec, specPath, moduleName string) (*program, error) {
+	gp, err := resolveTreeWith(spec, specPath, moduleName, spec.Command.EnvPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if adopted, err := gp.resolveEnvPrefix(); err != nil {
+		return nil, err
+	} else if adopted != "" {
+		return resolveTreeWith(spec, specPath, moduleName, adopted)
+	}
+	return gp, nil
+}
+
+func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*program, error) {
 	root := spec.Command
 	if root.Ref != "" || root.Name == "" {
 		return nil, errors.New("root command must have a name (the top-level \"command\" cannot use $ref)")
@@ -126,14 +148,15 @@ func resolveTree(spec *Spec, specPath, moduleName string) (*program, error) {
 		rootPassthrough: root.Passthrough,
 		schemas:         spec.Command.Schemas,
 		configFiles:     allScopedConfigFiles(spec),
-		envPrefix:       spec.Command.EnvPrefix,
+		envPrefix:       envPrefix,
+		adoptedPrefixes: map[string]string{},
 	}
 	gp.root = genCommand{
 		prefix:      gp.rootPascal,
 		invocation:  gp.rootName,
 		handler:     lowerFirst(gp.rootPascal) + "Handlers",
 		filename:    commandStubFilename(root.Name, "", root.Filename),
-		flags:       flagFields(root.inputs()),
+		flags:       flagFields(root.inputs(), gp.envPrefix),
 		args:        argFields(root.inputs()),
 		env:         envFields(root.inputs(), gp.envPrefix),
 		config:      configFields(root.inputs()),
@@ -199,7 +222,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				delegateAlias:  ctx.alias,
 				delegateMethod: ctx.childPascal + toPascalCase(rel),
 				passthrough:    ctx.passthrough,
-				flags:          flagFields(c.inputs()),
+				flags:          flagFields(c.inputs(), gp.envPrefix),
 				args:           argFields(c.inputs()),
 				env:            envFields(c.inputs(), gp.envPrefix),
 				config:         configFields(c.inputs()),
@@ -210,7 +233,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				invocation:  gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
 				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
 				filename:    commandStubFilename(gp.rootName, path, c.Filename),
-				flags:       flagFields(c.inputs()),
+				flags:       flagFields(c.inputs(), gp.envPrefix),
 				args:        argFields(c.inputs()),
 				env:         envFields(c.inputs(), gp.envPrefix),
 				config:      configFields(c.inputs()),
@@ -384,9 +407,15 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	}
 	prefix := gp.rootPascal + toPascalCase(composeRootPath)
 
+	// A composed child's BindMeta travels WITH its command tree. Without this the umbrella's
+	// descriptor is built from its own document alone, so a child's config_files and
+	// env_prefix are silently dropped: `child cmd` reads the configuration file and
+	// `parent child cmd` — the same handler, the same generated package — does not.
+	gp.adoptComposedMeta(rr.spec, childRoot.Name, composeRootPath)
+
 	gp.composed = append(gp.composed, composedCmd{
 		prefix: prefix, delegateAlias: alias, delegateMethod: delegateRoot, passthrough: passthrough,
-		flags:  flagFields(childRoot.inputs()),
+		flags:  flagFields(childRoot.inputs(), gp.envPrefix),
 		args:   argFields(childRoot.inputs()),
 		env:    envFields(childRoot.inputs(), gp.envPrefix),
 		config: configFields(childRoot.inputs()),
@@ -412,6 +441,57 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		}
 	}
 	return rnode{name: graftName, prefix: prefix, aliases: merged.Aliases, inputs: childRoot.inputs(), help: commandHelp(merged), hidden: merged.Hidden, group: merged.Group, deprecated: merged.Deprecated, deprecatedIdentifiers: merged.DeprecatedIdentifiers, composed: true, children: children}, nil
+}
+
+// adoptComposedMeta folds a composed child's document-level binding metadata into the parent's:
+// the config_files it declares, re-scoped to where the child now sits, and the env_prefix its
+// env inputs are named under.
+//
+// Config sources carry a Scope — the slash-joined command path they are declared on — and the
+// binder matches that against the invoked chain to cascade nearest-wins. A child declares its
+// own as "musak-songs", but under the umbrella that command is reached as "musak/songs", so
+// the child's root segment is swapped for the path the graft actually occupies. An overlay
+// rename is exactly why this cannot be a straight copy.
+//
+// The parent's own env_prefix wins when it declares one. Otherwise the children's is adopted,
+// and a disagreement between two children is reported rather than silently resolved — one
+// descriptor cannot carry two prefixes, and picking one would break the other child.
+func (gp *program) adoptComposedMeta(child *Spec, childRootName, composeRootPath string) {
+	scope := gp.rootName + "/" + strings.ReplaceAll(composeRootPath, "_", "/")
+	for _, cf := range allScopedConfigFiles(child) {
+		// "musak-songs" → "musak/songs"; "musak-songs/search" → "musak/songs/search".
+		cf.Scope = scope + strings.TrimPrefix(cf.Scope, childRootName)
+		gp.configFiles = append(gp.configFiles, cf)
+	}
+	if p := child.Command.EnvPrefix; p != "" {
+		gp.adoptedPrefixes[p] = childRootName
+	}
+}
+
+// resolveEnvPrefix reports the env_prefix this document should adopt from its composed
+// children, or "" when there is nothing to adopt.
+//
+// A document's own declaration wins — an umbrella that names a prefix has made a choice. A
+// disagreement between two children is reported rather than silently resolved: one descriptor
+// carries one prefix, and picking a winner would quietly rename the other child's variables.
+func (gp *program) resolveEnvPrefix() (string, error) {
+	if gp.envPrefix != "" || len(gp.adoptedPrefixes) == 0 {
+		return "", nil
+	}
+	if len(gp.adoptedPrefixes) > 1 {
+		prefixes := slices.Sorted(maps.Keys(gp.adoptedPrefixes))
+		parts := make([]string, 0, len(prefixes))
+		for _, p := range prefixes {
+			parts = append(parts, fmt.Sprintf("%q (from %s)", p, gp.adoptedPrefixes[p]))
+		}
+		return "", fmt.Errorf("composed children declare different env_prefix values — %s; "+
+			"one descriptor carries one prefix, so declare on %q the env_prefix it should use",
+			strings.Join(parts, " and "), gp.rootName)
+	}
+	for p := range gp.adoptedPrefixes {
+		return p, nil
+	}
+	return "", nil
 }
 
 // composeNestedRef handles a `$ref` inside an already-composed subtree — a transitive
