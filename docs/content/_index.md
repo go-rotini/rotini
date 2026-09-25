@@ -158,7 +158,7 @@ commands:
 
 ### The generated code is yours
 
-`rotini init` writes **356 lines across 5 files** — a CLI that already answers `--help`, `--version`, `help <command>` and `version`, because the seeded spec declares them and the seeded handlers are wired to the pages codegen just produced. Readable in one sitting, reviewable in a diff, and every line of it yours to delete.
+`rotini init` writes a working CLI — one that already answers `--help`, `--version`, `help <command>` and `version`, because the seeded spec declares them and the seeded handlers are wired to the pages codegen just produced. It is short enough to read in one sitting and review in a diff, and every line of it is yours to edit or delete.
 
 The machinery stays an ordinary import you upgrade with `go get -u`, not a vendored copy you must never edit.
 
@@ -175,6 +175,7 @@ The cost is fixed; the benefit scales with the CLI. For a three-command internal
 ## Start here
 
 - [docs](/docs) — set up a project, end to end
+- [guides](/guides) — commands, inputs, configuration, errors, testing, composition
 - [specification](/specification) — the `.rotini.spec.*` file
 - [configuration](/configuration) — the `.rotini.conf.*` file
 - [generated](/generated) — what rotini writes into your project

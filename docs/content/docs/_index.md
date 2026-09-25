@@ -104,7 +104,8 @@ func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// and defaults, in the documented precedence order.
 	inputs, err := rotini.Collect[TodoAddInputs](rtx)
 	if err != nil {
-		rtx.RecordError(err)
+		rtx.RecordError(err) // report it once, through the funnel
+		rtx.Halt()           // and stop; the funnel picks the exit code
 		return
 	}
 
@@ -113,6 +114,17 @@ func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 }
 {{< /code >}}
 
-`TodoAddInputs` is generated from the spec — you never declare it. A handler does not print its own errors: it **records** them, and the runtime reports them once, after teardown. See [api](/api).
+Two things worth noticing, because they are the conventions the rest of the docs assume:
+
+- **Write to `rtx.Stdout`, never `os.Stdout`.** The streams come from the `Program`, so the same handler works under a test, a REPL, or a parent CLI that composed you.
+- **Record, do not print, results and errors.** The runtime reports them once, after teardown, through one funnel — so a handler carries no reporting code and a program changes its reporting in one place.
+
+`TodoAddInputs` is generated from the spec — you never declare it.
+
+## Next
+
+- [Guides](/guides) — adding commands and inputs, configuration, errors, testing, composition
+- [Specification](/specification) — every key of the spec file
+- [API](/api) — what a handler is handed
 
 [^1]: Tool directives were added in <a href="https://go.dev/doc/go1.24#tools" target="_blank">Go 1.24</a>
