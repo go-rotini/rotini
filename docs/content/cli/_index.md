@@ -24,11 +24,11 @@ Usage:
         [-v | --version] [-h | --help]
 
 Commands:
-  initialize;init    scaffold a cli program
-  generate;gen       generate a cli program
-  validate;val       validate a spec file
-  help               print help
-  version            print version
+  initialize, init    scaffold a cli program
+  generate, gen       generate a cli program
+  validate, val       validate a spec file
+  help                print help
+  version             print version
 
 Flags:
   --no-styles     disable output styles
@@ -120,7 +120,7 @@ Arguments:
 Flags:
   -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)
   --fail string         failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]
-  --watch,-w            watch a rotini spec file for changes and re-generate
+  --watch,-w            watch a rotini spec file for changes and re-validate
   -h,--help             print help
 
 Examples:

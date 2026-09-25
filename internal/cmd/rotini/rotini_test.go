@@ -3,6 +3,9 @@ package rotini
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -423,3 +426,49 @@ var (
 	errBadSpec  = errors.New("spec is broken")
 	errAdvisory = errors.New("an advisory warning")
 )
+
+// TestCLIPageMatchesGeneratedHelp keeps the docs site's CLI page byte-identical to the help
+// the binary actually prints.
+//
+// That page is a transcript: every block is titled with the command that produced it. A
+// transcript is only worth anything if it is true, and this one had already drifted twice —
+// an alias separator changed from ";" to ", " and `validate --watch` stopped saying
+// "re-generate" — with nothing to notice. Both are invisible in review and both teach a
+// reader something false.
+//
+// The page is checked rather than generated because prose surrounds the blocks. What the test
+// owns is the blocks; what a writer owns is everything between them.
+func TestCLIPageMatchesGeneratedHelp(t *testing.T) {
+	page := filepath.Join("..", "..", "..", "docs", "content", "cli", "_index.md")
+	body, err := os.ReadFile(page)
+	if err != nil {
+		t.Fatalf("read %s: %v", page, err)
+	}
+
+	// title="$ rotini <args>" … the block's body … {{< /code >}}
+	blockRe := regexp.MustCompile(`(?s)\{\{< code title="\$ rotini([^"]*)"[^>]*>\}\}\n(.*?)\n\{\{< /code >\}\}`)
+	matches := blockRe.FindAllStringSubmatch(string(body), -1)
+	if len(matches) == 0 {
+		t.Fatalf("%s quotes no rotini help output — if that is deliberate, delete this test", page)
+	}
+
+	for _, m := range matches {
+		args, quoted := strings.Fields(m[1]), m[2]
+		// "$ rotini --help" is the root page; "$ rotini help <path...>" is that command's.
+		path := args
+		switch {
+		case len(args) == 1 && (args[0] == "--help" || args[0] == "-h"):
+			path = nil
+		case len(args) > 0 && args[0] == "help":
+			path = args[1:]
+		}
+		want, err := Help(path...)
+		if err != nil {
+			t.Errorf("$ rotini%s: %v", m[1], err)
+			continue
+		}
+		if quoted != want {
+			t.Errorf("$ rotini%s: the CLI page is stale.\n--- page\n%s\n--- binary\n%s", m[1], quoted, want)
+		}
+	}
+}

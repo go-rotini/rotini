@@ -351,8 +351,8 @@ StoreKey.Provide(todo.NewProgram(todo.Handlers()), newFakeStore()).
 	Execute()
 {{< /code >}}
 
-{{< alert type="info" title="ALSO AVAILABLE:" >}}
-`Program.Run(argv)` returns the exit code instead of exiting, which is the same seam under a different name — use it when a test wants the code without installing an exit function.
+{{< alert type="info" title="TWO SMALLER SEAMS:" >}}
+`Program.Run(argv)` returns the exit code instead of exiting — the same thing as `WithExit`, without the closure. And `rotini.NewContextFor(def, argv)` builds a bare `Context` against a `Definition` you construct by hand, for exercising the `Parser` alone. Reach for it only there: a handler test wants the real program, because the real program is what has the real command tree.
 {{< /alert >}}
 
 ## Share handlers between CLIs
@@ -385,8 +385,110 @@ To keep the handlers in a package other CLIs import, point the command at it. If
 
 The five composition modes — inline, passthrough, local `$ref`, module `$ref`, and dispatch to a sibling binary — are laid out on the [specification page](/specification#composition).
 
+## Ship it
+
+A rotini CLI is an ordinary Go binary, so `go build` and `go install` are the whole distribution story. What rotini adds is everything a packaged CLI is expected to carry — a version, a completion script, man and markdown pages — generated from the spec you already wrote.
+
+### Stamp the version
+
+The entrypoint binds whatever the binary was built with, and `--version` reports it:
+
+{{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+var version = "0.0.0" // overridden at build time
+
+func main() {
+	cmd.Program.
+		Bind(rotini.KeyVersion, version).
+		Bind(rotini.KeyParser, rotini.NewParser()).
+		Execute()
+}
+{{< /code >}}
+
+{{< code title="building a release" language="text" open="true" collapsible="false" copy="true" >}}
+$ go build -ldflags "-X main.version=1.2.3" -o todo ./cmd/todo
+$ ./todo --version
+1.2.3
+{{< /code >}}
+
+### Offer shell completion
+
+Turn the feature on and rotini generates a script per shell, plus a resolver to hand them out:
+
+{{< code title="cmd/todo/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+  features:
+    - type: completion
+      enabled: true
+{{< /code >}}
+
+The scripts call a hidden `__complete` entry point that every rotini binary answers, so completion reflects the live command tree — including values a dynamic completer supplies at run time. Expose them with an ordinary command:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+    - name: completion
+      summary: print a shell completion script
+      arguments:
+        - name: shell
+          summary: which shell
+          schema: { type: string, required: true, enum: [bash, zsh, fish, powershell] }
+{{< /code >}}
+
+{{< code title="internal/cmd/todo/todo_completion.go" language="golang" open="true" collapsible="false" copy="true" >}}
+script, err := Completion(inputs.TodoCompletion.Arguments.Shell) // generated resolver
+if err != nil {
+	rtx.RecordError(err)
+	rtx.Halt()
+	return
+}
+fmt.Fprint(rtx.Stdout, script)
+{{< /code >}}
+
+{{< code title="what the user does" language="text" open="true" collapsible="false" copy="true" >}}
+$ todo completion zsh > "${fpath[1]}/_todo"
+
+$ todo completion nope
+Error: invalid value "nope" for <shell> (one of: bash, zsh, fish, powershell)
+{{< /code >}}
+
+The `enum` is why the second case is a clean message rather than an empty script — the command validates its own argument because the spec declared what is valid.
+
+### Man and markdown pages
+
+Same shape, one page per command. `Man(path...)` and `Markdown(path...)` resolve them, and `embed` decides whether the content is a string literal in the generated file or a real file referenced with `//go:embed`:
+
+{{< code title="cmd/todo/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+    - type: man
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/todo/man      # module-root-relative, under the cmd package
+    - type: markdown
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/todo/markdown
+{{< /code >}}
+
+`embed: true` is the one to choose when a packaging step needs the files on disk — an `.rpm` shipping `man/man_todo.txt`, or a docs site publishing the markdown. `embed: false`, the default, keeps the generated `.go` self-contained.
+
+{{< alert type="info" title="EMBED PATHS ARE CHECKED:" >}}
+`//go:embed` cannot reach outside its own package, so rotini rejects an `embed_dir` that resolves elsewhere rather than emitting code that will not compile:
+
+`generate.features.man.embed_dir: "docs/man" must resolve under the cmd package "internal/cmd/todo" so //go:embed can reach it`
+{{< /alert >}}
+
+### Build for other platforms
+
+Nothing rotini-specific: the generated code is pure Go with no cgo, so cross-compilation is the usual environment variables.
+
+{{< code title="cross-compiling" language="sh" open="true" collapsible="false" copy="true" >}}
+for target in darwin/arm64 linux/amd64 windows/amd64; do
+	out="dist/todo_${target//\//_}"
+	GOOS=${target%/*} GOARCH=${target#*/} go build -ldflags "-X main.version=$VERSION" -o "$out" ./cmd/todo
+done
+{{< /code >}}
+
+Your users install it the way they install anything else — `go install github.com/me/todo/cmd/todo@latest`, or a release archive from whatever your CI publishes.
+
 ## Next
 
+- [Examples](/examples) — ten complete CLIs built on everything above
 - [Specification](/specification) — every spec key
 - [Configuration](/configuration) — codegen targets, features, templates
 - [API](/api) — the runtime contract in full

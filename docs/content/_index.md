@@ -82,10 +82,10 @@ func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 {{< code title="and it already behaves" language="bash" open="true" collapsible="false" copy="true" >}}
 $ todo add "write the docs"
-ok: added "write the docs" [normal] [inbox]
+added "write the docs" [normal] [inbox]
 
 $ todo add "ship it" -p high --tag release --tag urgent
-ok: added "ship it" [high] [release urgent]
+added "ship it" [high] [release urgent]
 
 $ todo add "x" -p urgent
 Error: invalid value "urgent" for -p (one of: low, normal, high)
@@ -179,6 +179,7 @@ The cost is fixed; the benefit scales with the CLI. For a three-command internal
 - [specification](/specification) — the `.rotini.spec.*` file
 - [configuration](/configuration) — the `.rotini.conf.*` file
 - [generated](/generated) — what rotini writes into your project
+- [examples](/examples) — ten complete CLIs, and what each one shows
 - [batteries](/batteries) — everything past parsing
 - [api](/api) — the runtime contract
 - [cli](/cli) — the `rotini` command itself

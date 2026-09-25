@@ -152,7 +152,8 @@ func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// and defaults, in the documented precedence order.
 	inputs, err := rotini.Collect[TodoAddInputs](rtx)
 	if err != nil {
-		rtx.RecordError(err)
+		rtx.RecordError(err) // report it once, through the funnel
+		rtx.Halt()           // and stop; the funnel picks the exit code
 		return
 	}
 

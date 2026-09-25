@@ -2,11 +2,68 @@
 title: "docs"
 ---
 
-# Setup
+# Getting Started
 
-This guide walks through creating a new Go project with rotini. If you are adding rotini to an existing project, skip to step 2.
+## Quick start
+
+From an empty directory to a CLI that runs, with a command tree and help pages.
+
+{{< code title="quick start" language="sh" open="true" collapsible="false" copy="true" >}}
+mkdir todo && cd todo
+go mod init github.com/me/todo
+
+go get -tool github.com/go-rotini/rotini/cmd/rotini@latest   # the generator
+go get github.com/go-rotini/rotini@latest                    # the runtime
+
+go tool rotini init todo
+{{< /code >}}
+
+{{< code title="what you get" language="text" open="true" collapsible="false" copy="false" >}}
+$ go build ./cmd/todo && ./todo --help
+TODO — the long description at the top of `todo --help`
+
+Usage:
+  todo <command> [flags]
+
+Commands:
+  help       print help
+  version    print version
+
+Flags:
+  -h,--help       print help
+  -v,--version    print version
+
+Use "todo help <command>" for more information about a command.
+{{< /code >}}
+
+Open `cmd/todo/.rotini.spec.yaml`, add a command, run `go generate ./...`, and a handler stub is waiting for you. The rest of this page explains each of those steps; the [guides](/guides) pick up from there.
+
+## Concepts
+
+Three files and one loop. Everything else on this site is detail on one of them.
+
+| | |
+|---|---|
+| **The spec** — `.rotini.spec.*` | your CLI as data: the command tree, and every input each command accepts. YAML, JSON, JSONC or TOML. |
+| **The conf** — `.rotini.conf.*` | codegen settings: where generated code is written, which derived outputs (help, completion, man, markdown) are on. |
+| **Your handlers** | ordinary Go, one file per command, seeded once and then yours. |
+
+{{< code title="the loop" language="text" open="true" collapsible="false" copy="false" >}}
+edit the spec  →  rotini validate  →  rotini generate  →  write the handler  →  go build
+                  (schema + lints)     (types, wiring,
+                                        help, stubs)
+{{< /code >}}
+
+Two ideas are worth holding onto before you read further:
+
+- **rotini is commands all the way down.** The root command is the binary itself; a sub-command is the same object one level in. Every key that works on one works on the other.
+- **Declared, then generated, then implemented.** A flag exists because the spec says so. The generator turns that into a typed field, a help line, a completion entry and a validation rule — so a handler receives values that are already parsed, coerced and checked, and never writes parsing code.
+
+Nothing runs behind your back: rotini adds no flags you did not declare, detects nothing about the terminal, and wires no service you did not bind.
 
 ## 1. Set up the module
+
+The rest of this page is the quick start, slowed down. Adding rotini to an existing project? Skip to step 2.
 
 Create a new directory and initialize a Go module.
 
@@ -124,6 +181,7 @@ Two things worth noticing, because they are the conventions the rest of the docs
 ## Next
 
 - [Guides](/guides) — adding commands and inputs, configuration, errors, testing, composition
+- [Examples](/examples) — ten complete CLIs, and what each one shows
 - [Specification](/specification) — every key of the spec file
 - [API](/api) — what a handler is handed
 

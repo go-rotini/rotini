@@ -227,3 +227,49 @@ var (
 	goEnvMu    sync.Mutex
 	goEnvCache map[string]string
 )
+
+// TestTutorialHandlerMatchesTheSetupPage pins r0_tutorial's handler fixture to the handler the
+// setup page actually shows.
+//
+// r0_tutorial says it copies "the page's handler, verbatim" and then asserts it builds and
+// runs — which is the whole reason that script is worth having. But the fixture is a copy, and
+// a copy drifts: the page gained an `rtx.Halt()` and the fixture did not, so for a while the
+// script was proving a handler no reader would ever have written.
+//
+// A test is cheaper than the discipline it replaces.
+func TestTutorialHandlerMatchesTheSetupPage(t *testing.T) {
+	page, err := os.ReadFile(filepath.Join("..", "docs", "content", "docs", "_index.md"))
+	if err != nil {
+		t.Fatalf("read the setup page: %v", err)
+	}
+	script, err := os.ReadFile(filepath.Join("testdata", "script", "r0_tutorial.txtar"))
+	if err != nil {
+		t.Fatalf("read r0_tutorial: %v", err)
+	}
+
+	want, ok := codeBlock(string(page), "internal/cmd/todo/todo_add.go")
+	if !ok {
+		t.Fatal(`the setup page no longer shows a "internal/cmd/todo/todo_add.go" block`)
+	}
+	_, rest, ok := strings.Cut(string(script), "-- handler.go.txt --\n")
+	if !ok {
+		t.Fatal("r0_tutorial no longer carries a handler.go.txt fixture")
+	}
+	if got := strings.TrimRight(rest, "\n"); got != want {
+		t.Errorf("r0_tutorial's handler.go.txt is not the page's handler.\n--- fixture\n%s\n--- page\n%s", got, want)
+	}
+}
+
+// codeBlock returns the body of the site's `{{< code title="<title>" … >}}` shortcode.
+func codeBlock(page, title string) (string, bool) {
+	_, after, ok := strings.Cut(page, `{{< code title="`+title+`"`)
+	if !ok {
+		return "", false
+	}
+	_, body, ok := strings.Cut(after, ">}}\n")
+	if !ok {
+		return "", false
+	}
+	body, _, ok = strings.Cut(body, "\n{{< /code >}}")
+	return body, ok
+}
