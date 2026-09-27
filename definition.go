@@ -132,7 +132,7 @@ type CommandDef struct {
 	Summary               string   // one-line description (completion candidates carry it as "name\tsummary")
 	Handler               string   // ProgramHandlers method, e.g. "RotiniGenerate"
 	Hidden                bool     // omitted from completion candidates (it still dispatches); help omission happens at codegen
-	DeprecatedIdentifiers []string // aliases (subset of Aliases) that [Parser.Deprecations] reports when used to invoke
+	DeprecatedIdentifiers []string // aliases (subset of Aliases) that [Deprecations] reports when used to invoke
 	Flags                 []FlagDef
 	Arguments             []ArgDef
 	FlagGroups            []FlagGroup      // cross-flag presence rules validated at parse time
@@ -193,7 +193,7 @@ type FlagDef struct {
 	Enum                  []string
 	Secret                bool     // when true, the value is redacted in usage/validation error output
 	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen
-	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Parser.Deprecations] reports when used
+	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Deprecations] reports when used
 	// Negatable adds a "--no-<x>" form for every long identifier of a bool flag, which sets
 	// it false. It is how an author expresses "turn this off for one run" when a default, a
 	// config file or an environment variable already turned it on — the direction a plain

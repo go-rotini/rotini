@@ -189,9 +189,19 @@ func (d Deprecation) Error() string {
 
 // Deprecations returns each deprecated token this invocation actually used — a command
 // invoked via a deprecated alias, or a flag set via a deprecated identifier. It is a data feed
-// only: rotini prints nothing, and the handler decides what to do with each. It holds no
-// parser state, so it can be called any time the chain is resolved.
-func (p *Parser) Deprecations(rtx *Context) []Deprecation {
+// only: rotini prints nothing, and the handler decides what to do with each:
+//
+//	for _, d := range rotini.Deprecations(rtx) {
+//		rtx.RecordWarning(fmt.Errorf("%w — use %q instead", d, d.Name))
+//	}
+//
+// It is a function rather than a method on [Parser] because it needs no parser: everything it
+// reports is already on the [Context] — the resolved chain and the argv that produced it. As a
+// method it forced a handler to pull a *Parser out of the registry to obtain a receiver it
+// never used, which in turn made [KeyParser] look mandatory in every entrypoint. Bind a Parser
+// when you want to override the default or call [Parser.Parse] yourself; deprecation reporting
+// needs neither.
+func Deprecations(rtx *Context) []Deprecation {
 	if rtx == nil {
 		return nil
 	}

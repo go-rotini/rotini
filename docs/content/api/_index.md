@@ -12,14 +12,22 @@ The generated entrypoint builds a `Program` and calls `Execute`, which resolves 
 
 {{< code title="program" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.
-	Bind(rotini.KeyParser, rotini.NewParser()).       // opt-in services
-	Bind(rotini.KeySuggestor, rotini.NewSuggestor()).
+	Bind(rotini.KeyVersion, version).                 // what --version reports
+	Bind(rotini.KeySuggestor, rotini.NewSuggestor()). // opt-in services
 	Execute()
 {{< /code >}}
 
 `Execute` ends the process. **`Run(argv)` does not** — it returns the exit code instead, which is what makes a `Program` reusable by a REPL, a daemon, or a test driving the whole binary end to end. Each `Run` gets a fresh `Context`, so one invocation never inherits another's outcomes; `RunContext(ctx, argv)` scopes a single invocation without changing the program.
 
-Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithPanicForward`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`.
+{{< alert type="info" title="EXECUTE RETURNS AN ERROR YOU USUALLY CANNOT SEE:" >}}
+It is the run's own failure — every recorded error and every recovered fault, joined, so `errors.Is` and `errors.As` reach each one.
+
+But it arrives **only when the exit action returns**. Under the default, `os.Exit`, the process is gone before the return statement runs, which is why the generated entrypoint discards it. Install a `WithExit` that returns — a test, or a host embedding the CLI — and it arrives.
+
+It is not the reporting channel: the funnel has already printed everything by then. The return is there so an embedder can *act* on the failure rather than re-derive it from a stream.
+{{< /alert >}}
+
+Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, and `With` for options that cannot be methods.
 
 ## Lifecycle
 
@@ -179,6 +187,34 @@ StoreKey.Provide(cmd.Program, NewStore()).Execute()
 store := StoreKey.MustGet(rtx)
 {{< /code >}}
 
+Go does not allow type parameters on methods, so `p.Provide[T](key, value)` cannot exist — which is why `Key.Provide` takes the program instead of chaining off it. For more than one service, `Provide` returns an option and **`With`** applies any number without leaving the chain:
+
+{{< code title="several services, one expression" language="golang" open="true" collapsible="false" copy="true" >}}
+cmd.Program.
+	With(
+		rotini.Provide(StoreKey, NewStore()),
+		rotini.Provide(ClientKey, NewClient()),
+	).
+	Bind(rotini.KeyVersion, version).
+	Execute()
+{{< /code >}}
+
+Options apply left to right, so a later one overwrites an earlier one binding the same key. An `Option` is just a `func(*Program)`, so a program can bundle its own configuration into one value and pass it around.
+
 `Provide` binds program-wide, so every invocation sees it — including every line of a REPL session. `BindTo` binds on one `Context`, for something a hook computes per run.
 
 Detection is opt-in too: `DetectProfile`, `IsTerminal` and `EnvNoColor` exist, but nothing calls them for you — the program decides and feeds the result in.
+
+`Parser` and `Binder` are overrides, not prerequisites: `Collect` builds its own. In particular **`rotini.Deprecations(rtx)` needs nothing bound** — it reports the deprecated aliases and identifiers this invocation actually used, reading the resolved chain and the argv that produced it straight off the `Context`.
+
+{{< code title="reporting a deprecated spelling" language="golang" open="true" collapsible="false" copy="true" >}}
+for _, d := range rotini.Deprecations(rtx) {
+	replacement := d.Name
+	if d.Kind == "flag" {
+		replacement = "--" + d.Name
+	}
+	rtx.RecordWarning(fmt.Errorf("%s; use %s", d, replacement))
+}
+{{< /code >}}
+
+rotini prints none of it: which deprecations cost a warning, a telemetry event or nothing at all is the program's call.

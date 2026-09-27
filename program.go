@@ -91,10 +91,10 @@ type Program struct {
 	stderr    io.Writer
 	exit      func(int) // terminal action for Execute; defaults to os.Exit
 
-	panicForward bool           // does teardown run after a panic? See WithPanicForward.
-	panicRecover bool           // is a panic funneled or re-raised? See WithPanicRecover.
-	signalMode   signalTrapMode // see WithSignals / WithoutSignalHandling
-	signalSet    []os.Signal    // signals trapped when on; empty → trapSignals
+	teardownOnPanic bool           // does teardown run after a panic? See WithTeardownOnPanic.
+	panicRecover    bool           // is a panic funneled or re-raised? See WithPanicRecover.
+	signalMode      signalTrapMode // see WithSignals / WithoutSignalHandling
+	signalSet       []os.Signal    // signals trapped when on; empty → trapSignals
 }
 
 // NewProgram wires a generated command tree and its aggregate handler set to the runtime.
@@ -102,16 +102,16 @@ type Program struct {
 // per-command handlers from it by the Handler names recorded in def.
 func NewProgram(def Definition, handlers any) *Program {
 	return &Program{
-		args:         os.Args[1:],
-		def:          def,
-		handlers:     handlers,
-		rtx:          newContext(),
-		stdin:        os.Stdin,
-		stdout:       os.Stdout,
-		stderr:       os.Stderr,
-		exit:         os.Exit,
-		panicForward: true,
-		panicRecover: true,
+		args:            os.Args[1:],
+		def:             def,
+		handlers:        handlers,
+		rtx:             newContext(),
+		stdin:           os.Stdin,
+		stdout:          os.Stdout,
+		stderr:          os.Stderr,
+		exit:            os.Exit,
+		teardownOnPanic: true,
+		panicRecover:    true,
 	}
 }
 
@@ -144,8 +144,21 @@ func (p *Program) WithStderr(w io.Writer) *Program {
 }
 
 // WithExit overrides what [Program.Execute] does with the resolved exit code (default
-// [os.Exit]) — supply a recording function to capture the code without terminating. If fn
-// returns, Execute returns to its caller. A nil function is ignored.
+// [os.Exit]) — supply a recording function to capture the code without terminating. A nil
+// function is ignored.
+//
+// If fn returns, Execute returns to its caller, and that is the ONLY way to observe the error
+// Execute reports: under the default os.Exit the process ends first and the return never runs.
+// So this is the seam that makes an end-to-end test of a real CLI ordinary Go —
+//
+//	code := -1
+//	err := cmd.Program.
+//		WithArgs(argv).WithStdout(&out).WithStderr(&errs).
+//		WithExit(func(c int) { code = c }).
+//		Execute()
+//
+// — and equally the seam an embedder needs when a rotini CLI is one component of a larger
+// process rather than the process itself.
 func (p *Program) WithExit(fn func(int)) *Program {
 	if fn != nil {
 		p.exit = fn
@@ -153,14 +166,19 @@ func (p *Program) WithExit(fn func(int)) *Program {
 	return p
 }
 
-// WithPanicForward controls whether teardown runs when a hook panics. The default, true, halts
-// forward progress but still runs every begun setup hook's teardown, mirroring how defers run
-// during a panic unwind. Pass false to skip the remaining teardown, as a hard [Context.Exit]
-// would.
+// WithTeardownOnPanic controls whether teardown runs when a hook panics. The default, true,
+// halts forward progress but still runs every begun setup hook's teardown, mirroring how
+// defers run during a panic unwind. Pass false to skip the remaining teardown, as a hard
+// [Context.Exit] would.
 //
-// Where the panic goes is the separate [Program.WithPanicRecover] knob; the two compose.
-func (p *Program) WithPanicForward(enabled bool) *Program {
-	p.panicForward = enabled
+// Where the panic GOES is the separate [Program.WithPanicRecover] knob; the two compose.
+//
+// This was called WithPanicForward, which named the wrong thing: "forward" reads as
+// forwarding the panic onward, and forwarding the panic is what WithPanicRecover(false) does.
+// These are the options someone reaches for while debugging a crash, so a name that has to be
+// unlearned from its doc is worse than a long one.
+func (p *Program) WithTeardownOnPanic(enabled bool) *Program {
+	p.teardownOnPanic = enabled
 	return p
 }
 
@@ -169,10 +187,13 @@ func (p *Program) WithPanicForward(enabled bool) *Program {
 // it to the caller instead — for embedding rotini under your own recover, a crash reporter, or
 // debugging.
 //
-// It composes with [Program.WithPanicForward]:
-//   - recover=false, forward=true  → teardown runs, then the panic is re-raised (its stack roots
-//     at the re-raise, not the original site).
-//   - recover=false, forward=false → the hook runs unguarded, so the panic propagates
+// It composes with [Program.WithTeardownOnPanic], which is the separate question of whether
+// teardown still runs:
+//   - recover=true (the default)  → the panic never leaves rotini; it reaches the funnel as a
+//     [*PanicError], and teardown runs or not according to WithTeardownOnPanic.
+//   - recover=false, teardown=true  → teardown runs, THEN the panic is re-raised (its stack
+//     roots at the re-raise, not the original site).
+//   - recover=false, teardown=false → the hook runs unguarded, so the panic propagates
 //     immediately with its original stack, skipping teardown.
 //
 // Only panics on the hook goroutine can be recovered; one in a goroutine a handler spawned
@@ -182,7 +203,16 @@ func (p *Program) WithPanicRecover(enabled bool) *Program {
 	return p
 }
 
-// WithArgs overrides the argument vector (defaults to os.Args[1:]).
+// WithArgs sets the argument vector [Program.Execute] runs (defaults to os.Args[1:]).
+//
+// Execute is the ONLY entry point that consults it. [Program.Run] and [Program.RunContext]
+// take argv as a parameter and use exactly what they were given — `p.WithArgs(x).Run(nil)`
+// runs with no arguments, not with x. That is deliberate rather than an oversight: Run is the
+// re-entrant core a REPL or a stdio server calls once per line, where the argv differs every
+// time and silently inheriting a program-level default would be a bug that prints the wrong
+// answer. A caller who wants the configured vector passes it: `p.Run(argv)`.
+//
+// A nil args is ignored, so the default survives; pass []string{} to run with none.
 func (p *Program) WithArgs(args []string) *Program {
 	if args != nil {
 		p.args = args
@@ -232,6 +262,47 @@ func (p *Program) WithSignals(sigs ...os.Signal) *Program {
 	if len(sigs) > 0 {
 		p.signalMode = signalOn
 		p.signalSet = sigs
+	}
+	return p
+}
+
+// Option is one configuration step, in a form that composes. Every seam below is also a
+// method, and for a single step the method reads better; Option exists for the steps that
+// cannot be methods.
+//
+// The case that forced it is the typed registry. Go does not allow type parameters on
+// methods, so a type-checked bind cannot be written as p.Provide[T](key, value) — it has to
+// take the program as an argument ([Key.Provide]), which ends the chain. [Provide] returns an
+// Option instead, and [Program.With] applies any number of them without breaking it.
+//
+// An Option is an ordinary function, so a program can carry its own:
+//
+//	func devDefaults() rotini.Option {
+//		return func(p *rotini.Program) { p.WithStdout(os.Stderr).WithoutSignalHandling() }
+//	}
+type Option func(*Program)
+
+// With applies each Option in order and returns the program, so configuration that cannot be
+// a method still chains with the configuration that can:
+//
+//	cmd.Program.
+//		With(
+//			rotini.Provide(tasks.StoreKey, store),
+//			rotini.Provide(tasks.ClientKey, client),
+//		).
+//		Bind(rotini.KeyVersion, version).
+//		Execute()
+//
+// Options are applied left to right, so a later one overwrites an earlier one binding the
+// same key — the same rule [Program.Bind] follows. A nil Option is skipped.
+func (p *Program) With(opts ...Option) *Program {
+	if p == nil {
+		return nil
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(p)
+		}
 	}
 	return p
 }
@@ -394,6 +465,32 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 
 // Execute resolves the command, runs its lifecycle, and ends with the resulting status code
 // via the program's exit action ([os.Exit] by default; see [Program.WithExit]).
+//
+// # The returned error, and when it can arrive
+//
+// The error is the run's own failure: every [Context.RecordError] value and every recovered
+// fault, joined with errors.Join — so errors.Is and errors.As reach each one, and a caller can
+// branch on a [*ParseError] or a [*BindError] rather than on text.
+//
+// It is reachable only when the exit action RETURNS. Under the default action, os.Exit, the
+// process is already gone by then and the return statement never runs, which is why the
+// generated entrypoint discards it:
+//
+//	cmd.Program.Bind(rotini.KeyVersion, version).Execute()   // the error cannot arrive here
+//
+// Supply a [Program.WithExit] that returns — a test capturing the code, a host embedding the
+// CLI — and it does:
+//
+//	code := -1
+//	err := cmd.Program.WithExit(func(c int) { code = c }).Execute()
+//
+// The error is not the reporting channel. By the time Execute returns, the funnel has already
+// printed everything the run recorded ([Program.WithFunnel]). The return exists so an embedder
+// can ACT on the failure — retry, wrap, classify with [CategoryOf] — without re-deriving it
+// from what was written to a stream. A caller that only wants the number can use
+// [Program.Run], which returns both and never exits.
+//
+// # Signals
 //
 // With no [Program.WithContext], Execute installs rotini's signal trap: the first
 // os.Interrupt or syscall.SIGTERM halts the lifecycle like [Context.SignalExit] — forward
@@ -642,7 +739,7 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, out Outcome) {
 //     Exit, panics, or a trapped signal cancels ctx.
 //   - Unwind: the Undo of every step whose Do began, in reverse, to completion. A panic or
 //     SignalExit inside an Undo neither aborts the rest nor displaces the first failure; a
-//     hard Exit skips what remains, and so does a panic under WithPanicForward(false).
+//     hard Exit skips what remains, and so does a panic under WithTeardownOnPanic(false).
 //
 // A recovered panic is routed to the funnel once, after teardown. A canceled run context is
 // converted into a [Context.SignalExit] between forward hooks — teardown still runs, and the
@@ -688,7 +785,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	panicked := false
 	var panicValue any
 	run := func(hook func(context.Context, *Context)) {
-		if !p.panicRecover && !p.panicForward {
+		if !p.panicRecover && !p.teardownOnPanic {
 			hook(ctx, rtx) // unguarded: original stack, no teardown
 			return
 		}
@@ -726,7 +823,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 
 	// Unwind. Both guards are re-checked per step, so an Exit or panic from within a teardown
 	// hook stops the rest too.
-	for i := began - 1; i >= 0 && !rtx.exitNow && (p.panicForward || !panicked); i-- {
+	for i := began - 1; i >= 0 && !rtx.exitNow && (p.teardownOnPanic || !panicked); i-- {
 		if steps[i].Undo != nil {
 			run(steps[i].Undo)
 		}

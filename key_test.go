@@ -1,8 +1,11 @@
 package rotini
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -171,3 +174,88 @@ func (rootOnlyRun) PreRun(context.Context, *Context)           {}
 func (rootOnlyRun) PostRun(context.Context, *Context)          {}
 func (rootOnlyRun) CascadingPostRun(context.Context, *Context) {}
 func (h rootOnlyRun) Run(_ context.Context, rtx *Context)      { h.capture(rtx) }
+
+// TestProvide_chains is P2: a type-checked bind that does not end the chain.
+//
+// Key.Provide type-checks correctly but takes the program as an argument, because Go forbids
+// type parameters on methods. A program with two services therefore had to abandon the fluent
+// form the generated entrypoint teaches and fall back to reassignment. Provide + With keeps
+// both the type check and the chain.
+func TestProvide_chains(t *testing.T) {
+	type store struct{ name string }
+	type client struct{ id int }
+
+	storeKey := NewKey[*store]("p2.store")
+	clientKey := NewKey[*client]("p2.client")
+
+	var got string
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		got = storeKey.MustGet(rtx).name + "/" + strconv.Itoa(clientKey.MustGet(rtx).id)
+	}}
+	p, _, _ := newTestProgram(h, nil)
+
+	// One expression, two typed binds, and the untyped seam still chains off the end.
+	code, err := p.
+		With(
+			Provide(storeKey, &store{name: "disk"}),
+			Provide(clientKey, &client{id: 7}),
+		).
+		Bind(KeyVersion, "9.9.9").
+		Run([]string{"run", "x"})
+	if err != nil || code != 0 {
+		t.Fatalf("Run = (%d, %v), want (0, nil)", code, err)
+	}
+	if got != "disk/7" {
+		t.Errorf("services seen by the handler = %q, want %q", got, "disk/7")
+	}
+}
+
+// TestProvide_lastWins pins the ordering rule: Options apply left to right, so a later bind
+// of the same key overwrites an earlier one — the same rule Bind follows.
+func TestProvide_lastWins(t *testing.T) {
+	key := NewKey[string]("p2.order")
+
+	var got string
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = key.MustGet(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+
+	if code, err := p.With(Provide(key, "first"), Provide(key, "second")).Run([]string{"run", "x"}); err != nil || code != 0 {
+		t.Fatalf("Run = (%d, %v)", code, err)
+	}
+	if got != "second" {
+		t.Errorf("got %q, want the later Option to win", got)
+	}
+}
+
+// TestWith_toleratesNothing covers the degenerate inputs, so a caller assembling an Option
+// slice conditionally does not have to guard every element.
+func TestWith_toleratesNothing(t *testing.T) {
+	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
+	if p.With() != p {
+		t.Error("With() with no options must return the same program")
+	}
+	if p.With(nil) != p {
+		t.Error("With(nil) must skip the nil option and return the same program")
+	}
+	var nilProgram *Program
+	if nilProgram.With(Provide(NewKey[int]("p2.nil"), 1)) != nil {
+		t.Error("With on a nil program must return nil, as Key.Provide does")
+	}
+}
+
+// TestWith_carriesAnArbitraryOption proves Option is not Provide-only: it is an ordinary
+// function over the program, so a caller can bundle any configuration into one value.
+func TestWith_carriesAnArbitraryOption(t *testing.T) {
+	var out bytes.Buffer
+	quiet := Option(func(p *Program) { p.WithStdout(&out).WithoutSignalHandling() })
+
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { fmt.Fprint(rtx.Stdout, "hello") }}
+	p, _, _ := newTestProgram(h, nil)
+
+	if code, err := p.With(quiet).Run([]string{"run", "x"}); err != nil || code != 0 {
+		t.Fatalf("Run = (%d, %v)", code, err)
+	}
+	if out.String() != "hello" {
+		t.Errorf("stdout = %q, want the option's writer to have been installed", out.String())
+	}
+}

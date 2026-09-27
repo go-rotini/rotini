@@ -237,7 +237,6 @@ The default funnel prints each channel with a severity label and exits non-zero 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.
 	Bind(rotini.KeyVersion, version).
-	Bind(rotini.KeyParser, rotini.NewParser()).
 	WithFunnel(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 		for _, err := range out.Errors {
 			fmt.Fprintf(rtx.Stderr, "todo: %v\n", err)
@@ -282,8 +281,7 @@ func run(t *testing.T, argv ...string) (stdout, stderr string, code int) {
 	code = -1
 	todo.NewProgram(todo.Handlers()).
 		Bind(rotini.KeyVersion, "0.0.0-test").
-		Bind(rotini.KeyParser, rotini.NewParser()).
-		WithArgs(argv).
+			WithArgs(argv).
 		WithStdin(strings.NewReader("")).
 		WithStdout(&out).
 		WithStderr(&errs).
@@ -337,7 +335,7 @@ func TestListReadsConfigFile(t *testing.T) {
 
 Three details make this work, and they are worth knowing before you write the first test:
 
-- **`WithExit`** replaces `os.Exit`, so `Execute` returns to the test with the code recorded instead of killing the test binary.
+- **`WithExit`** replaces `os.Exit`, so `Execute` returns to the test with the code recorded instead of killing the test binary. It is also the only way to see the error `Execute` returns — the run's recorded failures, joined — since under `os.Exit` the process ends before the return runs.
 - **`WithStdout` / `WithStderr`** are why handlers write to `rtx.Stdout`. A handler that reaches for `os.Stdout` is the one thing that will not be captured.
 - **A fresh `Program` per call.** Each run gets its own `Context`, so one test never inherits another's recorded outcomes. Build it in the helper, not in a package variable.
 
@@ -401,8 +399,7 @@ var version = "0.0.0" // overridden at build time
 func main() {
 	cmd.Program.
 		Bind(rotini.KeyVersion, version).
-		Bind(rotini.KeyParser, rotini.NewParser()).
-		Execute()
+			Execute()
 }
 {{< /code >}}
 

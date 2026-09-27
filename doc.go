@@ -139,6 +139,15 @@
 //	// main.go — the value's type is checked here, where it is supplied
 //	tasks.StoreKey.Provide(cmd.Program, tasks.NewStore()).Execute()
 //
+//	// or, for several at once, without leaving the chain ([Provide] and [Program.With])
+//	cmd.Program.
+//		With(
+//			rotini.Provide(tasks.StoreKey, tasks.NewStore()),
+//			rotini.Provide(tasks.ClientKey, tasks.NewClient()),
+//		).
+//		Bind(rotini.KeyVersion, version).
+//		Execute()
+//
 //	// any handler — no string, no type assertion, no miss check
 //	store := tasks.StoreKey.MustGet(rtx)
 //
@@ -163,7 +172,11 @@
 //
 //   - [Parser] parses and validates the argv channel alone — GNU/POSIX grammar, typed
 //     coercion, enum and constraint checks — failing with a [*ParseError]. [Binder] is
-//     Collect's engine, for callers who want to hold the meta explicitly.
+//     Collect's engine, for callers who want to hold the meta explicitly. Neither needs
+//     binding to be used: [Collect] builds its own, and [KeyParser] is an override.
+//
+//   - [Deprecations] reports the deprecated aliases and identifiers this invocation actually
+//     used. It is a plain function over the [Context] and needs no service bound.
 //
 //   - The per-channel surface ([ParseArgv], [ParseEnv], [ParseFiles], [ParseStdin],
 //     [Defaults], composed by [OverlayInputs] or [OverlayInputsP]) acquires channels one at a

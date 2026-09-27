@@ -40,11 +40,33 @@ func (k Key[T]) MustGet(rtx *Context) T { return rtx.MustGet[T](k.name) }
 // run. Use [Key.Provide] for program-wide services, so they are seeded into every run.
 func (k Key[T]) BindTo(rtx *Context, value T) { rtx.Bind(k.name, value) }
 
+// Provide is the composable form of [Key.Provide]: it returns an [Option] that binds value
+// under k, for [Program.With] to apply.
+//
+// It is a function rather than a method because Go does not allow type parameters on methods —
+// p.Provide[T](k, v) cannot be written. [Key.Provide] solves that by taking the program as an
+// argument, which type-checks correctly but ends the chain, so a program with two services had
+// to abandon the fluent form the generated entrypoint teaches. This keeps both:
+//
+//	cmd.Program.
+//		With(
+//			rotini.Provide(tasks.StoreKey, store),
+//			rotini.Provide(tasks.ClientKey, client),
+//		).
+//		Bind(rotini.KeyVersion, version).
+//		Execute()
+//
+// The type is checked at this call, where the value is supplied, exactly as [Key.Provide]
+// checks it. Reach for [Key.Provide] when there is one service and no chain to keep.
+func Provide[T any](k Key[T], value T) Option {
+	return func(p *Program) { p.Bind(k.name, value) }
+}
+
 // Provide binds value on the program's registry, so every invocation sees it, and returns the
 // program so it chains like [Program.Bind]:
 //
 //	tasks.StoreKey.Provide(cmd.Program, store).
-//		Bind(rotini.KeyParser, rotini.NewParser()).
+//		Bind(rotini.KeyVersion, version).
 //		Execute()
 //
 // The type is checked here, at the one place the value is supplied. Because the key fixes T,

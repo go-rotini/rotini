@@ -1,0 +1,125 @@
+# R1 — deprecated aliases and identifiers are reported, and need nothing bound.
+#
+# `Deprecations` used to be a METHOD on Parser. Since it needs no parser state — rotini's own
+# doc said so — the only thing the receiver bought was a reason to pull a *Parser out of the
+# registry, which made `Bind(KeyParser, NewParser())` look mandatory in every entrypoint. A
+# user who deleted that line, reasonably, since nothing else read it, silently lost every
+# deprecation warning: the conventional Get+ok guard just skipped the loop.
+#
+# It is a function now. This program binds NO services at all, which is the point: nothing
+# below depends on the registry, and the reporting still works.
+
+gomodinit example.com/deprec
+
+exec rotini generate cmd/dep/.rotini.spec.yaml --config cmd/dep/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o dep$exe ./cmd/dep
+
+# The entrypoint binds nothing. If anything here needed a service, this would fail.
+! grep 'KeyParser' cmd/dep/main.go
+
+# Current spellings: nothing deprecated, nothing said.
+exec ./dep$exe compile app --config x
+stdout 'compiled app'
+! stderr .
+
+# A command reached through a DEPRECATED alias is reported, with the token actually typed.
+exec ./dep$exe build app --config x
+stdout 'compiled app'
+stderr 'deprecated command identifier "build" was used'
+stderr 'use compile'
+
+# A non-deprecated alias of the same command is NOT reported — deprecating a subset is the
+# whole point of listing identifiers rather than flagging the input.
+exec ./dep$exe cc app --config x
+! stderr .
+
+# A flag set through a DEPRECATED identifier is reported the same way, and Kind tells the two
+# apart so the message can spell the replacement correctly.
+exec ./dep$exe compile app --conf x
+stderr 'deprecated flag identifier "--conf" was used'
+stderr 'use --config'
+
+# Both at once, both reported.
+exec ./dep$exe build app --conf x
+stderr 'deprecated command identifier "build" was used'
+stderr 'deprecated flag identifier "--conf" was used'
+
+# A warning is not a failure: the command still ran and the exit code is 0.
+wantexit 0 ./dep$exe build app --conf x
+
+-- cmd/dep/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: dep
+  summary: deprecation reporting
+  commands:
+    - name: compile
+      summary: compile the thing
+      aliases: [build, cc]
+      deprecated_identifiers: [build]
+      arguments:
+        - name: target
+          summary: what to compile
+          schema:
+            type: string
+      flags:
+        - name: config
+          summary: the config file
+          identifiers:
+            - --config
+            - --conf
+          deprecated_identifiers:
+            - --conf
+          schema:
+            type: string
+-- cmd/dep/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/dep/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/dep/zz_dep.go
+      package: dep
+validate:
+  fail: collect
+-- internal/cmd/dep/dep_compile.go --
+package dep
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*depCompileHandlers)(nil)
+
+type depCompileHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*depCompileHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[DepCompileInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.Halt()
+		return
+	}
+
+	// No registry lookup, no *Parser, no ok-guard to forget.
+	for _, d := range rotini.Deprecations(rtx) {
+		replacement := d.Name
+		if d.Kind == "flag" {
+			replacement = "--" + d.Name
+		}
+		rtx.RecordWarning(fmt.Errorf("%s; use %s", d, replacement))
+	}
+
+	fmt.Fprintln(rtx.Stdout, "compiled", in.DepCompile.Arguments.Target)
+}

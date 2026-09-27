@@ -15,6 +15,5 @@ var version = "0.0.0"
 func main() {
 	{{.PackageAlias}}.Program.
 		Bind(rotini.KeyVersion, version).
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

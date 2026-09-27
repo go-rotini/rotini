@@ -592,7 +592,7 @@ func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
 	}
 }
 
-// By default (WithPanicForward true), a recovered panic halts forward progress but
+// By default (WithTeardownOnPanic true), a recovered panic halts forward progress but
 // teardown for the begun setup hook still runs; the fault exits non-zero.
 func TestProgram_panic_default_runsTeardown(t *testing.T) {
 	var order []string
@@ -606,11 +606,11 @@ func TestProgram_panic_default_runsTeardown(t *testing.T) {
 	}
 }
 
-// WithPanicForward(false) makes a recovered panic a hard stop: remaining teardown is skipped.
-func TestProgram_panic_withPanicForwardFalse_skipsTeardown(t *testing.T) {
+// WithTeardownOnPanic(false) makes a recovered panic a hard stop: remaining teardown is skipped.
+func TestProgram_panic_withTeardownOnPanicFalse_skipsTeardown(t *testing.T) {
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
-	code, _ := newLifeProgram(h).WithPanicForward(false).Run(nil)
+	code, _ := newLifeProgram(h).WithTeardownOnPanic(false).Run(nil)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1 (panic → fault)", code)
 	}
@@ -637,14 +637,14 @@ func TestProgram_withPanicRecoverFalse_forwardTrue_teardownThenRepanic(t *testin
 	}
 }
 
-// WithPanicRecover(false) + WithPanicForward(false): "panic now" — the panic propagates
+// WithPanicRecover(false) + WithTeardownOnPanic(false): "panic now" — the panic propagates
 // immediately, skipping teardown.
 func TestProgram_withPanicRecoverFalse_forwardFalse_panicsNow(t *testing.T) {
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
 	recovered := func() (r any) {
 		defer func() { r = recover() }()
-		newLifeProgram(h).WithPanicRecover(false).WithPanicForward(false).Run(nil)
+		newLifeProgram(h).WithPanicRecover(false).WithTeardownOnPanic(false).Run(nil)
 		return nil
 	}()
 	if recovered != "boom" {
@@ -1176,5 +1176,201 @@ func TestRun_recordsDoNotLeakBetweenRuns(t *testing.T) {
 		if len(out.Errors) != 1 {
 			t.Errorf("run %d saw %d errors, want exactly its own 1 — records leaked", i+1, len(out.Errors))
 		}
+	}
+}
+
+// ── Execute's returned error (P4) ────────────────────────────────────────────
+//
+// Execute returns an error that, under the default exit action, is unreachable: os.Exit ends
+// the process before the return statement runs. That was undocumented and untested, so the
+// seam an embedder depends on had nothing holding it in place. These pin the contract the
+// doc now states: the error is the run's own failure, joined, and it arrives exactly when the
+// exit action returns.
+
+// TestExecute_returnsTheRunsFailure: with a returning exit action, the recorded error reaches
+// the caller — and reaches it as a value, not as text.
+func TestExecute_returnsTheRunsFailure(t *testing.T) {
+	boom := &ParseError{Kind: ParseKindUnknownFlag, Msg: "unknown flag \"--nope\""}
+
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		rtx.RecordError(boom)
+		rtx.Halt()
+	}}
+	p, _, _ := newTestProgram(h, []string{"run", "x"})
+
+	code := -1
+	err := p.WithExit(func(c int) { code = c }).Execute()
+
+	if err == nil {
+		t.Fatal("Execute() = nil, want the error the run recorded")
+	}
+	// errors.As reaches through the join, which is the point of returning a value at all.
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Errorf("errors.As(*ParseError) failed on %v — the caller cannot classify the failure", err)
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("errors.Is(recorded) failed on %v", err)
+	}
+	if code != 1 {
+		t.Errorf("exit code = %d, want the default funnel's error floor of 1", code)
+	}
+}
+
+// TestExecute_joinsEveryRecordedFailure: the error is the whole run's failure, not the first.
+func TestExecute_joinsEveryRecordedFailure(t *testing.T) {
+	first, second := errors.New("first"), errors.New("second")
+
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		rtx.RecordError(first)
+		rtx.RecordError(second)
+		rtx.Halt()
+	}}
+	p, _, _ := newTestProgram(h, []string{"run", "x"})
+
+	err := p.WithExit(func(int) {}).Execute()
+	if !errors.Is(err, first) || !errors.Is(err, second) {
+		t.Errorf("Execute() = %v, want both recorded errors reachable", err)
+	}
+}
+
+// TestExecute_returnsNilOnACleanRun: nothing recorded, nothing returned.
+func TestExecute_returnsNilOnACleanRun(t *testing.T) {
+	h := &testHandlers{log: new([]string), onRun: func(*Context) {}}
+	p, _, _ := newTestProgram(h, []string{"run", "x"})
+
+	code := -1
+	if err := p.WithExit(func(c int) { code = c }).Execute(); err != nil {
+		t.Errorf("Execute() = %v, want nil on a clean run", err)
+	}
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+}
+
+// TestExecute_exitRunsBeforeTheReturn pins the ordering the doc rests on: the exit action is
+// called with the resolved code FIRST, and only then does Execute return. Under os.Exit that
+// ordering is exactly why the error cannot arrive.
+func TestExecute_exitRunsBeforeTheReturn(t *testing.T) {
+	var order []string
+
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		rtx.RecordError(errors.New("boom"))
+		rtx.Halt()
+	}}
+	p, _, _ := newTestProgram(h, []string{"run", "x"})
+
+	err := p.WithExit(func(int) { order = append(order, "exit") }).Execute()
+	order = append(order, "returned")
+
+	if len(order) != 2 || order[0] != "exit" || order[1] != "returned" {
+		t.Errorf("order = %v, want the exit action to run before Execute returns", order)
+	}
+	if err == nil {
+		t.Error("Execute() = nil, want the recorded error")
+	}
+}
+
+// ── WithArgs' scope (P5) ─────────────────────────────────────────────────────
+
+// TestWithArgs_onlyExecuteConsultsIt pins the boundary the doc now states.
+//
+// WithArgs used to be documented as "overrides the argument vector", which reads like a
+// program-level setting. It is not: Run and RunContext take argv as a parameter and use
+// exactly what they were given. The behaviour is deliberate — Run is the re-entrant core a
+// REPL calls once per line, so inheriting a program-level default would answer the wrong
+// question — but nothing said so and nothing held it in place.
+func TestWithArgs_onlyExecuteConsultsIt(t *testing.T) {
+	var got []string
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		got = append([]string(nil), rtx.Args...)
+	}}
+
+	// Execute consults it.
+	p, _, _ := newTestProgram(h, []string{"run", "from-withargs"})
+	p.WithExit(func(int) {}).Execute()
+	if len(got) == 0 || got[len(got)-1] != "from-withargs" {
+		t.Errorf("Execute saw %q, want the vector set by WithArgs", got)
+	}
+
+	// Run does not: it uses exactly what it was handed.
+	got = nil
+	p2, _, _ := newTestProgram(h, []string{"run", "from-withargs"})
+	if _, err := p2.Run([]string{"run", "explicit"}); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) == 0 || got[len(got)-1] != "explicit" {
+		t.Errorf("Run(argv) saw %q, want the argv it was passed", got)
+	}
+
+	// And Run(nil) means "no arguments", NOT "fall back to WithArgs". The fallback is
+	// deliberately absent: it would make a REPL line silently inherit the process's argv.
+	got = nil
+	p3, _, _ := newTestProgram(h, []string{"run", "from-withargs"})
+	if _, err := p3.Run(nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("Run(nil) saw %q, want no arguments — WithArgs must not leak into Run", got)
+	}
+}
+
+// TestWithArgs_nilIsIgnored: a nil vector leaves the default in place, so a conditional
+// caller cannot accidentally erase os.Args by passing a nil slice.
+func TestWithArgs_nilIsIgnored(t *testing.T) {
+	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, []string{"run", "kept"})
+	p.WithArgs(nil)
+	if len(p.args) != 2 || p.args[1] != "kept" {
+		t.Errorf("args = %q, want the previous vector kept when nil is passed", p.args)
+	}
+	p.WithArgs([]string{})
+	if len(p.args) != 0 {
+		t.Errorf("args = %q, want an explicit empty vector to take effect", p.args)
+	}
+}
+
+// TestPanicKnobs_allFourQuadrants exercises the renamed option against its partner, so the
+// rename is shown to be behaviour-preserving rather than assumed to be.
+//
+// The two are orthogonal: WithPanicRecover decides where the panic GOES, WithTeardownOnPanic
+// decides whether teardown still RUNS. The old name conflated them, which is the whole reason
+// for the rename — so the grid is worth having written down.
+func TestPanicKnobs_allFourQuadrants(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		recover, teardown bool
+		wantTeardown      bool
+		wantReRaise       bool
+	}{
+		{"default — recovered, teardown runs", true, true, true, false},
+		{"recovered, teardown skipped", true, false, false, false},
+		{"re-raised after teardown", false, true, true, true},
+		{"re-raised immediately, teardown skipped", false, false, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var order []string
+			h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
+
+			var reRaised bool
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						reRaised = true
+					}
+				}()
+				newLifeProgram(h).
+					WithPanicRecover(tc.recover).
+					WithTeardownOnPanic(tc.teardown).
+					Run(nil)
+			}()
+
+			if reRaised != tc.wantReRaise {
+				t.Errorf("panic re-raised to the caller = %v, want %v", reRaised, tc.wantReRaise)
+			}
+			ranTeardown := slices.Contains(order, "CascadingPostRun")
+			if ranTeardown != tc.wantTeardown {
+				t.Errorf("teardown ran = %v, want %v (hooks: %v)", ranTeardown, tc.wantTeardown, order)
+			}
+		})
 	}
 }

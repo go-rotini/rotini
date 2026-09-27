@@ -642,7 +642,7 @@ func TestParser_deprecations(t *testing.T) {
 		if err := p.Parse(rtx, &in); err != nil {
 			t.Fatalf("parse %v: %v", argv, err)
 		}
-		return p.Deprecations(rtx)
+		return Deprecations(rtx)
 	}
 
 	// Deprecation implements error, so a handler can return/print it.
@@ -672,6 +672,46 @@ func TestParser_deprecations(t *testing.T) {
 	// The current name + current flag spelling → nothing deprecated.
 	if got := depsFor("compile", "--config", "x"); len(got) != 0 {
 		t.Errorf("Deprecations(compile --config) = %v, want none", got)
+	}
+}
+
+// TestDeprecations_needsNoParserBound is the point of making Deprecations a function.
+//
+// It used to be a method, so a handler had to pull a *Parser out of the registry to get a
+// receiver it never used. That made `Bind(KeyParser, NewParser())` look mandatory in every
+// entrypoint — and a user who removed the line, reasonably, since nothing else read it,
+// SILENTLY lost deprecation reporting: the conventional `Get`+ok guard simply skipped the
+// loop. Nothing failed and nothing said so.
+//
+// The chain here is resolved with no services bound at all.
+func TestDeprecations_needsNoParserBound(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{{
+			Name: "compile", Handler: "AppCompile",
+			Aliases:               []string{"build"},
+			DeprecatedIdentifiers: []string{"build"},
+		}},
+	}
+
+	rtx := NewContextFor(def, []string{"build"})
+	if _, ok := rtx.Get[*Parser](KeyParser); ok {
+		t.Fatal("a parser is bound; this test is meaningless unless the registry is empty")
+	}
+
+	deps := Deprecations(rtx)
+	if len(deps) != 1 {
+		t.Fatalf("Deprecations = %v, want the one deprecated alias", deps)
+	}
+	if deps[0].Kind != "command" || deps[0].Identifier != "build" || deps[0].Name != "compile" {
+		t.Errorf("Deprecations = %+v, want command compile via \"build\"", deps[0])
+	}
+}
+
+// TestDeprecations_nilContext keeps the defensive path covered now that the receiver is gone.
+func TestDeprecations_nilContext(t *testing.T) {
+	if got := Deprecations(nil); got != nil {
+		t.Errorf("Deprecations(nil) = %v, want nil", got)
 	}
 }
 

@@ -98,6 +98,20 @@ sequence:
 Raising `version:` in your spec and conf is the last step, not the first: it declares the
 minimum rotini your documents need, so raise it once you actually use something new.
 
+## Pre-v1 API changes
+
+Until v1.0 the surface is still being shaped, and a rename lands as a rename rather than as a
+deprecation cycle. Each one is mechanical; the compiler finds every call site.
+
+| Was | Is | Why |
+|---|---|---|
+| `Parser.Deprecations(rtx)` | `rotini.Deprecations(rtx)` | it never used its receiver, so it forced a `*Parser` out of the registry — which in turn made `Bind(KeyParser, …)` look mandatory in every entrypoint. The seeded `main.go` no longer binds a parser; bind one only to override the default or to call `Parser.Parse` yourself |
+| `Program.WithPanicForward(bool)` | `Program.WithTeardownOnPanic(bool)` | it names whether **teardown** runs, not where the panic goes. "Forward" read as forwarding the panic onward, which is what `WithPanicRecover(false)` actually does — a name that had to be unlearned from its own doc, on an option people reach for mid-crash |
+
+Also **added**, so nothing breaks: `rotini.Provide(key, value)` returning a `rotini.Option`,
+and `Program.With(opts ...Option)`, which let several type-checked binds sit in one chain.
+`Key.Provide` is unchanged and still the better call for a single service.
+
 ## Upgrading a composed tree
 
 A spec that composes others (`$ref`) has more than one document to keep in step:

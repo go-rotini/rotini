@@ -248,6 +248,7 @@ func CollectRoot
 func DefaultLifecycle
 func DefaultResolver
 func Defaults
+func Deprecations
 func DetectProfile
 func DiscoveredPlugins
 func DiscoveryDiagnostics
@@ -287,6 +288,7 @@ func ParseEnv
 func ParseFiles
 func ParseFormat
 func ParseStdin
+func Provide
 func Ptr
 func RemoteBinaryPath
 func Strip
@@ -347,7 +349,6 @@ method PanicError.Unwrap
 method ParseError.Error
 method ParseError.Unwrap
 method ParseKind.String
-method Parser.Deprecations
 method Parser.Parse
 method Printer.Print
 method Printer.WithFormat
@@ -359,18 +360,19 @@ method Program.Bind
 method Program.Execute
 method Program.Run
 method Program.RunContext
+method Program.With
 method Program.WithArgs
 method Program.WithContext
 method Program.WithExit
 method Program.WithFunnel
 method Program.WithLifecycle
-method Program.WithPanicForward
 method Program.WithPanicRecover
 method Program.WithResolver
 method Program.WithSignals
 method Program.WithStderr
 method Program.WithStdin
 method Program.WithStdout
+method Program.WithTeardownOnPanic
 method Program.WithoutSignalHandling
 method Progress.Add
 method Progress.Current
@@ -541,6 +543,7 @@ type LifecycleStep
 type Line
 type Match
 type NotifyFunc
+type Option
 type Outcome
 type Pager
 type PanicError
