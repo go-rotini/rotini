@@ -18,7 +18,7 @@ type rotiniGenerateHandlers struct {
 }
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
+	parser := rtx.Parser()
 
 	var inputs RotiniGenerateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {

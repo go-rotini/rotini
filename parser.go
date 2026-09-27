@@ -17,10 +17,6 @@ import (
 	"unicode/utf8"
 )
 
-// KeyParser is the conventional registry key the generated main binds the
-// [Parser] under (and handlers retrieve it by) — see [Program.Bind].
-const KeyParser = "parser"
-
 // parsedInputs is one invocation's parsed argv, indexed by position in the resolved chain
 // (root = 0 … leaf). Keying by position rather than command name means two commands on a
 // single path can never collide, and a statically-composed child still reads its own
@@ -135,7 +131,7 @@ func (e *ParseError) Unwrap() error { return ErrUsage }
 // It is a service, so parsing is opt-in (a CLI that wants raw argv binds nothing and reads
 // [Context.Args]) and the registry is a dependency-injection seam:
 //
-//	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
+//	parser := rtx.Parser()
 //	var in MycliInputs
 //	err := parser.Parse(rtx, &in)
 type Parser struct{}
@@ -198,7 +194,7 @@ func (d Deprecation) Error() string {
 // It is a function rather than a method on [Parser] because it needs no parser: everything it
 // reports is already on the [Context] — the resolved chain and the argv that produced it. As a
 // method it forced a handler to pull a *Parser out of the registry to obtain a receiver it
-// never used, which in turn made [KeyParser] look mandatory in every entrypoint. Bind a Parser
+// never used, which in turn made a parser binding look mandatory in every entrypoint. Supply a Parser
 // when you want to override the default or call [Parser.Parse] yourself; deprecation reporting
 // needs neither.
 func Deprecations(rtx *Context) []Deprecation {

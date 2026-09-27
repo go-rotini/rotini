@@ -150,13 +150,10 @@ func (*pathsScanHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	paths "example.com/paths/internal/cmd/paths"
 )
 
 func main() {
 	paths.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

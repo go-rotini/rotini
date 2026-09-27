@@ -370,35 +370,29 @@ func (*parentHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	parent "example.com/multi/internal/cmd/parent"
 )
 
 func main() {
-	parent.Program.Bind(rotini.KeyParser, rotini.NewParser()).Execute()
+	parent.Program.Execute()
 }
 -- cmd/alpha/main.go --
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	alpha "example.com/multi/internal/cmd/alpha"
 )
 
 func main() {
-	alpha.Program.Bind(rotini.KeyParser, rotini.NewParser()).Execute()
+	alpha.Program.Execute()
 }
 -- cmd/beta/main.go --
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	beta "example.com/multi/internal/cmd/beta"
 )
 
 func main() {
-	beta.Program.Bind(rotini.KeyParser, rotini.NewParser()).Execute()
+	beta.Program.Execute()
 }

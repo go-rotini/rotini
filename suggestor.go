@@ -5,9 +5,6 @@ import (
 	"strings"
 )
 
-// KeySuggestor is the conventional registry key a [Suggestor] is bound under.
-const KeySuggestor = "suggestor"
-
 // defaultMinScore is the cutoff a [Suggestor] keeps candidates at or above: similar enough to
 // be worth offering, strict enough to skip merely-adjacent words.
 const defaultMinScore = 0.6
@@ -24,10 +21,10 @@ const defaultMinScore = 0.6
 //		WithCaseFold()
 //	hits := s.Suggest("isntall", []string{"install", "uninstall", "list"}) // [install]
 //
-// rotini itself suggests nothing. A program binds one under [KeySuggestor] and applies it to a
+// rotini itself suggests nothing. A program supplies one with [Program.WithSuggestor] and applies it to a
 // [ParseError]'s Token and Candidates if it wants suggestions:
 //
-//	suggestor := rtx.MustGet[*rotini.Suggestor](rotini.KeySuggestor)
+//	suggestor, ok := rtx.Suggestor()
 //	if best, ok := suggestor.Closest(parseErr.Token, parseErr.Candidates); ok {
 //		fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", best)
 //	}

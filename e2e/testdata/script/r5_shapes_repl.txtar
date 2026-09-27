@@ -171,9 +171,10 @@ func main() { build(nil).Execute() }
 // here, so a command cannot behave differently at the prompt than it does from the shell.
 func build(rtx *rotini.Context) *rotini.Program {
 	p := loop.NewProgram(loop.Handlers()).
-		Bind(rotini.KeyParser, rotini.NewParser())
-	loop.CounterKey.Provide(p, counter)
-	loop.BuilderKey.Provide(p, build)
+		With(
+			rotini.Provide(loop.CounterKey, counter),
+			rotini.Provide(loop.BuilderKey, build),
+		)
 	if rtx != nil {
 		p = p.WithStdin(rtx.Stdin).WithStdout(rtx.Stdout).WithStderr(rtx.Stderr)
 	}

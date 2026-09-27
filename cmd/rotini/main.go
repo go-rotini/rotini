@@ -15,7 +15,6 @@ var (
 func main() {
 	cmd.Program.
 		Bind(cmd.KeyRotiniVersion, cmd.ResolveVersion(version)).
-		Bind(rotini.KeyParser, rotini.NewParser()).
-		Bind(rotini.KeySuggestor, rotini.NewSuggestor()).
+		WithSuggestor(rotini.NewSuggestor()).
 		Execute()
 }

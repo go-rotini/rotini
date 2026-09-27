@@ -125,13 +125,10 @@ func rotiniGracefulStop(err error) bool {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	daemon "example.com/daemon/internal/cmd/daemon"
 )
 
 func main() {
 	daemon.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

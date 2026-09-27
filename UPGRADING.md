@@ -108,9 +108,25 @@ deprecation cycle. Each one is mechanical; the compiler finds every call site.
 | `Parser.Deprecations(rtx)` | `rotini.Deprecations(rtx)` | it never used its receiver, so it forced a `*Parser` out of the registry — which in turn made `Bind(KeyParser, …)` look mandatory in every entrypoint. The seeded `main.go` no longer binds a parser; bind one only to override the default or to call `Parser.Parse` yourself |
 | `Program.WithPanicForward(bool)` | `Program.WithTeardownOnPanic(bool)` | it names whether **teardown** runs, not where the panic goes. "Forward" read as forwarding the panic onward, which is what `WithPanicRecover(false)` actually does — a name that had to be unlearned from its own doc, on an option people reach for mid-crash |
 
+| the six `Key*` constants — `KeyVersion` `KeyParser` `KeyBinder` `KeyBindMeta` `KeyStyler` `KeySuggestor` | `Program.WithVersion` · `WithParser` · `WithBinder` · `WithBindMeta` · `WithStyler` · `WithSuggestor`, read back with `Context.Version()` · `Parser()` · `Styler()` · `Suggestor()` | rotini's internals shared one flat, unreserved string namespace with your own services, and every read discarded its comma-ok — so a colliding name or a wrong type silently produced a zero value. Binding a `Binder` built from an empty `BindMeta`, the obvious way to write it, switched the configuration-file channel off without a word. The registry is now yours alone |
+
+`WithBinder` takes `func(BindMeta) *Binder` rather than a `*Binder`: an override **receives**
+the generated descriptor instead of having to reproduce it, which makes the silent-drop
+mistake unwritable.
+
+A **composed `mod://` child must be regenerated too** — its generated `NewProgram` calls
+`WithBindMeta` now. Regenerate the published module and bump the `$ref`, as
+`example-suite` does.
+
 Also **added**, so nothing breaks: `rotini.Provide(key, value)` returning a `rotini.Option`,
 and `Program.With(opts ...Option)`, which let several type-checked binds sit in one chain.
 `Key.Provide` is unchanged and still the better call for a single service.
+
+A **new wiring fault**: a command with `config:` inputs bound by a program that never called
+`WithBindMeta` is now reported instead of silently filling every configuration value with its
+zero. Supplying an *empty* `BindMeta` stays legal — "this program has no configuration
+sources" is a choice, and telling it apart from "nobody wired the descriptor" is only possible
+now that the descriptor is a typed option rather than a registry entry.
 
 ## Upgrading a composed tree
 

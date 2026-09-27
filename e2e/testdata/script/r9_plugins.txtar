@@ -219,14 +219,11 @@ func (*hostStatusHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	host "example.com/host/internal/cmd/host"
 )
 
 func main() {
 	host.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		WithFunnel(host.Funnel).
 		Execute()
 }

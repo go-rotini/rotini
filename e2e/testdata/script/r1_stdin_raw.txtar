@@ -135,13 +135,10 @@ func (*filterCountHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	filter "example.com/filter/internal/cmd/filter"
 )
 
 func main() {
 	filter.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

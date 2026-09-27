@@ -117,7 +117,7 @@ import (
 // The REPL shape: one Program, dispatched once per typed line. Run is re-entrant, so each
 // line gets a fresh Context while the Parser bound here reaches all of them.
 func main() {
-	p := shell.Program.Bind(rotini.KeyParser, rotini.NewParser())
+	p := shell.Program
 	repl := rotini.NewREPL(p).
 		WithPrompt("").
 		WithInput(os.Stdin).

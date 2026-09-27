@@ -145,13 +145,10 @@ func (*ownBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	own "example.com/own/internal/cmd/own"
 )
 
 func main() {
 	own.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

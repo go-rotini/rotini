@@ -123,7 +123,7 @@ func TestBinder_customSources(t *testing.T) {
 
 	t.Run("per-channel surface sees sources via KeyBindMeta", func(t *testing.T) {
 		rtx := NewContextFor(tbDef(), nil)
-		rtx.Bind(KeyBindMeta, BindMeta{Sources: []recon.Source{vault()}})
+		rtx.WithBindMeta(BindMeta{Sources: []recon.Source{vault()}})
 		files, err := ParseFiles[tbInputs](rtx)
 		if err != nil {
 			t.Fatalf("ParseFiles: %v", err)
@@ -1133,30 +1133,54 @@ func TestBindError_typeContract(t *testing.T) {
 	}
 }
 
-// ── KeyBinder as an override ─────────────────────────────────────────────.
+// ── WithBinder as an override ────────────────────────────────────────────────.
 
-// A Binder bound under KeyBinder replaces the one Collect would build. Before this
-// worked, KeyBinder was exported and documented but had no consumer: binding one had
-// no effect, and the advice to bind a custom binder was untrue.
-func TestKeyBinder_overridesTheDefault(t *testing.T) {
+// A WithBinder function replaces the binder Collect would build — and RECEIVES the meta, so
+// an override starts from the generated descriptor instead of having to reproduce it.
+//
+// The shape matters. This used to be a registry key holding a *Binder, which meant the caller
+// had to find BindMeta and pass it themselves; the obvious call, NewBinder(BindMeta{}), turned
+// the configuration-file channel off in silence. Handing the meta to the function makes that
+// mistake unwritable.
+func TestWithBinder_overridesTheDefault(t *testing.T) {
 	custom := NewBinder(BindMeta{EnvPrefix: "SENTINEL"})
 
 	var got *Binder
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
 	p, _, _ := newTestProgram(h, nil)
-	p.Bind(KeyBinder, custom)
+	p.WithBinder(func(BindMeta) *Binder { return custom })
 
 	if _, err := p.Run([]string{"run", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if got != custom {
-		t.Errorf("binderFor returned %p, want the bound %p — KeyBinder must override", got, custom)
+		t.Errorf("binderFor returned %p, want the supplied %p", got, custom)
 	}
 }
 
-// With nothing bound, Collect still works: the default is built from the generated
-// descriptor, so binding is an override rather than a prerequisite.
-func TestKeyBinder_defaultsWhenUnbound(t *testing.T) {
+// The override receives the program's meta, which is the whole reason for the signature.
+func TestWithBinder_receivesTheProgramsMeta(t *testing.T) {
+	meta := BindMeta{EnvPrefix: "ACME", ConfigFiles: []ConfigFile{{Name: "project", Scope: "app"}}}
+
+	var seen BindMeta
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { _ = binderFor(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+	p.WithBindMeta(meta).WithBinder(func(m BindMeta) *Binder {
+		seen = m
+		return NewBinder(m)
+	})
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if seen.EnvPrefix != "ACME" || len(seen.ConfigFiles) != 1 {
+		t.Errorf("the override saw %+v, want the program's BindMeta — an override that cannot see the descriptor silently drops channels", seen)
+	}
+}
+
+// With nothing supplied, Collect still works: the default is built from the descriptor, so
+// WithBinder is an override rather than a prerequisite.
+func TestWithBinder_defaultsWhenUnset(t *testing.T) {
 	var got *Binder
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
 	p, _, _ := newTestProgram(h, nil)
@@ -1165,26 +1189,22 @@ func TestKeyBinder_defaultsWhenUnbound(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got == nil {
-		t.Fatal("binderFor returned nil with no binder bound")
+		t.Fatal("binderFor returned nil with no binder supplied")
 	}
 }
 
-// A nil or wrongly-typed binding falls back rather than panicking mid-run.
-func TestKeyBinder_ignoresUnusableBindings(t *testing.T) {
-	for name, value := range map[string]any{"nil": (*Binder)(nil), "wrong type": "not a binder"} {
-		t.Run(name, func(t *testing.T) {
-			var got *Binder
-			h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
-			p, _, _ := newTestProgram(h, nil)
-			p.Bind(KeyBinder, value)
+// A function that returns nil falls back rather than handing a nil binder to Collect.
+func TestWithBinder_ignoresANilResult(t *testing.T) {
+	var got *Binder
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+	p.WithBinder(func(BindMeta) *Binder { return nil })
 
-			if _, err := p.Run([]string{"run", "x"}); err != nil {
-				t.Fatal(err)
-			}
-			if got == nil {
-				t.Error("an unusable KeyBinder binding produced a nil binder instead of the default")
-			}
-		})
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Error("a nil result produced a nil binder instead of the default")
 	}
 }
 
@@ -1314,5 +1334,96 @@ func TestBinder_rawStdinRequired(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("message %q does not mention %q", err, want)
 		}
+	}
+}
+
+// ── the descriptor's absence is now distinguishable (C1 Tier 1) ──────────────.
+
+// NewBinderWithoutDescriptor builds a binder the way a hand-assembled program produces one:
+// no BindMeta was ever supplied, as distinct from an empty one.
+func NewBinderWithoutDescriptor() *Binder {
+	b := NewBinder(BindMeta{})
+	b.described = false
+	return b
+}
+
+// TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor is the one silent failure that
+// survived moving BindMeta off the registry — and the first time it has been detectable.
+//
+// A command with `config:` inputs resolves them out of the sources in BindMeta. A program
+// assembled without one (hand-built, rather than through the generated NewProgram) used to
+// fill every configuration value with its zero and say nothing. Now it is a wiring fault,
+// because that is whose mistake it is.
+func TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Config    struct {
+				Region string `rotini:"region" recon:"api.region"`
+			}
+		}
+	}
+
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	var in inputs
+	err := NewBinderWithoutDescriptor().Bind(rtx, &in)
+
+	if err == nil {
+		t.Fatal("Bind succeeded with config: inputs and no BindMeta — the values would be silently zero")
+	}
+	var we *WiringError
+	if !errors.As(err, &we) {
+		t.Errorf("error is %T (%v), want a *WiringError — this is the program author's mistake, not the user's", err, err)
+	}
+	if !strings.Contains(err.Error(), "WithBindMeta") {
+		t.Errorf("error %q does not name the call that fixes it", err)
+	}
+}
+
+// An EMPTY descriptor is a different statement from an absent one — "this program has no
+// configuration sources" is a choice, and it stays legal. Telling the two apart is only
+// possible because the descriptor is a typed option; a registry entry read absent and zero
+// identically, which is exactly how the silent case survived.
+func TestCheckDescribed_anEmptyDescriptorIsLegal(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Config    struct {
+				Region string `rotini:"region" recon:"api.region"`
+			}
+		}
+	}
+
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithBindMeta(BindMeta{})
+	var in inputs
+	if err := binderFor(rtx).Bind(rtx, &in); err != nil {
+		t.Errorf("Bind failed with an explicitly empty BindMeta: %v", err)
+	}
+}
+
+// A command with NO config: inputs needs no descriptor, so a bare program still works. This is
+// the common case for a CLI that reads only argv, and it must not have been made noisier.
+func TestCheckDescribed_noConfigInputsNeedsNoDescriptor(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Verbose bool `rotini:"verbose"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	rtx := NewContextFor(Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"}},
+	}, []string{"-v"})
+	var in inputs
+	if err := NewBinderWithoutDescriptor().Bind(rtx, &in); err != nil {
+		t.Errorf("Bind failed for an argv-only command with no descriptor: %v", err)
+	}
+	if !in.App.Flags.Verbose {
+		t.Error("argv did not bind")
 	}
 }

@@ -58,7 +58,7 @@ func TestCollect(t *testing.T) {
 
 	newRtx := func() *Context {
 		rtx := NewContextFor(tbDef(), []string{"--verbose"})
-		rtx.Bind(KeyBindMeta, meta)
+		rtx.WithBindMeta(meta)
 		return rtx
 	}
 
@@ -98,12 +98,12 @@ func TestCollect(t *testing.T) {
 	bare := writeConfig(t, "api:\n  endpoint: only\n") // api.token (required) absent
 	bareMeta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: bare, Format: "yaml"}}}
 	rtx := NewContextFor(tbDef(), nil)
-	rtx.Bind(KeyBindMeta, bareMeta)
+	rtx.WithBindMeta(bareMeta)
 	if _, err := Collect[tbInputs](rtx); err == nil {
 		t.Error("Collect with missing required config = nil error, want loud")
 	}
 	rtx2 := NewContextFor(tbDef(), nil)
-	rtx2.Bind(KeyBindMeta, bareMeta)
+	rtx2.WithBindMeta(bareMeta)
 	if _, _, err := CollectP[tbInputs](rtx2); err == nil {
 		t.Error("CollectP with missing required config = nil error, want loud")
 	}
@@ -111,7 +111,7 @@ func TestCollect(t *testing.T) {
 
 func ovLayers(t *testing.T, rtx *Context, meta BindMeta) []Layer[ovInputs] {
 	t.Helper()
-	rtx.Bind(KeyBindMeta, meta) // the channel functions derive their meta from the Context
+	rtx.WithBindMeta(meta) // the channel functions derive their meta from the Context
 	defaults, err := Defaults[ovInputs](rtx)
 	if err != nil {
 		t.Fatalf("Defaults: %v", err)

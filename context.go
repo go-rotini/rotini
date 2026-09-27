@@ -70,6 +70,16 @@ type Context struct {
 	warnings    []error           // the lifecycle's to capture, never a handler's to record.
 	successes   []string
 	faults      []*PanicError
+
+	// rotini's own seams, seeded from the Program each run — see [Program.WithBindMeta].
+	// They are deliberately NOT in services: the registry is the user's namespace, and a
+	// value the runtime depends on must not share a flat keyspace with it.
+	meta      *BindMeta
+	binderFn  func(BindMeta) *Binder
+	version   string
+	parser    *Parser
+	styler    *Styler
+	suggestor *Suggestor
 }
 
 // cloneServices snapshots the registry's bindings. Every run's Context is seeded from the
@@ -97,9 +107,9 @@ func newContext() *Context {
 // helpers, or a single hook, against a Definition you construct:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
-//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"}).Bind(rotini.KeyParser, rotini.NewParser())
+//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"})
 //	var in appInputs
-//	err := rtx.MustGet[*rotini.Parser](rotini.KeyParser).Parse(rtx, &in)
+//	err := rtx.Parser().Parse(rtx, &in)
 //
 // To drive a whole generated program end to end — the usual handler test — construct it with
 // the generated NewProgram and run it under a recording exit and captured streams instead; the
@@ -462,10 +472,145 @@ func (rtx *Context) recordFault(pe *PanicError) {
 // or the bound value is not a T. It never panics; use [Context.MustGet] to route a miss
 // through the funnel instead of handling it inline, or a typed [Key], which supplies T for you.
 //
-//	parser, ok := rtx.Get[*rotini.Parser](rotini.KeyParser)
+//	parser := rtx.Parser()
 func (rtx *Context) Get[T any](key string) (T, bool) {
 	v, ok := rtx.Value(key).(T)
 	return v, ok
+}
+
+// ── rotini's own seams, as a standalone Context configures them ─────────────.
+//
+// A dispatched Context is seeded from the Program, so these are for a Context built by
+// [NewContextFor] — exercising a [Parser], or driving one hook — where there is no Program to
+// carry them. They mirror the [Program] options exactly, so there is one vocabulary to learn.
+
+// WithBindMeta supplies the generated descriptor [Collect] reconciles from. See
+// [Program.WithBindMeta].
+func (rtx *Context) WithBindMeta(meta BindMeta) *Context {
+	if rtx != nil {
+		rtx.mu.Lock()
+		rtx.meta = &meta
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithBinder replaces the binder [Collect] uses, built from the meta. See [Program.WithBinder].
+func (rtx *Context) WithBinder(fn func(BindMeta) *Binder) *Context {
+	if rtx != nil && fn != nil {
+		rtx.mu.Lock()
+		rtx.binderFn = fn
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithVersion sets what [Context.Version] reports. See [Program.WithVersion].
+func (rtx *Context) WithVersion(version string) *Context {
+	if rtx != nil {
+		rtx.mu.Lock()
+		rtx.version = version
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithParser sets the parser [Context.Parser] returns. See [Program.WithParser].
+func (rtx *Context) WithParser(parser *Parser) *Context {
+	if rtx != nil && parser != nil {
+		rtx.mu.Lock()
+		rtx.parser = parser
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithStyler sets the styler [Context.Styler] reports. See [Program.WithStyler].
+func (rtx *Context) WithStyler(styler *Styler) *Context {
+	if rtx != nil && styler != nil {
+		rtx.mu.Lock()
+		rtx.styler = styler
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithSuggestor sets the suggestor [Context.Suggestor] reports. See [Program.WithSuggestor].
+func (rtx *Context) WithSuggestor(suggestor *Suggestor) *Context {
+	if rtx != nil && suggestor != nil {
+		rtx.mu.Lock()
+		rtx.suggestor = suggestor
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// ── rotini's own seams, as the handler sees them ────────────────────────────.
+
+// Version is what the program reports as its version, from [Program.WithVersion]. It is "" if
+// the entrypoint set none, which is the honest answer rather than a guess.
+func (rtx *Context) Version() string {
+	if rtx == nil {
+		return ""
+	}
+	return rtx.version
+}
+
+// Parser is the [Parser] for this run: the one [Program.WithParser] supplied, or the default.
+//
+// It never returns nil. Parsing is not optional — [Collect] uses a parser whether or not the
+// entrypoint supplied one — so a handler that wants to parse argv itself should not have to
+// ask whether one exists, nor bind one to make the answer yes.
+func (rtx *Context) Parser() *Parser {
+	if rtx == nil {
+		return NewParser()
+	}
+	rtx.mu.RLock()
+	p := rtx.parser
+	rtx.mu.RUnlock()
+	if p == nil {
+		return NewParser()
+	}
+	return p
+}
+
+// Styler reports the [Styler] the program supplied, and whether it supplied one.
+//
+// Styling is opt-in: rotini styles nothing on its own, so an unset styler is a decision, not
+// an omission, and a handler renders plain text rather than inventing a default that the
+// program never asked for.
+//
+//	if styler, ok := rtx.Styler(); ok {
+//		styler.Fprintln(rtx.Stdout, "heading", title)
+//	}
+func (rtx *Context) Styler() (*Styler, bool) {
+	if rtx == nil {
+		return nil, false
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.styler, rtx.styler != nil
+}
+
+// Suggestor reports the [Suggestor] the program supplied, and whether it supplied one.
+//
+// Like styling, suggestion is opt-in: rotini emits no "did you mean" of its own, so a program
+// that wants one says so, and a handler that asks is told plainly when it did not.
+func (rtx *Context) Suggestor() (*Suggestor, bool) {
+	if rtx == nil {
+		return nil, false
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.suggestor, rtx.suggestor != nil
+}
+
+// bindMeta is the generated descriptor for this run, and whether the program supplied one.
+func (rtx *Context) bindMeta() (BindMeta, bool) {
+	if rtx == nil || rtx.meta == nil {
+		return BindMeta{}, false
+	}
+	return *rtx.meta, true
 }
 
 // MustGet returns the service bound under key as T, or panics with a [*ServiceError] when it
@@ -473,7 +618,7 @@ func (rtx *Context) Get[T any](key string) (T, bool) {
 // routes it through the funnel, so a handler that cannot run without a service reaches for
 // MustGet rather than handling a miss inline.
 //
-//	parser := rtx.MustGet[*rotini.Parser](rotini.KeyParser)
+//	parser := rtx.Parser()
 func (rtx *Context) MustGet[T any](key string) T {
 	v, ok := rtx.Get[T](key)
 	if !ok {

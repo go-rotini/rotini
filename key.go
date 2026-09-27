@@ -53,7 +53,7 @@ func (k Key[T]) BindTo(rtx *Context, value T) { rtx.Bind(k.name, value) }
 //			rotini.Provide(tasks.StoreKey, store),
 //			rotini.Provide(tasks.ClientKey, client),
 //		).
-//		Bind(rotini.KeyVersion, version).
+//		WithVersion(version).
 //		Execute()
 //
 // The type is checked at this call, where the value is supplied, exactly as [Key.Provide]
@@ -66,7 +66,7 @@ func Provide[T any](k Key[T], value T) Option {
 // program so it chains like [Program.Bind]:
 //
 //	tasks.StoreKey.Provide(cmd.Program, store).
-//		Bind(rotini.KeyVersion, version).
+//		WithVersion(version).
 //		Execute()
 //
 // The type is checked here, at the one place the value is supplied. Because the key fixes T,

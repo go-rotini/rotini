@@ -217,13 +217,10 @@ func (*outStopHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	out "example.com/out/internal/cmd/out"
 )
 
 func main() {
 	out.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

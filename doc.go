@@ -145,7 +145,7 @@
 //			rotini.Provide(tasks.StoreKey, tasks.NewStore()),
 //			rotini.Provide(tasks.ClientKey, tasks.NewClient()),
 //		).
-//		Bind(rotini.KeyVersion, version).
+//		WithVersion(version).
 //		Execute()
 //
 //	// any handler — no string, no type assertion, no miss check
@@ -159,8 +159,13 @@
 // # Opt-in services
 //
 // Everything else is a value a handler fetches from the registry — [Program.Bind] to provide,
-// [Context.Get] or [Context.MustGet] to consume — with [KeyParser], [KeyBinder],
-// [KeySuggestor] and [KeyStyler] naming the usual suspects:
+// [Context.Get] or [Context.MustGet] to consume.
+//
+// rotini's OWN seams are not in that registry. [Program.WithBindMeta], [Program.WithBinder],
+// [Program.WithParser], [Program.WithStyler], [Program.WithSuggestor] and
+// [Program.WithVersion] supply them; [Context.Parser], [Context.Styler], [Context.Suggestor]
+// and [Context.Version] read them back. The registry is yours alone, so nothing rotini depends
+// on can be shadowed by a name you chose or a type you got wrong:
 //
 //   - [Collect] is the typical handler's whole input story: every declared channel reconciled
 //     and validated in one line, into the command's generated inputs type.
@@ -168,12 +173,12 @@
 //     inputs, err := rotini.Collect[DeployInputs](rtx)
 //
 //     [CollectP] adds the provenance [Report]. Both ride the [BindMeta] the generated
-//     NewProgram binds under [KeyBindMeta].
+//     NewProgram supplies via [Program.WithBindMeta].
 //
 //   - [Parser] parses and validates the argv channel alone — GNU/POSIX grammar, typed
 //     coercion, enum and constraint checks — failing with a [*ParseError]. [Binder] is
 //     Collect's engine, for callers who want to hold the meta explicitly. Neither needs
-//     binding to be used: [Collect] builds its own, and [KeyParser] is an override.
+//     supplying to be used: [Collect] builds its own, and [Program.WithParser] overrides it.
 //
 //   - [Deprecations] reports the deprecated aliases and identifiers this invocation actually
 //     used. It is a plain function over the [Context] and needs no service bound.

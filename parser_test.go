@@ -50,13 +50,17 @@ func TestParse_bindsInputs(t *testing.T) {
 
 // TestParse_viaRegistryGet exercises the full handler flow: the parser is bound to
 // the registry, retrieved via rtx.Get (ctx.Value style), then used to parse.
-func TestParse_viaRegistryGet(t *testing.T) {
+// The parser a handler reaches is the one the program supplied — and Context.Parser never
+// returns nil, so a handler that wants to parse argv itself does not have to ask whether one
+// exists, nor supply one to make the answer yes.
+func TestParse_viaContextParser(t *testing.T) {
 	rtx := NewContextFor(parserTestDef(), []string{"run", "alice"})
-	rtx.Bind(KeyParser, NewParser())
+	supplied := NewParser()
+	rtx.WithParser(supplied)
 
-	parser, ok := rtx.Value(KeyParser).(*Parser)
-	if !ok {
-		t.Fatal("parser not retrievable from registry")
+	parser := rtx.Parser()
+	if parser != supplied {
+		t.Fatalf("Parser() = %p, want the supplied %p", parser, supplied)
 	}
 	var in runInputs
 	if err := parser.Parse(rtx, &in); err != nil {
@@ -695,8 +699,8 @@ func TestDeprecations_needsNoParserBound(t *testing.T) {
 	}
 
 	rtx := NewContextFor(def, []string{"build"})
-	if _, ok := rtx.Get[*Parser](KeyParser); ok {
-		t.Fatal("a parser is bound; this test is meaningless unless the registry is empty")
+	if len(rtx.services) != 0 {
+		t.Fatal("something is bound; this test is meaningless unless the registry is empty")
 	}
 
 	deps := Deprecations(rtx)

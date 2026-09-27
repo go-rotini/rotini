@@ -211,9 +211,10 @@ var BindMeta = rotini.BindMeta{}
 // ProgramHandlers. Construct your program with this so the compiler verifies your handlers
 // satisfy ProgramHandlers; the command tree stays an unexported implementation detail.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	// BindMeta rides the registry so the per-channel input functions need only the Context.
+	// BindMeta is a DESCRIPTION of this program, like the command tree above it, so it
+	// travels as a typed option rather than as a registry entry — the registry is yours.
 	return rotini.NewProgram(definition, handlers).
-		Bind(rotini.KeyBindMeta, BindMeta)
+		WithBindMeta(BindMeta)
 }
 
 // handlers is the generated ProgramHandlers implementation: each method wires a command to its

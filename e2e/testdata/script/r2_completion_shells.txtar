@@ -248,13 +248,10 @@ func (*appStatusHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	app "example.com/shells/internal/cmd/app"
 )
 
 func main() {
 	app.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

@@ -48,11 +48,10 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		}
 {{- end}}
 {{- if .VersionFlag}}
-		// rotini.KeyVersion is the conventional registry key for the program's version;
-		// the entrypoint binds it from whatever the binary was built with.
+		// The entrypoint sets this with rotini.Program.WithVersion, from whatever the
+		// binary was built with.
 		if argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
-			version, _ := rtx.Get[string](rotini.KeyVersion)
-			fmt.Fprintln(rtx.Stdout, version)
+			fmt.Fprintln(rtx.Stdout, rtx.Version())
 			rtx.SignalExit(0)
 			return
 		}
@@ -85,8 +84,7 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, page)
 {{- else if .VersionOnly}}
 
-	version, _ := rtx.Get[string](rotini.KeyVersion)
-	fmt.Fprintln(rtx.Stdout, version)
+	fmt.Fprintln(rtx.Stdout, rtx.Version())
 {{- else if .PrintHelpWhenBare}}
 
 	// Nothing to do yet: show this command's own help rather than an empty run.

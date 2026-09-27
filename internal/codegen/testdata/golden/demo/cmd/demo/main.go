@@ -2,8 +2,6 @@
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	cmd "example.com/demo/internal/cmd/demo"
 )
 
@@ -14,6 +12,6 @@ var version = "0.0.0"
 
 func main() {
 	cmd.Program.
-		Bind(rotini.KeyVersion, version).
+		WithVersion(version).
 		Execute()
 }

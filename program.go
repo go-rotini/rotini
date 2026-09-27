@@ -95,6 +95,17 @@ type Program struct {
 	panicRecover    bool           // is a panic funneled or re-raised? See WithPanicRecover.
 	signalMode      signalTrapMode // see WithSignals / WithoutSignalHandling
 	signalSet       []os.Signal    // signals trapped when on; empty → trapSignals
+
+	// rotini's own seams. These are NOT registry entries: the registry is the user's
+	// namespace, and a value the runtime depends on has no business sharing a flat string
+	// keyspace with the program's own services, where a name collision or a wrong type
+	// would degrade an input channel in silence. See [Program.WithBindMeta].
+	meta      *BindMeta              // WithBindMeta: the generated descriptor; nil → none
+	binderFn  func(BindMeta) *Binder // WithBinder: nil → NewBinder
+	version   string                 // WithVersion
+	parser    *Parser                // WithParser: nil → a default, built per run
+	styler    *Styler                // WithStyler: nil → the program styles nothing
+	suggestor *Suggestor             // WithSuggestor: nil → the program suggests nothing
 }
 
 // NewProgram wires a generated command tree and its aggregate handler set to the runtime.
@@ -290,7 +301,7 @@ type Option func(*Program)
 //			rotini.Provide(tasks.StoreKey, store),
 //			rotini.Provide(tasks.ClientKey, client),
 //		).
-//		Bind(rotini.KeyVersion, version).
+//		WithVersion(version).
 //		Execute()
 //
 // Options are applied left to right, so a later one overwrites an earlier one binding the
@@ -307,10 +318,104 @@ func (p *Program) With(opts ...Option) *Program {
 	return p
 }
 
+// ── rotini's own seams ──────────────────────────────────────────────────────.
+//
+// Everything in this block used to be a string key in the same registry [Program.Bind] writes
+// to. That made rotini's internals indistinguishable from the program's own services: the keys
+// were bare words ("parser", "version", "binder"), nothing reserved them, and every one was
+// read with a discarded comma-ok — so a name collision, or a wrong type, silently produced a
+// zero value instead of an error. The worst of it was reachable by accident: binding a
+// [Binder] built from an empty [BindMeta], the only way it could be written without knowing
+// about a key the user had never seen, turned the configuration-file channel off in silence.
+//
+// They are typed options now, and the registry belongs to the user alone.
+
+// WithBindMeta supplies the generated binding descriptor — the configuration sources, the
+// env prefix and the stdin schemas [Collect] reconciles from. The generated NewProgram calls
+// it; a hand-built program calls it when it wants those channels.
+//
+// It is a description of the program, like [Definition], not a dependency — which is why it
+// travels as a typed option rather than as a registry entry.
+func (p *Program) WithBindMeta(meta BindMeta) *Program {
+	if p == nil {
+		return nil
+	}
+	p.meta = &meta
+	return p
+}
+
+// WithBinder replaces the binder [Collect] and the per-channel helpers use. fn receives the
+// program's [BindMeta], so a custom binder is built FROM the generated descriptor rather than
+// having to reproduce it:
+//
+//	p.WithBinder(func(meta rotini.BindMeta) *rotini.Binder {
+//		meta.Sources = append(meta.Sources, mySource)
+//		return rotini.NewBinder(meta)
+//	})
+//
+// That signature is the point. The previous shape — bind a *Binder under a key — meant the
+// caller had to find the generated descriptor and pass it themselves, and a caller who did not
+// silently lost every configuration file the spec declared. A nil fn is ignored.
+func (p *Program) WithBinder(fn func(BindMeta) *Binder) *Program {
+	if p != nil && fn != nil {
+		p.binderFn = fn
+	}
+	return p
+}
+
+// WithVersion sets what the program reports as its version — what a generated `version`
+// command and a `--version` flag print, read back with [Context.Version].
+//
+//	var version = "0.0.0" // go build -ldflags "-X main.version=1.2.3"
+//	cmd.Program.WithVersion(version).Execute()
+func (p *Program) WithVersion(version string) *Program {
+	if p != nil {
+		p.version = version
+	}
+	return p
+}
+
+// WithParser replaces the [Parser] returned by [Context.Parser] and used by the argv channel.
+// Parsing is never optional, so a program that sets nothing still has one; this overrides it.
+// A nil parser is ignored.
+func (p *Program) WithParser(parser *Parser) *Program {
+	if p != nil && parser != nil {
+		p.parser = parser
+	}
+	return p
+}
+
+// WithStyler supplies the [Styler] handlers reach through [Context.Styler]. Styling is opt-in:
+// a program that sets none reports none, and [Context.Styler] says so, so a handler renders
+// plain text rather than guessing. A nil styler is ignored.
+func (p *Program) WithStyler(styler *Styler) *Program {
+	if p != nil && styler != nil {
+		p.styler = styler
+	}
+	return p
+}
+
+// WithSuggestor supplies the [Suggestor] handlers reach through [Context.Suggestor].
+//
+// Suggestions are opt-in by design — rotini emits no "did you mean" of its own, ever — so a
+// program that sets none reports none and a handler that asks is told so. A nil suggestor is
+// ignored.
+func (p *Program) WithSuggestor(suggestor *Suggestor) *Program {
+	if p != nil && suggestor != nil {
+		p.suggestor = suggestor
+	}
+	return p
+}
+
 // Bind registers a service on the program's registry under key, overwriting any prior
 // binding. It is the dependency-injection seam: bind a real implementation in production or a
 // double in tests, and handler code retrieves either through [Context.Get] or
-// [Context.MustGet]. Binding [KeyParser] overrides the default [Parser].
+// [Context.MustGet].
+//
+// It is YOUR namespace. rotini's own seams — the binder, the parser, the styler, the
+// suggestor, the version, the generated [BindMeta] — are typed options on the Program, not
+// entries here, so a key you choose can never shadow one of them and a type you get wrong can
+// never degrade an input channel in silence.
 func (p *Program) Bind(key string, value any) *Program {
 	p.rtx.Bind(key, value)
 	return p
@@ -327,23 +432,10 @@ func (p *Program) newRunContext() *Context {
 		}
 	}
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
+	rtx.meta, rtx.binderFn = p.meta, p.binderFn
+	rtx.version, rtx.parser, rtx.styler, rtx.suggestor = p.version, p.parser, p.styler, p.suggestor
 	return rtx
 }
-
-// KeyVersion is the well-known registry key for the program's version string — the one
-// convention rotini offers for a value every CLI has and no framework should invent. Nothing
-// binds it: the entrypoint does, from whatever it was built with, and a handler reads it back.
-//
-//	// main.go
-//	var version = "0.0.0" // go build -ldflags "-X main.version=1.2.3"
-//	cmd.Program.Bind(rotini.KeyVersion, version).Execute()
-//
-//	// the version command's handler
-//	v, _ := rtx.Get[string](rotini.KeyVersion)
-//
-// Like [KeyParser] and the rest, it is a plain string so an untyped [Context.Bind] reaches it;
-// wrap it in a [Key] if you prefer the type carried with the name.
-const KeyVersion = "version"
 
 // Outcome is everything a run recorded, handed to the funnel in one value. Each slice is in
 // recording order, and this struct is the only way the records surface — [Context] keeps them
@@ -476,7 +568,7 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 // process is already gone by then and the return statement never runs, which is why the
 // generated entrypoint discards it:
 //
-//	cmd.Program.Bind(rotini.KeyVersion, version).Execute()   // the error cannot arrive here
+//	cmd.Program.WithVersion(version).Execute()   // the error cannot arrive here
 //
 // Supply a [Program.WithExit] that returns — a test capturing the code, a host embedding the
 // CLI — and it does:

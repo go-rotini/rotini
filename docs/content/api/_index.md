@@ -12,8 +12,8 @@ The generated entrypoint builds a `Program` and calls `Execute`, which resolves 
 
 {{< code title="program" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.
-	Bind(rotini.KeyVersion, version).                 // what --version reports
-	Bind(rotini.KeySuggestor, rotini.NewSuggestor()). // opt-in services
+	WithVersion(version).                    // what --version reports
+	WithSuggestor(rotini.NewSuggestor()).    // an opt-in seam
 	Execute()
 {{< /code >}}
 
@@ -27,7 +27,7 @@ But it arrives **only when the exit action returns**. Under the default, `os.Exi
 It is not the reporting channel: the funnel has already printed everything by then. The return is there so an embedder can *act* on the failure rather than re-derive it from a stream.
 {{< /alert >}}
 
-Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, and `With` for options that cannot be methods.
+Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, `WithVersion`/`WithParser`/`WithStyler`/`WithSuggestor`/`WithBindMeta`/`WithBinder`, and `With` for options that cannot be methods.
 
 ## Lifecycle
 
@@ -172,7 +172,22 @@ A discovered plugin may never shadow a declared command, so dropping a binary on
 
 ## Services
 
-Nothing is wired unless the generated code — or you — binds it. `KeyParser`, `KeyBinder`, `KeySuggestor`, `KeyStyler`, `KeyBindMeta` and `KeyVersion` name the built-ins: `Parser` (argv alone), `Binder` (`Collect`'s engine), `Suggestor` (string-distance matching), `Style`/`Styler` (SGR styling by intent, with `Strip`, `Width` and `Hyperlink`), and the version string `--version` reports.
+**The registry is yours alone.** `Bind` and `Provide` write to it; nothing rotini depends on lives there.
+
+That is a deliberate split. rotini's own seams used to be string keys in the same flat namespace — `"parser"`, `"version"`, `"binder"` — with nothing reserving them and every read discarding its comma-ok, so a name you chose or a type you got wrong degraded an input channel in silence. The worst case was reachable by accident: binding a `Binder` built from an empty `BindMeta`, the only way it could be written without knowing about a key you had never seen, switched the configuration-file channel off without a word.
+
+| rotini's seam | supply | read back |
+|---|---|---|
+| the generated descriptor | `WithBindMeta(meta)` — the generated `NewProgram` does this | internal |
+| the binder | `WithBinder(func(BindMeta) *Binder)` — it **receives** the descriptor | internal |
+| the version | `WithVersion(v)` | `rtx.Version()` |
+| the parser | `WithParser(p)` | `rtx.Parser()` — never nil |
+| the styler | `WithStyler(s)` | `rtx.Styler() (*Styler, bool)` |
+| the suggestor | `WithSuggestor(s)` | `rtx.Suggestor() (*Suggestor, bool)` |
+
+`WithBinder` takes a function of the descriptor rather than a `*Binder` for exactly that reason — an override now starts *from* what the spec declared instead of having to reproduce it.
+
+Styling and suggestion report `(value, ok)` because both are opt-in: rotini styles nothing and suggests nothing on its own, so "none supplied" is a decision worth telling a handler about rather than papering over with a default it never asked for.
 
 Your own services use a **typed key**, so the registry string and the type it was bound as cannot drift apart and a handler needs neither a literal nor an assertion:
 
@@ -195,7 +210,7 @@ cmd.Program.
 		rotini.Provide(StoreKey, NewStore()),
 		rotini.Provide(ClientKey, NewClient()),
 	).
-	Bind(rotini.KeyVersion, version).
+	WithVersion(version).
 	Execute()
 {{< /code >}}
 

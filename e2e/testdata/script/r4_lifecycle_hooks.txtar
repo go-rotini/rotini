@@ -257,13 +257,10 @@ func (*lifeJobWorkRunHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	life "example.com/life/internal/cmd/life"
 )
 
 func main() {
 	life.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

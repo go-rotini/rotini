@@ -236,7 +236,7 @@ The default funnel prints each channel with a severity label and exits non-zero 
 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.
-	Bind(rotini.KeyVersion, version).
+	WithVersion(version).
 	WithFunnel(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 		for _, err := range out.Errors {
 			fmt.Fprintf(rtx.Stderr, "todo: %v\n", err)
@@ -280,7 +280,7 @@ func run(t *testing.T, argv ...string) (stdout, stderr string, code int) {
 	var out, errs bytes.Buffer
 	code = -1
 	todo.NewProgram(todo.Handlers()).
-		Bind(rotini.KeyVersion, "0.0.0-test").
+		WithVersion("0.0.0-test").
 			WithArgs(argv).
 		WithStdin(strings.NewReader("")).
 		WithStdout(&out).
@@ -398,7 +398,7 @@ var version = "0.0.0" // overridden at build time
 
 func main() {
 	cmd.Program.
-		Bind(rotini.KeyVersion, version).
+		WithVersion(version).
 			Execute()
 }
 {{< /code >}}

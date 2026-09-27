@@ -832,7 +832,7 @@ func conformanceCases() []inputCase {
 			check: func(t *testing.T, rtx *Context, _ BindMeta) {
 				// Provenance: the Report knows WHICH layer won, and the full
 				// history beneath it.
-				rtx.Bind(KeyBindMeta, acmeMeta(filepath.Dir(mustGetwd(t))))
+				rtx.WithBindMeta(acmeMeta(filepath.Dir(mustGetwd(t))))
 				defaults, _ := Defaults[acDeployInputs](rtx)
 				files, _ := ParseFiles[acDeployInputs](rtx)
 				env, _ := ParseEnv[acDeployInputs](rtx)

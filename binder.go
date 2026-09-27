@@ -15,18 +15,13 @@ import (
 	"github.com/go-rotini/recon"
 )
 
-// KeyBinder is the registry key a [Binder] is bound under. Nothing needs to be bound for
-// [Collect] and the per-channel functions to work — they build one from [KeyBindMeta]. Binding
-// here replaces that default, the seam for extra recon sources or a test double.
-const KeyBinder = "binder"
-
 // Binder is the default multi-source input binder: it fills a command's typed inputs from
 // argv (via the embedded [Parser]) and from the non-argv channels — environment variables,
 // configuration files, and a leaf command's typed stdin payload — reconciled and decoded by
 // recon. It is the engine behind [Collect]; the à-la-carte per-channel surface is in
 // overlay.go.
 //
-//	binder := rtx.MustGet[*rotini.Binder](rotini.KeyBinder)
+//	binder := rotini.NewBinder(meta)
 //	var in WidgetCreateInputs
 //	if err := binder.Bind(rtx, &in); err != nil { /* handler owns it */ }
 //
@@ -39,12 +34,13 @@ type Binder struct {
 	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
 	envPrefix    string            // BindMeta.EnvPrefix: scopes derived env-var names
 	sources      []recon.Source    // BindMeta.Sources: custom sources, after the declared files
-}
 
-// KeyBindMeta is the registry key the generated NewProgram binds the CLI's [BindMeta]
-// descriptor under, so [ParseEnv], [ParseFiles], [ParseStdin] and friends can configure
-// themselves from the [Context] alone. A standalone Context opts in the same way.
-const KeyBindMeta = "bindmeta"
+	// described records whether a [BindMeta] was SUPPLIED, as distinct from supplied empty.
+	// A registry entry could never tell those apart — an absent key and a zero value read
+	// identically — which is why "no configuration sources" and "nobody wired the
+	// descriptor" produced the same silent result. See [Binder.checkDescribed].
+	described bool
+}
 
 // binderFor builds a Binder from the Context's bound BindMeta, or the zero meta when none is
 // bound, so a CLI with no config files, stdin schemas or env prefix needs no ceremony.
@@ -52,18 +48,27 @@ func binderFor(rtx *Context) *Binder {
 	if rtx == nil {
 		return NewBinder(BindMeta{}) // the channel layer reports the nil context as a ParseError
 	}
-	// A Binder bound under KeyBinder wins, so binding is an override rather than a
-	// prerequisite.
-	if b, ok := rtx.Get[*Binder](KeyBinder); ok && b != nil {
-		return b
+	meta, described := rtx.bindMeta()
+	// A [Program.WithBinder] function wins. It receives the meta rather than having to find
+	// it, so an override cannot accidentally discard the configuration sources the spec
+	// declared — which is what binding a Binder under a registry key used to allow.
+	if fn := rtx.binderFn; fn != nil {
+		if b := fn(meta); b != nil {
+			b.described = described
+			return b
+		}
 	}
-	meta, _ := rtx.Get[BindMeta](KeyBindMeta)
-	return NewBinder(meta)
+	b := NewBinder(meta)
+	b.described = described
+	return b
 }
 
 // NewBinder returns the default binder, configured from the generated BindMeta descriptor.
 func NewBinder(meta BindMeta) *Binder {
-	return &Binder{parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas, envPrefix: meta.EnvPrefix, sources: meta.Sources}
+	return &Binder{
+		parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas,
+		envPrefix: meta.EnvPrefix, sources: meta.Sources, described: true,
+	}
 }
 
 // Bind fills out — a non-nil pointer to the generated inputs struct — from every wired
@@ -123,6 +128,10 @@ func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 		return internalBind(channelEnv, "", "could not build the environment registry", err)
 	}
 	defer envReg.Close()
+
+	if err := b.checkDescribed(v); err != nil {
+		return err
+	}
 
 	cfgRegs, err := b.configRegs(chain, overrides)
 	if err != nil {
@@ -492,6 +501,46 @@ func flagWasSet(argv, identifiers []string) bool {
 			name = before
 		}
 		if slices.Contains(identifiers, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkDescribed refuses to fill a configuration channel for a program that never said where
+// configuration lives.
+//
+// A command whose inputs struct carries a Config sub-struct declared `config:` inputs in its
+// spec. Those resolve out of the sources in [BindMeta], which the generated NewProgram
+// supplies — so reaching here with no descriptor at all means the program was assembled
+// without it, and every configuration value would come back as its zero with nothing said.
+// That is a wiring mistake by whoever built the program, not something an end user can cause
+// or correct, so it is reported as one.
+//
+// Supplying an EMPTY descriptor is a different statement and stays legal: it says "this
+// program has no configuration sources", which is a choice. Telling the two apart is only
+// possible because the descriptor travels as a typed option rather than as a registry entry,
+// where absent and zero are the same value.
+func (b *Binder) checkDescribed(v reflect.Value) error {
+	if b.described || !hasConfigChannel(v) {
+		return nil
+	}
+	return &WiringError{Msg: "rotini: this command declares config: inputs, but the program " +
+		"was built without a BindMeta — call Program.WithBindMeta (the generated NewProgram " +
+		"does) so the binder knows where configuration lives"}
+}
+
+// hasConfigChannel reports whether any command frame in the inputs struct declares a
+// non-empty Config sub-struct.
+func hasConfigChannel(v reflect.Value) bool {
+	if v.Kind() != reflect.Struct {
+		return false
+	}
+	for _, ci := range v.Fields() {
+		if ci.Kind() != reflect.Struct {
+			continue
+		}
+		if cfg := ci.FieldByName("Config"); cfg.IsValid() && cfg.Kind() == reflect.Struct && cfg.NumField() > 0 {
 			return true
 		}
 	}

@@ -158,13 +158,10 @@ func (*askWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	ask "example.com/ask/internal/cmd/ask"
 )
 
 func main() {
 	ask.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

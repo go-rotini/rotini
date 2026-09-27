@@ -73,8 +73,6 @@ func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	demo "example.com/demo/internal/cmd/demo"
 )
 
@@ -84,7 +82,6 @@ var version = "9.9.9"
 
 func main() {
 	demo.Program.
-		Bind(rotini.KeyVersion, version).
-		Bind(rotini.KeyParser, rotini.NewParser()).
+		WithVersion(version).
 		Execute()
 }

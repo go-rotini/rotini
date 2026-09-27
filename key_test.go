@@ -200,7 +200,7 @@ func TestProvide_chains(t *testing.T) {
 			Provide(storeKey, &store{name: "disk"}),
 			Provide(clientKey, &client{id: 7}),
 		).
-		Bind(KeyVersion, "9.9.9").
+		WithVersion("9.9.9").
 		Run([]string{"run", "x"})
 	if err != nil || code != 0 {
 		t.Fatalf("Run = (%d, %v), want (0, nil)", code, err)

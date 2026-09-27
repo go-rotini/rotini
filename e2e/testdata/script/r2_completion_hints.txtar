@@ -164,13 +164,10 @@ func (*hintsOpenHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	hints "example.com/hints/internal/cmd/hints"
 )
 
 func main() {
 	hints.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }

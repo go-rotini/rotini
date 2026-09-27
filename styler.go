@@ -11,10 +11,6 @@ import (
 // renders text by intent so a CLI's look lives in one place. Nothing here detects anything —
 // see detect.go for the opt-in helpers a program uses to decide.
 
-// KeyStyler is the conventional registry key a program binds a [Styler] under, so
-// handlers reach one shared set of named styles with [MustGet].
-const KeyStyler = "styler"
-
 const reset = "\x1b[0m"
 
 // Styler renders text by intent rather than appearance: a program defines what "warning" or

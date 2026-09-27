@@ -124,14 +124,11 @@ func (*rootHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	root "example.com/compose/internal/cmd/root"
 )
 
 func main() {
 	root.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }
 -- cmd/grand/.rotini.spec.yaml --

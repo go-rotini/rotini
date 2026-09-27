@@ -129,13 +129,10 @@ func (*dflHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 package main
 
 import (
-	"github.com/go-rotini/rotini"
-
 	dfl "example.com/dfl/internal/cmd/dfl"
 )
 
 func main() {
 	dfl.Program.
-		Bind(rotini.KeyParser, rotini.NewParser()).
 		Execute()
 }
