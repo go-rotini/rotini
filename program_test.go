@@ -1374,3 +1374,39 @@ func TestPanicKnobs_allFourQuadrants(t *testing.T) {
 		})
 	}
 }
+
+// TestDispatch_nilHandlersIsAWiringFault: NewProgram's handlers parameter is `any`, and the
+// generated NewProgram takes an interface — so NewProgram(nil) compiles, and used to crash out
+// of Run with `reflect: call of reflect.Value.MethodByName on zero Value`.
+//
+// Two promises were broken at once: the comment at that line says "a wiring failure is
+// detected and routed as a fault, never panicked", and the error taxonomy says rotini's own
+// messages never leak internals. A reflect panic escaping a public API is both.
+func TestDispatch_nilHandlersIsAWiringFault(t *testing.T) {
+	var out, errs bytes.Buffer
+	p := NewProgram(testDef(), nil)
+	p.stdout, p.stderr = &out, &errs
+
+	code, err := func() (c int, e error) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("Run panicked instead of reporting a fault: %v", r)
+			}
+		}()
+		return p.Run([]string{"run", "x"})
+	}()
+
+	if code == 0 {
+		t.Error("exit code = 0, want non-zero for a program with no handlers")
+	}
+	var we *WiringError
+	if !errors.As(err, &we) {
+		t.Errorf("error is %T (%v), want a *WiringError", err, err)
+	}
+	if s := errs.String(); strings.Contains(s, "reflect") || strings.Contains(s, "MethodByName") {
+		t.Errorf("the reported message leaks internals: %q", s)
+	}
+	if !strings.Contains(errs.String(), "nil handlers") {
+		t.Errorf("stderr = %q, want it to name the actual mistake", errs.String())
+	}
+}

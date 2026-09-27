@@ -92,12 +92,6 @@ func TestKey_nameAndString(t *testing.T) {
 	}
 }
 
-func TestProvide_nilProgram(t *testing.T) {
-	if got := demoStoreKey.Provide(nil, memDemoStore{}); got != nil {
-		t.Error("Provide on a nil program should return nil rather than panicking")
-	}
-}
-
 // A key declared over an INTERFACE accepts any value assignable to it — the shape a
 // real CLI has, where a constructor returns a concrete type.
 func TestKey_acceptsAssignableConcreteType(t *testing.T) {
@@ -227,8 +221,10 @@ func TestProvide_lastWins(t *testing.T) {
 	}
 }
 
-// TestWith_toleratesNothing covers the degenerate inputs, so a caller assembling an Option
-// slice conditionally does not have to guard every element.
+// TestWith_toleratesNothing covers the degenerate OPTION inputs, so a caller assembling an
+// option slice conditionally does not have to guard every element.
+//
+// A nil *Program is deliberately NOT in that set: see TestProgram_nilReceiverPanicsAtTheCall.
 func TestWith_toleratesNothing(t *testing.T) {
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
 	if p.With() != p {
@@ -237,9 +233,32 @@ func TestWith_toleratesNothing(t *testing.T) {
 	if p.With(nil) != p {
 		t.Error("With(nil) must skip the nil option and return the same program")
 	}
-	var nilProgram *Program
-	if nilProgram.With(Provide(NewKey[int]("p2.nil"), 1)) != nil {
-		t.Error("With on a nil program must return nil, as Key.Provide does")
+	if p.With(nil, Provide(NewKey[int]("p2.mixed"), 1), nil) != p {
+		t.Error("With must skip nil options interleaved with real ones")
+	}
+}
+
+// TestProgram_nilReceiverPanicsAtTheCall pins the contract the whole surface follows: a nil
+// *Program is a caller bug, and every method dereferences rather than checking.
+//
+// Two of these methods used to return the nil receiver instead, which is worse: the nil then
+// travels down the chain and panics somewhere later, at a call that was not the mistake.
+func TestProgram_nilReceiverPanicsAtTheCall(t *testing.T) {
+	for name, call := range map[string]func(*Program){
+		"With":         func(p *Program) { p.With(Provide(NewKey[int]("x"), 1)) },
+		"WithBindMeta": func(p *Program) { p.WithBindMeta(BindMeta{}) },
+		"WithVersion":  func(p *Program) { p.WithVersion("1") },
+		"Bind":         func(p *Program) { p.Bind("k", 1) },
+		"Key.Provide":  func(p *Program) { NewKey[int]("x").Provide(p, 1) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Error("no panic: the nil receiver was carried onward instead of failing here")
+				}
+			}()
+			call(nil)
+		})
 	}
 }
 

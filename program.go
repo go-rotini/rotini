@@ -68,13 +68,36 @@ func canceledExitCode(ctx context.Context) int {
 
 // Program is a rotini CLI ready to run: the compiled command tree ([Definition]), the
 // handlers that implement it, and the seams around them. The generated entrypoint builds one
-// with [NewProgram] and calls [Program.Execute]; streams, the exit action, signal handling,
-// the outcome funnel, and the resolve and lifecycle phases are each optional overrides. Every
-// With method returns the receiver, so they chain.
+// with [NewProgram] and calls [Program.Execute]. Every With method returns the receiver, so
+// they chain.
+//
+// The surface groups into seven jobs, and nothing outside them is worth hunting for:
+//
+//   - run it — [Program.Execute] exits, [Program.Run] returns the code, [Program.RunContext]
+//     scopes one invocation
+//   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr]
+//   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
+//     [Program.WithSignals], [Program.WithoutSignalHandling]
+//   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithFunnel]
+//   - YOUR dependencies — [Program.Bind] for a key you name, [Program.With] with [Provide]
+//     for a type-checked one
+//   - rotini's own seams — [Program.WithVersion], [Program.WithParser], [Program.WithStyler],
+//     [Program.WithSuggestor], and the two the generated code handles for you,
+//     [Program.WithBindMeta] and [Program.WithBinder]
+//   - replace a phase — [Program.WithResolver], [Program.WithLifecycle]
 //
 // A Program is reusable: [Program.Run] dispatches one invocation and returns instead of
 // exiting, giving each call a fresh [Context]. That is what lets a [REPL], a [StdioServer] or
 // a test drive the same program many times.
+//
+// Configure before the first run. Every With method and [Program.Bind] mutates the Program
+// without synchronization, so a concurrent host finishes configuring, then dispatches. Applied
+// between sequential runs they simply take effect on the next one.
+//
+// A nil *Program is a caller bug, not a state to handle: [NewProgram] never returns one, and
+// every method here dereferences rather than checking. That is deliberate — returning the nil
+// receiver instead would carry it silently down the chain and panic somewhere later, which is
+// strictly harder to debug than panicking at the call that was wrong.
 //
 // The zero value is not usable; start from [NewProgram].
 type Program struct {
@@ -307,9 +330,6 @@ type Option func(*Program)
 // Options are applied left to right, so a later one overwrites an earlier one binding the
 // same key — the same rule [Program.Bind] follows. A nil Option is skipped.
 func (p *Program) With(opts ...Option) *Program {
-	if p == nil {
-		return nil
-	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(p)
@@ -337,9 +357,6 @@ func (p *Program) With(opts ...Option) *Program {
 // It is a description of the program, like [Definition], not a dependency — which is why it
 // travels as a typed option rather than as a registry entry.
 func (p *Program) WithBindMeta(meta BindMeta) *Program {
-	if p == nil {
-		return nil
-	}
 	p.meta = &meta
 	return p
 }
@@ -357,7 +374,7 @@ func (p *Program) WithBindMeta(meta BindMeta) *Program {
 // caller had to find the generated descriptor and pass it themselves, and a caller who did not
 // silently lost every configuration file the spec declared. A nil fn is ignored.
 func (p *Program) WithBinder(fn func(BindMeta) *Binder) *Program {
-	if p != nil && fn != nil {
+	if fn != nil {
 		p.binderFn = fn
 	}
 	return p
@@ -369,9 +386,7 @@ func (p *Program) WithBinder(fn func(BindMeta) *Binder) *Program {
 //	var version = "0.0.0" // go build -ldflags "-X main.version=1.2.3"
 //	cmd.Program.WithVersion(version).Execute()
 func (p *Program) WithVersion(version string) *Program {
-	if p != nil {
-		p.version = version
-	}
+	p.version = version
 	return p
 }
 
@@ -379,7 +394,7 @@ func (p *Program) WithVersion(version string) *Program {
 // Parsing is never optional, so a program that sets nothing still has one; this overrides it.
 // A nil parser is ignored.
 func (p *Program) WithParser(parser *Parser) *Program {
-	if p != nil && parser != nil {
+	if parser != nil {
 		p.parser = parser
 	}
 	return p
@@ -389,7 +404,7 @@ func (p *Program) WithParser(parser *Parser) *Program {
 // a program that sets none reports none, and [Context.Styler] says so, so a handler renders
 // plain text rather than guessing. A nil styler is ignored.
 func (p *Program) WithStyler(styler *Styler) *Program {
-	if p != nil && styler != nil {
+	if styler != nil {
 		p.styler = styler
 	}
 	return p
@@ -401,7 +416,7 @@ func (p *Program) WithStyler(styler *Styler) *Program {
 // program that sets none reports none and a handler that asks is told so. A nil suggestor is
 // ignored.
 func (p *Program) WithSuggestor(suggestor *Suggestor) *Program {
-	if p != nil && suggestor != nil {
+	if suggestor != nil {
 		p.suggestor = suggestor
 	}
 	return p
@@ -485,6 +500,12 @@ type FunnelFunc func(ctx context.Context, rtx *Context, out Outcome)
 // The default prints info → warning → error → panic → success (infos and successes to stdout,
 // the rest to stderr) and applies an exit floor: a recorded error or panic exits non-zero
 // unless a handler already set a deliberate code. A custom funnel owns the exit entirely.
+//
+// A nil fn RESTORES the default, which is why this one seam accepts nil rather than ignoring
+// it: "report the way rotini does" is a thing a host may want back, and there is no other way
+// to ask for it. The seams that replace a value rather than a behavior — [Program.WithStdout],
+// [Program.WithResolver] and the rest — ignore nil instead, so a conditional caller cannot
+// erase a stream or a phase by passing one.
 func (p *Program) WithFunnel(fn FunnelFunc) *Program {
 	p.funnelFn = fn
 	return p
@@ -839,6 +860,17 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, out Outcome) {
 // goroutine, so rtx stays single-writer.
 func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (int, error) {
 	hv := reflect.ValueOf(p.handlers)
+	if !hv.IsValid() {
+		// A nil handlers value. reflect.ValueOf(nil) is the ZERO Value, and MethodByName on
+		// it panics with a reflect-internal message — so the promise one line below was
+		// broken for exactly this input, and the panic escaped Run rather than reaching the
+		// funnel. nil is the one thing a caller can pass that is not a wiring mistake it can
+		// see: the generated NewProgram takes an interface, so NewProgram(nil) compiles.
+		rtx.recordFault(asFault(&WiringError{
+			Msg: "no handlers: NewProgram was given a nil handlers value",
+		}))
+		return p.settle(ctx, rtx)
+	}
 	handlers := make([]Handlers, len(chain))
 	for i, f := range chain {
 		// A wiring failure is detected and routed as a fault, never panicked.

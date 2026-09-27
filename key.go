@@ -73,8 +73,5 @@ func Provide[T any](k Key[T], value T) Option {
 // any value assignable to T is accepted, so a constructor returning a concrete type satisfies
 // a key declared over an interface.
 func (k Key[T]) Provide(p *Program, value T) *Program {
-	if p == nil {
-		return nil
-	}
 	return p.Bind(k.name, value)
 }
