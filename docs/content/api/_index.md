@@ -44,7 +44,7 @@ One per invocation, passed to every hook.
 | | |
 |---|---|
 | `rtx.Args` | the raw argv |
-| `rtx.Chain()` | the resolved command path, root → leaf |
+| `rtx.Chain()` | the resolved command path, root → leaf — a **copy**, so editing it cannot reach the run |
 | `rtx.Stdin` `rtx.Stdout` `rtx.Stderr` | the program's streams — write through these, never `os.Std*`, and your handler tests cleanly |
 | `rtx.Command()` / `rtx.Path()` | the command being run, and its full path |
 | `rtx.Bind` / `rtx.Get[T]` / `rtx.MustGet[T]` | the service registry (generic methods, Go 1.27) |

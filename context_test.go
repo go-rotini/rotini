@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -165,12 +166,6 @@ func TestContext_RecordError_api(t *testing.T) {
 	if rtx.copyErrors()[0] != e1 {
 		t.Error("Errors() returned the live slice; want a copy")
 	}
-	// Nil receiver is safe.
-	var nilRtx *Context
-	nilRtx.RecordError(e1)
-	if nilRtx.copyErrors() != nil {
-		t.Error("nil Context Errors() should be nil")
-	}
 }
 
 // TestContext_RecordWarning_api mirrors the error API for the warning channel:
@@ -197,11 +192,6 @@ func TestContext_RecordWarning_api(t *testing.T) {
 	if rtx.copyErrors() != nil {
 		t.Errorf("RecordWarning leaked into Errors() = %v", rtx.copyErrors())
 	}
-	var nilRtx *Context
-	nilRtx.RecordWarning(w1)
-	if nilRtx.copyWarnings() != nil {
-		t.Error("nil Context Warnings() should be nil")
-	}
 }
 
 // TestContext_RecordSuccess_api mirrors it for the success channel; an empty
@@ -224,11 +214,6 @@ func TestContext_RecordSuccess_api(t *testing.T) {
 	}
 	if rtx.copyErrors() != nil || rtx.copyWarnings() != nil {
 		t.Error("RecordSuccess leaked into Errors()/Warnings()")
-	}
-	var nilRtx *Context
-	nilRtx.RecordSuccess("x")
-	if nilRtx.copySuccesses() != nil {
-		t.Error("nil Context Successes() should be nil")
 	}
 }
 
@@ -418,13 +403,6 @@ func TestContext_Failed(t *testing.T) {
 			t.Error("Failed() = false after a panic — the case a rollback most needs")
 		}
 	})
-	t.Run("a nil context has not failed", func(t *testing.T) {
-		t.Parallel()
-		var rtx *Context
-		if rtx.Failed() {
-			t.Error("Failed() = true on a nil context")
-		}
-	})
 }
 
 // TestContext_Halt covers stopping the lifecycle without claiming an exit code.
@@ -485,14 +463,162 @@ func TestContext_Halt(t *testing.T) {
 		}
 	})
 
-	t.Run("no-op in the funnel and on a nil context", func(t *testing.T) {
+	t.Run("no-op in the funnel", func(t *testing.T) {
 		t.Parallel()
 		rtx := &Context{funnelStage: true}
 		rtx.Halt()
 		if rtx.stopped {
 			t.Error("Halt stopped a lifecycle that had already finished")
 		}
-		var nilRtx *Context
-		nilRtx.Halt() // must not panic
+		// A nil receiver is NOT part of this contract — it panics, like every other
+		// method. See TestContext_nilReceiverPanicsAtTheCall.
 	})
+}
+
+// TestContext_seamAccessorsAreRaceFree pins that every seam accessor reads under the same lock
+// its setter writes under.
+//
+// Version() did not: it read rtx.version unlocked while WithVersion wrote it under the write
+// lock, which -race reported the moment a handler goroutine touched both. The Context is
+// explicitly designed for concurrent access from goroutines a handler spawns — that is why
+// every Record* method is mutex-guarded — so an unsynchronized accessor is a defect, not a
+// theoretical one.
+func TestContext_seamAccessorsAreRaceFree(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			rtx.WithVersion("1.2.3").
+				WithParser(NewParser()).
+				WithStyler(NewStyler()).
+				WithSuggestor(NewSuggestor())
+		}()
+		go func() {
+			defer wg.Done()
+			_ = rtx.Version()
+			_ = rtx.Parser()
+			_, _ = rtx.Styler()
+			_, _ = rtx.Suggestor()
+		}()
+	}
+	wg.Wait()
+}
+
+// TestContext_chainIsACopy pins S2: the chain a handler receives cannot reach the run.
+//
+// Chain() used to return the live slice with a doc asking callers to "treat the slice as
+// read-only" — a request, not a guarantee. One assignment through it rewrote the invocation:
+//
+//	Path() before="app run"   after mutating what Chain() returned="app HIJACKED"
+//
+// and with it Command(), the binder's leaf anchoring and configuration-file scoping, silently,
+// for the rest of the run. Every other internal slice the Context hands out is copied; this
+// was the one that was not.
+func TestContext_chainIsACopy(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{{Name: "run", Handler: "AppRun"}},
+	}
+	rtx := NewContextFor(def, []string{"run"})
+
+	want := rtx.Path()
+	if want != "app run" {
+		t.Fatalf("Path() = %q, want %q — the fixture is wrong", want, "app run")
+	}
+
+	// Every mutation a handler could plausibly make to the slice it was handed.
+	got := rtx.Chain()
+	got[1].Name = "HIJACKED"
+	got[0], got[1] = got[1], got[0]
+	got = got[:1]
+	_ = got
+
+	if rtx.Path() != want {
+		t.Errorf("Path() = %q after mutating the returned slice, want %q", rtx.Path(), want)
+	}
+	if rtx.Command().Name != "run" {
+		t.Errorf("Command().Name = %q, want run", rtx.Command().Name)
+	}
+	if len(rtx.Chain()) != 2 {
+		t.Errorf("Chain() length = %d, want 2 — reslicing the copy must not shorten the run's own", len(rtx.Chain()))
+	}
+}
+
+// Two calls hand back independent slices, so one handler's edits cannot reach another's.
+func TestContext_chainCopiesAreIndependent(t *testing.T) {
+	rtx := NewContextFor(Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{{Name: "run", Handler: "AppRun"}},
+	}, []string{"run"})
+
+	a, b := rtx.Chain(), rtx.Chain()
+	a[0].Name = "changed"
+	if b[0].Name == "changed" {
+		t.Error("two Chain() results share backing storage")
+	}
+}
+
+// TestContext_nilReceiverPanicsAtTheCall pins S3: every exported method dereferences, the
+// same rule Program follows.
+//
+// Half of them used to tolerate a nil receiver and half did not, so rtx.Chain() answered while
+// rtx.Path() panicked — three views of the same data, two behaviours. Tolerating it is the
+// worse of the two: a nil that reports "nothing recorded" or "no chain" hides the mistake and
+// surfaces it later, at a call that was not wrong.
+//
+// rotini's own entry points that ACCEPT a Context from a caller still check it; the guard
+// belongs at that boundary, not on every method behind it — see
+// TestContext_boundaryStillRejectsNil.
+func TestContext_nilReceiverPanicsAtTheCall(t *testing.T) {
+	for name, call := range map[string]func(*Context){
+		"Chain":         func(rtx *Context) { _ = rtx.Chain() },
+		"Command":       func(rtx *Context) { _ = rtx.Command() },
+		"Path":          func(rtx *Context) { _ = rtx.Path() },
+		"Value":         func(rtx *Context) { _ = rtx.Value("k") },
+		"Failed":        func(rtx *Context) { _ = rtx.Failed() },
+		"Halt":          func(rtx *Context) { rtx.Halt() },
+		"SignalExit":    func(rtx *Context) { rtx.SignalExit(1) },
+		"Exit":          func(rtx *Context) { rtx.Exit(1) },
+		"RecordInfo":    func(rtx *Context) { rtx.RecordInfo("x") },
+		"RecordError":   func(rtx *Context) { rtx.RecordError(errors.New("x")) },
+		"RecordWarning": func(rtx *Context) { rtx.RecordWarning(errors.New("x")) },
+		"RecordSuccess": func(rtx *Context) { rtx.RecordSuccess("x") },
+		"Version":       func(rtx *Context) { _ = rtx.Version() },
+		"Parser":        func(rtx *Context) { _ = rtx.Parser() },
+		"Styler":        func(rtx *Context) { _, _ = rtx.Styler() },
+		"Suggestor":     func(rtx *Context) { _, _ = rtx.Suggestor() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Error("no panic: the nil receiver was tolerated, hiding the caller's mistake")
+				}
+			}()
+			call(nil)
+		})
+	}
+}
+
+// TestContext_boundaryStillRejectsNil is the other half of the contract: a function that takes
+// a Context from a caller reports a nil one rather than panicking, because there the nil is an
+// argument to validate rather than a receiver that should never have been nil.
+func TestContext_boundaryStillRejectsNil(t *testing.T) {
+	if got := Deprecations(nil); got != nil {
+		t.Errorf("Deprecations(nil) = %v, want nil", got)
+	}
+
+	var in struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+		}
+	}
+	if err := NewParser().Parse(nil, &in); err == nil {
+		t.Error("Parser.Parse(nil, …) returned no error")
+	} else if !strings.Contains(err.Error(), "nil context") {
+		t.Errorf("Parse(nil) error = %q, want it to name the nil context", err)
+	}
 }

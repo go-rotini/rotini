@@ -6,6 +6,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -40,8 +41,21 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 // retrieve it with [Context.Get], [Context.MustGet] or the raw [Context.Value]. Bindings last
 // the lifetime of the Context. Input parsing is opt-in — the runtime itself never parses flags.
 //
-// A Context is safe for concurrent registry access. Always pass it as a pointer; it must not
-// be copied.
+// A Context is safe for concurrent registry access — a handler may read it, record outcomes
+// and reach its seams from goroutines it spawned. Always pass it as a pointer; it must not be
+// copied.
+//
+// A nil *Context is a caller bug, not a state to handle: the runtime always hands a real one
+// to every hook, and [NewContextFor] never returns nil, so every method here dereferences
+// rather than checking. That is the same rule [Program] follows, and for the same reason —
+// half these methods used to tolerate nil and half did not, which meant rtx.Chain() answered
+// while rtx.Path() panicked, on three views of the same data. Tolerating it is the worse of
+// the two: a nil that reports "nothing recorded" or "no chain" hides the mistake and surfaces
+// it somewhere later, at a call that was not wrong.
+//
+// rotini's own entry points that ACCEPT a Context from a caller — [Deprecations], [Collect]
+// and the per-channel functions — still check it, and report a nil one as an error rather than
+// panicking. The guard belongs at the boundary, not on every method behind it.
 type Context struct {
 	mu sync.RWMutex
 
@@ -157,13 +171,21 @@ func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 }
 
 // Chain returns the resolved command path for this invocation, root → leaf. The [Parser] and
-// [Usage] read it to bind inputs and render help against the command whose handler ran. Treat
-// the slice as read-only.
+// [Usage] read it to bind inputs and render help against the command whose handler ran.
+//
+// The slice is a COPY, so reordering, reslicing or replacing a frame is a caller's own
+// business and cannot reach the run. It used to be the live slice with a doc asking callers to
+// treat it as read-only, which is a request rather than a guarantee: one `chain[1].Name = …`
+// silently rewrote [Context.Path], [Context.Command], the binder's leaf anchoring and
+// configuration-file scoping for the rest of the run. Every other internal slice the Context
+// hands out — the outcome channels — has always been copied for the same reason.
+//
+// The copy is one level deep, which is the boundary that exists to defend. A frame's Flags,
+// Arguments and Commands are the [Definition]'s own slices, shared program-wide and read-only
+// across every run by the same convention that lets one Program serve a REPL; Chain neither
+// widens nor narrows that.
 func (rtx *Context) Chain() []ResolvedCommand {
-	if rtx == nil {
-		return nil
-	}
-	return rtx.chain
+	return slices.Clone(rtx.chain)
 }
 
 // Command returns the command this invocation resolved to — the leaf of the chain, whose Run
@@ -201,9 +223,6 @@ func (rtx *Context) Path() string {
 // mirroring [context.Context.Value]. It never panics. Prefer the typed [Context.Get] or
 // [Context.MustGet].
 func (rtx *Context) Value(key string) any {
-	if rtx == nil {
-		return nil
-	}
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	return rtx.services[key]
@@ -236,7 +255,7 @@ func (rtx *Context) Value(key string) any {
 //
 // Like SignalExit it is a no-op inside the funnel, where the lifecycle has already run.
 func (rtx *Context) Halt() {
-	if rtx == nil || rtx.funnelStage {
+	if rtx.funnelStage {
 		return
 	}
 	rtx.stopped = true
@@ -251,7 +270,7 @@ func (rtx *Context) Halt() {
 // It is a no-op inside the funnel, where the lifecycle has already run; [Context.Exit] is how
 // the funnel sets the code.
 func (rtx *Context) SignalExit(code int) {
-	if rtx == nil || rtx.funnelStage {
+	if rtx.funnelStage {
 		return
 	}
 	rtx.stopped = true
@@ -272,9 +291,6 @@ func (rtx *Context) SignalExit(code int) {
 // Inside the funnel, Exit overrides any code the lifecycle set; during the lifecycle it keeps
 // first-non-zero-wins.
 func (rtx *Context) Exit(code int) {
-	if rtx == nil {
-		return
-	}
 	rtx.stopped = true
 	rtx.exitNow = true
 	if rtx.funnelStage {
@@ -291,7 +307,7 @@ func (rtx *Context) Exit(code int) {
 // it neither prints nor stops the lifecycle: the funnel receives the infos once the run
 // settles. An empty msg is ignored.
 func (rtx *Context) RecordInfo(msg string) {
-	if rtx == nil || msg == "" {
+	if msg == "" {
 		return
 	}
 	rtx.mu.Lock()
@@ -329,7 +345,7 @@ func (rtx *Context) copyInfos() []string {
 //	    return
 //	}
 func (rtx *Context) RecordError(err error) {
-	if rtx == nil || err == nil {
+	if err == nil {
 		return
 	}
 	rtx.mu.Lock()
@@ -356,7 +372,7 @@ func (rtx *Context) copyErrors() []error {
 // a skipped item. It is an error value so it can be typed and branched on with errors.As and
 // so secrets stay redacted, but it never raises the exit code. A nil warn is ignored.
 func (rtx *Context) RecordWarning(warn error) {
-	if rtx == nil || warn == nil {
+	if warn == nil {
 		return
 	}
 	rtx.mu.Lock()
@@ -370,7 +386,7 @@ func (rtx *Context) RecordWarning(warn error) {
 // The funnel reports after the lifecycle settles, so recorded outcomes appear after anything a
 // handler wrote directly to [Context.Stdout] during Run. See the Ordering section on [Printer].
 func (rtx *Context) RecordSuccess(msg string) {
-	if rtx == nil || msg == "" {
+	if msg == "" {
 		return
 	}
 	rtx.mu.Lock()
@@ -449,9 +465,6 @@ func (rtx *Context) copyFaults() []*PanicError {
 // have recorded an error — but the answer only grows over a run, so a false is never a promise
 // about what comes next.
 func (rtx *Context) Failed() bool {
-	if rtx == nil {
-		return false
-	}
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	return len(rtx.recorded) > 0 || len(rtx.faults) > 0
@@ -550,9 +563,8 @@ func (rtx *Context) WithSuggestor(suggestor *Suggestor) *Context {
 // Version is what the program reports as its version, from [Program.WithVersion]. It is "" if
 // the entrypoint set none, which is the honest answer rather than a guess.
 func (rtx *Context) Version() string {
-	if rtx == nil {
-		return ""
-	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
 	return rtx.version
 }
 
@@ -562,9 +574,6 @@ func (rtx *Context) Version() string {
 // entrypoint supplied one — so a handler that wants to parse argv itself should not have to
 // ask whether one exists, nor bind one to make the answer yes.
 func (rtx *Context) Parser() *Parser {
-	if rtx == nil {
-		return NewParser()
-	}
 	rtx.mu.RLock()
 	p := rtx.parser
 	rtx.mu.RUnlock()
@@ -584,9 +593,6 @@ func (rtx *Context) Parser() *Parser {
 //		styler.Fprintln(rtx.Stdout, "heading", title)
 //	}
 func (rtx *Context) Styler() (*Styler, bool) {
-	if rtx == nil {
-		return nil, false
-	}
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	return rtx.styler, rtx.styler != nil
@@ -597,9 +603,6 @@ func (rtx *Context) Styler() (*Styler, bool) {
 // Like styling, suggestion is opt-in: rotini emits no "did you mean" of its own, so a program
 // that wants one says so, and a handler that asks is told plainly when it did not.
 func (rtx *Context) Suggestor() (*Suggestor, bool) {
-	if rtx == nil {
-		return nil, false
-	}
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	return rtx.suggestor, rtx.suggestor != nil
