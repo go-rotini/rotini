@@ -50,7 +50,7 @@ type Handlers interface {
 }
 
 // The four Default* types below have empty method bodies, so `go tool cover` reports them at
-// 0.0% forever: there are no statements to count. TestDefaultHooksAreNoOps executes all four
+// 0.0% forever: there are no statements to count. TestDefaultEmbedsAreNoOps executes all four
 // regardless — "does nothing, safely, including with a nil context" is a real contract, since
 // every generated stub embeds them.
 
@@ -77,3 +77,34 @@ type DefaultCascadingPostRun struct{}
 
 // CascadingPostRun does nothing.
 func (DefaultCascadingPostRun) CascadingPostRun(ctx context.Context, rtx *Context) {}
+
+// DefaultHooks is the four no-ops above in one embeddable, for a handler written by hand:
+//
+//	type handlers struct{ rotini.DefaultHooks }
+//
+//	func (*handlers) Run(ctx context.Context, rtx *rotini.Context) { … }
+//
+// It supplies CascadingPreRun, PreRun, PostRun and CascadingPostRun, and a method declared on
+// the outer type still wins over the one promoted through here — so implementing a hook is the
+// same act it always was: declare a method with that name, and leave this embedded.
+//
+// # It does not supply Run, on purpose
+//
+// There is no DefaultRun and DefaultHooks does not invent one. A command whose Run is missing
+// or misspelled therefore fails the `var _ rotini.Handlers` assertion every stub carries, at
+// compile time, by name. That property is why `rotini generate`'s hook audit does not have to
+// check Run at all, and collapsing the embeds must not cost it.
+//
+// # When to reach for it
+//
+// Generated stubs keep the four embeds written out: the stub is where the hook vocabulary is
+// introduced, and four named types show a reader the menu that one name hides. DefaultHooks is
+// for the handler you write yourself — a package behind a spec's `handler: {import,
+// convention}`, shared by several CLIs, where the author already knows the menu and the four
+// lines are noise.
+type DefaultHooks struct {
+	DefaultCascadingPreRun
+	DefaultPreRun
+	DefaultPostRun
+	DefaultCascadingPostRun
+}

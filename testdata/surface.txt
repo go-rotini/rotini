@@ -121,6 +121,10 @@ field Context.Argv
 field Context.Stderr
 field Context.Stdin
 field Context.Stdout
+field DefaultHooks.DefaultCascadingPostRun
+field DefaultHooks.DefaultCascadingPreRun
+field DefaultHooks.DefaultPostRun
+field DefaultHooks.DefaultPreRun
 field Definition.Arguments
 field Definition.Commands
 field Definition.Discovery
@@ -533,6 +537,7 @@ type Constraints
 type Context
 type DefaultCascadingPostRun
 type DefaultCascadingPreRun
+type DefaultHooks
 type DefaultPostRun
 type DefaultPreRun
 type Definition

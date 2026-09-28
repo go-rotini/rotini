@@ -150,9 +150,9 @@ func TestHyperlink(t *testing.T) {
 
 // ── handler defaults (handlers.go) ──────────────────────────────────────────
 
-// TestDefaultHooksAreNoOps executes the four embeddable defaults. Every generated stub embeds
+// TestDefaultEmbedsAreNoOps executes the four embeddable defaults. Every generated stub embeds
 // them, so "does nothing, safely, with a nil context" is a real contract.
-func TestDefaultHooksAreNoOps(t *testing.T) {
+func TestDefaultEmbedsAreNoOps(t *testing.T) {
 	var h struct {
 		DefaultCascadingPreRun
 		DefaultPreRun

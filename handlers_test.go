@@ -37,7 +37,7 @@ var (
 	_ Handlers = (*granular)(nil)
 )
 
-func TestDefaultHooks_bundleSatisfiesInterfaceAndNoOps(t *testing.T) {
+func TestDefaultEmbeds_bundleSatisfiesInterfaceAndNoOps(t *testing.T) {
 	h := &onlyRun{}
 	var iface Handlers = h
 
@@ -53,7 +53,7 @@ func TestDefaultHooks_bundleSatisfiesInterfaceAndNoOps(t *testing.T) {
 	}
 }
 
-func TestDefaultHooks_granularAndOverride(t *testing.T) {
+func TestDefaultEmbeds_granularAndOverride(t *testing.T) {
 	g := &granular{}
 	var iface Handlers = g
 
@@ -69,7 +69,7 @@ func TestDefaultHooks_granularAndOverride(t *testing.T) {
 	iface.CascadingPostRun(context.Background(), nil)
 }
 
-func TestDefaultHooks_overrideShadowsDefault(t *testing.T) {
+func TestDefaultEmbeds_overrideShadowsDefault(t *testing.T) {
 	// Embedding the defaults but defining a hook explicitly: the explicit one wins.
 	var iface Handlers = &overrider{}
 	iface.PreRun(context.Background(), nil)

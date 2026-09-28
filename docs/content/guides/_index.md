@@ -380,6 +380,23 @@ To keep the handlers in a package other CLIs import, point the command at it. If
       package: models
 {{< /code >}}
 
+That package writes the handler itself rather than editing a generated stub, so it embeds `rotini.DefaultHooks` — the four no-op hooks in one — and declares only what it implements:
+
+{{< code title="handlers/health/health.go — one implementation, four CLIs" language="golang" open="true" collapsible="false" copy="true" >}}
+// Health is the `convention` every spec's handler: block names.
+func Health() rotini.Handlers { return &handlers{} }
+
+type handlers struct{ rotini.DefaultHooks }
+
+func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {
+	// …
+}
+{{< /code >}}
+
+`DefaultHooks` supplies `CascadingPreRun`, `PreRun`, `PostRun` and `CascadingPostRun`. It deliberately does **not** supply `Run` — there is no `DefaultRun` — so a handler that forgets `Run` still fails to compile by name rather than silently doing nothing. Implementing a hook is unchanged: declare a method with that name and leave the embed alone; yours wins.
+
+Generated stubs keep the four embeds written out, because the stub is where the hook vocabulary is introduced and four names show a reader the menu that one name hides.
+
 The five composition modes — inline, passthrough, local `$ref`, module `$ref`, and dispatch to a sibling binary — are laid out on the [specification page](/specification#composition).
 
 ## Ship it
