@@ -622,3 +622,22 @@ func TestContext_boundaryStillRejectsNil(t *testing.T) {
 		t.Errorf("Parse(nil) error = %q, want it to name the nil context", err)
 	}
 }
+
+// TestContext_argsStayLiveButChainDoesNot pins the two halves of the slice rule in one place,
+// because they are easy to conflate: Args is deliberately the live argv, Chain deliberately is
+// not.
+func TestContext_argsStayLiveButChainDoesNot(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "run", Handler: "AppRun"}}}
+	rtx := NewContextFor(def, []string{"run", "x"})
+
+	rtx.Args[1] = "mutated"
+	if rtx.Args[1] != "mutated" {
+		t.Error("Args is not the live slice; a handler running its own parser depends on it")
+	}
+
+	c := rtx.Chain()
+	c[0].Name = "mutated"
+	if rtx.Chain()[0].Name == "mutated" {
+		t.Error("Chain handed back live storage")
+	}
+}

@@ -74,6 +74,23 @@
 // hidden __complete entry the generated shell scripts call, and os.Exit as the default exit
 // action (capture it with [Program.WithExit]).
 //
+// # Slices at the boundary
+//
+// One rule, because the two directions differ and the difference has bitten:
+//
+//   - A slice rotini RETURNS is a copy. [Context.Chain] and every [Outcome] channel hand back
+//     their own, so sorting, reslicing or editing one cannot reach the run. Chain used to be
+//     the live slice with a doc asking callers to treat it as read-only, and a single
+//     assignment through it silently rewrote [Context.Path] for the rest of the invocation.
+//
+//   - A slice you PASS IN is kept, not copied. [Program.WithArgs], [Program.WithSignals] and
+//     the slices inside a [BindMeta] are held by reference, so mutating yours afterwards
+//     changes the program. Copying them defensively would cost every caller for a mistake
+//     almost nobody makes; saying so costs nothing.
+//
+// [Context.Args] is the deliberate exception in the first group: it is documented as the live
+// argv precisely so a handler can run its own parser over it.
+//
 // # Outcomes
 //
 // A run reports through one funnel ([Program.WithFunnel]), handed all five recorded channels

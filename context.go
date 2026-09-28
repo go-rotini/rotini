@@ -62,7 +62,14 @@ type Context struct {
 	// Stdin, Stdout and Stderr are the program's streams, mirroring [Program.WithStdin] and
 	// friends. A handler reads and writes through these rather than os.Std* directly, so the
 	// same handler code can be driven by a test that configures the Program's streams. They
-	// are set before dispatch, never mutated thereafter, and never nil.
+	// are set before dispatch, never mutated by rotini thereafter, and never nil.
+	//
+	// They are for READING. Assigning one is not supported and does not do what it looks like:
+	// the default funnel reports through the PROGRAM's streams, so a hook that swaps
+	// rtx.Stdout redirects its own writes and nothing else — the run's errors still go where
+	// they were always going. To redirect a whole invocation, configure the Program
+	// ([Program.WithStdout]) or give the run its own ([Program.RunContext] on a Program built
+	// for it), which is what [REPL] and [StdioServer] do.
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -220,8 +227,12 @@ func (rtx *Context) Path() string {
 }
 
 // Value returns the service bound under key, or nil if none is bound — the raw accessor,
-// mirroring [context.Context.Value]. It never panics. Prefer the typed [Context.Get] or
-// [Context.MustGet].
+// mirroring [context.Context.Value]. It never panics.
+//
+// It is the fallback, not a peer of the typed readers. Reach for a [Key] and its Get/MustGet
+// when the key is known at compile time, which is nearly always; [Context.Get] and
+// [Context.MustGet] when you have the name but want the type checked; and Value only when the
+// key itself is computed and there is no type to assert.
 func (rtx *Context) Value(key string) any {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
