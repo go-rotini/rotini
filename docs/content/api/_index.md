@@ -48,6 +48,7 @@ One per invocation, passed to every hook.
 | `rtx.Stdin` `rtx.Stdout` `rtx.Stderr` | the program's streams — write through these, never `os.Std*`, and your handler tests cleanly |
 | `rtx.Command()` / `rtx.CommandPath()` | the command the user **invoked** (the leaf), and its full path |
 | `rtx.Frame()` | the command whose **hook is running** — the leaf in `Run`, an ancestor in a cascading hook |
+| `rtx.IsLeaf()` | whether those two are the same — the question a cascading hook asks, since `Frame() == Command()` will not compile |
 | `rtx.Bind` / `rtx.Get[T]` / `rtx.MustGet[T]` | the service registry (generic methods, Go 1.27) |
 | `rtx.RecordInfo` / `RecordSuccess` / `RecordWarning` / `RecordError` | outcomes |
 | `rtx.Failed()` | has anything failed so far — the one bit a teardown needs |

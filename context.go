@@ -42,7 +42,8 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 //   - what was typed — the [Context.Argv], [Context.Stdin], [Context.Stdout] and
 //     [Context.Stderr] fields above
 //   - which command — [Context.Frame] is whose hook is running, [Context.Command] is the one
-//     the user invoked, [Context.CommandPath] names it, [Context.Chain] is the whole path
+//     the user invoked, [Context.IsLeaf] says whether they are the same, [Context.CommandPath]
+//     names it, [Context.Chain] is the whole path
 //   - YOUR dependencies — [Context.Bind] and [Context.BindIfAbsent] for a key you name,
 //     [Context.Get] and [Context.MustGet] to read one back, [Context.Value] for the raw entry
 //   - report what happened — [Context.RecordInfo], [Context.RecordSuccess],
@@ -328,6 +329,31 @@ func (rtx *Context) setFrame(i int) int {
 	prev := rtx.frame
 	rtx.frame = i
 	return prev
+}
+
+// IsLeaf reports whether [Context.Frame] is the command the user invoked — whether this hook
+// belongs to the leaf of the chain, or to one of its ancestors.
+//
+// In PreRun, Run and PostRun it is always true: those hooks only ever run for the leaf. It is a
+// real question in a cascading hook, which runs at every depth:
+//
+//	func (*songsHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+//	    if rtx.IsLeaf() {
+//	        // `musak songs` — this command IS the invocation; print help rather than defer.
+//	        return
+//	    }
+//	    // `musak songs list` — a sub-command is running; set up for it.
+//	}
+//
+// It exists because the obvious spelling does not compile: [ResolvedCommand] holds slices, so
+// rtx.Frame() == rtx.Command() is not a legal comparison, and comparing their Names is unsound
+// when a chain repeats one.
+//
+// Outside a lifecycle step the frame is the leaf, so it reports true.
+func (rtx *Context) IsLeaf() bool {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.frameIndexLocked() == max(len(rtx.chain)-1, 0)
 }
 
 // CommandPath returns the invoked command path, space-joined — "tasks add" for a sub-command,

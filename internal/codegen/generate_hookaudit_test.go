@@ -351,3 +351,152 @@ func TestHookAudit_skipsHandlerPackagesInOtherModules(t *testing.T) {
 		t.Errorf("an out-of-module handler package produced %v, want it skipped", notices)
 	}
 }
+
+// The last silent misalignment: a handler collecting ANOTHER command's generated inputs type.
+//
+// The runtime cannot catch it. An inputs struct binds to the frame whose hook is running, so an
+// ancestor's type lands on the caller's own frame and reads it through the wrong shape — and the
+// alignment guard passes whenever the two commands share a flag name, which cascading flags
+// guarantee. Closing it at runtime needs a frame to carry a grafted command's origin identity,
+// which nothing does, because a composed child is renamed by the umbrella that mounts it.
+//
+// Codegen has what the runtime lacks: it knows which command each stub implements. The question
+// never crosses a package, so renaming and composition do not arise.
+
+const twoCommandSpec = `version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: trace
+      summary: cascading, so it appears on every frame
+      identifiers: [--trace]
+      cascading: true
+      schema: { type: bool }
+  commands:
+    - name: build
+      summary: has its own inputs type
+`
+
+func inputsAuditFixture(t *testing.T, buildBody string) func(*testing.T) []error {
+	t.Helper()
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, ".rotini.spec.yaml", twoCommandSpec)
+	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
+	t.Chdir(dir)
+
+	gen := func(t *testing.T) []error {
+		t.Helper()
+		var notices []error
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false,
+			func(string, error) {}, func(n []error) { notices = append(notices, n...) }); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return notices
+	}
+	gen(t) // seed the stubs
+	if buildBody != "" {
+		writeTestFile(t, dir, "internal/cmd/demo/demo_build.go", buildBody)
+	}
+	return gen
+}
+
+func buildStub(collect string) string {
+	return `package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*demoBuildHandlers)(nil)
+
+type demoBuildHandlers struct {
+	rotini.DefaultHooks
+}
+
+func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	` + collect + `
+}
+`
+}
+
+// TestInputsAudit_reportsAnotherCommandsType is the residue, closed.
+func TestInputsAudit_reportsAnotherCommandsType(t *testing.T) {
+	gen := inputsAuditFixture(t, buildStub(`in, err := rotini.Collect[DemoInputs](rtx)
+	_, _ = in, err`))
+	notices := gen(t)
+	if len(notices) != 1 {
+		t.Fatalf("notices = %v, want one", notices)
+	}
+	got := notices[0].Error()
+	for _, want := range []string{"demo_build.go:", "Collect", "demoBuildHandlers", "DemoInputs", "DemoBuildInputs"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("notice is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestInputsAudit_coversEveryAcquirer: Collect is not the only way in. The per-channel functions
+// take the same type argument and land on the same frame.
+func TestInputsAudit_coversEveryAcquirer(t *testing.T) {
+	for _, fn := range []string{"Collect", "CollectP", "Defaults", "ParseArgv", "ParseEnv", "ParseFiles", "ParseStdin"} {
+		t.Run(fn, func(t *testing.T) {
+			call := "v, err := rotini." + fn + "[DemoInputs](rtx)\n\t_, _ = v, err"
+			if fn == "CollectP" {
+				call = "v, r, err := rotini.CollectP[DemoInputs](rtx)\n\t_, _, _ = v, r, err"
+			}
+			gen := inputsAuditFixture(t, buildStub(call))
+			if notices := gen(t); len(notices) != 1 {
+				t.Errorf("%s: notices = %v, want one", fn, notices)
+			}
+		})
+	}
+}
+
+// TestInputsAudit_isQuietOnTheOwnType guards against the check becoming noise: the generated
+// stub already collects its own type, and every example must stay silent.
+func TestInputsAudit_isQuietOnTheOwnType(t *testing.T) {
+	gen := inputsAuditFixture(t, buildStub(`in, err := rotini.Collect[DemoBuildInputs](rtx)
+	_, _ = in, err`))
+	if notices := gen(t); len(notices) != 0 {
+		t.Errorf("a handler collecting its own type reported %v", notices)
+	}
+}
+
+// TestInputsAudit_ignoresAHandWrittenStruct is the shape the `handler:` seam uses: a shared
+// handler declares its own inputs struct because it cannot name any host CLI's generated one.
+// An unrecognized type argument is supported, not a mistake.
+func TestInputsAudit_ignoresAHandWrittenStruct(t *testing.T) {
+	gen := inputsAuditFixture(t, `package demo
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*demoBuildHandlers)(nil)
+
+type demoBuildHandlers struct {
+	rotini.DefaultHooks
+}
+
+// Own is this handler's own view of the command line, as a shared handler declares.
+type Own struct {
+	Host struct {
+		Flags     struct{}
+		Arguments struct{}
+	}
+}
+
+func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[Own](rtx)
+	_, _ = in, err
+}
+`)
+	if notices := gen(t); len(notices) != 0 {
+		t.Errorf("a hand-written inputs struct reported %v, want it ignored", notices)
+	}
+}

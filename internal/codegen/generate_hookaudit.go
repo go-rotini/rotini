@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -81,6 +82,9 @@ func (p *program) auditHooks() error {
 	}
 
 	p.hookWarnings = nearMissHooks(fset, files, handlerTypes, p.module.root)
+
+	expected, known := p.inputsTypeExpectations()
+	p.hookWarnings = append(p.hookWarnings, wrongInputsTypes(fset, files, expected, known, p.module.root)...)
 	return nil
 }
 
@@ -343,4 +347,126 @@ func receiverTypeName(t ast.Expr) string {
 		return v.Name
 	}
 	return ""
+}
+
+// ─── the inputs-type audit ──────────────────────────────────────────────────.
+
+// collectFuncs are the generic entry points that acquire a command's own declared inputs. Each
+// takes the inputs type as its type argument, which is what the audit reads.
+var collectFuncs = map[string]bool{
+	"Collect": true, "CollectP": true,
+	"Defaults": true, "ParseArgv": true, "ParseEnv": true, "ParseFiles": true, "ParseStdin": true,
+}
+
+// inputsTypeExpectations maps each generated handler type to the inputs type its command owns,
+// alongside the set of every inputs type this package generates.
+//
+// The pair is the whole check. An inputs struct binds to the frame whose hook is running, so a
+// handler can only mean its OWN command's type; collecting an ancestor's is a silent wrong
+// answer whenever the two commands share a flag name, which cascading flags guarantee. The
+// runtime cannot tell them apart — it sees a struct that fits — but codegen can, because it
+// knows which command each stub implements.
+//
+// That is why this is a generate-time check and not a runtime one. The runtime approach needs a
+// frame to carry a grafted command's origin identity, which nothing does: a composed child is
+// renamed by the umbrella that mounts it. Here the question never crosses a package, so renaming
+// and composition simply do not arise.
+func (p *program) inputsTypeExpectations() (expected map[string]string, known map[string]bool) {
+	expected, known = map[string]string{}, map[string]bool{}
+	note := func(c genCommand) {
+		if c.handler == "" || c.prefix == "" {
+			return
+		}
+		in := c.prefix + "Inputs"
+		expected[c.handler] = in
+		known[in] = true
+	}
+	note(p.root)
+	for _, c := range p.own {
+		note(c)
+	}
+	return expected, known
+}
+
+// wrongInputsTypes reports each call that acquires a DIFFERENT generated command's inputs type
+// than the handler it sits in owns.
+//
+// An unrecognized type argument is ignored on purpose: a hand-written handler package declares
+// its own struct (see the `handler:` seam), and that is a supported shape, not a mistake.
+func wrongInputsTypes(fset *token.FileSet, files map[string]*ast.File, expected map[string]string, known map[string]bool, moduleRoot string) []error {
+	type finding struct {
+		file string
+		line int
+		msg  string
+	}
+	var found []finding
+
+	for _, f := range files {
+		for _, d := range f.Decls {
+			fd, ok := d.(*ast.FuncDecl)
+			if !ok || fd.Recv == nil || len(fd.Recv.List) == 0 || fd.Body == nil {
+				continue
+			}
+			recv := receiverTypeName(fd.Recv.List[0].Type)
+			want, isHandler := expected[recv]
+			if !isHandler {
+				continue
+			}
+			ast.Inspect(fd.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				fn, arg, ok := genericCallTypeArg(call)
+				if !ok || !collectFuncs[fn] || arg == want || !known[arg] {
+					return true
+				}
+				pos := fset.Position(call.Pos())
+				rel := pos.Filename
+				if r, err := filepath.Rel(moduleRoot, pos.Filename); err == nil {
+					rel = filepath.ToSlash(r)
+				}
+				found = append(found, finding{file: rel, line: pos.Line, msg: fmt.Sprintf(
+					"%s:%d: %s in %s acquires %s, but this handler implements the command whose inputs are %s. "+
+						"An inputs type binds to the command whose hook is running, so another command's type "+
+						"reads THIS command's frame through the wrong shape — silently, when the two share a flag name",
+					rel, pos.Line, fn, recv, arg, want)})
+				return true
+			})
+		}
+	}
+
+	sort.Slice(found, func(i, j int) bool {
+		if found[i].file != found[j].file {
+			return found[i].file < found[j].file
+		}
+		return found[i].line < found[j].line
+	})
+	out := make([]error, 0, len(found))
+	for _, f := range found {
+		out = append(out, errors.New(f.msg))
+	}
+	return out
+}
+
+// genericCallTypeArg reads `pkg.Fn[Type](…)` — or `Fn[Type](…)` — returning the function name
+// and the single type argument's name.
+func genericCallTypeArg(call *ast.CallExpr) (fn, arg string, ok bool) {
+	idx, isIndex := call.Fun.(*ast.IndexExpr)
+	if !isIndex {
+		return "", "", false
+	}
+	switch f := idx.X.(type) {
+	case *ast.SelectorExpr:
+		fn = f.Sel.Name
+	case *ast.Ident:
+		fn = f.Name
+	default:
+		return "", "", false
+	}
+	id, isIdent := idx.Index.(*ast.Ident)
+	if !isIdent {
+		return "", "", false
+	}
+	return fn, id.Name, true
 }

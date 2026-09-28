@@ -283,3 +283,53 @@ func TestFrame_outsideAHookIsTheLeaf(t *testing.T) {
 		t.Errorf("the leaf's own type must collect from a hookless Context: %v", err)
 	}
 }
+
+// TestIsLeaf answers the question the frame surface could not express: a cascading hook runs at
+// every depth, so "is this invocation about ME, or am I an ancestor of it?" is real — and
+// rtx.Frame() == rtx.Command() does not compile, because ResolvedCommand holds slices.
+func TestIsLeaf(t *testing.T) {
+	for _, tc := range []struct {
+		argv     []string
+		wantMid  bool
+		wantRoot bool
+	}{
+		{[]string{"mid"}, true, false},          // mid IS the invocation
+		{[]string{"mid", "leaf"}, false, false}, // both are ancestors of `leaf`
+	} {
+		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
+			var midSaw, rootSaw bool
+			runF(t, tc.argv,
+				func(rtx *Context) { midSaw = rtx.IsLeaf() },
+				func(rtx *Context) { rootSaw = rtx.IsLeaf() },
+			)
+			if midSaw != tc.wantMid {
+				t.Errorf("mid's cascading hook: IsLeaf() = %v, want %v", midSaw, tc.wantMid)
+			}
+			if rootSaw != tc.wantRoot {
+				t.Errorf("root's cascading hook: IsLeaf() = %v, want %v", rootSaw, tc.wantRoot)
+			}
+		})
+	}
+}
+
+// TestIsLeaf_isAlwaysTrueInANonCascadingHook: PreRun, Run and PostRun only ever run for the
+// leaf, so the answer there is not interesting — but it must not be wrong.
+func TestIsLeaf_isAlwaysTrueInANonCascadingHook(t *testing.T) {
+	var inRun bool
+	p := NewProgram(fDef(), fLeafProbe{capture: func(rtx *Context) { inRun = rtx.IsLeaf() }}).
+		WithStdout(io.Discard).WithStderr(io.Discard)
+	if _, err := p.Run([]string{"mid", "leaf"}); err != nil {
+		t.Fatal(err)
+	}
+	if !inRun {
+		t.Error("the leaf's Run reported IsLeaf() = false")
+	}
+}
+
+// TestIsLeaf_outsideAHook: a Context from NewContextFor has no running hook, so the frame is the
+// leaf and the answer is true.
+func TestIsLeaf_outsideAHook(t *testing.T) {
+	if !NewContextFor(fDef(), []string{"mid", "leaf"}).IsLeaf() {
+		t.Error("a hookless Context reported IsLeaf() = false")
+	}
+}

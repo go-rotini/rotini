@@ -315,6 +315,7 @@ method Context.Get
 method Context.Halt
 method Context.HaltWith
 method Context.HaltWithCode
+method Context.IsLeaf
 method Context.MustGet
 method Context.Parser
 method Context.RecordError
