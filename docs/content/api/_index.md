@@ -46,7 +46,8 @@ One per invocation, passed to every hook.
 | `rtx.Argv` | the raw argument vector — command names and flags included, unparsed. Not to be confused with a command's **declared positionals**, which are `inputs.X.Arguments`, already parsed and typed |
 | `rtx.Chain()` | the resolved command path, root → leaf — a **copy**, so editing it cannot reach the run |
 | `rtx.Stdin` `rtx.Stdout` `rtx.Stderr` | the program's streams — write through these, never `os.Std*`, and your handler tests cleanly |
-| `rtx.Command()` / `rtx.CommandPath()` | the command being run, and its full path |
+| `rtx.Command()` / `rtx.CommandPath()` | the command the user **invoked** (the leaf), and its full path |
+| `rtx.Frame()` | the command whose **hook is running** — the leaf in `Run`, an ancestor in a cascading hook |
 | `rtx.Bind` / `rtx.Get[T]` / `rtx.MustGet[T]` | the service registry (generic methods, Go 1.27) |
 | `rtx.RecordInfo` / `RecordSuccess` / `RecordWarning` / `RecordError` | outcomes |
 | `rtx.Failed()` | has anything failed so far — the one bit a teardown needs |
@@ -120,18 +121,25 @@ env,  _ := rotini.ParseEnv[TodoAddInputs](rtx)
 merged  := rotini.OverlayInputs(argv, env)
 {{< /code >}}
 
-An inputs type binds to the **end** of the command chain: field *i* of an *n*-field struct takes `chain[len(chain)-n+i]`. A handler collecting the type generated for its own command is always right — and so is a composed child's handler, whose shorter type counts back from the leaf and lands on its own frames whatever tree it was grafted into.
+**A handler collects the type generated for its own command, in any hook.** That is the whole rule, and there is only one call.
 
-The one place that rule cannot serve is a **cascading hook on the root command**: it runs for every invocation, so it cannot name the leaf's type, and its own type would count back from the leaf and land on some descendant. `CollectRoot` anchors at the root instead.
+An inputs type describes a command and its ancestors: its last field is the collecting command, the fields before it are that command's lineage. `Collect` anchors the struct on `rtx.Frame()` — the command whose hook is running — so the same call is correct in a leaf's `Run`, in a cascading hook three frames up, and in a composed child mounted under someone else's umbrella.
 
-{{< code title="a root cascading hook reading its own flags" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="a cascading hook reading its own flags — the same call a leaf uses" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*rootHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.CollectRoot[MycliInputs](rtx) // not Collect
+	// Anchored on this command, not the leaf, because that is whose hook this is.
+	in, err := rotini.Collect[MycliInputs](rtx)
 	...
 }
 {{< /code >}}
 
-Collecting an ancestor's type with plain `Collect` from a deeper command is rejected rather than silently filled with zeros.
+{{< alert type="info" title="COMMAND() IS THE LEAF; FRAME() IS WHOSE HOOK YOU ARE IN:" >}}
+For `mig db status`, `rtx.Command()` is `status` in **every** hook of the run — it is the command the user invoked. `rtx.Frame()` is the command this particular hook belongs to: `mig` in mig's cascading hook, `db` in db's, `status` in the leaf's `PreRun`/`Run`/`PostRun`.
+
+A cascading hook had no way to ask that question before, which is why an inputs struct used to be aligned by counting its fields against the chain — and why a composed child's cascading hook could not read its own flags at all. Its type spans only its own lineage, so counting from the leaf landed below it and counting from the root landed above it. Both returned zeros with a nil error.
+{{< /alert >}}
+
+A struct that describes more commands than the collecting command is deep is rejected — that check is exact, because the anchor is known rather than inferred. `Binder.BindRoot` remains as a low-level escape for a caller that genuinely wants the first *n* frames.
 
 ## Outcomes
 

@@ -64,41 +64,24 @@ type layerCore struct {
 //
 //	inputs, err := rotini.Collect[MycliDeployInputs](rtx)
 //
+// **A handler collects the type generated for its own command, in any hook.** That is the whole
+// rule. An inputs struct's last field describes the collecting command and the fields before it
+// describe its ancestors, so Collect anchors the struct on [Context.Frame] — the command whose
+// hook is running. A leaf's Run, a cascading hook three frames up, a composed child mounted
+// under someone else's umbrella: same call, correct in each.
+//
+// It did not used to be one rule. The anchor was inferred from the struct's field count against
+// the chain, which made the correct call depend on how deep THIS invocation happened to go: a
+// cascading hook on a middle frame read a descendant's flags, and a composed child's cascading
+// hook could not read its own flags at all. Both returned zeros with a nil error. A separate
+// CollectRoot existed for part of the gap and is gone; [Binder.BindRoot] remains as the
+// low-level escape for a caller that genuinely wants the first n frames.
+//
 // It is [Binder.Bind] under the hood, so errors are the same data-shaped [*ParseError]s and
 // [*BindError]s. Use [CollectP] when "where did this value come from" matters.
 func Collect[T any](rtx *Context) (T, error) {
 	var t T
 	err := binderFor(rtx).Bind(rtx, &t)
-	return t, err
-}
-
-// CollectRoot is [Collect] for a cascading hook on the ROOT command.
-//
-// An inputs type binds to the END of the command chain: field i of an n-field struct takes
-// chain[len(chain)-n+i]. A handler collecting the type generated for its own command is always
-// right, and a composed child's handler is right too — its short type counts back from the leaf
-// and lands on its own frames, whatever tree it was mounted into.
-//
-// A root command's CascadingPreRun and CascadingPostRun are the one place that rule cannot
-// serve. They run for EVERY invocation, so they cannot name the leaf's type; and their own
-// type, collected from a deeper run, would count back from the leaf and land on some
-// descendant. That is not a theoretical mismatch — it is how a root hook reading its own
-// --verbose or --trace silently gets false:
-//
-//	// mig db status is running; MigInputs has one field, the chain has three frames,
-//	// so Mig lands on `status` and every field comes back zero.
-//	in, _ := rotini.Collect[MigInputs](rtx)   // WRONG from a root hook
-//	in, _ := rotini.CollectRoot[MigInputs](rtx) // reads the root's own frame
-//
-// The binder now rejects the first form rather than filling it with zeros, so this is a
-// compiler-less mistake that reports itself. Use CollectRoot only where the leaf's type is
-// genuinely unavailable — a root cascading hook. Everywhere else [Collect] is correct and
-// says less.
-//
-// The stdin payload is not bound: stdin has exactly one consumer and it is the leaf.
-func CollectRoot[T any](rtx *Context) (T, error) {
-	var t T
-	err := binderFor(rtx).BindRoot(rtx, &t)
 	return t, err
 }
 
@@ -130,7 +113,15 @@ func CollectP[T any](rtx *Context) (T, Report, error) {
 		return zero, Report{}, err
 	}
 	merged, report := OverlayInputsP(defaults, files, env, argv, stdin)
-	return merged, report, report.Validate()
+	if err := report.Validate(); err != nil {
+		return merged, report, err
+	}
+	// Same frame-fit check Collect applies, after validation so a bad command line reports
+	// itself first. See checkFrameFit.
+	if err := checkFrameFit(reflect.ValueOf(&merged).Elem(), rtx.Chain(), rtx.frameIndex()); err != nil {
+		return merged, report, err
+	}
+	return merged, report, nil
 }
 
 // ── channel acquisition ──────────────────────────────────────────────────────.
@@ -360,12 +351,13 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := bindInputs(v, store, chain, frameAnchor(v, chain, false)); err != nil {
+	anchor := frameAnchor(v, chain, rtx.frameIndex(), false)
+	if err := bindInputs(v, store, chain, anchor); err != nil {
 		return nil, nil, err
 	}
 
 	set := Presence{}
-	walkCommandStructs(v, chain, func(topName string, scope int, ci reflect.Value) {
+	walkCommandStructs(v, chain, anchor, func(topName string, scope int, ci reflect.Value) {
 		frame := chain[scope]
 		si := store.scopes[scope]
 		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.Value) {
@@ -394,7 +386,8 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 	// Flag defaults bind through the same store machinery as parsed values.
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	applyDefaults(chain, store)
-	if err := bindInputs(v, store, chain, frameAnchor(v, chain, false)); err != nil {
+	anchor := frameAnchor(v, chain, rtx.frameIndex(), false)
+	if err := bindInputs(v, store, chain, anchor); err != nil {
 		return nil, nil, err
 	}
 
@@ -409,7 +402,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 	}
 
 	set := Presence{}
-	walkCommandStructs(v, chain, func(topName string, scope int, ci reflect.Value) {
+	walkCommandStructs(v, chain, anchor, func(topName string, scope int, ci reflect.Value) {
 		frame := chain[scope]
 		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.Value) {
 			if _, ok := store.scopes[scope].flags[logical]; !ok {
@@ -481,7 +474,7 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 	}
 	defer flagReg.Close()
 
-	return channelLayer(v, chain, "env", "Env", envReg, flagReg, nil)
+	return channelLayer(v, chain, frameAnchor(v, chain, rtx.frameIndex(), false), "env", "Env", envReg, flagReg, nil)
 }
 
 // filesLayer acquires the config-files channel into v. config_source paths are honored here
@@ -501,18 +494,18 @@ func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 		return nil, nil, err
 	}
 	defer cfg.Close()
-	return channelLayer(v, chain, "files", "Config", cfg.merged, cfg.merged, cfg)
+	return channelLayer(v, chain, frameAnchor(v, chain, rtx.frameIndex(), false), "files", "Config", cfg.merged, cfg.merged, cfg)
 }
 
 // channelLayer is the shared env/files core: recon-bind each command's channel struct,
 // constraint-check the provided values, fill flag fallbacks, and record presence for
 // everything the channel supplied.
-func channelLayer(v reflect.Value, chain []ResolvedCommand, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs) (Presence, *layerCore, error) {
+func channelLayer(v reflect.Value, chain []ResolvedCommand, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs) (Presence, *layerCore, error) {
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	var bindErr error
 
-	walkCommandStructs(v, chain, func(topName string, scope int, ci reflect.Value) {
+	walkCommandStructs(v, chain, anchor, func(topName string, scope int, ci reflect.Value) {
 		if bindErr != nil {
 			return
 		}
@@ -660,12 +653,11 @@ func layerChain(rtx *Context) ([]ResolvedCommand, error) {
 
 // walkCommandStructs visits each per-command CommandInputs field with its Go field name and
 // chain scope index, aligned at the leaf exactly like bindInputs.
-func walkCommandStructs(v reflect.Value, chain []ResolvedCommand, visit func(topName string, scope int, ci reflect.Value)) {
+func walkCommandStructs(v reflect.Value, chain []ResolvedCommand, offset int, visit func(topName string, scope int, ci reflect.Value)) {
 	if v.Kind() != reflect.Struct {
 		return
 	}
-	offset := len(chain) - v.NumField()
-	if offset < 0 {
+	if offset < 0 || offset+v.NumField() > len(chain) {
 		return
 	}
 	for i := range v.NumField() {

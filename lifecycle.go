@@ -69,16 +69,48 @@ type Lifecycle func(chain []ResolvedCommand, handlers []Handlers) []LifecycleSte
 // one CascadingPreRun/CascadingPostRun pair per frame root → leaf, then the leaf's
 // PreRun/PostRun pair, then the leaf's Run with no teardown. With the engine's reverse unwind
 // this yields exactly the contract table above.
+//
+// Every hook is wrapped in [AtFrame], which is what lets a cascading hook know which command it
+// belongs to — see [Context.Frame] — and what lets [Collect] anchor an inputs struct on that
+// command instead of guessing from its field count.
 func DefaultLifecycle(chain []ResolvedCommand, handlers []Handlers) []LifecycleStep {
 	steps := make([]LifecycleStep, 0, len(handlers)+2)
 	for i, h := range handlers {
-		steps = append(steps, LifecycleStep{Name: "cascading:" + chain[i].Name, Do: h.CascadingPreRun, Undo: h.CascadingPostRun})
+		steps = append(steps, LifecycleStep{
+			Name: "cascading:" + chain[i].Name,
+			Do:   AtFrame(i, h.CascadingPreRun),
+			Undo: AtFrame(i, h.CascadingPostRun),
+		})
 	}
-	leaf := handlers[len(handlers)-1]
+	leafIdx := len(handlers) - 1
+	leaf := handlers[leafIdx]
 	leafName := chain[len(chain)-1].Name
 	steps = append(steps,
-		LifecycleStep{Name: "prerun:" + leafName, Do: leaf.PreRun, Undo: leaf.PostRun},
-		LifecycleStep{Name: "run:" + leafName, Do: leaf.Run},
+		LifecycleStep{Name: "prerun:" + leafName, Do: AtFrame(leafIdx, leaf.PreRun), Undo: AtFrame(leafIdx, leaf.PostRun)},
+		LifecycleStep{Name: "run:" + leafName, Do: AtFrame(leafIdx, leaf.Run)},
 	)
 	return steps
+}
+
+// AtFrame labels a hook with the chain index of the command it belongs to, so that
+// [Context.Frame] can answer "which command am I?" inside it and [Collect] can anchor an inputs
+// struct on that command. [DefaultLifecycle] wraps every hook it plans; a custom [Lifecycle]
+// that wraps DefaultLifecycle inherits this and needs to do nothing.
+//
+// A custom Lifecycle that builds steps from scratch should wrap its own hooks the same way. One
+// that does not is not broken: an unlabeled hook reports the LEAF, which is what every
+// non-cascading hook wants and what the whole API did before frames existed. The cost of
+// skipping it falls only on a cascading hook that collects its own inputs.
+//
+// The previous frame is restored on return, so nesting — a hook that drives another hook — does
+// not leave the Context describing the wrong command.
+func AtFrame(i int, hook func(context.Context, *Context)) func(context.Context, *Context) {
+	if hook == nil {
+		return nil
+	}
+	return func(ctx context.Context, rtx *Context) {
+		prev := rtx.setFrame(i)
+		defer rtx.setFrame(prev)
+		hook(ctx, rtx)
+	}
 }

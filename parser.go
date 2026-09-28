@@ -247,7 +247,7 @@ func (p *Parser) parseBind(rtx *Context, out any, atRoot bool) (*parsedInputs, [
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := bindInputs(rv.Elem(), store, chain, frameAnchor(rv.Elem(), chain, atRoot)); err != nil {
+	if err := bindInputs(rv.Elem(), store, chain, frameAnchor(rv.Elem(), chain, rtx.frameIndex(), atRoot)); err != nil {
 		return nil, nil, err
 	}
 	return store, chain, nil
@@ -1071,7 +1071,11 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand, offse
 		return nil
 	}
 	if offset < 0 || offset+v.NumField() > len(p.scopes) {
-		return nil // the struct does not fit the chain at this anchor
+		// Not an error HERE. bindInputs runs before argv is validated, and a chain that came
+		// up short is usually a symptom — an unknown command, a stray positional — whose own
+		// diagnostic is far better than anything this could say. checkFrameFit reports the
+		// genuine misfit after those have had their turn.
+		return nil
 	}
 	if err := checkChainAlignment(v, chain, offset); err != nil {
 		return err
@@ -1086,22 +1090,67 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand, offse
 
 // frameAnchor is the chain index that field 0 of an inputs struct maps to.
 //
-// LEAF-anchored is the default and the only one generated code ever needs: a handler collects
-// the type generated for its own command, and the chain ends at that command. It is also what
-// makes composition work — a composed child's type knows its own root, not the tree it was
-// mounted into, so counting back from the leaf is the only alignment available.
+// An inputs struct's LAST field describes the command whose handler is collecting it, and the
+// fields before it describe that command's ancestors, in order. So the anchor counts back from
+// the CALLER'S OWN FRAME:
 //
-// ROOT-anchored exists for one case that leaf-anchoring cannot express: a cascading hook on the
-// ROOT command, which runs for every invocation and therefore cannot know the leaf's type, but
-// legitimately wants its own command's flags. See [CollectRoot].
-func frameAnchor(v reflect.Value, chain []ResolvedCommand, atRoot bool) int {
+//	offset = self - n + 1
+//
+// self is [Context.Frame]'s index — the command whose hook is running, which the lifecycle
+// records for every step (see [AtFrame]). For a leaf hook self is the last frame and this
+// reduces to len(chain) - n, which is what the anchor used to be for every hook.
+//
+// It used to be that, for every hook, plus a boolean that forced index 0. Neither input
+// identified the caller, so the anchor was inferred from the struct's SHAPE — and a shorter
+// struct always aligns against something. A cascading hook on a middle frame got a descendant's
+// flags, and a composed child's cascading hook could not read its own flags at all: its type
+// spans only its own lineage, so leaf-anchoring landed below it and root-anchoring landed above
+// it. Both returned zeros and a nil error.
+//
+// atRoot pins the anchor at index 0 regardless. It is reached only from [Binder.BindRoot], kept
+// as a low-level escape for a caller that genuinely wants the first n frames.
+func frameAnchor(v reflect.Value, chain []ResolvedCommand, self int, atRoot bool) int {
 	if atRoot {
 		return 0
 	}
 	if v.Kind() != reflect.Struct {
 		return 0
 	}
-	return len(chain) - v.NumField()
+	if self < 0 || self >= len(chain) {
+		self = len(chain) - 1
+	}
+	return self - v.NumField() + 1
+}
+
+// checkFrameFit rejects an inputs struct that cannot sit on the chain at the caller's own frame
+// — it describes more ancestors than the running command has.
+//
+// This is an EXACT check rather than a heuristic, and it is only possible because the anchor is
+// now derived from the running frame instead of the struct's shape. It catches the mistake that
+// used to be entirely invisible: collecting a DESCENDANT's inputs type, which needs more
+// ancestors than the caller has. Under leaf-anchoring a struct of any size found somewhere to
+// sit, and an over-long one was skipped in silence and came back zeroed.
+//
+// It is called after argv has been parsed and validated, so a short chain caused by a bad
+// command line reports that instead of this.
+func checkFrameFit(v reflect.Value, chain []ResolvedCommand, self int) error {
+	if v.Kind() != reflect.Struct || len(chain) == 0 {
+		return nil
+	}
+	if self < 0 || self >= len(chain) {
+		self = len(chain) - 1
+	}
+	if n := v.NumField(); n > self+1 {
+		return &ParseError{
+			Kind: ParseKindInternal,
+			Msg: fmt.Sprintf(
+				"rotini: %s describes %d commands but %q is only %d deep: an inputs type covers a "+
+					"command and its ancestors, so a handler collects the type generated for ITS OWN "+
+					"command — a descendant's type cannot be collected from a shallower hook",
+				displayTypeName(v.Type()), n, pathOf(chain[:self+1]), self+1),
+		}
+	}
+	return nil
 }
 
 // checkChainAlignment rejects an inputs struct that does not describe the running command.

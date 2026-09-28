@@ -96,6 +96,12 @@ type Context struct {
 	successes   []string
 	faults      []*PanicError
 
+	// frame is the chain index of the command whose hook is currently running, or -1 for
+	// "not inside a hook", which resolves to the leaf. The lifecycle sets it around every
+	// step (see [AtFrame]); it is what lets an inputs struct be anchored on the caller's own
+	// command rather than guessed from its field count. See [Context.Frame].
+	frame int
+
 	// rotini's own seams, seeded from the Program each run — see [Program.WithBindMeta].
 	// They are deliberately NOT in services: the registry is the user's namespace, and a
 	// value the runtime depends on must not share a flat keyspace with it.
@@ -121,6 +127,7 @@ func (rtx *Context) cloneServices() map[string]any {
 func newContext() *Context {
 	return &Context{
 		services: make(map[string]any),
+		frame:    frameUnset,
 		Stdin:    os.Stdin,
 		Stdout:   os.Stdout,
 		Stderr:   os.Stderr,
@@ -212,6 +219,67 @@ func (rtx *Context) Command() ResolvedCommand {
 		return ResolvedCommand{}
 	}
 	return rtx.chain[len(rtx.chain)-1]
+}
+
+// frameUnset marks a Context that is not inside a lifecycle step. It resolves to the leaf,
+// which is what every non-cascading hook wants and what the API did before frames existed.
+const frameUnset = -1
+
+// Frame returns the command whose hook is currently running.
+//
+// This is not always [Context.Command], and the difference is the whole point. Command is the
+// command the user INVOKED — the leaf of the chain — and it is the same value in every hook of
+// the run. Frame is the command this particular hook belongs to:
+//
+//	$ mig db status        — Command() is the leaf, "status", in every hook below
+//
+//	hook                                 Frame()
+//	────                                 ───────
+//	mig's CascadingPreRun                mig
+//	db's CascadingPreRun                 db
+//	the leaf's PreRun / Run / PostRun    status
+//	db's CascadingPostRun                db
+//	mig's CascadingPostRun               mig
+//
+// A cascading hook had no way to answer "which command am I?" before this existed, which is why
+// an inputs struct had to be aligned by counting fields against the chain, and why a composed
+// child's cascading hook could not read its own flags at all. [Collect] now anchors on this
+// frame, so it is correct in every hook.
+//
+// Outside a lifecycle step — a Context from [NewContextFor], or one reaching a funnel after the
+// run has settled — there is no hook, and Frame reports the leaf.
+func (rtx *Context) Frame() ResolvedCommand {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.chain) == 0 {
+		return ResolvedCommand{}
+	}
+	return rtx.chain[rtx.frameIndexLocked()]
+}
+
+// frameIndex is the chain index Frame reports. Callers must not hold the lock.
+func (rtx *Context) frameIndex() int {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.frameIndexLocked()
+}
+
+// frameIndexLocked resolves the unset sentinel to the leaf. The caller holds the lock.
+func (rtx *Context) frameIndexLocked() int {
+	if rtx.frame < 0 || rtx.frame >= len(rtx.chain) {
+		return max(len(rtx.chain)-1, 0)
+	}
+	return rtx.frame
+}
+
+// setFrame records which frame's hook is running, returning the previous value so [AtFrame] can
+// restore it. Unexported: a handler never sets its own identity.
+func (rtx *Context) setFrame(i int) int {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	prev := rtx.frame
+	rtx.frame = i
+	return prev
 }
 
 // CommandPath returns the invoked command path, space-joined — "tasks add" for a sub-command,

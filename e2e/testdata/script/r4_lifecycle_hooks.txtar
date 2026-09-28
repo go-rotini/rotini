@@ -6,12 +6,11 @@
 #
 # It also pins the two seams that a real CLI (example-lifecycle) found missing:
 #
-#   1. CollectRoot. An inputs type binds to the END of the chain, which is what makes a
-#      composed child's short type land on its own frames. The cost is that a root command's
-#      CASCADING hook — which runs for every invocation and so cannot name the leaf's type —
-#      had no way to read its own flags: Collect[RootInputs] aligned Root against the leaf and
-#      returned zeros, silently, with --verbose coming back false in the one hook whose job is
-#      to act on it.
+#   1. A cascading hook reading its OWN flags. The anchor for an inputs struct used to be
+#      inferred from its field count against the chain, so a root CASCADING hook — which runs
+#      for every invocation and cannot name the leaf's type — got zeros: --verbose came back
+#      false in the one hook whose job is to act on it. Collect now anchors on rtx.Frame(), the
+#      command whose hook is running, so the ordinary call is correct here too.
 #
 #   2. Context.Failed. A teardown that owns a transaction has one decision to make and could
 #      not make it: Context had five Record* methods and no reader, while the Outcome that
@@ -33,7 +32,7 @@ cmp stdout order.txt
 ! stdout 'work PreRun'
 
 # ── the root's cascading hook read its OWN flag ──────────────────────────────
-# This is the CollectRoot assertion. Without it the first line reads "root CascadingPreRun
+# This is the frame-anchoring assertion. Without it the first line reads "root CascadingPreRun
 # verbose=false" while --verbose sits in argv.
 stdout 'root CascadingPreRun verbose=true'
 
@@ -135,10 +134,10 @@ type lifeHandlers struct {
 }
 
 func (*lifeHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	// CollectRoot, not Collect: this hook runs for every command in the tree, so it cannot
-	// name the leaf's inputs type, and its own type aligned at the leaf would read some
-	// descendant's frame.
-	in, err := rotini.CollectRoot[LifeInputs](rtx)
+	// Collect anchors the struct on rtx.Frame() — the command whose hook is running, which
+	// here is the root rather than the leaf. So a cascading hook reads its OWN flags with the
+	// same call a leaf's Run uses, without naming the leaf's type (which it cannot know).
+	in, err := rotini.Collect[LifeInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)

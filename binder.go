@@ -80,8 +80,14 @@ func NewBinder(meta BindMeta) *Binder {
 // others, both categorized and non-leaky, with the recon cause reachable via errors.As.
 func (b *Binder) Bind(rtx *Context, out any) error { return b.bind(rtx, out, false) }
 
-// BindRoot is [Binder.Bind] with the inputs struct anchored at the ROOT of the command chain
-// rather than at the leaf. See [CollectRoot] for why that exists and when to reach for it.
+// BindRoot is [Binder.Bind] with the inputs struct anchored at chain index 0 rather than at the
+// caller's own frame.
+//
+// It is the low-level escape, not the way to read your own inputs: [Collect] anchors on
+// [Context.Frame] and is correct in every hook, including a cascading hook and a composed child's.
+// Reach for BindRoot only when you genuinely want the FIRST n frames of the chain whatever
+// command is running — and note that it skips the frame-fit check for that reason, so a struct
+// that does not describe those frames binds whatever lands there.
 func (b *Binder) BindRoot(rtx *Context, out any) error { return b.bind(rtx, out, true) }
 
 func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
@@ -105,7 +111,7 @@ func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
-	anchor := frameAnchor(v, chain, atRoot)
+	anchor := frameAnchor(v, chain, rtx.frameIndex(), atRoot)
 	if err := b.reconcileFlags(v, chain, rtx.Argv, store, overrides, anchor); err != nil {
 		return err
 	}
@@ -120,6 +126,14 @@ func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 	}
 	if err := validateFlagDependencies(chain, store); err != nil {
 		return err
+	}
+
+	// The argv diagnostics have had their turn, so a struct that still does not fit the chain
+	// is a genuine mismatch rather than a symptom of a bad command line.
+	if !atRoot {
+		if err := checkFrameFit(v, chain, rtx.frameIndex()); err != nil {
+			return err
+		}
 	}
 
 	// 4. env + config → the Env/Config sub-structs, from independent registries.

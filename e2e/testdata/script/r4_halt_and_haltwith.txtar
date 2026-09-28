@@ -104,10 +104,10 @@ type haltHandlers struct {
 // CascadingPreRun is the hook where Halt decides something: it runs before the leaf's PreRun
 // and Run, so refusing here is what prevents the work.
 //
-// CollectRoot, not Collect: a cascading hook runs for every invocation and so cannot name the
-// leaf's inputs type. Collect would align HaltInputs against the leaf frame and hand back zeros.
+// Collect works here as it does anywhere: it anchors HaltInputs on rtx.Frame(), the command
+// whose hook is running, which in a cascading hook is this command rather than the leaf.
 func (*haltHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rotini.CollectRoot[HaltInputs](rtx)
+	inputs, err := rotini.Collect[HaltInputs](rtx)
 	if err != nil {
 		rtx.HaltWith(err)
 		return

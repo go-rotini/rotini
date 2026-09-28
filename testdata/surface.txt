@@ -235,10 +235,10 @@ field WizardStep.Ask
 field WizardStep.Key
 field WizardStep.When
 func Algorithms
+func AtFrame
 func CategoryOf
 func Collect
 func CollectP
-func CollectRoot
 func DefaultLifecycle
 func DefaultResolver
 func Defaults
@@ -307,6 +307,7 @@ method Context.Command
 method Context.CommandPath
 method Context.Exit
 method Context.Failed
+method Context.Frame
 method Context.Get
 method Context.Halt
 method Context.HaltWith
