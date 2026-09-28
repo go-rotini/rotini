@@ -223,3 +223,131 @@ func (aliasedHandlers) PostRunn(ctx context.Context, rtx *rt.Context) {}
 		t.Errorf("notices = %v, want one naming aliasedHandlers — an aliased import must not disable the audit", notices)
 	}
 }
+
+// A `handler: {import, convention}` package is the bring-your-own seam: one Handlers
+// implementation, written by hand, shared by several CLIs. It is where a misspelled hook is
+// least likely to be noticed — nobody regenerates it, and it has no stub to compare against —
+// and for a while it was the one place the audit did not look.
+const handlerPkgSpec = `version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: check
+      handler:
+        import: checkcmd example.com/demo/handlers/check
+        convention: Check
+`
+
+// handlerPkgFixture generates a project whose `check` command delegates to a hand-written
+// package, and returns that package's directory plus a re-generate function.
+func handlerPkgFixture(t *testing.T, handlerBody string) (pkgDir string, gen func(*testing.T) []error) {
+	t.Helper()
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, ".rotini.spec.yaml", handlerPkgSpec)
+	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
+	writeTestFile(t, dir, "handlers/check/check.go", handlerBody)
+	t.Chdir(dir)
+
+	gen = func(t *testing.T) []error {
+		t.Helper()
+		var notices []error
+		if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false,
+			func(string, error) {}, func(n []error) { notices = append(notices, n...) }); err != nil {
+			t.Fatalf("Generate: %v", err)
+		}
+		return notices
+	}
+	return filepath.Join(dir, "handlers", "check"), gen
+}
+
+// handlerPkg is the real shape: no `var _ rotini.Handlers` assertion, because the convention
+// function's return type already proves the type implements it.
+func handlerPkg(extra string) string {
+	return `package check
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+// Check is the convention the spec's handler: block names.
+func Check() rotini.Handlers { return &handlers{} }
+
+type handlers struct {
+	rotini.DefaultHooks
+}
+
+func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {}
+` + extra
+}
+
+// TestHookAudit_reachesAHandlerPackage is the gap closed: the audit follows `handler:` into a
+// package this module owns.
+func TestHookAudit_reachesAHandlerPackage(t *testing.T) {
+	_, gen := handlerPkgFixture(t, handlerPkg(`
+func (*handlers) CascadingPrerun(ctx context.Context, rtx *rotini.Context) {}
+`))
+	notices := gen(t)
+	if len(notices) != 1 {
+		t.Fatalf("notices = %v, want one naming the handler package", notices)
+	}
+	got := notices[0].Error()
+	for _, want := range []string{"handlers/check/check.go:", `method "CascadingPrerun"`, `did you mean "CascadingPreRun"?`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("notice is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// TestHookAudit_findsHandlerTypesWithoutAnAssertion pins the mechanism that makes the above
+// possible: a type is a handler if a function RETURNS it as rotini.Handlers, not only if an
+// assertion names it. Without this the audit walks the package and finds nothing to check.
+func TestHookAudit_findsHandlerTypesWithoutAnAssertion(t *testing.T) {
+	dir, gen := handlerPkgFixture(t, handlerPkg(""))
+	if notices := gen(t); len(notices) != 0 {
+		t.Fatalf("a correct handler package reported %v", notices)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "check.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "var _ rotini.Handlers") {
+		t.Fatal("fixture no longer demonstrates the case: it carries an assertion")
+	}
+}
+
+// TestHookAudit_isQuietOnACorrectHandlerPackage guards against the new reach becoming noise.
+func TestHookAudit_isQuietOnACorrectHandlerPackage(t *testing.T) {
+	_, gen := handlerPkgFixture(t, handlerPkg(`
+// A correctly spelled hook, and an ordinary helper.
+func (*handlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {}
+
+func (*handlers) prepare() error { return nil }
+`))
+	if notices := gen(t); len(notices) != 0 {
+		t.Errorf("a correct handler package reported %v, want silence", notices)
+	}
+}
+
+// TestHookAudit_skipsHandlerPackagesInOtherModules is the deliberate boundary: a dependency's
+// source is not this tool's to lint, and resolving an import path outside this module would mean
+// consulting the build list or the module cache.
+func TestHookAudit_skipsHandlerPackagesInOtherModules(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, ".rotini.spec.yaml", strings.Replace(handlerPkgSpec,
+		"example.com/demo/handlers/check", "example.com/elsewhere/handlers/check", 1))
+	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
+	t.Chdir(dir)
+
+	var notices []error
+	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false,
+		func(string, error) {}, func(n []error) { notices = append(notices, n...) }); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	if len(notices) != 0 {
+		t.Errorf("an out-of-module handler package produced %v, want it skipped", notices)
+	}
+}

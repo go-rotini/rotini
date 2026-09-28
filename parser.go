@@ -154,6 +154,18 @@ func NewParser() *Parser {
 //
 // It returns a [*ParseError] when out is not a non-nil pointer, a flag is unknown or missing
 // its value, a required input is absent, or a value falls outside a declared enum.
+//
+// # It does not check that out describes the running command
+//
+// Parse is the mechanism; [Collect] is the contract. Collect and the per-channel layer functions
+// reject a struct that cannot describe the caller's own command — one covering more commands
+// than the caller is deep — because a handler asking for its own inputs can only have meant one
+// thing. Parse binds what fits and leaves the rest zeroed, which is what lets a caller drive it
+// with a struct spanning a whole tree and reuse it across several argv shapes.
+//
+// That is a deliberate split, not an oversight, and it is the only place in the input surface
+// where a mismatched struct passes quietly. A handler collecting its own inputs should reach for
+// Collect and get the check.
 func (p *Parser) Parse(rtx *Context, out any) error {
 	store, chain, err := p.parseBind(rtx, out, false)
 	if err != nil {

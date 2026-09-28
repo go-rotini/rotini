@@ -45,6 +45,11 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 // and reach its seams from goroutines it spawned. Always pass it as a pointer; it must not be
 // copied.
 //
+// Safe is not the same as unchanging. [Context.Frame] tracks the lifecycle's progress, so a
+// goroutine that outlives the hook that spawned it reads the step running when it looks rather
+// than the step that started it — see Frame. Everything else a handler reads here is fixed for
+// the run.
+//
 // A nil *Context is a caller bug, not a state to handle: the runtime always hands a real one
 // to every hook, and [NewContextFor] never returns nil, so every method here dereferences
 // rather than checking. That is the same rule [Program] follows, and for the same reason —
@@ -194,7 +199,7 @@ func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 // The slice is a COPY, so reordering, reslicing or replacing a frame is a caller's own
 // business and cannot reach the run. It used to be the live slice with a doc asking callers to
 // treat it as read-only, which is a request rather than a guarantee: one `chain[1].Name = …`
-// silently rewrote [Context.CommandPath], [Context.Command], the binder's leaf anchoring and
+// silently rewrote [Context.CommandPath], [Context.Command], the binder's frame alignment and
 // configuration-file scoping for the rest of the run. Every other internal slice the Context
 // hands out — the outcome channels — has always been copied for the same reason.
 //
@@ -248,6 +253,28 @@ const frameUnset = -1
 //
 // Outside a lifecycle step — a Context from [NewContextFor], or one reaching a funnel after the
 // run has settled — there is no hook, and Frame reports the leaf.
+//
+// # It describes the step running NOW, not the one that spawned you
+//
+// The frame moves as the lifecycle advances, so Frame answers for whichever step is running when
+// it is called — not for the hook that happens to be on the stack. A goroutine a hook spawns and
+// does not wait for therefore reads whatever step the run has reached by the time it looks:
+//
+//	func (*h) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+//	    go func() {
+//	        // The run has moved on. This may report the leaf, not this command.
+//	        log.Println(rtx.Frame().Name)
+//	    }()
+//	}
+//
+// It is not a data race — the frame is mutex-guarded and every read is consistent — but the
+// ANSWER is timing-dependent, and [Collect] anchors on it, so a goroutine collecting inputs may
+// anchor somewhere its spawning hook did not intend. Capture what you need before spawning:
+//
+//	frame := rtx.Frame()                       // or collect the inputs here
+//	go func() { log.Println(frame.Name) }()
+//
+// A goroutine the hook WAITS for, before returning, sees its spawner's frame.
 func (rtx *Context) Frame() ResolvedCommand {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
@@ -387,6 +414,12 @@ func (rtx *Context) Halt() {
 // decision to a later hook that gates on [Context.Failed] — use RecordError on its own. That
 // remains a supported choice; HaltWith exists so it is a deliberate one rather than what
 // omission gives you.
+//
+// Inside the funnel it does nothing at all, and does not report that it did nothing. The halt
+// is a no-op there, as [Context.Halt]'s is, and the recorded error is dropped: the [Outcome] was
+// snapshotted before the funnel was called, so nothing re-reads the channels afterwards. A
+// funnel that fails while reporting should write to rtx.Stderr and set a code with
+// [Context.Exit] — it is the final authority by then, and recording has no one left to tell.
 func (rtx *Context) HaltWith(err error) {
 	rtx.RecordError(err)
 	rtx.Halt()
@@ -652,9 +685,18 @@ func (rtx *Context) Get[T any](key string) (T, bool) {
 // A dispatched Context is seeded from the Program, so these are for a Context built by
 // [NewContextFor] — exercising a [Parser], or driving one hook — where there is no Program to
 // carry them. They mirror the [Program] options exactly, so there is one vocabulary to learn.
+//
+// A handler should not need any of them, and each says so, because a grouping comment in the
+// source is not what a reader sees: `go doc Context.WithParser` prints that method's own lines
+// and nothing else. The six sit in the same autocomplete list as [Context.Stdout], which is the
+// cost of the single vocabulary C1 bought, so each one carries the scope itself.
 
 // WithBindMeta supplies the generated descriptor [Collect] reconciles from. See
 // [Program.WithBindMeta].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
 func (rtx *Context) WithBindMeta(meta BindMeta) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
@@ -665,6 +707,10 @@ func (rtx *Context) WithBindMeta(meta BindMeta) *Context {
 }
 
 // WithBinder replaces the binder [Collect] uses, built from the meta. See [Program.WithBinder].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
 func (rtx *Context) WithBinder(fn func(BindMeta) *Binder) *Context {
 	if rtx != nil && fn != nil {
 		rtx.mu.Lock()
@@ -675,6 +721,10 @@ func (rtx *Context) WithBinder(fn func(BindMeta) *Binder) *Context {
 }
 
 // WithVersion sets what [Context.Version] reports. See [Program.WithVersion].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
 func (rtx *Context) WithVersion(version string) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
@@ -685,6 +735,10 @@ func (rtx *Context) WithVersion(version string) *Context {
 }
 
 // WithParser sets the parser [Context.Parser] returns. See [Program.WithParser].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
 func (rtx *Context) WithParser(parser *Parser) *Context {
 	if rtx != nil && parser != nil {
 		rtx.mu.Lock()
@@ -695,6 +749,10 @@ func (rtx *Context) WithParser(parser *Parser) *Context {
 }
 
 // WithStyler sets the styler [Context.Styler] reports. See [Program.WithStyler].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
 func (rtx *Context) WithStyler(styler *Styler) *Context {
 	if rtx != nil && styler != nil {
 		rtx.mu.Lock()
@@ -705,6 +763,10 @@ func (rtx *Context) WithStyler(styler *Styler) *Context {
 }
 
 // WithSuggestor sets the suggestor [Context.Suggestor] reports. See [Program.WithSuggestor].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
 func (rtx *Context) WithSuggestor(suggestor *Suggestor) *Context {
 	if rtx != nil && suggestor != nil {
 		rtx.mu.Lock()

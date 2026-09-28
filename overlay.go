@@ -341,6 +341,25 @@ func (p *parsedInputs) argvSetAt(idx int) map[string]bool {
 
 // ── channel cores (shared, non-generic) ──────────────────────────────────────.
 
+// layerAnchor is frameAnchor plus checkFrameFit, for the per-channel layer functions.
+//
+// Every layer goes through this rather than calling frameAnchor directly, and that is the whole
+// point of it existing: when the anchor moved from the leaf to the caller's own frame, the fit
+// check was added to [Collect] and [CollectP] and the four layers were left behind. They went on
+// accepting a struct that could not describe the running command and returning it zeroed, with a
+// nil error — the exact silent failure the anchor work existed to remove, left in the corner of
+// the same API. One helper means the next change to either cannot separate them.
+//
+// Callers invoke it where they would have computed the anchor, which is after any parse step, so
+// a malformed command line still reports itself before this does.
+func layerAnchor(rtx *Context, v reflect.Value, chain []ResolvedCommand) (int, error) {
+	self := rtx.frameIndex()
+	if err := checkFrameFit(v, chain, self); err != nil {
+		return 0, err
+	}
+	return frameAnchor(v, chain, self, false), nil
+}
+
 // argvLayer parses argv only (no defaults) into v and records presence.
 func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
@@ -351,7 +370,10 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	anchor := frameAnchor(v, chain, rtx.frameIndex(), false)
+	anchor, err := layerAnchor(rtx, v, chain)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
 		return nil, nil, err
 	}
@@ -386,7 +408,10 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 	// Flag defaults bind through the same store machinery as parsed values.
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	applyDefaults(chain, store)
-	anchor := frameAnchor(v, chain, rtx.frameIndex(), false)
+	anchor, err := layerAnchor(rtx, v, chain)
+	if err != nil {
+		return nil, nil, err
+	}
 	if err := bindInputs(v, store, chain, anchor); err != nil {
 		return nil, nil, err
 	}
@@ -474,7 +499,11 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 	}
 	defer flagReg.Close()
 
-	return channelLayer(v, chain, frameAnchor(v, chain, rtx.frameIndex(), false), "env", "Env", envReg, flagReg, nil)
+	anchor, err := layerAnchor(rtx, v, chain)
+	if err != nil {
+		return nil, nil, err
+	}
+	return channelLayer(v, chain, anchor, "env", "Env", envReg, flagReg, nil)
 }
 
 // filesLayer acquires the config-files channel into v. config_source paths are honored here
@@ -494,7 +523,11 @@ func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 		return nil, nil, err
 	}
 	defer cfg.Close()
-	return channelLayer(v, chain, frameAnchor(v, chain, rtx.frameIndex(), false), "files", "Config", cfg.merged, cfg.merged, cfg)
+	anchor, err := layerAnchor(rtx, v, chain)
+	if err != nil {
+		return nil, nil, err
+	}
+	return channelLayer(v, chain, anchor, "files", "Config", cfg.merged, cfg.merged, cfg)
 }
 
 // channelLayer is the shared env/files core: recon-bind each command's channel struct,

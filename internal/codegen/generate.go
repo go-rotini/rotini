@@ -44,6 +44,11 @@ type program struct {
 	// alongside pruned, never as an error: an unused method is legal Go.
 	hookWarnings []error
 
+	// handlerImports are the Go import paths a spec's `handler:` blocks point at — the
+	// bring-your-own seam, where an author writes a Handlers implementation by hand. The
+	// hook audit reads the ones inside this module; see auditHooks.
+	handlerImports map[string]bool
+
 	// inputs — the validated spec + conf and where the spec was read from.
 	spec     *Spec
 	conf     *Conf

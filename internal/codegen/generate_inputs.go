@@ -11,8 +11,18 @@ import (
 
 // inputsFields returns the fields of a command's <Prefix>Inputs struct: one per ancestor plus
 // the command itself, in root→leaf order, each named after the command's PascalCase prefix.
-// There is deliberately no struct tag — the binder maps fields to chain frames by position,
-// aligned at the leaf, so command names can never collide along a path.
+//
+// There is deliberately no struct tag naming the command. The binder maps fields to chain frames
+// by POSITION, counting back from the frame whose hook is running, so field names are labels for
+// a reader and never matched against anything.
+//
+// Tagging them was considered as a way to make that mapping checkable — a field could then be
+// verified against the frame it landed on, closing the last case where a mismatched inputs type
+// binds quietly. It does not work: a composed child is RENAMED by the umbrella that grafts it
+// (`- $ref: ../child/… ` with `name: kid`), while the child's types are generated in the child's
+// own repo under its own names. The tag would say "child" and the frame would say "kid", so the
+// check would fire on exactly the composition it is supposed to protect. Closing that case needs
+// the frame to carry a grafted command's ORIGIN identity, which nothing does today.
 func inputsFields(rootPascal, path string) []fieldDef {
 	segments := strings.Split(path, "_")
 	fields := make([]fieldDef, 0, 1+len(segments))

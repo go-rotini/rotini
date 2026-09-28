@@ -247,6 +247,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				// stub filename so a converted command's old stub is pruned.
 				alias, importPath := parseAliasPath(c.Handler.Import)
 				gp.addImport(alias, importPath)
+				gp.noteHandlerImport(importPath)
 				gc.passthrough = true
 				gc.delegateAlias = alias
 				gc.delegateMethod = c.Handler.Convention
@@ -386,6 +387,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		a, p := parseAliasPath(c.Handler.Import)
 		alias, delegateRoot, passthrough = a, c.Handler.Convention, true
 		gp.addImport(a, p)
+		gp.noteHandlerImport(p)
 	default:
 		alias = identAlias(childRoot.Name)
 		delegateRoot = toPascalCase(childRoot.Name)

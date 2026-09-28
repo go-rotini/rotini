@@ -33,39 +33,46 @@ import (
 // helper names.
 var auditedHooks = []string{"CascadingPreRun", "PreRun", "PostRun", "CascadingPostRun"}
 
-// auditHooks reports methods on the cmd package's handler types whose names are near-misses
-// of a lifecycle hook. It is the last generate step: by then every stub this pass created
-// exists and every orphan is gone, so the audit sees exactly the files the author will build.
+// auditHooks reports methods on a handler type whose names are near-misses of a lifecycle hook.
+// It is the last generate step: by then every stub this pass created exists and every orphan is
+// gone, so the audit sees exactly the files the author will build.
 //
-// It is BEST-EFFORT and never fails the pass. These are the author's files, possibly mid-edit;
-// a file that will not parse is skipped, because the compiler is about to say so in better
-// detail than this audit could.
+// It covers the cmd package AND every package a spec's `handler:` block points at that lives in
+// this module — the bring-your-own seam, where a Handlers implementation is written by hand and
+// shared by several CLIs, and therefore the place a misspelled hook is LEAST likely to be noticed.
+// A handler package outside this module is skipped deliberately: that is a dependency's source,
+// and linting someone else's package is not this tool's business.
+//
+// It is BEST-EFFORT and never fails the pass for a package it cannot read. These are the
+// author's files, possibly mid-edit; a file that will not parse is skipped, because the compiler
+// is about to say so in better detail than this audit could.
 func (p *program) auditHooks() error {
-	// No cmd directory is nothing to audit, not a problem to report: the same answer
-	// stubLooksGenerated gives when deciding whether to delete a file that is not there.
-	// Anything else is a real filesystem failure and is surfaced, because a step that
-	// silently does nothing is the class of bug this one exists to catch.
-	entries, err := os.ReadDir(p.layout.cmdDir)
+	dirs, err := p.auditDirs()
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read %s to audit its handler hooks: %w", p.layout.cmdDir, err)
+		return err
 	}
 
 	fset := token.NewFileSet()
 	files := make(map[string]*ast.File)
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		path := filepath.Join(p.layout.cmdDir, name)
-		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	for _, dir := range dirs {
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			continue
+			continue // a directory that is not there is nothing to audit
 		}
-		files[path] = f
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				continue
+			}
+			f, err := parser.ParseFile(fset, filepath.Join(dir, name), nil, parser.SkipObjectResolution)
+			if err != nil {
+				continue
+			}
+			files[filepath.Join(dir, name)] = f
+		}
+	}
+	if len(files) == 0 {
+		return nil
 	}
 
 	handlerTypes := handlerTypeNames(files)
@@ -77,14 +84,114 @@ func (p *program) auditHooks() error {
 	return nil
 }
 
-// handlerTypeNames collects the type names asserted to implement rotini.Handlers anywhere in
-// the package — the `var _ rotini.Handlers = (*T)(nil)` line every stub is written with, which
-// is also what identifies a generated stub for pruning (see stubMarker).
+// noteHandlerImport records a Go import path a spec's `handler:` block names, for auditHooks.
+func (p *program) noteHandlerImport(importPath string) {
+	importPath = strings.TrimSpace(importPath)
+	if importPath == "" {
+		return
+	}
+	if p.handlerImports == nil {
+		p.handlerImports = map[string]bool{}
+	}
+	p.handlerImports[importPath] = true
+}
+
+// auditDirs is the cmd package plus each in-module handler package, deduped and ordered so a
+// pass is reproducible.
 //
-// Matching on the interface NAME rather than the qualified selector keeps this working when
-// the runtime is imported under an alias. The value form is read loosely — (*T)(nil), T{} and
-// &T{} all name T — so an author who rewrote the assertion by hand is still covered.
+// The module check is what makes resolving an import path to a directory possible at all: a path
+// under this module's own path maps to a directory beneath its root by string surgery, with no
+// build list and no module cache to consult. Anything else is another module's code.
+func (p *program) auditDirs() ([]string, error) {
+	seen := map[string]bool{}
+	var dirs []string
+	add := func(d string) {
+		if d != "" && !seen[d] {
+			seen[d] = true
+			dirs = append(dirs, d)
+		}
+	}
+
+	// The cmd directory must exist by now — the stubs were just written — so unlike a handler
+	// package, a failure to read it is a real filesystem problem and is surfaced.
+	if _, err := os.Stat(p.layout.cmdDir); err != nil {
+		if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("read %s to audit its handler hooks: %w", p.layout.cmdDir, err)
+		}
+	} else {
+		add(p.layout.cmdDir)
+	}
+
+	for imp := range p.handlerImports {
+		if dir, ok := inModuleDir(imp, p.module); ok {
+			add(dir)
+		}
+	}
+	sort.Strings(dirs)
+	return dirs, nil
+}
+
+// inModuleDir maps a Go import path to a directory inside m, reporting false when the path
+// belongs to another module.
+func inModuleDir(importPath string, m module) (string, bool) {
+	if m.path == "" || m.root == "" {
+		return "", false
+	}
+	switch {
+	case importPath == m.path:
+		return m.root, true
+	case strings.HasPrefix(importPath, m.path+"/"):
+		rel := strings.TrimPrefix(importPath, m.path+"/")
+		return filepath.Join(m.root, filepath.FromSlash(rel)), true
+	}
+	return "", false
+}
+
+// handlerTypeNames collects the type names this package declares that implement rotini.Handlers,
+// found two ways:
+//
+//  1. The `var _ rotini.Handlers = (*T)(nil)` assertion every generated stub carries, which is
+//     also what identifies a stub for pruning (see stubMarker).
+//  2. Any function RETURNING rotini.Handlers, through the types its body names.
+//
+// The second is what reaches a hand-written handler package. The `handler: {import, convention}`
+// seam is a package exporting `func Health() rotini.Handlers { return &handlers{} }` — the
+// convention function's return type is the proof it implements the interface, so such a package
+// has no reason to write the assertion as well, and the real ones do not. Finding types only
+// through the assertion would have audited every generated stub and none of the files the seam
+// exists for.
+//
+// Matching on the interface NAME rather than the qualified selector keeps this working when the
+// runtime is imported under an alias. Value forms are read loosely — (*T)(nil), T{} and &T{} all
+// name T — so a hand-rewritten assertion, and a constructor with a few branches, are covered.
 func handlerTypeNames(files map[string]*ast.File) map[string]bool {
+	declared := declaredTypeNames(files)
+	found := map[string]bool{}
+	collect := func(n ast.Node) {
+		ast.Inspect(n, func(n ast.Node) bool {
+			if id, ok := n.(*ast.Ident); ok && declared[id.Name] {
+				found[id.Name] = true
+			}
+			return true
+		})
+	}
+
+	for _, f := range files {
+		for _, d := range f.Decls {
+			switch d := d.(type) {
+			case *ast.GenDecl:
+				collectAssertedTypes(d, collect)
+			case *ast.FuncDecl:
+				collectConstructedTypes(d, collect)
+			}
+		}
+	}
+	return found
+}
+
+// declaredTypeNames is every type name the package declares, so the two scans below can tell a
+// local type from an imported identifier that happens to appear in the same expression.
+func declaredTypeNames(files map[string]*ast.File) map[string]bool {
 	declared := map[string]bool{}
 	for _, f := range files {
 		for _, d := range f.Decls {
@@ -92,36 +199,60 @@ func handlerTypeNames(files map[string]*ast.File) map[string]bool {
 			if !ok || gd.Tok != token.TYPE {
 				continue
 			}
-			for _, s := range gd.Specs {
-				if ts, ok := s.(*ast.TypeSpec); ok {
+			for _, sp := range gd.Specs {
+				if ts, ok := sp.(*ast.TypeSpec); ok {
 					declared[ts.Name.Name] = true
 				}
 			}
 		}
 	}
+	return declared
+}
 
-	asserted := map[string]bool{}
-	for _, f := range files {
-		for _, d := range f.Decls {
-			gd, ok := d.(*ast.GenDecl)
-			if !ok || gd.Tok != token.VAR {
-				continue
-			}
-			for _, s := range gd.Specs {
-				vs, ok := s.(*ast.ValueSpec)
-				if !ok || !assertsHandlers(vs.Type) || len(vs.Values) == 0 {
-					continue
-				}
-				ast.Inspect(vs.Values[0], func(n ast.Node) bool {
-					if id, ok := n.(*ast.Ident); ok && declared[id.Name] {
-						asserted[id.Name] = true
-					}
-					return true
-				})
-			}
+// collectAssertedTypes reads `var _ rotini.Handlers = (*T)(nil)` — the generated stub's form.
+func collectAssertedTypes(gd *ast.GenDecl, collect func(ast.Node)) {
+	if gd.Tok != token.VAR {
+		return
+	}
+	for _, sp := range gd.Specs {
+		vs, ok := sp.(*ast.ValueSpec)
+		if !ok || !assertsHandlers(vs.Type) || len(vs.Values) == 0 {
+			continue
+		}
+		collect(vs.Values[0])
+	}
+}
+
+// collectConstructedTypes reads `func Check() rotini.Handlers { return &handlers{} }` — the
+// hand-written handler package's form, where the return type is the proof and no assertion is
+// written.
+func collectConstructedTypes(fd *ast.FuncDecl, collect func(ast.Node)) {
+	if !returnsHandlers(fd) || fd.Body == nil {
+		return
+	}
+	for _, st := range fd.Body.List {
+		ret, ok := st.(*ast.ReturnStmt)
+		if !ok {
+			continue
+		}
+		for _, r := range ret.Results {
+			collect(r)
 		}
 	}
-	return asserted
+}
+
+// returnsHandlers reports whether fn's signature returns the Handlers interface — the proof a
+// hand-written handler package gives that its type implements it, in place of an assertion.
+func returnsHandlers(fn *ast.FuncDecl) bool {
+	if fn.Type == nil || fn.Type.Results == nil {
+		return false
+	}
+	for _, r := range fn.Type.Results.List {
+		if assertsHandlers(r.Type) {
+			return true
+		}
+	}
+	return false
 }
 
 // assertsHandlers reports whether a var's declared type is the Handlers interface, under any
