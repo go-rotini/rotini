@@ -137,6 +137,8 @@ go build ./cmd/todo
 
 Each command gets one stub, created once and then yours. It implements the five lifecycle hooks; embed the `Default*` types for the ones you do not need.
 
+To implement one later, declare a method with the same name. The embed can stay where it is — your method takes precedence over it.
+
 {{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
 
@@ -177,6 +179,18 @@ Two things worth noticing, because they are the conventions the rest of the docs
 - **Record, do not print, results and errors.** The runtime reports them once, after teardown, through one funnel — so a handler carries no reporting code and a program changes its reporting in one place.
 
 `TodoAddInputs` is generated from the spec — you never declare it.
+
+{{< alert type="info" title="A MISSPELLED HOOK IS CAUGHT FOR YOU:" >}}
+`var _ rotini.Handlers` at the top of the stub is a compile-time check: remove an embed without replacing it, or give a hook the wrong signature, and the build fails by name.
+
+A misspelled hook name is the one case it cannot see — the embed still satisfies the interface, so `CascadingPrerun` compiles, and never runs. `rotini generate` reports that one:
+
+```text
+Note: internal/cmd/todo/todo_add.go:33: method "CascadingPrerun" on todoAddHandlers is not a
+lifecycle hook, so it will never run — rotini.DefaultCascadingPreRun is what supplies
+CascadingPreRun; did you mean "CascadingPreRun"?
+```
+{{< /alert >}}
 
 ## Next
 

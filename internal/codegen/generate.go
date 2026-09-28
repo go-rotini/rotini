@@ -39,6 +39,11 @@ type program struct {
 	// as notices. Deleting a file the author can see is not a silent operation.
 	pruned []string
 
+	// hookWarnings are what auditHooks found in the handler files rotini does not own —
+	// a method that looks like a lifecycle hook but is not one. Surfaced as notices
+	// alongside pruned, never as an error: an unused method is legal Go.
+	hookWarnings []error
+
 	// inputs — the validated spec + conf and where the spec was read from.
 	spec     *Spec
 	conf     *Conf
@@ -118,6 +123,7 @@ func (p *program) generate() error {
 		{"emit handler stubs", p.emitStubs},
 		{"emit entrypoint", p.emitEntrypoint},
 		{"prune orphans", p.prune},
+		{"audit handler hooks", p.auditHooks},
 	}
 	for _, s := range steps {
 		if err := s.do(); err != nil {

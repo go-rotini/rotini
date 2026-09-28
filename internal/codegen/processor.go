@@ -47,8 +47,9 @@ func NewProcessor(version string) *Processor {
 // program — once, or on every spec/conf change in watch mode until interrupted (ctrl-c).
 // onGenerate (may be nil) receives a "[HH:MM:SS] <took>" summary and each pass's error;
 // without watch the single pass's error is returned so the caller can treat it as failed.
-// onNotices (may be nil) receives what the pass removed — mirroring Validate's warnings
-// channel, because a file deleted without a word is how work gets lost.
+// onNotices (may be nil) receives the pass's non-fatal remarks — mirroring Validate's warnings
+// channel: what it removed, because a file deleted without a word is how work gets lost, and
+// what the hook audit noticed in the handler files it did not write.
 func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error {
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
@@ -145,8 +146,9 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 
 // validateAndEmit is the gate-then-emit step: validation must pass (the gate — invalid input
 // never reaches codegen), then the conf defaults are applied and the program emitted.
-// validateAndEmit validates then emits, returning any NOTICES the emit produced — today, the
-// orphaned stubs it pruned, which the caller reports rather than deleting them silently.
+// validateAndEmit validates then emits, returning any NOTICES the emit produced: the orphaned
+// stubs it pruned, which the caller reports rather than deleting them silently, and what the
+// hook audit found in the handler files it did not write.
 func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) ([]error, error) {
 	if _, err := p.validateDocuments(rs, rc, ""); err != nil {
 		return nil, err
@@ -157,10 +159,11 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) ([]e
 		return nil, err
 	}
 	err = prog.generate()
-	notices := make([]error, 0, len(prog.pruned))
+	notices := make([]error, 0, len(prog.pruned)+len(prog.hookWarnings))
 	for _, name := range prog.pruned {
 		notices = append(notices, fmt.Errorf("pruned %s — its command is no longer in the spec", name))
 	}
+	notices = append(notices, prog.hookWarnings...)
 	return notices, err
 }
 
