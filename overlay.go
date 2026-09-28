@@ -64,6 +64,17 @@ type layerCore struct {
 //
 //	inputs, err := rotini.Collect[MycliDeployInputs](rtx)
 //
+// The stdin channel is not in that order because it never competes: it fills the leaf command's
+// declared payload field, which no other channel writes. It is overlaid last, and where it sits
+// makes no difference.
+//
+// On failure the returned T holds whatever was filled before the failure, including the value
+// that failed. **It is not a result — check the error and stop.** It is deliberately weaker than
+// [CollectP]'s: Collect stops at the first argv problem, before the environment and
+// configuration channels are read at all, because an argv error is the one worth reporting; so a
+// config-supplied default that CollectP would show is simply absent here. CollectP hands its
+// merged value back on purpose, paired with the Report that explains it.
+//
 // **A handler collects the type generated for its own command, in any hook.** That is the whole
 // rule. An inputs struct's last field describes the collecting command and the fields before it
 // describe its ancestors, so Collect anchors the struct on [Context.Frame] — the command whose
@@ -260,9 +271,22 @@ func (r Report) Fields() []FieldPath {
 }
 
 // Validate runs the same declarative checks [Parser.Parse] applies — required, enum,
-// constraints, flag groups and dependencies — over the merged values, with "explicitly set"
-// meaning set by the argv layer. Run it after the overlay so a required flag satisfied by any
-// layer passes. Hand-built layers contribute values but nothing to validate.
+// constraints, flag groups and dependencies — with "explicitly set" meaning set by the argv
+// layer. Run it after the overlay so a required flag satisfied by any layer passes.
+//
+// It checks what the layers SUPPLIED, which is not the same as checking the merged struct
+// field by field:
+//
+//   - PRESENCE rules fire on absence. A required input no layer supplied is an error.
+//   - VALUE rules fire only on a value some layer supplied. A field nobody supplied is absent,
+//     and its zero value is not measured against its enum or bounds.
+//
+// That distinction is invisible while the defaults layer is present, because a declared default
+// supplies the field. Drop [Defaults] from a custom precedence and an enum-constrained flag can
+// merge as "" — legally, because nothing claimed it — so build custom precedence from all five
+// channels unless leaving one out is the point.
+//
+// Hand-built layers contribute values but nothing to validate.
 func (r Report) Validate() error {
 	if r.chain == nil || r.store == nil {
 		return nil

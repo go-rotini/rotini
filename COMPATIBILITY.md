@@ -28,9 +28,11 @@ vars, methods, **struct fields** and **interface methods**: a removed field on `
 `FlagDef` breaks every generated file in every project, which is a larger break than removing
 a function, not a smaller one.
 
-Behavior is covered too, not just shape: the documented precedence order of input channels
-(defaults < files < env < argv), the lifecycle hook order and its reverse unwind, the outcome
-funnel's contract, and the exit-code floor.
+Behavior is covered too, not just shape: the documented precedence order of the four competing
+input channels (defaults < files < env < argv), the lifecycle hook order and its reverse unwind,
+the outcome funnel's contract, and the exit-code floor. The stdin channel is the fifth and is not
+in that order: it fills a command's declared payload field, which no other channel writes, so it
+never competes for one.
 
 ### 2. The spec and conf schema keys
 
