@@ -22,8 +22,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs RotiniGenerateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
+		rtx.HaltWith(err)
 		return
 	}
 
@@ -37,7 +36,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", args.SpecFilePath, flags.ConfFilePath)
 
-	version := rtx.MustGet[string](KeyRotiniVersion)
+	version := rtx.Version()
 	rtx.BindIfAbsent("generate", codegen.NewProcessor(version).Generate)
 	generate := rtx.MustGet[codegen.GenerateFn]("generate")
 
@@ -62,8 +61,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	)
 
 	if err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
+		rtx.HaltWith(err)
 		return
 	}
 

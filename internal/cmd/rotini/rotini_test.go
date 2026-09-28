@@ -35,7 +35,7 @@ func newTestCLI(t *testing.T) (*rotini.Program, *bytes.Buffer, *bytes.Buffer) {
 		WithStdout(out).
 		WithStderr(errb).
 		WithExit(func(int) { t.Error("a handler called the exit action; Run must not exit the process") }).
-		Bind(KeyRotiniVersion, testVersion)
+		WithVersion(testVersion)
 
 	return p, out, errb
 }

@@ -19,8 +19,7 @@ type rotiniHelpHandlers struct {
 func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniHelpInputs](rtx)
 	if err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
+		rtx.HaltWith(err)
 		return
 	}
 
@@ -35,8 +34,7 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	help, err := Help(args.Command...)
 	if err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
+		rtx.HaltWith(err)
 		return
 	}
 

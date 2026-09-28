@@ -14,7 +14,7 @@ var (
 
 func main() {
 	cmd.Program.
-		Bind(cmd.KeyRotiniVersion, cmd.ResolveVersion(version)).
+		WithVersion(cmd.ResolveVersion(version)).
 		WithSuggestor(rotini.NewSuggestor()).
 		Execute()
 }

@@ -22,8 +22,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	var inputs RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
+		rtx.HaltWith(err)
 		return
 	}
 
@@ -38,7 +37,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
 
-	version := rtx.MustGet[string](KeyRotiniVersion)
+	version := rtx.Version()
 	rtx.BindIfAbsent("validate", codegen.NewProcessor(version).Validate)
 	validate := rtx.MustGet[codegen.ValidateFn]("validate")
 

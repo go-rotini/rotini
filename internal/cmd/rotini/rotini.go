@@ -10,10 +10,6 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-const (
-	KeyRotiniVersion = "versioner"
-)
-
 var (
 	readBuildInfo = debug.ReadBuildInfo
 	// releaseVersionRe matches a full semantic version and captures its X.Y.Z, anchored at
@@ -96,7 +92,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		rtx.HaltWithCode(0)
 		return
 	case flags.Version:
-		version := rtx.MustGet[string](KeyRotiniVersion)
+		version := rtx.Version()
 		fmt.Fprintf(rtx.Stdout, "v%s\n", version)
 		rtx.HaltWithCode(0)
 		return
