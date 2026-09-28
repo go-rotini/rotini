@@ -106,7 +106,7 @@ func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
 	anchor := frameAnchor(v, chain, atRoot)
-	if err := b.reconcileFlags(v, chain, rtx.Args, store, overrides, anchor); err != nil {
+	if err := b.reconcileFlags(v, chain, rtx.Argv, store, overrides, anchor); err != nil {
 		return err
 	}
 

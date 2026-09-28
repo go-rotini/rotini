@@ -88,8 +88,7 @@ Stubs and the generated types share **one package**, so a handler refers to its 
 func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[TodoAddInputs](rtx) // not somepkg.TodoAddInputs
 	if err != nil {
-		rtx.RecordError(err)
-		rtx.Halt()
+		rtx.HaltWith(err)
 		return
 	}
 	// …

@@ -160,7 +160,7 @@ func (*childMakeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[ChildMakeInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	fmt.Fprintf(rtx.Stdout, "child made %s\n", in.Child.Flags.Target)
@@ -202,7 +202,7 @@ func (*rootChildExtraHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[RootChildExtraInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	fmt.Fprintf(rtx.Stdout, "extra: target=%s\n", in.RootChild.Flags.Target)
@@ -223,13 +223,13 @@ func (*rootHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[RootHelpInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	page, err := Help(in.RootHelp.Arguments.Command...)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	fmt.Fprintln(rtx.Stdout, page)

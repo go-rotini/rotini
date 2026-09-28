@@ -19,7 +19,7 @@ const completeCommand = "__complete"
 // CompleteFlagValue with the flag's logical name and the word being typed. A nil return falls
 // back to the flag's static enum; a non-nil return, empty included, is authoritative.
 //
-// rtx carries the resolved chain, the completion words in [Context.Args], and every service
+// rtx carries the resolved chain, the completion words in [Context.Argv], and every service
 // bound on the Program, so a completer can reach a bound API client or the filesystem.
 //
 // It is entirely opt-in, a panic in it is not recovered, and it may be called on every
@@ -400,7 +400,7 @@ func resolveHandler[T any](handlers any, handlerName string) (T, bool) {
 func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string) {
 	if rtx != nil {
 		rtx.chain = chain
-		rtx.Args = words
+		rtx.Argv = words
 	}
 }
 

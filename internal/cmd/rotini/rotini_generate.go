@@ -23,7 +23,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	var inputs RotiniGenerateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 
@@ -63,9 +63,9 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 
-	rtx.SignalExit(0)
+	rtx.HaltWithCode(0)
 }

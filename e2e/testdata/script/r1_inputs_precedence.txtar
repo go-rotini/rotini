@@ -244,7 +244,7 @@ func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[AppInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	if in.App.Flags.Help {

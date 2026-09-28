@@ -86,23 +86,23 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	if err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", err.Error())
 		fmt.Fprintln(rtx.Stdout, help)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 
 	switch {
 	case flags.Help:
 		fmt.Fprintln(rtx.Stdout, help)
-		rtx.SignalExit(0)
+		rtx.HaltWithCode(0)
 		return
 	case flags.Version:
 		version := rtx.MustGet[string](KeyRotiniVersion)
 		fmt.Fprintf(rtx.Stdout, "v%s\n", version)
-		rtx.SignalExit(0)
+		rtx.HaltWithCode(0)
 		return
 	default:
 		fmt.Fprintln(rtx.Stdout, help)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 }

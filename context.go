@@ -32,7 +32,7 @@ func (e *ServiceError) Error() string {
 func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, ErrInternal} }
 
 // Context is rotini's per-invocation context: the service registry, the program's streams, and
-// what the runtime resolved before dispatch — the raw argument vector ([Context.Args]) and the
+// what the runtime resolved before dispatch — the raw argument vector ([Context.Argv]) and the
 // resolved command chain ([Context.Chain]). One is built per [Program.Run] and passed to every
 // hook, so all hooks share the same bindings and exit state and no records leak between
 // invocations.
@@ -49,7 +49,7 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 // to every hook, and [NewContextFor] never returns nil, so every method here dereferences
 // rather than checking. That is the same rule [Program] follows, and for the same reason —
 // half these methods used to tolerate nil and half did not, which meant rtx.Chain() answered
-// while rtx.Path() panicked, on three views of the same data. Tolerating it is the worse of
+// while rtx.CommandPath() panicked, on three views of the same data. Tolerating it is the worse of
 // the two: a nil that reports "nothing recorded" or "no chain" hides the mistake and surfaces
 // it somewhere later, at a call that was not wrong.
 //
@@ -74,18 +74,22 @@ type Context struct {
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// Args is the raw argument vector for this invocation, with everything after the resolved
+	// Argv is the raw argument vector for this invocation, with everything after the resolved
 	// command path still present, so a handler can run its own parser instead of
 	// [Parser.Parse]. It is the live slice, not a copy: a handler that mutates it changes what
 	// every later read sees, including the Parser and Binder.
-	Args []string
+	//
+	// Argv, not Args: these are the invocation's raw tokens, command names and flags included.
+	// A command's DECLARED positionals are the generated inputs' Arguments field, already
+	// parsed, typed and validated — a different thing that a handler reaches for far more often.
+	Argv []string
 
 	services    map[string]any
 	chain       []ResolvedCommand // resolved command path, root → leaf
 	exitCode    int               // first non-zero wins; the funnel overrides
 	stopped     bool              // an exit was requested: forward progress halts
 	exitNow     bool              // hard Exit: skip remaining teardown too
-	funnelStage bool              // the funnel is executing: Exit overrides, SignalExit is a no-op
+	funnelStage bool              // the funnel is executing: Exit overrides, HaltWithCode is a no-op
 	infos       []string          // the five outcome channels, all private: they surface
 	recorded    []error           // only as the slices handed to the funnel. faults are
 	warnings    []error           // the lifecycle's to capture, never a handler's to record.
@@ -141,7 +145,7 @@ func newContext() *Context {
 func NewContextFor(def Definition, argv []string) *Context {
 	rtx := newContext()
 	chain, _ := resolveChain(def, argv)
-	rtx.Args = argv
+	rtx.Argv = argv
 	rtx.chain = chain
 	return rtx
 }
@@ -183,7 +187,7 @@ func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 // The slice is a COPY, so reordering, reslicing or replacing a frame is a caller's own
 // business and cannot reach the run. It used to be the live slice with a doc asking callers to
 // treat it as read-only, which is a request rather than a guarantee: one `chain[1].Name = …`
-// silently rewrote [Context.Path], [Context.Command], the binder's leaf anchoring and
+// silently rewrote [Context.CommandPath], [Context.Command], the binder's leaf anchoring and
 // configuration-file scoping for the rest of the run. Every other internal slice the Context
 // hands out — the outcome channels — has always been copied for the same reason.
 //
@@ -210,13 +214,17 @@ func (rtx *Context) Command() ResolvedCommand {
 	return rtx.chain[len(rtx.chain)-1]
 }
 
-// Path returns the invoked command path, space-joined — "tasks add" for a sub-command,
+// CommandPath returns the invoked command path, space-joined — "tasks add" for a sub-command,
 // "tasks" for a bare root invocation.
 //
 // The names are canonical, not the tokens the user typed, so an invocation through an alias
 // reports the real command name and a path is stable to log and aggregate on. Each frame's
 // Matched token in [Context.Chain] is what the user actually typed.
-func (rtx *Context) Path() string {
+//
+// CommandPath, not Path: in this API "path" already means a filesystem location
+// ([RemoteBinaryPath], a command's PluginPath) and a route through an inputs struct
+// ([FieldPath]). This one is neither.
+func (rtx *Context) CommandPath() string {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	names := make([]string, 0, len(rtx.chain))
@@ -239,32 +247,46 @@ func (rtx *Context) Value(key string) any {
 	return rtx.services[key]
 }
 
-// Halt stops the lifecycle's forward progress WITHOUT claiming an exit code, leaving the
+// Halt stops the lifecycle's FORWARD progress without claiming an exit code, leaving the
 // verdict to whatever else the run records and to the funnel. Teardown is unaffected: every
 // PostRun and CascadingPostRun whose paired setup hook began still runs, in reverse.
 //
-// It is the honest spelling of the commonest stop there is — a handler that has recorded an
-// error and has nothing further to do:
+// Forward progress is the operative word, and it makes Halt load-bearing in two of the five
+// hooks and a no-op in the other three:
 //
-//	if err != nil {
-//	    rtx.RecordError(err)
-//	    rtx.Halt()          // the funnel decides what this costs
+//	Hook                What Halt does there
+//	────                ────────────────────
+//	CascadingPreRun     stops the run: no further frame's setup, no PreRun, no work
+//	PreRun              stops the run: the leaf's Run never happens
+//	Run                 NOTHING — this is the last forward step of the default plan
+//	PostRun             NOTHING — the unwind runs to completion; only Exit cuts it short
+//	CascadingPostRun    NOTHING — likewise
+//
+// So Halt is how a SETUP hook refuses to let the command proceed. It is safe to call anywhere
+// and its own failure mode is omission, not misuse — which is why [Context.HaltWith] exists:
+// it records an error and halts as one act, is correct in all five hooks, and cannot be
+// half-forgotten the way `RecordError` followed by a `Halt` that is never written can be.
+//
+// Prefer Halt on its own when there is nothing to record — a deliberate, unremarkable stop:
+//
+//	if !inputs.Force && !confirmed {
+//	    rtx.Halt()          // nothing failed; there is simply nothing more to do
 //	    return
 //	}
 //
-// [Context.SignalExit] does two jobs at once — set the code AND stop — so a program that
-// centralizes its exit policy in a funnel had to write a number it did not mean purely to
-// stop, and explain in a comment that the number was a lie. Worse, the number then reads as
+// [Context.HaltWithCode] does two jobs at once — claim the code AND stop — so a program that
+// centralizes its exit policy in a funnel would have to write a number it did not mean purely
+// to stop, and explain in a comment that the number was a lie. Worse, the number then reads as
 // redundant: deleting it looks like tidying and silently removes the halt, so the next hook
 // collects the same inputs, hits the same validation and records the same error again. That
 // is not hypothetical — it is how one bad flag came to be reported three times, with a
 // fourth misleading error on top, while this example was being written.
 //
 // Halt claims nothing, so it cannot be mistaken for policy and cannot be deleted as
-// redundant. Reach for [Context.SignalExit] when the code IS the point (a filter reporting
-// "no match" as 1), and [Context.Exit] when pending teardown must not run.
+// redundant. Reach for [Context.HaltWith] to fail, [Context.HaltWithCode] when the code IS the
+// point, and [Context.Exit] when pending teardown must not run.
 //
-// Like SignalExit it is a no-op inside the funnel, where the lifecycle has already run.
+// Like HaltWithCode it is a no-op inside the funnel, where the lifecycle has already run.
 func (rtx *Context) Halt() {
 	if rtx.funnelStage {
 		return
@@ -272,15 +294,58 @@ func (rtx *Context) Halt() {
 	rtx.stopped = true
 }
 
-// SignalExit records the program's exit code and stops the lifecycle's forward progress.
-// Teardown is unaffected: every PostRun and CascadingPostRun whose paired setup hook began
-// still runs, in reverse. The first non-zero code wins, so a later SignalExit cannot change
-// the verdict, and SignalExit records no error — it is a deliberate stop, not a failure. Use
-// [Context.Exit] for an abort that skips pending teardown.
+// HaltWith records err and stops the lifecycle's forward progress — [Context.RecordError] and
+// [Context.Halt] as one act. It claims no exit code: the funnel decides what the failure costs.
+//
+//	if err := store.Save(task); err != nil {
+//	    rtx.HaltWith(err)
+//	    return
+//	}
+//
+// This is the spelling to reach for when a hook has failed, and the reason it exists is that
+// the two-part version can be half-written. Failing used to be "record, then stop", and the
+// stop is the half that decides anything — in a setup hook, omitting it lets the command do
+// the work it just established it must not do. The exit code and stderr are IDENTICAL either
+// way, so nothing in the output says the work ran, and no test that asserts on output catches
+// it. A single call cannot be half-forgotten.
+//
+// HaltWith is correct in all five hooks. Where Halt is a no-op (see its table) HaltWith
+// degrades to recording alone, which is what a failure in Run or a teardown hook wants anyway
+// — so a handler never has to know which hook it is in to fail correctly.
+//
+// A nil err records nothing and still halts, so a caller need not guard.
+//
+// To record a problem and CONTINUE — collecting several before anything stops, or leaving the
+// decision to a later hook that gates on [Context.Failed] — use RecordError on its own. That
+// remains a supported choice; HaltWith exists so it is a deliberate one rather than what
+// omission gives you.
+func (rtx *Context) HaltWith(err error) {
+	rtx.RecordError(err)
+	rtx.Halt()
+}
+
+// HaltWithCode claims the program's exit code and stops the lifecycle's forward progress — for
+// when the NUMBER is the point: a filter reporting "no match" as 1, a wrapper passing a child's
+// status through. It records no error; it is a deliberate verdict, not a failure.
+//
+// Teardown is unaffected: every PostRun and CascadingPostRun whose paired setup hook began still
+// runs, in reverse. The first non-zero code wins, so a later HaltWithCode cannot overrule an
+// earlier one.
+//
+// It is one of the Halt family, and the family is the thing to learn:
+//
+//	Halt()              stop
+//	HaltWith(err)       stop, and record err          — the way a hook fails
+//	HaltWithCode(n)     stop, and claim exit code n    — the way a hook renders a verdict
+//	Exit(n)             stop, claim n, and SKIP pending teardown
+//
+// Everything named Halt* leaves teardown intact. [Context.Exit] is the one that does not, which
+// is the whole distinction and the reason it is spelled like [os.Exit], whose deferred functions
+// do not run either.
 //
 // It is a no-op inside the funnel, where the lifecycle has already run; [Context.Exit] is how
 // the funnel sets the code.
-func (rtx *Context) SignalExit(code int) {
+func (rtx *Context) HaltWithCode(code int) {
 	if rtx.funnelStage {
 		return
 	}
@@ -292,7 +357,7 @@ func (rtx *Context) SignalExit(code int) {
 
 // Exit records the program's exit code and stops the lifecycle immediately — every pending
 // teardown hook is skipped. Use it where remaining cleanup must not run; prefer
-// [Context.SignalExit] for an orderly stop. The first non-zero code wins, and Exit is a
+// [Context.HaltWithCode] for an orderly stop. The first non-zero code wins, and Exit is a
 // deliberate stop, not an error.
 //
 // It skips teardown, not fault reporting: a panic recovered before Exit still reaches the
@@ -349,12 +414,17 @@ func (rtx *Context) copyInfos() []string {
 // Recovered panics and rotini-detected faults are not recorded here; the lifecycle captures
 // them as the funnel's panics slice.
 //
-//	inputs, err := rotini.Collect[MycliInputs](rtx)
-//	if err != nil {
-//	    rtx.RecordError(err)
-//	    rtx.SignalExit(1) // graceful; or rtx.Exit(…) to skip teardown
-//	    return
+// Use it on its own when the run should CONTINUE — to collect several problems before anything
+// stops, or to leave the decision to a later hook that gates on [Context.Failed]:
+//
+//	for _, path := range inputs.Check.Arguments.Paths {
+//	    if err := validate(path); err != nil {
+//	        rtx.RecordError(err) // report them all, not just the first
+//	    }
 //	}
+//
+// To fail and stop in one act, use [Context.HaltWith]. Pairing RecordError with a separate
+// [Context.Halt] does the same thing, and is the form whose second half can go missing.
 func (rtx *Context) RecordError(err error) {
 	if err == nil {
 		return
@@ -382,6 +452,13 @@ func (rtx *Context) copyErrors() []error {
 // RecordWarning records warn as a non-fatal warning of this run — a deprecation, a fallback,
 // a skipped item. It is an error value so it can be typed and branched on with errors.As and
 // so secrets stay redacted, but it never raises the exit code. A nil warn is ignored.
+//
+// Why the Record family splits its parameter type, since the names do not say: the two
+// SEVERITY-bearing channels take an error, because a warning or a failure is something a funnel
+// may want to branch on — categorize it with [CategoryOf], match it with errors.As, redact it.
+// [Context.RecordInfo] and [Context.RecordSuccess] take a string, because neither carries
+// severity and there is nothing to inspect. The asymmetry is deliberate, and the compiler tells
+// you which one you are in.
 func (rtx *Context) RecordWarning(warn error) {
 	if warn == nil {
 		return

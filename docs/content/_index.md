@@ -61,8 +61,7 @@ command:
 func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[TodoAddInputs](rtx)
 	if err != nil {
-		rtx.RecordError(err)
-		rtx.Halt()
+		rtx.HaltWith(err)
 		return
 	}
 	add := in.TodoAdd

@@ -138,7 +138,7 @@ func (*pathsScanHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[PathsScanInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	// Both path types arrive as plain strings: the check happened at parse time, and what

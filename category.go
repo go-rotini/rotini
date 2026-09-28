@@ -56,9 +56,9 @@ var (
 //
 //	func onError(ctx context.Context, rtx *rotini.Context, err error) {
 //	    switch rotini.CategoryOf(err) {
-//	    case rotini.CategoryUsage:    fmt.Fprintln(rtx.Stderr, err); rtx.SignalExit(1)
-//	    case rotini.CategoryInternal: report(err); rtx.SignalExit(70)
-//	    default:                      fmt.Fprintln(rtx.Stderr, err); rtx.SignalExit(1)
+//	    case rotini.CategoryUsage:    fmt.Fprintln(rtx.Stderr, err); rtx.HaltWithCode(1)
+//	    case rotini.CategoryInternal: report(err); rtx.HaltWithCode(70)
+//	    default:                      fmt.Fprintln(rtx.Stderr, err); rtx.HaltWithCode(1)
 //	    }
 //	}
 func CategoryOf(err error) Category {

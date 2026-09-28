@@ -8,14 +8,14 @@ import "context"
 //
 //	Phase     Order                    Hook                Halts forward on        Runs during unwind when
 //	─────     ─────                    ────                ────────────────        ───────────────────────
-//	setup     root → leaf              CascadingPreRun     SignalExit/Exit,        —
+//	setup     root → leaf              CascadingPreRun     HaltWithCode/Exit,        —
 //	setup     leaf                     PreRun              a panic, or a           —
 //	work      leaf                     Run                 trapped signal          —
 //	teardown  leaf                     PostRun             —                       its PreRun began
 //	teardown  leaf → root              CascadingPostRun    —                       its CascadingPreRun began
 //
 // Teardown unwinds in reverse for exactly the steps whose forward hook began, and runs to
-// completion: a panic or SignalExit inside teardown neither aborts the rest nor displaces the
+// completion: a panic or HaltWithCode inside teardown neither aborts the rest nor displaces the
 // first failure, and only a hard [Context.Exit] skips what remains. A panic anywhere is
 // recovered and routed once, after all teardown, to the funnel. A custom lifecycle changes
 // only the plan — the halting, unwind, funnel and exit-code semantics are not overridable.
@@ -29,10 +29,13 @@ type Resolution struct {
 	// Remote, when non-nil, short-circuits local dispatch: the runtime execs this binary
 	// instead, stdio passed through and context honored.
 	Remote *RemoteDispatch
-	// Args is the vector the run phase exposes as [Context.Args]. A resolver that rewrites
+	// Argv is the vector the run phase exposes as [Context.Argv]. A resolver that rewrites
 	// tokens returns the rewritten vector here so parsing agrees with its routing; nil keeps
 	// the original argv.
-	Args []string
+	//
+	// Contrast [RemoteDispatch.Args], which stays Args: those are the arguments handed to a
+	// CHILD process, not this invocation's own vector.
+	Argv []string
 }
 
 // Resolver is the resolve phase: argv against the [Definition], deciding what this invocation
@@ -46,7 +49,7 @@ type Resolver func(def Definition, argv []string) (Resolution, error)
 // errors.
 func DefaultResolver(def Definition, argv []string) (Resolution, error) {
 	chain, remote := resolveChain(def, argv)
-	return Resolution{Chain: chain, Remote: remote, Args: argv}, nil
+	return Resolution{Chain: chain, Remote: remote, Argv: argv}, nil
 }
 
 // LifecycleStep pairs one forward hook with its teardown — the unit of the run phase's plan.

@@ -87,8 +87,7 @@ type TodoAddInputs struct {
 func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[TodoAddInputs](rtx)
 	if err != nil {
-		rtx.RecordError(err)
-		rtx.Halt()
+		rtx.HaltWith(err)
 		return
 	}
 
@@ -206,21 +205,19 @@ A handler does not print failures. It **records** them and stops; one funnel rep
 
 {{< code title="the pattern" language="golang" open="true" collapsible="false" copy="true" >}}
 if err := store.Save(task); err != nil {
-	rtx.RecordError(err)
-	rtx.Halt()
+	rtx.HaltWith(err)
 	return
 }
 {{< /code >}}
 
-Recording without halting is the mistake to know about: the next hook collects the same inputs, fails the same way, and records the same error twice. `Halt` stops without claiming an exit code; use `SignalExit(n)` only when the number itself is the point — a filter reporting "no match" as `1`, a wrapper passing a child's status through.
+Recording without halting is the mistake to know about: the next hook collects the same inputs, fails the same way, and records the same error twice. `Halt` stops without claiming an exit code; use `HaltWithCode(n)` only when the number itself is the point — a filter reporting "no match" as `1`, a wrapper passing a child's status through.
 
 Errors carry a category so a funnel can classify one in a single call. Tag your own domain errors the same way:
 
 {{< code title="tagging a domain error" language="golang" open="true" collapsible="false" copy="true" >}}
 if !store.Has(id) {
 	// UsageError says "the user can fix this" without changing the message.
-	rtx.RecordError(rotini.UsageError(fmt.Errorf("no task %d", id)))
-	rtx.Halt()
+	rtx.HaltWith(rotini.UsageError(fmt.Errorf("no task %d", id)))
 	return
 }
 {{< /code >}}
@@ -433,8 +430,7 @@ The scripts call a hidden `__complete` entry point that every rotini binary answ
 {{< code title="internal/cmd/todo/todo_completion.go" language="golang" open="true" collapsible="false" copy="true" >}}
 script, err := Completion(inputs.TodoCompletion.Arguments.Shell) // generated resolver
 if err != nil {
-	rtx.RecordError(err)
-	rtx.Halt()
+	rtx.HaltWith(err)
 	return
 }
 fmt.Fprint(rtx.Stdout, script)

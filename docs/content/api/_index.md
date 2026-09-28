@@ -43,26 +43,52 @@ One per invocation, passed to every hook.
 
 | | |
 |---|---|
-| `rtx.Args` | the raw argv |
+| `rtx.Argv` | the raw argument vector — command names and flags included, unparsed. Not to be confused with a command's **declared positionals**, which are `inputs.X.Arguments`, already parsed and typed |
 | `rtx.Chain()` | the resolved command path, root → leaf — a **copy**, so editing it cannot reach the run |
 | `rtx.Stdin` `rtx.Stdout` `rtx.Stderr` | the program's streams — write through these, never `os.Std*`, and your handler tests cleanly |
-| `rtx.Command()` / `rtx.Path()` | the command being run, and its full path |
+| `rtx.Command()` / `rtx.CommandPath()` | the command being run, and its full path |
 | `rtx.Bind` / `rtx.Get[T]` / `rtx.MustGet[T]` | the service registry (generic methods, Go 1.27) |
 | `rtx.RecordInfo` / `RecordSuccess` / `RecordWarning` / `RecordError` | outcomes |
 | `rtx.Failed()` | has anything failed so far — the one bit a teardown needs |
-| `rtx.Halt()` / `rtx.SignalExit(code)` / `rtx.Exit(code)` | stop — see below |
+| `rtx.HaltWith(err)` | fail: record and stop, in one call — see below |
+| `rtx.Halt()` / `rtx.HaltWithCode(code)` / `rtx.Exit(code)` | stop — see below |
 
-### Stopping
+### Failing, and stopping
 
-Three ways, chosen by whether the exit code is the point:
+A hook has no return value, so failing is something you *say* rather than something you return. One call says it:
 
-| | |
+{{< code title="the one you want, in any hook" language="golang" open="true" collapsible="false" copy="true" >}}
+if err := store.Save(task); err != nil {
+	rtx.HaltWith(err) // records it, stops the run; the funnel decides the cost
+	return
+}
+{{< /code >}}
+
+Each intent has one spelling, and nothing is taken away:
+
+| Intent | Call |
 |---|---|
-| `Halt()` | stop, claim **no** code. The verdict is left to what the run recorded and to the funnel. This is the common case — a handler that recorded an error and has nothing more to do. |
-| `SignalExit(n)` | stop **and** claim a code, for when the number is the point: a filter reporting "no match" as 1, a wrapper passing a child's status through. |
-| `Exit(n)` | stop immediately and **skip** pending teardown, for when remaining cleanup must not run. |
+| **fail here, stop the run** | `HaltWith(err)` — `RecordError` + `Halt` as one act, claiming no exit code |
+| record a problem and **keep going** — collect several, or let a later hook decide | `RecordError(err)` on its own |
+| stop cleanly, nothing failed | `Halt()` |
+| stop **and** claim a code, when the number is the point — a filter reporting "no match" as 1, a wrapper passing a child's status through | `HaltWithCode(n)` |
+| stop now and **skip pending teardown**, when remaining cleanup must not run | `Exit(n)` |
 
-All three leave teardown intact except `Exit`. Halting matters as much as recording: a hook that records a failure and returns *without* stopping lets the next hook collect the same inputs, hit the same validation, and record the same error again.
+One rule covers the four: **everything named `Halt*` leaves teardown intact; `Exit` does not** — which is why it is spelled like `os.Exit`, whose deferred functions do not run either.
+
+{{< alert type="warning" title="HALT STOPS FORWARD PROGRESS — WHICH IS ONLY TWO OF THE FIVE HOOKS:" >}}
+| Hook | What `Halt()` does there |
+|---|---|
+| `CascadingPreRun` | **stops the run** — no further setup, no `PreRun`, no `Run` |
+| `PreRun` | **stops the run** — no `Run` |
+| `Run` | nothing: `Run` is the last forward step |
+| `PostRun` | nothing: the unwind runs to completion |
+| `CascadingPostRun` | nothing |
+
+So `Halt` is how a **setup** hook refuses to let a command proceed, and its failure mode is omission. A setup hook that records an error and returns *without* halting exits with the same code and the same stderr as one that halts — the only difference is that the command went on to do the work its setup had just established it must not do.
+
+`HaltWith` is the answer: it is correct in all five hooks, so failing never depends on knowing which one you are in, and one call cannot be half-written.
+{{< /alert >}}
 
 `Failed()` is what makes a teardown decision possible — commit or roll back, keep or discard:
 
@@ -120,7 +146,7 @@ Five channels reach the funnel, together in one `Outcome`: `Infos`, `Successes`,
 {{< code title="a custom funnel" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.WithFunnel(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
     for _, e := range out.Errors {
-        fmt.Fprintf(rtx.Stderr, "%s: %v\n", rtx.Path(), e)
+        fmt.Fprintf(rtx.Stderr, "%s: %v\n", rtx.CommandPath(), e)
     }
     if out.Failed() {
         rtx.Exit(2) // the funnel is the final authority on the exit code

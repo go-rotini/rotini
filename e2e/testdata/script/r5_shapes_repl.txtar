@@ -110,7 +110,7 @@ func (*loopShellHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	build, ok := BuilderKey.Get(rtx)
 	if !ok {
 		rtx.RecordError(rotini.InternalError(errors.New("shell: nothing to dispatch into")))
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	// The error echo is left at its default (off): the program's funnel already reports.
@@ -152,7 +152,7 @@ type loopExplodeHandlers struct{ base }
 
 func (*loopExplodeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.RecordError(errors.New("boom"))
-	rtx.SignalExit(1)
+	rtx.HaltWithCode(1)
 }
 -- cmd/loop/main.go --
 package main

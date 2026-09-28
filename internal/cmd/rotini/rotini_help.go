@@ -20,7 +20,7 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniHelpInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 
@@ -29,14 +29,14 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	if flags.Help {
 		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
-		rtx.SignalExit(0)
+		rtx.HaltWithCode(0)
 		return
 	}
 
 	help, err := Help(args.Command...)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 

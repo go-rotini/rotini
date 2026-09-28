@@ -256,7 +256,7 @@ Example command-line invocations, rendered one per line. Ignored when 'help' is 
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man page. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code. So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.SignalExit) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man page. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code. So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
 
 ### `filename`
 

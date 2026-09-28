@@ -121,7 +121,7 @@ func TestContext_concurrentRegistry(t *testing.T) {
 	}
 }
 
-// TestContext_ArgsField locks the W1 contract: rtx.Args is the exact argument
+// TestContext_ArgsField locks the W1 contract: rtx.Argv is the exact argument
 // vector the invocation was given — os.Args[1:] or the Program.WithArgs
 // override — exposed as a plain field (the live slice, not a copy).
 func TestContext_ArgsField(t *testing.T) {
@@ -129,19 +129,19 @@ func TestContext_ArgsField(t *testing.T) {
 
 	// The standalone constructor round-trips argv exactly.
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, argv)
-	if !reflect.DeepEqual(rtx.Args, argv) {
-		t.Errorf("NewContextFor args = %v, want %v", rtx.Args, argv)
+	if !reflect.DeepEqual(rtx.Argv, argv) {
+		t.Errorf("NewContextFor args = %v, want %v", rtx.Argv, argv)
 	}
 
 	// The program path round-trips WithArgs exactly, including tokens after "--".
 	var got []string
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.Args }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = rtx.Argv }}
 	p, _, errb := newTestProgram(h, argv)
 	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("run() = %d (stderr: %s)", code, errb)
 	}
 	if !reflect.DeepEqual(got, argv) {
-		t.Errorf("rtx.Args during Run = %v, want %v", got, argv)
+		t.Errorf("rtx.Argv during Run = %v, want %v", got, argv)
 	}
 }
 
@@ -251,7 +251,7 @@ func TestContext_Panics_api(t *testing.T) {
 // a CUSTOM funnel: it fires iff ≥1 channel recorded something (edge 1); record-without-exit
 // still fires it (edge 2); a custom funnel OWNS the exit code — the error floor is the
 // DEFAULT funnel's, so a custom funnel that sets no code exits 0 (edge 3); and the
-// SignalExit/Exit choice still governs teardown.
+// HaltWithCode/Exit choice still governs teardown.
 func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 	errA := UsageError(errors.New("bad flag")) // carries ErrUsage through the join
 	errB := errors.New("also bad")
@@ -267,11 +267,11 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 		return
 	}
 
-	t.Run("record + SignalExit: fires, teardown runs, join keeps tags", func(t *testing.T) {
+	t.Run("record + HaltWithCode: fires, teardown runs, join keeps tags", func(t *testing.T) {
 		log, code, funneled, drained, fired := exec(func(rtx *Context) {
 			rtx.RecordError(errA)
 			rtx.RecordError(errB)
-			rtx.SignalExit(1)
+			rtx.HaltWithCode(1)
 		})
 		if !fired {
 			t.Fatal("OnError did not fire on recorded errors")
@@ -286,7 +286,7 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 			t.Errorf("code = %d, want %d", code, 1)
 		}
 		if !contains(log, "run.PostRun") || !contains(log, "app.CascadingPostRun") {
-			t.Errorf("teardown did not run on graceful SignalExit: %v", log)
+			t.Errorf("teardown did not run on graceful HaltWithCode: %v", log)
 		}
 	})
 
@@ -308,13 +308,13 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 
 	t.Run("record without exit + custom funnel: fires, code stays 0 (custom funnel owns it — edges 2,3)", func(t *testing.T) {
 		log, code, _, _, fired := exec(func(rtx *Context) {
-			rtx.RecordError(errB) // no SignalExit/Exit; the custom OnError (in exec) sets no code either
+			rtx.RecordError(errB) // no HaltWithCode/Exit; the custom OnError (in exec) sets no code either
 		})
 		if !fired {
 			t.Fatal("OnError did not fire on record-without-exit (edge 2)")
 		}
 		if code != 0 {
-			t.Errorf("code = %d, want 0 — the error floor is the DEFAULT OnError's; a custom funnel that omits SignalExit exits 0 (edge 3)", code)
+			t.Errorf("code = %d, want 0 — the error floor is the DEFAULT OnError's; a custom funnel that omits HaltWithCode exits 0 (edge 3)", code)
 		}
 		if !contains(log, "run.PostRun") {
 			t.Errorf("teardown should run when no exit was called: %v", log)
@@ -323,7 +323,7 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 
 	t.Run("no errors recorded: does NOT fire (edge 1)", func(t *testing.T) {
 		_, code, _, _, fired := exec(func(rtx *Context) {
-			rtx.SignalExit(0) // clean success
+			rtx.HaltWithCode(0) // clean success
 		})
 		if fired {
 			t.Error("OnError fired with no recorded errors (edge 1 violated)")
@@ -407,7 +407,7 @@ func TestContext_Failed(t *testing.T) {
 
 // TestContext_Halt covers stopping the lifecycle without claiming an exit code.
 //
-// Before Halt, SignalExit was the only way to stop, and it does two jobs at once. A program
+// Before Halt, HaltWithCode was the only way to stop, and it does two jobs at once. A program
 // whose funnel owns exit codes therefore wrote a meaningless number purely to halt — and
 // because the number then looked redundant, deleting it read as tidying while silently
 // removing the halt. That is how one bad flag came to be reported three times in
@@ -433,18 +433,18 @@ func TestContext_Halt(t *testing.T) {
 	t.Run("does not displace a code already signalled", func(t *testing.T) {
 		t.Parallel()
 		rtx := &Context{}
-		rtx.SignalExit(3)
+		rtx.HaltWithCode(3)
 		rtx.Halt()
 		if rtx.exitCode != 3 {
 			t.Errorf("exitCode = %d, want 3 — Halt must not clear a deliberate code", rtx.exitCode)
 		}
 	})
 
-	t.Run("a later SignalExit still sets the code", func(t *testing.T) {
+	t.Run("a later HaltWithCode still sets the code", func(t *testing.T) {
 		t.Parallel()
 		rtx := &Context{}
 		rtx.Halt()
-		rtx.SignalExit(2)
+		rtx.HaltWithCode(2)
 		if rtx.exitCode != 2 {
 			t.Errorf("exitCode = %d, want 2", rtx.exitCode)
 		}
@@ -524,7 +524,7 @@ func TestContext_chainIsACopy(t *testing.T) {
 	}
 	rtx := NewContextFor(def, []string{"run"})
 
-	want := rtx.Path()
+	want := rtx.CommandPath()
 	if want != "app run" {
 		t.Fatalf("Path() = %q, want %q — the fixture is wrong", want, "app run")
 	}
@@ -536,8 +536,8 @@ func TestContext_chainIsACopy(t *testing.T) {
 	got = got[:1]
 	_ = got
 
-	if rtx.Path() != want {
-		t.Errorf("Path() = %q after mutating the returned slice, want %q", rtx.Path(), want)
+	if rtx.CommandPath() != want {
+		t.Errorf("Path() = %q after mutating the returned slice, want %q", rtx.CommandPath(), want)
 	}
 	if rtx.Command().Name != "run" {
 		t.Errorf("Command().Name = %q, want run", rtx.Command().Name)
@@ -565,7 +565,7 @@ func TestContext_chainCopiesAreIndependent(t *testing.T) {
 // same rule Program follows.
 //
 // Half of them used to tolerate a nil receiver and half did not, so rtx.Chain() answered while
-// rtx.Path() panicked — three views of the same data, two behaviours. Tolerating it is the
+// rtx.CommandPath() panicked — three views of the same data, two behaviours. Tolerating it is the
 // worse of the two: a nil that reports "nothing recorded" or "no chain" hides the mistake and
 // surfaces it later, at a call that was not wrong.
 //
@@ -576,11 +576,11 @@ func TestContext_nilReceiverPanicsAtTheCall(t *testing.T) {
 	for name, call := range map[string]func(*Context){
 		"Chain":         func(rtx *Context) { _ = rtx.Chain() },
 		"Command":       func(rtx *Context) { _ = rtx.Command() },
-		"Path":          func(rtx *Context) { _ = rtx.Path() },
+		"Path":          func(rtx *Context) { _ = rtx.CommandPath() },
 		"Value":         func(rtx *Context) { _ = rtx.Value("k") },
 		"Failed":        func(rtx *Context) { _ = rtx.Failed() },
 		"Halt":          func(rtx *Context) { rtx.Halt() },
-		"SignalExit":    func(rtx *Context) { rtx.SignalExit(1) },
+		"HaltWithCode":  func(rtx *Context) { rtx.HaltWithCode(1) },
 		"Exit":          func(rtx *Context) { rtx.Exit(1) },
 		"RecordInfo":    func(rtx *Context) { rtx.RecordInfo("x") },
 		"RecordError":   func(rtx *Context) { rtx.RecordError(errors.New("x")) },
@@ -630,8 +630,8 @@ func TestContext_argsStayLiveButChainDoesNot(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "run", Handler: "AppRun"}}}
 	rtx := NewContextFor(def, []string{"run", "x"})
 
-	rtx.Args[1] = "mutated"
-	if rtx.Args[1] != "mutated" {
+	rtx.Argv[1] = "mutated"
+	if rtx.Argv[1] != "mutated" {
 		t.Error("Args is not the live slice; a handler running its own parser depends on it")
 	}
 

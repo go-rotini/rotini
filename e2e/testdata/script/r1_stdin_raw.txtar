@@ -100,7 +100,7 @@ func (*filterUpperHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[FilterUpperInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	// The payload is a *string: nil means nothing was piped.
@@ -122,7 +122,7 @@ func (*filterCountHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[FilterCountInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	if in.FilterCount.Stdin == nil {

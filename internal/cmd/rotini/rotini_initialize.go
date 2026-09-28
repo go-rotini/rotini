@@ -24,7 +24,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	var inputs RotiniInitializeInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 
@@ -33,13 +33,13 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	if flags.Help {
 		fmt.Fprintln(rtx.Stdout, HelpRotiniInitialize)
-		rtx.SignalExit(0)
+		rtx.HaltWithCode(0)
 		return
 	}
 
 	if args.Name == "" {
 		rtx.RecordError(rotini.UsageError(errors.New("a name argument is required")))
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 
@@ -49,7 +49,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	if err := initialize(args.Name, flags.Format, flags.Force); err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 

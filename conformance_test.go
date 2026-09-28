@@ -532,7 +532,7 @@ func conformanceCases() []inputCase {
 					t.Error("empty $ACME_REGION not recorded as present — empty must differ from unset")
 				}
 				os.Unsetenv("ACME_REGION")
-				layer2, err := ParseEnv[acDeployInputs](NewContextFor(acmeDef(), rtx.Args))
+				layer2, err := ParseEnv[acDeployInputs](NewContextFor(acmeDef(), rtx.Argv))
 				if err != nil {
 					t.Fatalf("ParseEnv(unset): %v", err)
 				}
@@ -701,7 +701,7 @@ func conformanceCases() []inputCase {
 				if err := os.WriteFile(filepath.Join("..", "acme.yaml"), []byte("acme:\n  env: prod\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
-				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), rtx.Args), meta); in.Deploy.Flags.Env != "prod" {
+				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), rtx.Argv), meta); in.Deploy.Flags.Env != "prod" {
 					t.Errorf("env = %q, want prod from the now-conforming file", in.Deploy.Flags.Env)
 				}
 			}},

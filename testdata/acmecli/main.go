@@ -84,7 +84,7 @@ func (noop) Run(context.Context, *rotini.Context) {}
 // CLI picks whatever ints it wants.
 func fail(rtx *rotini.Context, err error) {
 	fmt.Fprintf(rtx.Stderr, "acme: %v\n", err)
-	rtx.SignalExit(1)
+	rtx.HaltWithCode(1)
 }
 
 type getHandler struct{ base }

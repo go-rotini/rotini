@@ -105,7 +105,7 @@ func TestContext_commandAndPath(t *testing.T) {
 	var cmd ResolvedCommand
 	var path string
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		cmd, path = rtx.Command(), rtx.Path()
+		cmd, path = rtx.Command(), rtx.CommandPath()
 	}}
 	p, _, _ := newTestProgram(h, nil)
 	p.Run([]string{"run", "x"})
@@ -123,7 +123,7 @@ func TestContext_pathIsCanonicalNotTyped(t *testing.T) {
 	var path string
 	var matched string
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		path = rtx.Path()
+		path = rtx.CommandPath()
 		matched = rtx.Command().Matched
 	}}
 	p, _, _ := newTestProgram(h, nil)
@@ -145,7 +145,7 @@ func TestContext_commandAtRoot(t *testing.T) {
 
 	p := NewProgram(
 		Definition{Name: "app", Handler: "Main"},
-		rootOnlyHandlers{capture: func(rtx *Context) { cmd, path = rtx.Command(), rtx.Path() }},
+		rootOnlyHandlers{capture: func(rtx *Context) { cmd, path = rtx.Command(), rtx.CommandPath() }},
 	).WithStdout(io.Discard).WithStderr(io.Discard)
 
 	if _, err := p.Run(nil); err != nil {

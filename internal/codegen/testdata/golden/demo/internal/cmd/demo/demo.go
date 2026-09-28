@@ -34,12 +34,11 @@ func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	inputs, err := rotini.Collect[DemoInputs](rtx)
 	if err != nil {
-		// Record, then Halt. Halt stops the chain WITHOUT claiming an exit code, so the
-		// funnel decides what an input failure costs. Halting matters as much as
-		// recording: without it the next hook collects the same inputs, hits the same
-		// validation and records the same error again.
-		rtx.RecordError(err)
-		rtx.Halt()
+		// HaltWith records the error and stops the run as one act, claiming no exit code —
+		// the funnel decides what an input failure costs. It is the correct spelling in
+		// every hook, so failing never has to be written differently depending on which
+		// hook you are in. To record a problem and CONTINUE instead, use rtx.RecordError.
+		rtx.HaltWith(err)
 		return
 	}
 

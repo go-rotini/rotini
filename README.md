@@ -67,7 +67,7 @@ rotini does not wrap them — a facade would put another package's API inside ro
 frozen surface and put its documentation in the wrong place.
 
 **3. The generated code is small, legible, and yours.** `rotini init` generates
-**372 lines across 5 files** — and they are a CLI that already answers `--help`,
+**368 lines across 5 files** — and they are a CLI that already answers `--help`,
 `--version`, `help <command>` and `version`, because the seeded spec declares them and
 the seeded handlers are wired to the pages codegen just produced. Nothing is injected at
 run time; every line is in your repo, and every line is yours to delete. The machinery is

@@ -65,7 +65,7 @@
 // The generated entrypoint builds a [Program] with [NewProgram] and calls [Program.Execute]:
 // resolve the invoked command from argv, run its [Handlers] hooks, and exit. Each invocation
 // carries a [Context] — the argv, the resolved chain, the program's streams, and the service
-// registry. Stopping is deliberate ([Context.Halt], [Context.SignalExit], [Context.Exit]), and a recorded error,
+// registry. Stopping is deliberate ([Context.Halt], [Context.HaltWithCode], [Context.Exit]), and a recorded error,
 // recovered panic or detected fault is reported once, after teardown, through the outcome
 // funnel.
 //
@@ -81,14 +81,14 @@
 //   - A slice rotini RETURNS is a copy. [Context.Chain] and every [Outcome] channel hand back
 //     their own, so sorting, reslicing or editing one cannot reach the run. Chain used to be
 //     the live slice with a doc asking callers to treat it as read-only, and a single
-//     assignment through it silently rewrote [Context.Path] for the rest of the invocation.
+//     assignment through it silently rewrote [Context.CommandPath] for the rest of the invocation.
 //
 //   - A slice you PASS IN is kept, not copied. [Program.WithArgs], [Program.WithSignals] and
 //     the slices inside a [BindMeta] are held by reference, so mutating yours afterwards
 //     changes the program. Copying them defensively would cost every caller for a mistake
 //     almost nobody makes; saying so costs nothing.
 //
-// [Context.Args] is the deliberate exception in the first group: it is documented as the live
+// [Context.Argv] is the deliberate exception in the first group: it is documented as the live
 // argv precisely so a handler can run its own parser over it.
 //
 // # Outcomes
@@ -115,7 +115,7 @@
 //     run recorded and to the funnel. This is the commonest stop — a handler that has recorded
 //     an error and has nothing further to do — and the one to prefer when a program centralizes
 //     its exit policy in a funnel.
-//   - [Context.SignalExit] stops AND claims a code, for when the number is the point: a filter
+//   - [Context.HaltWithCode] stops AND claims a code, for when the number is the point: a filter
 //     reporting "no match" as 1, a wrapper passing a child's status through.
 //   - [Context.Exit] stops immediately and skips pending teardown, for when remaining cleanup
 //     must not run.
@@ -170,7 +170,7 @@
 //
 // For a one-off lookup, rtx.Get[T](key) and rtx.MustGet[T](key) supply the type at the call
 // site. A handler that needs to know which command it is asks the context: [Context.Command] is
-// the resolved leaf, [Context.Path] the canonical invocation ("tasks add"), and
+// the resolved leaf, [Context.CommandPath] the canonical invocation ("tasks add"), and
 // [Context.Chain] the full chain with the tokens the user actually typed.
 //
 // # Opt-in services

@@ -45,12 +45,12 @@ func TestLifecycle_explicitDefaultsAreIdentity(t *testing.T) {
 }
 
 // A resolver alias: rewrite the token, delegate to the default, and return its
-// resolution — routing AND parsing then agree, because Resolution.Args carries
-// the rewritten vector into rtx.Args.
+// resolution — routing AND parsing then agree, because Resolution.Argv carries
+// the rewritten vector into rtx.Argv.
 func TestWithResolver_alias(t *testing.T) {
 	var log []string
 	var gotArgs []string
-	h := &testHandlers{log: &log, onRun: func(rtx *Context) { gotArgs = rtx.Args }}
+	h := &testHandlers{log: &log, onRun: func(rtx *Context) { gotArgs = rtx.Argv }}
 	p, _, errb := newTestProgram(h, []string{"st", "alice"})
 	p.WithResolver(func(def Definition, argv []string) (Resolution, error) {
 		if len(argv) > 0 && argv[0] == "st" {
@@ -70,7 +70,7 @@ func TestWithResolver_alias(t *testing.T) {
 		t.Errorf("aliased dispatch order:\n got=%v\nwant=%v", log, want)
 	}
 	if want := []string{"run", "alice"}; !reflect.DeepEqual(gotArgs, want) {
-		t.Errorf("rtx.Args = %v, want the REWRITTEN vector %v (so Parse agrees with routing)", gotArgs, want)
+		t.Errorf("rtx.Argv = %v, want the REWRITTEN vector %v (so Parse agrees with routing)", gotArgs, want)
 	}
 }
 

@@ -110,7 +110,7 @@ func BenchmarkParser_parse(b *testing.B) {
 	for b.Loop() {
 		rtx := p.newRunContext()
 		rtx.chain = mustResolve(b, testDef(), []string{"run", "target", "--count", "3"})
-		rtx.Args = []string{"run", "target", "--count", "3"}
+		rtx.Argv = []string{"run", "target", "--count", "3"}
 		var in struct {
 			App struct {
 				Flags struct {

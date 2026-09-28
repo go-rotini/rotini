@@ -57,7 +57,7 @@ func (*grandHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[GrandInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	if in.Grand.Flags.Loud {
@@ -111,7 +111,7 @@ func (*rootHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[RootInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	if in.Root.Flags.Help {

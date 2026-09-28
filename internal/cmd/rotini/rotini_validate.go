@@ -23,7 +23,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	var inputs RotiniValidateInputs
 	if err := parser.Parse(rtx, &inputs); err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 
@@ -32,7 +32,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	if flags.Help {
 		fmt.Fprintln(rtx.Stdout, HelpRotiniValidate)
-		rtx.SignalExit(0)
+		rtx.HaltWithCode(0)
 		return
 	}
 
@@ -73,11 +73,11 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		for _, problem := range flatten(err) {
 			rtx.RecordError(problem)
 		}
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 
-	rtx.SignalExit(0)
+	rtx.HaltWithCode(0)
 }
 
 // flatten expands an errors.Join tree into its leaves, so each validation problem is recorded

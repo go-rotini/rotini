@@ -127,11 +127,11 @@ func ExampleCategoryOf() {
 // ── the unopinionated path ──────────────────────────────────.
 
 // unopinionatedCmd overrides only Run; the four embeddable no-op Default* hooks satisfy
-// the rest of [Handlers]. Run reads the raw argv from [Context.Args], consults the
+// the rest of [Handlers]. Run reads the raw argv from [Context.Argv], consults the
 // resolved frame's declared flags via [Context.Chain] (spec-aware without a parser), reads
 // an env var with the standard library (env is NOT runtime-mediated — only the streams
 // are), writes through [Context.Stdout] so the program's streams stay injectable, and
-// reports its outcome by recording + [Context.SignalExit] rather than printing inline.
+// reports its outcome by recording + [Context.HaltWithCode] rather than printing inline.
 // (Stdin would likewise be read via [Context.Stdin], never os.Stdin.)
 type unopinionatedCmd struct {
 	DefaultCascadingPreRun
@@ -152,10 +152,10 @@ func (unopinionatedCmd) Run(_ context.Context, rtx *Context) {
 		}
 	}
 	name := ""
-	for i := 0; i+1 < len(rtx.Args); i++ {
+	for i := 0; i+1 < len(rtx.Argv); i++ {
 		for _, id := range ids {
-			if rtx.Args[i] == id {
-				name = rtx.Args[i+1]
+			if rtx.Argv[i] == id {
+				name = rtx.Argv[i+1]
 			}
 		}
 	}
@@ -163,7 +163,7 @@ func (unopinionatedCmd) Run(_ context.Context, rtx *Context) {
 		// Record the outcome; the runtime reports it through the funnels after teardown,
 		// and the default OnError floors the exit to 1.
 		rtx.RecordError(UsageError(errors.New("--name is required")))
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 

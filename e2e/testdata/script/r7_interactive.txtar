@@ -104,25 +104,25 @@ func (*askSetupHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	name, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).WithLabel("Name").Ask(ctx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	_, size, err := rotini.NewSelect(rtx.Stdin, rtx.Stdout, "small", "large").WithLabel("Size").Ask(ctx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	ok, err := rotini.NewConfirm(rtx.Stdin, rtx.Stdout).WithLabel("Sure?").Ask(ctx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	note, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).WithLabel("Note").Ask(ctx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	fmt.Fprintf(rtx.Stdout, "\nname=%s size=%s confirmed=%t note=%s\n", name, size, ok, note)

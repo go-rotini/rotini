@@ -170,7 +170,7 @@ type outCodeHandlers struct{ base }
 
 func (*outCodeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.RecordError(errors.New("a specific failure"))
-	rtx.SignalExit(3)
+	rtx.HaltWithCode(3)
 }
 -- internal/cmd/out/out_boom.go --
 package out
@@ -206,7 +206,7 @@ func (*outStopHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {}
 
 func (*outStopHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.RecordError(errors.New("stopping"))
-	rtx.SignalExit(1)
+	rtx.HaltWithCode(1)
 }
 
 // PostRun is teardown: a graceful stop still runs it, and the funnel reports afterwards.

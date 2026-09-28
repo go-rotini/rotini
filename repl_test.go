@@ -47,7 +47,7 @@ func replProgram(t *testing.T, onRun func(rtx *Context)) (*Program, *bytes.Buffe
 // Each typed line dispatches against the same Definition the binary uses.
 func TestREPL_dispatchesEachLine(t *testing.T) {
 	var seen []string
-	p, _ := replProgram(t, func(rtx *Context) { seen = append(seen, strings.Join(rtx.Args, " ")) })
+	p, _ := replProgram(t, func(rtx *Context) { seen = append(seen, strings.Join(rtx.Argv, " ")) })
 	out := &bytes.Buffer{}
 
 	err := NewREPL(p).
@@ -73,7 +73,7 @@ func TestREPL_runsAreIsolated(t *testing.T) {
 		n++
 		if n == 1 {
 			rtx.RecordError(errors.New("first line failed"))
-			rtx.SignalExit(2)
+			rtx.HaltWithCode(2)
 		}
 	})
 

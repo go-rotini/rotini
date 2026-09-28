@@ -129,7 +129,7 @@ func (e *ParseError) Unwrap() error { return ErrUsage }
 // constraint checks — failing with a [*ParseError].
 //
 // It is a service, so parsing is opt-in (a CLI that wants raw argv binds nothing and reads
-// [Context.Args]) and the registry is a dependency-injection seam:
+// [Context.Argv]) and the registry is a dependency-injection seam:
 //
 //	parser := rtx.Parser()
 //	var in MycliInputs
@@ -201,7 +201,7 @@ func Deprecations(rtx *Context) []Deprecation {
 	if rtx == nil {
 		return nil
 	}
-	argv := rtx.Args
+	argv := rtx.Argv
 	var out []Deprecation
 	for _, frame := range rtx.Chain() {
 		// A command invoked via one of its deprecated aliases (frame.Matched is the token
@@ -243,7 +243,7 @@ func (p *Parser) parseBind(rtx *Context, out any, atRoot bool) (*parsedInputs, [
 	if len(chain) == 0 {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}
-	store, err := parseInto(chain, rtx.Args, rtx.Stdin)
+	store, err := parseInto(chain, rtx.Argv, rtx.Stdin)
 	if err != nil {
 		return nil, nil, err
 	}

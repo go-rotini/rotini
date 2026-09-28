@@ -261,7 +261,7 @@ func (p *Program) WithArgs(args []string) *Program {
 // context is canceled rotini starts no further forward hook, and teardown for every begun
 // setup hook still runs in reverse. Attach the process exit code with [ExitCode]; without one
 // the code falls through to the normal resolution. To stop without canceling the context, use
-// [Context.SignalExit] or [Context.Exit].
+// [Context.HaltWithCode] or [Context.Exit].
 //
 // Supplying a context also opts out of rotini's signal trap by default, on the assumption that
 // the caller owns signals (typically via [signal.NotifyContext], which leaves it holding the
@@ -490,7 +490,7 @@ func (o Outcome) Failed() bool { return len(o.Errors) > 0 || len(o.Panics) > 0 }
 //
 // The funnel decides what to print, where, in what order, and the final exit code: it is the
 // last authority, so [Context.Exit] inside it overrides whatever the lifecycle set
-// ([Context.SignalExit] is a no-op here).
+// ([Context.HaltWithCode] is a no-op here).
 type FunnelFunc func(ctx context.Context, rtx *Context, out Outcome)
 
 // WithFunnel sets the program's outcome funnel — the one place a run's recorded channels are
@@ -606,7 +606,7 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 // # Signals
 //
 // With no [Program.WithContext], Execute installs rotini's signal trap: the first
-// os.Interrupt or syscall.SIGTERM halts the lifecycle like [Context.SignalExit] — forward
+// os.Interrupt or syscall.SIGTERM halts the lifecycle like [Context.HaltWithCode] — forward
 // progress stops, every begun teardown hook still runs — and exits 128+signum. A second signal
 // forces exit immediately, so a handler that ignores the context can still be interrupted. See
 // [Program.WithoutSignalHandling] and [Program.WithSignals].
@@ -754,9 +754,9 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		return p.settle(ctx, rtx)
 	}
 
-	rtx.Args = argv
-	if res.Args != nil {
-		rtx.Args = res.Args
+	rtx.Argv = argv
+	if res.Argv != nil {
+		rtx.Argv = res.Argv
 	}
 	rtx.chain = res.Chain
 	return p.dispatch(ctx, res.Chain, rtx)
@@ -798,7 +798,7 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 		if fn == nil {
 			fn = p.defaultFunnel
 		}
-		rtx.funnelStage = true // rtx.Exit now overrides; rtx.SignalExit is a no-op
+		rtx.funnelStage = true // rtx.Exit now overrides; rtx.HaltWithCode is a no-op
 		fn(ctx, rtx, out)
 		rtx.funnelStage = false
 	}
@@ -848,14 +848,14 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, out Outcome) {
 // dispatch resolves each command in the chain to its [Handlers], asks the lifecycle planner
 // for the step plan, and executes it as a balanced LIFO setup/teardown:
 //
-//   - Forward: each step's Do in plan order, halting the moment a hook calls SignalExit or
+//   - Forward: each step's Do in plan order, halting the moment a hook calls HaltWithCode or
 //     Exit, panics, or a trapped signal cancels ctx.
 //   - Unwind: the Undo of every step whose Do began, in reverse, to completion. A panic or
-//     SignalExit inside an Undo neither aborts the rest nor displaces the first failure; a
+//     HaltWithCode inside an Undo neither aborts the rest nor displaces the first failure; a
 //     hard Exit skips what remains, and so does a panic under WithTeardownOnPanic(false).
 //
 // A recovered panic is routed to the funnel once, after teardown. A canceled run context is
-// converted into a [Context.SignalExit] between forward hooks — teardown still runs, and the
+// converted into a [Context.HaltWithCode] between forward hooks — teardown still runs, and the
 // exit code is the cancellation cause's or 0. That conversion happens only on the dispatch
 // goroutine, so rtx stays single-writer.
 func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (int, error) {
@@ -927,10 +927,10 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	}
 
 	// halt reports whether forward progress should stop. On cancellation it records the cause's
-	// exit code via SignalExit, turning the cancellation into a clean stop that runs teardown.
+	// exit code via HaltWithCode, turning the cancellation into a clean stop that runs teardown.
 	halt := func() bool {
 		if !rtx.stopped && ctx.Err() != nil {
-			rtx.SignalExit(canceledExitCode(ctx))
+			rtx.HaltWithCode(canceledExitCode(ctx))
 		}
 		return rtx.stopped || panicked
 	}

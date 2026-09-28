@@ -14,10 +14,10 @@ import (
 
 // TestProgram_WithExit_capturesCode proves WithExit makes Execute hand the resolved code
 // to a callback instead of calling os.Exit, so Execute returns and a test can assert on
-// the code — here a handler's rtx.SignalExit(1).
+// the code — here a handler's rtx.HaltWithCode(1).
 func TestProgram_WithExit_capturesCode(t *testing.T) {
 	var code int
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.SignalExit(1) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.HaltWithCode(1) }}
 
 	NewProgram(testDef(), h).
 		WithArgs([]string{"run", "x"}).
@@ -78,7 +78,7 @@ func TestProgram_Run_isReentrant(t *testing.T) {
 		n++
 		if n == 1 { // only the FIRST run fails
 			rtx.RecordError(errors.New("first run failed"))
-			rtx.SignalExit(3)
+			rtx.HaltWithCode(3)
 		}
 	}}
 	p, _, errb := newTestProgram(h, nil)
@@ -295,7 +295,7 @@ func TestRun_exitCode_funnelIsFinalAuthority(t *testing.T) {
 	// A handler set 2 during the lifecycle; the funnel OVERRIDES it to 5.
 	po, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(errors.New("boom"))
-		rtx.SignalExit(2)
+		rtx.HaltWithCode(2)
 	}}, []string{"run"})
 	po.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(5) })
 	if code, _ := po.Run(po.args); code != 5 {
@@ -663,7 +663,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 	var gotArgs []string
 	args := []string{"--verbose", "run", "alice", "x", "y", "--count", "3"}
 	h := &testHandlers{log: &log, onRun: func(rtx *Context) {
-		gotChain, gotArgs = rtx.Chain(), rtx.Args
+		gotChain, gotArgs = rtx.Chain(), rtx.Argv
 	}}
 
 	p, _, errb := newTestProgram(h, args)
@@ -684,7 +684,7 @@ func TestRun_lifecycleOrderAndContext(t *testing.T) {
 		t.Errorf("Chain() during Run = %v, want [app run]", names)
 	}
 	if !reflect.DeepEqual(gotArgs, args) {
-		t.Errorf("rtx.Args during Run = %v, want %v", gotArgs, args)
+		t.Errorf("rtx.Argv during Run = %v, want %v", gotArgs, args)
 	}
 }
 
@@ -715,7 +715,7 @@ func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 }
 
 func TestRun_exitCodePropagates(t *testing.T) {
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.SignalExit(5) }}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.HaltWithCode(5) }}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	if code, _ := p.Run(p.args); code != 5 {
 		t.Errorf("run() = %d, want 5 (handler called Exit)", code)
@@ -783,7 +783,7 @@ func TestRun_defaultOnPanicPrintsAndFails(t *testing.T) {
 // Exit in PreRun: Run is skipped, but PostRun (paired with PreRun) still runs.
 func TestRun_exitInPreRunStillRunsPostRun(t *testing.T) {
 	code, log := runActs(t, []string{"run"}, map[string]act{
-		"run": {at: "PreRun", do: func(rtx *Context) { rtx.SignalExit(1) }},
+		"run": {at: "PreRun", do: func(rtx *Context) { rtx.HaltWithCode(1) }},
 	})
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
@@ -801,7 +801,7 @@ func TestRun_exitInPreRunStillRunsPostRun(t *testing.T) {
 // Exit in Run: PostRun (paired with PreRun) still runs.
 func TestRun_exitInRunStillRunsPostRun(t *testing.T) {
 	_, log := runActs(t, []string{"run"}, map[string]act{
-		"run": {at: "Run", do: func(rtx *Context) { rtx.SignalExit(1) }},
+		"run": {at: "Run", do: func(rtx *Context) { rtx.HaltWithCode(1) }},
 	})
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
@@ -883,7 +883,7 @@ func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 // (its pair never started), but both CascadingPostRuns do.
 func TestRun_exitInLeafCascadingPreRunSkipsPostRun(t *testing.T) {
 	_, log := runActs(t, []string{"run"}, map[string]act{
-		"run": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.SignalExit(1) }},
+		"run": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.HaltWithCode(1) }},
 	})
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
@@ -898,7 +898,7 @@ func TestRun_exitInLeafCascadingPreRunSkipsPostRun(t *testing.T) {
 // its CascadingPostRun must NOT run — only begun commands tear down (paired rule).
 func TestRun_exitInRootCascadingPreRunSkipsUnstartedTeardown(t *testing.T) {
 	_, log := runActs(t, []string{"run"}, map[string]act{
-		"app": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.SignalExit(1) }},
+		"app": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.HaltWithCode(1) }},
 	})
 	want := []string{"app.CascadingPreRun", "app.CascadingPostRun"}
 	if !reflect.DeepEqual(log, want) {
@@ -910,8 +910,8 @@ func TestRun_exitInRootCascadingPreRunSkipsUnstartedTeardown(t *testing.T) {
 // the verdict set during Run.
 func TestRun_firstNonZeroExitWins(t *testing.T) {
 	code, _ := runActs(t, []string{"run"}, map[string]act{
-		"run": {at: "Run", do: func(rtx *Context) { rtx.SignalExit(3) }},
-		"app": {at: "CascadingPostRun", do: func(rtx *Context) { rtx.SignalExit(7) }},
+		"run": {at: "Run", do: func(rtx *Context) { rtx.HaltWithCode(3) }},
+		"app": {at: "CascadingPostRun", do: func(rtx *Context) { rtx.HaltWithCode(7) }},
 	})
 	if code != 3 {
 		t.Errorf("code = %d, want 3 (first non-zero Exit wins; teardown Exit(7) ignored)", code)
@@ -1096,7 +1096,7 @@ func (h *concurrentHandler) Run(_ context.Context, rtx *Context) {
 		return
 	}
 	rtx.RecordInfo("ran") // into this run's own context; nothing may leak across runs
-	h.seen <- rtx.Path()
+	h.seen <- rtx.CommandPath()
 }
 
 // TestRun_concurrentDispatch pins what doc.go promises: Run is not merely re-entrant (the
@@ -1283,7 +1283,7 @@ func TestExecute_exitRunsBeforeTheReturn(t *testing.T) {
 func TestWithArgs_onlyExecuteConsultsIt(t *testing.T) {
 	var got []string
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		got = append([]string(nil), rtx.Args...)
+		got = append([]string(nil), rtx.Argv...)
 	}}
 
 	// Execute consults it.

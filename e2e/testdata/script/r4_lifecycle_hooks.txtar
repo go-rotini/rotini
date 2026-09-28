@@ -141,7 +141,7 @@ func (*lifeHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.CollectRoot[LifeInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	say(rtx, "root CascadingPreRun verbose=%t", in.Life.Flags.Verbose)
@@ -232,7 +232,7 @@ func (*lifeJobWorkRunHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	in, err := rotini.Collect[LifeJobWorkRunInputs](rtx)
 	if err != nil {
 		rtx.RecordError(err)
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 		return
 	}
 	say(rtx, "run Run")
@@ -244,13 +244,13 @@ func (*lifeJobWorkRunHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		// `life job work run`. This used to bind zeros in silence.
 		if _, err := rotini.Collect[LifeInputs](rtx); err != nil {
 			rtx.RecordError(err)
-			rtx.SignalExit(1)
+			rtx.HaltWithCode(1)
 		}
 	case f.Panic:
 		panic("run panicked")
 	case f.Fail:
 		rtx.RecordError(errors.New("the work failed"))
-		rtx.SignalExit(1)
+		rtx.HaltWithCode(1)
 	}
 }
 -- cmd/life/main.go --
