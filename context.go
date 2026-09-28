@@ -37,9 +37,30 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 // hook, so all hooks share the same bindings and exit state and no records leak between
 // invocations.
 //
+// The surface groups into six jobs, and nothing outside them is worth hunting for:
+//
+//   - what was typed — the [Context.Argv], [Context.Stdin], [Context.Stdout] and
+//     [Context.Stderr] fields above
+//   - which command — [Context.Frame] is whose hook is running, [Context.Command] is the one
+//     the user invoked, [Context.CommandPath] names it, [Context.Chain] is the whole path
+//   - YOUR dependencies — [Context.Bind] and [Context.BindIfAbsent] for a key you name,
+//     [Context.Get] and [Context.MustGet] to read one back, [Context.Value] for the raw entry
+//   - report what happened — [Context.RecordInfo], [Context.RecordSuccess],
+//     [Context.RecordWarning], [Context.RecordError], and [Context.Failed] to ask
+//   - stop — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] when
+//     the code is the point, [Context.Exit] to skip pending teardown
+//   - rotini's own seams — [Context.Version], [Context.Parser], [Context.Styler] and
+//     [Context.Suggestor] to read, and for a Context you built yourself rather than one the
+//     runtime handed you, [Context.WithVersion], [Context.WithParser], [Context.WithStyler],
+//     [Context.WithSuggestor], [Context.WithBindMeta] and [Context.WithBinder] to set
+//
+// Inputs are NOT on this list. A handler reads them with [Collect], which takes the Context
+// rather than hanging off it, because parsing is opt-in: a CLI that wants raw argv binds
+// nothing and reads [Context.Argv].
+//
 // The registry is the dependency-injection seam: bind a service with [Context.Bind] and
 // retrieve it with [Context.Get], [Context.MustGet] or the raw [Context.Value]. Bindings last
-// the lifetime of the Context. Input parsing is opt-in — the runtime itself never parses flags.
+// the lifetime of the Context.
 //
 // A Context is safe for concurrent registry access — a handler may read it, record outcomes
 // and reach its seams from goroutines it spawned. Always pass it as a pointer; it must not be

@@ -139,7 +139,7 @@ For `mig db status`, `rtx.Command()` is `status` in **every** hook of the run �
 A cascading hook had no way to ask that question before, which is why an inputs struct used to be aligned by counting its fields against the chain — and why a composed child's cascading hook could not read its own flags at all. Its type spans only its own lineage, so counting from the leaf landed below it and counting from the root landed above it. Both returned zeros with a nil error.
 {{< /alert >}}
 
-A struct that describes more commands than the collecting command is deep is rejected — that check is exact, because the anchor is known rather than inferred. `Binder.BindRoot` remains as a low-level escape for a caller that genuinely wants the first *n* frames.
+A struct that describes more commands than the collecting command is deep is rejected — that check is exact, because the anchor is known rather than inferred. To read the chain directly rather than bind against it, use `rtx.Chain()`.
 
 ## Outcomes
 

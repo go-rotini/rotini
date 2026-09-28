@@ -73,9 +73,9 @@ type layerCore struct {
 // It did not used to be one rule. The anchor was inferred from the struct's field count against
 // the chain, which made the correct call depend on how deep THIS invocation happened to go: a
 // cascading hook on a middle frame read a descendant's flags, and a composed child's cascading
-// hook could not read its own flags at all. Both returned zeros with a nil error. A separate
-// CollectRoot existed for part of the gap and is gone; [Binder.BindRoot] remains as the
-// low-level escape for a caller that genuinely wants the first n frames.
+// hook could not read its own flags at all. Both returned zeros with a nil error. CollectRoot
+// existed for part of that gap, and Binder.BindRoot for the mechanism under it; both are gone,
+// and a caller who wants to read the chain directly has [Context.Chain].
 //
 // It is [Binder.Bind] under the hood, so errors are the same data-shaped [*ParseError]s and
 // [*BindError]s. Use [CollectP] when "where did this value come from" matters.
@@ -357,7 +357,7 @@ func layerAnchor(rtx *Context, v reflect.Value, chain []ResolvedCommand) (int, e
 	if err := checkFrameFit(v, chain, self); err != nil {
 		return 0, err
 	}
-	return frameAnchor(v, chain, self, false), nil
+	return frameAnchor(v, chain, self), nil
 }
 
 // argvLayer parses argv only (no defaults) into v and records presence.

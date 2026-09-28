@@ -78,19 +78,9 @@ func NewBinder(meta BindMeta) *Binder {
 //
 // It returns the first error: a [*ParseError] from the argv channel or a [*BindError] from the
 // others, both categorized and non-leaky, with the recon cause reachable via errors.As.
-func (b *Binder) Bind(rtx *Context, out any) error { return b.bind(rtx, out, false) }
+func (b *Binder) Bind(rtx *Context, out any) error { return b.bind(rtx, out) }
 
-// BindRoot is [Binder.Bind] with the inputs struct anchored at chain index 0 rather than at the
-// caller's own frame.
-//
-// It is the low-level escape, not the way to read your own inputs: [Collect] anchors on
-// [Context.Frame] and is correct in every hook, including a cascading hook and a composed child's.
-// Reach for BindRoot only when you genuinely want the FIRST n frames of the chain whatever
-// command is running — and note that it skips the frame-fit check for that reason, so a struct
-// that does not describe those frames binds whatever lands there.
-func (b *Binder) BindRoot(rtx *Context, out any) error { return b.bind(rtx, out, true) }
-
-func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
+func (b *Binder) bind(rtx *Context, out any) error {
 	if b == nil {
 		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil binder"}
 	}
@@ -100,7 +90,7 @@ func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 	}
 
 	// 1. argv → Flags + Arguments, without validation: step 3 checks the reconciled store.
-	store, chain, err := b.parser.parseBind(rtx, out, atRoot)
+	store, chain, err := b.parser.parseBind(rtx, out)
 	if err != nil {
 		return err
 	}
@@ -111,7 +101,7 @@ func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 
 	// 2. Flag fallback: argv-set > env > config, recorded back into the store so step 3
 	//    validates it too. A flag with no recon key keeps the Parser's value.
-	anchor := frameAnchor(v, chain, rtx.frameIndex(), atRoot)
+	anchor := frameAnchor(v, chain, rtx.frameIndex())
 	if err := b.reconcileFlags(v, chain, rtx.Argv, store, overrides, anchor); err != nil {
 		return err
 	}
@@ -130,10 +120,8 @@ func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 
 	// The argv diagnostics have had their turn, so a struct that still does not fit the chain
 	// is a genuine mismatch rather than a symptom of a bad command line.
-	if !atRoot {
-		if err := checkFrameFit(v, chain, rtx.frameIndex()); err != nil {
-			return err
-		}
+	if err := checkFrameFit(v, chain, rtx.frameIndex()); err != nil {
+		return err
 	}
 
 	// 4. env + config → the Env/Config sub-structs, from independent registries.
@@ -162,11 +150,7 @@ func (b *Binder) bind(rtx *Context, out any, atRoot bool) error {
 		return err
 	}
 
-	// 5. stdin → the leaf command's typed payload. A root-anchored bind is explicitly NOT
-	//    the leaf, and stdin has exactly one consumer, so it is left alone.
-	if atRoot {
-		return nil
-	}
+	// 5. stdin → the leaf command's typed payload. Stdin has exactly one consumer.
 	return b.fillStdin(rtx, v)
 }
 

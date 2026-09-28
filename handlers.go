@@ -54,25 +54,29 @@ type Handlers interface {
 // regardless — "does nothing, safely, including with a nil context" is a real contract, since
 // every generated stub embeds them.
 
-// DefaultCascadingPreRun is an embeddable no-op [Handlers.CascadingPreRun].
+// DefaultCascadingPreRun is an embeddable no-op [Handlers.CascadingPreRun]. Embed [DefaultHooks] instead to take
+// all four no-ops at once, which is what a hand-written handler usually wants.
 type DefaultCascadingPreRun struct{}
 
 // CascadingPreRun does nothing.
 func (DefaultCascadingPreRun) CascadingPreRun(ctx context.Context, rtx *Context) {}
 
-// DefaultPreRun is an embeddable no-op [Handlers.PreRun].
+// DefaultPreRun is an embeddable no-op [Handlers.PreRun]. Embed [DefaultHooks] instead to take
+// all four no-ops at once, which is what a hand-written handler usually wants.
 type DefaultPreRun struct{}
 
 // PreRun does nothing.
 func (DefaultPreRun) PreRun(ctx context.Context, rtx *Context) {}
 
-// DefaultPostRun is an embeddable no-op [Handlers.PostRun].
+// DefaultPostRun is an embeddable no-op [Handlers.PostRun]. Embed [DefaultHooks] instead to take
+// all four no-ops at once, which is what a hand-written handler usually wants.
 type DefaultPostRun struct{}
 
 // PostRun does nothing.
 func (DefaultPostRun) PostRun(ctx context.Context, rtx *Context) {}
 
-// DefaultCascadingPostRun is an embeddable no-op [Handlers.CascadingPostRun].
+// DefaultCascadingPostRun is an embeddable no-op [Handlers.CascadingPostRun]. Embed [DefaultHooks] instead to take
+// all four no-ops at once, which is what a hand-written handler usually wants.
 type DefaultCascadingPostRun struct{}
 
 // CascadingPostRun does nothing.

@@ -63,6 +63,11 @@ type LifecycleStep struct {
 // Lifecycle is the run phase's planner: given the resolved chain and each frame's [Handlers],
 // index-aligned, it returns the ordered step plan the engine executes. It orders and pairs the
 // declared hooks; the handler wiring rules hold before it is consulted. See [DefaultLifecycle].
+//
+// A plan built by wrapping [DefaultLifecycle] needs nothing further. One built from scratch
+// should wrap each hook in [AtFrame] so [Context.Frame] — and therefore [Collect]'s anchor —
+// knows which command the hook belongs to; an unlabeled hook reports the leaf, which is right
+// for a leaf's own hooks and wrong for a cascading one.
 type Lifecycle func(chain []ResolvedCommand, handlers []Handlers) []LifecycleStep
 
 // DefaultLifecycle is rotini's run-phase plan, exported so a custom [Lifecycle] can wrap it:

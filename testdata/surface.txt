@@ -296,7 +296,6 @@ method ArgValueCompleter.CompleteArgValue
 method BindError.Error
 method BindError.Unwrap
 method Binder.Bind
-method Binder.BindRoot
 method Category.String
 method Confirm.Ask
 method Confirm.WithAffirmative

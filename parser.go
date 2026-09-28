@@ -167,7 +167,7 @@ func NewParser() *Parser {
 // where a mismatched struct passes quietly. A handler collecting its own inputs should reach for
 // Collect and get the check.
 func (p *Parser) Parse(rtx *Context, out any) error {
-	store, chain, err := p.parseBind(rtx, out, false)
+	store, chain, err := p.parseBind(rtx, out)
 	if err != nil {
 		return err
 	}
@@ -240,7 +240,7 @@ func Deprecations(rtx *Context) []Deprecation {
 // [validate]'s job. It is the shared front half of [Parser.Parse] and of the [Binder], which
 // reconciles env and config fallbacks into the store before validating, so a required input is
 // satisfiable from any source. It returns the store and chain for that deferred pass.
-func (p *Parser) parseBind(rtx *Context, out any, atRoot bool) (*parsedInputs, []ResolvedCommand, error) {
+func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedCommand, error) {
 	if p == nil {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil parser"}
 	}
@@ -259,7 +259,7 @@ func (p *Parser) parseBind(rtx *Context, out any, atRoot bool) (*parsedInputs, [
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := bindInputs(rv.Elem(), store, chain, frameAnchor(rv.Elem(), chain, rtx.frameIndex(), atRoot)); err != nil {
+	if err := bindInputs(rv.Elem(), store, chain, frameAnchor(rv.Elem(), chain, rtx.frameIndex())); err != nil {
 		return nil, nil, err
 	}
 	return store, chain, nil
@@ -1119,12 +1119,12 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand, offse
 // spans only its own lineage, so leaf-anchoring landed below it and root-anchoring landed above
 // it. Both returned zeros and a nil error.
 //
-// atRoot pins the anchor at index 0 regardless. It is reached only from [Binder.BindRoot], kept
-// as a low-level escape for a caller that genuinely wants the first n frames.
-func frameAnchor(v reflect.Value, chain []ResolvedCommand, self int, atRoot bool) int {
-	if atRoot {
-		return 0
-	}
+// There is no longer a way to pin the anchor at index 0. Root-anchoring existed for CollectRoot,
+// which frames replaced; BindRoot outlived it by one release as "the low-level escape", with no
+// caller and no test, and it was the only remaining route to the silent wrong-frame answer this
+// function exists to prevent. A caller who genuinely wants the first n frames has
+// [Context.Chain].
+func frameAnchor(v reflect.Value, chain []ResolvedCommand, self int) int {
 	if v.Kind() != reflect.Struct {
 		return 0
 	}

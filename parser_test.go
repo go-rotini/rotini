@@ -1209,7 +1209,7 @@ func bindStore[T any](store *parsedInputs) T {
 	var out T
 	chain := make([]ResolvedCommand, len(store.scopes))
 	v := reflect.ValueOf(&out).Elem()
-	_ = bindInputs(v, store, chain, frameAnchor(v, chain, frameUnset, false))
+	_ = bindInputs(v, store, chain, frameAnchor(v, chain, frameUnset))
 	return out
 }
 
