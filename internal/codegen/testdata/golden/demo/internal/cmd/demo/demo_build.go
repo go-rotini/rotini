@@ -15,6 +15,11 @@ var _ rotini.Handlers = (*demoBuildHandlers)(nil)
 // only Run is written below. Implement one by declaring a method with the same name:
 // CascadingPreRun and CascadingPostRun run for every command in the chain, PreRun, Run and
 // PostRun only for this one.
+//
+// One value of this type serves THIS command's hooks for one run, so a field is a fine home
+// for state passing between them — a transaction opened in PreRun and committed in PostRun,
+// say. State that has to reach a DIFFERENT command in the chain does not fit in a field: use
+// the registry (rotini.Key + BindTo) for that. See rotini.Handlers for the full rule.
 type demoBuildHandlers struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun

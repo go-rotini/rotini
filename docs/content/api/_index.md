@@ -252,6 +252,39 @@ Options apply left to right, so a later one overwrites an earlier one binding th
 
 `Provide` binds program-wide, so every invocation sees it — including every line of a REPL session. `BindTo` binds on one `Context`, for something a hook computes per run.
 
+### Where should state live?
+
+Not everything needs the registry. The runtime asks your handlers for a command's handler **once per command, per run**, and that value serves all of that command's hooks — so a plain field is often the right answer:
+
+| State flows… | Use |
+|---|---|
+| between **one command's own** hooks — `PreRun` → `Run` → `PostRun`, or a frame's `CascadingPreRun` → `CascadingPostRun` | **a field on the handler.** No key, no lookup, and the compiler checks the type |
+| between **different commands** in the chain — `db` opens it, `db migrate` uses it | `Key.BindTo(rtx, v)` — different commands are different handler values, so a field cannot reach |
+| across **every run** of the program — a client, a store, a config | `Provide` / `Program.Bind` |
+
+{{< code title="a transaction that lives in a field, because it never leaves this command" language="golang" open="true" collapsible="false" copy="true" >}}
+type migrateHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultCascadingPostRun
+	tx *sql.Tx // set in PreRun, used in Run, resolved in PostRun
+}
+
+func (h *migrateHandlers) PreRun(ctx context.Context, rtx *rotini.Context)  { h.tx, _ = db.Begin() }
+func (h *migrateHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+	if rtx.Failed() {
+		h.tx.Rollback()
+		return
+	}
+	h.tx.Commit()
+}
+{{< /code >}}
+
+{{< alert type="warning" title="IF YOU SUPPLY YOUR OWN PROGRAMHANDLERS, RETURN A NEW VALUE PER CALL:" >}}
+Generated wiring returns a fresh handler from every method, which is what makes a handler's fields *per-run* state.
+
+If you write your own `ProgramHandlers` and a method returns a **shared** value — a field on your aggregate, a package variable — then that handler's fields are shared across runs. For a stateless handler that is harmless and common. For one that keeps state in fields it is a bug, and under concurrent runs (a REPL, a `StdioServer`, or `Program.Run` from several goroutines) it is a data race.
+{{< /alert >}}
+
 Detection is opt-in too: `DetectProfile`, `IsTerminal` and `EnvNoColor` exist, but nothing calls them for you — the program decides and feeds the result in.
 
 `Parser` and `Binder` are overrides, not prerequisites: `Collect` builds its own. In particular **`rotini.Deprecations(rtx)` needs nothing bound** — it reports the deprecated aliases and identifiers this invocation actually used, reading the resolved chain and the argv that produced it straight off the `Context`.

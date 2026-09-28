@@ -116,6 +116,11 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 // handlers is the generated ProgramHandlers implementation: each method wires a command to its
 // handler, whether a local type or a composed command's delegated package. Program is the
 // ready-to-run program, and Handlers returns a fresh value.
+//
+// Every method below returns a NEW handler per call, which is what makes a handler's fields
+// per-run state: the runtime asks once per command per run and uses what it gets. If you supply
+// your own ProgramHandlers instead of this one, keep that property — a method returning a shared
+// value makes its handler's fields shared across runs, and a data race under concurrent ones.
 type handlers struct{}
 
 var _ ProgramHandlers = (*handlers)(nil)
