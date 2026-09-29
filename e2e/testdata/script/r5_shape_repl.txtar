@@ -4,6 +4,8 @@
 # which is the only way to see what a user sees: quoting, the exit word, EOF, and — the
 # property the whole shape rests on — a failing command NOT killing the loop.
 
+[!unix] skip 'sends a real SIGINT to its own process'
+
 gomodinit example.com/shell
 
 exec rotini generate cmd/shell/.rotini.spec.yaml --config cmd/shell/.rotini.conf.yaml
@@ -28,6 +30,21 @@ stdin eof.txt
 exec ./shell$exe
 stdout 'echo: last'
 
+# ── ^C cancels the COMMAND, not the session ──────────────────────────────────
+#
+# This one needs a REAL process and a REAL signal, because the defect it guards was invisible
+# in-process: every line used to run on the SESSION's context, so an interrupt that should abort
+# one command tore the shell down. In bash, python, psql and redis-cli, ^C returns you to the
+# prompt — it is the most-pressed key in a REPL.
+#
+# The binary sends itself a SIGINT while a line is blocking. What must survive is the LINE AFTER
+# it: if the session had died, "still here" would never print.
+stdin interrupt.txt
+exec ./shell$exe
+stdout 'blocking: started'
+stdout 'blocking: canceled'
+stdout 'echo: still here'
+
 -- lines.txt --
 echo hello
 echo two words
@@ -37,6 +54,10 @@ quit
 nosuchcommand
 echo still alive
 quit
+-- interrupt.txt --
+block
+echo still here
+exit
 -- eof.txt --
 echo last
 -- cmd/shell/.rotini.spec.yaml --
@@ -52,6 +73,8 @@ command:
         - name: words
           schema:
             type: '[]string'
+    - name: block
+      summary: block until the line's context is canceled
 -- cmd/shell/.rotini.conf.yaml --
 version: 0.0.0
 generate:
@@ -102,12 +125,51 @@ func (*shellEchoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	fmt.Fprintf(rtx.Stdout, "echo: %s\n", strings.Join(in.ShellEcho.Arguments.Words, " "))
 }
+-- internal/cmd/shell/shell_block.go --
+package shell
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"syscall"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shellBlockHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+// Run blocks until its LINE's context is canceled, and sends itself the SIGINT that should do
+// it. An operator presses ^C; the path through the handler is the same either way.
+func (*shellBlockHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "blocking: started")
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = syscall.Kill(os.Getpid(), syscall.SIGINT)
+	}()
+	// The timer is a safety net, not part of the behaviour: without it, a regression that
+	// stops routing the interrupt hangs the whole test suite instead of failing an
+	// assertion. A hang tells you nothing and costs the run.
+	select {
+	case <-ctx.Done():
+		fmt.Fprintln(rtx.Stdout, "blocking: canceled")
+	case <-time.After(5 * time.Second):
+		fmt.Fprintln(rtx.Stdout, "blocking: NEVER CANCELED — the interrupt did not reach the line")
+	}
+}
 -- cmd/shell/main.go --
 package main
 
 import (
 	"context"
 	"os"
+	"os/signal"
 
 	"github.com/go-rotini/rotini"
 
@@ -115,14 +177,30 @@ import (
 )
 
 // The REPL shape: one Program, dispatched once per typed line. Run is re-entrant, so each
-// line gets a fresh Context while the Parser bound here reaches all of them.
+// line gets a fresh Context while services bound here reach all of them.
+//
+// SIGINT is routed to the REPL's interrupt channel rather than to the session's context, which
+// is what makes ^C abort the running command and leave the shell standing. rotini wires none of
+// this: only a program knows whether its own ^C means "abort this line" or "kill this process".
 func main() {
-	p := shell.Program
-	repl := rotini.NewREPL(p).
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, os.Interrupt)
+	interrupts := make(chan struct{}, 1)
+	go func() {
+		for range sigint {
+			select {
+			case interrupts <- struct{}{}:
+			default:
+			}
+		}
+	}()
+
+	repl := rotini.NewREPL(shell.Program).
 		WithPrompt("").
 		WithInput(os.Stdin).
 		WithOutput(os.Stdout).
 		WithExitCommands("quit", "exit").
+		WithInterrupts(interrupts).
 		WithErrorEcho(true)
 	if err := repl.Run(context.Background()); err != nil {
 		os.Exit(1)

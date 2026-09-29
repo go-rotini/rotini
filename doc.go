@@ -246,6 +246,9 @@
 //
 //   - [REPL] runs a [Program] as an interactive loop, dispatching each typed line against the
 //     same [Definition] the binary uses. A failing command is reported and the loop continues.
+//     rotini owns the dispatch — [REPL.Complete] answers what your command tree would complete,
+//     which no line editor can — and leaves reading the line to whatever you plug into
+//     [REPL.WithLineReader].
 //   - [Service] runs long-lived workers until the context ends or one fails, with ordered
 //     shutdown hooks that run in every case. Since the runtime already cancels the run context
 //     on SIGINT/SIGTERM, a Service built on that ctx gets graceful shutdown for free.

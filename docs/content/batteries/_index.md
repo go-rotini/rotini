@@ -86,6 +86,48 @@ rotini.NewREPL(Program).WithPrompt("todo> ").Run(ctx)
 
 The program's funnel already reports a failing command, so the REPL adds nothing of its own. `WithErrorEcho(true)` turns on a second report for a program whose funnel is deliberately silent.
 
+#### rotini owns the dispatch, you bring the line
+
+A REPL is two halves. **Getting a line from a human** — history, arrow keys, `^R`, multi-line, bracketed paste — needs raw terminal mode and is solved better by [chzyer/readline](https://github.com/chzyer/readline), [peterh/liner](https://github.com/peterh/liner) or [go-prompt](https://github.com/c-bata/go-prompt). **Turning that line into a dispatched invocation against your command tree** is the half nobody else can do, because nobody else has your tree.
+
+The built-in reader is a plain byte-at-a-time line read: exactly right for a pipe, a test or a CI job, and deliberately minimal at a terminal. Five seams let a program assemble the REPL it actually wants:
+
+| | |
+|---|---|
+| `WithLineReader` | where a line comes from — readline, a socket, a test |
+| `WithPromptFunc` | what the prompt says, per line, from live state |
+| `Complete(line, pos)` | what the command tree would complete, for that reader to render |
+| `WithInterrupts` | what `^C` cancels |
+| `WithIntercept` | lines that never reach dispatch — `\d`, `.schema`, `:q` |
+
+{{< code title="a terminal session" language="golang" open="true" collapsible="false" copy="true" >}}
+rl, _ := readline.NewEx(&readline.Config{AutoComplete: completer{repl}})
+
+repl.WithLineReader(func(_ context.Context, prompt string) (string, error) {
+	rl.SetPrompt(prompt)
+	line, err := rl.Readline()
+	switch {
+	case errors.Is(err, readline.ErrInterrupt):
+		return "", rotini.ErrInterrupted   // ^C: drop the line, keep the shell
+	case errors.Is(err, io.EOF):
+		return "", rotini.ErrNotInteractive // ^D: the session is over
+	}
+	return line, err
+})
+{{< /code >}}
+
+{{< alert type="warning" title="^C MUST CANCEL THE COMMAND, NOT THE SESSION:" >}}
+Without `WithInterrupts`, every line runs on the **session's** context — so an interrupt that should abort one command tears the shell down. In bash, python, psql and redis-cli, `^C` returns you to the prompt; it is the most-pressed key in a REPL.
+
+Send on a **buffered** channel, without blocking. Anything already pending when a line is submitted arrived at the *prompt* rather than at a command, and is dropped — a stray `^C` at an empty prompt must not kill the next thing typed.
+
+rotini wires no signal itself: only your program knows whether its `^C` means "abort this line" or "kill this process".
+{{< /alert >}}
+
+**`Complete` is the reason a rotini REPL beats a hand-rolled readline loop.** It is the same completion the generated shell scripts use — sub-commands, flag names, enum values, and anything a `FlagValueCompleter` or `ArgValueCompleter` supplies dynamically — from the same `Definition`, against the same handlers. No general-purpose line editor can offer it, because it does not know your commands.
+
+`example-daemon`'s `syncd shell` is the worked version: readline with history and tab completion at a terminal, the built-in reader over a pipe, guarded by one `rotini.IsTerminal` check so the same handler serves a human, a pipe and its own tests.
+
 ### Service
 
 `Service` runs long-lived workers until the context ends or one fails. It is **not** a supervisor — `errgroup` is a supervisor. It is the part of a daemon that is not about doing the work, but about **ending**.

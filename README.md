@@ -50,7 +50,7 @@ constructed it:
 | | |
 |---|---|
 | `Subprocess` | `exec` with env/dir/timeout; a non-zero exit quotes the child's stderr, and output streams as a breakable iterator |
-| `REPL` | run your command tree as an interactive loop |
+| `REPL` | run your command tree as an interactive loop — dispatch, `^C` semantics and tab completion of your real commands; bring your own line editor |
 | `Program.Run` is re-entrant | each dispatch gets a fresh `Context`, so the same command tree serves a loop, a server answering a peer, or a test |
 | `Service` | daemon workers, ordered teardown that still runs after a Ctrl-C, and one budget for both halves |
 | `IsTerminal` `EnvNoColor` `TerminalSize` | the questions that come before any drawing decision, and that the standard library will not answer |

@@ -299,12 +299,17 @@ method Program.WithStdout(w io.Writer) *Program
 method Program.WithTeardownOnPanic(enabled bool) *Program
 method Program.WithVersion(version string) *Program
 method Program.WithoutSignalHandling() *Program
+method REPL.Complete(line string, pos int) []string
 method REPL.Run(ctx context.Context) error
 method REPL.WithErrorEcho(enabled bool) *REPL
 method REPL.WithExitCommands(words ...string) *REPL
 method REPL.WithInput(in io.Reader) *REPL
+method REPL.WithIntercept(fn func(ctx context.Context, line string) (bool, error)) *REPL
+method REPL.WithInterrupts(ch <-chan struct{}) *REPL
+method REPL.WithLineReader(fn func(ctx context.Context, prompt string) (string, error)) *REPL
 method REPL.WithOutput(out io.Writer) *REPL
 method REPL.WithPrompt(prompt string) *REPL
+method REPL.WithPromptFunc(fn func() string) *REPL
 method RemoteError.Error() string
 method RemoteError.Unwrap() []error
 method RemoteErrorKind.String() string
@@ -398,6 +403,7 @@ type SubprocessError
 type Suggestor
 type WiringError
 var ErrInternal
+var ErrInterrupted
 var ErrNotInteractive
 var ErrServiceNotFound
 var ErrShutdownTimeout
