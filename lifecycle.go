@@ -40,6 +40,17 @@ type Resolution struct {
 
 // Resolver is the resolve phase: argv against the [Definition], deciding what this invocation
 // targets. An error is routed through the funnel and fails the run. See [DefaultResolver].
+//
+// # The Definition is READ-ONLY
+//
+// It arrives by value, but a Definition is mostly slices — Commands, Flags, Arguments — and
+// those are the program's own, not a copy. Writing through one (`def.Commands[0].Name = …`)
+// edits the command tree itself, and the edit OUTLIVES the run: the next invocation of the same
+// [Program] sees it, which for a [REPL] or a [StdioServer] means every line after the first.
+//
+// This is the same convention [Context.Chain] states for the frames it hands a handler, and it
+// is what lets one Program serve many runs without rebuilding its tree. A resolver that wants a
+// different tree should build its own rather than edit the one it was shown.
 type Resolver func(def Definition, argv []string) (Resolution, error)
 
 // DefaultResolver is rotini's resolve phase, exported so a custom [Resolver] can wrap rather
@@ -53,7 +64,11 @@ func DefaultResolver(def Definition, argv []string) (Resolution, error) {
 }
 
 // LifecycleStep pairs one forward hook with its teardown — the unit of the run phase's plan.
-// A nil Undo is a step with no teardown, as the default plan's Run step is.
+//
+// Either half may be nil. A nil Undo is a step with no teardown, as the default plan's Run step
+// is; a nil Do is a step with no forward work, which is how a hand-built plan registers a
+// teardown that pairs with nothing. A step counts as begun either way, so a teardown-only step
+// still unwinds.
 type LifecycleStep struct {
 	Name string                                  // diagnostic label, e.g. "cascading:app", "prerun:build", "run:build"
 	Do   func(ctx context.Context, rtx *Context) // the forward hook

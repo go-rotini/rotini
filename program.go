@@ -969,7 +969,14 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	began := 0
 	for _, s := range steps {
 		began++
-		run(s.Do)
+		// A nil Do is a step with no forward work, mirroring the nil Undo the unwind below
+		// already tolerates. That symmetry is the point: a hand-built plan may legitimately
+		// register a teardown with no setup, and before this guard a nil Do was a nil
+		// dereference reported as "invalid memory address" — an opaque diagnostic for what
+		// is, at worst, a plain wiring mistake.
+		if s.Do != nil {
+			run(s.Do)
+		}
 		if halt() {
 			break
 		}

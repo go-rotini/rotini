@@ -127,7 +127,7 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 
 	cmd := exec.CommandContext(ctx, path, r.Args...)
 	// All three streams come from the Program, not from the process. Stdin used to read
-	// os.Stdin directly while stdout and stderr honored [Program.WithStdout]/[WithStderr],
+	// os.Stdin directly while stdout and stderr honored [Program.WithStdout]/[Program.WithStderr],
 	// so a host that redirected input — a test, a REPL feeding a plugin, an embedding
 	// program — had two streams wired and the third reaching around it.
 	//

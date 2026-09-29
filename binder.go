@@ -38,7 +38,7 @@ type Binder struct {
 	// described records whether a [BindMeta] was SUPPLIED, as distinct from supplied empty.
 	// A registry entry could never tell those apart — an absent key and a zero value read
 	// identically — which is why "no configuration sources" and "nobody wired the
-	// descriptor" produced the same silent result. See [Binder.checkDescribed].
+	// descriptor" produced the same silent result. See checkDescribed.
 	described bool
 }
 

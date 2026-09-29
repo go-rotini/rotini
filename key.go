@@ -23,7 +23,7 @@ type Key[T any] struct{ name string }
 func NewKey[T any](name string) Key[T] { return Key[T]{name: name} }
 
 // Name returns the underlying registry key, for interoperating with the untyped
-// [Context.Bind] / [Get] surface.
+// [Context.Bind] / [Context.Get] surface.
 func (k Key[T]) Name() string { return k.name }
 
 // String implements [fmt.Stringer], so a key renders as its name in a message.

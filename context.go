@@ -162,8 +162,8 @@ func newContext() *Context {
 }
 
 // NewContextFor builds a [Context] with argv resolved against an explicit def — the same
-// context the runtime hands a handler at dispatch. Use it to exercise the [Parser] or [Usage]
-// helpers, or a single hook, against a Definition you construct:
+// context the runtime hands a handler at dispatch. Use it to exercise the [Parser] or the
+// [Collect] family, or a single hook, against a Definition you construct:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
 //	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"})
@@ -216,7 +216,7 @@ func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 }
 
 // Chain returns the resolved command path for this invocation, root → leaf. The [Parser] and
-// [Usage] read it to bind inputs and render help against the command whose handler ran.
+// [Binder] read it to bind inputs against the command whose handler ran.
 //
 // The slice is a COPY, so reordering, reslicing or replacing a frame is a caller's own
 // business and cannot reach the run. It used to be the live slice with a doc asking callers to
