@@ -12,8 +12,7 @@ The generated entrypoint builds a `Program` and calls `Execute`, which resolves 
 
 {{< code title="program" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.
-	WithVersion(version).                    // what --version reports
-	WithSuggestor(rotini.NewSuggestor()).    // an opt-in seam
+	WithVersion(version).    // what --version reports
 	Execute()
 {{< /code >}}
 
@@ -27,7 +26,7 @@ But it arrives **only when the exit action returns**. Under the default, `os.Exi
 It is not the reporting channel: the funnel has already printed everything by then. The return is there so an embedder can *act* on the failure rather than re-derive it from a stream.
 {{< /alert >}}
 
-Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, `WithVersion`/`WithParser`/`WithSuggestor`/`WithBindMeta`/`WithBinder`, and `With` for options that cannot be methods.
+Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, `WithVersion`/`WithParser`/`WithBindMeta`/`WithBinder`, and `With` for options that cannot be methods.
 
 ## Lifecycle
 
@@ -177,7 +176,7 @@ Every class below is both `errors.Is`-able against the `ErrUsage` / `ErrInternal
 
 | Type | Channel |
 |---|---|
-| `*ParseError` | argv — with a `Kind` you can branch on, plus the token and candidates a `Suggestor` turns into "did you mean" |
+| `*ParseError` | argv — with a `Kind` you can branch on, plus the token and candidates `Suggestor.For` turns into "did you mean" |
 | `*BindError` | environment / configuration / stdin |
 | `*RemoteError` | plugin dispatch |
 | `*WiringError` `*ServiceError` `*PanicError` | rotini-detected faults, arriving as panics. A recovered panic is `CategoryInternal` whatever was thrown |
@@ -185,6 +184,45 @@ Every class below is both `errors.Is`-able against the `ErrUsage` / `ErrInternal
 `*SubprocessError` sits outside this taxonomy: it reports a child process's exit, carrying the code and the stderr that explains it.
 
 rotini ships **no opinions on top**: no automatic "did you mean", no help dump on error. A program that wants either writes its own funnel.
+
+### Nearness, when you want it
+
+`Suggestor` ranks a rejected token against the vocabulary it was rejected against. Constructing one is the entire opt-in — nothing is wired, nothing is printed, and what to say stays yours:
+
+{{< code title="did you mean" language="golang" open="true" collapsible="false" copy="true" >}}
+var suggestor = rotini.NewSuggestor()
+
+func funnel(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	for _, err := range out.Errors {
+		fmt.Fprintf(rtx.Stderr, "Error: %s\n", err)
+		if hits := suggestor.For(err); len(hits) > 0 {
+			fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
+		}
+	}
+}
+{{< /code >}}
+
+`For` does the `errors.As`, the token check and the vocabulary check in one call — rotini owns the error, so it is the one place that knows both what was typed and what would have been valid there. It returns nothing for an error that is not a parse failure, or a token that is not near anything: **offering nothing is a real answer.**
+
+There is **one algorithm and no menu**, and the defaults are the answer rather than a starting point: optimal string alignment at a 0.75 minimum, always case-insensitive.
+
+It was measured over 30 realistic CLI typos and 22 words that were *not* typos. The second set matters more, because a confident wrong guess is what makes people stop trusting the feature:
+
+| | correct | **wrong guesses** |
+|---|---:|---:|
+| **optimal string alignment @ 0.75** | **30/30** | **0/22** |
+| damerau-levenshtein @ 0.75 | 30/30 | 0/22 (≈3× the cost) |
+| jaro-winkler @ 0.80 | 30/30 | 3/22 |
+| jaro-winkler @ 0.70 | 30/30 | 7/22 |
+| levenshtein @ 0.80 | 18/30 | 0/22 |
+
+{{< alert type="info" title="WHY 0.75 AND NOT 0.80:" >}}
+0.80 looked perfect on that corpus and was **silently useless for short commands**, which the corpus had none of. A 0.80 threshold allows one edit per five characters, so `help`, `list`, `show` and `init` tolerate none — `hlep` suggested nothing at all. Against a second corpus of short commands: **0/14 at 0.80, 13/14 at 0.75**, both with zero wrong guesses. It was found by running a real binary, not by reading the table.
+
+The remaining miss is a three-character command, where one edit is a third of the word and genuinely ambiguous. Catching those needs ~0.65, which starts inventing matches — so rotini stays silent there, which is the correct end to fail on.
+{{< /alert >}}
+
+`WithMinScore` and `WithMaxResults` are there for a program that wants to suggest more freely, or to offer two candidates when both are genuinely close — `--vers` really is ambiguous between `--verbose` and `--version`, and that is the user's call.
 
 ## Plugins
 
@@ -225,11 +263,8 @@ That is a deliberate split. rotini's own seams used to be string keys in the sam
 | the binder | `WithBinder(func(BindMeta) *Binder)` — it **receives** the descriptor | internal |
 | the version | `WithVersion(v)` | `rtx.Version()` |
 | the parser | `WithParser(p)` | `rtx.Parser()` — never nil |
-| the suggestor | `WithSuggestor(s)` | `rtx.Suggestor() (*Suggestor, bool)` |
 
 `WithBinder` takes a function of the descriptor rather than a `*Binder` for exactly that reason — an override now starts *from* what the spec declared instead of having to reproduce it.
-
-Suggestion reports `(value, ok)` because it is opt-in: rotini suggests nothing on its own, so "none supplied" is a decision worth telling a handler about rather than papering over with a default it never asked for.
 
 Your own services use a **typed key**, so the registry string and the type it was bound as cannot drift apart and a handler needs neither a literal nor an assertion:
 

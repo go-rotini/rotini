@@ -4,7 +4,6 @@
 package main
 
 import (
-	"github.com/go-rotini/rotini"
 	cmd "github.com/go-rotini/rotini/internal/cmd/rotini"
 )
 
@@ -15,6 +14,5 @@ var (
 func main() {
 	cmd.Program.
 		WithVersion(cmd.ResolveVersion(version)).
-		WithSuggestor(rotini.NewSuggestor()).
 		Execute()
 }

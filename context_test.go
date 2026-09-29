@@ -492,14 +492,12 @@ func TestContext_seamAccessorsAreRaceFree(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			rtx.WithVersion("1.2.3").
-				WithParser(NewParser()).
-				WithSuggestor(NewSuggestor())
+				WithParser(NewParser())
 		}()
 		go func() {
 			defer wg.Done()
 			_ = rtx.Version()
 			_ = rtx.Parser()
-			_, _ = rtx.Suggestor()
 		}()
 	}
 	wg.Wait()
@@ -586,7 +584,6 @@ func TestContext_nilReceiverPanicsAtTheCall(t *testing.T) {
 		"RecordSuccess": func(rtx *Context) { rtx.RecordSuccess("x") },
 		"Version":       func(rtx *Context) { _ = rtx.Version() },
 		"Parser":        func(rtx *Context) { _ = rtx.Parser() },
-		"Suggestor":     func(rtx *Context) { _, _ = rtx.Suggestor() },
 	} {
 		t.Run(name, func(t *testing.T) {
 			defer func() {

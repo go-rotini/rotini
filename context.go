@@ -50,10 +50,9 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 //     [Context.RecordWarning], [Context.RecordError], and [Context.Failed] to ask
 //   - stop — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] when
 //     the code is the point, [Context.Exit] to skip pending teardown
-//   - rotini's own seams — [Context.Version], [Context.Parser] and [Context.Suggestor] to
-//     read, and for a Context you built yourself rather than one the runtime handed you,
-//     [Context.WithVersion], [Context.WithParser], [Context.WithSuggestor],
-//     [Context.WithBindMeta] and [Context.WithBinder] to set
+//   - rotini's own seams — [Context.Version] and [Context.Parser] to read, and for a Context
+//     you built yourself rather than one the runtime handed you, [Context.WithVersion],
+//     [Context.WithParser], [Context.WithBindMeta] and [Context.WithBinder] to set
 //
 // Inputs are NOT on this list. A handler reads them with [Collect], which takes the Context
 // rather than hanging off it, because parsing is opt-in: a CLI that wants raw argv binds
@@ -132,11 +131,10 @@ type Context struct {
 	// rotini's own seams, seeded from the Program each run — see [Program.WithBindMeta].
 	// They are deliberately NOT in services: the registry is the user's namespace, and a
 	// value the runtime depends on must not share a flat keyspace with it.
-	meta      *BindMeta
-	binderFn  func(BindMeta) *Binder
-	version   string
-	parser    *Parser
-	suggestor *Suggestor
+	meta     *BindMeta
+	binderFn func(BindMeta) *Binder
+	version  string
+	parser   *Parser
 }
 
 // cloneServices snapshots the registry's bindings. Every run's Context is seeded from the
@@ -794,20 +792,6 @@ func (rtx *Context) WithParser(parser *Parser) *Context {
 	return rtx
 }
 
-// WithSuggestor sets the suggestor [Context.Suggestor] reports. See [Program.WithSuggestor].
-//
-// For a Context you built yourself. One handed to a hook is already seeded from the Program,
-// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
-// does not outlive the run — the next invocation is seeded from the Program again.
-func (rtx *Context) WithSuggestor(suggestor *Suggestor) *Context {
-	if rtx != nil && suggestor != nil {
-		rtx.mu.Lock()
-		rtx.suggestor = suggestor
-		rtx.mu.Unlock()
-	}
-	return rtx
-}
-
 // ── rotini's own seams, as the handler sees them ────────────────────────────.
 
 // Version is what the program reports as its version, from [Program.WithVersion]. It is "" if
@@ -831,16 +815,6 @@ func (rtx *Context) Parser() *Parser {
 		return NewParser()
 	}
 	return p
-}
-
-// Suggestor reports the [Suggestor] the program supplied, and whether it supplied one.
-//
-// Like styling, suggestion is opt-in: rotini emits no "did you mean" of its own, so a program
-// that wants one says so, and a handler that asks is told plainly when it did not.
-func (rtx *Context) Suggestor() (*Suggestor, bool) {
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	return rtx.suggestor, rtx.suggestor != nil
 }
 
 // bindMeta is the generated descriptor for this run, and whether the program supplied one.

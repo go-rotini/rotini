@@ -21,15 +21,6 @@ const RemoteSpawnFailed
 const RemoteTimeout
 const StreamStderr
 const StreamStdout
-const SuggestAlgorithmDamerauLevenshtein
-const SuggestAlgorithmHamming
-const SuggestAlgorithmJaccard
-const SuggestAlgorithmJaro
-const SuggestAlgorithmJaroWinkler
-const SuggestAlgorithmLevenshtein
-const SuggestAlgorithmLongestCommonSubsequence
-const SuggestAlgorithmOptimalStringAlignment
-const SuggestAlgorithmSorensenDice
 field ArgDef.Complete
 field ArgDef.Constraints
 field ArgDef.Default
@@ -136,8 +127,6 @@ field LifecycleStep.Name
 field LifecycleStep.Undo
 field Line.Stream
 field Line.Text
-field Match.Score
-field Match.Value
 field Outcome.Errors
 field Outcome.Infos
 field Outcome.Panics
@@ -197,7 +186,6 @@ field SubprocessError.Stderr
 field WiringError.Command
 field WiringError.Handler
 field WiringError.Msg
-func Algorithms() []SuggestAlgorithm
 func AtFrame(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
 func CollectP[T any](rtx *Context) (T, Report, error)
@@ -258,13 +246,11 @@ method Context.RecordError(err error)
 method Context.RecordInfo(msg string)
 method Context.RecordSuccess(msg string)
 method Context.RecordWarning(warn error)
-method Context.Suggestor() (*Suggestor, bool)
 method Context.Value(key string) any
 method Context.Version() string
 method Context.WithBindMeta(meta BindMeta) *Context
 method Context.WithBinder(fn func(BindMeta) *Binder) *Context
 method Context.WithParser(parser *Parser) *Context
-method Context.WithSuggestor(suggestor *Suggestor) *Context
 method Context.WithVersion(version string) *Context
 method DefaultCascadingPostRun.CascadingPostRun(ctx context.Context, rtx *Context)
 method DefaultCascadingPreRun.CascadingPreRun(ctx context.Context, rtx *Context)
@@ -310,7 +296,6 @@ method Program.WithSignals(sigs ...os.Signal) *Program
 method Program.WithStderr(w io.Writer) *Program
 method Program.WithStdin(r io.Reader) *Program
 method Program.WithStdout(w io.Writer) *Program
-method Program.WithSuggestor(suggestor *Suggestor) *Program
 method Program.WithTeardownOnPanic(enabled bool) *Program
 method Program.WithVersion(version string) *Program
 method Program.WithoutSignalHandling() *Program
@@ -346,16 +331,11 @@ method Subprocess.WithTimeout(d time.Duration) *Subprocess
 method Subprocess.WithoutParentEnv() *Subprocess
 method SubprocessError.Error() string
 method SubprocessError.Unwrap() []error
-method SuggestAlgorithm.Valid() bool
 method Suggestor.Closest(input string, candidates []string) (suggestion string, ok bool)
-method Suggestor.Matches(input string, candidates []string) []Match
-method Suggestor.Score(a, b string) float64
+method Suggestor.For(err error) []string
 method Suggestor.Suggest(input string, candidates []string) []string
-method Suggestor.WithAlgorithm(algorithm SuggestAlgorithm) *Suggestor
-method Suggestor.WithCaseFold() *Suggestor
 method Suggestor.WithMaxResults(n int) *Suggestor
 method Suggestor.WithMinScore(score float64) *Suggestor
-method Suggestor.WithNormalizer(normalizer func(string) string) *Suggestor
 method WiringError.Error() string
 method WiringError.Unwrap() error
 type ArgDef
@@ -390,7 +370,6 @@ type Layer
 type Lifecycle
 type LifecycleStep
 type Line
-type Match
 type Option
 type Outcome
 type PanicError
@@ -416,7 +395,6 @@ type ServiceError
 type Stream
 type Subprocess
 type SubprocessError
-type SuggestAlgorithm
 type Suggestor
 type WiringError
 var ErrInternal

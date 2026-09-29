@@ -179,8 +179,8 @@
 // [Context.Get] or [Context.MustGet] to consume.
 //
 // rotini's OWN seams are not in that registry. [Program.WithBindMeta], [Program.WithBinder],
-// [Program.WithParser], [Program.WithSuggestor] and [Program.WithVersion] supply them;
-// [Context.Parser], [Context.Suggestor] and [Context.Version] read them back. The registry is yours alone, so nothing rotini depends
+// [Program.WithParser] and [Program.WithVersion] supply them; [Context.Parser] and
+// [Context.Version] read them back. The registry is yours alone, so nothing rotini depends
 // on can be shadowed by a name you chose or a type you got wrong:
 //
 //   - [Collect] is the typical handler's whole input story: every declared channel reconciled
@@ -203,8 +203,9 @@
 //     [Defaults], composed by [OverlayInputs] or [OverlayInputsP]) acquires channels one at a
 //     time, for programs that want custom precedence.
 //
-//   - [Suggestor] turns a [ParseError]'s unknown token and candidate vocabulary into "did you
-//     mean" suggestions.
+//   - [Suggestor] turns a [ParseError]'s rejected token and candidate vocabulary into "did you
+//     mean" suggestions — [Suggestor.For] does it in one call. Constructing one is the whole of
+//     the opt-in: rotini emits nothing of its own, and what to say stays with the program.
 //
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve and orchestration
 //     phases wholesale; [FlagValueCompleter] and [ArgValueCompleter] feed dynamic completion.

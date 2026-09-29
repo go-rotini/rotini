@@ -82,7 +82,7 @@ func canceledExitCode(ctx context.Context) int {
 //   - YOUR dependencies — [Program.Bind] for a key you name, [Program.With] with [Provide]
 //     for a type-checked one
 //   - rotini's own seams — [Program.WithVersion], [Program.WithParser],
-//     [Program.WithSuggestor], and the two the generated code handles for you,
+//     and the two the generated code handles for you,
 //     [Program.WithBindMeta] and [Program.WithBinder]
 //   - replace a phase — [Program.WithResolver], [Program.WithLifecycle]
 //
@@ -123,11 +123,10 @@ type Program struct {
 	// namespace, and a value the runtime depends on has no business sharing a flat string
 	// keyspace with the program's own services, where a name collision or a wrong type
 	// would degrade an input channel in silence. See [Program.WithBindMeta].
-	meta      *BindMeta              // WithBindMeta: the generated descriptor; nil → none
-	binderFn  func(BindMeta) *Binder // WithBinder: nil → NewBinder
-	version   string                 // WithVersion
-	parser    *Parser                // WithParser: nil → a default, built per run
-	suggestor *Suggestor             // WithSuggestor: nil → the program suggests nothing
+	meta     *BindMeta              // WithBindMeta: the generated descriptor; nil → none
+	binderFn func(BindMeta) *Binder // WithBinder: nil → NewBinder
+	version  string                 // WithVersion
+	parser   *Parser                // WithParser: nil → a default, built per run
 }
 
 // NewProgram wires a generated command tree and its aggregate handler set to the runtime.
@@ -399,25 +398,13 @@ func (p *Program) WithParser(parser *Parser) *Program {
 	return p
 }
 
-// WithSuggestor supplies the [Suggestor] handlers reach through [Context.Suggestor].
-//
-// Suggestions are opt-in by design — rotini emits no "did you mean" of its own, ever — so a
-// program that sets none reports none and a handler that asks is told so. A nil suggestor is
-// ignored.
-func (p *Program) WithSuggestor(suggestor *Suggestor) *Program {
-	if suggestor != nil {
-		p.suggestor = suggestor
-	}
-	return p
-}
-
 // Bind registers a service on the program's registry under key, overwriting any prior
 // binding. It is the dependency-injection seam: bind a real implementation in production or a
 // double in tests, and handler code retrieves either through [Context.Get] or
 // [Context.MustGet].
 //
-// It is YOUR namespace. rotini's own seams — the binder, the parser, the suggestor, the
-// version, the generated [BindMeta] — are typed options on the Program, not
+// It is YOUR namespace. rotini's own seams — the binder, the parser, the version, the
+// generated [BindMeta] — are typed options on the Program, not
 // entries here, so a key you choose can never shadow one of them and a type you get wrong can
 // never degrade an input channel in silence.
 func (p *Program) Bind(key string, value any) *Program {
@@ -437,7 +424,7 @@ func (p *Program) newRunContext() *Context {
 	}
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.binderFn = p.meta, p.binderFn
-	rtx.version, rtx.parser, rtx.suggestor = p.version, p.parser, p.suggestor
+	rtx.version, rtx.parser = p.version, p.parser
 	return rtx
 }
 

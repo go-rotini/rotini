@@ -56,7 +56,7 @@ constructed it:
 | `IsTerminal` `EnvNoColor` `TerminalSize` | the questions that come before any drawing decision, and that the standard library will not answer |
 | `ReadSecret` | read a line with terminal echo off, and put it back on every path |
 | `Strip` | remove ANSI escapes, so styled text is safe in a man page or a completion description |
-| `Suggestor` | turn a near-miss into a "did you mean", opt-in, never emitted by rotini itself |
+| `Suggestor` | rank a rejected token against the vocabulary it failed against — `For(err)` in one call, opt-in, never emitted by rotini itself |
 
 **rotini ships no styler, no table, no spinner, no prompt and no pager.** Drawing to a
 terminal is a design decision belonging to your program, and lipgloss, huh, bubbles,
