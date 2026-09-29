@@ -31,9 +31,9 @@ Commands:
   version             print version
 
 Flags:
-  --no-styles     disable output styles
-  -v,--version    print version
-  -h,--help       print help
+  --no-styles      disable output styles
+  -v, --version    print version
+  -h, --help       print help
 
 Environment:
   ROTINI_NO_STYLES    disable output styles
@@ -65,7 +65,7 @@ Arguments:
 Flags:
   --format string    the created rotini spec file format (defaults to yaml) [yaml|json|jsonc|toml]
   --force            force re-initialization if files exist that init would overwrite
-  -h,--help          print help
+  -h, --help         print help
 
 Examples:
   rotini initialize mycli
@@ -91,9 +91,9 @@ Arguments:
   [spec_file_path]    path to the spec file (default .rotini.spec.yaml)
 
 Flags:
-  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)
-  --watch,-w            watch a rotini spec file for changes and re-generate
-  -h,--help             print help
+  -c, --config string    path to the rotini conf file (default .rotini.conf.yaml)
+  --watch, -w            watch a rotini spec file for changes and re-generate
+  -h, --help             print help
 
 Examples:
   rotini generate
@@ -118,10 +118,10 @@ Arguments:
   [spec_file_path]    path to the spec file (default .rotini.spec.yaml)
 
 Flags:
-  -c,--config string    path to the rotini conf file (default .rotini.conf.yaml)
-  --fail string         failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]
-  --watch,-w            watch a rotini spec file for changes and re-validate
-  -h,--help             print help
+  -c, --config string    path to the rotini conf file (default .rotini.conf.yaml)
+  --fail string          failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect [fast|collect]
+  --watch, -w            watch a rotini spec file for changes and re-validate
+  -h, --help             print help
 
 Examples:
   rotini validate
@@ -147,7 +147,7 @@ Usage:
   rotini version [flags]
 
 Flags:
-  -h,--help    print help
+  -h, --help    print help
 
 Examples:
   rotini version
@@ -169,7 +169,7 @@ Arguments:
   [command...]    name of the command to print help for
 
 Flags:
-  -h,--help    print help
+  -h, --help    print help
 
 Examples:
   rotini help

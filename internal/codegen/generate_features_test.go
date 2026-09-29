@@ -258,7 +258,7 @@ func TestGenerateFeatures_inline(t *testing.T) {
 		"the acme control cli",
 		"acme <command> [flags]",
 		"deploy, dep",           // name + alias
-		"--config,-c string",    // typed flag row
+		"--config, -c string",   // typed flag row
 		"ACME_TOKEN string",     // env input row
 		"https://api.acme.test", // config default
 		"acme deploy web",       // example

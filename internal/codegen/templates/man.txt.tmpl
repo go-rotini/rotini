@@ -34,7 +34,7 @@ NAME
 {{end}}
 {{end -}}
 {{- range .FlagGroups}}{{if .Title}}{{upper .Title}}{{else}}OPTIONS{{end}}
-{{range .Flags}}    {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .Flags}}    {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Environment}}ENVIRONMENT
@@ -46,7 +46,7 @@ NAME
 {{end}}
 {{end -}}
 {{- with .Cascading}}GLOBAL OPTIONS
-{{range .}}    {{join .Identifiers ","}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .}}    {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Examples}}EXAMPLES

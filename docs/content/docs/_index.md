@@ -30,8 +30,8 @@ Commands:
   version    print version
 
 Flags:
-  -h,--help       print help
-  -v,--version    print version
+  -h, --help       print help
+  -v, --version    print version
 
 Use "todo help <command>" for more information about a command.
 {{< /code >}}

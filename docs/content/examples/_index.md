@@ -93,7 +93,7 @@ Four ways to pull a command in from somewhere else, in one spec. Read this one w
     - $ref: ../build/.rotini.spec.yaml
       summary: compile things                    # overrides the child's own summary
     - $ref: ../release/.rotini.spec.yaml         # which $refs a child of its own
-    - $ref: mod://example.com/specsuite@v1.2.2/scan/.rotini.spec.yaml
+    - $ref: mod://example.com/specsuite@v1.2.3/scan/.rotini.spec.yaml
     - name: lint                                 # and one written inline
       summary: run the linters
 {{< /code >}}
