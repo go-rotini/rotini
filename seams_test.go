@@ -29,7 +29,7 @@ func (h seamHandlers) Run(_ context.Context, rtx *Context) {
 // TestResolver_definitionIsTheProgramsOwnTree is the hazard the Resolver doc now names.
 //
 // Definition arrives by value, but it is mostly slices, and those are the program's own. An edit
-// through one outlives the run — which for a REPL or a StdioServer means every line after the
+// through one outlives the run — which for a REPL means every line after the
 // first sees a tree the previous line rewrote.
 func TestResolver_definitionIsTheProgramsOwnTree(t *testing.T) {
 	var ran []string

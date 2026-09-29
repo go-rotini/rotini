@@ -96,7 +96,7 @@ type Context struct {
 	// rtx.Stdout redirects its own writes and nothing else — the run's errors still go where
 	// they were always going. To redirect a whole invocation, configure the Program
 	// ([Program.WithStdout]) or give the run its own ([Program.RunContext] on a Program built
-	// for it), which is what [REPL] and [StdioServer] do.
+	// for it), which is what a [REPL] does.
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer

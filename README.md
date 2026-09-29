@@ -51,8 +51,8 @@ constructed it:
 |---|---|
 | `Subprocess` | `exec` with env/dir/timeout; a non-zero exit quotes the child's stderr, and output streams as a breakable iterator |
 | `REPL` | run your command tree as an interactive loop |
+| `Program.Run` is re-entrant | each dispatch gets a fresh `Context`, so the same command tree serves a loop, a server answering a peer, or a test |
 | `Service` `Scheduler` | daemon workers and interval tasks with graceful shutdown |
-| `StdioServer` | JSON-RPC 2.0 over stdio — LSP and MCP framing |
 | `IsTerminal` `EnvNoColor` `TerminalSize` | the questions that come before any drawing decision, and that the standard library will not answer |
 | `ReadSecret` | read a line with terminal echo off, and put it back on every path |
 | `Strip` | remove ANSI escapes, so styled text is safe in a man page or a completion description |

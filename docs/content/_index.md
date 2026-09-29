@@ -125,7 +125,7 @@ Nothing above was hand-written except the body of `Run`. The enum, the default, 
 
 <div class="feature_card">
 <h3>Batteries, all opt-in</h3>
-<p>Subprocesses, plugins, terminal detection — and the long-running shapes: <code>Service</code>, <code>Scheduler</code>, <code>REPL</code> and a JSON-RPC <code>StdioServer</code>. No styler, no table, no prompt: drawing is yours. Importing rotini starts none of it.</p>
+<p>Subprocesses, plugins, terminal detection — and the long-running shapes: <code>Service</code>, <code>Scheduler</code> and <code>REPL</code>, all resting on <code>Program.Run</code> being re-entrant. No styler, no table, no prompt, no JSON-RPC: drawing and protocols are yours. Importing rotini starts none of it.</p>
 </div>
 
 </div>

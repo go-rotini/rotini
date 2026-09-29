@@ -174,7 +174,7 @@ func TestHandlerLifetime_sharedWiringPersistsAcrossRuns(t *testing.T) {
 }
 
 // TestHandlerLifetime_generatedWiringIsRaceFreeUnderConcurrentRuns is the claim that matters for
-// a REPL or a StdioServer: with a fresh value per call, handler fields are per-run state and
+// a REPL or a concurrent host: with a fresh value per call, handler fields are per-run state and
 // concurrent runs cannot collide. Meaningful under -race; harmless without it.
 func TestHandlerLifetime_generatedWiringIsRaceFreeUnderConcurrentRuns(t *testing.T) {
 	seen := make([]ltSighting, 0)

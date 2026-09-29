@@ -1,17 +1,10 @@
 const CategoryInternal
 const CategoryNone
 const CategoryUsage
-const CodeInternalError
-const CodeInvalidParams
-const CodeInvalidRequest
-const CodeMethodNotFound
-const CodeParseError
 const FlagGroupAtLeastOne
 const FlagGroupMutuallyExclusive
 const FlagGroupOneOf
 const FlagGroupRequiredTogether
-const FramingContentLength
-const FramingLine
 const ParseKindConstraintViolation
 const ParseKindEnumViolation
 const ParseKindInternal
@@ -162,9 +155,6 @@ field PathFromDef.Env
 field PathFromDef.Flag
 field Provenance.Layer
 field Provenance.Raw
-field RPCError.Code
-field RPCError.Data
-field RPCError.Message
 field RemoteDef.Aliases
 field RemoteDef.Binary
 field RemoteDef.Name
@@ -228,10 +218,8 @@ func NewKey[T any](name string) Key[T]
 func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewREPL(program *Program) *REPL
-func NewRPCError(code int, message string) *RPCError
 func NewScheduler() *Scheduler
 func NewService() *Service
-func NewStdioServer(in io.Reader, out io.Writer) *StdioServer
 func NewSubprocess(name string, args ...string) *Subprocess
 func NewSuggestor() *Suggestor
 func OverlayInputsP[T any](layers ...Layer[T]) (T, Report)
@@ -333,7 +321,6 @@ method REPL.WithExitCommands(words ...string) *REPL
 method REPL.WithInput(in io.Reader) *REPL
 method REPL.WithOutput(out io.Writer) *REPL
 method REPL.WithPrompt(prompt string) *REPL
-method RPCError.Error() string
 method RemoteError.Error() string
 method RemoteError.Unwrap() []error
 method RemoteErrorKind.String() string
@@ -351,10 +338,6 @@ method Service.WithShutdown(fn func(context.Context) error) *Service
 method Service.WithShutdownTimeout(d time.Duration) *Service
 method ServiceError.Error() string
 method ServiceError.Unwrap() []error
-method StdioServer.Handle(method string, fn RequestFunc) *StdioServer
-method StdioServer.Notify(method string, fn NotifyFunc) *StdioServer
-method StdioServer.Run(ctx context.Context) error
-method StdioServer.WithFraming(f Framing) *StdioServer
 method Stream.String() string
 method Subprocess.Lines(ctx context.Context) iter.Seq2[Line, error]
 method Subprocess.Output(ctx context.Context) (string, error)
@@ -405,7 +388,6 @@ type FlagDependency
 type FlagGroup
 type FlagGroupKind
 type FlagValueCompleter
-type Framing
 type FunnelFunc
 type Handlers
 type Key
@@ -414,7 +396,6 @@ type Lifecycle
 type LifecycleStep
 type Line
 type Match
-type NotifyFunc
 type Option
 type Outcome
 type PanicError
@@ -426,21 +407,18 @@ type Presence
 type Program
 type Provenance
 type REPL
-type RPCError
 type RemoteDef
 type RemoteDiscoveryDef
 type RemoteDispatch
 type RemoteError
 type RemoteErrorKind
 type Report
-type RequestFunc
 type Resolution
 type ResolvedCommand
 type Resolver
 type Scheduler
 type Service
 type ServiceError
-type StdioServer
 type Stream
 type Subprocess
 type SubprocessError

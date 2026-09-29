@@ -182,7 +182,7 @@ Every class below is both `errors.Is`-able against the `ErrUsage` / `ErrInternal
 | `*RemoteError` | plugin dispatch |
 | `*WiringError` `*ServiceError` `*PanicError` | rotini-detected faults, arriving as panics. A recovered panic is `CategoryInternal` whatever was thrown |
 
-`*RPCError` and `*SubprocessError` sit outside this taxonomy: the first is a JSON-RPC wire object carrying its own `Code`, the second reports a child process's exit.
+`*SubprocessError` sits outside this taxonomy: it reports a child process's exit, carrying the code and the stderr that explains it.
 
 rotini ships **no opinions on top**: no automatic "did you mean", no help dump on error. A program that wants either writes its own funnel.
 
@@ -290,7 +290,7 @@ func (h *migrateHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
 {{< alert type="warning" title="IF YOU SUPPLY YOUR OWN PROGRAMHANDLERS, RETURN A NEW VALUE PER CALL:" >}}
 Generated wiring returns a fresh handler from every method, which is what makes a handler's fields *per-run* state.
 
-If you write your own `ProgramHandlers` and a method returns a **shared** value — a field on your aggregate, a package variable — then that handler's fields are shared across runs. For a stateless handler that is harmless and common. For one that keeps state in fields it is a bug, and under concurrent runs (a REPL, a `StdioServer`, or `Program.Run` from several goroutines) it is a data race.
+If you write your own `ProgramHandlers` and a method returns a **shared** value — a field on your aggregate, a package variable — then that handler's fields are shared across runs. For a stateless handler that is harmless and common. For one that keeps state in fields it is a bug, and under concurrent runs (a REPL, a server answering a peer, or `Program.Run` from several goroutines) it is a data race.
 {{< /alert >}}
 
 Detection is opt-in too: `IsTerminal`, `EnvNoColor` and `TerminalSize` exist, but nothing calls them for you — the program decides and feeds the result in.

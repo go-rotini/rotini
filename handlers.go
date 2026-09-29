@@ -37,7 +37,7 @@ import "context"
 // A wiring method that returns a SHARED value instead — a field on your aggregate, a package
 // variable — makes that handler's fields shared across runs. For a stateless handler that is
 // harmless and common. For one that keeps state in fields it is a bug, and under concurrent
-// runs ([REPL], [StdioServer], or [Program.Run] from several goroutines) it is a data race.
+// runs (a [REPL], or [Program.Run] from several goroutines) it is a data race.
 //
 // So: if you write your own ProgramHandlers and your handlers keep state in fields, return a
 // new value per call.

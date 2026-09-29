@@ -148,11 +148,6 @@ func TestErrorStrings(t *testing.T) {
 			parts: []string{"deprecated", "flag", "--conf"},
 		},
 		{
-			name:  "RPCError",
-			err:   NewRPCError(CodeInvalidParams, "missing field"),
-			parts: []string{"jsonrpc", "-32602", "missing field"},
-		},
-		{
 			name:  "ExitCode cancellation cause",
 			err:   ExitCode(3),
 			parts: []string{"rotini", "3"},

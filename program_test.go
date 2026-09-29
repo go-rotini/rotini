@@ -1101,7 +1101,7 @@ func (h *concurrentHandler) Run(_ context.Context, rtx *Context) {
 
 // TestRun_concurrentDispatch pins what doc.go promises: Run is not merely re-entrant (the
 // REPL's requirement — one dispatch after another) but safe to call CONCURRENTLY once
-// configuration is done, which is what a StdioServer author will assume when a peer
+// configuration is done, which is what a concurrent host will assume when a peer
 // pipelines requests. Each run gets its own Context with its own records, while services
 // bound before the runs reach all of them.
 //
@@ -1154,7 +1154,7 @@ func TestRun_concurrentDispatch(t *testing.T) {
 }
 
 // TestRun_recordsDoNotLeakBetweenRuns is the other half of re-entrancy: run N+1 must see none
-// of run N's records. The REPL and StdioServer shapes both depend on it.
+// of run N's records. Every re-entrant host depends on it.
 func TestRun_recordsDoNotLeakBetweenRuns(t *testing.T) {
 	var got []Outcome
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {

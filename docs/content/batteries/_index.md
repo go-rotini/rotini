@@ -106,20 +106,6 @@ err = rotini.NewScheduler().
 	Run(ctx)
 {{< /code >}}
 
-### StdioServer
-
-JSON-RPC 2.0 over stdin/stdout, in newline-delimited or `Content-Length` framing — how LSP language servers and MCP servers speak. It is the shape your CLI takes when a tool drives it instead of a human.
-
-{{< code title="stdio server" language="golang" open="true" collapsible="false" copy="true" >}}
-rotini.NewStdioServer(rtx.Stdin, rtx.Stdout).
-	WithFraming(rotini.FramingContentLength).
-	Handle("tools/list", listTools).
-	Notify("notifications/initialized", ignore).
-	Run(ctx)
-{{< /code >}}
-
-Requests are served one at a time, in arrival order: a stdio peer shares one pipe, so concurrent handlers would interleave their writes. A handler with slow work hands it to a `Service` and answers immediately.
-
 ## What rotini does not ship
 
 ### Drawing

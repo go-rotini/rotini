@@ -87,8 +87,8 @@ func canceledExitCode(ctx context.Context) int {
 //   - replace a phase — [Program.WithResolver], [Program.WithLifecycle]
 //
 // A Program is reusable: [Program.Run] dispatches one invocation and returns instead of
-// exiting, giving each call a fresh [Context]. That is what lets a [REPL], a [StdioServer] or
-// a test drive the same program many times.
+// exiting, giving each call a fresh [Context]. That is what lets a [REPL], a test, or a server
+// answering a peer drive the same program many times.
 //
 // Configure before the first run. Every With method and [Program.Bind] mutates the Program
 // without synchronization, so a concurrent host finishes configuring, then dispatches. Applied
@@ -639,7 +639,7 @@ func (p *Program) Execute() error {
 // For hosts that dispatch in a loop: with no supplied context Run installs and tears down the
 // signal trap on every call, about 30µs — negligible once per process, but roughly 20x the
 // dispatch itself when repeated. Prefer [Program.RunContext] or [Program.WithoutSignalHandling],
-// as [REPL] and [StdioServer] do.
+// as [REPL] does.
 //
 // # Concurrency
 //
@@ -657,7 +657,7 @@ func (p *Program) Execute() error {
 //
 // Signal trapping is per-run: with no supplied context, every concurrent run installs its own
 // handler and all of them observe one signal. A concurrent host passes its own context
-// ([Program.RunContext]) or turns the trap off, which is what [StdioServer] does.
+// ([Program.RunContext]) or turns the trap off with [Program.WithoutSignalHandling].
 func (p *Program) Run(argv []string) (int, error) {
 	if p.ctx != nil {
 		return p.runWith(p.ctx, true, argv)

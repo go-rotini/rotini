@@ -182,14 +182,16 @@ Leans on: `ErrNotInteractive` as the answer to "no input at all", `IsTerminal`/`
 One binary, four long-running shapes, all over the same command tree.
 
 {{< code title="syncd" language="text" open="true" collapsible="false" copy="false" >}}
-syncd serve      a Service     — concurrent workers with an ordered shutdown
-      schedule   a Scheduler   — periodic work with jitter
-      rpc        a StdioServer — JSON-RPC over stdin/stdout, two framings
-      shell      a REPL        — the same commands, interactively
+syncd serve      a Service   — concurrent workers with an ordered shutdown
+      schedule   a Scheduler — periodic work with jitter
+      rpc        JSON-RPC over stdin/stdout — on sourcegraph/jsonrpc2, not rotini
+      shell      a REPL      — the same commands, interactively
       status | queue add|list|drain      ordinary commands, shared by all four
 {{< /code >}}
 
 The REPL is the one to look at first: it dispatches against the same tree the binary uses, so `syncd queue add x` and `queue add x` typed at the prompt run the identical handler. State that must survive a line is bound on the `Program`; state that must not goes on the `Context`.
+
+`rpc` is the one that shows the boundary. rotini ships no JSON-RPC server, so the protocol is a third-party library's job — and `queue/drain` proves why: it is a notification that gets no reply and then **notifies the peer anyway**, which is server→client traffic no inbound-only server could ever express.
 
 ## The negative rig
 

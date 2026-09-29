@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -86,8 +87,16 @@ func schemaFields(t *testing.T, files ...string) map[string]string {
 	return out
 }
 
-// readFieldNames collects every selector ".Name" appearing in the package's non-test source
-// and in the runtime, which is where a spec key ends up being acted on.
+// readFieldNames collects every selector ".Name" appearing in the package's non-test source,
+// in the runtime, and in the codegen TEMPLATES — the three places a spec key ends up being
+// acted on.
+//
+// The templates matter and were missed at first. A key can reach codegen by a whole-struct
+// CONVERSION — `templateDocExitRow(e)` copies every field of an ExitStatusEntry in one
+// expression — and then be read only by `{{.Code}}` in man.txt.tmpl. No Go selector exists
+// anywhere for it. `exit_status.code` is exactly that shape, and it passed this test for
+// months on an unrelated `.Code` in the JSON-RPC server that used to live in the runtime;
+// deleting that server is what exposed the blind spot.
 func readFieldNames(t *testing.T) map[string]bool {
 	t.Helper()
 	read := map[string]bool{}
@@ -122,5 +131,30 @@ func readFieldNames(t *testing.T) map[string]bool {
 
 	collect(".")                       // internal/codegen
 	collect(filepath.Join("..", "..")) // the runtime, where several keys are finally acted on
+	collectTemplates(t, read)          // the output stage, where a converted struct is finally read
 	return read
+}
+
+// collectTemplates records every "{{...}}" field selector in the codegen templates, so a key
+// rendered straight into a page counts as consumed.
+func collectTemplates(t *testing.T, read map[string]bool) {
+	t.Helper()
+	dir := filepath.Join("templates")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	selector := regexp.MustCompile(`\.([A-Z][A-Za-z0-9_]*)`)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		for _, m := range selector.FindAllStringSubmatch(string(b), -1) {
+			read[m[1]] = true
+		}
+	}
 }

@@ -250,8 +250,6 @@
 //     on SIGINT/SIGTERM, a Service built on that ctx gets graceful shutdown for free.
 //   - [Scheduler] is [Service] with timers: interval tasks with optional jitter, so a fleet
 //     started together does not stampede in lockstep.
-//   - [StdioServer] serves JSON-RPC 2.0 over stdin/stdout — how LSP and MCP servers speak. It
-//     is the shape a CLI takes when a tool drives it instead of a human.
 //
 // # What rotini deliberately does not ship
 //
