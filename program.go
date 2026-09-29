@@ -491,6 +491,15 @@ func (o Outcome) Failed() bool { return len(o.Errors) > 0 || len(o.Panics) > 0 }
 // The funnel decides what to print, where, in what order, and the final exit code: it is the
 // last authority, so [Context.Exit] inside it overrides whatever the lifecycle set
 // ([Context.HaltWithCode] is a no-op here).
+//
+// It is the last authority on the CODE, not on what the run recorded. The [Outcome] is the
+// funnel's own copy to read; the error [Program.Run] returns is built before the funnel is
+// called, so editing the slices it was handed changes nothing but the funnel's own view.
+//
+// Nothing recovers a panic from inside a funnel — it is the last thing a run does, and a funnel
+// for the funnel is not a thing. A funnel that can fail should handle its own failure, write to
+// rtx.Stderr and set a code with [Context.Exit]; recording there is dropped, because the Outcome
+// was snapshotted before it ran.
 type FunnelFunc func(ctx context.Context, rtx *Context, out Outcome)
 
 // WithFunnel sets the program's outcome funnel — the one place a run's recorded channels are
@@ -792,6 +801,17 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 		Panics:    rtx.copyFaults(),
 	}
 
+	// The run's error is built BEFORE the funnel sees the Outcome, and that ordering is the
+	// point. Outcome is passed by value but its slices are headers over shared arrays, so a
+	// funnel writing out.Errors[0] used to reach this line and change what Run returns —
+	// while out.Errors = append(...) did not, because append reallocates. Aliasing that
+	// propagates for an index write and vanishes for an append is a trap, not a feature.
+	//
+	// The funnel is the final authority on the EXIT CODE, through [Context.Exit], and that
+	// still holds because rtx.exitCode is read after it runs. It is not an authority on what
+	// the run recorded: that is the run's own account of itself.
+	err := joinOutcome(out.Errors, out.Panics)
+
 	// A clean run that recorded nothing never invokes the funnel.
 	if !out.Empty() {
 		fn := p.funnelFn
@@ -802,7 +822,7 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 		fn(ctx, rtx, out)
 		rtx.funnelStage = false
 	}
-	return rtx.exitCode, joinOutcome(out.Errors, out.Panics)
+	return rtx.exitCode, err
 }
 
 // joinOutcome is the error a run returns to its caller: every recorded error and captured

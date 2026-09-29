@@ -148,9 +148,13 @@ A struct that describes more commands than the collecting command is deep is rej
 A handler does not print its results or its errors. It **records** them, and the runtime reports them once, after teardown, through a single funnel. A generated handler therefore carries zero reporting code — and a program that wants different reporting changes one function instead of every command.
 {{< /alert >}}
 
-Five channels reach the funnel, together in one `Outcome`: `Infos`, `Successes`, `Warnings`, `Errors`, and `Panics` (recovered panics plus rotini-detected faults — there is no record call for those). The default funnel prints each with a severity label and applies a conservative exit floor: a recorded error exits non-zero unless a deliberate code was already set, which it never downgrades.
+Five channels reach the funnel, together in one `Outcome`: `Infos`, `Successes`, `Warnings`, `Errors`, and `Panics` (recovered panics plus rotini-detected faults — there is no record call for those).
 
-`WithFunnel` replaces all of it, receiving every channel at once so cross-channel logic, print order and the exit code live in one place.
+The default funnel prints them in that severity order — `info → warning → error → panic → success` — with infos and successes on **stdout** and unlabelled, and warnings, errors and panics on **stderr** behind `Warning:`, `Error:` and `Fatal Error:`. It then applies a flat exit floor: any recorded error or panic exits **1**, unless a handler already set a deliberate code, which it never downgrades.
+
+That floor is flat on purpose. rotini *labels* an error's category — `CategoryOf`, `UsageError`, `InternalError` — and leaves the code to you. There is no built-in category→exit-code table, because which number means what is a program's contract with its users, not a framework's.
+
+`WithFunnel` replaces all of it, receiving every channel at once so cross-channel logic, print order and the exit code live in one place. **All of it includes the floor**: a custom funnel that sets no code exits 0, even for a run that recorded errors — which is why the example below calls `Exit`.
 
 {{< code title="a custom funnel" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.WithFunnel(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {

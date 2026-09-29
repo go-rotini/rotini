@@ -97,8 +97,12 @@ func (k ParseKind) String() string {
 // ParseError is a parse-time failure caused by bad input. It is data, not presentation: the
 // message offers no suggestions and no usage dump, and the structured fields let a handler
 // compose its own response — switch on Kind, pair Token with Candidates and a bound
-// [Suggestor] for "did you mean", or render help for Command. Handlers conventionally map it
-// to exit code 2. It unwraps to [ErrUsage].
+// [Suggestor] for "did you mean", or render help for Command. It unwraps to [ErrUsage], so
+// [CategoryOf] reports [CategoryUsage].
+//
+// That is a label, not an exit code. rotini forces no category→code mapping and the default
+// funnel exits 1 for any failure; a program that wants the common "2 means the command line was
+// wrong" convention maps it in its own funnel. See [Category].
 //
 //	var pe *rotini.ParseError
 //	if errors.As(err, &pe) {
