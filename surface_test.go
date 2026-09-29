@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -54,7 +55,12 @@ func TestExportedSurface(t *testing.T) {
 }
 
 // exportedSurface renders one stable line per exported declaration of the package:
-// "func Name", "type Name", "method Recv.Name", "const Name", "var Name".
+// "func Name(sig)", "type Name", "method Recv.Name(sig)", "const Name", "var Name".
+//
+// Functions and methods carry their SIGNATURE, not just their name. COMPATIBILITY.md promises
+// shape, and a signature IS shape: changing PanicError.Unwrap from `error` to `[]error` is a
+// breaking change that a name-only guard waves through — which is exactly what happened while
+// this file was being reviewed.
 func exportedSurface(t *testing.T) []string {
 	t.Helper()
 	entries, err := filepath.Glob("*.go")
@@ -78,11 +84,11 @@ func exportedSurface(t *testing.T) []string {
 					continue
 				}
 				if decl.Recv == nil {
-					out = append(out, "func "+decl.Name.Name)
+					out = append(out, "func "+decl.Name.Name+signature(fset, decl.Type))
 					continue
 				}
 				if recv := receiverName(decl.Recv); recv != "" && ast.IsExported(recv) {
-					out = append(out, "method "+recv+"."+decl.Name.Name)
+					out = append(out, "method "+recv+"."+decl.Name.Name+signature(fset, decl.Type))
 				}
 			case *ast.GenDecl:
 				out = append(out, exportedSpecs(decl)...)
@@ -91,6 +97,17 @@ func exportedSurface(t *testing.T) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// signature renders a func type's parameters and results as source, so the surface records the
+// shape a caller depends on rather than only the name they call.
+func signature(fset *token.FileSet, ft *ast.FuncType) string {
+	var b strings.Builder
+	if err := printer.Fprint(&b, fset, ft); err != nil {
+		return "(?)"
+	}
+	// printer writes "func(a int) error"; the leading keyword is noise beside the name.
+	return strings.TrimPrefix(b.String(), "func")
 }
 
 // exportedSpecs renders the exported type/const/var names of one declaration block.

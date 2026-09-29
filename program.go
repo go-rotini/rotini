@@ -533,13 +533,23 @@ type PanicError struct {
 // printed.
 func (e *PanicError) Error() string { return fmt.Sprintf("%v", e.Value) }
 
-// Unwrap exposes a panicked error value so errors.Is/As and [CategoryOf] see through it. It
-// is nil for non-error panic values.
-func (e *PanicError) Unwrap() error {
+// Unwrap exposes a panicked error value so errors.Is/As and [CategoryOf] see through it, and
+// always exposes [ErrInternal] underneath.
+//
+// The floor matters. A recovered panic is a bug in the program by definition — [CategoryInternal]
+// is literally "the end-user cannot fix it; the author must" — but a panic value is usually not
+// an error at all (panic("boom")), and without the floor CategoryOf reported [CategoryNone] for
+// it. That is not merely uninformative: none sorts BELOW usage, so a funnel keeping the most
+// severe category across a run would rank a crash under a mistyped flag.
+//
+// A panicked error value still wins the classification, because [CategoryOf] tests [ErrUsage]
+// before [ErrInternal] — panicking a [UsageError] reports usage, the floor only catches what
+// nothing else classifies.
+func (e *PanicError) Unwrap() []error {
 	if err, ok := e.Value.(error); ok {
-		return err
+		return []error{err, ErrInternal}
 	}
-	return nil
+	return []error{ErrInternal}
 }
 
 // WiringError reports that the generated [Definition] and the handler set are out of sync — a

@@ -315,7 +315,7 @@ func TestPanicError(t *testing.T) {
 		}
 	})
 
-	t.Run("non-error value: rendered, nothing to unwrap", func(t *testing.T) {
+	t.Run("non-error value: rendered, and still classified internal", func(t *testing.T) {
 		var log []string
 		got := capture(t, &panicValueHandlers{log: &log, val: 42})
 		var pe *PanicError
@@ -325,8 +325,14 @@ func TestPanicError(t *testing.T) {
 		if pe.Error() != "42" {
 			t.Errorf("Error() = %q, want \"42\"", pe.Error())
 		}
-		if pe.Unwrap() != nil {
-			t.Errorf("Unwrap() = %v, want nil for a non-error value", pe.Unwrap())
+		// A panic value that is not an error used to unwrap to nothing, which left a CRASH
+		// reporting CategoryNone — below usage in the severity ordering a funnel compares on.
+		// ErrInternal is the floor: a recovered panic is the author's bug whatever was thrown.
+		if !errors.Is(got, ErrInternal) {
+			t.Error("a panicked non-error value does not reach ErrInternal")
+		}
+		if CategoryOf(got) != CategoryInternal {
+			t.Errorf("CategoryOf = %v, want internal for a recovered panic", CategoryOf(got))
 		}
 	})
 }

@@ -1258,7 +1258,7 @@ func bindCommandInputs(v reflect.Value, si scopeInputs, frame ResolvedCommand) e
 				return err
 			}
 		case "Arguments":
-			if err := bindArgs(v.Field(i), si.args); err != nil {
+			if err := bindArgs(v.Field(i), si.args, frame.Arguments); err != nil {
 				return err
 			}
 		}
@@ -1286,7 +1286,7 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 			switch {
 			case def.DottedKeys:
 				if err := coerceMapDotted(v.Field(i), raw); err != nil {
-					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err), Flag: labelForFlag(defs, name)}
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", labelForFlag(defs, name), coerceMessage(err, def.Secret)), Flag: labelForFlag(defs, name)}
 				}
 				continue
 			case def.Type == "count":
@@ -1298,10 +1298,20 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 			}
 		}
 		if err := coerce(v.Field(i), raw); err != nil {
-			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err), Flag: labelForFlag(defs, name)}
+			secret := false
+			if def, ok := findFlagDef(defs, name); ok {
+				secret = def.Secret
+			}
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", labelForFlag(defs, name), coerceMessage(err, secret)), Flag: labelForFlag(defs, name)}
 		}
 	}
 	return nil
+}
+
+// argSecret reports whether the positional at index i is declared secret. Arguments are
+// positional, so the struct field's index IS the declaration index.
+func argSecret(defs []ArgDef, i int) bool {
+	return i < len(defs) && defs[i].Secret
 }
 
 // labelForFlag is a flag's CLI label (its identifiers) for error messages, falling back
@@ -1317,7 +1327,7 @@ func labelForFlag(defs []FlagDef, name string) string {
 
 // bindArgs fills a <Cmd>Arguments struct positionally; a trailing []string field is variadic
 // and absorbs the remaining positionals.
-func bindArgs(v reflect.Value, args []string) error {
+func bindArgs(v reflect.Value, args []string, defs []ArgDef) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1328,14 +1338,14 @@ func bindArgs(v reflect.Value, args []string) error {
 		label := "<" + t.Field(i).Tag.Get("rotini") + ">"
 		if f.Kind() == reflect.Slice { // a slice argument is variadic, whatever its element type
 			if err := coerce(f, args[min(idx, len(args)):]); err != nil {
-				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", label, err)}
+				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, argSecret(defs, i)))}
 			}
 			idx = len(args)
 			continue
 		}
 		if idx < len(args) {
 			if err := coerce(f, args[idx:idx+1]); err != nil {
-				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", label, err)}
+				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, argSecret(defs, i)))}
 			}
 			idx++
 		}
@@ -1373,7 +1383,7 @@ func coerce(f reflect.Value, raw []string) error {
 	}
 	if f.CanAddr() && f.Addr().Type().Implements(textUnmarshalerType) {
 		if err := f.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(last)); err != nil {
-			return fmt.Errorf("%q is not a valid %s (%w)", last, f.Type(), err)
+			return &coerceError{Value: last, TypeName: f.Type().String(), Cause: err}
 		}
 		return nil
 	}
@@ -1439,9 +1449,46 @@ func coerceSlice(f reflect.Value, raw []string) error {
 	return nil
 }
 
+// coerceError is the standard "value isn't a <type>" failure, holding the offending value
+// SEPARATELY from its rendering so a caller that knows the input is secret can re-render it
+// redacted.
+//
+// It is a type rather than a formatted string because redaction has to happen where the
+// FlagDef/ArgDef is in scope, and that is several frames above where coercion fails. The enum
+// and constraint paths could redact inline because they already had the definition; this one
+// could not, and so it leaked — a secret flag given a bad value printed the value.
+type coerceError struct {
+	Value    string // the raw input, unredacted
+	TypeName string // what it failed to parse as
+	Cause    error  // an underlying decoder error, when there was one
+}
+
+func (e *coerceError) Error() string { return e.render(false) }
+
+func (e *coerceError) Unwrap() error { return e.Cause }
+
+// render writes the message with the value redacted or not.
+func (e *coerceError) render(secret bool) string {
+	msg := fmt.Sprintf("%q is not a valid %s", redactValue(e.Value, secret), e.TypeName)
+	if e.Cause != nil {
+		msg += fmt.Sprintf(" (%v)", e.Cause)
+	}
+	return msg
+}
+
+// coerceMessage renders err for a message, redacting the offending value when the input it came
+// from is secret. A non-coercion error is rendered as-is: it carries no value of its own.
+func coerceMessage(err error, secret bool) string {
+	var ce *coerceError
+	if secret && errors.As(err, &ce) {
+		return ce.render(true)
+	}
+	return err.Error()
+}
+
 // notValid is the standard "value isn't a <type>" coercion error.
 func notValid(value, typeName string) error {
-	return fmt.Errorf("%q is not a valid %s", value, typeName)
+	return &coerceError{Value: value, TypeName: typeName}
 }
 
 // coerceMap fills a string-keyed map field from raw "key=value" pairs, splitting on the first

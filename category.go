@@ -26,6 +26,10 @@ const (
 	CategoryInternal
 )
 
+// The constants are declared in increasing severity — none < usage < internal — so a funnel
+// summarizing several errors can keep the worst with a plain comparison. That ordering is part
+// of the contract; the numbers are not.)
+
 // String renders the category as a short, stable label.
 func (c Category) String() string {
 	switch c {
@@ -51,16 +55,38 @@ var (
 	ErrInternal = errors.New("rotini: internal error")
 )
 
-// CategoryOf returns the [Category] an error carries, or [CategoryNone] when it matches
-// neither sentinel — the single classification call a funnel makes:
+// CategoryOf returns the [Category] an error carries, or [CategoryNone] when it matches neither
+// sentinel — the single classification call a funnel makes:
 //
-//	func onError(ctx context.Context, rtx *rotini.Context, err error) {
-//	    switch rotini.CategoryOf(err) {
-//	    case rotini.CategoryUsage:    fmt.Fprintln(rtx.Stderr, err); rtx.HaltWithCode(1)
-//	    case rotini.CategoryInternal: report(err); rtx.HaltWithCode(70)
-//	    default:                      fmt.Fprintln(rtx.Stderr, err); rtx.HaltWithCode(1)
+//	cmd.Program.WithFunnel(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//	    worst := rotini.CategoryNone
+//	    for _, err := range out.Errors {
+//	        fmt.Fprintln(rtx.Stderr, err)
+//	        if c := rotini.CategoryOf(err); c > worst {
+//	            worst = c
+//	        }
 //	    }
-//	}
+//	    switch worst {
+//	    case rotini.CategoryInternal:
+//	        rtx.Exit(70)
+//	    case rotini.CategoryUsage:
+//	        rtx.Exit(2)
+//	    }
+//	})
+//
+// Note [Context.Exit] rather than [Context.HaltWithCode]: inside a funnel the lifecycle has
+// already settled, so HaltWithCode is a no-op and Exit is the only way to claim a code.
+//
+// # It answers for ONE error, and usage wins a tie
+//
+// An error can carry both sentinels — [errors.Join] of a user's bad input and an internal bug is
+// exactly what [Program.Run] returns for a run that recorded both. CategoryOf tests [ErrUsage]
+// first, so such a value reports [CategoryUsage].
+//
+// That is the right answer for a single error and a poor summary of a whole run: "the user can
+// fix this" is misleading when a bug is also in the pile. A funnel classifying a run should walk
+// out.Errors and keep the MOST SEVERE category, as above — the constants are ordered
+// none < usage < internal so that a comparison does it.
 func CategoryOf(err error) Category {
 	switch {
 	case err == nil:

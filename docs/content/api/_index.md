@@ -171,14 +171,18 @@ The channels arrive as a struct rather than as five parameters for a reason that
 
 ## Errors
 
-Every class is both `errors.Is`-able against the `ErrUsage` / `ErrInternal` sentinels — so `CategoryOf` classifies it — and `errors.As`-able to a typed value with structured fields. rotini's own messages never leak internals or secret values.
+Every class below is both `errors.Is`-able against the `ErrUsage` / `ErrInternal` sentinels — so `CategoryOf` classifies it — and `errors.As`-able to a typed value with structured fields. rotini's own messages never leak internals, and a value declared `secret:` is replaced with `[redacted]` in every rejection it can cause.
+
+`CategoryOf` answers for one error, and tests `ErrUsage` first, so a value carrying both sentinels reports usage. To classify a whole run, walk `out.Errors` and keep the most severe — the categories are ordered `none < usage < internal` for exactly that comparison.
 
 | Type | Channel |
 |---|---|
 | `*ParseError` | argv — with a `Kind` you can branch on, plus the token and candidates a `Suggestor` turns into "did you mean" |
 | `*BindError` | environment / configuration / stdin |
 | `*RemoteError` | plugin dispatch |
-| `*WiringError` `*ServiceError` `*PanicError` | rotini-detected faults, arriving as panics |
+| `*WiringError` `*ServiceError` `*PanicError` | rotini-detected faults, arriving as panics. A recovered panic is `CategoryInternal` whatever was thrown |
+
+`*RPCError` and `*SubprocessError` sit outside this taxonomy: the first is a JSON-RPC wire object carrying its own `Code`, the second reports a child process's exit.
 
 rotini ships **no opinions on top**: no automatic "did you mean", no help dump on error. A program that wants either writes its own funnel.
 
