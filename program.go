@@ -81,7 +81,7 @@ func canceledExitCode(ctx context.Context) int {
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithFunnel]
 //   - YOUR dependencies — [Program.Bind] for a key you name, [Program.With] with [Provide]
 //     for a type-checked one
-//   - rotini's own seams — [Program.WithVersion], [Program.WithParser], [Program.WithStyler],
+//   - rotini's own seams — [Program.WithVersion], [Program.WithParser],
 //     [Program.WithSuggestor], and the two the generated code handles for you,
 //     [Program.WithBindMeta] and [Program.WithBinder]
 //   - replace a phase — [Program.WithResolver], [Program.WithLifecycle]
@@ -127,7 +127,6 @@ type Program struct {
 	binderFn  func(BindMeta) *Binder // WithBinder: nil → NewBinder
 	version   string                 // WithVersion
 	parser    *Parser                // WithParser: nil → a default, built per run
-	styler    *Styler                // WithStyler: nil → the program styles nothing
 	suggestor *Suggestor             // WithSuggestor: nil → the program suggests nothing
 }
 
@@ -400,16 +399,6 @@ func (p *Program) WithParser(parser *Parser) *Program {
 	return p
 }
 
-// WithStyler supplies the [Styler] handlers reach through [Context.Styler]. Styling is opt-in:
-// a program that sets none reports none, and [Context.Styler] says so, so a handler renders
-// plain text rather than guessing. A nil styler is ignored.
-func (p *Program) WithStyler(styler *Styler) *Program {
-	if styler != nil {
-		p.styler = styler
-	}
-	return p
-}
-
 // WithSuggestor supplies the [Suggestor] handlers reach through [Context.Suggestor].
 //
 // Suggestions are opt-in by design — rotini emits no "did you mean" of its own, ever — so a
@@ -427,8 +416,8 @@ func (p *Program) WithSuggestor(suggestor *Suggestor) *Program {
 // double in tests, and handler code retrieves either through [Context.Get] or
 // [Context.MustGet].
 //
-// It is YOUR namespace. rotini's own seams — the binder, the parser, the styler, the
-// suggestor, the version, the generated [BindMeta] — are typed options on the Program, not
+// It is YOUR namespace. rotini's own seams — the binder, the parser, the suggestor, the
+// version, the generated [BindMeta] — are typed options on the Program, not
 // entries here, so a key you choose can never shadow one of them and a type you get wrong can
 // never degrade an input channel in silence.
 func (p *Program) Bind(key string, value any) *Program {
@@ -448,7 +437,7 @@ func (p *Program) newRunContext() *Context {
 	}
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.binderFn = p.meta, p.binderFn
-	rtx.version, rtx.parser, rtx.styler, rtx.suggestor = p.version, p.parser, p.styler, p.suggestor
+	rtx.version, rtx.parser, rtx.suggestor = p.version, p.parser, p.suggestor
 	return rtx
 }
 

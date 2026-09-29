@@ -42,29 +42,35 @@ is reported with a `file:line:col`, by `rotini validate`, before a line of Go is
 generated. Frameworks that declare the CLI *in Go* can only catch what the compiler
 happens to notice.
 
-**2. One import is the whole binary, not just its front door.** Parsing is the first
-10% of a CLI. rotini also carries the other 90% — and every piece is opt-in, wired only
-because your handler constructed it:
+**2. One import covers the whole binary, not just its front door — and stops where your
+UI begins.** Parsing is the first 10% of a CLI. rotini carries the rest of the *dispatch*
+problem in the same import, and every piece is opt-in, wired only because your handler
+constructed it:
 
 | | |
 |---|---|
-| `Printer` | render a result as text/JSON/YAML/TOML/table off your `--output` flag |
-| `Table` | aligned columns, measured by display width (styling and wide runes align) |
-| `Prompt` `Confirm` `Select` | ask questions; a pipe or CI gets `ErrNotInteractive`, never a hang |
-| `Spinner` `Progress` | live one-line indicators, silent on a non-terminal |
-| `Pager` | `$PAGER`, passing straight through when piped |
-| `Subprocess` | `exec` with env/dir/timeout; streams output as an iterator |
+| `Subprocess` | `exec` with env/dir/timeout; a non-zero exit quotes the child's stderr, and output streams as a breakable iterator |
 | `REPL` | run your command tree as an interactive loop |
 | `Service` `Scheduler` | daemon workers and interval tasks with graceful shutdown |
 | `StdioServer` | JSON-RPC 2.0 over stdio — LSP and MCP framing |
-| `Wizard` | multi-step flows with branching and back navigation |
+| `IsTerminal` `EnvNoColor` `TerminalSize` | the questions that come before any drawing decision, and that the standard library will not answer |
+| `ReadSecret` | read a line with terminal echo off, and put it back on every path |
+| `Strip` | remove ANSI escapes, so styled text is safe in a man page or a completion description |
+| `Suggestor` | turn a near-miss into a "did you mean", opt-in, never emitted by rotini itself |
 
-Two things rotini deliberately does **not** reimplement, because they already exist in
-the same ecosystem: **file watching** is `fs.NewWatcher` and a **single-instance lock**
-is `fs.PIDLock`, both in [`go-rotini/fs`](https://github.com/go-rotini/fs); caching for
-a long-running program is [`go-rotini/memcache`](https://github.com/go-rotini/memcache).
-rotini does not wrap them — a facade would put another package's API inside rotini's
-frozen surface and put its documentation in the wrong place.
+**rotini ships no styler, no table, no spinner, no prompt and no pager.** Drawing to a
+terminal is a design decision belonging to your program, and lipgloss, huh, bubbles,
+bubbletea and `text/tabwriter` do it better than a CLI framework would on the side. A
+framework that shipped its own would hand you two vocabularies for the same screen.
+[`example-flow`](https://github.com/go-rotini/example-flow) is the worked boundary: the
+whole asking layer, written out, is about eighty lines.
+
+Three more things live elsewhere in the same ecosystem: **file watching** is
+`fs.NewWatcher` and a **single-instance lock** is `fs.PIDLock`, both in
+[`go-rotini/fs`](https://github.com/go-rotini/fs); caching for a long-running program is
+[`go-rotini/memcache`](https://github.com/go-rotini/memcache). rotini does not wrap them —
+a facade would put another package's API inside rotini's frozen surface and put its
+documentation in the wrong place.
 
 **3. The generated code is small, legible, and yours.** `rotini init` generates
 **388 lines across 5 files** — and they are a CLI that already answers `--help`,

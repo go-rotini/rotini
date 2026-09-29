@@ -4,148 +4,48 @@ title: "batteries"
 
 # Batteries
 
-Parsing is the first 10% of a CLI. rotini carries the other 90% in the same import — and **nothing is wired unless you wire it**. Importing rotini starts no goroutine, touches no terminal, and changes no behavior; each battery does something only because a handler constructed it and called it.
+Parsing is the first 10% of a CLI. rotini carries the rest of the *dispatch* problem in the same import — and **nothing is wired unless you wire it**. Importing rotini starts no goroutine, touches no terminal, and changes no behavior; each battery does something only because a handler constructed it and called it.
 
 {{< alert type="info" title="NOTE:" >}}
-Two rules hold across every battery. **Configuration chains** — `New*(…).WithX(…).WithY(…)` — because one package cannot hold eight different package-level `WithTimeout` functions. And **every battery degrades safely when there is no terminal**: prompts fail fast instead of hanging, indicators stay silent instead of smearing a CI log with carriage returns, and the pager passes text straight through.
+The shelf is deliberately **short**. rotini ships no styler, no table, no spinner, no prompt and no pager — see [what rotini does not ship](#what-rotini-does-not-ship). What is here is the part underneath those decisions: process work that is subtly wrong in most hand-rolled versions, and platform questions the standard library will not answer.
 {{< /alert >}}
 
-## Printing output
+## Terminal questions
 
-### Printer
+Two questions come before any decision about how to write to a stream, and the standard library answers neither. rotini never asks them for you — nothing in the runtime calls these.
 
-The complement to `Collect`'s "data in": one writer that renders a value as text, JSON, YAML, TOML or a table, chosen from whatever your `--output` flag carried.
+{{< code title="detection" language="golang" open="true" collapsible="false" copy="true" >}}
+tty := rotini.IsTerminal(os.Stdout)  // a character device, not a pipe or a file
+plain := rotini.EnvNoColor()         // NO_COLOR, with the CLICOLOR_FORCE override
 
-It pairs with the spec's command `output:` key, which generates a typed `<Prefix>Output` struct. The spec declares the shape, the Printer renders it, and **neither wires a flag** — you declare `--output` yourself and hand the value in.
-
-{{< code title="printer" language="golang" open="true" collapsible="false" copy="true" >}}
-format, err := rotini.ParseFormat(inputs.List.Flags.Output) // "json" -> rotini.FormatJSON
-if err != nil {
-	rtx.RecordError(err)
-	return
-}
-
-out := rotini.NewPrinter(rtx.Stdout).WithFormat(format)
-if err := out.Print(tasks); err != nil {
-	rtx.RecordError(err)
-}
-{{< /code >}}
-
-A value with no table shape degrades to text under `--output table`, so the flag is a preference rather than an assertion about the result.
-
-### Table
-
-Aligned columns, measured by **display width** — styled cells and wide East-Asian runes line up correctly, where a byte-length measurement would not. Optionally bounded to a width budget (truncating with an ellipsis) and optionally styled through a `Styler`.
-
-{{< code title="table" language="golang" open="true" collapsible="false" copy="true" >}}
-rotini.NewTable("NAME", "SIZE").
-	WithAlign(rotini.AlignLeft, rotini.AlignRight).
-	Row("alpha", "1").
-	Row("beta", "1000").
-	Fprint(rtx.Stdout)
-{{< /code >}}
-
-An empty table prints **nothing** — not a blank line — so a command with no results stays quiet.
-
-### Pager
-
-Sends long output through `$PAGER`, and passes it straight through when there is no terminal, so `mycli list | grep x` is never hijacked. A pager that fails to start is not an error: the text still reaches the writer, because failing to display output is worse than displaying it unpaged.
-
-### Editor
-
-The counterpart: brings text **in** through `$VISUAL`, then `$EDITOR` — the `git commit` / `crontab -e` shape.
-
-{{< code title="edit a draft" language="golang" open="true" collapsible="false" copy="true" >}}
-body, err := rotini.NewEditor().WithExtension(".md").Edit(ctx, draft)
-switch {
-case errors.Is(err, rotini.ErrEditAborted):
-	rtx.RecordInfo("no changes")
-	return
-case err != nil:
-	rtx.HaltWith(err)
-	return
-}
-{{< /code >}}
-
-`ErrEditAborted` folds the two ways a user says *never mind* — quit without saving, or save an empty buffer — into one sentinel, so you branch once instead of diffing. The temp file carries your extension so the editor highlights it, and is removed on every path.
-
-### Wrapping, truncating, measuring
-
-`Width` measures **display cells**, so styled and wide-rune text lines up. `Wrap` and `Truncate` do the cut, and neither can split an escape sequence — which would leave the terminal wearing whatever style the fragment half-opened.
-
-{{< code title="fit output to the terminal" language="golang" open="true" collapsible="false" copy="true" >}}
-cols, _, ok := rotini.TerminalSize(os.Stdout)
+cols, rows, ok := rotini.TerminalSize(os.Stdout)
 if !ok {
-	cols = 80 // a pipe, or a platform that cannot say
+	cols, rows = 80, 24 // a pipe, or a platform that cannot say
 }
-fmt.Fprintln(rtx.Stdout, rotini.Wrap(description, cols))
-rotini.NewTable(headers...).WithWidth(cols).Fprint(rtx.Stdout)
 {{< /code >}}
 
-`Wrap` does not reopen styling across a break, because it does not need to: a newline does not reset a terminal, so a color opened before the break is still in effect after it. `TerminalSize` honors `COLUMNS`/`LINES` first — the conventional override, and how a test pins a width.
+`TerminalSize` honors `COLUMNS`/`LINES` first — the conventional override, and how a test pins a width. Measure the stream you are **about to write to**: a program piping stdout to a file while a human watches stderr has two different answers, and only you know which one matters.
 
-## Asking questions
+Hand the answers to whatever draws your output.
 
-`Prompt`, `Confirm` and `Select` read from an `io.Reader`, so the same code works interactively, from a pipe (`echo y | mycli`), and in a test with a `strings.Reader`.
+### Reading a secret
 
-{{< alert type="warning" title="THE CONTRACT:" >}}
-Input that ends without an answer returns `ErrNotInteractive` — **never a hang**. That is what makes an interactive command safe to run in CI. A prompt with a default never fails for lack of a human: the default *is* the non-interactive answer.
-{{< /alert >}}
-
-{{< code title="prompt / confirm / select" language="golang" open="true" collapsible="false" copy="true" >}}
-name, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).
-	WithLabel("Project name").
-	WithDefault("my-app").
-	WithValidate(validName).
-	WithRetries(2).
-	Ask(ctx)
-
-ok, err := rotini.NewConfirm(rtx.Stdin, rtx.Stdout).
-	WithLabel("Delete everything?").
-	WithDefault(false).
-	Ask(ctx)
-
-i, choice, err := rotini.NewSelect(rtx.Stdin, rtx.Stdout, "staging", "production").
-	WithLabel("Target").
-	WithSuggestor(rotini.NewSuggestor()). // a typo'd answer still resolves
-	Ask(ctx)
-{{< /code >}}
-
-A secret is read without echo, and the terminal is restored on every path — including a `SIGINT`, because rotini owns the signal trap. Off a terminal it degrades to a plain read, so a handler that asks for a token stays testable.
+The one piece of interactive input rotini keeps, because it is the one you cannot safely fake: it needs a termios ioctl to clear the `ECHO` bit, and it must put the bit back on **every** path. The failure mode is not a wrong value — it is a shell left with echo off, which survives your process and confuses the user's next command.
 
 {{< code title="read a secret" language="golang" open="true" collapsible="false" copy="true" >}}
-token, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).
-	WithLabel("token").
-	WithSecret().   // or WithMask('*') to echo the shape of what was typed
-	Ask(ctx)
+fmt.Fprint(rtx.Stdout, "token: ")
+secret, err := rotini.ReadSecret(os.Stdin)
+fmt.Fprintln(rtx.Stdout) // the user's Enter was not echoed either
 {{< /code >}}
 
-`Select` is a **numbered menu**, not arrow-key navigation. Raw terminal mode would need a platform dependency rotini does not carry, and would not work over a pipe at all. A numbered menu answers the same question, stays scriptable, and resolves a typed answer by number, by exact text, or — with a `Suggestor` — by fuzzy match.
+Off a terminal — a pipe, a test, a CI runner — there is no echo to disable and the line is read normally, which keeps a secret-reading command testable. Input that ends without an answer is `ErrNotInteractive`, **never a hang**: that is what makes an interactive command safe to run in CI.
 
-## Showing progress
+### Stripping escapes
 
-`Spinner` (indeterminate) and `Progress` (determinate) each redraw **one line in place**.
+`Strip` removes every ANSI escape sequence, SGR styling and OSC alike. It is what makes a styled string safe to put somewhere that would print the escapes literally — which is exactly what codegen does to your man pages, markdown pages and completion descriptions.
 
-{{< alert type="info" title="NOTE:" >}}
-Both stay **silent on a non-terminal writer**. A `\r` redraw written into a log file is not a cosmetic issue — it is corruption — so this is the one place rotini decides something for you by default. `WithAnimation(bool)` overrides it in either direction.
-{{< /alert >}}
-
-To write **past** a live indicator, use `Print`. Writing to the same stream directly smears into the frame — the indicator owns that line and never cleared it:
-
-{{< code title="printing while a spinner runs" language="golang" open="true" collapsible="false" copy="true" >}}
-spinner.Print(func() { fmt.Fprintln(rtx.Stdout, "done:", f) })
-{{< /code >}}
-
-{{< code title="spinner / progress" language="golang" open="true" collapsible="false" copy="true" >}}
-spinner := rotini.NewSpinner(rtx.Stdout).WithMessage("fetching").Start(ctx)
-defer spinner.Stop()
-
-bar := rotini.NewProgress(rtx.Stdout, int64(len(files))).WithMessage("uploading")
-for _, f := range files {
-	upload(f)
-	bar.Add(1)
-}
-bar.Done()
+{{< code title="strip" language="golang" open="true" collapsible="false" copy="true" >}}
+plain := rotini.Strip(styled)
 {{< /code >}}
 
 ## Shelling out
@@ -220,24 +120,27 @@ rotini.NewStdioServer(rtx.Stdin, rtx.Stdout).
 
 Requests are served one at a time, in arrival order: a stdio peer shares one pipe, so concurrent handlers would interleave their writes. A handler with slow work hands it to a `Service` and answers immediately.
 
-### Wizard
-
-A guided multi-step flow with branching (`When`) and back navigation (`ErrWizardBack`). It owns no streams — a step does its own asking — which keeps the flow pure orchestration, testable with plain functions.
-
-{{< code title="wizard" language="golang" open="true" collapsible="false" copy="true" >}}
-answers, err := rotini.NewWizard().
-	Step("name", askName).
-	Add(rotini.WizardStep{
-		Key:  "region",
-		When: func(a map[string]string) bool { return a["deploy"] == "yes" },
-		Ask:  askRegion,
-	}).
-	Run(ctx)
-{{< /code >}}
-
-Going back over a branch that was skipped skips it again — the flow does not resurface a question it already decided was irrelevant.
-
 ## What rotini does not ship
+
+### Drawing
+
+Styling, tables, spinners, progress bars, prompts, forms, paging and editor round-trips are all how a program **draws**. That is a design decision belonging to your program and to libraries built for it — not to a CLI framework.
+
+A framework that shipped its own would either be worse than they are or grow into a second product; either way you would end up with two vocabularies for the same screen. rotini's job is turning a spec into a parsed, bound, dispatched invocation and handing your handler a `Context` that knows what the user asked for. What the handler prints, and how, is yours.
+
+| Need | Use |
+|---|---|
+| styling, layout, borders, adaptive light/dark | [lipgloss](https://github.com/charmbracelet/lipgloss) |
+| forms, prompts, selects, confirms | [huh](https://github.com/charmbracelet/huh), [survey](https://github.com/AlecAivazis/survey) |
+| spinners, progress bars, live views | [bubbles](https://github.com/charmbracelet/bubbles), [progressbar](https://github.com/schollz/progressbar) |
+| a full TUI | [bubbletea](https://github.com/charmbracelet/bubbletea) |
+| wrapping and truncating styled text | [reflow](https://github.com/muesli/reflow) |
+| aligned columns | `text/tabwriter`, in the standard library |
+| paging, `$EDITOR` round-trips | a dozen lines of `os/exec` — see [example-txt](https://github.com/go-rotini/example-txt) and [example-flow](https://github.com/go-rotini/example-flow) |
+
+`example-flow` is the worked version of this boundary: the whole asking layer, written out, is about eighty lines.
+
+### Elsewhere in the family
 
 | Need | Use |
 |---|---|
@@ -247,4 +150,4 @@ Going back over a branch that was skipped skips it again — the flow does not r
 
 rotini does not wrap these. A facade would give each API two names, put its documentation in the wrong package, and pull another module's surface inside rotini's frozen compatibility promise — all for zero added capability.
 
-The "one import" promise is about not shopping the ecosystem and reconciling four libraries' idioms. These are the same author, the same release cadence, the same house style: importing them directly is not the problem that promise solves.
+The "one import" promise is about not shopping the ecosystem for the parts of a CLI that are genuinely rotini's job. These are the same author, the same release cadence, the same house style: importing them directly is not the problem that promise solves.

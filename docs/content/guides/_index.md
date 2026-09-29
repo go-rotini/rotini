@@ -504,4 +504,4 @@ Your users install it the way they install anything else — `go install github.
 - [Specification](/specification) — every spec key
 - [Configuration](/configuration) — codegen targets, features, templates
 - [API](/api) — the runtime contract in full
-- [Toolkit](/batteries) — printers, tables, prompts, progress, REPL, daemon
+- [Toolkit](/batteries) — subprocesses, terminal detection, REPL, daemon

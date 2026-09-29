@@ -100,7 +100,4 @@ func TestTerminalSize_documentedFallbackShape(t *testing.T) {
 	if cols != 80 {
 		t.Errorf("the fallback did not take: cols = %d", cols)
 	}
-	if got := Wrap("one two three four five six", cols); got == "" {
-		t.Error("Wrap produced nothing at the fallback width")
-	}
 }

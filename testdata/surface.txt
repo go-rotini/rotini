@@ -1,22 +1,3 @@
-const ANSIColorBlack
-const ANSIColorBlue
-const ANSIColorBrightBlack
-const ANSIColorBrightBlue
-const ANSIColorBrightCyan
-const ANSIColorBrightGreen
-const ANSIColorBrightMagenta
-const ANSIColorBrightRed
-const ANSIColorBrightWhite
-const ANSIColorBrightYellow
-const ANSIColorCyan
-const ANSIColorGreen
-const ANSIColorMagenta
-const ANSIColorRed
-const ANSIColorWhite
-const ANSIColorYellow
-const AlignCenter
-const AlignLeft
-const AlignRight
 const CategoryInternal
 const CategoryNone
 const CategoryUsage
@@ -29,11 +10,6 @@ const FlagGroupAtLeastOne
 const FlagGroupMutuallyExclusive
 const FlagGroupOneOf
 const FlagGroupRequiredTogether
-const FormatJSON
-const FormatTOML
-const FormatTable
-const FormatText
-const FormatYAML
 const FramingContentLength
 const FramingLine
 const ParseKindConstraintViolation
@@ -47,10 +23,6 @@ const ParseKindTooManyArguments
 const ParseKindUnknownCommand
 const ParseKindUnknownFlag
 const ParseKindUnspecified
-const ProfileANSI16
-const ProfileANSI256
-const ProfileNoColor
-const ProfileTrueColor
 const RemoteBinaryNotFound
 const RemoteSpawnFailed
 const RemoteTimeout
@@ -235,9 +207,6 @@ field SubprocessError.Stderr
 field WiringError.Command
 field WiringError.Handler
 field WiringError.Msg
-field WizardStep.Ask
-field WizardStep.Key
-field WizardStep.When
 func Algorithms() []SuggestAlgorithm
 func AtFrame(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
@@ -247,66 +216,42 @@ func DefaultLifecycle(chain []ResolvedCommand, handlers []Handlers) []LifecycleS
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
 func Defaults[T any](rtx *Context) (Layer[T], error)
 func Deprecations(rtx *Context) []Deprecation
-func DetectProfile() Profile
 func DiscoveredPlugins(cmd ResolvedCommand) []string
 func DiscoveryDiagnostics(cmd ResolvedCommand) []error
 func EnvNoColor() bool
 func ExitCode(code int) error
-func Formats() []Format
-func Hyperlink(url, text string) string
 func InternalError(err error) error
 func IsTerminal(file *os.File) bool
 func NewBinder(meta BindMeta) *Binder
-func NewConfirm(in io.Reader, out io.Writer) *Confirm
 func NewContextFor(def Definition, argv []string) *Context
-func NewEditor() *Editor
 func NewKey[T any](name string) Key[T]
-func NewPager(w io.Writer) *Pager
 func NewParser() *Parser
-func NewPrinter(w io.Writer) *Printer
 func NewProgram(def Definition, handlers any) *Program
-func NewProgress(w io.Writer, total int64) *Progress
-func NewPrompt(in io.Reader, out io.Writer) *Prompt
 func NewREPL(program *Program) *REPL
 func NewRPCError(code int, message string) *RPCError
 func NewScheduler() *Scheduler
-func NewSelect(in io.Reader, out io.Writer, options ...string) *Select
 func NewService() *Service
-func NewSpinner(w io.Writer) *Spinner
 func NewStdioServer(in io.Reader, out io.Writer) *StdioServer
-func NewStyle() *Style
-func NewStyler() *Styler
 func NewSubprocess(name string, args ...string) *Subprocess
 func NewSuggestor() *Suggestor
-func NewTable(headers ...string) *Table
-func NewWizard() *Wizard
 func OverlayInputsP[T any](layers ...Layer[T]) (T, Report)
 func OverlayInputs[T any](layers ...Layer[T]) T
 func ParseArgv[T any](rtx *Context) (Layer[T], error)
 func ParseEnv[T any](rtx *Context) (Layer[T], error)
 func ParseFiles[T any](rtx *Context) (Layer[T], error)
-func ParseFormat(name string) (Format, error)
 func ParseStdin[T any](rtx *Context) (Layer[T], error)
 func Provide[T any](k Key[T], value T) Option
 func Ptr[T any](v T) *T
+func ReadSecret(file *os.File) ([]byte, error)
 func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool)
 func Strip(text string) string
 func TerminalSize(file *os.File) (cols, rows int, ok bool)
-func Truncate(text string, cols int, ellipsis string) string
 func UsageError(err error) error
-func Width(text string) int
-func Wrap(text string, cols int) string
 method ArgValueCompleter.CompleteArgValue
 method BindError.Error() string
 method BindError.Unwrap() []error
 method Binder.Bind(rtx *Context, out any) error
 method Category.String() string
-method Confirm.Ask(ctx context.Context) (bool, error)
-method Confirm.WithAffirmative(tokens ...string) *Confirm
-method Confirm.WithDefault(value bool) *Confirm
-method Confirm.WithLabel(label string) *Confirm
-method Confirm.WithNegative(tokens ...string) *Confirm
-method Confirm.WithRetries(n int) *Confirm
 method Context.Bind(key string, value any) *Context
 method Context.BindIfAbsent(key string, value any) *Context
 method Context.Chain() []ResolvedCommand
@@ -326,14 +271,12 @@ method Context.RecordError(err error)
 method Context.RecordInfo(msg string)
 method Context.RecordSuccess(msg string)
 method Context.RecordWarning(warn error)
-method Context.Styler() (*Styler, bool)
 method Context.Suggestor() (*Suggestor, bool)
 method Context.Value(key string) any
 method Context.Version() string
 method Context.WithBindMeta(meta BindMeta) *Context
 method Context.WithBinder(fn func(BindMeta) *Binder) *Context
 method Context.WithParser(parser *Parser) *Context
-method Context.WithStyler(styler *Styler) *Context
 method Context.WithSuggestor(suggestor *Suggestor) *Context
 method Context.WithVersion(version string) *Context
 method DefaultCascadingPostRun.CascadingPostRun(ctx context.Context, rtx *Context)
@@ -341,10 +284,6 @@ method DefaultCascadingPreRun.CascadingPreRun(ctx context.Context, rtx *Context)
 method DefaultPostRun.PostRun(ctx context.Context, rtx *Context)
 method DefaultPreRun.PreRun(ctx context.Context, rtx *Context)
 method Deprecation.Error() string
-method Editor.Edit(ctx context.Context, initial []byte) ([]byte, error)
-method Editor.WithCommand(command string) *Editor
-method Editor.WithDir(dir string) *Editor
-method Editor.WithExtension(ext string) *Editor
 method FlagValueCompleter.CompleteFlagValue
 method Handlers.CascadingPostRun
 method Handlers.CascadingPreRun
@@ -359,21 +298,12 @@ method Key.Provide(p *Program, value T) *Program
 method Key.String() string
 method Outcome.Empty() bool
 method Outcome.Failed() bool
-method Pager.Page(ctx context.Context, text string) error
-method Pager.WithCommand(command string) *Pager
-method Pager.WithEnabled(enabled bool) *Pager
 method PanicError.Error() string
 method PanicError.Unwrap() []error
 method ParseError.Error() string
 method ParseError.Unwrap() error
 method ParseKind.String() string
 method Parser.Parse(rtx *Context, out any) error
-method Printer.Print(v any) error
-method Printer.WithFormat(f Format) *Printer
-method Printer.WithIndent(indent string) *Printer
-method Printer.WithStyler(styler *Styler) *Printer
-method Printer.WithWidth(n int) *Printer
-method Profile.String() string
 method Program.Bind(key string, value any) *Program
 method Program.Execute() error
 method Program.Run(argv []string) (int, error)
@@ -393,29 +323,10 @@ method Program.WithSignals(sigs ...os.Signal) *Program
 method Program.WithStderr(w io.Writer) *Program
 method Program.WithStdin(r io.Reader) *Program
 method Program.WithStdout(w io.Writer) *Program
-method Program.WithStyler(styler *Styler) *Program
 method Program.WithSuggestor(suggestor *Suggestor) *Program
 method Program.WithTeardownOnPanic(enabled bool) *Program
 method Program.WithVersion(version string) *Program
 method Program.WithoutSignalHandling() *Program
-method Progress.Add(delta int64)
-method Progress.Current() int64
-method Progress.Done()
-method Progress.ETA() time.Duration
-method Progress.Message(msg string)
-method Progress.Print(fn func())
-method Progress.Rate() float64
-method Progress.Set(n int64)
-method Progress.WithAnimation(enabled bool) *Progress
-method Progress.WithMessage(msg string) *Progress
-method Progress.WithWidth(n int) *Progress
-method Prompt.Ask(ctx context.Context) (string, error)
-method Prompt.WithDefault(value string) *Prompt
-method Prompt.WithLabel(label string) *Prompt
-method Prompt.WithMask(r rune) *Prompt
-method Prompt.WithRetries(n int) *Prompt
-method Prompt.WithSecret() *Prompt
-method Prompt.WithValidate(fn func(string) error) *Prompt
 method REPL.Run(ctx context.Context) error
 method REPL.WithErrorEcho(enabled bool) *REPL
 method REPL.WithExitCommands(words ...string) *REPL
@@ -434,70 +345,17 @@ method Scheduler.Every(name string, interval time.Duration, fn func(context.Cont
 method Scheduler.Run(ctx context.Context) error
 method Scheduler.WithJitter(fraction float64) *Scheduler
 method Scheduler.WithRunAtStart(enabled bool) *Scheduler
-method Select.Ask(ctx context.Context) (int, string, error)
-method Select.WithDefault(index int) *Select
-method Select.WithLabel(label string) *Select
-method Select.WithRetries(n int) *Select
-method Select.WithSuggestor(suggestor *Suggestor) *Select
 method Service.Go(name string, fn func(context.Context) error) *Service
 method Service.Run(ctx context.Context) error
 method Service.WithShutdown(fn func(context.Context) error) *Service
 method Service.WithShutdownTimeout(d time.Duration) *Service
 method ServiceError.Error() string
 method ServiceError.Unwrap() []error
-method Spinner.Message(msg string)
-method Spinner.Print(fn func())
-method Spinner.Start(ctx context.Context) *Spinner
-method Spinner.Stop()
-method Spinner.WithAnimation(enabled bool) *Spinner
-method Spinner.WithFrames(frames ...string) *Spinner
-method Spinner.WithInterval(d time.Duration) *Spinner
-method Spinner.WithMessage(msg string) *Spinner
 method StdioServer.Handle(method string, fn RequestFunc) *StdioServer
 method StdioServer.Notify(method string, fn NotifyFunc) *StdioServer
 method StdioServer.Run(ctx context.Context) error
 method StdioServer.WithFraming(f Framing) *StdioServer
 method Stream.String() string
-method Style.Background256(code uint8) *Style
-method Style.BackgroundANSI(c ANSIColor) *Style
-method Style.BackgroundHex(hex string) *Style
-method Style.BackgroundRGB(red, green, blue uint8) *Style
-method Style.Blink() *Style
-method Style.Bold() *Style
-method Style.Clone() *Style
-method Style.Conceal() *Style
-method Style.DoubleUnderline() *Style
-method Style.Faint() *Style
-method Style.Foreground256(code uint8) *Style
-method Style.ForegroundANSI(c ANSIColor) *Style
-method Style.ForegroundHex(hex string) *Style
-method Style.ForegroundRGB(red, green, blue uint8) *Style
-method Style.Fprint(w io.Writer, a ...any)
-method Style.Fprintf(w io.Writer, format string, a ...any)
-method Style.Fprintln(w io.Writer, a ...any)
-method Style.Italic() *Style
-method Style.Merge(other *Style) *Style
-method Style.Overline() *Style
-method Style.RapidBlink() *Style
-method Style.Raw(sgr string) *Style
-method Style.Reverse() *Style
-method Style.SetEnabled(enabled bool) *Style
-method Style.SetProfile(profile Profile) *Style
-method Style.Sprint(text string) string
-method Style.Sprintf(format string, args ...any) string
-method Style.Strikethrough() *Style
-method Style.Underline() *Style
-method Styler.Define(key string) *Style
-method Styler.Delete(key string) *Styler
-method Styler.Fprint(w io.Writer, key string, a ...any)
-method Styler.Fprintf(w io.Writer, key, format string, a ...any)
-method Styler.Fprintln(w io.Writer, key string, a ...any)
-method Styler.Get(key string) (*Style, bool)
-method Styler.Render(key, text string) string
-method Styler.Renderf(key, format string, args ...any) string
-method Styler.Set(key string, style *Style) *Styler
-method Styler.SetEnabled(enabled bool) *Styler
-method Styler.SetProfile(profile Profile) *Styler
 method Subprocess.Lines(ctx context.Context) iter.Seq2[Line, error]
 method Subprocess.Output(ctx context.Context) (string, error)
 method Subprocess.Run(ctx context.Context) (int, error)
@@ -520,21 +378,8 @@ method Suggestor.WithCaseFold() *Suggestor
 method Suggestor.WithMaxResults(n int) *Suggestor
 method Suggestor.WithMinScore(score float64) *Suggestor
 method Suggestor.WithNormalizer(normalizer func(string) string) *Suggestor
-method Table.Fprint(w io.Writer) (int, error)
-method Table.Render() string
-method Table.Row(cells ...string) *Table
-method Table.WithAlign(aligns ...Align) *Table
-method Table.WithHeaderStyle(key string) *Table
-method Table.WithPadding(n int) *Table
-method Table.WithStyler(styler *Styler) *Table
-method Table.WithWidth(n int) *Table
 method WiringError.Error() string
 method WiringError.Unwrap() error
-method Wizard.Add(step WizardStep) *Wizard
-method Wizard.Run(ctx context.Context) (map[string]string, error)
-method Wizard.Step(key string, ask func(ctx context.Context, answers map[string]string) (string, error)) *Wizard
-type ANSIColor
-type Align
 type ArgDef
 type ArgValueCompleter
 type BindError
@@ -544,7 +389,6 @@ type Category
 type CommandDef
 type Completion
 type ConfigFile
-type Confirm
 type Constraints
 type Context
 type DefaultCascadingPostRun
@@ -555,14 +399,12 @@ type DefaultPreRun
 type Definition
 type Deprecation
 type DiscoverDef
-type Editor
 type FieldPath
 type FlagDef
 type FlagDependency
 type FlagGroup
 type FlagGroupKind
 type FlagValueCompleter
-type Format
 type Framing
 type FunnelFunc
 type Handlers
@@ -575,18 +417,13 @@ type Match
 type NotifyFunc
 type Option
 type Outcome
-type Pager
 type PanicError
 type ParseError
 type ParseKind
 type Parser
 type PathFromDef
 type Presence
-type Printer
-type Profile
 type Program
-type Progress
-type Prompt
 type Provenance
 type REPL
 type RPCError
@@ -601,28 +438,17 @@ type Resolution
 type ResolvedCommand
 type Resolver
 type Scheduler
-type Select
 type Service
 type ServiceError
-type Spinner
 type StdioServer
 type Stream
-type Style
-type Styler
 type Subprocess
 type SubprocessError
 type SuggestAlgorithm
 type Suggestor
-type Table
 type WiringError
-type Wizard
-type WizardStep
-var ErrEditAborted
 var ErrInternal
 var ErrNotInteractive
-var ErrPromptInvalid
 var ErrServiceNotFound
 var ErrShutdownTimeout
 var ErrUsage
-var ErrWizardBack
-var ErrWizardCanceled

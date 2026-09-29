@@ -23,7 +23,7 @@ taskr add       add a task
       compact   rewrite the store
 {{< /code >}}
 
-Leans on: the full command-key vocabulary (`usage`, `header`, `footer`, `examples`, `group`, `hidden`, `deprecated`, `aliases`, `see_also`), the `output:` key with a `Printer`, and help + man + markdown + completion together.
+Leans on: the full command-key vocabulary (`usage`, `header`, `footer`, `examples`, `group`, `hidden`, `deprecated`, `aliases`, `see_also`), the `output:` key rendered by hand into text, JSON, YAML, TOML and columns, and help + man + markdown + completion together.
 
 ### `txt` — a text filter
 
@@ -167,15 +167,15 @@ It also ships a `plugins` command — the doctor — that reports what is instal
 
 ### `flow` — a project scaffolder
 
-The interactive shelf, and the proof that it stays scriptable. The same `flow new` runs as a wizard, as a flag-driven one-liner, and from a pipe.
+**Where rotini stops and your UI begins.** rotini ships no prompt, no select, no spinner and no styler; `flow` writes all of them out — the whole asking layer is about eighty lines — and the same `flow new` still runs as a guided flow, as a flag-driven one-liner, and from a pipe.
 
 {{< code title="flow" language="text" open="true" collapsible="false" copy="false" >}}
-flow new      a wizard: name → template → deploy? → [region] → confirm
-     build    a spinner, then a progress bar
+flow new      a guided flow: name → template → deploy? → [region] → confirm
+     build    a progress line that goes quiet when nobody is watching
      theme    what styling resolves to, here, now
 {{< /code >}}
 
-Leans on: `Wizard` with a conditional step and back navigation, `Prompt`/`Confirm`/`Select`, `Spinner` and `Progress`, and `Style`/`Styler` — including what happens when there is no terminal.
+Leans on: `ErrNotInteractive` as the answer to "no input at all", `IsTerminal`/`EnvNoColor`/`TerminalSize`, `Suggestor` for a typo'd answer, `Strip`, and a `negatable` + `nullable` flag that can override detection in **both** directions.
 
 ### `syncd` — a sync agent
 

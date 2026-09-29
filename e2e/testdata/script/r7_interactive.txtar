@@ -1,74 +1,66 @@
-# R7 — the interactive shelf, driven from a pipe.
+# R7 — reading a secret, and not eating the rest of the stream.
 #
-# A terminal is the one environment these pieces are NOT tested in here, and that is
-# deliberate: a tty hides the defect this script exists for.
+# A terminal is the one environment this is NOT tested in, and that is deliberate: a tty hides
+# the defect this script exists for.
 #
-# Every Prompt/Confirm/Select used to wrap its reader in its OWN bufio.Reader. The first read
-# filled that private buffer with everything available — the answers to every later question —
-# returned one line, and dropped the rest when it went out of scope. The second component saw
-# EOF and reported "not interactive" with three answers still sitting in the pipe.
+# rotini no longer ships prompts, selects or confirms — drawing questions belongs to a library
+# built for it. What it still ships is ReadSecret, because turning terminal echo off is a
+# termios ioctl the standard library will not do and a program cannot safely fake: the failure
+# is not a wrong value, it is a shell left with echo off after the process is gone.
 #
-# At a terminal it works perfectly, because a tty hands over one line at a time and there is
-# never a surplus to lose. So rotini's own Wizard could not drive rotini's own prompts anywhere
-# a human was not typing: not under a pipe, not in a test, not in CI.
+# The shape that used to break is still the shape to guard. A reader that buffers ahead fills
+# its private buffer with everything available — the secret AND whatever came after it — returns
+# one line, and drops the rest when it goes out of scope. The next consumer sees EOF with its
+# input still sitting in the pipe. At a terminal it works perfectly, because a tty hands over
+# one line at a time and there is never a surplus to lose.
 #
-# Hence: one binary, several questions, one pipe.
+# Hence: one binary, one pipe, a secret followed by more input that must survive.
 
-gomodinit example.com/ask
+gomodinit example.com/vault
 
-exec rotini generate cmd/ask/.rotini.spec.yaml --config cmd/ask/.rotini.conf.yaml
+exec rotini generate cmd/vault/.rotini.spec.yaml --config cmd/vault/.rotini.conf.yaml
 exec go mod tidy
-exec go build -o ask$exe ./cmd/ask
+exec go build -o vault$exe ./cmd/vault
 
-# Four answers, three different component kinds, one stream.
-stdin answers.txt
-exec ./ask$exe setup
-stdout 'name=widget'
-stdout 'size=large'
-stdout 'confirmed=true'
-stdout 'note=ship it'
+# The secret is read, and the two lines after it are still there to read.
+stdin session.txt
+exec ./vault$exe login
+stdout 'secret=hunter2'
+stdout 'rest=\[keep me\] \[and me\]'
 
-# No input at all is a named error, not a hang and not a silent default.
+# The secret is never written to the output. Nothing echoes it, because nothing printed it.
+! stdout 'hunter2 '
+! stderr 'hunter2'
+
+# No input at all is a named error, not a hang and not an empty password accepted as one.
 stdin empty.txt
-! exec ./ask$exe setup
-! stdout 'name='
+! exec ./vault$exe login
 stderr 'not interactive'
 
-# The indicators write NOTHING to a pipe: no escapes, no carriage returns. An indicator that
-# animated into a log would fill it with cursor moves, and one that erased lines it had not
-# written would corrupt output some other process produced.
-exec ./ask$exe work
-cmp stdout work-expected.txt
-
 -- empty.txt --
--- answers.txt --
-widget
-large
-y
-ship it
--- work-expected.txt --
-done 3
--- cmd/ask/.rotini.spec.yaml --
+-- session.txt --
+hunter2
+keep me
+and me
+-- cmd/vault/.rotini.spec.yaml --
 version: 0.0.0
 command:
-  name: ask
-  summary: asks several questions
+  name: vault
+  summary: reads a secret from stdin
   commands:
-    - name: setup
-      summary: ask four questions in a row
-    - name: work
-      summary: run indicators
--- cmd/ask/.rotini.conf.yaml --
+    - name: login
+      summary: read a secret, then read what follows it
+-- cmd/vault/.rotini.conf.yaml --
 version: 0.0.0
 generate:
   packages:
     - type: main
-      file: cmd/ask/main.go
+      file: cmd/vault/main.go
     - type: cmd
-      file: internal/cmd/ask/zz_ask.go
-      package: ask
--- internal/cmd/ask/ask.go --
-package ask
+      file: internal/cmd/vault/zz_vault.go
+      package: vault
+-- internal/cmd/vault/vault.go --
+package vault
 
 import (
 	"context"
@@ -83,85 +75,50 @@ type base struct {
 	rotini.DefaultCascadingPostRun
 }
 
-type askHandlers struct{ base }
+type vaultHandlers struct{ base }
 
-func (*askHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
--- internal/cmd/ask/ask_setup.go --
-package ask
+func (*vaultHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/vault/vault_login.go --
+package vault
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/go-rotini/rotini"
 )
 
-type askSetupHandlers struct{ base }
+type vaultLoginHandlers struct{ base }
 
-// Run asks four questions with four separately constructed components over ONE stream, which
-// is exactly the shape a Wizard produces.
-func (*askSetupHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	name, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).WithLabel("Name").Ask(ctx)
+// Run reads a secret and then keeps reading the SAME stream, which is the shape that catches a
+// reader buffering past its line.
+func (*vaultLoginHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	secret, err := rotini.ReadSecret(os.Stdin)
 	if err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
+		rtx.HaltWith(err)
 		return
 	}
-	_, size, err := rotini.NewSelect(rtx.Stdin, rtx.Stdout, "small", "large").WithLabel("Size").Ask(ctx)
-	if err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
-		return
+
+	var rest []string
+	scan := bufio.NewScanner(os.Stdin)
+	for scan.Scan() {
+		rest = append(rest, "["+scan.Text()+"]")
 	}
-	ok, err := rotini.NewConfirm(rtx.Stdin, rtx.Stdout).WithLabel("Sure?").Ask(ctx)
-	if err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
-		return
-	}
-	note, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).WithLabel("Note").Ask(ctx)
-	if err != nil {
-		rtx.RecordError(err)
-		rtx.HaltWithCode(1)
-		return
-	}
-	fmt.Fprintf(rtx.Stdout, "\nname=%s size=%s confirmed=%t note=%s\n", name, size, ok, note)
+
+	fmt.Fprintf(rtx.Stdout, "secret=%s\n", secret)
+	fmt.Fprintf(rtx.Stdout, "rest=%s\n", strings.Join(rest, " "))
 }
--- internal/cmd/ask/ask_work.go --
-package ask
-
-import (
-	"context"
-	"fmt"
-	"time"
-
-	"github.com/go-rotini/rotini"
-)
-
-type askWorkHandlers struct{ base }
-
-func (*askWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	s := rotini.NewSpinner(rtx.Stdout).WithMessage("working").WithInterval(5 * time.Millisecond)
-	s.Start(ctx)
-	s.Message("still working")
-	s.Stop()
-
-	p := rotini.NewProgress(rtx.Stdout, 3).WithMessage("stepping")
-	for range 3 {
-		p.Add(1)
-	}
-	p.Done()
-
-	fmt.Fprintf(rtx.Stdout, "done %d\n", p.Current())
-}
--- cmd/ask/main.go --
+-- cmd/vault/main.go --
 package main
 
 import (
-	ask "example.com/ask/internal/cmd/ask"
+	vault "example.com/vault/internal/cmd/vault"
 )
 
 func main() {
-	ask.Program.
+	vault.Program.
 		Execute()
 }

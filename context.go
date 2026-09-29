@@ -50,10 +50,10 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 //     [Context.RecordWarning], [Context.RecordError], and [Context.Failed] to ask
 //   - stop — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] when
 //     the code is the point, [Context.Exit] to skip pending teardown
-//   - rotini's own seams — [Context.Version], [Context.Parser], [Context.Styler] and
-//     [Context.Suggestor] to read, and for a Context you built yourself rather than one the
-//     runtime handed you, [Context.WithVersion], [Context.WithParser], [Context.WithStyler],
-//     [Context.WithSuggestor], [Context.WithBindMeta] and [Context.WithBinder] to set
+//   - rotini's own seams — [Context.Version], [Context.Parser] and [Context.Suggestor] to
+//     read, and for a Context you built yourself rather than one the runtime handed you,
+//     [Context.WithVersion], [Context.WithParser], [Context.WithSuggestor],
+//     [Context.WithBindMeta] and [Context.WithBinder] to set
 //
 // Inputs are NOT on this list. A handler reads them with [Collect], which takes the Context
 // rather than hanging off it, because parsing is opt-in: a CLI that wants raw argv binds
@@ -136,7 +136,6 @@ type Context struct {
 	binderFn  func(BindMeta) *Binder
 	version   string
 	parser    *Parser
-	styler    *Styler
 	suggestor *Suggestor
 }
 
@@ -620,7 +619,7 @@ func (rtx *Context) RecordWarning(warn error) {
 // empty msg is ignored.
 //
 // The funnel reports after the lifecycle settles, so recorded outcomes appear after anything a
-// handler wrote directly to [Context.Stdout] during Run. See the Ordering section on [Printer].
+// handler wrote directly to [Context.Stdout] during Run.
 func (rtx *Context) RecordSuccess(msg string) {
 	if msg == "" {
 		return
@@ -795,20 +794,6 @@ func (rtx *Context) WithParser(parser *Parser) *Context {
 	return rtx
 }
 
-// WithStyler sets the styler [Context.Styler] reports. See [Program.WithStyler].
-//
-// For a Context you built yourself. One handed to a hook is already seeded from the Program,
-// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
-// does not outlive the run — the next invocation is seeded from the Program again.
-func (rtx *Context) WithStyler(styler *Styler) *Context {
-	if rtx != nil && styler != nil {
-		rtx.mu.Lock()
-		rtx.styler = styler
-		rtx.mu.Unlock()
-	}
-	return rtx
-}
-
 // WithSuggestor sets the suggestor [Context.Suggestor] reports. See [Program.WithSuggestor].
 //
 // For a Context you built yourself. One handed to a hook is already seeded from the Program,
@@ -846,21 +831,6 @@ func (rtx *Context) Parser() *Parser {
 		return NewParser()
 	}
 	return p
-}
-
-// Styler reports the [Styler] the program supplied, and whether it supplied one.
-//
-// Styling is opt-in: rotini styles nothing on its own, so an unset styler is a decision, not
-// an omission, and a handler renders plain text rather than inventing a default that the
-// program never asked for.
-//
-//	if styler, ok := rtx.Styler(); ok {
-//		styler.Fprintln(rtx.Stdout, "heading", title)
-//	}
-func (rtx *Context) Styler() (*Styler, bool) {
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	return rtx.styler, rtx.styler != nil
 }
 
 // Suggestor reports the [Suggestor] the program supplied, and whether it supplied one.

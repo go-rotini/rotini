@@ -27,7 +27,7 @@ But it arrives **only when the exit action returns**. Under the default, `os.Exi
 It is not the reporting channel: the funnel has already printed everything by then. The return is there so an embedder can *act* on the failure rather than re-derive it from a stream.
 {{< /alert >}}
 
-Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, `WithVersion`/`WithParser`/`WithStyler`/`WithSuggestor`/`WithBindMeta`/`WithBinder`, and `With` for options that cannot be methods.
+Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, `WithVersion`/`WithParser`/`WithSuggestor`/`WithBindMeta`/`WithBinder`, and `With` for options that cannot be methods.
 
 ## Lifecycle
 
@@ -225,12 +225,11 @@ That is a deliberate split. rotini's own seams used to be string keys in the sam
 | the binder | `WithBinder(func(BindMeta) *Binder)` — it **receives** the descriptor | internal |
 | the version | `WithVersion(v)` | `rtx.Version()` |
 | the parser | `WithParser(p)` | `rtx.Parser()` — never nil |
-| the styler | `WithStyler(s)` | `rtx.Styler() (*Styler, bool)` |
 | the suggestor | `WithSuggestor(s)` | `rtx.Suggestor() (*Suggestor, bool)` |
 
 `WithBinder` takes a function of the descriptor rather than a `*Binder` for exactly that reason — an override now starts *from* what the spec declared instead of having to reproduce it.
 
-Styling and suggestion report `(value, ok)` because both are opt-in: rotini styles nothing and suggests nothing on its own, so "none supplied" is a decision worth telling a handler about rather than papering over with a default it never asked for.
+Suggestion reports `(value, ok)` because it is opt-in: rotini suggests nothing on its own, so "none supplied" is a decision worth telling a handler about rather than papering over with a default it never asked for.
 
 Your own services use a **typed key**, so the registry string and the type it was bound as cannot drift apart and a handler needs neither a literal nor an assertion:
 
@@ -294,7 +293,7 @@ Generated wiring returns a fresh handler from every method, which is what makes 
 If you write your own `ProgramHandlers` and a method returns a **shared** value — a field on your aggregate, a package variable — then that handler's fields are shared across runs. For a stateless handler that is harmless and common. For one that keeps state in fields it is a bug, and under concurrent runs (a REPL, a `StdioServer`, or `Program.Run` from several goroutines) it is a data race.
 {{< /alert >}}
 
-Detection is opt-in too: `DetectProfile`, `IsTerminal` and `EnvNoColor` exist, but nothing calls them for you — the program decides and feeds the result in.
+Detection is opt-in too: `IsTerminal`, `EnvNoColor` and `TerminalSize` exist, but nothing calls them for you — the program decides and feeds the result in.
 
 `Parser` and `Binder` are overrides, not prerequisites: `Collect` builds its own. In particular **`rotini.Deprecations(rtx)` needs nothing bound** — it reports the deprecated aliases and identifiers this invocation actually used, reading the resolved chain and the argv that produced it straight off the `Context`.
 

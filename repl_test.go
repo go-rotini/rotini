@@ -251,3 +251,10 @@ type boomHandlers struct {
 }
 
 func (h *boomHandlers) Run(ctx context.Context, rtx *Context) { rtx.RecordError(h.fail) }
+
+// blockingReader never returns, standing in for a terminal nobody types into. It is what makes
+// the cancellation test meaningful: a REPL that read on the calling goroutine would hang here
+// forever rather than honoring the context.
+type blockingReader struct{}
+
+func (blockingReader) Read([]byte) (int, error) { select {} }

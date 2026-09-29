@@ -125,7 +125,7 @@ Nothing above was hand-written except the body of `Run`. The enum, the default, 
 
 <div class="feature_card">
 <h3>Batteries, all opt-in</h3>
-<p>Tables, paging, prompts, progress, styling, subprocesses, plugins — and the long-running shapes: <code>Service</code>, <code>Scheduler</code>, <code>REPL</code> and a JSON-RPC <code>StdioServer</code>. Importing rotini starts none of it.</p>
+<p>Subprocesses, plugins, terminal detection — and the long-running shapes: <code>Service</code>, <code>Scheduler</code>, <code>REPL</code> and a JSON-RPC <code>StdioServer</code>. No styler, no table, no prompt: drawing is yours. Importing rotini starts none of it.</p>
 </div>
 
 </div>
@@ -179,6 +179,6 @@ The cost is fixed; the benefit scales with the CLI. For a three-command internal
 - [configuration](/configuration) — the `.rotini.conf.*` file
 - [generated](/generated) — what rotini writes into your project
 - [examples](/examples) — ten complete CLIs, and what each one shows
-- [batteries](/batteries) — everything past parsing
+- [batteries](/batteries) — what else ships, and what deliberately does not
 - [api](/api) — the runtime contract
 - [cli](/cli) — the `rotini` command itself

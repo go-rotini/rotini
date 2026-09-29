@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -12,24 +11,9 @@ import (
 // one invocation. `make test-bench` reports them; they exist so a change that makes
 // one of these materially worse is visible rather than discovered later.
 
-// Width is called per cell, per column-measuring pass, when aligning a table — so an
-// allocation here is an allocation per cell. Unstyled text must cost none.
-func BenchmarkWidth_unstyled(b *testing.B) {
-	const s = "a moderately long plain cell value"
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = Width(s)
-	}
-}
-
-func BenchmarkWidth_styled(b *testing.B) {
-	s := NewStyle().Bold().ForegroundHex("#cc6666").Sprint("a moderately long styled cell")
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = Width(s)
-	}
-}
-
+// Strip runs over every generated man, markdown and completion page at build time, and over
+// any text a program routes through it at run time. Text that was never styled must cost
+// nothing at all.
 func BenchmarkStrip_unstyled(b *testing.B) {
 	const s = "nothing to strip in this string at all"
 	b.ReportAllocs()
@@ -39,51 +23,11 @@ func BenchmarkStrip_unstyled(b *testing.B) {
 }
 
 func BenchmarkStrip_styled(b *testing.B) {
-	s := NewStyle().Bold().Sprint("some styled text here")
+	const s = "\x1b[1msome\x1b[0m \x1b[38;5;203mstyled\x1b[0m text here"
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = Strip(s)
 	}
-}
-
-func BenchmarkTable_render(b *testing.B) {
-	t := NewTable("NAME", "SIZE", "DESCRIPTION")
-	for i := range 200 {
-		t.Row(fmt.Sprintf("item-%d", i), fmt.Sprintf("%d", i*37), "a description of moderate length")
-	}
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = t.Render()
-	}
-}
-
-func BenchmarkPrinter_json(b *testing.B) {
-	rows := make([]benchRow, 200)
-	for i := range rows {
-		rows[i] = benchRow{Name: fmt.Sprintf("w%d", i), Size: i}
-	}
-	p := NewPrinter(io.Discard).WithFormat(FormatJSON)
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = p.Print(rows)
-	}
-}
-
-func BenchmarkPrinter_table(b *testing.B) {
-	rows := make([]benchRow, 200)
-	for i := range rows {
-		rows[i] = benchRow{Name: fmt.Sprintf("w%d", i), Size: i}
-	}
-	p := NewPrinter(io.Discard).WithFormat(FormatTable)
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = p.Print(rows)
-	}
-}
-
-type benchRow struct {
-	Name string `json:"name"`
-	Size int    `json:"size"`
 }
 
 // Dispatch is the cost every invocation pays before a handler runs: resolve the

@@ -179,9 +179,8 @@
 // [Context.Get] or [Context.MustGet] to consume.
 //
 // rotini's OWN seams are not in that registry. [Program.WithBindMeta], [Program.WithBinder],
-// [Program.WithParser], [Program.WithStyler], [Program.WithSuggestor] and
-// [Program.WithVersion] supply them; [Context.Parser], [Context.Styler], [Context.Suggestor]
-// and [Context.Version] read them back. The registry is yours alone, so nothing rotini depends
+// [Program.WithParser], [Program.WithSuggestor] and [Program.WithVersion] supply them;
+// [Context.Parser], [Context.Suggestor] and [Context.Version] read them back. The registry is yours alone, so nothing rotini depends
 // on can be shadowed by a name you chose or a type you got wrong:
 //
 //   - [Collect] is the typical handler's whole input story: every declared channel reconciled
@@ -207,10 +206,6 @@
 //   - [Suggestor] turns a [ParseError]'s unknown token and candidate vocabulary into "did you
 //     mean" suggestions.
 //
-//   - [Style] builds SGR styling with opt-in [Profile] downsampling, and [Styler] renders text
-//     by intent from a registry of named styles. Detection is opt-in — see [DetectProfile],
-//     [IsTerminal] and [EnvNoColor]; rotini auto-detects nothing.
-//
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve and orchestration
 //     phases wholesale; [FlagValueCompleter] and [ArgValueCompleter] feed dynamic completion.
 //
@@ -218,26 +213,27 @@
 //
 // # Batteries
 //
-// Beyond the runtime, rotini carries the pieces a one-shot, interactive or long-running binary
-// keeps needing. They are batteries on a shelf: importing rotini wires none of them, starts no
+// Beyond the runtime, rotini carries a short shelf of things a binary keeps needing that are
+// awkward to write and easy to get wrong. Importing rotini wires none of them, starts no
 // goroutine and touches no terminal.
 //
-//   - [Printer] is the "data out" complement to [Collect]: one writer that renders a value as
-//     text, JSON, YAML, TOML or a table, chosen from whatever the --output flag carried
-//     ([ParseFormat] turns that string into a [Format]). It pairs with the spec's command
-//     output: key, which generates the typed <Prefix>Output struct.
-//   - [Table] renders aligned columns, measuring cells by display [Width] so styled and
-//     wide-rune text line up.
-//   - [Prompt], [Confirm] and [Select] ask questions over an [io.Reader], so the same code
-//     works interactively, from a pipe and in a test — and input that ends without an answer
-//     is [ErrNotInteractive] rather than a hang.
-//   - [Spinner] and [Progress] show live activity, redrawing one line in place and staying
-//     silent on a non-terminal writer so a CI log is never smeared with carriage returns.
-//   - [Pager] sends long output through $PAGER and passes it through when there is no
-//     terminal, so a piped invocation is never hijacked.
+// The shelf is deliberately SHORT. rotini ships no styler, no table, no spinner, no prompt and
+// no pager, because drawing to a terminal is a solved problem with better libraries behind it
+// than a CLI framework should be writing on the side. What stays here is the part underneath
+// those choices: platform questions the standard library will not answer, and process work that
+// is subtly wrong in most hand-rolled versions.
+//
 //   - [Subprocess] wraps os/exec with environment, working-directory and timeout control; a
 //     non-zero exit is a [*SubprocessError] quoting the child's stderr, and [Subprocess.Lines]
 //     streams tagged output as an iterator you can break out of.
+//   - [TerminalSize] reports the terminal's width and height, honoring COLUMNS and LINES and
+//     saying plainly when there is no answer rather than inventing one. [IsTerminal] and
+//     [EnvNoColor] answer the two questions that come before any styling decision; rotini
+//     auto-detects nothing.
+//   - [ReadSecret] reads one line with terminal echo off and puts the echo back on every path,
+//     including a panic — the failure nobody notices until their next shell command.
+//   - [Strip] removes ANSI escape sequences, which is what makes a styled string safe to put
+//     in a man page, a markdown page or a completion description.
 //
 // # Program shapes
 //
@@ -256,13 +252,10 @@
 //     started together does not stampede in lockstep.
 //   - [StdioServer] serves JSON-RPC 2.0 over stdin/stdout — how LSP and MCP servers speak. It
 //     is the shape a CLI takes when a tool drives it instead of a human.
-//   - [Wizard] sequences steps into a guided flow with branching and back navigation, owning
-//     no streams of its own.
 //
 // # What rotini deliberately does not ship
 //
-// Three things a CLI often wants live elsewhere in the same ecosystem, and rotini does not
-// wrap them:
+// Some of it lives elsewhere in the same ecosystem:
 //
 //   - watching files — go-rotini/fs, fs.NewWatcher
 //   - a single-instance lock — go-rotini/fs, fs.PIDLock
@@ -270,4 +263,12 @@
 //
 // Import them directly. A re-export would give each API two names, put its documentation in
 // the wrong package, and pull another module's surface inside rotini's compatibility promise.
+//
+// The rest is not rotini's to ship at all. Styling, tables, spinners, prompts, forms and
+// paging are how a program DRAWS, and that is a design decision belonging to the program and
+// to libraries built for it. A framework that shipped its own would either be worse than they
+// are or grow into a second product; either way its users would end up with two vocabularies
+// for the same screen. rotini's job is turning a spec into a parsed, bound, dispatched
+// invocation, and handing your handler a [Context] that knows what the user asked for. What
+// the handler prints, and how, is yours.
 package rotini

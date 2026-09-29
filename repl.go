@@ -83,7 +83,7 @@ func (r *REPL) Run(ctx context.Context) error {
 	if r.in == nil {
 		return UsageError(errors.New("rotini: repl has no input"))
 	}
-	ask := newAsker(r.in, r.out)
+	lines := newLineReader(r.in)
 
 	for {
 		select {
@@ -95,7 +95,7 @@ func (r *REPL) Run(ctx context.Context) error {
 			fmt.Fprint(r.out, r.prompt)
 		}
 
-		line, err := ask.readLine(ctx)
+		line, err := lines.read(ctx)
 		switch classifyRead(err) {
 		case readEnded:
 			return nil // end of input, or a canceled session: both are clean exits
@@ -196,4 +196,93 @@ func splitArgs(line string) []string {
 	}
 	flush()
 	return args
+}
+
+// ── reading a line without stealing the next one ─────────────────────────────.
+//
+// A REPL cannot use bufio.Scanner, and the reason is worth keeping written down. A buffered
+// reader created per read fills its buffer from the stream and then goes out of scope, taking
+// whatever it read past the newline with it. On a terminal that is invisible, because a tty
+// hands over one line at a time and there is never a surplus to lose. Everywhere else — a pipe,
+// a test, a CI job — the second line of a scripted session would vanish.
+//
+// So lineReader consumes exactly the bytes of the line it returns. An already-buffered source
+// (a *bufio.Reader, strings.Reader or bytes.Buffer) is used as-is, keeping its buffering;
+// anything else is read one byte at a time, which costs a syscall per character typed and is
+// the price of not eating input that belongs to the next command — or to a subprocess one of
+// them starts.
+type lineReader struct{ in io.ByteReader }
+
+func newLineReader(in io.Reader) lineReader {
+	if br, ok := in.(io.ByteReader); ok {
+		return lineReader{in: br}
+	}
+	return lineReader{in: byteAtATime{in}}
+}
+
+// byteAtATime adapts an io.Reader to io.ByteReader without reading ahead.
+type byteAtATime struct{ r io.Reader }
+
+func (b byteAtATime) ReadByte() (byte, error) {
+	if b.r == nil {
+		return 0, io.EOF
+	}
+	var buf [1]byte
+	for {
+		n, err := b.r.Read(buf[:])
+		if n > 0 {
+			return buf[0], nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		// n == 0 with a nil error is legal and means nothing yet; try again.
+	}
+}
+
+// read reads one line, honoring ctx: the read runs on its own goroutine so a canceled context
+// returns immediately rather than waiting for a keystroke that may never come. The goroutine
+// may outlive the call, since a blocked Read cannot be interrupted; it writes to a buffered
+// channel and exits on its own.
+//
+// End of input with nothing typed is [ErrNotInteractive], which classifyRead treats as a clean
+// end of session rather than a failure.
+func (l lineReader) read(ctx context.Context) (string, error) {
+	type result struct {
+		line string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		var b strings.Builder
+		var err error
+		for {
+			c, readErr := l.in.ReadByte()
+			if readErr != nil {
+				err = readErr
+				break
+			}
+			if c == '\n' {
+				break
+			}
+			b.WriteByte(c)
+		}
+		ch <- result{b.String(), err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return "", fmt.Errorf("rotini: repl canceled: %w", ctx.Err())
+	case r := <-ch:
+		line := strings.TrimRight(r.line, "\r\n")
+		if r.err != nil {
+			if errors.Is(r.err, io.EOF) && line == "" {
+				return "", ErrNotInteractive
+			}
+			if !errors.Is(r.err, io.EOF) {
+				return "", fmt.Errorf("rotini: read line: %w", r.err)
+			}
+		}
+		return line, nil
+	}
 }

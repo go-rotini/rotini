@@ -6,7 +6,9 @@ import (
 )
 
 // Terminal geometry, opt-in like everything else in detect.go: rotini never measures the
-// terminal for you, and nothing in the runtime calls [TerminalSize].
+// terminal for you, and nothing in the runtime calls [TerminalSize]. It is here so the library
+// that DOES wrap or draw your output has a width to work with, without you taking a dependency
+// to learn one number.
 //
 // The platform half lives in terminal_size_unix.go and terminal_size_other.go behind build tags,
 // because asking the kernel how wide a terminal is needs an ioctl the standard library does not
@@ -22,7 +24,7 @@ import (
 //	if !ok {
 //	    cols = 80
 //	}
-//	fmt.Fprintln(rtx.Stdout, rotini.Wrap(text, cols))
+//	fmt.Fprintln(rtx.Stdout, wrap(text, cols))
 //
 // **COLUMNS and LINES win when set.** Those are the conventional override — `COLUMNS=40 mycli`
 // is how a user asks for a narrower render, and how a test pins one — so they are consulted

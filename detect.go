@@ -1,13 +1,14 @@
 package rotini
 
-import (
-	"os"
-	"strings"
-)
+import "os"
 
-// Terminal and color detection. Every function here is opt-in: rotini never calls them for
-// you. A program decides whether to style its output and feeds the answer in — see
-// [Style.SetEnabled] and [Styler.SetProfile], and the deliberate exception on [Spinner].
+// The two questions a program has to answer before it decides how to write to a stream: is
+// anyone watching, and do they want color. rotini never asks them for you — nothing in the
+// runtime calls either function. They are here because both answers are environment trivia that
+// every CLI needs and no library should make you depend on it for.
+//
+// What a program does with the answers — styling, tables, spinners, prompts — is not rotini's
+// business. Hand them to whatever draws your output.
 
 // EnvNoColor reports whether the environment asks for no color, honoring the
 // NO_COLOR convention and its CLICOLOR_FORCE override (a non-empty, non-"0"
@@ -17,30 +18,6 @@ func EnvNoColor() bool {
 		return false
 	}
 	return os.Getenv("NO_COLOR") != ""
-}
-
-// DetectProfile guesses the richest color [Profile] the environment supports from COLORTERM
-// and TERM, returning [ProfileNoColor] when color is unwanted or the terminal is dumb. It is a
-// guess from environment variables, not a capability query.
-func DetectProfile() Profile {
-	if EnvNoColor() {
-		return ProfileNoColor
-	}
-	switch colorterm := os.Getenv("COLORTERM"); colorterm {
-	case "truecolor", "24bit":
-		return ProfileTrueColor
-	}
-	term := os.Getenv("TERM")
-	switch {
-	case strings.Contains(term, "truecolor"):
-		return ProfileTrueColor
-	case strings.Contains(term, "256color"):
-		return ProfileANSI256
-	case term == "" || term == "dumb":
-		return ProfileNoColor
-	default:
-		return ProfileANSI16
-	}
 }
 
 // IsTerminal reports whether file is a character device — a terminal rather than a pipe, a
