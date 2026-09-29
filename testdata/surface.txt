@@ -218,7 +218,6 @@ func NewKey[T any](name string) Key[T]
 func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewREPL(program *Program) *REPL
-func NewScheduler() *Scheduler
 func NewService() *Service
 func NewSubprocess(name string, args ...string) *Subprocess
 func NewSuggestor() *Suggestor
@@ -328,10 +327,6 @@ method Report.Fields() []FieldPath
 method Report.History(path FieldPath) []Provenance
 method Report.Validate() error
 method Report.Winner(path FieldPath) (Provenance, bool)
-method Scheduler.Every(name string, interval time.Duration, fn func(context.Context) error) *Scheduler
-method Scheduler.Run(ctx context.Context) error
-method Scheduler.WithJitter(fraction float64) *Scheduler
-method Scheduler.WithRunAtStart(enabled bool) *Scheduler
 method Service.Go(name string, fn func(context.Context) error) *Service
 method Service.Run(ctx context.Context) error
 method Service.WithShutdown(fn func(context.Context) error) *Service
@@ -416,7 +411,6 @@ type Report
 type Resolution
 type ResolvedCommand
 type Resolver
-type Scheduler
 type Service
 type ServiceError
 type Stream

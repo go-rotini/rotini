@@ -3,6 +3,7 @@ package rotini
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -265,4 +266,152 @@ func TestService_shutdownHookOverrunIsATimeout(t *testing.T) {
 			t.Errorf("err = %v, want the worker's error", err)
 		}
 	})
+}
+
+// ── robustness: the four ways a daemon used to end badly ─────────────────────
+//
+// Service exists for the ENDING, so every one of these is about what happens on the way out.
+// All four were found by probing after Scheduler was removed, and each had the same shape: the
+// failure mode was invisible until the worst possible moment.
+
+// TestService_workerPanicDoesNotKillTheProcess is the most serious of the four.
+//
+// A worker panic used to propagate off its own goroutine and terminate the process outright:
+// no shutdown hooks, no flush, no funnel, no exit code. Program.WithPanicRecover cannot help —
+// it guards the dispatch goroutine, and a goroutine's panic is unrecoverable from anywhere but
+// itself — so the Service that spawned the goroutine has to be the one to guard it.
+//
+// A panicking worker is precisely when the journal most needs flushing.
+func TestService_workerPanicDoesNotKillTheProcess(t *testing.T) {
+	var flushed bool
+	err := NewService().
+		Go("boom", func(context.Context) error { panic("worker exploded") }).
+		WithShutdown(func(context.Context) error { flushed = true; return nil }).
+		Run(context.Background())
+
+	if err == nil {
+		t.Fatal("a panicking worker reported success")
+	}
+	if !flushed {
+		t.Error("teardown was skipped — the panic ended the run before the flush")
+	}
+
+	var pe *PanicError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err = %v, want a *PanicError carrying the value and the stack", err)
+	}
+	if pe.Value != "worker exploded" {
+		t.Errorf("PanicError.Value = %v, want the panicked value", pe.Value)
+	}
+	if len(pe.Stack) == 0 {
+		t.Error("no stack captured — the one thing that makes a recovered panic debuggable")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %q, want it to name the worker that panicked", err)
+	}
+	// A recovered panic is a bug in the program, and the funnel has to price it as one.
+	if got := CategoryOf(err); got != CategoryInternal {
+		t.Errorf("CategoryOf = %v, want internal", got)
+	}
+}
+
+// TestService_hookPanicStillRunsTheRestOfTeardown is worse than a worker panic, because it
+// happens DURING the flush: an escaping panic took out the close after the flush and the unlock
+// after the close.
+//
+// Teardown is the one phase where best-effort beats fail-fast.
+func TestService_hookPanicStillRunsTheRestOfTeardown(t *testing.T) {
+	var ran []string
+	err := NewService().
+		WithShutdown(func(context.Context) error { ran = append(ran, "unlock"); return nil }).
+		WithShutdown(func(context.Context) error { panic("hook exploded") }).
+		WithShutdown(func(context.Context) error { ran = append(ran, "flush"); return nil }).
+		Run(context.Background())
+
+	// Reverse order: flush, then the panicking hook, then unlock.
+	if want := []string{"flush", "unlock"}; !slices.Equal(ran, want) {
+		t.Errorf("hooks ran %v, want %v — a panicking hook cost the ones after it", ran, want)
+	}
+	var pe *PanicError
+	if !errors.As(err, &pe) {
+		t.Errorf("err = %v, want the panic reported as a *PanicError", err)
+	}
+}
+
+// TestService_aDeadlineIsAsGracefulAsACancel pins the symmetry.
+//
+// `<-ctx.Done(); return ctx.Err()` is the idiomatic worker body. Under a CANCELLED context that
+// was graceful; under a context with a DEADLINE the identical worker failed the run, because
+// only context.Canceled was filtered. Both mean "the context you gave me is over", and a
+// bounded run is not a failed one.
+//
+// example-daemon's schedule handler carried `!errors.Is(err, context.DeadlineExceeded)` to
+// paper over exactly this.
+func TestService_aDeadlineIsAsGracefulAsACancel(t *testing.T) {
+	idiomatic := func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }
+
+	t.Run("cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+		if err := NewService().Go("w", idiomatic).Run(ctx); err != nil {
+			t.Errorf("Run = %v, want nil", err)
+		}
+	})
+
+	t.Run("deadline", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		if err := NewService().Go("w", idiomatic).Run(ctx); err != nil {
+			t.Errorf("Run = %v, want nil — a bounded run that reached its bound succeeded", err)
+		}
+	})
+}
+
+// TestService_shutdownTimeoutNamesTheWorker: ErrShutdownTimeout exists to drive a decision, and
+// "rotini: shutdown timed out" on its own sends an operator to read the whole binary.
+func TestService_shutdownTimeoutNamesTheWorker(t *testing.T) {
+	stop := make(chan struct{})
+	defer close(stop)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { time.Sleep(10 * time.Millisecond); cancel() }()
+
+	err := NewService().
+		WithShutdownTimeout(20*time.Millisecond).
+		Go("well-behaved", func(ctx context.Context) error { <-ctx.Done(); return nil }).
+		Go("stuck", func(context.Context) error { <-stop; return nil }).
+		Run(ctx)
+
+	if !errors.Is(err, ErrShutdownTimeout) {
+		t.Fatalf("err = %v, want ErrShutdownTimeout", err)
+	}
+	if !strings.Contains(err.Error(), `"stuck"`) {
+		t.Errorf("err = %q, want it to name the worker that hung", err)
+	}
+	if strings.Contains(err.Error(), "well-behaved") {
+		t.Errorf("err = %q, named a worker that stopped in time", err)
+	}
+}
+
+// TestService_isReusableAndConcurrent backs the doc's claim. Run keeps all its mutable state on
+// the stack, which is what lets one configured Service serve several runs — and what makes the
+// "configure before running" rule the only rule.
+func TestService_isReusableAndConcurrent(t *testing.T) {
+	var runs atomic.Int64
+	svc := NewService().Go("w", func(context.Context) error { runs.Add(1); return nil })
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := svc.Run(context.Background()); err != nil {
+				t.Errorf("Run = %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if runs.Load() != 8 {
+		t.Errorf("worker ran %d times across 8 runs", runs.Load())
+	}
 }

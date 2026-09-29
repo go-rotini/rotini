@@ -86,25 +86,38 @@ rotini.NewREPL(Program).WithPrompt("todo> ").Run(ctx)
 
 The program's funnel already reports a failing command, so the REPL adds nothing of its own. `WithErrorEcho(true)` turns on a second report for a program whose funnel is deliberately silent.
 
-### Service and Scheduler
+### Service
 
-`Service` runs long-lived workers until the context ends or one fails, with shutdown hooks that run in reverse order **in every case** — clean stop, failure, and cancellation alike. The budget covers both halves of teardown: workers that will not stop and hooks that overrun both surface as `ErrShutdownTimeout`, so a supervisor can tell "finished" from "exited with work possibly unflushed". Because the runtime already cancels the run context on SIGINT/SIGTERM, a handler that builds a Service on its own `ctx` gets signal-driven graceful shutdown for free.
+`Service` runs long-lived workers until the context ends or one fails. It is **not** a supervisor — `errgroup` is a supervisor. It is the part of a daemon that is not about doing the work, but about **ending**.
 
-`Scheduler` is `Service` with timers, so it inherits exactly those semantics.
-
-{{< code title="service / scheduler" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="service" language="golang" open="true" collapsible="false" copy="true" >}}
 err := rotini.NewService().
 	Go("http", serveHTTP).
 	Go("reconciler", reconcile).
 	WithShutdown(closeDB).
 	WithShutdownTimeout(30 * time.Second).
 	Run(ctx)
-
-err = rotini.NewScheduler().
-	Every("refresh", time.Minute, refresh).
-	WithJitter(0.1). // so a fleet does not stampede in lockstep
-	Run(ctx)
 {{< /code >}}
+
+Three behaviours, all about the shutdown, and none of them free anywhere else:
+
+- **Teardown runs on a context that is not already dead.** Hooks get a context derived with `context.WithoutCancel`, under a fresh budget. After a Ctrl-C the run context is *already cancelled*, so naive cleanup — `db.Close(ctx)`, `flush(ctx)` — fails instantly and silently, taking the buffer you were trying to flush with it.
+- **A context *ended* from outside is a graceful stop, so `Run` returns nil.** `errgroup.Wait` returns `context.Canceled`, which a CLI would turn into a non-zero exit for a clean SIGTERM. "Ended" covers a deadline as well as a cancel, so a worker writing the idiomatic `<-ctx.Done(); return ctx.Err()` does not fail a bounded run merely because the bound was a timeout.
+- **One budget across both halves, surfaced as `ErrShutdownTimeout`.** Workers that will not stop and hooks that overrun both produce the same typed sentinel, because the question a supervisor asks is the same either way: did teardown complete, or is this process exiting with work possibly unflushed? It exists to become an **exit code** — and when workers are what overran, it **names them**: `rotini: shutdown timed out: worker "indexer" did not stop`.
+
+Hooks run in **reverse** registration order, like deferred calls, so a resource is released before whatever it depends on. They run in every case — clean stop, worker failure, cancellation alike.
+
+**A panic does not take the process with it.** A worker that panics is recovered on its own goroutine, becomes the service's failure as a `*PanicError` carrying the stack, and teardown still runs. `Program.WithPanicRecover` cannot do this for you: it guards the dispatch goroutine, and a goroutine's panic is unrecoverable from anywhere but itself — so the thing that spawned the goroutine has to be the thing that guards it. A panicking shutdown hook is contained the same way and does **not** cost the hooks after it, because teardown is the one phase where best-effort beats fail-fast.
+
+{{< alert type="info" title="A PANICKING WORKER IS WHEN THE JOURNAL MOST NEEDS FLUSHING:" >}}
+Without containment, one worker panic ends the binary with Go's panic dump on stderr and every hook unrun — no flush, no close, no unlock, no funnel, no exit code. That is the single worst way for a daemon to end, and it is the reason `Service` is in rotini at all.
+{{< /alert >}}
+
+Because the runtime already cancels the run context on SIGINT/SIGTERM, a handler that builds a Service on its own `ctx` gets signal-driven graceful shutdown for free.
+
+{{< alert type="info" title="THERE IS NO SCHEDULER:" >}}
+`rotini.Scheduler` was removed — it was a *consumer* of this seam rather than a peer of it, and everything it added was a `time.Timer` loop and a jitter multiplication. Run your timers as workers, or put a real scheduler inside one: `svc.Go("cron", func(ctx) error { c.Start(); <-ctx.Done(); <-c.Stop().Done(); return nil })`. [robfig/cron](https://github.com/robfig/cron) and [go-co-op/gocron](https://github.com/go-co-op/gocron) give you cron expressions, timezones and skip-if-still-running, none of which rotini's version had. `example-daemon` shows both halves.
+{{< /alert >}}
 
 ## What rotini does not ship
 

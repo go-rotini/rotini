@@ -183,7 +183,7 @@ One binary, four long-running shapes, all over the same command tree.
 
 {{< code title="syncd" language="text" open="true" collapsible="false" copy="false" >}}
 syncd serve      a Service   — concurrent workers with an ordered shutdown
-      schedule   a Scheduler — periodic work with jitter
+      schedule   periodic work — syncd's own timers, supervised by a Service
       rpc        JSON-RPC over stdin/stdout — on sourcegraph/jsonrpc2, not rotini
       shell      a REPL      — the same commands, interactively
       status | queue add|list|drain      ordinary commands, shared by all four

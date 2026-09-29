@@ -4,13 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
 
 // [Service]: the daemon shape — long-lived workers supervised until the context ends
-// or one fails, with shutdown hooks that run in every case. [Scheduler] is built on it.
+// or one fails, with shutdown hooks that run in every case — the part of a daemon that is not
+// about doing the work, but about ending.
 
 // ErrShutdownTimeout reports that a service did not tear itself down within the shutdown
 // budget — either its workers did not stop, or its shutdown hooks did not finish. The budget
@@ -21,6 +25,10 @@ import (
 //
 // The service returns rather than hanging, so a supervisor's own kill timer is never the thing
 // that ends the process.
+//
+// When workers are what overran, the error NAMES THEM — "rotini: shutdown timed out: worker
+// \"indexer\" did not stop". An operator reading a log at 3am needs to know which worker to go
+// and fix, and "shutdown timed out" on its own sends them to read the whole binary.
 var ErrShutdownTimeout = InternalError(errors.New("rotini: shutdown timed out"))
 
 // Service runs a set of long-lived workers until the context ends or one of them fails, then
@@ -34,7 +42,18 @@ var ErrShutdownTimeout = InternalError(errors.New("rotini: shutdown timed out"))
 //	    WithShutdown(closeDB)
 //	if err := svc.Run(ctx); err != nil { rtx.RecordError(err) }
 //
-// Workers are plain funcs returning an error, so a failure travels back the normal Go way.
+// Workers are plain funcs returning an error, so a failure travels back the normal Go way. A
+// worker that PANICS does not take the process with it: the panic is recovered on its own
+// goroutine, becomes the service's failure as a [*PanicError], and teardown still runs. That is
+// not a nicety — a panicking worker is exactly when the journal most needs flushing, and a
+// process that dies on a goroutine rotini spawned would skip every hook, every outcome and every
+// exit code on the way out. [Program.WithPanicRecover] cannot help here: it guards the dispatch
+// goroutine, and a goroutine's panic is unrecoverable from anywhere but itself.
+//
+// Configure before running. [Service.Go], [Service.WithShutdown] and
+// [Service.WithShutdownTimeout] are not synchronized, so calling one while [Service.Run] is in
+// flight is a data race. A configured Service may be run more than once, and concurrently: Run
+// keeps all of its mutable state on the stack.
 //
 // The zero value is usable: a Service with no workers runs nothing and returns nil.
 type Service struct {
@@ -87,8 +106,11 @@ func (s *Service) WithShutdownTimeout(d time.Duration) *Service {
 // worker's name. A worker returning nil has simply finished. Shutdown hooks run in every case,
 // so cleanup is not conditional on success.
 //
-// A context canceled from outside is a graceful stop rather than a failure, so Run returns nil
-// for it; only a worker's own error or [ErrShutdownTimeout] is an error.
+// A context ENDED from outside is a graceful stop rather than a failure, so Run returns nil for
+// it; only a worker's own error or [ErrShutdownTimeout] is an error. "Ended" covers both
+// cancellation and a deadline, and the symmetry is deliberate: a worker that writes the
+// idiomatic `<-ctx.Done(); return ctx.Err()` must not fail a bounded run merely because the
+// bound was a timeout rather than a cancel. Both mean "the context you gave me is over".
 func (s *Service) Run(ctx context.Context) error {
 	if len(s.workers) == 0 {
 		return s.runShutdown(ctx, nil)
@@ -102,11 +124,14 @@ func (s *Service) Run(ctx context.Context) error {
 		once    sync.Once
 		failure error
 	)
+	var running sync.Map // worker name -> struct{}, for naming whoever overruns the budget
 	for _, w := range s.workers {
 		wg.Add(1)
+		running.Store(w.name, struct{}{})
 		go func(w serviceWorker) {
 			defer wg.Done()
-			if err := w.fn(runCtx); err != nil && !errors.Is(err, context.Canceled) {
+			defer running.Delete(w.name)
+			if err := runWorker(runCtx, w); err != nil {
 				once.Do(func() { failure = fmt.Errorf("rotini: service worker %q: %w", w.name, err) })
 				cancel() // one failure stops the rest
 			}
@@ -118,17 +143,46 @@ func (s *Service) Run(ctx context.Context) error {
 
 	select {
 	case <-done: // every worker returned on its own
-	case <-ctx.Done(): // a signal or the caller stopped us
+	case <-ctx.Done(): // a signal, a deadline, or the caller stopped us
 		cancel()
-		if err := s.await(done); err != nil {
+		if err := s.await(done, &running); err != nil {
 			return s.runShutdown(context.WithoutCancel(ctx), err)
 		}
 	}
 	return s.runShutdown(context.WithoutCancel(ctx), failure)
 }
 
-// await waits for the workers within the shutdown budget.
-func (s *Service) await(done <-chan struct{}) error {
+// runWorker calls one worker, containing a panic and normalizing the errors that mean "the
+// context is over" to nil.
+//
+// Recovering here rather than around Run is the only place it CAN be done: a panic unwinds its
+// own goroutine and nothing else can catch it, so a Service that spawned the goroutine has to be
+// the one to guard it. The recovered value becomes a [*PanicError], which carries the stack and
+// classifies as [CategoryInternal], so the funnel prices it as the bug it is.
+func runWorker(ctx context.Context, w serviceWorker) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			stack := make([]byte, 8192)
+			stack = stack[:runtime.Stack(stack, false)]
+			err = &PanicError{Value: r, Stack: stack}
+		}
+	}()
+	if err := w.fn(ctx); err != nil && !contextEnded(err) {
+		return err
+	}
+	return nil
+}
+
+// contextEnded reports whether err is just the context saying it is over. Cancellation and a
+// deadline are the same answer to a worker: stop. Treating only the first as graceful made a
+// bounded run fail for writing `return ctx.Err()`, which is the idiomatic thing to write.
+func contextEnded(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+}
+
+// await waits for the workers within the shutdown budget, naming whoever is still running when
+// it runs out.
+func (s *Service) await(done <-chan struct{}, running *sync.Map) error {
 	if s.timeout <= 0 {
 		<-done
 		return nil
@@ -139,13 +193,53 @@ func (s *Service) await(done <-chan struct{}) error {
 	case <-done:
 		return nil
 	case <-timer.C:
-		return ErrShutdownTimeout
+		return fmt.Errorf("%w: %s", ErrShutdownTimeout, stuckWorkers(running))
 	}
+}
+
+// runHook calls one shutdown hook, containing a panic the same way [runWorker] does.
+//
+// A panicking hook is strictly worse than a panicking worker: it happens DURING the flush, so
+// letting it escape would kill the process with the remaining hooks unrun — the close after the
+// flush, the unlock after the close. Recovering turns it into this hook's error and lets the
+// rest of teardown finish.
+func runHook(ctx context.Context, hook func(context.Context) error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			stack := make([]byte, 8192)
+			stack = stack[:runtime.Stack(stack, false)]
+			err = &PanicError{Value: r, Stack: stack}
+		}
+	}()
+	return hook(ctx)
+}
+
+// stuckWorkers renders the workers that have not returned, sorted so the message is stable.
+func stuckWorkers(running *sync.Map) string {
+	var names []string
+	running.Range(func(k, _ any) bool {
+		if name, ok := k.(string); ok {
+			names = append(names, fmt.Sprintf("%q", name))
+		}
+		return true
+	})
+	if len(names) == 0 {
+		return "the workers did not stop"
+	}
+	sort.Strings(names)
+	if len(names) == 1 {
+		return "worker " + names[0] + " did not stop"
+	}
+	return "workers " + strings.Join(names, ", ") + " did not stop"
 }
 
 // runShutdown runs the teardown hooks in reverse order under a fresh budget —
 // derived from a context WITHOUT the caller's cancellation, so cleanup still gets
 // to run after a Ctrl-C. It returns prior if set, else the first hook error.
+//
+// Every hook runs, whatever the ones before it did. A hook that fails or panics must not cost
+// the ones after it: they are the flush, the unlock and the close, and teardown is the one phase
+// where best-effort beats fail-fast.
 func (s *Service) runShutdown(ctx context.Context, prior error) error {
 	if len(s.shutdown) == 0 {
 		return prior
@@ -157,7 +251,7 @@ func (s *Service) runShutdown(ctx context.Context, prior error) error {
 	}
 	var first error
 	for _, hook := range slices.Backward(s.shutdown) {
-		if err := hook(ctx); err != nil && first == nil {
+		if err := runHook(ctx, hook); err != nil && first == nil {
 			first = fmt.Errorf("rotini: service shutdown: %w", err)
 		}
 	}

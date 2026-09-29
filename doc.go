@@ -248,8 +248,6 @@
 //   - [Service] runs long-lived workers until the context ends or one fails, with ordered
 //     shutdown hooks that run in every case. Since the runtime already cancels the run context
 //     on SIGINT/SIGTERM, a Service built on that ctx gets graceful shutdown for free.
-//   - [Scheduler] is [Service] with timers: interval tasks with optional jitter, so a fleet
-//     started together does not stampede in lockstep.
 //
 // # What rotini deliberately does not ship
 //

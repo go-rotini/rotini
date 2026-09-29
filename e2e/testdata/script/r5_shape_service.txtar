@@ -32,6 +32,24 @@ stdout 'shutdown: flush'
 # reports nothing because nothing was recorded.
 ! stderr 'Error'
 
+# ── a panicking worker must not take the process with it ─────────────────────
+#
+# This is the one that needs a REAL process. A worker panic used to propagate off the goroutine
+# Service spawned and terminate the binary outright: no shutdown hooks, no funnel, no exit code
+# — just Go's panic dump on stderr. Program.WithPanicRecover cannot help, because it guards the
+# dispatch goroutine and a goroutine's panic is unrecoverable from anywhere but itself.
+#
+# A panicking worker is exactly when the journal most needs flushing.
+! exec ./daemon$exe crash
+
+# The flush still ran, in reverse order, after the panic.
+stdout 'shutdown: close'
+stdout 'shutdown: flush'
+
+# The failure was REPORTED, through the funnel, naming the worker — not dumped by the runtime.
+stderr 'crasher'
+! stderr 'goroutine 1 \[running\]'
+
 -- cmd/daemon/.rotini.spec.yaml --
 version: 0.0.0
 command:
@@ -40,6 +58,8 @@ command:
   commands:
     - name: serve
       summary: run workers until interrupted
+    - name: crash
+      summary: run a worker that panics
 -- cmd/daemon/.rotini.conf.yaml --
 version: 0.0.0
 generate:
@@ -120,6 +140,43 @@ func (*daemonServeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 // which is a deliberate stop rather than a failure.
 func rotiniGracefulStop(err error) bool {
 	return err != nil && (err == context.Canceled || context.Cause(context.Background()) == err)
+}
+-- internal/cmd/daemon/daemon_crash.go --
+package daemon
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type daemonCrashHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+// Run panics inside a worker. The process must survive long enough to tear itself down and
+// report, because a crash with the buffers unflushed is the failure Service exists to prevent.
+func (*daemonCrashHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	svc := rotini.NewService().
+		Go("crasher", func(context.Context) error {
+			panic("the index is corrupt")
+		}).
+		WithShutdown(func(context.Context) error {
+			fmt.Fprintln(rtx.Stdout, "shutdown: flush")
+			return nil
+		}).
+		WithShutdown(func(context.Context) error {
+			fmt.Fprintln(rtx.Stdout, "shutdown: close")
+			return nil
+		})
+
+	if err := svc.Run(ctx); err != nil {
+		rtx.RecordError(err)
+	}
 }
 -- cmd/daemon/main.go --
 package main
