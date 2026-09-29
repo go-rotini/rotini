@@ -3,6 +3,7 @@ package rotini
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -171,5 +172,89 @@ func TestProgress_doneClearsTheLine(t *testing.T) {
 	p.Done()
 	if !strings.HasSuffix(buf.String(), "\r") {
 		t.Errorf("Done did not clear the line: %q", buf.String())
+	}
+}
+
+// An indicator owns a line and redraws it with \r. A handler writing to the same stream while
+// one is live produces corrupt output, and the audit captured the byte stream:
+//
+//	\r | fetching \r / fetching done: 0 \n \r -
+//
+// "fetchingdone: 0" — the frame is never cleared, so the handler's line lands on top of it and
+// the next frame lands on top of that. The mutex and the drawn-cells counter that make clearing
+// possible are unexported, so this could not be fixed from outside the package.
+func TestSpinner_printDoesNotSmearTheLine(t *testing.T) {
+	var buf syncBuf
+	s := NewSpinner(&buf).WithAnimation(true).WithMessage("fetching").
+		WithInterval(time.Millisecond).WithFrames("A").Start(context.Background())
+
+	for i := range 3 {
+		s.Print(func() { fmt.Fprintf(&buf, "done: %d\n", i) })
+		time.Sleep(2 * time.Millisecond)
+	}
+	s.Stop()
+
+	got := buf.String()
+	for i := range 3 {
+		want := fmt.Sprintf("done: %d\n", i)
+		if !strings.Contains(got, want) {
+			t.Errorf("the handler's line %q never appeared:\n%q", want, got)
+		}
+		// The smear signature: a frame's text butted directly against the handler's line
+		// with no clear between them.
+		if strings.Contains(got, "fetchingdone: "+fmt.Sprint(i)) {
+			t.Errorf("line %d smeared into the spinner frame:\n%q", i, got)
+		}
+	}
+}
+
+// TestSpinner_printIsSafeWhenNotAnimating: on a pipe or in a test nothing is drawn, so there is
+// nothing to clear — but fn must still run, or output would vanish exactly where it is hardest
+// to notice.
+func TestSpinner_printIsSafeWhenNotAnimating(t *testing.T) {
+	var buf syncBuf
+	s := NewSpinner(&buf) // no terminal, no WithAnimation
+	ran := false
+	s.Print(func() { ran = true; fmt.Fprintln(&buf, "plain") })
+
+	if !ran {
+		t.Error("Print swallowed fn on a non-animating indicator")
+	}
+	if got := buf.String(); got != "plain\n" {
+		t.Errorf("output = %q, want just the handler's line with no control characters", got)
+	}
+}
+
+// TestSpinner_printOnAStoppedOrUnstartedSpinner: Print must be as forgiving as Stop.
+func TestSpinner_printOnAStoppedOrUnstartedSpinner(t *testing.T) {
+	var buf syncBuf
+	s := NewSpinner(&buf).WithAnimation(true)
+	s.Print(func() { fmt.Fprint(&buf, "before-start ") }) // never started
+	s.Start(context.Background())
+	s.Stop()
+	s.Print(func() { fmt.Fprint(&buf, "after-stop") }) // already stopped
+	s.Print(nil)                                       // nil fn
+
+	got := buf.String()
+	if !strings.Contains(got, "before-start") || !strings.Contains(got, "after-stop") {
+		t.Errorf("Print dropped output outside the running window: %q", got)
+	}
+}
+
+// TestProgress_printDoesNotSmearTheBar is the same guarantee on the other indicator.
+func TestProgress_printDoesNotSmearTheBar(t *testing.T) {
+	var buf syncBuf
+	p := NewProgress(&buf, 10).WithAnimation(true).WithMessage("copying")
+	p.Set(5)
+	p.Print(func() { fmt.Fprintln(&buf, "skipped: a") })
+	p.Set(6)
+	p.Done()
+
+	got := buf.String()
+	if !strings.Contains(got, "skipped: a\n") {
+		t.Errorf("the handler's line never appeared:\n%q", got)
+	}
+	if strings.Contains(got, "copyingskipped") {
+		t.Errorf("the line smeared into the bar:\n%q", got)
 	}
 }

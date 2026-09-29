@@ -109,8 +109,8 @@ func (p *Printer) WithStyler(styler *Styler) *Printer {
 }
 
 // WithWidth bounds [FormatTable] output to n display cells (see
-// [Table.WithWidth]). Zero renders at natural width. It returns the receiver to
-// chain.
+// [Table.WithWidth]), with n typically from [TerminalSize]. Zero renders at
+// natural width. It returns the receiver to chain.
 func (p *Printer) WithWidth(n int) *Printer {
 	p.width = n
 	return p

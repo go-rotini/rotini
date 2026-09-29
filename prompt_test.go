@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -341,3 +342,79 @@ func TestAskers_shareOneStream(t *testing.T) {
 type unbufferedReader struct{ r io.Reader }
 
 func (u unbufferedReader) Read(p []byte) (int, error) { return u.r.Read(p) }
+
+// A secret prompt must hide the answer where there is something to hide, and must keep working
+// where there is not — a pipe, a test, a CI runner. The failure mode that makes this rotini's job
+// is not a wrong value: it is a shell left with echo off, which survives the process.
+
+func TestPrompt_secretReadsFromAPipeUnchanged(t *testing.T) {
+	in := strings.NewReader("s3cret\n")
+	var out strings.Builder
+	got, err := NewPrompt(in, &out).WithLabel("token").WithSecret().Ask(context.Background())
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+	if got != "s3cret" {
+		t.Errorf("answer = %q, want the piped value — a secret prompt must stay testable", got)
+	}
+	// Nothing was echoed by the terminal, because there is no terminal; rotini must not invent
+	// a newline or a mask for output that never appeared.
+	if strings.Contains(out.String(), "\n") {
+		t.Errorf("output = %q, want just the label — nothing to un-echo on a pipe", out.String())
+	}
+}
+
+func TestPrompt_secretHonorsDefaultAndValidation(t *testing.T) {
+	var out strings.Builder
+	got, err := NewPrompt(strings.NewReader("\n"), &out).
+		WithLabel("token").WithSecret().WithDefault("fallback").Ask(context.Background())
+	if err != nil || got != "fallback" {
+		t.Errorf("Ask = (%q, %v), want the default to apply to a secret prompt too", got, err)
+	}
+
+	calls := 0
+	_, err = NewPrompt(strings.NewReader("bad\n"), &out).
+		WithLabel("token").WithSecret().WithRetries(0).
+		WithValidate(func(string) error { calls++; return errors.New("too short") }).
+		Ask(context.Background())
+	if err == nil || calls != 1 {
+		t.Errorf("validation did not run on a secret prompt: err=%v calls=%d", err, calls)
+	}
+}
+
+// WithMask implies WithSecret, so a masked prompt is never echoed by the terminal either.
+func TestPrompt_maskImpliesSecret(t *testing.T) {
+	p := NewPrompt(strings.NewReader("x\n"), &strings.Builder{}).WithMask('*')
+	if !p.secret {
+		t.Error("WithMask did not imply WithSecret — the answer would be echoed in the clear")
+	}
+	if p.mask != '*' {
+		t.Errorf("mask = %q, want '*'", p.mask)
+	}
+	if q := NewPrompt(strings.NewReader("x\n"), &strings.Builder{}).WithMask(0); !q.secret || q.mask != 0 {
+		t.Error("WithMask(0) should be exactly WithSecret")
+	}
+}
+
+// withEchoDisabled must run fn and report "echoed" when it cannot disable anything, so the caller
+// does not print a newline or a mask for output that was never suppressed.
+func TestWithEchoDisabled_degradesWithoutATerminal(t *testing.T) {
+	ran := false
+	if echoed := withEchoDisabled(nil, func() { ran = true }); !echoed {
+		t.Error("a nil file reported that echo was suppressed")
+	}
+	if !ran {
+		t.Error("fn did not run when echo could not be disabled")
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	ran = false
+	if echoed := withEchoDisabled(r, func() { ran = true }); !echoed || !ran {
+		t.Error("a pipe should run fn and report nothing was suppressed")
+	}
+}

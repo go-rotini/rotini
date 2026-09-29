@@ -24,8 +24,15 @@ const (
 // [Table.Render] or [Table.Fprint]. Column widths are measured with [Width], so cells carrying
 // ANSI styling align by what the terminal displays rather than by byte length.
 //
-// Terminal width is not detected: an unbounded table renders at its natural width, and a
-// program that wants it fitted passes the budget in with [Table.WithWidth].
+// Terminal width is not detected FOR you: an unbounded table renders at its natural width, and a
+// program that wants it fitted passes the budget in with [Table.WithWidth]. [TerminalSize] is
+// where that number comes from — opt-in, like every other detection in rotini:
+//
+//	cols, _, ok := rotini.TerminalSize(os.Stdout)
+//	if !ok {
+//	    cols = 80
+//	}
+//	rotini.NewTable(headers...).WithWidth(cols).Fprint(rtx.Stdout)
 //
 // The zero value is not usable; start from [NewTable].
 type Table struct {
@@ -69,7 +76,7 @@ func (t *Table) WithPadding(n int) *Table {
 
 // WithWidth bounds the rendered table to n display cells, truncating the widest
 // columns (with a trailing "…") until it fits. Zero — the default — renders at
-// natural width.
+// natural width. [TerminalSize] supplies n for a table meant to fit the screen.
 func (t *Table) WithWidth(n int) *Table {
 	if n >= 0 {
 		t.width = n

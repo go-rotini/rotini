@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -50,13 +51,24 @@ const defaultRetries = 2
 type asker struct {
 	in  io.ByteReader
 	out io.Writer
+	// src is the reader as handed in, before any byte-at-a-time adaptation. It exists so a
+	// secret prompt can find the *os.File underneath and silence the right terminal —
+	// unwrapping by type assertion would only work for the adapters rotini happens to use
+	// today.
+	src io.Reader
 }
 
 func newAsker(in io.Reader, out io.Writer) asker {
 	if br, ok := in.(io.ByteReader); ok {
-		return asker{in: br, out: out}
+		return asker{in: br, out: out, src: in}
 	}
-	return asker{in: byteAtATime{in}, out: out}
+	return asker{in: byteAtATime{in}, out: out, src: in}
+}
+
+// inputFile returns the terminal the user types at, or nil when the input is not a file.
+func (a asker) inputFile() *os.File {
+	f, _ := a.src.(*os.File)
+	return f
 }
 
 // byteAtATime adapts an io.Reader to io.ByteReader without buffering ahead.
@@ -141,6 +153,8 @@ type Prompt struct {
 	def      string
 	validate func(string) error
 	retries  int
+	secret   bool
+	mask     rune
 }
 
 // NewPrompt returns a prompt reading from in and writing its label to out. Pass a
@@ -175,7 +189,7 @@ func (p *Prompt) WithRetries(n int) *Prompt {
 func (p *Prompt) Ask(ctx context.Context) (string, error) {
 	for attempt := 0; ; attempt++ {
 		p.write(promptLabel(p.label, p.def))
-		answer, err := p.readLine(ctx)
+		answer, err := p.readAnswer(ctx)
 		if errors.Is(err, ErrNotInteractive) && p.def != "" {
 			return p.def, nil // a default makes the question answerable without a human
 		}
@@ -197,6 +211,46 @@ func (p *Prompt) Ask(ctx context.Context) (string, error) {
 		}
 		return answer, nil
 	}
+}
+
+// WithSecret reads the answer without echoing it, for a password, token or passphrase.
+//
+// Echo is disabled on the terminal for the duration of the read and restored afterwards on every
+// path, including a panic and a canceled context. A newline is written when the read ends, since
+// the user's own Enter was not echoed either and without it the next output lands on the prompt.
+//
+// # Why this belongs to rotini
+//
+// Doing it by hand means putting the terminal in a non-default state and being certain to undo
+// it — and the failure mode is not a wrong value, it is a SHELL LEFT WITH ECHO OFF, which
+// survives the process and confuses the user's next command. rotini installs the signal trap
+// (see [Program.WithSignals]), so a SIGINT during the read cancels the run context, the read
+// returns, and the restore runs. That is the part a program cannot reliably do for itself
+// without duplicating the trap.
+//
+// # It degrades rather than failing
+//
+// When the input is not a terminal — a pipe, a test, a CI runner — there is no echo to disable
+// and nothing to hide, so the answer is read normally. That keeps the existing contract: a
+// prompt works from a pipe, and a handler that asks for a secret is still testable.
+//
+//	token, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).
+//	    WithLabel("token").WithSecret().Ask(ctx)
+func (p *Prompt) WithSecret() *Prompt {
+	p.secret = true
+	return p
+}
+
+// WithMask is [Prompt.WithSecret] that echoes r for each rune typed, the "••••" shape, so a user
+// can see their keystrokes register. A zero r is the same as WithSecret.
+//
+// The mask is written by rotini rather than the terminal, so it appears only where echo was
+// actually disabled: on a pipe the answer is read plainly and nothing is masked, because there
+// was nothing on screen to mask.
+func (p *Prompt) WithMask(r rune) *Prompt {
+	p.secret = true
+	p.mask = r
+	return p
 }
 
 // promptLabel renders "label [default]: ".
@@ -436,4 +490,32 @@ func (s *Select) resolve(answer string) int {
 		}
 	}
 	return -1
+}
+
+// readAnswer reads one line, without echo when the prompt is a secret.
+//
+// The terminal to silence is the one the user TYPES at, which is the input stream — not the
+// output the label went to. They are usually the same device and occasionally are not, and
+// disabling echo on the wrong one silences nothing.
+func (p *Prompt) readAnswer(ctx context.Context) (string, error) {
+	if !p.secret {
+		return p.readLine(ctx)
+	}
+
+	var line string
+	var err error
+	echoed := withEchoDisabled(p.inputFile(), func() {
+		line, err = p.readLine(ctx)
+	})
+
+	if !echoed {
+		// The user's Enter was not echoed either, so without this the next write lands on
+		// the prompt line.
+		p.write("\n")
+		if p.mask != 0 {
+			// The keystrokes were invisible; show the shape of what was typed.
+			p.write(strings.Repeat(string(p.mask), len([]rune(line))) + "\n")
+		}
+	}
+	return line, err
 }

@@ -59,11 +59,28 @@ func (l *line) draw(text string) {
 func (l *line) clear() {
 	l.drawMu.Lock()
 	defer l.drawMu.Unlock()
+	l.clearLocked()
+}
+
+// clearLocked is clear with the mutex already held.
+func (l *line) clearLocked() {
 	if !l.animate || l.w == nil || l.drawn == 0 {
 		return
 	}
 	fmt.Fprint(l.w, "\r"+strings.Repeat(" ", l.drawn)+"\r")
 	l.drawn = 0
+}
+
+// bypass clears the live line, runs fn, and lets the next frame repaint. The draw mutex is held
+// throughout, so no frame can land in the middle of fn's output.
+func (l *line) bypass(fn func()) {
+	if fn == nil {
+		return
+	}
+	l.drawMu.Lock()
+	defer l.drawMu.Unlock()
+	l.clearLocked()
+	fn()
 }
 
 // Spinner is an animated activity indicator for work of unknown duration. It is inert until
@@ -166,6 +183,28 @@ func (s *Spinner) Message(msg string) {
 	s.mu.Unlock()
 }
 
+// Print writes through the spinner without smearing it: the live line is cleared, fn writes, and
+// the next frame repaints beneath whatever it left.
+//
+// It exists because the obvious code is wrong and looks right. A handler that writes to the same
+// stream a spinner owns produces this —
+//
+//	\r | fetching \r / fetching done: 0 \n \r -
+//
+// "fetchingdone: 0", because the frame is never cleared before the handler's line lands on top of
+// it. The mutex and the "how many cells did I draw" counter that make clearing possible are
+// unexported, so this could not be done correctly from outside:
+//
+//	spinner := rotini.NewSpinner(rtx.Stdout).WithMessage("fetching").Start(ctx)
+//	for _, f := range files {
+//	    spinner.Print(func() { fmt.Fprintln(rtx.Stdout, "done:", f) })
+//	}
+//
+// The draw mutex is held for the whole call, so no frame can interleave with fn's output. Keep fn
+// short for that reason — it blocks the animation. On a non-terminal writer nothing is drawn or
+// cleared and fn simply runs.
+func (s *Spinner) Print(fn func()) { s.bypass(fn) }
+
 // Stop halts the animation and clears the line. It is safe to call on a spinner
 // that was never started, and safe to call more than once.
 func (s *Spinner) Stop() {
@@ -212,7 +251,8 @@ func NewProgress(w io.Writer, total int64) *Progress {
 	}
 }
 
-// WithWidth sets the bar's width in cells (default 30).
+// WithWidth sets the bar's width in cells (default 30). [TerminalSize] supplies the number for
+// a bar meant to span the screen.
 func (p *Progress) WithWidth(n int) *Progress {
 	if n > 0 {
 		p.mu.Lock()
@@ -266,6 +306,13 @@ func (p *Progress) Message(msg string) {
 	p.mu.Unlock()
 	p.draw(text)
 }
+
+// Print writes through the bar without smearing it: the live line is cleared, fn writes, and the
+// next update repaints beneath whatever it left. See [Spinner.Print] for why this cannot be done
+// from outside.
+//
+//	bar.Print(func() { fmt.Fprintln(rtx.Stdout, "skipped:", name) })
+func (p *Progress) Print(fn func()) { p.bypass(fn) }
 
 // Done clears the line. A progress bar's final state belongs in the program's
 // own reported outcome, not in a leftover terminal line.

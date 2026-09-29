@@ -51,6 +51,39 @@ An empty table prints **nothing** — not a blank line — so a command with no 
 
 Sends long output through `$PAGER`, and passes it straight through when there is no terminal, so `mycli list | grep x` is never hijacked. A pager that fails to start is not an error: the text still reaches the writer, because failing to display output is worse than displaying it unpaged.
 
+### Editor
+
+The counterpart: brings text **in** through `$VISUAL`, then `$EDITOR` — the `git commit` / `crontab -e` shape.
+
+{{< code title="edit a draft" language="golang" open="true" collapsible="false" copy="true" >}}
+body, err := rotini.NewEditor().WithExtension(".md").Edit(ctx, draft)
+switch {
+case errors.Is(err, rotini.ErrEditAborted):
+	rtx.RecordInfo("no changes")
+	return
+case err != nil:
+	rtx.HaltWith(err)
+	return
+}
+{{< /code >}}
+
+`ErrEditAborted` folds the two ways a user says *never mind* — quit without saving, or save an empty buffer — into one sentinel, so you branch once instead of diffing. The temp file carries your extension so the editor highlights it, and is removed on every path.
+
+### Wrapping, truncating, measuring
+
+`Width` measures **display cells**, so styled and wide-rune text lines up. `Wrap` and `Truncate` do the cut, and neither can split an escape sequence — which would leave the terminal wearing whatever style the fragment half-opened.
+
+{{< code title="fit output to the terminal" language="golang" open="true" collapsible="false" copy="true" >}}
+cols, _, ok := rotini.TerminalSize(os.Stdout)
+if !ok {
+	cols = 80 // a pipe, or a platform that cannot say
+}
+fmt.Fprintln(rtx.Stdout, rotini.Wrap(description, cols))
+rotini.NewTable(headers...).WithWidth(cols).Fprint(rtx.Stdout)
+{{< /code >}}
+
+`Wrap` does not reopen styling across a break, because it does not need to: a newline does not reset a terminal, so a color opened before the break is still in effect after it. `TerminalSize` honors `COLUMNS`/`LINES` first — the conventional override, and how a test pins a width.
+
 ## Asking questions
 
 `Prompt`, `Confirm` and `Select` read from an `io.Reader`, so the same code works interactively, from a pipe (`echo y | mycli`), and in a test with a `strings.Reader`.
@@ -78,6 +111,15 @@ i, choice, err := rotini.NewSelect(rtx.Stdin, rtx.Stdout, "staging", "production
 	Ask(ctx)
 {{< /code >}}
 
+A secret is read without echo, and the terminal is restored on every path — including a `SIGINT`, because rotini owns the signal trap. Off a terminal it degrades to a plain read, so a handler that asks for a token stays testable.
+
+{{< code title="read a secret" language="golang" open="true" collapsible="false" copy="true" >}}
+token, err := rotini.NewPrompt(rtx.Stdin, rtx.Stdout).
+	WithLabel("token").
+	WithSecret().   // or WithMask('*') to echo the shape of what was typed
+	Ask(ctx)
+{{< /code >}}
+
 `Select` is a **numbered menu**, not arrow-key navigation. Raw terminal mode would need a platform dependency rotini does not carry, and would not work over a pipe at all. A numbered menu answers the same question, stays scriptable, and resolves a typed answer by number, by exact text, or — with a `Suggestor` — by fuzzy match.
 
 ## Showing progress
@@ -87,6 +129,12 @@ i, choice, err := rotini.NewSelect(rtx.Stdin, rtx.Stdout, "staging", "production
 {{< alert type="info" title="NOTE:" >}}
 Both stay **silent on a non-terminal writer**. A `\r` redraw written into a log file is not a cosmetic issue — it is corruption — so this is the one place rotini decides something for you by default. `WithAnimation(bool)` overrides it in either direction.
 {{< /alert >}}
+
+To write **past** a live indicator, use `Print`. Writing to the same stream directly smears into the frame — the indicator owns that line and never cleared it:
+
+{{< code title="printing while a spinner runs" language="golang" open="true" collapsible="false" copy="true" >}}
+spinner.Print(func() { fmt.Fprintln(rtx.Stdout, "done:", f) })
+{{< /code >}}
 
 {{< code title="spinner / progress" language="golang" open="true" collapsible="false" copy="true" >}}
 spinner := rotini.NewSpinner(rtx.Stdout).WithMessage("fetching").Start(ctx)
