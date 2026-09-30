@@ -1,6 +1,9 @@
 package codegen
 
 import (
+	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -178,4 +181,77 @@ func validateSpecText(t *testing.T, spec string) []string {
 		}
 	}
 	return msgs
+}
+
+// A failed pattern quotes the key's examples, never the regex.
+func TestHumanizeSchemaError_patternQuotesExamples(t *testing.T) {
+	for _, tc := range []struct {
+		err  jsonschema.ValidationError
+		want string
+	}{
+		{jsonschema.ValidationError{Keyword: "pattern", InstanceLocation: "/command/flags/0/schema/$ref",
+			KeywordLocation: "#/definitions/BaseSchema/properties/$ref/pattern"},
+			`"$ref" must look like "DB" or "#/schemas/DB"`},
+		{jsonschema.ValidationError{Keyword: "pattern", InstanceLocation: "/command/flags/0/identifiers/1",
+			KeywordLocation: "#/definitions/FlagInput/properties/identifiers/items/pattern"},
+			`"identifiers" item 1 must look like "-o" or "--output"`},
+		{jsonschema.ValidationError{Keyword: "pattern", InstanceLocation: "/generate/packages/0/package",
+			KeywordLocation: "#/definitions/PackageConfig/allOf/0/properties/package/pattern"},
+			`"package" must look like "app"`},
+	} {
+		if got := humanizeSchemaError(&tc.err); got != tc.want {
+			t.Errorf("got %q, want %q", got, tc.want)
+		}
+	}
+}
+
+// Every patterned key in both schemas declares examples, and every example passes its own
+// pattern — so a pattern failure always has something true to show.
+func TestSchemaPatternsHaveMatchingExamples(t *testing.T) {
+	for name, raw := range map[string][]byte{"spec": schemaSpecFileBytes, "conf": schemaConfFileBytes} {
+		var doc any
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		var walk func(v any, path string)
+		walk = func(v any, path string) {
+			switch n := v.(type) {
+			case map[string]any:
+				if pat, ok := n["pattern"].(string); ok {
+					ex, _ := n["examples"].([]any)
+					if len(ex) == 0 {
+						t.Errorf("%s %s: pattern %q has no examples", name, path, pat)
+					}
+					re := regexp.MustCompile(pat)
+					for _, e := range ex {
+						if s, _ := e.(string); !re.MatchString(s) {
+							t.Errorf("%s %s: example %q does not match pattern %q", name, path, s, pat)
+						}
+					}
+				}
+				for k, c := range n {
+					walk(c, path+"/"+k)
+				}
+			case []any:
+				for i, c := range n {
+					walk(c, fmt.Sprintf("%s/%d", path, i))
+				}
+			}
+		}
+		walk(doc, "")
+	}
+}
+
+// The noun's article follows the noun: "an argument input", "a flag input".
+func TestHumanizeSchemaError_article(t *testing.T) {
+	for loc, want := range map[string]string{
+		"#/definitions/ArgumentInput/additionalProperties": `unknown key "x" on an argument input`,
+		"#/definitions/FlagInput/additionalProperties":     `unknown key "x" on a flag input`,
+		"#/definitions/EnvInput/additionalProperties":      `unknown key "x" on an env input`,
+	} {
+		ve := jsonschema.ValidationError{Keyword: "false", InstanceLocation: "/command/x", KeywordLocation: loc}
+		if got := humanizeSchemaError(&ve); got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	}
 }

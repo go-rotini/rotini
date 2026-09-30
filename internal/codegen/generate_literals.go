@@ -270,6 +270,25 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 	})
 }
 
+// layoutFor is the layout a time input's value is parsed under: its declared `layout:`, else
+// "2006-01-02" for `type: date` (or a list of dates), else "" — RFC 3339.
+func layoutFor(schema *InputSchema) string {
+	if schema == nil {
+		return ""
+	}
+	if schema.Layout != "" {
+		return schema.Layout
+	}
+	t := schema.Type
+	if schema.Items != nil && schema.Items.Type != "" && jsonSchemaTypeToGo(t) == "[]string" {
+		t = schema.Items.Type
+	}
+	if strings.TrimPrefix(t, "[]") == "date" {
+		return "2006-01-02"
+	}
+	return ""
+}
+
 // objectRef is the named schema an object-valued input refers to — its own $ref, or its
 // items' for a list of objects — when that schema is an object; "" otherwise.
 func objectRef(schema *InputSchema, schemas map[string]Schema) string {
@@ -470,6 +489,9 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	}
 	if schema.Separator != "" {
 		b.WriteString(", Separator: " + strconv.Quote(schema.Separator))
+	}
+	if l := layoutFor(schema); l != "" {
+		b.WriteString(", Layout: " + strconv.Quote(l))
 	}
 	if c := constraintsLiteral(schema); c != "" {
 		b.WriteString(", Constraints: " + c)

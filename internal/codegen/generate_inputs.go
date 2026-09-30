@@ -124,6 +124,9 @@ func constraintTags(schema *InputSchema) string {
 	eachConstraint(schema, func(tag, _, tagVal, _ string) {
 		parts = append(parts, tag+":"+strconv.Quote(tagVal))
 	})
+	if l := layoutFor(schema); l != "" {
+		parts = append(parts, "layout:"+strconv.Quote(l))
+	}
 	if schema != nil && len(schema.Enum) > 0 {
 		if members, err := json.Marshal(schema.Enum); err == nil { // a []string always marshals
 			parts = append(parts, "enum:"+strconv.Quote(string(members)))

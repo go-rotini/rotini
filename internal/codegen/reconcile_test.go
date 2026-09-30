@@ -160,3 +160,33 @@ func TestHoistItemConstraints_feedsDefaultValidation(t *testing.T) {
 		t.Error("a default element violating an items-level enum was not caught")
 	}
 }
+
+// A bare schema name is the spelling people write; everything downstream sees the pointer form.
+// A command's $ref — a spec file to compose — is a different key and must survive untouched.
+func TestQualifySchemaRefs(t *testing.T) {
+	spec := &Spec{Command: Command{
+		Name: "app",
+		Schemas: map[string]Schema{
+			"DB":   {BaseSchema: BaseSchema{Type: "object", Properties: map[string]Schema{"pool": {BaseSchema: BaseSchema{Ref: "Pool"}}}}},
+			"Pool": {BaseSchema: BaseSchema{Type: "object"}},
+		},
+		Flags: []FlagInput{
+			{Name: "db", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "DB"}}},
+			{Name: "dbs", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Ref: "DB"}}}}},
+			{Name: "qualified", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"}}},
+		},
+		Commands: []Command{{Ref: "./child/.rotini.spec.yaml"}},
+	}}
+	spec.normalize()
+	for got, want := range map[string]string{
+		spec.Command.Flags[0].Schema.Ref:                  "#/schemas/DB",
+		spec.Command.Flags[1].Schema.Items.Ref:            "#/schemas/DB",
+		spec.Command.Flags[2].Schema.Ref:                  "#/schemas/DB",
+		spec.Command.Schemas["DB"].Properties["pool"].Ref: "#/schemas/Pool",
+		spec.Command.Commands[0].Ref:                      "./child/.rotini.spec.yaml",
+	} {
+		if got != want {
+			t.Errorf("ref = %q, want %q", got, want)
+		}
+	}
+}

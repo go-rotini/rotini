@@ -80,6 +80,7 @@ var specLints = []func(*Spec) []error{
 	lintImplicitValue,
 	lintValuesParse,
 	lintObjectFlags,
+	lintLayout,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level

@@ -241,3 +241,60 @@ func TestParse_boolFlagSpellings(t *testing.T) {
 		}
 	}
 }
+
+func TestParseTimeLayout(t *testing.T) {
+	for _, tc := range []struct {
+		in, layout string
+		want       time.Time
+	}{
+		{"2026-09-29", "2006-01-02", time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)}, // a bare date is UTC midnight
+		{"29/09/2026", "02/01/2006", time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)},
+		{"Sep 29 2026 14:05", "Jan 2 2006 15:04", time.Date(2026, 9, 29, 14, 5, 0, 0, time.UTC)},
+		{"1759104000", "unix", time.Unix(1759104000, 0).UTC()},
+		{"1759104000.5", "unix", time.Unix(1759104000, 5e8).UTC()},
+		{"1759104000123", "unixmilli", time.UnixMilli(1759104000123).UTC()},
+	} {
+		got, err := parseTimeLayout(tc.in, tc.layout)
+		if err != nil || !got.Equal(tc.want) || got.Location() != time.UTC {
+			t.Errorf("parseTimeLayout(%q, %q) = %v, %v; want %v UTC", tc.in, tc.layout, got, err, tc.want)
+		}
+	}
+	for _, tc := range [][2]string{{"2026-13-01", "2006-01-02"}, {"2026-09-29T10:00:00Z", "2006-01-02"}, {"soon", "unix"}, {"1.5", "unixmilli"}} {
+		if _, err := parseTimeLayout(tc[0], tc[1]); err == nil {
+			t.Errorf("parseTimeLayout(%q, %q) accepted", tc[0], tc[1])
+		}
+	}
+}
+
+// A layout applies to a time field, a pointer to one, and each element of a list; without one a
+// time is RFC 3339 and a failure says so in words, not in Go's parse error.
+func TestCoerceWithLayout(t *testing.T) {
+	var f struct {
+		Day   time.Time
+		Maybe *time.Time
+		Days  []time.Time
+		At    time.Time
+	}
+	v := reflect.ValueOf(&f).Elem()
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(coerceWithLayout(v.FieldByName("Day"), []string{"2026-09-29"}, "2006-01-02"))
+	must(coerceWithLayout(v.FieldByName("Maybe"), []string{"2026-09-30"}, "2006-01-02"))
+	must(coerceWithLayout(v.FieldByName("Days"), []string{"2026-01-01", "2026-12-25"}, "2006-01-02"))
+	must(coerceWithLayout(v.FieldByName("At"), []string{"2026-09-29T14:00:00Z"}, ""))
+	if f.Day.Day() != 29 || f.Maybe == nil || f.Maybe.Day() != 30 || len(f.Days) != 2 || f.Days[1].Month() != 12 || f.At.Hour() != 14 {
+		t.Errorf("%+v", f)
+	}
+	err := coerceWithLayout(v.FieldByName("Day"), []string{"29-09-2026"}, "2006-01-02")
+	if err == nil || !strings.Contains(err.Error(), `"29-09-2026" is not a valid date (write it as 2006-01-02)`) {
+		t.Errorf("err = %v", err)
+	}
+	err = coerceWithLayout(v.FieldByName("At"), []string{"2026-09-29"}, "")
+	if err == nil || !strings.Contains(err.Error(), "is not a valid time (write it as RFC 3339") {
+		t.Errorf("err = %v", err)
+	}
+}

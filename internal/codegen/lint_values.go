@@ -76,7 +76,7 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 		{Name: "Arguments", Type: reflect.TypeFor[struct{}]()},
 	})
 	inputs := reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}})
-	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{{Name: "v", Identifiers: []string{"--v"}, Type: defType}}}
+	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{{Name: "v", Identifiers: []string{"--v"}, Type: defType, Layout: layoutFor(schema)}}}
 	for _, v := range values {
 		err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"--v=" + v}), reflect.New(inputs).Interface())
 		if err != nil {
@@ -87,10 +87,10 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 }
 
 // valueTypes are the Go types a spec's type names resolve to whose reflect.Type codegen knows —
-// the builtins and rotini's own vocabulary. time.Time is left out until `date` parses the
-// dates it is documented to accept; until then this would reject every date default.
+// the builtins and rotini's own vocabulary.
 var valueTypes = map[string]reflect.Type{
-	"string": reflect.TypeFor[string](), "bool": reflect.TypeFor[bool](),
+	"time.Time": reflect.TypeFor[time.Time](),
+	"string":    reflect.TypeFor[string](), "bool": reflect.TypeFor[bool](),
 	"int": reflect.TypeFor[int](), "int8": reflect.TypeFor[int8](), "int16": reflect.TypeFor[int16](),
 	"int32": reflect.TypeFor[int32](), "int64": reflect.TypeFor[int64](),
 	"uint": reflect.TypeFor[uint](), "uint8": reflect.TypeFor[uint8](), "uint16": reflect.TypeFor[uint16](),
@@ -251,4 +251,50 @@ func validationSummary(err error) string {
 		return err.Error()
 	}
 	return strings.Join(msgs, "; ")
+}
+
+// lintLayout enforces layout's contract: it says how a TIME is written, so it applies to time
+// inputs only, and it must be a layout Go can parse with — the reference time written the way
+// the value is, or unix / unixmilli. The commonest mistake is the notation other languages use,
+// `YYYY-MM-DD`, which Go reads as literal text: every value would fail to parse.
+func lintLayout(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Layout == "" {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q %s", channel, name, msg)})
+			}
+			if t := strings.TrimPrefix(getSchemaType(schema), "[]"); t != "time.Time" && t != "*time.Time" {
+				add(fmt.Sprintf("sets layout but its type is %s — layout says how a time is written, so it applies to time, datetime and date", displayType(getSchemaType(schema))))
+				return
+			}
+			if msg := layoutProblem(schema.Layout); msg != "" {
+				add(msg)
+			}
+		})
+	})
+	return problems
+}
+
+// sampleTime differs from Go's reference time (Mon Jan 2 15:04:05 MST 2006) in every field, so
+// formatting it under a layout changes every reference element the layout contains — and
+// changes nothing when it contains none.
+var sampleTime = time.Date(2019, time.November, 23, 17, 38, 49, 0, time.UTC)
+
+// layoutProblem reports why a layout cannot parse anything, or "".
+func layoutProblem(layout string) string {
+	if layout == "unix" || layout == "unixmilli" {
+		return ""
+	}
+	if sampleTime.Format(layout) == layout {
+		return fmt.Sprintf("sets layout %q, which contains no part of Go's reference time, so no value could ever match — Go layouts write the reference time Mon Jan 2 15:04:05 MST 2006 the way yours is, e.g. %q for a date (or use unix / unixmilli)", layout, "2006-01-02")
+	}
+	if _, err := time.Parse(layout, sampleTime.Format(layout)); err != nil {
+		return fmt.Sprintf("sets layout %q, which cannot read back the times it writes (%v)", layout, err)
+	}
+	return ""
 }

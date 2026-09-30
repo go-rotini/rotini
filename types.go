@@ -180,6 +180,15 @@ var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
 		}
 		return reflect.ValueOf(loc), nil
 	},
+	// time.Time parses itself (RFC 3339), but its error — cannot parse "" as "T" — explains
+	// nothing to someone who typed a date where a timestamp was wanted.
+	reflect.TypeFor[time.Time](): func(s string) (reflect.Value, error) {
+		t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
+		if err != nil {
+			return reflect.Value{}, errors.New("write it as RFC 3339, e.g. 2026-09-29T14:00:00Z — or declare `type: date` or a `layout:`")
+		}
+		return reflect.ValueOf(t), nil
+	},
 	reflect.TypeFor[net.HardwareAddr](): func(s string) (reflect.Value, error) {
 		mac, err := net.ParseMAC(s)
 		if err != nil {
@@ -199,6 +208,7 @@ var valueTypeLabels = map[reflect.Type]string{
 	reflect.TypeFor[netip.Addr]():       "IP address",
 	reflect.TypeFor[netip.Prefix]():     "CIDR prefix",
 	reflect.TypeFor[netip.AddrPort]():   "address and port",
+	reflect.TypeFor[time.Time]():        "time",
 	reflect.TypeFor[ByteSize]():         "size",
 	reflect.TypeFor[HexBytes]():         "hex value",
 	reflect.TypeFor[Base64Bytes]():      "base64 value",
@@ -223,6 +233,88 @@ func parseBool(s string) (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("%q is not a boolean — use true/false, yes/no, on/off or 1/0", s)
+}
+
+// Time layouts beyond Go's reference-time layouts: a Unix timestamp in seconds (fractions
+// allowed) or in milliseconds.
+const (
+	layoutUnix      = "unix"
+	layoutUnixMilli = "unixmilli"
+	// layoutDate is the layout `type: date` gets: a calendar date, parsed as UTC midnight.
+	layoutDate = "2006-01-02"
+)
+
+// parseTimeLayout parses s under a time input's layout: a Go reference-time layout, or
+// "unix" / "unixmilli". A layout with no zone parses as UTC, so a bare date is
+// that day's UTC midnight.
+func parseTimeLayout(s, layout string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	switch layout {
+	case layoutUnix:
+		secs, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return time.Time{}, errors.New("want a Unix timestamp in seconds, e.g. 1759104000")
+		}
+		whole, frac := math.Modf(secs)
+		return time.Unix(int64(whole), int64(math.Round(frac*1e9))).UTC(), nil
+	case layoutUnixMilli:
+		ms, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return time.Time{}, errors.New("want a Unix timestamp in milliseconds, e.g. 1759104000000")
+		}
+		return time.UnixMilli(ms).UTC(), nil
+	}
+	t, err := time.Parse(layout, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("write it as %s", layout)
+	}
+	return t, nil
+}
+
+// layoutLabel names a layout's kind of value for an error message.
+func layoutLabel(layout string) string {
+	if layout == layoutDate {
+		return "date"
+	}
+	return "time"
+}
+
+var timeType = reflect.TypeFor[time.Time]()
+
+// coerceWithLayout is [coerce] for an input that declares a time layout: a time.Time field —
+// or a pointer to one, or a list of them — parses each value under the layout instead of as
+// RFC 3339. Any other field, or no layout, is plain coerce.
+func coerceWithLayout(f reflect.Value, raw []string, layout string) error {
+	if layout == "" || len(raw) == 0 {
+		return coerce(f, raw)
+	}
+	switch {
+	case f.Type() == timeType:
+		last := raw[len(raw)-1]
+		t, err := parseTimeLayout(last, layout)
+		if err != nil {
+			return &coerceError{Value: last, TypeName: layoutLabel(layout), Cause: err}
+		}
+		f.Set(reflect.ValueOf(t))
+		return nil
+	case f.Kind() == reflect.Pointer && f.Type().Elem() == timeType:
+		v := reflect.New(timeType)
+		if err := coerceWithLayout(v.Elem(), raw, layout); err != nil {
+			return err
+		}
+		f.Set(v)
+		return nil
+	case f.Kind() == reflect.Slice && derefType(f.Type().Elem()) == timeType:
+		out := reflect.MakeSlice(f.Type(), len(raw), len(raw))
+		for i, r := range raw {
+			if err := coerceWithLayout(out.Index(i), []string{r}, layout); err != nil {
+				return err
+			}
+		}
+		f.Set(out)
+		return nil
+	}
+	return coerce(f, raw)
 }
 
 // durationDays matches a day or week component of a duration: `7d`, `1.5w`.

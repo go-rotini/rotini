@@ -8,6 +8,7 @@ package codegen
 import (
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 )
 
@@ -97,7 +98,47 @@ func reconcileConf(specPath, confPath string) (*reconciledConf, error) {
 // each spec a `$ref` composes in — hands validation, lint and generation the same model.
 type normalizer interface{ normalize() }
 
-func (s *Spec) normalize() { hoistItemConstraints(s) }
+func (s *Spec) normalize() {
+	qualifySchemaRefs(reflect.ValueOf(s).Elem())
+	hoistItemConstraints(s)
+}
+
+// qualifySchemaRefs rewrites every bare schema reference (`$ref: DB`) to its pointer form
+// (`#/schemas/DB`), so everything downstream — codegen, the JSON Schema documents rotini
+// assembles, the lint rules — meets one spelling. The bare name is the one people write; the
+// pointer is what JSON Schema tooling expects. Only a schema block's $ref is touched: a
+// command's $ref names a spec file to compose, and is left alone.
+func qualifySchemaRefs(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if !v.IsNil() {
+			qualifySchemaRefs(v.Elem())
+		}
+	case reflect.Struct:
+		if v.Type() == reflect.TypeFor[BaseSchema]() {
+			if ref := v.FieldByName("Ref"); ref.String() != "" && !strings.HasPrefix(ref.String(), "#/") {
+				ref.SetString("#/schemas/" + ref.String())
+			}
+		}
+		for i := range v.NumField() {
+			if v.Type().Field(i).IsExported() {
+				qualifySchemaRefs(v.Field(i))
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := range v.Len() {
+			qualifySchemaRefs(v.Index(i))
+		}
+	case reflect.Map:
+		// Map values are not addressable: rewrite a copy and store it back.
+		for _, k := range v.MapKeys() {
+			cp := reflect.New(v.Type().Elem()).Elem()
+			cp.Set(v.MapIndex(k))
+			qualifySchemaRefs(cp)
+			v.SetMapIndex(k, cp)
+		}
+	}
+}
 
 // hoistItemConstraints copies per-value constraints declared on an array input's `items` up onto
 // the input itself, where the runtime already applies them to every element.

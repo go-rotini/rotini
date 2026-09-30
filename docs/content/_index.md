@@ -105,7 +105,7 @@ Nothing above was hand-written except the body of `Run`. The enum, the default, 
 
 <div class="feature_card">
 <h3>Checked before it compiles</h3>
-<p>A JSON Schema and 42 spec lint rules reject a misspelled key, a duplicate identifier, a <code>$ref</code> cycle or a bound that can never fire — each with a <code>file:line:col</code>, from <code>rotini validate</code>.</p>
+<p>A JSON Schema and 43 spec lint rules reject a misspelled key, a duplicate identifier, a <code>$ref</code> cycle or a bound that can never fire — each with a <code>file:line:col</code>, from <code>rotini validate</code>.</p>
 </div>
 
 <div class="feature_card">
@@ -136,7 +136,7 @@ Nothing above was hand-written except the body of `Run`. The enum, the default, 
 
 ### Checked before your code exists
 
-The spec is validated by a JSON Schema plus 42 spec lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
+The spec is validated by a JSON Schema plus 43 spec lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
 
 These are mistakes a compiler has no reason to notice, so catching them is the spec's job — in CI, without building anything.
 

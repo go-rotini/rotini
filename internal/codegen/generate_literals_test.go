@@ -126,3 +126,34 @@ func TestFlagDefsLiteral_objectFlags(t *testing.T) {
 		t.Errorf("%d flags carry ObjectSchema, want 2 (the named scalar is not an object):\n%s", n, got)
 	}
 }
+
+// `date` means a calendar date, so it carries Layout "2006-01-02" to the runtime — on the
+// definition for argv, and as a struct tag for env and config — and an explicit `layout:` wins.
+func TestLayoutFor(t *testing.T) {
+	for _, tc := range []struct {
+		schema *InputSchema
+		want   string
+	}{
+		{&InputSchema{BaseSchema: BaseSchema{Type: "date"}}, "2006-01-02"},
+		{&InputSchema{BaseSchema: BaseSchema{Type: "[]date"}}, "2006-01-02"},
+		{&InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Type: "date"}}}}, "2006-01-02"},
+		{&InputSchema{BaseSchema: BaseSchema{Type: "date"}, Layout: "02/01/2006"}, "02/01/2006"},
+		{&InputSchema{BaseSchema: BaseSchema{Type: "datetime"}}, ""},
+		{&InputSchema{BaseSchema: BaseSchema{Type: "time"}, Layout: "unix"}, "unix"},
+		{nil, ""},
+	} {
+		if got := layoutFor(tc.schema); got != tc.want {
+			t.Errorf("layoutFor(%+v) = %q, want %q", tc.schema, got, tc.want)
+		}
+	}
+	in := &Inputs{
+		Flags:     []FlagInput{{Name: "due", Identifiers: []string{"--due"}, Schema: &InputSchema{BaseSchema: BaseSchema{Type: "date"}}}},
+		Arguments: []ArgumentInput{{Name: "at", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "time"}, Layout: "unix"}}},
+	}
+	if lit := flagDefsLiteral(in, nil) + argDefsLiteral(in); !strings.Contains(lit, `Layout: "2006-01-02"`) || !strings.Contains(lit, `Layout: "unix"`) {
+		t.Errorf("literal does not carry the layouts:\n%s", lit)
+	}
+	if tags := constraintTags(&InputSchema{BaseSchema: BaseSchema{Type: "date"}}); tags != `layout:"2006-01-02"` {
+		t.Errorf("channel tags = %q", tags)
+	}
+}

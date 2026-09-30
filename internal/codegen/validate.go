@@ -204,6 +204,13 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 				return fmt.Sprintf("%q must be of type %s", key, want)
 			}
 		}
+	case "pattern":
+		// A regex is how the schema checks a value, not how anyone should learn what to write.
+		// Every patterned key in rotini's schemas declares `examples` (a guard keeps it so), and
+		// those are what the reader needs.
+		if ex := schemaExamples(strings.TrimSuffix(ve.KeywordLocation, "/pattern")); len(ex) > 0 {
+			return fmt.Sprintf("%s must look like %s", patternSubject(ve.InstanceLocation), quotedOrList(ex))
+		}
 	case "anyOf":
 		// Every branch failed. In rotini's schemas an anyOf is a choice between required
 		// keys, so the branches' causes name the choice exactly.
@@ -218,6 +225,67 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 		return fmt.Sprintf("%s needs either %s", noun, quotedOrList(keys))
 	}
 	return ve.Message
+}
+
+// patternSubject names the value a pattern failed on: its key, or for a list element the list's
+// key and position ("identifiers[1]").
+func patternSubject(instanceLocation string) string {
+	leaf := pointerLeaf(instanceLocation)
+	if _, err := strconv.Atoi(leaf); err == nil {
+		parent := pointerLeaf(strings.TrimSuffix(instanceLocation, "/"+leaf))
+		return fmt.Sprintf("%q item %s", parent, leaf)
+	}
+	return fmt.Sprintf("%q", leaf)
+}
+
+// schemaDocuments are rotini's two embedded schemas, parsed once, for reading keywords the
+// validator does not report — the `examples` a pattern failure quotes.
+var schemaDocuments = sync.OnceValue(func() []any {
+	var docs []any
+	for _, raw := range [][]byte{schemaSpecFileBytes, schemaConfFileBytes} {
+		var doc any
+		if err := json.Unmarshal(raw, &doc); err == nil {
+			docs = append(docs, doc)
+		}
+	}
+	return docs
+})
+
+// schemaExamples returns the `examples` of the schema node at a keyword location
+// ("#/definitions/BaseSchema/properties/$ref"), looked up in either embedded schema.
+func schemaExamples(location string) []string {
+	path := strings.Split(strings.TrimPrefix(location, "#/"), "/")
+	for _, doc := range schemaDocuments() {
+		node := doc
+		for _, seg := range path {
+			seg = strings.ReplaceAll(strings.ReplaceAll(seg, "~1", "/"), "~0", "~")
+			switch n := node.(type) {
+			case map[string]any:
+				node = n[seg]
+			case []any:
+				i, err := strconv.Atoi(seg)
+				if err != nil || i >= len(n) {
+					node = nil
+				} else {
+					node = n[i]
+				}
+			default:
+				node = nil
+			}
+		}
+		if m, ok := node.(map[string]any); ok {
+			if raw, ok := m["examples"].([]any); ok {
+				out := make([]string, 0, len(raw))
+				for _, e := range raw {
+					if s, ok := e.(string); ok {
+						out = append(out, s)
+					}
+				}
+				return out
+			}
+		}
+	}
+	return nil
 }
 
 // pointerLeaf is the last segment of a JSON pointer ("/command/summry" -> "summry"), with
@@ -239,7 +307,11 @@ func definitionNoun(keywordLocation string) string {
 	segs := strings.Split(strings.TrimPrefix(keywordLocation, "#/"), "/")
 	for i, seg := range segs {
 		if (seg == "definitions" || seg == "$defs") && i+1 < len(segs) {
-			return "a " + splitCamel(segs[i+1])
+			noun := splitCamel(segs[i+1])
+			if strings.ContainsRune("aeiou", rune(noun[0])) {
+				return "an " + noun
+			}
+			return "a " + noun
 		}
 	}
 	return ""

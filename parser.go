@@ -1335,7 +1335,11 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 		if def, ok := findFlagDef(defs, name); ok && def.IgnoreCase {
 			raw = canonicalEnum(def.Enum, raw)
 		}
-		if err := coerce(v.Field(i), raw); err != nil {
+		layout := ""
+		if def, ok := findFlagDef(defs, name); ok {
+			layout = def.Layout
+		}
+		if err := coerceWithLayout(v.Field(i), raw, layout); err != nil {
 			secret := false
 			if def, ok := findFlagDef(defs, name); ok {
 				secret = def.Secret
@@ -1379,14 +1383,14 @@ func bindArgs(v reflect.Value, args []string, defs []ArgDef) error {
 			def = defs[i]
 		}
 		if f.Kind() == reflect.Slice { // a slice argument is variadic, whatever its element type
-			if err := coerce(f, canonicalFor(def, args[min(idx, len(args)):])); err != nil {
+			if err := coerceWithLayout(f, canonicalFor(def, args[min(idx, len(args)):]), def.Layout); err != nil {
 				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, argSecret(defs, i)))}
 			}
 			idx = len(args)
 			continue
 		}
 		if idx < len(args) {
-			if err := coerce(f, canonicalFor(def, args[idx:idx+1])); err != nil {
+			if err := coerceWithLayout(f, canonicalFor(def, args[idx:idx+1]), def.Layout); err != nil {
 				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, argSecret(defs, i)))}
 			}
 			idx++

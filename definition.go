@@ -202,6 +202,10 @@ type FlagDef struct {
 	// "always"), making its value optional: a value must then be attached (`--color=never`),
 	// since the next argument is never consumed. Empty means the flag requires a value.
 	ImplicitValue string
+	// Layout is how a time input's value is written: a Go reference-time layout
+	// ("2006-01-02", "Jan 2 2006 15:04"), or "unix" / "unixmilli" for a timestamp. Empty means
+	// RFC 3339. `type: date` gets "2006-01-02".
+	Layout string
 	// ObjectSchema is the JSON Schema of an object-valued flag's value — set when the spec's
 	// schema is a named object (`$ref: '#/schemas/DB'`), or a list of them. The flag then
 	// takes JSON, key=value pairs, a YAML @file, or one field per flag (--db.host=…); see
@@ -259,6 +263,8 @@ type ArgDef struct {
 	IgnoreCase bool
 	// Separator splits each value of a variadic argument into several; see [FlagDef.Separator].
 	Separator string
+	// Layout is how a time argument's value is written; see [FlagDef.Layout].
+	Layout string
 	// Complete is the declarative shell-completion hint for this argument's value.
 	Complete Completion
 	Secret   bool // when true, the value is redacted in usage/validation error output

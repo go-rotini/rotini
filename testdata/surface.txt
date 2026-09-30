@@ -27,6 +27,7 @@ field ArgDef.Default
 field ArgDef.Enum
 field ArgDef.Hidden
 field ArgDef.IgnoreCase
+field ArgDef.Layout
 field ArgDef.Name
 field ArgDef.Required
 field ArgDef.Secret
@@ -113,6 +114,7 @@ field FlagDef.Identifiers
 field FlagDef.IgnoreCase
 field FlagDef.ImplicitValue
 field FlagDef.KeyPaths
+field FlagDef.Layout
 field FlagDef.Name
 field FlagDef.Negatable
 field FlagDef.ObjectSchema

@@ -556,7 +556,7 @@ func coerceFlagValues(f reflect.Value, def FlagDef, vals []string) error {
 	if def.DottedKeys {
 		return coerceMapDotted(f, vals)
 	}
-	return coerce(f, vals)
+	return coerceWithLayout(f, vals, def.Layout)
 }
 
 // fallbackOrigin names where a flag's fallback value came from in the user's terms: the
@@ -775,13 +775,13 @@ func hasConfigChannel(v reflect.Value) bool {
 
 // configRegistry builds a recon registry over the configuration_files, first (highest
 // precedence) to last as declared. overrides carries any config_source-supplied paths.
-func (b *Binder) configRegistry(files []ConfigFile, overrides map[string]string, bools map[string]bool) (*recon.Registry, error) {
+func (b *Binder) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys) (*recon.Registry, error) {
 	srcs, err := b.fileSources(files, overrides)
 	if err != nil {
 		return nil, err
 	}
 	for i, src := range srcs {
-		srcs[i] = boolWords{Source: src, keys: bools}
+		srcs[i] = spellings{Source: src, keys: keys}
 	}
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
@@ -796,7 +796,7 @@ type cfgRegs struct {
 	binder    *Binder
 	files     []ConfigFile // sources in scope for the invoked chain, nearest-wins order
 	overrides map[string]string
-	bools     map[string]bool // recon keys of bool config fields; see boolWords
+	keys      valueKeys // how config fields' text is read; see spellings
 	merged    *recon.Registry
 	perFile   map[string]*recon.Registry
 }
@@ -805,12 +805,12 @@ type cfgRegs struct {
 // scope for chain.
 func (b *Binder) configRegs(chain []ResolvedCommand, overrides map[string]string, v reflect.Value) (*cfgRegs, error) {
 	files := b.chainConfigFiles(chain)
-	bools := boolKeys(v, "Config")
-	merged, err := b.configRegistry(files, overrides, bools)
+	keys := channelValueKeys(v, "Config")
+	merged, err := b.configRegistry(files, overrides, keys)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{binder: b, files: files, overrides: overrides, bools: bools, merged: merged, perFile: map[string]*recon.Registry{}}, nil
+	return &cfgRegs{binder: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
@@ -856,7 +856,7 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		if err != nil {
 			return nil, err
 		}
-		reg, err := recon.New(recon.WithSource(boolWords{Source: src, keys: c.bools}))
+		reg, err := recon.New(recon.WithSource(spellings{Source: src, keys: c.keys}))
 		if err != nil {
 			return nil, internalBind(channelConfig, name, fmt.Sprintf("could not build the registry for configuration file %q", name), err)
 		}
@@ -1092,34 +1092,52 @@ func envSources(v reflect.Value, envPrefix string) []recon.Source {
 	if envPrefix != "" {
 		opts = append(opts, recon.WithEnvPrefix(envPrefix+"_"))
 	}
-	return []recon.Source{boolWords{Source: recon.NewOSEnvSource(opts...), keys: boolKeys(v, "Env")}}
+	return []recon.Source{spellings{Source: recon.NewOSEnvSource(opts...), keys: channelValueKeys(v, "Env")}}
 }
 
-// boolWords gives env and config inputs the bool spellings flags accept (see parseBool): a
-// string at the key of a bool field — yes/no, on/off, y/n — reaches recon as a real bool.
-// recon's own decode takes only true/false/1/0, so CACHE=yes was "expected bool" on an env
-// input while the same variable worked as a flag's fallback. Only bool fields' keys are
-// touched: a string input whose value happens to be "yes" keeps it.
-type boolWords struct {
+// spellings gives env and config inputs the value spellings flags accept, which recon's own
+// decode does not: a bool field takes yes/no, on/off, y/n (see parseBool) — recon alone takes
+// only true/false/1/0, so CACHE=yes was "expected bool" on an env input while working as a
+// flag's fallback — and a time field with a layout (`type: date`, `layout:`) parses under it
+// rather than as RFC 3339. Only those fields' keys are touched: a string input whose value
+// happens to be "yes" keeps it.
+type spellings struct {
 	recon.Source
 
-	keys map[string]bool
+	keys valueKeys
 }
 
-func (s boolWords) Get(path recon.Path) (recon.Value, bool, error) {
+// valueKeys maps the recon keys of an Env or Config struct's bool fields, and of its time
+// fields that declare a layout, to how their text is read.
+type valueKeys struct {
+	bools   map[string]bool
+	layouts map[string]string
+}
+
+func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 	v, found, err := s.Source.Get(path)
-	if found && err == nil && v.Kind() == recon.StringKind && s.keys[path.String()] {
+	if !found || err != nil || v.Kind() != recon.StringKind {
+		return v, found, err
+	}
+	key := path.String()
+	if s.keys.bools[key] {
 		if b, perr := parseBool(v.String()); perr == nil {
 			return recon.NewValue(b), true, nil
+		}
+	}
+	if layout := s.keys.layouts[key]; layout != "" {
+		// A value that does not parse goes through as the text it is: recon then refuses it as
+		// a time, as a usage error naming the input. (An error from Get would be swallowed.)
+		if t, perr := parseTimeLayout(v.String(), layout); perr == nil {
+			return recon.NewValue(t), true, nil
 		}
 	}
 	return v, found, err
 }
 
-// boolKeys collects the recon keys of every bool (or *bool) field in each command's Env or
-// Config struct — the keys [boolWords] rewrites.
-func boolKeys(v reflect.Value, structName string) map[string]bool {
-	keys := map[string]bool{}
+// channelValueKeys collects [valueKeys] from each command's Env or Config struct.
+func channelValueKeys(v reflect.Value, structName string) valueKeys {
+	keys := valueKeys{bools: map[string]bool{}, layouts: map[string]string{}}
 	if v.Kind() != reflect.Struct {
 		return keys
 	}
@@ -1133,12 +1151,16 @@ func boolKeys(v reflect.Value, structName string) map[string]bool {
 		}
 		ct := ch.Type()
 		for j := range ch.NumField() {
-			ft := ct.Field(j).Type
-			if ft.Kind() == reflect.Pointer {
-				ft = ft.Elem()
+			sf := ct.Field(j)
+			key := reconKey(sf.Tag.Get("recon"))
+			if key == "" {
+				continue
 			}
-			if key := reconKey(ct.Field(j).Tag.Get("recon")); key != "" && ft.Kind() == reflect.Bool {
-				keys[key] = true
+			switch ft := derefType(sf.Type); {
+			case ft.Kind() == reflect.Bool:
+				keys.bools[key] = true
+			case ft == timeType && sf.Tag.Get("layout") != "":
+				keys.layouts[key] = sf.Tag.Get("layout")
 			}
 		}
 	}

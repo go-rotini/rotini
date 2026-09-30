@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-rotini/recon"
 )
@@ -1703,5 +1704,41 @@ func TestBinder_boolSpellingsOnEnvAndConfig(t *testing.T) {
 	var bad inputs
 	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
 		t.Error("CACHE=maybe accepted")
+	}
+}
+
+// A date on an env or config input reads the same way a date flag does: the generated layout
+// tag reaches recon through the source, which alone would demand RFC 3339.
+func TestBinder_channelTimeLayouts(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Env       struct {
+				Since time.Time `rotini:"since" recon:"since" env:"SINCE" layout:"2006-01-02"`
+				Epoch time.Time `rotini:"epoch" recon:"epoch" env:"EPOCH" layout:"unix"`
+			}
+			Config struct {
+				Until *time.Time `rotini:"until" recon:"until" layout:"02/01/2006"`
+			}
+		}
+	}
+	cfg := writeConfig(t, "until: '25/12/2026'\n")
+	t.Setenv("SINCE", "2026-09-29")
+	t.Setenv("EPOCH", "1759104000")
+	var in inputs
+	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, c := in.App.Env, in.App.Config
+	if !e.Since.Equal(time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)) || e.Epoch.Unix() != 1759104000 || c.Until == nil || c.Until.Month() != 12 {
+		t.Errorf("since=%v epoch=%v until=%v", e.Since, e.Epoch, c.Until)
+	}
+	t.Setenv("SINCE", "yesterday")
+	var bad inputs
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
+		t.Error("SINCE=yesterday accepted")
 	}
 }

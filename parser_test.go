@@ -2365,3 +2365,34 @@ func TestParse_implicitValue(t *testing.T) {
 		}
 	}
 }
+
+// `type: date` generates Layout "2006-01-02": a calendar date parses on a flag, a list flag and
+// an argument, where before only a full RFC 3339 timestamp did.
+func TestParse_dateLayout(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "due", Identifiers: []string{"--due"}, Type: "time.Time", Layout: "2006-01-02"},
+			{Name: "skip", Identifiers: []string{"--skip"}, Type: "[]time.Time", Layout: "2006-01-02"},
+		},
+		Arguments: []ArgDef{{Name: "since", Type: "time.Time", Layout: "unix"}},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Due  time.Time   `rotini:"due"`
+				Skip []time.Time `rotini:"skip"`
+			}
+			Arguments struct {
+				Since time.Time `rotini:"since"`
+			}
+		}
+	}
+	if err := NewParser().Parse(NewContextFor(def, []string{"--due", "2026-10-01", "--skip", "2026-12-25", "--skip", "2026-12-26", "1759104000"}), &in); err != nil {
+		t.Fatal(err)
+	}
+	f, a := in.App.Flags, in.App.Arguments
+	if f.Due.Format("2006-01-02") != "2026-10-01" || len(f.Skip) != 2 || a.Since.Unix() != 1759104000 {
+		t.Errorf("due=%v skip=%v since=%v", f.Due, f.Skip, a.Since)
+	}
+}
