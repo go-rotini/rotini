@@ -14,12 +14,29 @@ ifeq ($(GOBIN),)
 GOBIN := $(shell go env GOPATH)/bin
 endif
 
-.PHONY: all clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race rotini rotini-build rotini-install
+.PHONY: all check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race rotini rotini-build rotini-install
 
 all: clean lint test test-conformance test-acceptance test-e2e test-bench test-fuzz test-mutation test-race rotini-build rotini-install
 
 clean:
 	@rm -rf *.out test_mutation.json
+
+# Regenerates everything rotini commits from its own sources and fails if that changed a file:
+# a source edited without regenerating would otherwise ship stale code with the tests green.
+# It compares fingerprints taken before and after, so it answers the same with or without
+# uncommitted work in the tree.
+GENERATED_FINGERPRINT = find . -type f -not -path './.git/*' -not -path './docs/public/*' -not -name '*.out' | LC_ALL=C sort | xargs shasum
+
+check-generated:
+	@$(GENERATED_FINGERPRINT) > /tmp/rotini-generated.before
+	@cp internal/codegen/schema-spec.json schema-spec.json
+	@cp internal/codegen/schema-conf.json schema-conf.json
+	@go generate ./cmd/rotini > /dev/null
+	@go mod tidy
+	@$(GENERATED_FINGERPRINT) > /tmp/rotini-generated.after
+	@diff /tmp/rotini-generated.before /tmp/rotini-generated.after > /dev/null || \
+		(echo "regenerating changed these files — commit the regenerated result:"; \
+		 diff /tmp/rotini-generated.before /tmp/rotini-generated.after | grep '^>' | awk '{print "  " $$3}'; exit 1)
 
 lint:
 	@gofmt_unformatted=$$(gofmt -l . 2>/dev/null | grep -v '^testdata/' || true); \

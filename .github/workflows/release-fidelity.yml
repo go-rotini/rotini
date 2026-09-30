@@ -45,7 +45,7 @@ jobs:
           go mod init example.com/fidelity
 
           # The real user path: one module, two faces, one version.
-          go get -tool "github.com/go-rotini/rotini@${VERSION}"
+          go get -tool "github.com/go-rotini/rotini/cmd/rotini@${VERSION}"
           go get "github.com/go-rotini/rotini@${VERSION}"
 
           go tool rotini init fidelity
