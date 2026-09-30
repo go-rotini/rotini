@@ -433,7 +433,7 @@ A rotini CLI is an ordinary Go binary, so `go build` and `go install` are the wh
 The entrypoint binds whatever the binary was built with, and `--version` reports it:
 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
-// version is what `--version` reports. Stamp it at build time.
+// go build -ldflags "-X main.version=1.2.3" ./cmd/...
 var version = "0.0.0"
 
 func main() {

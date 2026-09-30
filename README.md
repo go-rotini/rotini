@@ -47,7 +47,7 @@ fmt.Fprintf(rtx.Stdout, "added %q, due %s\n", in.TodoAdd.Arguments.Title, in.Tod
 A rotini CLI is four kinds of file, each easy to reason about on its own: the **spec** (what
 the CLI accepts), the **conf** (where the generated code goes), **`main.go`** (the entrypoint),
 and one **handler file** per command (what it does). `rotini init` writes a working CLI —
-**398 lines across 5 files**, already answering `--help`, `--version`, `help` and `version`
+**396 lines across 5 files**, already answering `--help`, `--version`, `help` and `version`
 — and every line of it is yours to read and change.
 
 ## The cost, stated up front
