@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:7:7: command demo/build: timeout is not supported on a local command — it is a remote-only, host-side bound with no effect here; set it on a remote_commands entry's timeout instead
+spec: .rotini.spec.yaml:8:16: command demo/build: sets `timeout`, which is not supported on a local command — it is a remote-only, host-side bound with no effect here; set it on a `remote_commands` entry's `timeout` instead

@@ -31,7 +31,7 @@ command:
       aliases:
         - init
       summary: scaffold a cli program
-      description: Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
+      description: Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
       examples:
         - rotini initialize mycli
         - rotini init mycli --format json
@@ -42,20 +42,23 @@ command:
           summary: the root command name written to the created spec file (expected binary name)
           schema:
             type: string
+            required: true
       flags:
         - name: format
-          summary: the created rotini spec file format (defaults to yaml)
+          summary: the created rotini spec file format
           identifiers:
             - --format
           schema:
             type: string
+            default: yaml
             enum:
               - yaml
+              - yml
               - json
               - jsonc
               - toml
         - name: force
-          summary: force re-initialization if files exist that init would overwrite
+          summary: replace an existing spec and conf with the seed (never deletes a file)
           identifiers:
             - --force
           schema:
@@ -71,31 +74,29 @@ command:
       aliases:
         - gen
       summary: generate a cli program
-      description: Generate a cli program from a rotini spec file.
+      description: Generate a cli program from a rotini spec file and its conf.
       examples:
         - rotini generate
         - rotini generate ./path/to/.rotini.spec.json --watch
       footer: Use "rotini help <command>" for more information about a command.
       arguments:
         - name: spec_file_path
-          summary: path to the spec file
+          summary: path to the spec file (default the .rotini.spec.* in the working directory)
           schema:
             type: string
-            default: .rotini.spec.yaml
       flags:
         - name: conf_file_path
-          summary: path to the rotini conf file
+          summary: path to the rotini conf file (default the .rotini.conf.* beside the spec)
           identifiers:
             - -c
             - --config
           schema:
             type: string
-            default: .rotini.conf.yaml
         - name: watch
-          summary: watch a rotini spec file for changes and re-generate
+          summary: watch the spec and conf for changes and re-generate
           identifiers:
-            - --watch
             - -w
+            - --watch
           schema:
             type: bool
         - name: help
@@ -108,29 +109,27 @@ command:
     - name: validate
       aliases:
         - val
-      summary: validate a spec file
-      description: Validate a rotini spec file for correctness.
+      summary: validate a spec and conf
+      description: Validate a rotini spec file and its conf for correctness.
       examples:
         - rotini validate
         - rotini val ./path/to/.rotini.spec.yaml
       footer: Use "rotini help <command>" for more information about a command.
       arguments:
         - name: spec_file_path
-          summary: path to the spec file
+          summary: path to the spec file (default the .rotini.spec.* in the working directory)
           schema:
             type: string
-            default: .rotini.spec.yaml
       flags:
         - name: conf_file_path
-          summary: path to the rotini conf file
+          summary: path to the rotini conf file (default the .rotini.conf.* beside the spec)
           identifiers:
             - -c
             - --config
           schema:
             type: string
-            default: .rotini.conf.yaml
         - name: fail
-          summary: failure reporting — fast (first problem) or collect (all); defaults to the module conf's validate.fail, else collect
+          summary: failure reporting — fast (first problem) or collect (all); defaults to validate.fail in the conf, else collect
           identifiers:
             - --fail
           schema:
@@ -139,10 +138,10 @@ command:
               - fast
               - collect
         - name: watch
-          summary: watch a rotini spec file for changes and re-validate
+          summary: watch the spec and conf for changes and re-validate
           identifiers:
-            - --watch
             - -w
+            - --watch
           schema:
             type: bool
         - name: help

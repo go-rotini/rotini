@@ -2,8 +2,8 @@
 # listed as "<package> <FuzzName>". List every FuzzXxx here as it is added.
 #
 #   FuzzParse          the argv grammar
-#   FuzzSuggest        the nine string-distance algorithms
-#   FuzzValidateSpec   the spec loader: four codecs, schema, 35 lint rules, source locator
+#   FuzzSuggest        the suggestion ranking
+#   FuzzValidateSpec   the spec loader: four codecs, schema, lint rules, source locator
 #   FuzzValidateConf   the same for the conf
 FUZZ_TARGETS := .:FuzzParse .:FuzzSuggest ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf
 

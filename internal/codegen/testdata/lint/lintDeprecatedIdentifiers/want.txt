@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:5:3: command demo: flag "out" deprecated_identifiers entry "--never-declared" is not one of its identifiers — it could never be reported as deprecated
+spec: .rotini.spec.yaml:7:7: command demo: flag "out": `deprecated_identifiers` entry "--never-declared" is not one of its identifiers — it could never be reported as deprecated

@@ -70,30 +70,23 @@ func ResolveVersion(ldflagVersion string) string {
 }
 
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	if answerHelp(rtx, func(in RotiniInputs) bool { return in.Rotini.Flags.Help }) {
+		return
+	}
+
 	inputs, err := rotini.Collect[RotiniInputs](rtx)
-	flags := inputs.Rotini.Flags
-	help := HelpRotini
-
 	if err != nil {
-		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", err.Error())
-		fmt.Fprintln(rtx.Stdout, help)
-		rtx.HaltWithCode(1)
+		rtx.HaltWith(err)
 		return
 	}
 
-	switch {
-	case flags.Help:
-		fmt.Fprintln(rtx.Stdout, help)
+	if inputs.Rotini.Flags.Version {
+		fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version())
 		rtx.HaltWithCode(0)
-		return
-	case flags.Version:
-		version := rtx.Version()
-		fmt.Fprintf(rtx.Stdout, "v%s\n", version)
-		rtx.HaltWithCode(0)
-		return
-	default:
-		fmt.Fprintln(rtx.Stdout, help)
-		rtx.HaltWithCode(1)
 		return
 	}
+
+	// A bare `rotini` names no command: show what there is, and exit non-zero, since nothing ran.
+	fmt.Fprintln(rtx.Stdout, rtx.Help())
+	rtx.HaltWithCode(1)
 }

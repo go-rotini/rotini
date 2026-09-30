@@ -456,7 +456,7 @@ func TestCompose_validatesComposedSpecs(t *testing.T) {
 	}
 	for _, want := range []string{
 		`cmd/child/.rotini.spec.yaml:5:`, `unknown key "bogus_key"`,
-		`cmd/grand/.rotini.spec.yaml:`, `default "abc" is not a valid integer`,
+		`cmd/grand/.rotini.spec.yaml:`, "`default` \"abc\" is not a valid integer",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %q:\n%v", want, err)

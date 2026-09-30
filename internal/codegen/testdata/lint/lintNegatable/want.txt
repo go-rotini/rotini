@@ -1,3 +1,3 @@
-spec: .rotini.spec.yaml:5:3: command demo: flag "level": sets negatable but its type is int — the negated form sets a bool false, so it applies to bool flags only
-spec: .rotini.spec.yaml:5:3: command demo: flag "quiet": sets negatable but declares no long identifier — the negated form is derived as "--no-<name>", so there is nothing to derive it from
-spec: .rotini.spec.yaml:5:3: command demo: flag "cache" is negatable, deriving "--no-cache", which flag "nocache" already declares — one of the two would never match
+spec: .rotini.spec.yaml:8:7: command demo: flag "level": sets `negatable` but its type is int — the negated form sets a bool false, so it applies to bool flags only
+spec: .rotini.spec.yaml:15:7: command demo: flag "quiet": sets `negatable` but declares no long identifier — the negated form is derived as "--no-<name>", so there is nothing to derive it from
+spec: .rotini.spec.yaml:22:7: command demo: flag "cache": sets `negatable`, deriving "--no-cache", which flag "nocache" already declares — one of the two would never match

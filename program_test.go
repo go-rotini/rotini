@@ -30,7 +30,7 @@ func TestProgram_WithExit_capturesCode(t *testing.T) {
 }
 
 // TestProgram_WithStderr_capturesDiagnostics proves WithStderr redirects the runtime's
-// own diagnostics: a panicking hook is funneled to the default OnPanic, which writes to
+// own diagnostics: a panicking hook is funneled to the default funnel, which writes to
 // the program's stderr and exits 1.
 func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	var code int
@@ -762,21 +762,21 @@ func TestRun_defaultFunnelFaultFloorsTo1(t *testing.T) {
 	}
 }
 
-func TestRun_defaultOnPanicPrintsAndFails(t *testing.T) {
+func TestRun_defaultFunnelPrintsPanicAndFails(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic("boom")
 	}}
 	p, _, errb := newTestProgram(h, []string{"run"})
 	code, err := p.Run(p.args)
 	if code != 1 {
-		t.Fatalf("run() = %d, want %d (default OnPanic)", code, 1)
+		t.Fatalf("run() = %d, want %d (default funnel)", code, 1)
 	}
 
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("run returned err = %v, want it to carry %q", err, "boom")
 	}
 	if !strings.Contains(errb.String(), "boom") {
-		t.Errorf("default OnPanic should print the panic, stderr: %s", errb)
+		t.Errorf("the default funnel should print the panic, stderr: %s", errb)
 	}
 }
 
@@ -869,7 +869,7 @@ func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 		t.Errorf("hook order:\n got=%v\nwant=%v", log, want)
 	}
 	if seen == nil || seen.Error() != "boom" {
-		t.Errorf("OnPanic saw %v, want the recovered panic %q", seen, "boom")
+		t.Errorf("the funnel saw %v, want the recovered panic %q", seen, "boom")
 	}
 	if !errorContains(err, "boom") {
 		t.Errorf("run returned err = %v, want it to carry %q", err, "boom")

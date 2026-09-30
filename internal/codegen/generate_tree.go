@@ -134,8 +134,11 @@ func resolveTree(spec *Spec, specPath, moduleName string) (*program, error) {
 
 func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*program, error) {
 	root := spec.Command
-	if root.Ref != "" || root.Name == "" {
-		return nil, errors.New("root command must have a name (the top-level \"command\" cannot use $ref)")
+	if root.Ref != "" {
+		return nil, errors.New("the root command cannot use `$ref` — compose child specs as sub-commands instead")
+	}
+	if root.Name == "" {
+		return nil, errors.New("the root command must have a `name` (it is the binary name)")
 	}
 	gp := &program{
 		rootName:        root.Name,

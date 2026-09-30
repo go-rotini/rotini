@@ -46,7 +46,7 @@ stdout 'order=\[env argv\]'
 # A multi-value default on a SINGLE-valued input has nowhere to put the second element, and is
 # still rejected — with a message that names the type and says what to declare instead.
 ! exec rotini validate cmd/bad/.rotini.spec.yaml --config cmd/dfl/.rotini.conf.yaml
-stderr 'a multi-value default needs a repeatable type, and this one is "string"'
+stderr 'a multi-value `default` needs a repeatable type, and this one is string'
 stderr 'Declare the type as a list'
 
 -- cmd/dfl/.rotini.spec.yaml --

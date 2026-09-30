@@ -12,7 +12,7 @@
     },
     "version": {
       "type": "string",
-      "description": "The MINIMUM rotini this conf requires (X.Y.Z) — the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. A rotini older than this, or a different major, is an error. The check is skipped when the binary carries no parseable version (a dev build). Mirrors the spec document's `version` key.",
+      "description": "The MINIMUM rotini this conf requires (X.Y.Z) — the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. A rotini older than this, or a different major, is an error. The check is skipped for a development build of rotini, which reports no release version (0.0.0, or none at all). Mirrors the spec document's `version` key.",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["1.0.0"],
       "default": "0.0.0"
     },
@@ -22,14 +22,14 @@
     },
     "validate": {
       "$ref": "#/definitions/ValidateConfig",
-      "description": "Controls how `rotini validate` reports problems (collect everything vs. fail fast)."
+      "description": "Controls how `rotini validate` and `rotini generate` report problems (collect everything vs. fail fast)."
     }
   },
   "definitions": {
     "ValidateConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Controls how `rotini validate` reports problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. The `--fail` flag overrides this.",
+      "description": "Controls how `rotini validate`, and the validation `rotini generate` runs first, report problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. `rotini validate --fail` overrides this.",
       "properties": {
         "fail": {
           "type": "string",
@@ -46,7 +46,7 @@
       "properties": {
         "schemas": {
           "$ref": "#/definitions/SchemasConfig",
-          "description": "Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so an editor `# yaml-language-server: $schema=<path>` comment can resolve them locally instead of fetching a remote URL."
+          "description": "Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so a document's `$schema:` key (what `rotini init` seeds) can point at a local copy instead of a remote URL."
         },
         "packages": {
           "type": "array",
@@ -63,7 +63,7 @@
     "SchemasConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Where to write rotini's embedded JSON Schemas into this project. Each entry is opt-in: declare 'conf' and/or 'spec' with a 'file' to have `rotini generate` write that schema there (overwriting it from the embedded bytes each pass). The files are not pruned. Intended target for a local editor `# yaml-language-server: $schema=<path>` reference.",
+      "description": "Where to write rotini's embedded JSON Schemas into this project. Each entry is opt-in: declare 'conf' and/or 'spec' with a 'file' to have `rotini generate` write that schema there (overwriting it from the embedded bytes each pass). The files are not pruned. Intended target for a document's `$schema:` key.",
       "properties": {
         "conf": {
           "$ref": "#/definitions/SchemaConfig",
@@ -84,7 +84,7 @@
         "file": {
           "type": "string",
           "pattern": "^[^/\\\\].*\\.json$", "examples": ["schema/spec.json"],
-          "description": "Module-root-relative path file (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a `# yaml-language-server: $schema=<path>` comment at it for local IDE syntax highlighting."
+          "description": "Module-root-relative path file (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a document's `$schema:` key at it for local editor completion and validation."
         }
       }
     },
@@ -99,12 +99,12 @@
             "type": {
               "type": "string",
               "enum": ["main", "cmd", "models"],
-              "description": "Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). cmd = the cli package: it locates the editable per-command handler stubs AND the single generated file written into that directory — the typed input/output structs (Collect[T]/Parse* targets), the framework glue (Definition, NewProgram, ProgramHandlers, BindMeta), and the handlers rollup (handlers struct, Program, Handlers(), command→handler wiring), all merged into the one 'file'. models = ONLY the typed input/output structs, in their own package. Optional: without it they live in the cmd file. Declare it when a command sources its handler from another package (`handler:`) AND that package needs its own input types — the cmd package imports the handler package, so the handler package cannot import cmd back. With models, both import it instead. The cmd package re-exports every model as a type alias, so handler code inside cmd is unaffected either way. There is no 'runtime' target: the rotini runtime is imported from github.com/go-rotini/rotini, not emitted."
+              "description": "Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). cmd = the cli package: it locates the editable per-command handler stubs AND the single generated file written into that directory — the typed input/output structs (Collect[T]/Parse* targets), the framework glue (the command-tree definition, NewProgram, ProgramHandlers, BindMeta), and the handlers rollup (handlers struct, Program, Handlers(), command→handler wiring), all merged into the one 'file'. models = ONLY the typed input/output structs, in their own package. Optional: without it they live in the cmd file. Declare it when a command sources its handler from another package (`handler:`) AND that package needs its own input types — the cmd package imports the handler package, so the handler package cannot import cmd back. With models, both import it instead. The cmd package re-exports every model as a type alias, so handler code inside cmd is unaffected either way. There is no 'runtime' target: the rotini runtime is imported from github.com/go-rotini/rotini, not emitted."
             },
             "file": {
               "type": "string",
               "pattern": "^[^/\\\\].*\\.go$", "examples": ["internal/cmd/app/zz_app.go"],
-              "description": "Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.gen.go' (the cli package's generated file); main has no default and is only written when 'file' is set."
+              "description": "Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.go' (the cli package's generated file); main has no default and is only written when 'file' is set."
             },
             "package": {
               "type": "string",
@@ -122,7 +122,7 @@
               "type": "array",
               "items": {
                 "type": "string",
-                "pattern": "^[^/\\\\].*$", "examples": ["internal/cmd/app/extra.go"]
+                "pattern": "^[^/\\\\].*$", "examples": ["extra.go"]
               },
               "description": "Package-relative paths (e.g. 'helpers.go') that pruning must never remove.\n\nYou rarely need it: pruning only ever removes files ROTINI WROTE — an orphaned handler stub, identified by the generated marker it carries — and reports each one. A file you wrote is never a candidate, whatever it is named, and neither are test files or the editable per-feature templates. Reach for 'keep' when you have adopted a generated stub as your own AND kept its marker, or to protect a rendered output file under an embed_dir."
             }

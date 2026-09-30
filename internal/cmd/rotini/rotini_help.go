@@ -17,26 +17,22 @@ type rotiniHelpHandlers struct {
 }
 
 func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	if answerHelp(rtx, func(in RotiniHelpInputs) bool { return in.RotiniHelp.Flags.Help }) {
+		return
+	}
+
 	inputs, err := rotini.Collect[RotiniHelpInputs](rtx)
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
 
-	args := inputs.RotiniHelp.Arguments
-	flags := inputs.RotiniHelp.Flags
-
-	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-
-	help, err := Help(args.Command...)
+	help, err := Help(inputs.RotiniHelp.Arguments.Command...)
 	if err != nil {
-		rtx.HaltWith(err)
+		rtx.HaltWith(rotini.UsageError(err))
 		return
 	}
 
 	fmt.Fprintln(rtx.Stdout, help)
+	rtx.HaltWithCode(0)
 }

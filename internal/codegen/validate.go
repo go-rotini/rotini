@@ -112,11 +112,12 @@ func (v semver) olderThan(w semver) bool {
 //     the schema would reject them with a confusing "unknown property" instead of the truth;
 //   - the majors differ — by definition a different, incompatible feature set.
 //
-// It is skipped whenever either side is not a parseable X.Y.Z: a dev build with no version
-// stamped in, or a document that declares none. Judging an unknown is worse than not judging.
+// It is skipped whenever either side is unknown: a development build of rotini (no parseable
+// version, or the 0.0.0 an unreleased build reports), or a document that declares none.
+// Judging an unknown is worse than not judging.
 func versionProblem(kind, docVersion, binaryVersion string) *problem {
 	bin, ok := parseSemver(binaryVersion)
-	if !ok {
+	if !ok || bin == (semver{}) {
 		return nil
 	}
 	doc, ok := parseSemver(docVersion)
@@ -127,14 +128,14 @@ func versionProblem(kind, docVersion, binaryVersion string) *problem {
 	switch {
 	case doc.major != bin.major:
 		return &problem{
-			kind: kind, loc: "version",
+			kind: kind, loc: "version", ptr: "/version",
 			msg: fmt.Sprintf("targets rotini %s but this rotini is %s — major version %d and %d are different, incompatible feature sets; install rotini %d.x or migrate this document to %d.x",
 				doc, bin, doc.major, bin.major, doc.major, bin.major),
 		}
 	case bin.olderThan(doc):
 		return &problem{
-			kind: kind, loc: "version",
-			msg: fmt.Sprintf("targets rotini %s but this rotini is %s — this rotini is older than the document requires; upgrade it (go get -tool github.com/go-rotini/rotini@latest), or lower the version to %s if the document does not use anything newer",
+			kind: kind, loc: "version", ptr: "/version",
+			msg: fmt.Sprintf("targets rotini %s but this rotini is %s — this rotini is older than the document requires; upgrade it (go get -tool github.com/go-rotini/rotini/cmd/rotini@latest), or lower the version to %s if the document does not use anything newer",
 				doc, bin, bin),
 		}
 	}

@@ -113,8 +113,9 @@ all land in the same generated struct.
 
 ## Handlers
 
-`go generate` creates one handler file per command, once — after that it is yours. Fill in
-`Run`:
+`go generate` creates one handler file per command, once, and never overwrites it — it is
+yours. (It is removed if its command leaves the spec; delete its `var _ rotini.Handlers` line or
+list it under the conf's `keep:` to hold on to it.) Fill in `Run`:
 
 {{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
@@ -173,7 +174,8 @@ A handler that fails calls `rtx.HaltWith(err)`. By default the runtime prints ea
 error to stderr as `Error: …` and exits 1. Every error carries a category —
 `rotini.UsageError(err)` marks one as the user's to fix — so a program that wants distinct exit
 codes installs its own reporting with `Program.WithFunnel` and maps `rotini.CategoryOf(err)` to
-a code. Declare `exit_status:` in the spec to document a command's codes in its help.
+a code. Declare `exit_status:` in the spec to document a command's codes in its man and
+markdown pages.
 
 ## Help, completion and docs
 
@@ -181,13 +183,13 @@ The conf's `features:` turn on output generated from the spec:
 
 | Feature | What you get |
 |---|---|
-| `help` (on by default) | `Help(path...)` pages, printed by `--help` and `help <command>` |
+| `help` (on in the conf `rotini init` writes) | `Help(path...)` pages, printed by `--help` and `help <command>` |
 | `completion` | `Completion(shell)` scripts for bash, zsh, fish and PowerShell |
 | `man` | `Man(path...)` man pages |
 | `markdown` | `Markdown(path...)` reference pages |
 
-A command exposes one with a single line, e.g. a `completion` command whose handler prints
-`Completion(shell)`.
+A command exposes one with a few lines, e.g. a `completion` command whose handler prints the
+script `Completion(shell)` returns.
 
 ## Testing
 

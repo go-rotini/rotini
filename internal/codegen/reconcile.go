@@ -70,8 +70,10 @@ func reconcileSpec(path string) (*reconciledSpec, error) {
 }
 
 // reconcileConf reads + decodes the end-user conf beside the spec (or at confPath). The
-// conf is OPTIONAL: no path given and none discovered — or a resolved path that does not
-// exist — yields the DEFAULT &Conf{} with an empty path.
+// conf is OPTIONAL: with no path given and none discovered, it yields the DEFAULT &Conf{}
+// with an empty path. A path that WAS given must exist — discovery only returns files that
+// do, so a missing one is always a path the user typed, and quietly generating with the
+// defaults instead is how a typo in --config went unnoticed.
 func reconcileConf(specPath, confPath string) (*reconciledConf, error) {
 	rc := &reconciledConf{conf: &Conf{}}
 
@@ -81,7 +83,7 @@ func reconcileConf(specPath, confPath string) (*reconciledConf, error) {
 	}
 	if _, statErr := os.Stat(resolved); statErr != nil {
 		if os.IsNotExist(statErr) {
-			return rc, nil // optional → default when the resolved path doesn't exist
+			return nil, fmt.Errorf("conf %s: %w", resolved, os.ErrNotExist)
 		}
 		return nil, fmt.Errorf("stat conf %s: %w", resolved, statErr)
 	}

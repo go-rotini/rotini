@@ -1,0 +1,10 @@
+# Nothing is pruned from the models package, so a keep list there would do nothing.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_rotini.go
+    - type: models
+      file: internal/models/demo/zz_models.go
+      keep:
+        - extra.go

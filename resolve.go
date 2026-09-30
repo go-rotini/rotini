@@ -16,7 +16,7 @@ import (
 // ResolvedCommand is one node on the invoked command path, root → leaf: the flattened
 // command-tree data the runtime resolved for this invocation. It is exposed via
 // [Context.Chain] so opt-in tooling binds inputs against the exact command whose handler ran —
-// including a statically composed child, whose chain is relative to its own root.
+// including a statically composed child, whose chain is its full path under the parent.
 //
 // Fields copy the matching [Definition] (root) or [CommandDef] fields; an empty slice means the
 // command declares none of that kind.

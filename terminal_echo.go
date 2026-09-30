@@ -7,8 +7,8 @@ import "os"
 // The ioctl request constants differ between Linux (TCGETS/TCSETS) and the BSDs including
 // macOS (TIOCGETA/TIOCSETA), so they live behind build tags, with the shared termios code in
 // terminal_echo_termios.go and a no-op for every other platform. Same bargain as
-// [TerminalSize]: a little platform tedium to keep rotini's runtime free of external
-// dependencies.
+// [TerminalSize]: a little platform tedium to keep rotini's runtime free of a terminal-library
+// dependency.
 
 // withEchoDisabled runs fn with terminal echo turned off on file, restoring the previous state
 // afterwards — on every path, including a panic. When file is not a terminal, or the platform

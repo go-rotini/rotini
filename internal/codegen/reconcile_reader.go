@@ -66,6 +66,11 @@ func readRaw(path string) (fileFormat, []byte, error) {
 	}
 	data, err := fs.ReadFile(path)
 	if err != nil {
+		// The fs error nests the os one, so its text names the path three times; a missing
+		// file is common enough to deserve one plain sentence.
+		if errors.Is(err, os.ErrNotExist) {
+			return format, nil, fmt.Errorf("%s: %w", path, os.ErrNotExist)
+		}
 		return format, nil, fmt.Errorf("read %s: %w", path, err)
 	}
 	return format, data, nil
@@ -172,7 +177,7 @@ func readConf(path string) (*Conf, error) {
 
 // errSpecPathRequired is reported when no spec-file path is supplied and none of the
 // fallback locations resolve to a spec.
-var errSpecPathRequired = errors.New("spec file path is required")
+var errSpecPathRequired = errors.New("no .rotini.spec.* file in the working directory — pass the spec's path")
 
 // fallbackExtensions is the spec/conf discovery precedence: the first
 // .rotini.<type>.<ext> that exists wins.
@@ -198,6 +203,30 @@ func resolveSpecPath(path string) (string, error) {
 	}
 	found, _ := discoverFile(cwd, fileTypeSpec)
 	return found, nil
+}
+
+// ResolvePaths resolves the spec and conf files a generate or validate of specPath and
+// confPath reads, by the same rules the pipeline uses: an empty specPath is the first
+// .rotini.spec.* in the working directory, and an empty confPath is the first .rotini.conf.*
+// beside the spec. conf is "" when there is none, and the conf defaults apply. A path the
+// caller gave is returned as given; whether it exists is the pipeline's to report. A
+// discovered path is made relative to the working directory, for display.
+func ResolvePaths(specPath, confPath string) (spec, conf string, err error) {
+	spec, err = resolveSpecPath(specPath)
+	if err != nil {
+		return "", "", err
+	}
+	if spec == "" {
+		return "", "", errSpecPathRequired
+	}
+	conf = resolveConfBesideSpec(spec, confPath)
+	if specPath == "" {
+		spec = displayPath(spec) // discovered from the working directory, so absolute
+	}
+	if confPath == "" && conf != "" {
+		conf = displayPath(conf)
+	}
+	return spec, conf, nil
 }
 
 // resolveConfBesideSpec resolves the conf file path: the given path when set,

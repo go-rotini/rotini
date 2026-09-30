@@ -84,7 +84,7 @@ func ExampleBinder_Bind() {
 // The registry: anything bound on the Program (or Context) is fetched typed.
 // Get reports absence; MustGet panics — and that panic reaches the
 // Program.WithFunnel funnel as a *PanicError in its panics slice, teardown already done.
-func ExampleMustGet() {
+func ExampleContext_MustGet() {
 	type apiClient struct{ baseURL string }
 
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
@@ -101,13 +101,13 @@ func ExampleMustGet() {
 	// nothing bound under "other"
 }
 
-// The category taxonomy: tag errors at the source, map them to conventional
-// exit codes in one switch — typically inside Program.WithFunnel.
+// The category taxonomy: tag errors at the source, map them to exit codes in one
+// switch — typically inside Program.WithFunnel. Here usage errors take the common 2.
 func ExampleCategoryOf() {
 	classify := func(err error) int {
 		switch CategoryOf(err) {
 		case CategoryUsage:
-			return 1
+			return 2
 		case CategoryInternal:
 			return 70
 		default:
@@ -119,26 +119,21 @@ func ExampleCategoryOf() {
 	fmt.Println(classify(InternalError(errors.New("wiring mismatch"))))
 	fmt.Println(classify(errors.New("untagged")))
 	// Output:
-	// 1
+	// 2
 	// 70
 	// 1
 }
 
 // ── the unopinionated path ──────────────────────────────────.
 
-// unopinionatedCmd overrides only Run; the four embeddable no-op Default* hooks satisfy
-// the rest of [Handlers]. Run reads the raw argv from [Context.Argv], consults the
+// unopinionatedCmd overrides only Run; the embedded [DefaultHooks] satisfies the rest of
+// [Handlers]. Run reads the raw argv from [Context.Argv], consults the
 // resolved frame's declared flags via [Context.Chain] (spec-aware without a parser), reads
 // an env var with the standard library (env is NOT runtime-mediated — only the streams
 // are), writes through [Context.Stdout] so the program's streams stay injectable, and
-// reports its outcome by recording + [Context.HaltWithCode] rather than printing inline.
+// reports a failure with [Context.HaltWith] rather than printing inline.
 // (Stdin would likewise be read via [Context.Stdin], never os.Stdin.)
-type unopinionatedCmd struct {
-	DefaultCascadingPreRun
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
-}
+type unopinionatedCmd struct{ DefaultHooks }
 
 func (unopinionatedCmd) Run(_ context.Context, rtx *Context) {
 	leaf := rtx.Chain()[len(rtx.Chain())-1] // the resolved command frame
@@ -160,10 +155,9 @@ func (unopinionatedCmd) Run(_ context.Context, rtx *Context) {
 		}
 	}
 	if name == "" {
-		// Record the outcome; the runtime reports it through the funnels after teardown,
-		// and the default OnError floors the exit to 1.
-		rtx.RecordError(UsageError(errors.New("--name is required")))
-		rtx.HaltWithCode(1)
+		// Record and stop; the runtime reports it through the funnel after teardown, and
+		// the default funnel floors the exit to 1.
+		rtx.HaltWith(UsageError(errors.New("--name is required")))
 		return
 	}
 

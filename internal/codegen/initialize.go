@@ -104,8 +104,9 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	if err != nil {
 		return err
 	}
-	// A fresh scaffold has nothing to prune, so its notices are always empty.
-	_, err = p.validateAndEmit(rs, rc)
+	// Init never deletes a file: over --force, the seed replaces a spec that may have had more
+	// commands, and pruning would take their handlers — edited ones included — with it.
+	_, err = p.validateAndEmit(rs, rc, false)
 	return err
 }
 

@@ -23,11 +23,13 @@ func EnvNoColor() bool {
 	return os.Getenv("NO_COLOR") != ""
 }
 
-// IsTerminal reports whether stream is a terminal rather than a pipe, a regular file, a buffer
-// or /dev/null. It takes the streams a handler holds — rtx.Stdin, rtx.Stdout, rtx.Stderr — as
+// IsTerminal reports whether stream is a terminal rather than a pipe, a regular file or a
+// buffer. It takes the streams a handler holds — rtx.Stdin, rtx.Stdout, rtx.Stderr — as
 // they are, so a prompt guard needs no type assertion: a stream that is not a file (a test's
 // bytes.Buffer, a nil) is not a terminal. It is the check behind "is anyone watching this?":
 // paging, animating and prompting all become wrong when the answer is no.
+//
+// It checks for a character device, so /dev/null — also a character device — reports true.
 //
 //	if !rotini.IsTerminal(rtx.Stdin) {
 //		return rotini.ErrNotInteractive

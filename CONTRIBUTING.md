@@ -12,7 +12,7 @@ make all   # run every project process (lint, the full test suite, build, instal
 ```
 
 `rotini` is two-faced: a spec-driven CLI **code generator** (the `go tool rotini`
-binary — `init`, `generate`, `mod`, …) and the **runtime library** that generated
+binary — `init`, `generate`, `validate`, …) and the **runtime library** that generated
 CLIs import. Most contributions touch one side or the other; the codegen engine
 lives under `internal/`, the runtime surface in the package root.
 
@@ -24,12 +24,12 @@ lives under `internal/`, the runtime surface in the package root.
 4. Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages (e.g., `feat:`, `fix:`, `test:`, `docs:`).
 
 If your change alters generated output, update the golden fixtures under
-`internal/codegen/testdata/` (the `golden/` module and the `help/` pages) and confirm
-the diff is intentional. If it changes the spec or conf schema, keep
+`internal/codegen/testdata/golden/` (`go test ./internal/codegen -run Golden -update`) and
+confirm the diff is intentional. If it changes the spec or conf schema, keep
 `internal/codegen/schema-spec.json` / `internal/codegen/schema-conf.json`, the
 root-level published copies (`schema-spec.json` / `schema-conf.json`, which a release
 tag serves as the `$schema` URL), and the generated reference pages under
-`docs/content/specification/_index.md` and `docs/content/configuration/_index.md`, plus the every-key examples in `docs/assets/examples/`, in sync (`go generate ./cmd/rotini`, then
+`docs/content/specification/_index.md` and `docs/content/configuration/_index.md`, plus the every-key examples in `docs/assets/examples/`, in sync (`go test ./internal/codegen -run PublishedSchemas -update-schemas`, then
 `go test ./internal/codegen -run SchemaDocs -update-schema-docs`).
 `TestPublishedSchemasInSync` and `TestSchemaDocsInSync` fail until they are.
 

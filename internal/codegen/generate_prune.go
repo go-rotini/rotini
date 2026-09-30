@@ -61,8 +61,7 @@ func pruneEntrypoint(lay layout, keepList []string, onPrune func(string)) error 
 // The "rotini wrote it" test is the point. Pruning used to remove every unprotected .go file,
 // so a helper placed beside the handlers that use it — the obvious home for a shared
 // registry key — was deleted by the next `go generate`, silently, with the build failure as
-// the first sign anything had happened. `keep:` was the remedy, and its own description says
-// it is "intended to stay empty".
+// the first sign anything had happened. `keep:` was the only remedy; now it is rarely needed.
 //
 // Every pruned file is reported through onPrune. Removing a file is not a silent operation.
 func pruneGoDir(dir string, protected map[string]bool, onPrune func(string)) error {

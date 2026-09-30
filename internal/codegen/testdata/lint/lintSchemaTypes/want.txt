@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:5:3: command demo: flag "weird": type "not a go type!" is not a Go type — use a builtin (string, int, bool, []string, map[string]int), a rotini alias (count, duration, date), a JSON Schema name (integer, number, array, object), or an imported type with `import:`
+spec: .rotini.spec.yaml:7:7: command demo: flag "weird": `type` "not a go type!" is not a Go type — use a builtin (string, int, bool, []string, map[string]int), a rotini alias (count, duration, date), a JSON Schema name (integer, number, array, object), or an imported type with `import`

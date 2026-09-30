@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:4:3: (root): the root command cannot declare aliases ("dm") — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands
+spec: .rotini.spec.yaml:6:5: command demo: the root command cannot declare `aliases` ("dm") — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands

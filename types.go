@@ -232,7 +232,7 @@ func parseBool(s string) (bool, error) {
 	case "false", "f", "0", "no", "n", "off":
 		return false, nil
 	}
-	return false, fmt.Errorf("%q is not a boolean — use true/false, yes/no, on/off or 1/0", s)
+	return false, fmt.Errorf("%q is not a boolean — use true/false, t/f, yes/no, y/n, on/off or 1/0", s)
 }
 
 // Time layouts beyond Go's reference-time layouts: a Unix timestamp in seconds (fractions

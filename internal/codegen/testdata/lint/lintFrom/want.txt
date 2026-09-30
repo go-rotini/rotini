@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:5:3: command demo: flag "force" sets from: but is bool — a bool takes no value to resolve
+spec: .rotini.spec.yaml:7:7: command demo: flag "force": sets `from` but its type is bool — a bool takes no value to resolve

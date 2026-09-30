@@ -39,7 +39,9 @@ func lintComposedTree(spec *Spec, specPath string) []error {
 		return nil
 	}
 	if _, err := resolveTree(spec, specPath, name); err != nil {
-		return []error{&problem{kind: "spec", loc: "composition", msg: err.Error()}}
+		// The composer reports the tree as a whole, so the problem sits on the root: it is the
+		// document the author ran, and it names the file even when the ref at fault is deeper.
+		return []error{&problem{kind: "spec", ptr: rootPointer, loc: "command " + spec.Command.Name, msg: "composition: " + err.Error()}}
 	}
 	return nil
 }

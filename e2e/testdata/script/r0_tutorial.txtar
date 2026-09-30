@@ -5,18 +5,19 @@
 # the documented results asserted — so the guide cannot quietly stop being true, which is the
 # usual fate of a tutorial.
 #
-# The only departure is step 2: the page says `go get -tool github.com/go-rotini/rotini`, and
-# this module is wired to the working tree instead. Installing the PUBLISHED module is Mode A,
+# The only departure is the install: the page says
+# `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest`, and this module is wired to the
+# working tree instead. Installing the PUBLISHED module is Mode A,
 # and it has its own gate (.github/workflows/release-fidelity.yml) because it needs a release
 # to install.
 
-# ── 1. Go module setup ───────────────────────────────────────────────────────
+# ── Install: Go module setup ─────────────────────────────────────────────────
 gomodinit github.com/me/todo
 
-# ── 3. Initialize your project ───────────────────────────────────────────────
+# ── The files and the loop: initialize ───────────────────────────────────────
 exec rotini init todo
 
-# "Your project now contains:" — each bullet on the page, checked.
+# The page's table of files `rotini init` writes, checked.
 exists cmd/todo/.rotini.spec.yaml
 exists cmd/todo/.rotini.conf.yaml
 exists cmd/todo/main.go
@@ -28,7 +29,7 @@ grep 'rotini generate' cmd/todo/main.go
 
 exec go mod tidy
 
-# ── 4. The development loop ──────────────────────────────────────────────────
+# ── The files and the loop: validate, generate, build ────────────────────────
 # "validate the spec without generating (fast; use it in CI)"
 exec rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
 
@@ -43,7 +44,7 @@ exec go build ./cmd/todo
 exec ./todo$exe --help
 stdout 'Usage:'
 
-# ── 5. Write a handler ───────────────────────────────────────────────────────
+# ── Handlers: write one ──────────────────────────────────────────────────────
 # The page shows a handler for a `todo add` command. Declare it, regenerate, and the stub
 # appears at exactly the path the page names.
 cp spec-with-add.yaml cmd/todo/.rotini.spec.yaml

@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:6:3: command demo: remote_commands "deploy" timeout "9999999999999999999h" is not a positive Go duration (e.g. "10s", "1m30s")
+spec: .rotini.spec.yaml:8:7: command demo: remote_commands "deploy": `timeout` "9999999999999999999h" is not a positive Go duration (e.g. "10s", "1m30s")

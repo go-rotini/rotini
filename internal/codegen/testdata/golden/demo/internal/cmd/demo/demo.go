@@ -34,7 +34,9 @@ type demoHandlers struct {
 // its own errors: it records them, and the runtime reports them once, after teardown.
 //
 // This file was created once and is now yours — rotini never overwrites it. Delete anything
-// below you do not want.
+// below you do not want. If this command leaves the spec, `go generate` removes the file;
+// delete the `var _ rotini.Handlers` line above, or list the file under `keep:`, to hold on
+// to it.
 func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	inputs, err := rotini.Collect[DemoInputs](rtx)

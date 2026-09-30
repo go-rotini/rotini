@@ -403,9 +403,9 @@ func (p *Program) WithHelp(help HelpFunc) *Program {
 	return p
 }
 
-// WithParser replaces the [Parser] returned by [Context.Parser] and used by the argv channel.
-// Parsing is never optional, so a program that sets nothing still has one; this overrides it.
-// A nil parser is ignored.
+// WithParser replaces the [Parser] that [Context.Parser] returns. [Collect] and the [Binder]
+// always use the default parser, so this changes only what a handler gets from
+// [Context.Parser]. A nil parser is ignored.
 func (p *Program) WithParser(parser *Parser) *Program {
 	if parser != nil {
 		p.parser = parser

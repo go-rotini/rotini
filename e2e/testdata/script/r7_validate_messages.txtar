@@ -1,6 +1,6 @@
 # R7 — the negative rig: make rules fire and judge the message as a stranger would.
 #
-# The in-repo corpus (internal/codegen/testdata/lint) freezes all 35 rules' text. This script
+# The in-repo corpus (internal/codegen/testdata/lint) freezes every rule's text. This script
 # is the other half: it runs `rotini validate` as a USER runs it and checks the three things
 # the campaign says a rejection owes the reader — what is wrong, WHERE, and what to do
 # instead — plus the exit code and the stream, which the corpus cannot see.
@@ -10,7 +10,7 @@ gomodinit example.com/bad
 # A duplicate flag identifier: names both flags, and points at a line.
 ! exec rotini validate dup.spec.yaml --config ok.conf.yaml
 stderr '\.spec\.yaml:\d+:\d+'
-stderr '"-o" is declared by both'
+stderr 'identifier "-o" is already declared by flag "out"'
 ! stdout 'Error'
 
 # An unknown key is rejected by the schema, positioned, and NOT silently ignored.

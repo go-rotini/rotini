@@ -4,7 +4,7 @@ title: "generated"
 
 # zz_rotini.go
 
-`go generate ./...` turns your spec into one Go file, `internal/<cmd>/zz_rotini.go`. It is
+`go generate ./...` turns your spec into one Go file, `internal/cmd/<name>/zz_rotini.go`. It is
 rewritten on every run, so you never edit it — and you rarely need to read it. This page
 explains what is in it, so the step from spec to code is not a mystery.
 
@@ -16,7 +16,7 @@ For a spec with a `todo` command and an `add` sub-command, the file holds:
 |---|---|
 | each command's flags | a struct — `TodoAddFlags { Priority string; Tag []string }` |
 | each command's arguments | a struct — `TodoAddArguments { Title string }` |
-| its env and config inputs | `TodoAddEnv` and `TodoAddConfig` structs |
+| its env and config inputs, when it declares any | `TodoAddEnv` and `TodoAddConfig` structs |
 | the command and its parents | `TodoAddInputs`, the type your handler passes to `rotini.Collect` |
 | the command tree | a `rotini.Definition` the runtime parses against |
 | each command | a method wiring it to your handler type (`todoAddHandlers`) |
@@ -56,8 +56,8 @@ var Program = NewProgram(&handlers{})
 
 - **The handler files** — one per command, created the first time a command appears and never
   overwritten. If you remove a command from the spec, its handler file is removed on the next
-  `go generate` (`generate` prints what it removed); list a file under the conf's `keep:` to
-  hold on to it.
+  `go generate` (`generate` prints what it removed), edits and all; delete the file's
+  `var _ rotini.Handlers` line or list it under the conf's `keep:` to hold on to it.
 - **`main.go`** — created once, never touched again.
 
 ## Names

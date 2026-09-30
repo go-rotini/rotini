@@ -134,7 +134,7 @@ func CollectP[T any](rtx *Context) (T, Report, error) {
 // ParseArgv parses the command line only — flags and positionals across the resolved chain,
 // exactly as supplied: no defaults, no fallback, and no required or enum validation. Validate
 // the overlaid result with [Report.Validate], so a required flag satisfied by another layer
-// passes. Parse failures are [ParseError]s.
+// passes. Parse failures are [*ParseError] values.
 func ParseArgv[T any](rtx *Context) (Layer[T], error) {
 	var t T
 	set, core, err := argvLayer(rtx, reflect.ValueOf(&t).Elem())

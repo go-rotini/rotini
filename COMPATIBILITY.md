@@ -56,7 +56,7 @@ What your handlers and your `main.go` are written against:
 - the exported package symbols codegen emits: `Program`, `Handlers()`, `ProgramHandlers`,
   `BindMeta`, the feature vars (`Help<Prefix>`, `Man<Prefix>`, `Markdown<Prefix>`,
   `Completion<Shell>`) and their resolvers (`Help()`, `Man()`, `Markdown()`, `Completion()`);
-- the `Handlers` interface every stub implements, and the `Default*` embeddable no-ops.
+- the `Handlers` interface every handler file implements, and the `Default*` embeddable no-ops.
 
 ### 4. The CLI's own interface
 
@@ -71,7 +71,7 @@ These change in minor and patch releases. If you depend on one, pin the rotini v
 | **The exact text of error and warning messages** | Improving a message is a bug fix. Branch on the typed error (`*ParseError`, `*BindError`, `*RemoteError`, `*WiringError`, `*ServiceError`, `*PanicError`), on `ParseError.Kind`, or on `CategoryOf` — never on a string. |
 | **The layout of generated help, man and markdown pages** | Column widths, wrapping, spacing and section ordering are presentation, and they improve. If you golden-test your CLI's `--help`, expect to re-record it on a minor upgrade — or take ownership of the layout by turning the feature's `template` knob on, which is exactly what it is for. |
 | **Generated file formatting** | Comment wording, import grouping, blank lines. The *identifiers* are covered (§3); the whitespace around them is not. |
-| **The contents of a newly seeded handler stub** | `rotini init` and the first `generate` write starter code. It is yours from the moment it is written and rotini never touches it again, so what a *future* rotini would have seeded is not a compatibility surface. |
+| **The contents of a newly seeded handler stub** | `rotini init` and the first `generate` write starter code. It is yours from the moment it is written and rotini never overwrites it (it only removes it if its command leaves the spec), so what a *future* rotini would have seeded is not a compatibility surface. |
 | **Anything under `internal/`** | Not importable, by Go's own rule. |
 | **The `__complete` wire protocol** | Private between a generated completion script and the binary that ships with it. Both come from the same `generate`, so they cannot disagree. |
 | **Benchmark numbers** | Tracked, not promised. |

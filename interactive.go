@@ -36,6 +36,9 @@ var ErrNotInteractive = UsageError(errors.New("no input available (not interacti
 // test's buffer, a CI runner — there is no echo to disable and the line is read normally, which
 // keeps a secret-reading command testable and scriptable with the same code: pass rtx.Stdin.
 //
+// Echo control needs a termios ioctl, which rotini wires on Linux, macOS and the BSDs. On any
+// other platform (Windows among them) the line is read normally and the terminal echoes it.
+//
 // The trailing newline is consumed and not returned. Nothing is written to the screen, so a
 // caller that printed a prompt should print its own newline afterwards: the user's Enter was not
 // echoed either.

@@ -16,8 +16,8 @@ import (
 
 // The companion CLI is rotini's own dogfood, and these tests drive it exactly as a
 // user's CLI would be driven: build the generated Program, bind doubles for the
-// codegen entry points (the reason GenerateFn/ValidateFn/InitializeFn are named
-// types bound through the registry), and call Run.
+// codegen entry points (the handlers fetch GenerateFn/ValidateFn/InitializeFn from the
+// registry with BindIfAbsent, so a test's binding wins), and call Run.
 //
 // Run is used rather than Execute so nothing calls os.Exit, and a fresh Program per
 // test keeps registry bindings from leaking between them. Run returns (code, err):
@@ -26,8 +26,8 @@ import (
 
 const testVersion = "9.9.9"
 
-// newTestCLI builds an isolated companion-CLI program with captured streams and the
-// services main.go binds. Extra services (the codegen doubles) are bound by the caller.
+// newTestCLI builds an isolated companion-CLI program with captured streams and the version
+// main.go sets. The codegen doubles are bound by the caller.
 func newTestCLI(t *testing.T) (*rotini.Program, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
@@ -55,7 +55,7 @@ func TestCLI_version(t *testing.T) {
 }
 
 // Every command answers --help without doing any work, so a user can always discover
-// a command without running it.
+// a command without running it — even beside a bad value or a missing argument.
 func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 	for _, argv := range [][]string{
 		{"--help"},
@@ -64,6 +64,9 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 		{"validate", "--help"},
 		{"version", "--help"},
 		{"help", "--help"},
+		{"initialize", "--format", "xml", "--help"},
+		{"validate", "--fail", "slow", "--help"},
+		{"version", "extra", "--help"},
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			p, out, _ := newTestCLI(t)
@@ -133,7 +136,7 @@ func TestCLI_generateDelegatesItsArguments(t *testing.T) {
 	if !strings.Contains(out.String(), "generated ok") {
 		t.Errorf("the generate callback's result was not printed:\n%s", out.String())
 	}
-	// The paths are echoed so a failing run says which files it read.
+	// The resolved paths are echoed so a failing run says which files it read.
 	if !strings.Contains(out.String(), "my.spec.yaml") || !strings.Contains(out.String(), "my.conf.yaml") {
 		t.Errorf("generate did not echo its inputs:\n%s", out.String())
 	}
@@ -479,5 +482,56 @@ func TestRequiresRuntime(t *testing.T) {
 		if got := requiresRuntime(dir); got != want {
 			t.Errorf("requiresRuntime(%s) = %v, want %v", dir, got, want)
 		}
+	}
+}
+
+// Every command reports bad input the same way: one "Error:" line on stderr and a non-zero
+// exit, with no help page dumped after it.
+func TestCLI_inputErrorsAreReportedAlike(t *testing.T) {
+	for _, argv := range [][]string{
+		{"nope"},
+		{"--nope"},
+		{"version", "extra"},
+		{"init", "a", "b"},
+		{"validate", "--nope"},
+	} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			p, out, errb := newTestCLI(t)
+			code, _ := p.Run(argv)
+			if code == 0 {
+				t.Error("exited 0")
+			}
+			if !strings.HasPrefix(errb.String(), "Error: ") {
+				t.Errorf("stderr = %q, want an Error: line", errb.String())
+			}
+			if out.Len() != 0 {
+				t.Errorf("printed to stdout on an input error:\n%s", out.String())
+			}
+		})
+	}
+}
+
+// With no conf given and none beside the spec, the banner says the defaults apply rather than
+// naming a file that was never read.
+func TestCLI_bannerNamesTheFilesRead(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile(".rotini.spec.json", []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, out, _ := newTestCLI(t)
+	var gotSpec, gotConf string
+	p.Bind("validate", codegen.ValidateFn(func(spec, conf string, _ bool, _ string, _ func(string, error), _ func([]error)) error {
+		gotSpec, gotConf = spec, conf
+		return nil
+	}))
+	if _, err := p.Run([]string{"validate"}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if gotSpec != ".rotini.spec.json" || gotConf != "" {
+		t.Errorf("validate got (%q, %q), want the discovered spec and no conf", gotSpec, gotConf)
+	}
+	if !strings.Contains(out.String(), "conf: none (defaults)") {
+		t.Errorf("banner does not say the conf defaults apply:\n%s", out.String())
 	}
 }

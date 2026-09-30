@@ -84,7 +84,7 @@ func (si scopeInputs) label(fd FlagDef) string {
 	return flagLabel(fd)
 }
 
-// ParseKind classifies a [ParseError] so a funnel can branch on the failure without matching
+// ParseKind classifies a [*ParseError] so a funnel can branch on the failure without matching
 // the human message. Most kinds are the end-user's to fix; [ParseKindInternal] is a misuse of
 // the parser API itself — surfaced as a [*ParseError] for uniformity, but the author's bug.
 type ParseKind int
@@ -92,7 +92,7 @@ type ParseKind int
 // The parse failure kinds. Branch on these rather than on a message: the message is
 // presentation, the kind is data.
 const (
-	// ParseKindUnspecified is the zero value: a [ParseError] whose construction
+	// ParseKindUnspecified is the zero value: a [*ParseError] whose construction
 	// site did not classify it (a hand-built error that sets no Kind).
 	ParseKindUnspecified         ParseKind = iota
 	ParseKindUnknownFlag                   // an argv token looked like a flag no command on the chain declares
@@ -137,8 +137,8 @@ func (k ParseKind) String() string {
 
 // ParseError is a parse-time failure caused by bad input. It is data, not presentation: the
 // message offers no suggestions and no usage dump, and the structured fields let a handler
-// compose its own response — switch on Kind, pair Token with Candidates and a bound
-// [Suggestor] for "did you mean", or render help for Command. It unwraps to [ErrUsage], so
+// compose its own response — switch on Kind, pair Token with Candidates and a [Suggestor]
+// for "did you mean", or render help for Command. It unwraps to [ErrUsage], so
 // [CategoryOf] reports [CategoryUsage].
 //
 // That is a label, not an exit code. rotini forces no category→code mapping and the default
@@ -180,16 +180,15 @@ func (e *ParseError) Unwrap() error {
 // line against what those commands declare — GNU/POSIX grammar, typed coercion, enum and
 // constraint checks — failing with a [*ParseError].
 //
-// It is a service, so parsing is opt-in (a CLI that wants raw argv binds nothing and reads
-// [Context.Argv]) and the registry is a dependency-injection seam:
+// Parsing is opt-in: a CLI that wants raw argv never calls it and reads [Context.Argv]. Supply
+// a parser with [Program.WithParser]; a handler reads it with [Context.Parser]:
 //
 //	parser := rtx.Parser()
 //	var in MycliInputs
 //	err := parser.Parse(rtx, &in)
 type Parser struct{}
 
-// NewParser returns rotini's default [Parser], ready to bind under the "parser"
-// registry key.
+// NewParser returns rotini's default [Parser].
 func NewParser() *Parser {
 	return &Parser{}
 }
@@ -234,8 +233,8 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 }
 
 // Deprecation is a deprecated CLI token found in this invocation's argv: the identifier used,
-// the kind of input, and that input's logical name. It is pure identification — rotini attaches
-// no message and does nothing with it. It implements error so it can be returned or printed
+// the kind of input, and that input's logical name. rotini attaches only the spec's own
+// `deprecated:` message and does nothing else with it. It implements error so it can be returned or printed
 // directly.
 type Deprecation struct {
 	Kind       string // "flag", "argument" or "command"
@@ -385,7 +384,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 }
 
 // parseInto binds argv to an already-resolved chain, strictly: an unrecognized flag, or one
-// missing its value, is a [ParseError]. Chain command tokens are consumed, and everything
+// missing its value, is a [*ParseError]. Chain command tokens are consumed, and everything
 // after the leaf command and after "--" is a positional of the leaf. Declared defaults are
 // applied; required and enum checks are [validate]'s job.
 func parseInto(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsedInputs, error) {
@@ -1353,7 +1352,7 @@ func negatedIdentifiers(f FlagDef) []string {
 }
 
 // childCommandNames is the dispatchable vocabulary of a command's visible children, for a
-// mistyped-command [ParseError]'s Candidates.
+// mistyped-command [*ParseError]'s Candidates.
 func childCommandNames(cur ResolvedCommand) []string {
 	var names []string
 	for _, c := range cur.Commands {
@@ -1371,7 +1370,7 @@ func childCommandNames(cur ResolvedCommand) []string {
 }
 
 // chainFlagIdentifiers is the non-hidden flag vocabulary of the whole chain, for an
-// unknown-flag [ParseError]'s Candidates.
+// unknown-flag [*ParseError]'s Candidates.
 func chainFlagIdentifiers(chain []ResolvedCommand) []string {
 	var ids []string
 	for _, v := range slices.Backward(chain) {

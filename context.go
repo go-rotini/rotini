@@ -13,9 +13,9 @@ import (
 	"sync"
 )
 
-// ErrServiceNotFound is the sentinel reported when a registry key is unbound.
-// [Context.MustGet] panics a [*ServiceError] wrapping it, which the runtime recovers and
-// routes to the funnel.
+// ErrServiceNotFound is the sentinel reported when a registry key is unbound, or bound to a
+// value of the wrong type, which [Context.MustGet] cannot hand back either. MustGet panics a
+// [*ServiceError] wrapping it, which the runtime recovers and routes to the funnel.
 var ErrServiceNotFound = errors.New("rotini: service not found")
 
 // ServiceError reports a registry key that was requested but unbound, or bound to the wrong
@@ -107,7 +107,7 @@ type Context struct {
 	// rtx.Stdout redirects its own writes and nothing else — the run's errors still go where
 	// they were always going. To redirect a whole invocation, configure the Program
 	// ([Program.WithStdout]) or give the run its own ([Program.RunContext] on a Program built
-	// for it), which is what a [REPL] does.
+	// for it).
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -256,8 +256,11 @@ func (rtx *Context) Bind(key string, value any) *Context {
 // dependency, but a test that bound a double under the same key earlier keeps it. Either way
 // the dependency is resolvable from the registry rather than hidden inline.
 //
-//	rtx.BindIfAbsent("generate", internal.Generate)
-//	gen := rtx.MustGet[internal.GenerateFn]("generate")
+//	rtx.BindIfAbsent("clock", time.Now)
+//	now := rtx.MustGet[func() time.Time]("clock")
+//
+// MustGet matches the bound value's exact type, so a value bound as a plain func is only
+// found under a func type, or an alias of one — not under a named func type.
 func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()

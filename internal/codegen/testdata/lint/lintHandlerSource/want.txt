@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:4:3: (root): sets handler: on the root command — handler: passthrough is supported on sub-commands only (a $ref node or an inline command), not the root
+spec: .rotini.spec.yaml:6:5: command demo: sets `handler` on the root command — handler delegation is supported on sub-commands only (a `$ref` node or an inline command), not the root

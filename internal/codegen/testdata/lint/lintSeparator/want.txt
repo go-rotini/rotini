@@ -1,4 +1,4 @@
-spec: .rotini.spec.yaml:5:3: command demo: flag "name" sets separator but its type is string — only a list or map takes several values to split into
-spec: .rotini.spec.yaml:5:3: command demo: flag "labels" sets separator to "=", which already separates each map entry's key from its value
-spec: .rotini.spec.yaml:5:3: command demo: flag "quoted" sets separator to a double quote, which is how an item that contains the separator is quoted
-spec: .rotini.spec.yaml:5:3: command demo: env "hosts" sets separator, which applies to flags and arguments only — an env input's list splits on commas and a configuration file writes a list as a list, so there is nothing for it to choose
+spec: .rotini.spec.yaml:7:7: command demo: flag "name": sets `separator` but its type is string — only a list or map takes several values to split into
+spec: .rotini.spec.yaml:12:7: command demo: flag "labels": sets `separator` to "=", which already separates each map entry's key from its value
+spec: .rotini.spec.yaml:17:7: command demo: flag "quoted": sets `separator` to a double quote, which is how an item that contains the separator is quoted
+spec: .rotini.spec.yaml:41:7: command demo: env "hosts": sets `separator`, which applies to flags and arguments only — an env input's list splits on commas and a configuration file writes a list as a list, so there is nothing for it to choose

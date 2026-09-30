@@ -743,7 +743,7 @@ func completionContents(prog string, nodes []helpNode) ([]string, error) {
 // output files: their content lives in the generated .go as a string literal.
 func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, feat docFeature) error {
 	if featDir == "" {
-		return fmt.Errorf("generate.features.%s.dir must not be empty", feat.name)
+		return fmt.Errorf("generate.features.%s.embed_dir must not be empty", feat.name)
 	}
 	if err := os.MkdirAll(featDir, 0o755); err != nil {
 		return fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)

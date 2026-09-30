@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:4:3: (root): the root command cannot use $ref — compose child specs as sub-commands instead
+spec: .rotini.spec.yaml:5:9: command demo: the root command cannot use `$ref` — compose child specs as sub-commands instead

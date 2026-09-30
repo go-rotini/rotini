@@ -276,7 +276,7 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 			rtx.HaltWithCode(1)
 		})
 		if !fired {
-			t.Fatal("OnError did not fire on recorded errors")
+			t.Fatal("the funnel did not fire on recorded errors")
 		}
 		if len(drained) != 2 {
 			t.Errorf("rtx.copyErrors() drained %d, want 2", len(drained))
@@ -298,7 +298,7 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 			rtx.Exit(5)
 		})
 		if !fired {
-			t.Fatal("OnError did not fire")
+			t.Fatal("the funnel did not fire")
 		}
 		if code != 5 {
 			t.Errorf("code = %d, want 5", code)
@@ -310,13 +310,13 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 
 	t.Run("record without exit + custom funnel: fires, code stays 0 (custom funnel owns it — edges 2,3)", func(t *testing.T) {
 		log, code, _, _, fired := exec(func(rtx *Context) {
-			rtx.RecordError(errB) // no HaltWithCode/Exit; the custom OnError (in exec) sets no code either
+			rtx.RecordError(errB) // no HaltWithCode/Exit; the custom funnel (in exec) sets no code either
 		})
 		if !fired {
-			t.Fatal("OnError did not fire on record-without-exit (edge 2)")
+			t.Fatal("the funnel did not fire on record-without-exit (edge 2)")
 		}
 		if code != 0 {
-			t.Errorf("code = %d, want 0 — the error floor is the DEFAULT OnError's; a custom funnel that omits HaltWithCode exits 0 (edge 3)", code)
+			t.Errorf("code = %d, want 0 — the error floor is the DEFAULT funnel's; a custom funnel that sets no code exits 0 (edge 3)", code)
 		}
 		if !contains(log, "run.PostRun") {
 			t.Errorf("teardown should run when no exit was called: %v", log)
@@ -328,7 +328,7 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 			rtx.HaltWithCode(0) // clean success
 		})
 		if fired {
-			t.Error("OnError fired with no recorded errors (edge 1 violated)")
+			t.Error("the funnel fired with no recorded errors (edge 1 violated)")
 		}
 		if code != 0 {
 			t.Errorf("code = %d, want 0", code)
@@ -336,15 +336,15 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 	})
 }
 
-// TestRun_defaultOnError_prints is the end-to-end golden: with no custom funnel,
+// TestRun_defaultFunnelPrintsErrors is the end-to-end golden: with no custom funnel,
 // the default prints one program-name-prefixed line per recorded error to
 // stderr and exits 1 (rotini holds no exit-code constants — any error is 1).
-func TestRun_defaultOnError_prints(t *testing.T) {
+func TestRun_defaultFunnelPrintsErrors(t *testing.T) {
 	cases := []struct {
 		name   string
 		record []error
 		want   int
-		stderr string // exact stderr (the format golden): the default OnError labels each line "Error:"
+		stderr string // exact stderr (the format golden): the default funnel labels each line "Error:"
 	}{
 		{"usage", []error{UsageError(errors.New("bad flag"))}, 1, "Error: bad flag\n"},
 		{"internal", []error{InternalError(errors.New("broken wiring"))}, 1, "Error: broken wiring\n"},

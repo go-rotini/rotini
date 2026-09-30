@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,27 +21,17 @@ type rotiniInitializeHandlers struct {
 }
 
 func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rtx.Parser()
+	if answerHelp(rtx, func(in RotiniInitializeInputs) bool { return in.RotiniInitialize.Flags.Help }) {
+		return
+	}
 
-	var inputs RotiniInitializeInputs
-	if err := parser.Parse(rtx, &inputs); err != nil {
+	inputs, err := rotini.Collect[RotiniInitializeInputs](rtx)
+	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
-
 	args := inputs.RotiniInitialize.Arguments
 	flags := inputs.RotiniInitialize.Flags
-
-	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
-		return
-	}
-
-	if args.Name == "" {
-		rtx.HaltWith(rotini.UsageError(errors.New("a name argument is required")))
-		return
-	}
 
 	version := rtx.Version()
 	rtx.BindIfAbsent("initialize", codegen.NewProcessor(version).Initialize)

@@ -34,14 +34,14 @@ import (
 func lintValuesParse(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
 			if schema == nil || (channel != "flag" && channel != "argument") || schema.Ref != "" {
 				return
 			}
 			check := func(what, consequence string, values []string) {
 				if msg := runtimeRejects(schema, values); msg != "" {
-					problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
-						msg: fmt.Sprintf("%s %q: %s %s — %s", channel, name, what, msg, consequence)})
+					problems = append(problems, inputProblem(ptr, path, channel, name,
+						fmt.Sprintf("`%s` %s — %s", what, msg, consequence)))
 				}
 			}
 			if schema.Default != nil {
@@ -49,7 +49,7 @@ func lintValuesParse(spec *Spec) []error {
 				if values == nil {
 					values = []string{defaultString(schema.Default)}
 				}
-				check("default", "every run that leaves it unset would fail", values)
+				check("default", defaultFails, values)
 			}
 			if schema.ImplicitValue != nil && channel == "flag" {
 				check("implicit_value", "the flag given bare would always fail", []string{defaultString(schema.ImplicitValue)})
@@ -190,15 +190,12 @@ func lintObjectFlags(spec *Spec) []error {
 	var problems []error
 	schemas := spec.Command.Schemas
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
 			ref := objectRef(schema, schemas)
 			if ref == "" {
 				return
 			}
-			add := func(msg string) {
-				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
-					msg: fmt.Sprintf("%s %q %s", channel, name, msg)})
-			}
+			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			if channel == "argument" {
 				add(fmt.Sprintf("refers to the object schema %q — an object value is taken by a flag, whose name gives its fields somewhere to go (--%s host=…, --%s.host=…); declare it as a flag", refTypeName(ref), name, name))
 				return
@@ -207,11 +204,11 @@ func lintObjectFlags(spec *Spec) []error {
 				return // env and config inputs decode objects through recon
 			}
 			if bad := scalarOnlyKeys(schema); len(bad) > 0 {
-				add(fmt.Sprintf("is an object flag, so %s cannot apply — an object's rules belong in its schema %q", strings.Join(bad, ", "), refTypeName(ref)))
+				add(fmt.Sprintf("an object flag, so %s cannot apply — an object's rules belong in its schema %q", keyList(bad), refTypeName(ref)))
 			}
 			if schema.Default != nil {
 				if msg := objectDefaultProblem(schema, schemas); msg != "" {
-					add("has a default that " + msg + " — every run that leaves it unset would fail")
+					add("has a `default` that " + msg + " — " + defaultFails)
 				}
 			}
 		})
@@ -297,16 +294,13 @@ func validationSummary(err error) string {
 func lintLayout(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+		eachInputAt(c, ptr, func(channel, name, ptr string, schema *InputSchema) {
 			if schema == nil || schema.Layout == "" {
 				return
 			}
-			add := func(msg string) {
-				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
-					msg: fmt.Sprintf("%s %q %s", channel, name, msg)})
-			}
+			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			if t := strings.TrimPrefix(getSchemaType(schema), "[]"); t != "time.Time" && t != "*time.Time" {
-				add(fmt.Sprintf("sets layout but its type is %s — layout says how a time is written, so it applies to time, datetime and date", displayType(getSchemaType(schema))))
+				add(fmt.Sprintf("sets `layout` but its type is %s — a layout says how a time is written, so it applies to time, datetime and date", displayType(getSchemaType(schema))))
 				return
 			}
 			if msg := layoutProblem(schema.Layout); msg != "" {
@@ -328,10 +322,10 @@ func layoutProblem(layout string) string {
 		return ""
 	}
 	if sampleTime.Format(layout) == layout {
-		return fmt.Sprintf("sets layout %q, which contains no part of Go's reference time, so no value could ever match — Go layouts write the reference time Mon Jan 2 15:04:05 MST 2006 the way yours is, e.g. %q for a date (or use unix / unixmilli)", layout, "2006-01-02")
+		return fmt.Sprintf("sets `layout` %q, which contains no part of Go's reference time, so no value could ever match — Go layouts write the reference time Mon Jan 2 15:04:05 MST 2006 the way yours is, e.g. %q for a date (or use unix / unixmilli)", layout, "2006-01-02")
 	}
 	if _, err := time.Parse(layout, sampleTime.Format(layout)); err != nil {
-		return fmt.Sprintf("sets layout %q, which cannot read back the times it writes (%v)", layout, err)
+		return fmt.Sprintf("sets `layout` %q, which cannot read back the times it writes (%v)", layout, err)
 	}
 	return ""
 }

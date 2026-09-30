@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:5:3: command demo: flag "conf" names config_source "nosuchfile", which is not a config_files entry in scope (declared on this command or an ancestor)
+spec: .rotini.spec.yaml:7:7: command demo: flag "conf": names `config_source` "nosuchfile", which is not a `config_files` entry in scope (declared on this command or an ancestor)

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"reflect"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -44,47 +45,172 @@ var (
 )
 
 // convert transcodes a rendered YAML document to the target serialization: YAML is returned
-// verbatim, json and jsonc become pretty-printed JSON, and toml is transcoded through JSON.
-// Conversion goes through an untyped value, so it carries every field the template declares.
+// verbatim, json and jsonc become pretty-printed JSON, and toml becomes TOML.
+//
+// Every field the template declares is carried in the TEMPLATE'S order — `version` first, a
+// command's `name` before its inputs, a feature's `type` before `enabled` — rather than
+// alphabetized, and the template's comments are carried into the formats that have them.
+// The encoders keep a struct's field order, so the decoded document is rebuilt as structs
+// (see orderedValue) before encoding.
 func convert(yamlBytes []byte, target fileFormat) ([]byte, error) {
 	if target == formatYAML {
 		return yamlBytes, nil
 	}
 
-	jsonBytes, err := yaml.ToJSON(yamlBytes)
-	if err != nil {
-		return nil, fmt.Errorf("convert seed to json: %w", err)
+	var doc any
+	if err := yaml.UnmarshalWithOptions(yamlBytes, &doc, yaml.WithOrderedMap()); err != nil {
+		return nil, fmt.Errorf("convert seed: %w", err)
 	}
+	comments, err := seedComments(yamlBytes)
+	if err != nil {
+		return nil, fmt.Errorf("convert seed: %w", err)
+	}
+	value := orderedValue(doc)
 
 	switch target {
 	case formatJSON:
-		var v any
-		if err := json.Unmarshal(jsonBytes, &v); err != nil {
-			return nil, fmt.Errorf("decode json: %w", err)
-		}
-		out, err := json.MarshalIndent(v, "", "  ")
+		out, err := json.MarshalIndent(value, "", "  ")
 		if err != nil {
 			return nil, fmt.Errorf("encode json: %w", err)
 		}
 		return append(out, '\n'), nil
 	case formatJSONC:
-		var v any
-		if err := jsonc.Unmarshal(jsonBytes, &v); err != nil {
-			return nil, fmt.Errorf("decode jsonc: %w", err)
+		byPath := map[string][]jsonc.Comment{}
+		for path, lines := range comments {
+			for _, line := range lines {
+				byPath[path] = append(byPath[path], jsonc.Comment{Position: jsonc.HeadCommentPos, Text: line})
+			}
 		}
-		out, err := jsonc.MarshalIndent(v, "  ")
+		out, err := jsonc.MarshalWithOptions(value, jsonc.WithIndent("  "), jsonc.WithEscapeHTML(false), jsonc.WithComment(byPath))
 		if err != nil {
 			return nil, fmt.Errorf("encode jsonc: %w", err)
 		}
 		return append(out, '\n'), nil
 	case formatTOML:
-		out, err := toml.FromJSON(jsonBytes)
+		out, err := toml.Marshal(value)
 		if err != nil {
 			return nil, fmt.Errorf("convert to toml: %w", err)
 		}
-		return out, nil
+		return tomlWithComments(out, comments), nil
 	default:
 		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, target)
+	}
+}
+
+// tomlWithComments writes each comment above the table header its path names (`[a.b]`, or
+// `[[a.b]]` for a list of tables). The toml encoder places comments only on key/value lines,
+// and a seed's comments sit above tables. A comment whose table is not in the output is
+// dropped rather than guessed at.
+func tomlWithComments(out []byte, comments map[string][]string) []byte {
+	text := string(out)
+	for path, lines := range comments {
+		for _, header := range []string{"[[" + path + "]]\n", "[" + path + "]\n"} {
+			i := strings.Index(text, header)
+			if i < 0 || (i > 0 && text[i-1] != '\n') {
+				continue
+			}
+			var block strings.Builder
+			for _, line := range lines {
+				block.WriteString("# " + line + "\n")
+			}
+			text = text[:i] + block.String() + text[i:]
+			break
+		}
+	}
+	return []byte(text)
+}
+
+// seedComments collects a YAML seed's head comments by the dotted path of the key they sit
+// above ("generate.features"). A comment written above a list item is reported against the
+// key holding the list: that is where JSONC and TOML can carry it, and where a reader of the
+// converted file expects it.
+func seedComments(yamlBytes []byte) (map[string][]string, error) {
+	file, err := yaml.Parse(yamlBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read seed comments: %w", err)
+	}
+	out := map[string][]string{}
+	var walk func(n *yaml.Node, path string, listItem bool)
+	walk = func(n *yaml.Node, path string, listItem bool) {
+		switch n.Kind {
+		case yaml.DocumentNode:
+			for _, c := range n.Children {
+				walk(c, path, false)
+			}
+		case yaml.SequenceNode:
+			for _, c := range n.Children {
+				walk(c, path, true)
+			}
+		case yaml.MappingNode:
+			for i := 0; i+1 < len(n.Children); i += 2 {
+				key, val := n.Children[i], n.Children[i+1]
+				child := key.Value
+				if path != "" {
+					child = path + "." + key.Value
+				}
+				if key.HeadComment != "" {
+					// A comment above a list item parses onto the item's first key.
+					at := child
+					if i == 0 && listItem {
+						at = path
+					}
+					out[at] = append(out[at], commentLines(key.HeadComment)...)
+				}
+				walk(val, child, false)
+			}
+		}
+	}
+	for _, d := range file.Docs {
+		walk(d, "", false)
+	}
+	return out, nil
+}
+
+// commentLines splits a parsed comment block into its lines, without the '#' markers.
+func commentLines(text string) []string {
+	var lines []string
+	for line := range strings.SplitSeq(text, "\n") {
+		lines = append(lines, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#")))
+	}
+	return lines
+}
+
+// orderedValue rebuilds a decoded ordered YAML value with every mapping as a struct whose
+// fields are the mapping's keys in order (tagged for the json, jsonc and toml encoders), so
+// encoding keeps the order a map would lose.
+func orderedValue(v any) any {
+	switch t := v.(type) {
+	case yaml.MapSlice:
+		fields := make([]reflect.StructField, len(t))
+		values := make([]reflect.Value, len(t))
+		for i, item := range t {
+			val := reflect.ValueOf(orderedValue(item.Value))
+			typ := reflect.TypeFor[any]()
+			if val.IsValid() {
+				typ = val.Type()
+			}
+			fields[i] = reflect.StructField{
+				Name: "F" + strconv.Itoa(i),
+				Type: typ,
+				Tag:  reflect.StructTag(fmt.Sprintf(`json:%q`, fmt.Sprint(item.Key))),
+			}
+			values[i] = val
+		}
+		out := reflect.New(reflect.StructOf(fields)).Elem()
+		for i, val := range values {
+			if val.IsValid() {
+				out.Field(i).Set(val)
+			}
+		}
+		return out.Interface()
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = orderedValue(e)
+		}
+		return out
+	default:
+		return v
 	}
 }
 
@@ -178,7 +304,7 @@ func renderMainFile(header, pkg, pkgAlias, extension string) ([]byte, error) {
 // templateHandlerData is the per-command handler stub context. The stub is
 // create-once and then the user's, so it is written to be the shape worth copying:
 // the Default* hooks embedded rather than overridden, and Run showing the
-// Collect-then-RecordError idiom against this command's own generated inputs type.
+// Collect-then-HaltWith idiom against this command's own generated inputs type.
 type templateHandlerData struct {
 	Package       string
 	HandlersType  string

@@ -124,7 +124,7 @@ func TestParse_unknownCommand(t *testing.T) {
 	// "ru" is a stray positional on a branch-only root: a mistyped sub-command.
 	// The error is data, not presentation: no baked-in suggestion text — the
 	// structured fields carry the token and the sibling vocabulary so a handler
-	// composes its own response (typically with a bound [Suggestor]).
+	// composes its own response (typically with a [Suggestor]).
 	rtx := NewContextFor(parserTestDef(), []string{"ru"})
 	var in runInputs
 	err := NewParser().Parse(rtx, &in)

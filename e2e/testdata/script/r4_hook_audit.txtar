@@ -27,7 +27,7 @@ exec go vet ./...
 
 # ── generate says so, with everything needed to act on it ────────────────────
 exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
-stderr 'internal/cmd/demo/demo\.go:\d+'
+stderr '^Warning: internal/cmd/demo/demo\.go:\d+'
 stderr 'method "CascadingPrerun" on demoHandlers is not a lifecycle hook'
 stderr 'will never run'
 stderr 'rotini\.DefaultCascadingPreRun is what supplies CascadingPreRun'
@@ -42,7 +42,7 @@ stdout 'ran'
 # ── fix the spelling: generate goes quiet and the hook fires ─────────────────
 cp fixed-handler.go.txt internal/cmd/demo/demo.go
 exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
-! stderr 'Note:'
+! stderr 'Warning:'
 
 exec go build -o demo$exe ./cmd/demo
 exec ./demo$exe

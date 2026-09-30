@@ -85,7 +85,7 @@ func TestWithResolver_error(t *testing.T) {
 		return Resolution{}, errors.New("routing table on fire")
 	})
 	code, err := p.Run(p.args)
-	// A resolver error is a resolution-phase fault routed to OnPanic; the default
+	// A resolver error is a resolution-phase fault routed to the funnel as a panic; the default
 	// exits 1 (the returned err still carries the internal category).
 	if code != 1 || err == nil {
 		t.Errorf("run() = (%d, %v), want (1, the resolver error)", code, err)
@@ -159,7 +159,7 @@ func TestRun_wiringError(t *testing.T) {
 func TestWithResolver_emptyChain(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.WithResolver(func(Definition, []string) (Resolution, error) { return Resolution{}, nil })
-	// An empty chain is a resolver fault → OnPanic; the default exits 1.
+	// An empty chain is a resolver fault → the funnel's panics; the default exits 1.
 	if code, err := p.Run(p.args); code != 1 || err == nil {
 		t.Errorf("run() = (%d, %v), want (1, an empty-chain error)", code, err)
 	}
@@ -176,7 +176,7 @@ func TestWithResolver_customRemote(t *testing.T) {
 		return Resolution{Remote: &RemoteDispatch{Def: RemoteDef{Name: "ghost", Binary: "rotini-test-no-such-binary"}}}, nil
 	})
 	// Not flagged Discovered → a declared remote → a missing binary is recorded
-	// as an error → OnError; the default exits 1.
+	// as an error → the funnel's errors; the default exits 1.
 	if code, _ := p.Run(p.args); code != 1 {
 		t.Errorf("run() = %d, want 1 for an unresolvable remote binary", code)
 	}
@@ -234,7 +234,7 @@ func TestWithLifecycle_customPlanKeepsUnwindContract(t *testing.T) {
 	p.WithLifecycle(DefaultLifecycle) // explicitly seamed; the engine owns halting/unwind
 	code, err := p.Run(p.args)
 	if code != 1 || err == nil {
-		t.Fatalf("run() = (%d, %v), want (1, the panic via OnPanic)", code, err)
+		t.Fatalf("run() = (%d, %v), want (1, the panic via the funnel)", code, err)
 	}
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",

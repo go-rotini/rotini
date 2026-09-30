@@ -97,6 +97,20 @@ func TestSubprocess_timeoutKills(t *testing.T) {
 	}
 }
 
+// WithTimeout(0) clears an earlier deadline, as its doc promises: zero means none.
+func TestSubprocess_zeroTimeoutClears(t *testing.T) {
+	s := NewSubprocess("sleep", "0.3").WithTimeout(50 * time.Millisecond).WithTimeout(0)
+	if s.timeout != 0 {
+		t.Fatalf("timeout = %v after WithTimeout(0), want 0", s.timeout)
+	}
+	if _, err := s.Run(context.Background()); err != nil {
+		t.Fatalf("a cleared timeout still killed the child: %v", err)
+	}
+	if NewSubprocess("true").WithTimeout(-time.Second).timeout != 0 {
+		t.Error("a negative timeout was kept")
+	}
+}
+
 func TestSubprocess_contextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() { time.Sleep(50 * time.Millisecond); cancel() }()

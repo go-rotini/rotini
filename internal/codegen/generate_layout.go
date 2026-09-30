@@ -76,7 +76,7 @@ func goPkgName(dir string) string {
 
 // applyConfDefaults fills in the conf defaults for any unset generation setting, so a missing
 // or partial conf still generates. The cmd package defaults to "internal/cmd/<root>/" with its
-// generated file at zz_rotini.gen.go. The entrypoint gets no default: main.go is written only
+// generated file at zz_rotini.go. The entrypoint gets no default: main.go is written only
 // when the conf declares one.
 func applyConfDefaults(conf *Conf, rootName string) {
 	if conf.Generate == nil {
@@ -97,7 +97,7 @@ func applyConfDefaults(conf *Conf, rootName string) {
 
 	// The generated code defaults to one self-contained file beside the editable stubs. The
 	// runtime is imported, not emitted, so it has no target at all.
-	frameworkFile := "internal/cmd/" + rootName + "/zz_rotini.gen.go"
+	frameworkFile := "internal/cmd/" + rootName + "/zz_rotini.go"
 	if p := ensure(typeCmd); p.File == "" {
 		p.File = frameworkFile
 	}
@@ -125,7 +125,7 @@ func applyConfDefaults(conf *Conf, rootName string) {
 type layout struct {
 	cmdDir     string // absolute output dir for the cmd package (editable stubs + the generated file)
 	cmdPkgName string // cmd package name, e.g. "mycli"
-	cmdFile    string // basename of the single generated file (framework + rollup), e.g. "zz_rotini.gen.go"
+	cmdFile    string // basename of the single generated file (framework + rollup), e.g. "zz_rotini.go"
 	cmdImport  string // cmd package import path (the entrypoint's Program import)
 
 	// cmdHeader, mainHeader and modelsHeader are each target's conf-declared `header:` —

@@ -116,10 +116,11 @@ func (r *REPL) WithPromptFunc(fn func() string) *REPL { r.promptFn = fn; return 
 //		return line, err
 //	})
 //
-// The contract is three errors and nothing else:
+// The contract is a small set of errors:
 //
 //   - [ErrInterrupted] — ^C at the prompt. The line is discarded and the loop prompts again.
-//   - [ErrNotInteractive] or io.EOF — the input ended. The session closes cleanly, Run nil.
+//   - [ErrNotInteractive], io.EOF, context.Canceled or context.DeadlineExceeded — the input
+//     ended. The session closes cleanly, Run nil.
 //   - anything else — a real I/O failure, returned by [REPL.Run].
 //
 // A reader that writes its own prompt should ignore the one it is handed. The REPL writes no

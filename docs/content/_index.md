@@ -59,7 +59,7 @@ internal/cmd/helloworld/
 
 ### 3. Generate, and fill in the handler
 
-`go generate ./...` creates `internal/cmd/helloworld/helloworld_hello.go`. Replace its `TODO` with the command's work:
+`go generate ./...` creates `internal/cmd/helloworld/helloworld_hello.go`. Replace its `TODO` with the command's work, and add `"strings"` to its imports:
 
 {{< code title="internal/cmd/helloworld/helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
 func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {

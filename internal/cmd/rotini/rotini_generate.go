@@ -2,7 +2,6 @@ package rotini
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-rotini/rotini"
 	"github.com/go-rotini/rotini/internal/codegen"
@@ -18,59 +17,32 @@ type rotiniGenerateHandlers struct {
 }
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rtx.Parser()
+	if answerHelp(rtx, func(in RotiniGenerateInputs) bool { return in.RotiniGenerate.Flags.Help }) {
+		return
+	}
 
-	var inputs RotiniGenerateInputs
-	if err := parser.Parse(rtx, &inputs); err != nil {
+	inputs, err := rotini.Collect[RotiniGenerateInputs](rtx)
+	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
-
 	args := inputs.RotiniGenerate.Arguments
 	flags := inputs.RotiniGenerate.Flags
 
-	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
+	spec, conf, ok := resolveInputs(rtx, args.SpecFilePath, flags.ConfFilePath)
+	if !ok {
 		return
 	}
-
-	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", args.SpecFilePath, flags.ConfFilePath)
 
 	version := rtx.Version()
 	rtx.BindIfAbsent("generate", codegen.NewProcessor(version).Generate)
 	generate := rtx.MustGet[codegen.GenerateFn]("generate")
 
-	err := generate(
-		args.SpecFilePath,
-		flags.ConfFilePath,
-		flags.Watch,
-		func(result string, err error) {
-			if err != nil {
-				for _, problem := range flatten(err) {
-					fmt.Fprintln(rtx.Stderr, "Error:", problem)
-				}
-				return
-			}
-			fmt.Fprintln(rtx.Stdout, result)
-		},
-		// Notices from the pass: files it removed — generating is not supposed to be
-		// destructive, so on the rare occasion it is, it says so — and what the handler-hook
-		// audit found in files rotini did not write.
-		func(notices []error) {
-			for _, n := range notices {
-				fmt.Fprintln(rtx.Stderr, "Note:", n)
-			}
-		},
-	)
-
-	if err != nil {
-		// One outcome per problem, as validate records them: the generator joins its findings
-		// into one error, and the funnel's "Error: %s" would mark only the first line.
-		problems := flatten(err)
-		for _, problem := range problems[:len(problems)-1] {
-			rtx.RecordError(problem)
-		}
-		rtx.HaltWith(problems[len(problems)-1])
+	// The warnings are validate's, plus what the pass removed — generating is not supposed to
+	// be destructive, so on the rare occasion it is, it says so — and what the handler-hook
+	// audit found in files rotini did not write.
+	if err := generate(spec, conf, flags.Watch, printResult(rtx), printWarnings(rtx)); err != nil {
+		haltWithProblems(rtx, err)
 		return
 	}
 

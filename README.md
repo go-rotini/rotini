@@ -39,8 +39,8 @@ $schema: ./.rotini-schema.spec.json
 version: 0.0.0
 command:
   name: helloworld
-  summary: TODO — one line, shown next to this command in a parent's command list
-  description: TODO — the long description at the top of `helloworld --help`
+  summary: TODO — what helloworld does, in one line
+  description: TODO — the paragraph at the top of `helloworld --help`
   footer: Use "helloworld help <command>" for more information about a command.
   flags:
     - name: help
@@ -127,8 +127,9 @@ Enable `completion`, `man` or `markdown` to generate those from the spec too.
 
 ### 4. Review the generated handler file and modify
 
-`go generate ./...` creates a stub for each new command — here
-`internal/cmd/helloworld/helloworld_hello.go`. Replace its `TODO` with the command's work:
+`go generate ./...` creates a handler file for each new command — here
+`internal/cmd/helloworld/helloworld_hello.go`. Replace its `TODO` with the command's work, and
+add `"strings"` to its imports:
 
 ```go
 func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {

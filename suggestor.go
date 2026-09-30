@@ -11,7 +11,7 @@ import (
 //
 // rotini itself suggests NOTHING. A framework that guesses at a user's intent and prints the
 // guess in its own voice is making an editorial decision that belongs to the program — so what
-// rotini does is hand over the facts ([ParseError] carries the Token that failed and the
+// rotini does is hand over the facts ([*ParseError] carries the Token that failed and the
 // Candidates it failed against) plus a ranker, and the program decides whether to speak.
 //
 // # Why there is one algorithm and not a menu

@@ -39,6 +39,9 @@ type program struct {
 	// as notices. Deleting a file the author can see is not a silent operation.
 	pruned []string
 
+	// skipPrune leaves orphaned stubs in place. `rotini init` sets it: init never deletes a file.
+	skipPrune bool
+
 	// auditWarnings are what auditHooks found in the handler files rotini does not own — a
 	// method that looks like a lifecycle hook but is not one, or a call acquiring another
 	// command's inputs type. Surfaced as notices alongside pruned, never as an error: both
@@ -209,6 +212,9 @@ func (p *program) emitEntrypoint() error {
 // sparing each package's `keep` paths (and test files + editable templates). When the
 // entrypoint shares the cmd directory its keep list folds into that one pass.
 func (p *program) prune() error {
+	if p.skipPrune {
+		return nil
+	}
 	var mainKeep []string
 	if m := p.conf.Generate.mainPkg(); m != nil {
 		mainKeep = m.Keep
@@ -287,11 +293,11 @@ func writeSchemas(conf *Conf, moduleRoot string) error {
 		}
 		rel := filepath.FromSlash(sc.File)
 		if filepath.IsAbs(rel) {
-			return fmt.Errorf("generate.schemas.%s.path %q must be module-root-relative, not absolute", label, sc.File)
+			return fmt.Errorf("generate.schemas.%s.file %q must be module-root-relative, not absolute", label, sc.File)
 		}
 		abs := filepath.Join(moduleRoot, rel)
 		if r, err := filepath.Rel(moduleRoot, abs); err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("generate.schemas.%s.path %q must resolve under the module root", label, sc.File)
+			return fmt.Errorf("generate.schemas.%s.file %q must resolve under the module root", label, sc.File)
 		}
 		return writeGeneratedFile(abs, content)
 	}

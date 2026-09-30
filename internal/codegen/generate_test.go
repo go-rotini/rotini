@@ -76,7 +76,7 @@ func modelsModule(t *testing.T, conf, handlerImport, qualifier string) string {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/cyc\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
+	writeTestFile(t, dir, "go.mod", "module example.com/cyc\n\ngo 1.27\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
 	writeTestFile(t, dir, ".rotini.spec.yaml", modelsSpec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", conf)
 	writeTestFile(t, dir, "handlers/deploy.go", modelsHandler(handlerImport, qualifier))
@@ -291,7 +291,7 @@ generate:
 func emitInModule(t *testing.T, spec, conf string) map[string]string {
 	t.Helper()
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
 	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", conf)
 	t.Chdir(dir)
@@ -348,9 +348,8 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-// TestGenerateGolden pins the emitted output. The merged runtime file is parse-checked
-// (correct package, parses) rather than byte-snapshotted; every other emitted .go file
-// is byte-compared against testdata/golden. Run with -update to refresh.
+// TestGenerateGolden pins the emitted output: every emitted .go file is byte-compared against
+// testdata/golden. Run with -update to refresh.
 func TestGenerateGolden(t *testing.T) {
 	// Resolve the golden dir to absolute BEFORE emitInModule chdirs into the temp module.
 	goldenDir, err := filepath.Abs(filepath.Join("testdata", "golden", "demo"))
@@ -371,7 +370,7 @@ func TestGenerateGolden(t *testing.T) {
 // (no churn, no orphans) — the dogfood-regen invariant the whole refactor must preserve.
 func TestGenerateIdempotent(t *testing.T) {
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
 	writeTestFile(t, dir, ".rotini.spec.yaml", goldenSpec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
 	t.Chdir(dir)
@@ -536,7 +535,7 @@ generate:
       header: "this is not a comment"
 `
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
 	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", conf)
 	t.Chdir(dir)
@@ -582,7 +581,7 @@ command:
     - name: ship
 `
 	dir := t.TempDir()
-	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
 	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", goldenConf)
 	t.Chdir(dir)

@@ -11,12 +11,12 @@
   "properties": {
     "version": {
       "type": "string",
-      "description": "The MINIMUM rotini this spec requires (X.Y.Z) \u2014 the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. Two cases are errors: a rotini OLDER than this (it may not know keys the spec uses) and a different MAJOR (an incompatible feature set). The check is skipped when the binary carries no parseable version (a dev build). This \u2014 not the optional `$schema` URL \u2014 is the source of the check.",
+      "description": "The MINIMUM rotini this spec requires (X.Y.Z) \u2014 the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. Two cases are errors: a rotini OLDER than this (it may not know keys the spec uses) and a different MAJOR (an incompatible feature set). The check is skipped for a development build of rotini, which reports no release version (0.0.0, or none at all). This \u2014 not the optional `$schema` URL \u2014 is the source of the check.",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["1.0.0"]
     },
     "$schema": {
       "type": "string",
-      "description": "Optional URI identifying the rotini spec schema, for editor tooling ONLY \u2014 rotini itself never fetches it, and the binary-version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json \u2014 note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. Editors that prefer a comment can use `# yaml-language-server: $schema=<path>` instead of this key."
+      "description": "Optional URI identifying the rotini spec schema, for editor tooling ONLY \u2014 rotini itself never fetches it, and the binary-version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json \u2014 note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. This key is what `rotini init` seeds (`$schema: ./.rotini-schema.spec.json`) and works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place."
     },
     "command": {
       "$ref": "#/definitions/Command",
@@ -44,11 +44,11 @@
         "env_prefix": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]*[A-Z0-9]$|^[A-Z]$", "examples": ["APP", "MY_TOOL"],
-          "description": "Document-level (root only): prefix for every DERIVED environment-variable name \u2014 the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' \u2192 ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' \u2192 ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt \u2014 they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the binder reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix)."
+          "description": "Document-level (root only): prefix for every DERIVED environment-variable name \u2014 the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' \u2192 ACME_HOME), nested env families without 'variable:' (the family's base name), and flags' env fallbacks (key 'server.port' \u2192 ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt \u2014 they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the binder reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix)."
         },
         "schemas": {
           "type": "object",
-          "description": "Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: \"#/schemas/<Name>\"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers \u2014 each becomes a generated Go type in the cmd package, which other packages may import.",
+          "description": "Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: \"#/schemas/<Name>\"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers \u2014 each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.",
           "additionalProperties": {
             "$ref": "#/definitions/Schema"
           },
@@ -141,7 +141,7 @@
         },
         "summary": {
           "type": "string",
-          "description": "Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list \u2014 not this command's own page."
+          "description": "Short one-liner describing this command. It is shown next to the command in its parent's generated Commands list (so it applies even when a verbatim 'help' string is set), and it is also the NAME line of the man page, the opening line of the markdown page, and the lead of the command's own help page when no 'description' is set."
         },
         "description": {
           "type": "string",
@@ -224,7 +224,7 @@
         },
         "exit_status": {
           "type": "array",
-          "description": "Exit codes this command documents, rendered as an EXIT STATUS section in the man page. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code. So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 \u2014 set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.",
+          "description": "Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code, and the default signal handling, which exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 \u2014 set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.",
           "items": {
             "$ref": "#/definitions/ExitStatusEntry"
           }
@@ -246,7 +246,7 @@
         },
         "handler": {
           "$ref": "#/definitions/HandlerSource",
-          "description": "Source this command's handlers from an external Go PACKAGE instead of a generated stub (W9 handler-code composition). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command \u2014 there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time \u2014 rotini cannot type-check a foreign package."
+          "description": "Source this command's handlers from an external Go PACKAGE instead of a generated stub (handler delegation). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command \u2014 there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time \u2014 rotini cannot type-check a foreign package."
         }
       }
     },
@@ -257,7 +257,7 @@
         "import",
         "convention"
       ],
-      "description": "Where a command's handlers come from when they are not a generated stub: a Go package (handler-code passthrough). The package's typed inputs live with it; this spec contributes only the command tree.",
+      "description": "Where a command's handlers come from when they are not a generated stub: a Go package (handler delegation). The package's typed inputs live with it; this spec contributes only the command tree.",
       "properties": {
         "import": {
           "type": "string",
@@ -319,7 +319,7 @@
         },
         "cascading": {
           "type": "string",
-          "description": "Heading for the cascading-flags section on descendant pages. Defaults to 'Global Flags:'. The value is rendered verbatim, so include a trailing ':' if you want one."
+          "description": "Heading rendered above the cascading-flags section on descendant commands' generated help pages. Rendered verbatim — include any trailing ':' you want. Default: \"Global Flags:\"."
         },
         "examples": {
           "type": "string",
@@ -506,7 +506,7 @@
               "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "examples": ["GH_TOKEN"]},
               "minItems": 1,
               "uniqueItems": true,
-              "description": "The EXACT environment variable this input reads, instead of the name rotini would derive \u2014 or a LIST of names, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on FLAGS (as a flag's env fallback); rejected on arguments, config inputs and stdin, which have no environment channel.\n\nExempt from `env_prefix` either way: an explicitly named variable is already exact, and prefixing it would silently make it a different variable.\n\nOn a flag it also opts the flag into the fallback chain (argv > env > config > default), keyed by the flag's own name unless `key:` names one \u2014 so `--token` with `variable: GITHUB_TOKEN` reads that variable directly, where before the only spelling was a config `key: github.token` whose SNAKE_UPPER happened to match. Because the flag now has a key, a configuration file defining that key supplies it too; declare `key:` to control what that key is.",
+              "description": "The EXACT environment variable this input reads, instead of the name rotini would derive \u2014 or a LIST of names, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on FLAGS (as a flag's env fallback); rejected on arguments, config inputs and stdin, which have no environment channel.\n\nExempt from `env_prefix` either way: an explicitly named variable is already exact, and prefixing it would silently make it a different variable.\n\nOn a flag it also opts the flag into the fallback chain (argv > env > config > default), keyed by the flag's own name unless `key:` names one \u2014 so `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no config `key:` whose SNAKE_UPPER must happen to match. Because the flag now has a key, a configuration file defining that key supplies it too; declare `key:` to control what that key is.",
               "pattern": "^[A-Z_][A-Z0-9_]*$", "examples": ["GITHUB_TOKEN"]
             },
             "file": {
@@ -516,13 +516,13 @@
             },
             "key": {
               "type": "string",
-              "description": "Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; recon resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).",
+              "description": "Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).",
               "pattern": "^[a-zA-Z0-9_-]+(\\.[a-zA-Z0-9_-]+)*$", "examples": ["port", "server.port"]
             },
             "secret": {
               "type": "boolean",
               "default": false,
-              "description": "When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag. rotini ships no interactive secret prompt (the UX layer is deliberately out of scope): a handler wanting one reads rtx.Stdin with any prompt library; for non-interactive supply, pair secret with from: [file] (token file) or an env input."
+              "description": "When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. It does not prompt: a handler that wants to ask for the value interactively calls rotini.ReadSecret(rtx.Stdin), which reads a line without echoing it; for non-interactive supply, pair secret with from: [file] (token file) or an env input."
             },
             "ignore_case": {
               "type": "boolean",
@@ -601,7 +601,7 @@
               "required": [
                 "kind"
               ],
-              "description": "Declarative shell-completion hint for this input's VALUE \u2014 the case between a static `enum` and writing a Go FlagValueCompleter, which is 'this is a file': the commonest value shape there is, and the one that until now required code.\n\nFlags and arguments only. The hint reaches the shell as a directive on the last line of the hidden __complete output, and each generated script translates it into that shell's own path completion. A dynamic completer still wins when it answers \u2014 this is the fallback, not a ceiling.",
+              "description": "Declarative shell-completion hint for this input's VALUE \u2014 the case between a static `enum` and writing a Go FlagValueCompleter, which is 'this is a file': the commonest value shape there is.\n\nFlags and arguments only. The hint reaches the shell as a directive on the last line of the hidden __complete output, and each generated script translates it into that shell's own path completion. A dynamic completer still wins when it answers \u2014 this is the fallback, not a ceiling.",
               "properties": {
                 "kind": {
                   "type": "string",
@@ -801,7 +801,7 @@
             "lines"
           ],
           "default": "json",
-          "description": "How the piped stdin payload is read.\n\nThe four DOCUMENT formats \u2014 json, yaml, jsonc, toml \u2014 decode it into the generated <Prefix>Stdin struct, validated against the declared schema. Defaults to json.\n\nThe two RAW formats are for the grep/jq/fmt family, whose stdin is not a document: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). Both require the schema's type to match \u2014 'string' for text, '[]string' or 'array' for lines \u2014 and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Before they existed, a command whose input is plain text could not declare its stdin channel at all: it read rtx.Stdin directly, which appears in no help page and no completion."
+          "description": "How the piped stdin payload is read.\n\nThe four DOCUMENT formats \u2014 json, yaml, jsonc, toml \u2014 decode it into the generated <Prefix>Stdin struct, validated against the declared schema. Defaults to json.\n\nThe two RAW formats are for the grep/jq/fmt family, whose stdin is not a document: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). Both require the schema's type to match \u2014 'string' for text, '[]string' or 'array' for lines \u2014 and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring the channel this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion."
         }
       }
     },
@@ -917,7 +917,7 @@
             "jsonc",
             "dotenv"
           ],
-          "description": "Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) \u2014 declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path."
+          "description": "Decode format for the file. OMITTED means the format is inferred from the file extension \u2014 declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path."
         },
         "schema": {
           "$ref": "#/definitions/Schema",
@@ -955,7 +955,7 @@
             },
             "app": {
               "type": "string",
-              "description": "The application directory under the XDG config root \u2014 the '<app>' in $XDG_CONFIG_HOME/<app>. REQUIRED by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. Both are enforced by rotini validation rather than by this schema, deliberately: a JSON Schema if/then can only say \"missing required property\", where lintConfigurationFiles says which strategy needs it and what it is for.",
+              "description": "The application directory under the XDG config root \u2014 the '<app>' in $XDG_CONFIG_HOME/<app>. REQUIRED by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. Both are enforced by rotini validation rather than by this schema, deliberately: a JSON Schema if/then can only say \"missing required property\", where `rotini validate` says which strategy needs it and what it is for.",
               "pattern": "^[^/\\\\]+$", "examples": ["mytool"]
             }
           }

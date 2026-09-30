@@ -12,9 +12,8 @@ import (
 	"testing"
 )
 
-// The lint layer is rotini's clearest advantage over frameworks that declare a CLI in Go: 35
-// rules that reject a mistake before any code exists, each naming the offending thing, its
-// file:line:col, and what to do instead. Every one had coverage; NOT ONE had a test that
+// The lint layer rejects a mistake before any code exists, each rule naming the offending
+// thing, its file:line:col, and what to do instead. Every rule had coverage; NOT ONE had a test that
 // asserted what it SAYS. A refactor that turned lintConfigSource's sentence into
 // "invalid config_source" would have passed the entire suite.
 //
@@ -203,22 +202,19 @@ func lintReport(failure error, warnings []error) string {
 	return b.String()
 }
 
-// TestLintProblemsArePositioned is the claim README.md and doc.go both make about validation:
-// a problem is reported at a file:line:col, not just named. Before the fixture corpus existed,
-// NOT ONE of the 35 rules produced a position — locateProblems only placed JSON Schema
-// violations, whose loc happens to be a pointer, and every lint rule's loc is a human label.
-//
-// One rule legitimately has nowhere to point, and it is named here rather than left to erode
-// the promise silently: lintImportConsistency reports a type declared with conflicting
-// imports in two or more places, so there is no single node — the message names both imports
-// instead. Anything else reporting without a position is a regression.
 // lineColRe matches the full position promise: file:line:col.
 var lineColRe = regexp.MustCompile(`\.rotini\.(spec|conf)\.yaml:\d+:\d+`)
 
+// TestLintProblemsArePositioned is the claim README.md and doc.go both make about validation:
+// a problem is reported at a file:line:col, not just named. Before the fixture corpus existed,
+// no rule produced a position — locateProblems only placed JSON Schema violations, whose loc
+// happens to be a pointer, and every lint rule's loc is a human label.
+//
+// A rule that genuinely has nowhere to point is named in unpositionable rather than left to
+// erode the promise silently. None does today: even a type imported two ways is placed where
+// the conflicting import is written. Anything reporting without a position is a regression.
 func TestLintProblemsArePositioned(t *testing.T) {
-	unpositionable := map[string]string{
-		"lintImportConsistency": "reports a conflict across two or more declarations",
-	}
+	unpositionable := map[string]string{}
 
 	entries, err := os.ReadDir(lintFixtureDir)
 	if err != nil {

@@ -15,7 +15,7 @@ import (
 )
 
 // Object-valued flags: a flag whose schema is a named object (`$ref: '#/schemas/DB'`) takes a
-// structured value, in whichever of three spellings suits the moment:
+// structured value, in whichever of four spellings suits the moment:
 //
 //	--db '{"host":"db.internal","port":5432}'    JSON, recognized by its leading {
 //	--db host=db.internal,port=5432,tls=true     key=value pairs, CSV-quoted; dotted keys nest

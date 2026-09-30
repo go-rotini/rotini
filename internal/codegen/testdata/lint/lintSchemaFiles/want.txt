@@ -1,0 +1,1 @@
+conf: .rotini.conf.yaml:7:13: generate.schemas.spec.file: "../../outside.spec.json" must resolve under the module root

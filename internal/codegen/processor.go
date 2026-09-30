@@ -50,8 +50,8 @@ func NewProcessor(version string) *Processor {
 // program — once, or on every spec/conf change in watch mode until interrupted (ctrl-c).
 // onGenerate (may be nil) receives a "[HH:MM:SS] <took>" summary and each pass's error;
 // without watch the single pass's error is returned so the caller can treat it as failed.
-// onNotices (may be nil) receives the pass's non-fatal remarks — mirroring Validate's warnings
-// channel: what it removed, because a file deleted without a word is how work gets lost, and
+// onNotices (may be nil) receives the pass's non-fatal findings — the same validation warnings
+// Validate reports, what it removed (a file deleted without a word is how work gets lost), and
 // what the hook audit noticed in the handler files it did not write.
 func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error {
 	if onGenerate == nil {
@@ -62,7 +62,7 @@ func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate f
 		if err != nil {
 			return nil, err
 		}
-		return p.validateAndEmit(rs, rc)
+		return p.validateAndEmit(rs, rc, true)
 	}
 	return p.run(specPath, confPath, watch, pass, onGenerate, onNotices)
 }
@@ -87,7 +87,9 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode str
 
 // Initialize scaffolds a new rotini CLI named name: it writes + validates the seed
 // spec + conf, then runs the standard generate to produce a ready-to-build CLI (see
-// initialize). format selects the serialization; force overwrites create-once files.
+// initialize). format selects the serialization; force replaces an existing seed spec and
+// conf. It never deletes a file: handlers for commands the new seed lacks stay until the next
+// generate, which prunes them and says so.
 func (p *Processor) Initialize(name, format string, force bool) error {
 	return p.initialize(name, format, force)
 }
@@ -243,21 +245,25 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 }
 
 // validateAndEmit is the gate-then-emit step: validation must pass (the gate — invalid input
-// never reaches codegen), then the conf defaults are applied and the program emitted. It
-// returns any NOTICES the emit produced: the orphaned stubs it pruned, which the caller reports
-// rather than deleting them silently, and what the hook audit found in the handler files it
-// did not write.
-func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) ([]error, error) {
-	if _, err := p.validateDocuments(rs, rc, ""); err != nil {
-		return nil, err
+// never reaches codegen), then the conf defaults are applied and the program emitted. prune
+// says whether orphaned stubs are removed; init passes false, since it never deletes a file.
+// It returns the pass's NOTICES: the validation warnings, the orphaned stubs it pruned, which
+// the caller reports rather than deleting them silently, and what the hook audit found in the
+// handler files it did not write.
+func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prune bool) ([]error, error) {
+	warnings, err := p.validateDocuments(rs, rc, "")
+	if err != nil {
+		return warnings, err
 	}
 	applyConfDefaults(rc.conf, rs.spec.Command.Name)
 	prog, err := resolveProgram(rs.spec, rc.conf, rs.path)
 	if err != nil {
-		return nil, err
+		return warnings, err
 	}
+	prog.skipPrune = !prune
 	err = prog.generate()
-	notices := make([]error, 0, len(prog.pruned)+len(prog.auditWarnings))
+	notices := make([]error, 0, len(warnings)+len(prog.pruned)+len(prog.auditWarnings))
+	notices = append(notices, warnings...)
 	for _, name := range prog.pruned {
 		notices = append(notices, fmt.Errorf("pruned %s — its command is no longer in the spec", name))
 	}

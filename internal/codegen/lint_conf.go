@@ -66,6 +66,8 @@ var confLints = []func(*Conf) []error{
 	lintEntrypoint,
 	lintFeatureDirs,
 	lintFeatureKnobs,
+	lintSchemaFiles,
+	lintModelsKeep,
 }
 
 // lintPackageTypes rejects a generate.packages array naming the same `type` twice, which would
@@ -135,10 +137,10 @@ func lintPackageColocation(conf *Conf) []error {
 	return problems
 }
 
-// lintEntrypoint rejects a main block whose 'keep' would be silently ignored:
-// keep only takes effect once the entrypoint is actually written and its
-// directory pruned, and that happens only when 'file' is set. (The entrypoint's
-// Go package is always 'main'; there is no package key to reconcile.)
+// lintEntrypoint rejects a main block whose `keep` would be silently ignored: keep only takes
+// effect once the entrypoint is actually written and its directory pruned, and that happens
+// only when `file` is set. (The entrypoint's Go package is always `main`, which the schema
+// fixes, so there is no package name to reconcile here.)
 func lintEntrypoint(conf *Conf) []error {
 	if conf.Generate == nil || conf.Generate.mainPkg() == nil {
 		return nil
@@ -156,32 +158,39 @@ func lintEntrypoint(conf *Conf) []error {
 			kind: "conf",
 			ptr:  packagePointer(mainAt),
 			loc:  "generate.packages.main.keep",
-			msg:  "has no effect without generate.packages.main.file — the entrypoint is only written, and its directory pruned, when file is set",
+			msg:  "has no effect without `generate.packages.main.file` — the entrypoint is only written, and its directory pruned, when `file` is set",
 		}}
 	}
 	return nil
 }
 
 // lintFeatureDirs rejects an enabled embedding feature whose explicit embed_dir cannot resolve
-// under an explicitly-set cmd package, which //go:embed could never reach. Only embed mode is
-// checked: an inline feature writes no embedded file, and template_dir is never embedded. When
-// either side is unset the defaults guarantee nesting.
+// under the cmd package, which //go:embed could never reach. Only embed mode is checked: an
+// inline feature writes no embedded file, and template_dir is never embedded. An unset
+// embed_dir defaults under the cmd package, so only an explicit one can escape it.
+//
+// With no cmd package declared, the cmd package is the default internal/cmd/<root name>. The
+// root name lives in the spec, which conf lint does not see, so the check there is that the
+// directory sits under internal/cmd/<some name>; generate, which knows the name, holds it to
+// the exact directory.
 func lintFeatureDirs(conf *Conf) []error {
-	if conf.Generate == nil {
+	if conf.Generate == nil || len(conf.Generate.Features) == 0 {
 		return nil
 	}
-	fw := conf.Generate.cmdPkg()
-	if len(conf.Generate.Features) == 0 || fw == nil || fw.File == "" {
-		return nil
+	cmdDir, under := "internal/cmd/<root name>", func(dir string) bool {
+		rest, ok := strings.CutPrefix(dir, "internal/cmd/")
+		return ok && rest != "" && !strings.HasPrefix(rest, "..")
 	}
-	cmdDir := path.Dir(filepath.ToSlash(fw.File))
+	if fw := conf.Generate.cmdPkg(); fw != nil && fw.File != "" {
+		cmdDir = path.Dir(filepath.ToSlash(fw.File))
+		under = func(dir string) bool { return dir == cmdDir || strings.HasPrefix(dir, cmdDir+"/") }
+	}
 	var problems []error
 	check := func(name string, f *Feature) {
 		if f == nil || !f.Enabled || !f.Embed || f.EmbedDir == "" {
 			return
 		}
-		dir := path.Clean(filepath.ToSlash(f.EmbedDir))
-		if dir != cmdDir && !strings.HasPrefix(dir, cmdDir+"/") {
+		if !under(path.Clean(filepath.ToSlash(f.EmbedDir))) {
 			problems = append(problems, &problem{
 				kind: "conf",
 				ptr:  featurePointer(featureIndex(conf, name)),
@@ -219,19 +228,70 @@ func lintFeatureKnobs(conf *Conf) []error {
 		}
 		name := cf.desc.name
 		if f.EmbedDir != "" && !f.Embed {
-			warn(name, "embed_dir", "is set but embed is false — embed_dir is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")
+			warn(name, "embed_dir", "is set but `embed` is false — `embed_dir` is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")
 		}
 		if cf.desc.tmplFile == "" { // no editable template (completion)
 			if f.Template {
-				warn(name, "template", name+" has no editable template — 'template' has no effect here")
+				warn(name, "template", name+" has no editable template — `template` has no effect here")
 			}
 			if f.TemplateDir != "" {
-				warn(name, "template_dir", name+" has no editable template — 'template_dir' has no effect here")
+				warn(name, "template_dir", name+" has no editable template — `template_dir` has no effect here")
 			}
 			continue
 		}
 		if f.TemplateDir != "" && !f.Template {
-			warn(name, "template_dir", "is set but template is false — template_dir is used only when the editable template is seeded (template: true); it is otherwise ignored")
+			warn(name, "template_dir", "is set but `template` is false — `template_dir` is used only when the editable template is seeded (`template: true`); it is otherwise ignored")
+		}
+	}
+	return problems
+}
+
+// lintSchemaFiles rejects a generate.schemas file that generate could not write: the path is
+// module-root-relative, so an absolute one, or one climbing out of the module with "..", has no
+// place to go. Generate refuses both; validate is the gate, so it refuses them first.
+func lintSchemaFiles(conf *Conf) []error {
+	if conf.Generate == nil || conf.Generate.Schemas == nil {
+		return nil
+	}
+	var problems []error
+	check := func(label string, sc *SchemaConfig) {
+		if sc == nil || sc.File == "" {
+			return
+		}
+		var why string
+		switch clean := path.Clean(filepath.ToSlash(sc.File)); {
+		case path.IsAbs(clean) || filepath.IsAbs(sc.File):
+			why = "must be module-root-relative, not absolute"
+		case clean == ".." || strings.HasPrefix(clean, "../"):
+			why = "must resolve under the module root"
+		default:
+			return
+		}
+		problems = append(problems, &problem{
+			kind: "conf", ptr: "/generate/schemas/" + label + "/file",
+			loc: "generate.schemas." + label + ".file",
+			msg: fmt.Sprintf("%q %s", sc.File, why),
+		})
+	}
+	check("spec", conf.Generate.Schemas.Spec)
+	check("conf", conf.Generate.Schemas.Conf)
+	return problems
+}
+
+// lintModelsKeep rejects `keep` on the models package. Pruning runs over the cmd and main
+// packages only — the models package holds one generated file and no stubs to prune — so a
+// keep list there would be accepted and silently do nothing.
+func lintModelsKeep(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	for i, p := range conf.Generate.Packages {
+		if p.Type == typeModels && len(p.Keep) > 0 {
+			problems = append(problems, &problem{
+				kind: "conf", ptr: packagePointer(i) + "/keep", loc: "generate.packages.models.keep",
+				msg: "has no effect — nothing is pruned from the models package, so there is nothing to keep; remove it",
+			})
 		}
 	}
 	return problems

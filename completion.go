@@ -325,7 +325,7 @@ func DiscoveredPlugins(cmd ResolvedCommand) []DiscoveredPlugin {
 
 // DiscoveryDiagnostics returns the problems encountered while scanning cmd's author-configured
 // discovery path — typically that it is unreadable, or not a directory — and nil when there is
-// no discovery, none is configured, or the path scanned cleanly. A path that does not exist is
+// no discovery, none is configured, discovery is hidden, or the path scanned cleanly. A path that does not exist is
 // not a problem: it is where plugins go once one is installed, and before that it is empty. The
 // incidental locations, next to the binary and the entries of $PATH, are deliberately not
 // reported: a missing $PATH entry is normal, not a misconfiguration.

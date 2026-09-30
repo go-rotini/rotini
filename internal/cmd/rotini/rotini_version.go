@@ -17,21 +17,15 @@ type rotiniVersionHandlers struct {
 }
 
 func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rotini.Collect[RotiniVersionInputs](rtx)
-	if err != nil {
-		fmt.Fprintln(rtx.Stderr, err)
-		rtx.HaltWithCode(1)
+	if answerHelp(rtx, func(in RotiniVersionInputs) bool { return in.RotiniVersion.Flags.Help }) {
 		return
 	}
 
-	flags := inputs.RotiniVersion.Flags
-	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, rtx.Help())
-		rtx.HaltWithCode(0)
+	if _, err := rotini.Collect[RotiniVersionInputs](rtx); err != nil {
+		rtx.HaltWith(err)
 		return
 	}
 
-	version := rtx.Version()
-	fmt.Fprintf(rtx.Stdout, "v%s\n", version)
+	fmt.Fprintf(rtx.Stdout, "v%s\n", rtx.Version())
 	rtx.HaltWithCode(0)
 }

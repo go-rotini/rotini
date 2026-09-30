@@ -23,7 +23,7 @@ this list is rendered from the schema, so it always matches what the tool accept
 
 `string` · **required**
 
-The MINIMUM rotini this spec requires (X.Y.Z) — the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. Two cases are errors: a rotini OLDER than this (it may not know keys the spec uses) and a different MAJOR (an incompatible feature set). The check is skipped when the binary carries no parseable version (a dev build). This — not the optional `$schema` URL — is the source of the check.
+The MINIMUM rotini this spec requires (X.Y.Z) — the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. Two cases are errors: a rotini OLDER than this (it may not know keys the spec uses) and a different MAJOR (an incompatible feature set). The check is skipped for a development build of rotini, which reports no release version (0.0.0, or none at all). This — not the optional `$schema` URL — is the source of the check.
 
 ### `command`
 
@@ -35,7 +35,7 @@ The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/
 
 `string`
 
-Optional URI identifying the rotini spec schema, for editor tooling ONLY — rotini itself never fetches it, and the binary-version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. Editors that prefer a comment can use `# yaml-language-server: $schema=<path>` instead of this key.
+Optional URI identifying the rotini spec schema, for editor tooling ONLY — rotini itself never fetches it, and the binary-version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. This key is what `rotini init` seeds (`$schema: ./.rotini-schema.spec.json`) and works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
 
 
 ## Command
@@ -116,7 +116,7 @@ Config-file SOURCES this command contributes — where config values come from (
 
 `string`
 
-Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the envnest base), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the binder reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix).
+Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the family's base name), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the binder reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix).
 
 #### `flag_groups`
 
@@ -157,7 +157,7 @@ The child's own remote_commands, remote_discovery and passthrough travel with it
 
 [`HandlerSource`](#handlersource)
 
-Source this command's handlers from an external Go PACKAGE instead of a generated stub (W9 handler-code composition). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package.
+Source this command's handlers from an external Go PACKAGE instead of a generated stub (handler delegation). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package.
 
 #### `passthrough`
 
@@ -195,7 +195,7 @@ Not supported on a local command and rejected by rotini validation: a timeout is
 
 `string`
 
-Short one-liner shown next to this command in its parent's generated Commands list. Applies even when a verbatim 'help' string is set, since it feeds the parent's list — not this command's own page.
+Short one-liner describing this command. It is shown next to the command in its parent's generated Commands list (so it applies even when a verbatim 'help' string is set), and it is also the NAME line of the man page, the opening line of the markdown page, and the lead of the command's own help page when no 'description' is set.
 
 #### `description`
 
@@ -219,7 +219,7 @@ Example command-line invocations, rendered one per line. Ignored when 'help' is 
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man page. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code. So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code, and the default signal handling, which exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
 
 #### `see_also`
 
@@ -281,7 +281,7 @@ This command's output shape, as a JSON-schema type. rotini generates a typed '<P
 
 `object`
 
-Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package, which other packages may import.
+Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
 
 ### Generated code
 
@@ -460,7 +460,7 @@ How the piped stdin payload is read.
 
 The four DOCUMENT formats — json, yaml, jsonc, toml — decode it into the generated <Prefix>Stdin struct, validated against the declared schema. Defaults to json.
 
-The two RAW formats are for the grep/jq/fmt family, whose stdin is not a document: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). Both require the schema's type to match — 'string' for text, '[]string' or 'array' for lines — and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Before they existed, a command whose input is plain text could not declare its stdin channel at all: it read rtx.Stdin directly, which appears in no help page and no completion.
+The two RAW formats are for the grep/jq/fmt family, whose stdin is not a document: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). Both require the schema's type to match — 'string' for text, '[]string' or 'array' for lines — and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring the channel this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
 
 ### `schema`
 
@@ -487,7 +487,7 @@ Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or
 
 `string` · one of `json`, `yaml`, `toml`, `jsonc`, `dotenv`
 
-Decode format for the file. OMITTED means the format is inferred from the file extension (recon's codec resolution) — declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
+Decode format for the file. OMITTED means the format is inferred from the file extension — declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
 
 ### `path`
 
@@ -538,7 +538,7 @@ Flags that must also be set when 'when' is set.
 
 ## HandlerSource
 
-Where a command's handlers come from when they are not a generated stub: a Go package (handler-code passthrough). The package's typed inputs live with it; this spec contributes only the command tree.
+Where a command's handlers come from when they are not a generated stub: a Go package (handler delegation). The package's typed inputs live with it; this spec contributes only the command tree.
 
 ### `import`
 
@@ -626,7 +626,7 @@ Heading rendered above the arguments section of the generated help page. Rendere
 
 `string`
 
-Heading for the cascading-flags section on descendant pages. Defaults to 'Global Flags:'. The value is rendered verbatim, so include a trailing ':' if you want one.
+Heading rendered above the cascading-flags section on descendant commands' generated help pages. Rendered verbatim — include any trailing ':' you want. Default: "Global Flags:".
 
 ### `commands`
 
@@ -737,7 +737,7 @@ document instead; see [StdinSpec](#stdinspec).
 
 `object`
 
-Declarative shell-completion hint for this input's VALUE — the case between a static `enum` and writing a Go FlagValueCompleter, which is 'this is a file': the commonest value shape there is, and the one that until now required code.
+Declarative shell-completion hint for this input's VALUE — the case between a static `enum` and writing a Go FlagValueCompleter, which is 'this is a file': the commonest value shape there is.
 
 Flags and arguments only. The hint reaches the shell as a directive on the last line of the hidden __complete output, and each generated script translates it into that shell's own path completion. A dynamic completer still wins when it answers — this is the fallback, not a ceiling.
 
@@ -799,7 +799,7 @@ FLAGS only: the value a flag takes when it is given WITHOUT one, which makes its
 
 `string`
 
-Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; recon resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).
+Dotted key path the value is read from (config inputs and flag config-fallbacks; e.g. 'server.port'). Segments of letters/digits/_/-, joined by dots; rotini resolves it through the configuration files (and SNAKE_UPPER of it names a flag's env fallback variable).
 
 ### `layout`
 
@@ -839,7 +839,7 @@ When true, the input must be provided (or stdin must not be empty for stdin inpu
 
 `boolean` · default `false`
 
-When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag. rotini ships no interactive secret prompt (the UX layer is deliberately out of scope): a handler wanting one reads rtx.Stdin with any prompt library; for non-interactive supply, pair secret with from: [file] (token file) or an env input.
+When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. It does not prompt: a handler that wants to ask for the value interactively calls rotini.ReadSecret(rtx.Stdin), which reads a line without echoing it; for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 
 ### `separator`
 
@@ -855,7 +855,7 @@ The EXACT environment variable this input reads, instead of the name rotini woul
 
 Exempt from `env_prefix` either way: an explicitly named variable is already exact, and prefixing it would silently make it a different variable.
 
-On a flag it also opts the flag into the fallback chain (argv > env > config > default), keyed by the flag's own name unless `key:` names one — so `--token` with `variable: GITHUB_TOKEN` reads that variable directly, where before the only spelling was a config `key: github.token` whose SNAKE_UPPER happened to match. Because the flag now has a key, a configuration file defining that key supplies it too; declare `key:` to control what that key is.
+On a flag it also opts the flag into the fallback chain (argv > env > config > default), keyed by the flag's own name unless `key:` names one — so `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no config `key:` whose SNAKE_UPPER must happen to match. Because the flag now has a key, a configuration file defining that key supplies it too; declare `key:` to control what that key is.
 
 
 ## ConfigurationFileDiscover
@@ -880,7 +880,7 @@ The file name to look for in each searched directory (e.g. '.acme.toml', 'config
 
 `string`
 
-The application directory under the XDG config root — the '<app>' in $XDG_CONFIG_HOME/<app>. REQUIRED by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. Both are enforced by rotini validation rather than by this schema, deliberately: a JSON Schema if/then can only say "missing required property", where lintConfigurationFiles says which strategy needs it and what it is for.
+The application directory under the XDG config root — the '<app>' in $XDG_CONFIG_HOME/<app>. REQUIRED by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. Both are enforced by rotini validation rather than by this schema, deliberately: a JSON Schema if/then can only say "missing required property", where `rotini validate` says which strategy needs it and what it is for.
 
 
 ## BaseSchema

@@ -46,16 +46,16 @@ would a new module dependency.
 ## Tool / Library Version Compatibility
 
 The rotini **tool** that generates code and the rotini **library** the consuming
-module builds against must agree on the contract. `checkPackageVersion` refuses to
-generate on a definite **cross-major mismatch** (a `go install`ed tool from a
-different major than the project's `require`), catching the one case Go's minimal
-version selection cannot. The check is conservative: it skips whenever it cannot
-prove a mismatch (a dev/unknown tool version, a local `replace`, or no rotini
-require), so it never blocks a legitimate build.
+module builds against are one module, so `go tool rotini` runs at the version your
+`go.mod` requires. On top of that, every spec and conf declares a `version:`: the
+minimum rotini it was written against. `validate` and `generate` reject a document
+that needs a newer rotini than the running tool, or that belongs to a different
+major version, so generated code never quietly diverges from the definition it came
+from.
 
 ## Secret Handling
 
-- **Secret-aware inputs.** Env/config inputs marked `secret` in the spec carry that
+- **Secret-aware inputs.** Inputs marked `secret` in the spec carry that
   marking through to the generated binding, so secret values are handled distinctly
   from ordinary inputs.
 - **Errors do not leak secrets.** The typed error and fault classes
@@ -70,8 +70,10 @@ Pillar 1 of rotini's design is that the runtime injects nothing you did not ask 
 
 - **No telemetry.** The runtime emits no logs, metrics, or network calls of its own.
 - **No auto-injected behavior.** No implicit `--help`/`--version`/`--color`/`--no-*`
-  flags, and no "did you mean" suggestions, unless you declare them in the spec.
-  Fuzzy suggestion (`Suggestor`) ships, but is end-user opt-in.
+  flags; declare the ones you want in the spec.
+- **No "did you mean" suggestions.** rotini prints none. A `ParseError` carries the
+  rejected token and its candidates, and a program may rank them with `Suggestor` in
+  its own funnel — the program author's choice, never rotini's default.
 - **No network during generation.** rotini has no fetcher at all: `generate` and
   `validate` read only the filesystem and the Go module cache.
 - **One runtime default.** Interrupt/SIGTERM handling is on by default (so a CLI
@@ -86,9 +88,6 @@ Pillar 1 of rotini's design is that the runtime injects nothing you did not ask 
 - **The composition contract is enforced at compile time.** A `$ref` that delegates
   to an external Go package is checked when you build, not by rotini — rotini cannot
   type-check a foreign package on your behalf.
-- **Version compatibility is best-effort.** The cross-major guard intentionally
-  errs toward allowing the build when it cannot prove a mismatch; it is a safety net,
-  not a guarantee.
 
 For the runtime contract, the outcome/error model, and the opt-in service registry,
 see the package documentation in `doc.go`.

@@ -113,12 +113,7 @@ Sleep 120ms
 Type@75ms "validate "
 Sleep 350ms
 Type@41ms "cmd/helloworld/."
-Type@70ms "rotini.spec.yaml "
-Sleep 180ms
-Type@39ms "-c "
-Sleep 540ms
-Type@74ms "cmd/hellow"
-Type@48ms "orld/.rotini.conf.yaml"
+Type@70ms "rotini.spec.yaml"
 Sleep 400ms
 Enter
 Sleep 2s

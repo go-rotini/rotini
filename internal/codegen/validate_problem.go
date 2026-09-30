@@ -83,7 +83,7 @@ func locateProblems(problems []error, path string, locate sourceLocator) {
 		if ptr == "" && strings.HasPrefix(p.loc, "/") {
 			ptr = p.loc
 		}
-		if line, col, ok := locate(ptr); ptr != "" && ok {
+		if line, col, ok := locateNearest(locate, ptr); ok {
 			p.pos = fmt.Sprintf("%s:%d:%d", path, line, col)
 			continue
 		}
@@ -94,4 +94,22 @@ func locateProblems(problems []error, path string, locate sourceLocator) {
 		// report as "spec: /: missing required property" and name nothing at all.
 		p.pos = path
 	}
+}
+
+// locateNearest resolves ptr, or failing that its nearest ancestor that resolves: a rule may
+// point at a key one format's locator cannot place (a TOML inline table, say), and the node
+// holding it is a better answer than no line at all. The document root is never an answer —
+// it has no position of its own.
+func locateNearest(locate sourceLocator, ptr string) (line, col int, ok bool) {
+	for ptr != "" && ptr != "/" {
+		if line, col, ok := locate(ptr); ok {
+			return line, col, true
+		}
+		i := strings.LastIndex(ptr, "/")
+		if i <= 0 {
+			break
+		}
+		ptr = ptr[:i]
+	}
+	return 0, 0, false
 }

@@ -4,14 +4,14 @@
 //
 // One module serves two faces at one version:
 //
-//   - As a tool — `go get -tool github.com/go-rotini/rotini` — it installs the codegen binary
-//     (`go tool rotini init` / `generate` / `validate`), which compiles a spec into a per-CLI
-//     framework file plus one editable handler stub per command.
+//   - As a tool — `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest` — it installs
+//     the codegen binary (`go tool rotini init` / `generate` / `validate`), which compiles a
+//     spec into a per-CLI framework file plus one editable handler file per command.
 //   - As a library — `go get github.com/go-rotini/rotini` — it is this package: the runtime
 //     that generated code imports and handlers are written against.
 //
 // The companion CLI under cmd/rotini is built with rotini itself and is the worked example;
-// the annotated files under reference/ show every spec and conf key with commentary.
+// docs/assets/examples/ holds a spec and a conf that use every key.
 //
 // # Declare
 //
@@ -175,17 +175,21 @@
 // the final authority, so a custom one owns the exit entirely. rotini holds no named exit-code
 // constants.
 //
-// Every error class is errors.Is-able against the [ErrUsage] and [ErrInternal] sentinels, so
-// [CategoryOf] classifies it, and errors.As-able to a typed value with structured fields.
+// Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
+// [CategoryOf] classifies it — except a remote timeout, which is deliberately [CategoryNone] —
+// and errors.As-able to a typed value with structured fields.
 // rotini's own messages are non-leaky — no recon, decode or OS internals, and no secret values:
 //
 //   - [*ParseError] — the argv channel. [ParseError.Kind] branches it without matching the
 //     message; Token and Candidates are what a [Suggestor] turns into "did you mean".
 //   - [*BindError] — the env, config, stdin and flag-fallback channels, carrying the channel,
 //     the input and a clean message, with the recon cause reachable via errors.As.
-//   - [*RemoteError] — a plugin dispatch. Recorded as an error: a missing plugin is the
-//     consumer's environment, not the author's fault.
-//   - [*WiringError], [*ServiceError] and [*PanicError] arrive as panics.
+//   - [*RemoteError] — a plugin dispatch, recorded as an error. A discovered plugin that is
+//     missing is a usage error (the user's typo); a declared one that is missing, or a plugin
+//     that cannot start, is internal (an install problem); a timeout is neither.
+//   - [*ServiceError] and [*PanicError] arrive as panics, and so does a [*WiringError] from the
+//     program's own wiring. The one [*WiringError] [Collect] returns — config inputs on a
+//     program built without a [BindMeta] — comes back as an error instead.
 //
 // rotini ships no opinions on top: no "did you mean", no help dump on error. A program that
 // wants either writes its own funnel.
@@ -240,7 +244,8 @@
 //   - [Parser] parses and validates the argv channel alone — GNU/POSIX grammar, typed
 //     coercion, enum and constraint checks — failing with a [*ParseError]. [Binder] is
 //     Collect's engine, for callers who want to hold the meta explicitly. Neither needs
-//     supplying to be used: [Collect] builds its own, and [Program.WithParser] overrides it.
+//     supplying to be used: [Collect] builds its own. [Program.WithParser] replaces only the
+//     parser that [Context.Parser] returns.
 //
 //   - [Deprecations] reports the deprecated aliases and identifiers this invocation actually
 //     used. It is a plain function over the [Context] and needs no service bound.
@@ -249,7 +254,7 @@
 //     [Defaults], composed by [OverlayInputs] or [OverlayInputsP]) acquires channels one at a
 //     time, for programs that want custom precedence.
 //
-//   - [Suggestor] turns a [ParseError]'s rejected token and candidate vocabulary into "did you
+//   - [Suggestor] turns a [*ParseError]'s rejected token and candidate vocabulary into "did you
 //     mean" suggestions — [Suggestor.For] does it in one call. Constructing one is the whole of
 //     the opt-in: rotini emits nothing of its own, and what to say stays with the program.
 //

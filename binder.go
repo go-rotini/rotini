@@ -19,7 +19,7 @@ import (
 )
 
 // Binder is the default multi-source input binder: it fills a command's typed inputs from
-// argv (via the embedded [Parser]) and from the non-argv channels — environment variables,
+// argv (via a default [Parser]) and from the non-argv channels — environment variables,
 // configuration files, and a leaf command's typed stdin payload — reconciled and decoded by
 // recon. It is the engine behind [Collect]; the à-la-carte per-channel surface is in
 // overlay.go.
@@ -759,7 +759,7 @@ func (b *Binder) checkDescribed(v reflect.Value) error {
 	if b.described || !hasConfigChannel(v) {
 		return nil
 	}
-	return &WiringError{Msg: "rotini: this command declares config: inputs, but the program " +
+	return &WiringError{Msg: "this command declares config: inputs, but the program " +
 		"was built without a BindMeta — call Program.WithBindMeta (the generated NewProgram " +
 		"does) so the binder knows where configuration lives"}
 }
@@ -781,7 +781,7 @@ func hasConfigChannel(v reflect.Value) bool {
 	return false
 }
 
-// configRegistry builds a recon registry over the configuration_files, first (highest
+// configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. overrides carries any config_source-supplied paths.
 func (b *Binder) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys) (*recon.Registry, error) {
 	srcs, err := b.fileSources(files, overrides)
@@ -850,7 +850,7 @@ func (b *Binder) chainConfigFiles(chain []ResolvedCommand) []ConfigFile {
 	return out
 }
 
-// For returns the registry over only the named configuration_files entry — what a pinned
+// For returns the registry over only the named config_files entry — what a pinned
 // input's value and required marker are judged against.
 func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 	if reg, ok := c.perFile[name]; ok {
@@ -914,7 +914,7 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 	return nil
 }
 
-// fileSources builds one recon file source per configuration_files entry, in declared
+// fileSources builds one recon file source per config_files entry, in declared
 // precedence order. Missing files are tolerated and ~ is expanded. A Discover strategy
 // resolves its search directories now, first directory containing the file winning. A path
 // supplied through config_source is not optional: the user asked for that exact file, so a
@@ -932,7 +932,7 @@ func (b *Binder) fileSources(files []ConfigFile, overrides map[string]string) ([
 	return append(srcs, b.sources...), nil
 }
 
-// namedSource renames a recon source to its configuration_files logical name. Source names
+// namedSource renames a recon source to its config_files logical name. Source names
 // must be unique, but two entries may legitimately share a basename — a walk-up project file
 // and a home file both called ".app.yaml". The binder reads once at parse time, so the
 // wrapper's loss of live-watch capability costs nothing.
@@ -944,7 +944,7 @@ type namedSource struct {
 
 func (s namedSource) Name() string { return s.name }
 
-// fileSource builds the recon source for one configuration_files entry.
+// fileSource builds the recon source for one config_files entry.
 func (b *Binder) fileSource(f ConfigFile, overrides map[string]string) (recon.Source, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(true)}
 	if f.Format != "" {
@@ -976,7 +976,7 @@ func (b *Binder) fileSource(f ConfigFile, overrides map[string]string) (recon.So
 	return namedSource{Source: src, name: f.Name}, nil
 }
 
-// validateConfigFile checks one configuration_files entry's loaded document against its
+// validateConfigFile checks one config_files entry's loaded document against its
 // declared schema — the same load-time gate stdin applies to its payload — against the file
 // recon actually resolved. An absent optional file passes vacuously: shape validation gates
 // what is loaded, and absence is the per-input required marker's concern.
@@ -1581,7 +1581,7 @@ func channelString(val recon.Value) string {
 
 // ── BindError ───────────────────────────────────────────────.
 
-// The non-argv input channels a [BindError] can report on.
+// The non-argv input channels a [*BindError] can report on.
 const (
 	channelEnv    = "env"
 	channelConfig = "config"

@@ -7,8 +7,8 @@ import (
 )
 
 // Definition is the compiled command tree for a generated rotini program: codegen emits it as
-// a Go literal, and the runtime parses argv, dispatches, and renders help and completion
-// against it. Every type in this file is data only, with no behavior, which is what lets the
+// a Go literal, and the runtime parses argv, dispatches and completes against it (help pages
+// are rendered at codegen and supplied through [Program.WithHelp]). Every type in this file is data only, with no behavior, which is what lets the
 // generated file read as a description of the CLI rather than as code.
 type Definition struct {
 	Name             string
@@ -71,9 +71,9 @@ type BindMeta struct {
 	// names are exempt, and with a prefix set the unprefixed names no longer bind.
 	EnvPrefix string
 	// Sources are custom recon sources — a secrets manager, a remote config service —
-	// joined into the config precedence after the declared configuration_files, so explicit
+	// joined into the config precedence after the declared config_files, so explicit
 	// files beat ambient services. Codegen never emits one; the program appends its own.
-	// A per-input `file:` pin stays a configuration_files anchor and cannot name a custom
+	// A per-input `file:` pin stays a config_files anchor and cannot name a custom
 	// source, and a source name colliding with a declared file is rejected loudly.
 	Sources []recon.Source
 	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
@@ -167,7 +167,8 @@ type Constraints struct {
 }
 
 // Ptr returns a pointer to v, for the presence-carrying [Constraints] bounds:
-// Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0.
+// Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0. It is superseded by the
+// built-in new(v), which go fix inlines it to.
 //
 //go:fix inline
 func Ptr[T any](v T) *T { return new(v) }

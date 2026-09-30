@@ -151,6 +151,7 @@ func TestVersionProblem(t *testing.T) {
 		{"doc empty skips", "", "2.0.0", false},
 		{"binary empty skips", "1.0.0", "", false},
 		{"dev build skips", "1.0.0", "dev", false},
+		{"unreleased 0.0.0 build skips", "1.2.3", "0.0.0", false},
 		{"non-semver doc skips", "not-a-version", "1.0.0", false},
 
 		// Pre-release and build metadata are ignored, not rejected.

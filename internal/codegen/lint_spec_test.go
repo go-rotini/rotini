@@ -20,8 +20,8 @@ func TestLintRegistryCompleteness(t *testing.T) {
 	if got := len(specLints); got != 43 {
 		t.Errorf("len(specLints) = %d, want 43 (a rule was dropped or added — update intentionally)", got)
 	}
-	if got := len(confLints); got != 6 {
-		t.Errorf("len(confLints) = %d, want 6", got)
+	if got := len(confLints); got != 8 {
+		t.Errorf("len(confLints) = %d, want 8", got)
 	}
 }
 
@@ -541,8 +541,60 @@ func TestLintPatternMessage_needsAPattern(t *testing.T) {
 		t.Fatalf("problems = %q, want 3 (schema DB's host, flag alone, flag tags' items)", got)
 	}
 	for _, want := range []string{`schema "DB"`, `flag "alone"`, `flag "tags"`} {
-		if !slices.ContainsFunc(got, func(s string) bool { return strings.Contains(s, want) && strings.Contains(s, "no pattern beside it") }) {
+		if !slices.ContainsFunc(got, func(s string) bool { return strings.Contains(s, want) && strings.Contains(s, "no `pattern` beside it") }) {
 			t.Errorf("no problem naming %s in %q", want, got)
 		}
+	}
+}
+
+// With no cmd package declared, the cmd package is the default internal/cmd/<root name>, so an
+// embed_dir outside internal/cmd can never be reached by //go:embed — validate says so rather
+// than leaving it to generate. One under internal/cmd passes here; generate, which knows the
+// root name, holds it to the exact directory.
+func TestLintFeatureDirs_defaultCmdPackage(t *testing.T) {
+	conf := func(dir string) *Conf {
+		return &Conf{Generate: &GenerateConfig{Features: []Feature{{Type: "help", Enabled: true, Embed: true, EmbedDir: dir}}}}
+	}
+	if got := lintFeatureDirs(conf("docs/renders")); len(got) != 1 || !strings.Contains(got[0].Error(), "internal/cmd/<root name>") {
+		t.Errorf("embed_dir outside internal/cmd: problems = %v, want one naming the default cmd package", got)
+	}
+	for _, ok := range []string{"internal/cmd/demo/renders", "internal/cmd/demo"} {
+		if got := lintFeatureDirs(conf(ok)); len(got) != 0 {
+			t.Errorf("embed_dir %q: problems = %v, want none", ok, got)
+		}
+	}
+	if got := lintFeatureDirs(conf("internal/cmd/../elsewhere")); len(got) != 1 {
+		t.Errorf("embed_dir climbing out of internal/cmd: problems = %v, want one", got)
+	}
+}
+
+// generate writes schema files relative to the module root, so validate rejects one it could
+// not write: absolute, or climbing out with "..".
+func TestLintSchemaFiles(t *testing.T) {
+	for file, want := range map[string]int{
+		".rotini-schema.spec.json": 0, "cmd/app/.rotini-schema.spec.json": 0,
+		"/etc/schema.json": 1, "../schema.json": 1, "a/../../schema.json": 1,
+	} {
+		conf := &Conf{Generate: &GenerateConfig{Schemas: &SchemasConfig{Spec: &SchemaConfig{File: file}}}}
+		if got := lintSchemaFiles(conf); len(got) != want {
+			t.Errorf("schemas.spec.file %q: problems = %v, want %d", file, got, want)
+		}
+	}
+}
+
+// A rule may point at a key a format's locator cannot place; the problem then lands on the
+// nearest enclosing node that it can, never on nothing.
+func TestLocateNearest_fallsBackToAncestor(t *testing.T) {
+	locate := func(ptr string) (int, int, bool) {
+		if ptr == "/command/flags/2" {
+			return 9, 7, true
+		}
+		return 0, 0, false
+	}
+	if line, col, ok := locateNearest(locate, "/command/flags/2/schema/default"); !ok || line != 9 || col != 7 {
+		t.Errorf("locateNearest = %d:%d %v, want 9:7 from the enclosing flag", line, col, ok)
+	}
+	if _, _, ok := locateNearest(locate, "/generate/features/0"); ok {
+		t.Error("an unplaceable pointer with no placeable ancestor must report no position")
 	}
 }

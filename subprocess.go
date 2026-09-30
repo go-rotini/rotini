@@ -131,11 +131,10 @@ func (s *Subprocess) WithStdout(w io.Writer) *Subprocess { s.stdout = w; return 
 func (s *Subprocess) WithStderr(w io.Writer) *Subprocess { s.stderr = w; return s }
 
 // WithTimeout kills the child if it has not exited within d. Zero — the default —
-// means no deadline beyond the context's.
+// means no deadline beyond the context's, so WithTimeout(0) clears an earlier one; a
+// negative d is treated as zero.
 func (s *Subprocess) WithTimeout(d time.Duration) *Subprocess {
-	if d > 0 {
-		s.timeout = d
-	}
+	s.timeout = max(d, 0)
 	return s
 }
 

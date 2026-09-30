@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-// Plugin dispatch: resolving a co-located `<program>-<name>` binary, optionally
-// verifying it, and exec'ing it with stream and signal passthrough — the git-style
+// Plugin dispatch: resolving a co-located `<program>-<name>` binary and exec'ing it with the
+// program's streams — canceling the run's context kills the plugin — the git-style
 // sub-command model, declared in the spec as remote_commands / remote_discovery.
 
 // RemoteErrorKind classifies a remote-dispatch failure: the plugin binary could
@@ -21,7 +21,7 @@ type RemoteErrorKind int
 
 const (
 	// RemoteBinaryNotFound: no binary was found next to the executable, in the
-	// discovery path, or on PATH.
+	// plugin path, or on PATH.
 	RemoteBinaryNotFound RemoteErrorKind = iota
 	// RemoteTimeout: the plugin ran past its declared timeout and was killed.
 	RemoteTimeout
