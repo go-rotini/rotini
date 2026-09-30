@@ -1,6 +1,6 @@
 # rotini
 
-Rotini is a spec-driven codegen and runtime cli package for Go. Declare your commands and flags via a YAML, JSON, or JSONC spec file, generate Go code from your spec file, provide implementations to the handlers associated to your commands, then build and run. The loop is modifying your spec file, generating, handler implementations, build.
+Rotini is a spec-driven CLI package for Go, with a codegen tool and a runtime library. You declare your commands, flags and arguments in a spec file (YAML, JSON, JSONC or TOML). Rotini validates it and generates the typed Go, the command tree and a handler stub per command. You write each command's handler, and the runtime parses and validates input before calling it. The loop is: edit the spec, `go generate`, provide/update handler implementations, build.
 
 ## Quick Start
 
