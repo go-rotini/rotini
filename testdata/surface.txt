@@ -78,6 +78,7 @@ field Constraints.MinLength
 field Constraints.Minimum
 field Constraints.MultipleOf
 field Constraints.Pattern
+field Constraints.PatternMessage
 field Context.Argv
 field Context.Stderr
 field Context.Stdin

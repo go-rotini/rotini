@@ -61,7 +61,7 @@ func TestDefinitionTypePreservesParserSemantics(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := definitionType(tt.schema); got != tt.wantDefType {
+			if got := definitionType(tt.schema, nil); got != tt.wantDefType {
 				t.Errorf("definitionType = %q, want %q", got, tt.wantDefType)
 			}
 			if got := goFieldType(tt.schema); got != tt.wantFieldType {
@@ -85,7 +85,7 @@ func TestDefinitionTypeReachesEmittedLiterals(t *testing.T) {
 			{Name: "dir", Schema: &InputSchema{Type: "existingdir"}},
 		},
 	}
-	got := flagDefsLiteral(in, nil) + argDefsLiteral(in)
+	got := flagDefsLiteral(in, nil) + argDefsLiteral(in, nil)
 	for _, want := range []string{`Type: "existingfile"`, `Type: "count"`, `Type: "existingdir"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("emitted literals missing %s\ngot: %s", want, got)
@@ -150,7 +150,7 @@ func TestLayoutFor(t *testing.T) {
 		Flags:     []FlagInput{{Name: "due", Identifiers: []string{"--due"}, Schema: &InputSchema{BaseSchema: BaseSchema{Type: "date"}}}},
 		Arguments: []ArgumentInput{{Name: "at", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "time"}, Layout: "unix"}}},
 	}
-	if lit := flagDefsLiteral(in, nil) + argDefsLiteral(in); !strings.Contains(lit, `Layout: "2006-01-02"`) || !strings.Contains(lit, `Layout: "unix"`) {
+	if lit := flagDefsLiteral(in, nil) + argDefsLiteral(in, nil); !strings.Contains(lit, `Layout: "2006-01-02"`) || !strings.Contains(lit, `Layout: "unix"`) {
 		t.Errorf("literal does not carry the layouts:\n%s", lit)
 	}
 	if tags := constraintTags(&InputSchema{BaseSchema: BaseSchema{Type: "date"}}); tags != `layout:"2006-01-02"` {
@@ -164,7 +164,7 @@ func TestDefsLiteral_deprecatedMessages(t *testing.T) {
 		Flags:     []FlagInput{{Name: "conf", Identifiers: []string{"--conf"}, Deprecated: "use --config"}},
 		Arguments: []ArgumentInput{{Name: "legacy", Deprecated: "no longer read"}},
 	}
-	lit := flagDefsLiteral(in, nil) + argDefsLiteral(in)
+	lit := flagDefsLiteral(in, nil) + argDefsLiteral(in, nil)
 	for _, want := range []string{`Deprecated: "use --config"`, `Deprecated: "no longer read"`} {
 		if !strings.Contains(lit, want) {
 			t.Errorf("literal missing %s:\n%s", want, lit)

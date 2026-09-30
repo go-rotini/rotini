@@ -1,7 +1,9 @@
 package rotini
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"strings"
@@ -613,5 +615,382 @@ func TestOverlay_flagFallbacksMatchTheBinder(t *testing.T) {
 	t.Setenv("PORTS", "1,x")
 	if _, err := ParseEnv[tbListInputs](rtx); err == nil || !strings.Contains(err.Error(), "environment variable PORTS") {
 		t.Errorf("env layer with a bad value: err = %v, want it to name PORTS", err)
+	}
+}
+
+// Collect and the per-channel layer functions must agree about which frames a struct describes.
+//
+// They did not, for one release of this work: the anchor moved from the leaf to the caller's own
+// frame everywhere, but the fit check that came with it was added only to Collect and CollectP.
+// ParseArgv, Defaults, ParseEnv and ParseFiles went on accepting a struct that could not describe
+// the running command and returning it zeroed with a nil error — the same silent failure the
+// anchor work existed to remove, left in the corner of the same API.
+//
+// These are the tests that would have caught that, so they assert the whole family together
+// rather than one function.
+
+type acFlags struct {
+	Own  bool `rotini:"own"`
+	Help bool `rotini:"help"`
+}
+type acCmd struct {
+	Flags     acFlags
+	Arguments struct{}
+}
+
+// acDeep describes three commands. The root's hook is one deep, so it can never be right there.
+type acDeep struct {
+	A acCmd
+	B acCmd
+	C acCmd
+}
+
+// acOwn describes one command — what a root hook legitimately collects.
+type acOwn struct{ Root acCmd }
+
+func acDefs(own string) []FlagDef {
+	return []FlagDef{
+		{Name: own, Identifiers: []string{"--" + own}, Type: "bool"},
+		{Name: "help", Identifiers: []string{"-h", "--help"}, Type: "bool"},
+	}
+}
+
+func acDef() Definition {
+	return Definition{
+		Name: "root", Handler: "Root", Flags: acDefs("own"),
+		Commands: []CommandDef{{Name: "leaf", Handler: "Leaf", Flags: acDefs("leafown")}},
+	}
+}
+
+type acProg struct{ inRootHook func(*Context) }
+
+func (p acProg) Root() Handlers { return acRootH{probe: p.inRootHook} }
+func (p acProg) Leaf() Handlers { return acNoop{} }
+
+type acNoop struct{ DefaultHooks }
+
+func (acNoop) Run(context.Context, *Context) {}
+
+type acRootH struct {
+	DefaultPreRun
+	DefaultPostRun
+	DefaultCascadingPostRun
+	probe func(*Context)
+}
+
+func (h acRootH) Run(context.Context, *Context) {}
+func (h acRootH) CascadingPreRun(_ context.Context, rtx *Context) {
+	if h.probe != nil {
+		h.probe(rtx)
+	}
+}
+
+// acEntryPoints is every public way to acquire inputs, so a new one cannot be added without
+// deciding what it does here.
+func acEntryPoints(rtx *Context) map[string]error {
+	_, ec := Collect[acDeep](rtx)
+	_, _, ep := CollectP[acDeep](rtx)
+	_, ea := ParseArgv[acDeep](rtx)
+	_, ed := Defaults[acDeep](rtx)
+	_, ee := ParseEnv[acDeep](rtx)
+	_, ef := ParseFiles[acDeep](rtx)
+	return map[string]error{
+		"Collect": ec, "CollectP": ep, "ParseArgv": ea,
+		"Defaults": ed, "ParseEnv": ee, "ParseFiles": ef,
+	}
+}
+
+// TestAnchor_everyEntryPointRejectsATooDeepType is the regression. A struct describing more
+// commands than the caller is deep cannot be describing the caller, and every entry point has to
+// say so rather than hand back zeros.
+func TestAnchor_everyEntryPointRejectsATooDeepType(t *testing.T) {
+	var got map[string]error
+	p := NewProgram(acDef(), acProg{inRootHook: func(rtx *Context) { got = acEntryPoints(rtx) }}).
+		WithStdout(io.Discard).WithStderr(io.Discard)
+	p.Run([]string{"--own", "leaf"})
+
+	if got == nil {
+		t.Fatal("the root's cascading hook never ran")
+	}
+	for name, err := range got {
+		if err == nil {
+			t.Errorf("%s accepted a 3-command type from a hook 1 command deep, silently", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "acDeep") || !strings.Contains(err.Error(), "ITS OWN") {
+			t.Errorf("%s rejected it, but not with the shared explanation: %v", name, err)
+		}
+	}
+}
+
+// TestAnchor_everyEntryPointAcceptsTheCallersOwnType is the other half: the check must not fire
+// on the type a hook is supposed to collect, in any of the six.
+func TestAnchor_everyEntryPointAcceptsTheCallersOwnType(t *testing.T) {
+	var errs map[string]error
+	var own bool
+	p := NewProgram(acDef(), acProg{inRootHook: func(rtx *Context) {
+		in, ec := Collect[acOwn](rtx)
+		own = in.Root.Flags.Own
+		_, _, ep := CollectP[acOwn](rtx)
+		_, ea := ParseArgv[acOwn](rtx)
+		_, ed := Defaults[acOwn](rtx)
+		_, ee := ParseEnv[acOwn](rtx)
+		_, ef := ParseFiles[acOwn](rtx)
+		errs = map[string]error{
+			"Collect": ec, "CollectP": ep, "ParseArgv": ea,
+			"Defaults": ed, "ParseEnv": ee, "ParseFiles": ef,
+		}
+	}}).WithStdout(io.Discard).WithStderr(io.Discard)
+	p.Run([]string{"--own", "leaf"})
+
+	for name, err := range errs {
+		if err != nil {
+			t.Errorf("%s rejected the hook's own inputs type: %v", name, err)
+		}
+	}
+	if !own {
+		t.Error("Collect did not read the root's own --own from its cascading hook")
+	}
+}
+
+// Collect and CollectP are two code paths to one answer: Collect goes through [Binder.Bind],
+// CollectP acquires five layers separately and overlays them. TestCollect pins that they agree
+// for one argv shape. These pin that they agree across the whole precedence matrix — and, which
+// nothing covered, that they FAIL the same way.
+//
+// The failure half matters most. A handler reaches for CollectP when it wants provenance, often
+// after starting with Collect; if the two disagreed on which inputs are legal, that swap would
+// change behaviour while looking like it only added a Report.
+
+func describeErr(err error) string {
+	if err == nil {
+		return "<nil>"
+	}
+	return fmt.Sprintf("%T: %s", err, err.Error())
+}
+
+func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
+	cfg := writeConfig(t, "app:\n  color: red\n")
+	withFiles := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+
+	for _, c := range []struct {
+		name string
+		argv []string
+		env  string // APP_COLOR; "" leaves it unset
+		meta BindMeta
+		want string // merged Color, "" when the case is an error
+	}{
+		{"argv beats everything", []string{"--color", "green"}, "teal", withFiles, "green"},
+		{"env beats files and default", nil, "teal", withFiles, "teal"},
+		{"files beat the default", nil, "", withFiles, "red"},
+		{"the default when nothing supplies", nil, "", BindMeta{}, "blue"},
+		{"an enum violation on argv", []string{"--color", "mauve"}, "", withFiles, ""},
+		{"an enum violation from env", nil, "mauve", withFiles, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if c.env != "" {
+				t.Setenv("APP_COLOR", c.env)
+			}
+			mk := func() *Context {
+				rtx := NewContextFor(ovDef(), c.argv)
+				rtx.WithBindMeta(c.meta)
+				return rtx
+			}
+
+			viaCollect, errCollect := Collect[ovInputs](mk())
+			viaCollectP, _, errCollectP := CollectP[ovInputs](mk())
+
+			// The verdict must be identical: swapping Collect for CollectP to gain provenance
+			// must not change which inputs are legal.
+			if describeErr(errCollect) != describeErr(errCollectP) {
+				t.Errorf("the two paths disagree on failure:\n  Collect  → %s\n  CollectP → %s",
+					describeErr(errCollect), describeErr(errCollectP))
+			}
+
+			// On SUCCESS the values must be identical too.
+			if errCollect == nil && !reflect.DeepEqual(viaCollect, viaCollectP) {
+				t.Errorf("the two paths disagree on values:\n  Collect  → %+v\n  CollectP → %+v",
+					viaCollect.App, viaCollectP.App)
+			}
+
+			// On FAILURE they deliberately differ, and the difference is pinned rather than
+			// left to be rediscovered: Collect stops at the first argv problem, before the env
+			// and config channels are read, so a config-supplied default (Retries, recon
+			// default=3) is absent from its partial value and present in CollectP's.
+			if errCollect != nil {
+				if viaCollect.App.Config.Retries != 0 {
+					t.Errorf("Collect's partial value gained a config default it should not have read: %d",
+						viaCollect.App.Config.Retries)
+				}
+				if viaCollectP.App.Config.Retries != 3 {
+					t.Errorf("CollectP's merged value lost the config default: %d", viaCollectP.App.Config.Retries)
+				}
+			}
+			if c.want != "" {
+				if errCollect != nil {
+					t.Fatalf("Collect: %v", errCollect)
+				}
+				if got := viaCollect.App.Flags.Color; got != c.want {
+					t.Errorf("Color = %q, want %q", got, c.want)
+				}
+			} else if errCollect == nil {
+				t.Error("an enum violation was accepted")
+			}
+		})
+	}
+}
+
+// TestCollect_isIdempotent: a handler that collects twice — or a helper that collects for
+// itself — must get the same answer, since the Context is shared across a run's hooks.
+func TestCollect_isIdempotent(t *testing.T) {
+	cfg := writeConfig(t, "app:\n  color: red\n")
+	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
+	rtx.WithBindMeta(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+
+	first, err1 := Collect[ovInputs](rtx)
+	second, err2 := Collect[ovInputs](rtx)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("Collect: %v / %v", err1, err2)
+	}
+	if first != second {
+		t.Errorf("Collect is not idempotent on one Context:\n  first  = %+v\n  second = %+v", first.App, second.App)
+	}
+}
+
+// TestReport_validateChecksWhatWasSupplied pins the rule Validate's doc now states, because the
+// two halves look the same from the outside and only one of them fires on an absent field.
+func TestReport_validateChecksWhatWasSupplied(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"--color"}, Type: "string", Default: "blue",
+				Enum: []string{"red", "green", "blue"}},
+			{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Required: true,
+				Enum: []string{"fast", "slow"}},
+		},
+	}
+	type flags struct {
+		Color string `rotini:"color"`
+		Mode  string `rotini:"mode"`
+	}
+	type cmd struct {
+		Flags     flags
+		Arguments struct{}
+	}
+	type inputs struct{ App cmd }
+
+	argvOnly, err := ParseArgv[inputs](NewContextFor(def, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A PRESENCE rule fires on absence: --mode is required and nothing supplied it.
+	merged, rep := OverlayInputsP(argvOnly)
+	if e := rep.Validate(); e == nil {
+		t.Error("a required input nobody supplied passed validation")
+	}
+
+	// A VALUE rule does not fire on absence: Color merged as "" — not in its enum — because no
+	// layer claimed it. Dropping the defaults layer is what exposes this, which is why the doc
+	// says to build custom precedence from all five channels.
+	if merged.App.Flags.Color != "" {
+		t.Fatalf("fixture no longer demonstrates the case: Color = %q", merged.App.Flags.Color)
+	}
+	for _, p := range rep.Fields() {
+		if p == "App.Flags.Color" {
+			t.Error("Color was reported as supplied by a layer, which it was not")
+		}
+	}
+
+	// With the defaults layer present the field is supplied, and the enum applies again.
+	defaults, err := Defaults[inputs](NewContextFor(def, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	withDefaults, _ := OverlayInputsP(defaults, argvOnly)
+	if withDefaults.App.Flags.Color != "blue" {
+		t.Errorf("Color with defaults = %q, want the declared default", withDefaults.App.Flags.Color)
+	}
+}
+
+// TestCollect_isCorrectInACascadingHookAtEveryDepth is the finding, fixed. The same call reads
+// mid's own flag whether or not a sub-command was invoked, and whether mid's type spans its
+// whole lineage (an ordinary cli) or only itself (a composed child).
+//
+// Before this, three of these four cells returned false with a nil error.
+func TestCollect_isCorrectInACascadingHookAtEveryDepth(t *testing.T) {
+	for _, argv := range [][]string{
+		{"mid", "--midonly"},         // mid IS the leaf
+		{"mid", "--midonly", "leaf"}, // mid is a MIDDLE frame
+	} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			runF(t, argv, func(rtx *Context) {
+				span, err := Collect[fMidSpan](rtx)
+				if err != nil {
+					t.Errorf("Collect[fMidSpan] (ordinary cli): %v", err)
+				} else if !span.Mid.Flags.MidOnly {
+					t.Error("Collect[fMidSpan] (ordinary cli) did not read mid's own --midonly")
+				}
+
+				own, err := Collect[fMidOwn](rtx)
+				if err != nil {
+					t.Errorf("Collect[fMidOwn] (composed child): %v", err)
+				} else if !own.Mid.Flags.MidOnly {
+					t.Error("Collect[fMidOwn] (composed child) did not read mid's own --midonly")
+				}
+			}, nil)
+		})
+	}
+}
+
+// TestCollect_doesNotSeeADescendantsFlag is the other half of correctness: anchoring on the
+// caller's frame must not reach DOWN the chain either.
+func TestCollect_doesNotSeeADescendantsFlag(t *testing.T) {
+	runF(t, []string{"mid", "leaf", "--leafonly"}, func(rtx *Context) {
+		own, err := Collect[fMidOwn](rtx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if own.Mid.Flags.MidOnly {
+			t.Error("mid's frame reported --midonly, which was never passed")
+		}
+	}, nil)
+}
+
+// TestCollect_rejectsADescendantsType is the exact check the frame makes possible: a struct that
+// describes more commands than the caller is deep cannot be describing the caller.
+//
+// Under leaf-anchoring this was silent — the struct did not fit, binding was skipped, and every
+// field came back zero with a nil error.
+func TestCollect_rejectsADescendantsType(t *testing.T) {
+	var err error
+	runF(t, []string{"mid", "leaf"}, nil, func(rtx *Context) {
+		_, err = Collect[fLeafSpan](rtx) // 3 fields, but the root is 1 deep
+	})
+	if err == nil {
+		t.Fatal("collecting a descendant's 3-field type from the root's hook returned no error")
+	}
+	for _, want := range []string{"fLeafSpan", "describes 3 commands", "only 1 deep", "ITS OWN"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error is missing %q:\n%s", want, err)
+		}
+	}
+}
+
+// TestCollect_leafRunIsUnchanged pins the compatibility claim: for a leaf hook the frame IS the
+// leaf, so the anchor reduces to what it always was.
+func TestCollect_leafRunIsUnchanged(t *testing.T) {
+	var got fLeafSpan
+	var err error
+	p := NewProgram(fDef(), fLeafProbe{capture: func(rtx *Context) { got, err = Collect[fLeafSpan](rtx) }}).
+		WithStdout(io.Discard).WithStderr(io.Discard)
+	if _, e := p.Run([]string{"mid", "--midonly", "leaf", "--leafonly"}); e != nil {
+		t.Fatal(e)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Leaf.Flags.LeafOnly || !got.Mid.Flags.MidOnly {
+		t.Errorf("leaf Run got leaf=%v mid=%v, want both true", got.Leaf.Flags.LeafOnly, got.Mid.Flags.MidOnly)
 	}
 }

@@ -63,7 +63,7 @@ func lintValuesParse(spec *Spec) []error {
 // the runtime's own complaint about the first that fails, or "" when all parse or the type is
 // one this cannot build.
 func runtimeRejects(schema *InputSchema, values []string) string {
-	defType := definitionType(schema)
+	defType := definitionType(schema, nil)
 	if defType == "count" || strings.Contains(defType, "existingfile") || strings.Contains(defType, "existingdir") {
 		return ""
 	}

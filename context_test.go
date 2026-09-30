@@ -5,10 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestGet_typed(t *testing.T) {
@@ -633,5 +635,379 @@ func TestContext_argsStayLiveButChainDoesNot(t *testing.T) {
 	c[0].Name = "mutated"
 	if rtx.Chain()[0].Name == "mutated" {
 		t.Error("Chain handed back live storage")
+	}
+}
+
+// Failing from a hook is the most common thing a handler does, and it used to be a two-part
+// ritual — record, then stop — whose second half is the half that decides anything and the half
+// that can go missing. These tests pin both the shape of the hazard and the one-call cure.
+
+// TestHalt_isLoadBearingInSetupAndInertElsewhere is the fact the whole finding rests on, and it
+// was not written down anywhere before: Halt stops FORWARD progress, so it does something in
+// exactly two of the five hooks.
+//
+// The unwind loop never consults `stopped` (see the teardown guard in dispatch — only exitNow
+// and a panic cut it short), and Run is the last forward step of the default plan. So a Halt in
+// Run, PostRun or CascadingPostRun changes nothing at all. The generated stub used to teach it
+// in Run, which is why the ritual was learned as boilerplate and then omitted where it counts.
+func TestHalt_isLoadBearingInSetupAndInertElsewhere(t *testing.T) {
+	full := []string{
+		"app.CascadingPreRun", "run.CascadingPreRun", "run.PreRun", "run.Run",
+		"run.PostRun", "run.CascadingPostRun", "app.CascadingPostRun",
+	}
+
+	for _, tc := range []struct {
+		hook string
+		want []string
+	}{
+		// Setup: the command is prevented from proceeding. Teardown still unwinds for the
+		// steps that began — that is the contract, and Halt does not touch it.
+		{"CascadingPreRun", []string{
+			"app.CascadingPreRun", "run.CascadingPreRun",
+			"run.CascadingPostRun", "app.CascadingPostRun",
+		}},
+		{"PreRun", []string{
+			"app.CascadingPreRun", "run.CascadingPreRun", "run.PreRun",
+			"run.PostRun", "run.CascadingPostRun", "app.CascadingPostRun",
+		}},
+		// Inert: there is no forward progress left to stop.
+		{"Run", full},
+		{"PostRun", full},
+		{"CascadingPostRun", full},
+	} {
+		t.Run(tc.hook, func(t *testing.T) {
+			_, log := runActs(t, []string{"run", "x"}, map[string]act{
+				"run": {at: tc.hook, do: func(rtx *Context) { rtx.Halt() }},
+			})
+			if fmt.Sprint(log) != fmt.Sprint(tc.want) {
+				t.Errorf("Halt in %s:\n got %v\nwant %v", tc.hook, log, tc.want)
+			}
+		})
+	}
+}
+
+// TestHaltWith_isExactlyRecordErrorPlusHalt is the equivalence contract. HaltWith is a
+// convenience, not a new behaviour: if the two forms ever diverge, the convenience has become a
+// second set of semantics to learn, which is the opposite of the point.
+func TestHaltWith_isExactlyRecordErrorPlusHalt(t *testing.T) {
+	boom := errors.New("setup failed")
+
+	oneCall, oneLog := runActs(t, []string{"run", "x"}, map[string]act{
+		"run": {at: "PreRun", do: func(rtx *Context) { rtx.HaltWith(boom) }},
+	})
+	twoCalls, twoLog := runActs(t, []string{"run", "x"}, map[string]act{
+		"run": {at: "PreRun", do: func(rtx *Context) { rtx.RecordError(boom); rtx.Halt() }},
+	})
+
+	if oneCall != twoCalls {
+		t.Errorf("exit code: HaltWith = %d, RecordError+Halt = %d", oneCall, twoCalls)
+	}
+	if fmt.Sprint(oneLog) != fmt.Sprint(twoLog) {
+		t.Errorf("hooks run:\n HaltWith        %v\n RecordError+Halt %v", oneLog, twoLog)
+	}
+	if oneCall == 0 {
+		t.Error("a recorded error exited 0")
+	}
+}
+
+// TestHaltWith_stopsTheWorkTheHookRefused is the harm the finding is about, stated as a test.
+//
+// The exit code and stderr are IDENTICAL whether or not a setup hook halts — so this asserts
+// the only thing that differs: whether Run got to do work the setup had already established it
+// must not do. That is why no output-asserting test caught the original bug.
+func TestHaltWith_stopsTheWorkTheHookRefused(t *testing.T) {
+	boom := errors.New("no connection was opened")
+
+	_, halted := runActs(t, []string{"run", "x"}, map[string]act{
+		"run": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.HaltWith(boom) }},
+	})
+	if contains(halted, "run.Run") {
+		t.Errorf("Run executed after its setup hook failed: %v", halted)
+	}
+
+	// The two-part form with the stop omitted — the mistake. Kept here so the difference is
+	// visible in one place: same verdict, work still done.
+	_, leaked := runActs(t, []string{"run", "x"}, map[string]act{
+		"run": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.RecordError(boom) }},
+	})
+	if !contains(leaked, "run.Run") {
+		t.Fatal("fixture no longer demonstrates the hazard: Run was skipped without a halt")
+	}
+}
+
+// TestHaltWith_isCorrectInEveryHook is the property that removes the hook-dependent knowledge:
+// whichever hook a handler is in, one call records the failure and stops whatever forward
+// progress remains. Where Halt is inert HaltWith degrades to recording, which is what a failure
+// in Run or a teardown hook wants anyway.
+func TestHaltWith_isCorrectInEveryHook(t *testing.T) {
+	for _, hook := range []string{"CascadingPreRun", "PreRun", "Run", "PostRun", "CascadingPostRun"} {
+		t.Run(hook, func(t *testing.T) {
+			log := []string{}
+			p, _, errb := newTestProgram(&actProgram{log: &log, actions: map[string]act{
+				"run": {at: hook, do: func(rtx *Context) { rtx.HaltWith(errors.New("failed in " + hook)) }},
+			}}, []string{"run", "x"})
+
+			code, _ := p.Run(p.args)
+			if code == 0 {
+				t.Errorf("HaltWith in %s exited 0", hook)
+			}
+			if got := errb.String(); !strings.Contains(got, "failed in "+hook) {
+				t.Errorf("HaltWith in %s did not reach the funnel; stderr = %q", hook, got)
+			}
+		})
+	}
+}
+
+// TestHaltWith_nilErrorStillHalts: a nil error records nothing (RecordError's documented
+// behaviour) but the halt stands, so a caller passing a maybe-nil error needs no guard and
+// cannot accidentally turn the stop into a fall-through.
+func TestHaltWith_nilErrorStillHalts(t *testing.T) {
+	code, log := runActs(t, []string{"run", "x"}, map[string]act{
+		"run": {at: "PreRun", do: func(rtx *Context) { rtx.HaltWith(nil) }},
+	})
+	if contains(log, "run.Run") {
+		t.Errorf("HaltWith(nil) did not halt: %v", log)
+	}
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 — nothing was recorded, so nothing failed", code)
+	}
+}
+
+// TestRecordError_aloneStillContinues guards the choice HaltWith must NOT take away. Recording
+// without stopping is a real pattern — collect every problem, or let a later hook decide by
+// gating on Failed — and it has to keep working exactly as before.
+func TestRecordError_aloneStillContinues(t *testing.T) {
+	var sawFailed bool
+	code, log := runActs(t, []string{"run", "x"}, map[string]act{
+		"run": {at: "PreRun", do: func(rtx *Context) {
+			rtx.RecordError(errors.New("first problem"))
+			rtx.RecordError(errors.New("second problem"))
+		}},
+		"app": {at: "CascadingPreRun", do: func(rtx *Context) { sawFailed = rtx.Failed() }},
+	})
+	if !contains(log, "run.Run") {
+		t.Errorf("RecordError alone stopped the run: %v", log)
+	}
+	if code == 0 {
+		t.Error("two recorded errors exited 0")
+	}
+	if sawFailed {
+		t.Error("Failed() was true before anything had been recorded")
+	}
+}
+
+// TestHaltWith_inTheFunnelDoesNotReenter: Halt is documented as a no-op inside the funnel, where
+// the lifecycle has already run. HaltWith inherits that, so a funnel that fails while reporting
+// cannot stall the settle it is part of.
+func TestHaltWith_inTheFunnelDoesNotReenter(t *testing.T) {
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		rtx.RecordError(errors.New("original"))
+	}}
+	p, _, _ := newTestProgram(h, []string{"run", "x"})
+	p.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) {
+		rtx.HaltWith(errors.New("while reporting"))
+	})
+
+	done := make(chan int, 1)
+	go func() { code, _ := p.Run(p.args); done <- code }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("HaltWith inside the funnel did not return")
+	}
+}
+
+// Frame tracks the lifecycle's progress, which makes it the one thing a handler reads off the
+// Context that is not fixed for the run. The Context promises goroutine-safe reads, and that
+// promise holds — the frame is mutex-guarded — but "safe" and "unchanging" are different claims,
+// and only the first one is true here.
+//
+// These pin the documented behaviour so it is a contract rather than an accident: a goroutine
+// the hook WAITS for sees its spawner's frame; one that outlives the hook sees whatever step is
+// running when it looks.
+
+type fgHandlers struct {
+	DefaultPreRun
+	DefaultPostRun
+	DefaultCascadingPostRun
+	cascading func(*Context)
+}
+
+func (h fgHandlers) Run(context.Context, *Context) {}
+func (h fgHandlers) CascadingPreRun(_ context.Context, rtx *Context) {
+	if h.cascading != nil {
+		h.cascading(rtx)
+	}
+}
+
+type fgLeaf struct {
+	DefaultHooks
+	onRun func(*Context)
+}
+
+func (h fgLeaf) Run(_ context.Context, rtx *Context) {
+	if h.onRun != nil {
+		h.onRun(rtx)
+	}
+}
+
+type fgProg struct {
+	cascading func(*Context)
+	onRun     func(*Context)
+}
+
+func (p fgProg) App() Handlers    { return fgHandlers{cascading: p.cascading} }
+func (p fgProg) AppRun() Handlers { return fgLeaf{onRun: p.onRun} }
+
+// TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame is the supported shape: fan out, wait,
+// return. Everything the goroutines read is the frame their spawner was in.
+func TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame(t *testing.T) {
+	var seen []string
+	var mu sync.Mutex
+
+	p := NewProgram(testDef(), fgProg{cascading: func(rtx *Context) {
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				mu.Lock()
+				defer mu.Unlock()
+				seen = append(seen, rtx.Frame().Name)
+			}()
+		}
+		wg.Wait() // the hook does not return until they are done
+	}}).WithStdout(io.Discard).WithStderr(io.Discard)
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 4 {
+		t.Fatalf("saw %d readings, want 4", len(seen))
+	}
+	for _, got := range seen {
+		if got != "app" {
+			t.Errorf("a waited-for goroutine read Frame() = %q, want its spawner's %q", got, "app")
+		}
+	}
+}
+
+// TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep is the documented hazard, pinned so
+// it cannot change silently in either direction.
+//
+// It is NOT a data race — run this file under -race and it is clean. The value is simply the
+// step running at the moment of the call, which for a detached goroutine is not its spawner's.
+// The guidance on Frame is to capture what you need before spawning, and the second half of this
+// test is that capture working.
+func TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep(t *testing.T) {
+	release := make(chan struct{})
+	done := make(chan struct{})
+	var detached, captured string
+	var capturedFrame ResolvedCommand
+
+	p := NewProgram(testDef(), fgProg{
+		cascading: func(rtx *Context) {
+			capturedFrame = rtx.Frame() // the remedy: read it while the hook still owns the frame
+			go func() {
+				defer close(done)
+				<-release // resume only after the spawning hook has returned
+				detached = rtx.Frame().Name
+				captured = capturedFrame.Name
+			}()
+		},
+		onRun: func(rtx *Context) {
+			close(release)
+			<-done
+		},
+	}).WithStdout(io.Discard).WithStderr(io.Discard)
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The run has moved on to the leaf by the time the detached goroutine looks.
+	if detached != "run" {
+		t.Errorf("a detached goroutine read Frame() = %q; the documented behaviour is the current step, %q", detached, "run")
+	}
+	// The captured value is stable, which is what the doc tells authors to rely on.
+	if captured != "app" {
+		t.Errorf("the captured frame changed under the caller: %q, want %q", captured, "app")
+	}
+}
+
+// TestFrame_reportsTheHooksOwnCommand is the information that did not exist before: Command is
+// the leaf in every hook, Frame is the command this hook belongs to.
+func TestFrame_reportsTheHooksOwnCommand(t *testing.T) {
+	var rootSaw, midSaw, cmdSaw string
+	runF(t, []string{"mid", "leaf"},
+		func(rtx *Context) { midSaw, cmdSaw = rtx.Frame().Name, rtx.Command().Name },
+		func(rtx *Context) { rootSaw = rtx.Frame().Name },
+	)
+	if rootSaw != "root" || midSaw != "mid" {
+		t.Errorf("Frame() = root:%q mid:%q, want root/mid", rootSaw, midSaw)
+	}
+	if cmdSaw != "leaf" {
+		t.Errorf("Command() in mid's cascading hook = %q, want the leaf %q", cmdSaw, "leaf")
+	}
+}
+
+// TestFrame_outsideAHookIsTheLeaf covers a Context from NewContextFor, where no hook is running.
+func TestFrame_outsideAHookIsTheLeaf(t *testing.T) {
+	rtx := NewContextFor(fDef(), []string{"mid", "leaf"})
+	if got := rtx.Frame().Name; got != "leaf" {
+		t.Errorf("Frame() outside a hook = %q, want the leaf %q", got, "leaf")
+	}
+	if _, err := Collect[fLeafSpan](rtx); err != nil {
+		t.Errorf("the leaf's own type must collect from a hookless Context: %v", err)
+	}
+}
+
+// TestIsLeaf answers the question the frame surface could not express: a cascading hook runs at
+// every depth, so "is this invocation about ME, or am I an ancestor of it?" is real — and
+// rtx.Frame() == rtx.Command() does not compile, because ResolvedCommand holds slices.
+func TestIsLeaf(t *testing.T) {
+	for _, tc := range []struct {
+		argv     []string
+		wantMid  bool
+		wantRoot bool
+	}{
+		{[]string{"mid"}, true, false},          // mid IS the invocation
+		{[]string{"mid", "leaf"}, false, false}, // both are ancestors of `leaf`
+	} {
+		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
+			var midSaw, rootSaw bool
+			runF(t, tc.argv,
+				func(rtx *Context) { midSaw = rtx.IsLeaf() },
+				func(rtx *Context) { rootSaw = rtx.IsLeaf() },
+			)
+			if midSaw != tc.wantMid {
+				t.Errorf("mid's cascading hook: IsLeaf() = %v, want %v", midSaw, tc.wantMid)
+			}
+			if rootSaw != tc.wantRoot {
+				t.Errorf("root's cascading hook: IsLeaf() = %v, want %v", rootSaw, tc.wantRoot)
+			}
+		})
+	}
+}
+
+// TestIsLeaf_isAlwaysTrueInANonCascadingHook: PreRun, Run and PostRun only ever run for the
+// leaf, so the answer there is not interesting — but it must not be wrong.
+func TestIsLeaf_isAlwaysTrueInANonCascadingHook(t *testing.T) {
+	var inRun bool
+	p := NewProgram(fDef(), fLeafProbe{capture: func(rtx *Context) { inRun = rtx.IsLeaf() }}).
+		WithStdout(io.Discard).WithStderr(io.Discard)
+	if _, err := p.Run([]string{"mid", "leaf"}); err != nil {
+		t.Fatal(err)
+	}
+	if !inRun {
+		t.Error("the leaf's Run reported IsLeaf() = false")
+	}
+}
+
+// TestIsLeaf_outsideAHook: a Context from NewContextFor has no running hook, so the frame is the
+// leaf and the answer is true.
+func TestIsLeaf_outsideAHook(t *testing.T) {
+	if !NewContextFor(fDef(), []string{"mid", "leaf"}).IsLeaf() {
+		t.Error("a hookless Context reported IsLeaf() = false")
 	}
 }

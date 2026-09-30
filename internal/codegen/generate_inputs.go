@@ -171,6 +171,9 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 	intC("maxitems", "MaxItems", schema.MaxItems)
 	if schema.Pattern != "" {
 		visit("pattern", "Pattern", schema.Pattern, strconv.Quote(schema.Pattern))
+		if schema.PatternMessage != "" {
+			visit("patternmsg", "PatternMessage", schema.PatternMessage, strconv.Quote(schema.PatternMessage))
+		}
 	}
 }
 

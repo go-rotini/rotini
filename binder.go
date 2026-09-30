@@ -221,6 +221,7 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 			return internalBind(channelStdin, "", "invalid stdin schema", err)
 		}
 		if err := validator.Validate(m); err != nil {
+			applyPatternMessages(js, err)
 			return reconBind(channelStdin, err)
 		}
 	}
@@ -1007,6 +1008,7 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 		return internalBind(channelConfig, f.Name, fmt.Sprintf("invalid schema for configuration file %q", f.Name), err)
 	}
 	if err := validator.Validate(m); err != nil {
+		applyPatternMessages(f.Schema, err)
 		return usageBind(channelConfig, f.Name,
 			fmt.Sprintf("configuration file %q (%s) is invalid: %s", f.Name, path, schemaDetail(err)), err)
 	}
@@ -1553,6 +1555,7 @@ func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 	if v := tag.Get("pattern"); v != "" {
 		c.Pattern, has = v, true
 	}
+	c.PatternMessage = tag.Get("patternmsg")
 	return c, has
 }
 

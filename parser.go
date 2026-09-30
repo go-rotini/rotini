@@ -901,6 +901,9 @@ func checkStringBounds(label string, c Constraints, v string, secret bool) error
 	}
 	if c.Pattern != "" {
 		if ok, err := regexp.MatchString(c.Pattern, v); err == nil && !ok {
+			if c.PatternMessage != "" {
+				return constraintViolation("%s %s (got %q)", label, c.PatternMessage, redactValue(v, secret))
+			}
 			return constraintViolation("%s must match %s (got %q)", label, c.Pattern, redactValue(v, secret))
 		}
 	}

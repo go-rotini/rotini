@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -514,5 +515,35 @@ func TestRequiredArgumentOrderMatchesTheParser(t *testing.T) {
 		t.Errorf("one value: optional=%q err=%v — want it in the optional argument and a missing-input error; "+
 			"the parser no longer fills positionals strictly in order, so lintRequiredArgumentOrder is wrong",
 			got.T.Arguments.Optional, err)
+	}
+}
+
+// TestLintPatternMessage_needsAPattern: pattern_message only ever replaces a pattern's failure
+// text, so one with no pattern beside it — on an input, its items, a named schema or a property
+// — would never be shown. It is rejected, naming where it sits.
+func TestLintPatternMessage_needsAPattern(t *testing.T) {
+	msg := BaseSchema{Type: "string", PatternMessage: "must be lowercase"}
+	spec := &Spec{Command: Command{
+		Name: "app",
+		Schemas: map[string]Schema{
+			"DB": {BaseSchema: BaseSchema{Type: "object", Properties: map[string]Schema{"host": {BaseSchema: msg}}}},
+		},
+		Flags: []FlagInput{
+			{Name: "ok", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "string", Pattern: "^a", PatternMessage: "must start with a"}}},
+			{Name: "alone", Schema: &InputSchema{BaseSchema: msg}},
+			{Name: "tags", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: msg}}}},
+		},
+	}}
+	var got []string
+	for _, p := range lintPatternCompiles(spec) {
+		got = append(got, p.Error())
+	}
+	if len(got) != 3 {
+		t.Fatalf("problems = %q, want 3 (schema DB's host, flag alone, flag tags' items)", got)
+	}
+	for _, want := range []string{`schema "DB"`, `flag "alone"`, `flag "tags"`} {
+		if !slices.ContainsFunc(got, func(s string) bool { return strings.Contains(s, want) && strings.Contains(s, "no pattern beside it") }) {
+			t.Errorf("no problem naming %s in %q", want, got)
+		}
 	}
 }

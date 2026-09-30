@@ -161,7 +161,13 @@ Generate the field as a pointer (*T): nil means the input was not provided, dist
 
 `string`
 
-Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match.
+Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match. A failure shows the user the regex itself unless `pattern_message:` says it in words.
+
+### `pattern_message`
+
+`string`
+
+With 'pattern' only: what the user is told when a value does not match, in place of the regex — which is written for the program, not the person typing. Phrase it to follow the input's name: `pattern_message: must be json, yaml, wide, name or custom-columns=<spec>` reports `-o must be json, yaml, wide, name or custom-columns=<spec> (got "bogus")`, where the default is `-o must match ^(json|yaml|…)$ (got "bogus")`. Applies wherever the pattern is checked: an input on every channel it reads, each element of a list, a named schema an input refers to, and a property of an object-valued flag or a stdin payload.
 
 ### `properties`
 

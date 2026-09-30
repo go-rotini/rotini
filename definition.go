@@ -163,6 +163,7 @@ type Constraints struct {
 	MinItems         int      // minimum item count (repeatable flag / variadic argument); 0 = unset
 	MaxItems         int      // maximum item count; 0 = unset
 	Pattern          string   // regular expression the value must contain (string types); "" = unset
+	PatternMessage   string   // what a Pattern failure tells the user, in place of the regex; "" = show the regex
 }
 
 // Ptr returns a pointer to v, for the presence-carrying [Constraints] bounds:

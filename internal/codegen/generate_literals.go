@@ -20,7 +20,7 @@ func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Sc
 	if fl := flagDefsLiteral(in, schemas); fl != "" {
 		b.WriteString("Flags: " + fl + ",\n")
 	}
-	if al := argDefsLiteral(in); al != "" {
+	if al := argDefsLiteral(in, schemas); al != "" {
 		b.WriteString("Arguments: " + al + ",\n")
 	}
 	if fg := flagGroupsLiteral(in); fg != "" {
@@ -237,7 +237,7 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if f.Summary != "" {
 			b.WriteString(", Summary: " + strconv.Quote(f.Summary))
 		}
-		b.WriteString(", Type: " + strconv.Quote(definitionType(f.Schema)))
+		b.WriteString(", Type: " + strconv.Quote(definitionType(f.Schema, schemas)))
 		objectSchema := objectSchemaFor(f.Schema, schemas)
 		if objectSchema != "" {
 			writeSchemaCommon(b, withObjectDefault(f.Schema))
@@ -387,12 +387,12 @@ func keyPaths(schema *InputSchema) []string {
 	return out
 }
 
-func argDefsLiteral(in *Inputs) string {
+func argDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 	if in == nil {
 		return ""
 	}
 	return sliceLiteral("ArgDef", in.Arguments, func(b *strings.Builder, a ArgumentInput) {
-		typ := definitionType(a.Schema)
+		typ := definitionType(a.Schema, schemas)
 		b.WriteString("Name: " + strconv.Quote(a.Name) + ", Type: " + strconv.Quote(typ))
 		if strings.HasPrefix(typ, "[]") {
 			b.WriteString(", Variadic: true")
@@ -536,8 +536,19 @@ func constraintsLiteral(schema *InputSchema) string {
 // Run those through jsonSchemaTypeToGo and the parser sees "int"/"string" and does nothing —
 // the declared behavior silently never fires. The Definition keeps the declared name; the
 // struct field keeps the Go type (goFieldType, which is getSchemaType-based, still applies).
-func definitionType(schema *InputSchema) string {
-	if schema == nil || schema.Ref != "" {
+//
+// A reference to a named SCALAR schema (`schemas: {Kind: {type: string, pattern: …}}`) is the
+// opposite case: the field is the named Go type, but the parser must see the underlying one.
+// Checks dispatch on the type string, so "Kind" matched no family and the pattern, lengths and
+// bounds the input inherited from the schema were silently never checked. schemas may be nil.
+func definitionType(schema *InputSchema, schemas map[string]Schema) string {
+	if schema == nil {
+		return getSchemaType(schema)
+	}
+	if t := namedScalarType(getSchemaType(schema), schemas); t != "" {
+		return t
+	}
+	if schema.Ref != "" {
 		return getSchemaType(schema)
 	}
 	if parserSignificantType(schema.Type) {
@@ -555,6 +566,25 @@ func definitionType(schema *InputSchema) string {
 		return "[]" + schema.Items.Type
 	}
 	return getSchemaType(schema)
+}
+
+// namedScalarType resolves typ — or, for a list, its element — when it names a non-object
+// schema in schemas, to the Go type that schema declares: "Kind" → "string", "[]Kind" →
+// "[]string". It returns "" when typ names no such schema.
+func namedScalarType(typ string, schemas map[string]Schema) string {
+	elem, list := strings.CutPrefix(typ, "[]")
+	src, ok := schemas[elem]
+	if !ok || src.Type == "" || src.Type == "object" || len(src.Properties) > 0 {
+		return ""
+	}
+	resolved := src.Type
+	if !parserSignificantType(resolved) {
+		resolved = jsonSchemaTypeToGo(resolved)
+	}
+	if list {
+		return "[]" + resolved
+	}
+	return resolved
 }
 
 // parserSignificantType reports whether a declared type name means something to the parser

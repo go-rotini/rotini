@@ -318,12 +318,90 @@ func validateObject(doc map[string]any, schema string) error {
 	if err == nil {
 		return nil
 	}
+	applyPatternMessages(schema, err)
 	var msgs []string
 	collectValidation(err, &msgs)
 	if len(msgs) == 0 {
 		return fmt.Errorf("the value does not match its schema: %w", err)
 	}
 	return errors.New(strings.Join(msgs, "; "))
+}
+
+// patternMessageCache holds each schema document's pattern messages, by schema text: the same
+// few schemas are validated on every run, and the walk need happen once.
+var patternMessageCache sync.Map // string → map[string]string
+
+// applyPatternMessages rewrites each pattern failure in err whose property declares a
+// `pattern_message`, so a JSON-Schema-validated value — an object flag, a stdin payload, a
+// configuration file — reports the author's sentence rather than the regex, exactly as an
+// input's own pattern does. Other failures are untouched.
+func applyPatternMessages(schema string, err error) {
+	cached, ok := patternMessageCache.Load(schema)
+	if !ok {
+		var doc map[string]any
+		msgs := map[string]string{}
+		if json.Unmarshal([]byte(schema), &doc) == nil {
+			defs, _ := doc["definitions"].(map[string]any)
+			collectPatternMessages(doc, defs, nil, msgs, 0)
+		}
+		cached, _ = patternMessageCache.LoadOrStore(schema, msgs)
+	}
+	msgs, _ := cached.(map[string]string)
+	if len(msgs) == 0 {
+		return
+	}
+	var walk func(error)
+	walk = func(err error) {
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			for _, e := range joined.Unwrap() {
+				walk(e)
+			}
+			return
+		}
+		if ve, ok := errors.AsType[*recon.ValidationError](err); ok && ve.Rule == "pattern" {
+			if msg, ok := msgs[wildcardIndexes(ve.Path.String())]; ok {
+				ve.Msg = msg
+			}
+		}
+	}
+	walk(err)
+}
+
+// collectPatternMessages records every pattern_message in a JSON schema under the dotted path
+// of the value it governs, with "*" standing for a list index. depth bounds a recursive $ref.
+func collectPatternMessages(node, defs map[string]any, path []string, out map[string]string, depth int) {
+	if node == nil || depth > 32 {
+		return
+	}
+	if ref, ok := node["$ref"].(string); ok {
+		if def, ok := defs[strings.TrimPrefix(ref, "#/definitions/")].(map[string]any); ok {
+			collectPatternMessages(def, defs, path, out, depth+1)
+		}
+	}
+	if msg, ok := node["pattern_message"].(string); ok && msg != "" {
+		out[strings.Join(path, ".")] = msg
+	}
+	if props, ok := node["properties"].(map[string]any); ok {
+		for key, p := range props {
+			sub, _ := p.(map[string]any)
+			collectPatternMessages(sub, defs, append(slices.Clip(path), key), out, depth+1)
+		}
+	}
+	if items, ok := node["items"].(map[string]any); ok {
+		collectPatternMessages(items, defs, append(slices.Clip(path), "*"), out, depth+1)
+	}
+}
+
+// wildcardIndexes writes each numeric segment of a dotted value path as "*", the form
+// collectPatternMessages keys list elements by: "mounts.0.src" → "mounts.*.src".
+func wildcardIndexes(path string) string {
+	segs := strings.Split(path, ".")
+	for i, s := range segs {
+		if _, err := strconv.Atoi(s); err == nil {
+			segs[i] = "*"
+		}
+	}
+	return strings.Join(segs, ".")
 }
 
 // collectValidation flattens recon's (possibly joined) validation errors into "key: problem"

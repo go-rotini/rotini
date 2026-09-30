@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -238,5 +239,20 @@ func TestSubprocess_linesNoFalseScanError(t *testing.T) {
 	}
 	if n != 3 {
 		t.Errorf("got %d lines, want 3", n)
+	}
+}
+
+func TestSubprocess_WithStdin(t *testing.T) {
+	if _, err := os.Stat("/bin/cat"); err != nil {
+		t.Skip("no /bin/cat on this platform")
+	}
+	out, err := NewSubprocess("/bin/cat").
+		WithStdin(strings.NewReader("through the child")).
+		Output(context.Background())
+	if err != nil {
+		t.Fatalf("cat: %v", err)
+	}
+	if strings.TrimSpace(out) != "through the child" {
+		t.Errorf("child echoed %q, want the stdin WithStdin supplied", out)
 	}
 }

@@ -301,3 +301,17 @@ func TestRun_remoteHonorsProgramStdin(t *testing.T) {
 		t.Errorf("the plugin read %q lines from stdin, want 3 — the Program's stdin was not passed through", got)
 	}
 }
+
+func TestRemoteErrorKind_String(t *testing.T) {
+	seen := map[string]bool{}
+	for _, k := range []RemoteErrorKind{RemoteBinaryNotFound, RemoteTimeout, RemoteSpawnFailed} {
+		s := k.String()
+		if s == "" {
+			t.Errorf("kind %d renders empty", k)
+		}
+		if seen[s] {
+			t.Errorf("kind %d renders %q, already used by another kind", k, s)
+		}
+		seen[s] = true
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -782,6 +783,9 @@ func lintConstraintApplicability(spec *Spec) []error {
 				return
 			}
 			typ := getSchemaType(schema)
+			if t := namedScalarType(typ, spec.Command.Schemas); t != "" {
+				typ = t // checked as the type the named schema declares, as the runtime does
+			}
 			elem := strings.TrimPrefix(typ, "[]")
 			add := func(msg string) {
 				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: loc,
@@ -1158,10 +1162,37 @@ func defaultKindName(v any) string {
 // expression. The runtime deliberately tolerates a failed compile, so a typo'd pattern would
 // otherwise silently never enforce. Patterns inside stdin and config document schemas are
 // exempt: those fail loudly at bind time.
+//
+// It also rejects a `pattern_message` with no `pattern` beside it — on an input, its items, a
+// named schema, an output, or any property within them. The message only ever replaces a
+// pattern's failure text, so alone it would never be shown.
 func lintPatternCompiles(spec *Spec) []error {
 	var problems []error
+	orphans := func(path, ptr, where string, b BaseSchema) {
+		walkSchemaRefs(b, func(s BaseSchema) {
+			if s.PatternMessage != "" && s.Pattern == "" {
+				problems = append(problems, &problem{
+					kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s: pattern_message %q has no pattern beside it — it replaces a pattern's failure message, so it would never be shown", where, s.PatternMessage),
+				})
+			}
+		})
+	}
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		for _, name := range slices.Sorted(maps.Keys(c.Schemas)) {
+			orphans(path, ptr, fmt.Sprintf("schema %q", name), c.Schemas[name].BaseSchema)
+		}
+		if c.Output != nil {
+			orphans(path, ptr, "output", c.Output.BaseSchema)
+		}
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema != nil {
+				where := fmt.Sprintf("%s %q", channel, name)
+				if channel == "stdin" {
+					where = "stdin"
+				}
+				orphans(path, ptr, where, schema.BaseSchema)
+			}
 			if channel == "stdin" || schema == nil || schema.Pattern == "" {
 				return
 			}

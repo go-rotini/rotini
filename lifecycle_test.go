@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -412,4 +413,98 @@ func ExampleProgram_WithLifecycle() {
 	// status.PostRun
 	// app.CascadingPostRun
 	// status.CascadingPostRun
+}
+
+// TestAtFrame_customLifecycleFallsBackToTheLeaf is where the risk of this change is concentrated.
+//
+// A custom Lifecycle that wraps DefaultLifecycle inherits frame labelling. One that builds steps
+// from scratch does not label them, and an unlabeled hook must report the LEAF — the behaviour
+// the whole API had before frames existed — rather than the root, which would silently change
+// what every existing custom lifecycle collects.
+func TestAtFrame_customLifecycleFallsBackToTheLeaf(t *testing.T) {
+	var unlabeled, labeled string
+
+	// Steps built by hand, with no AtFrame: the root's cascading hook must see the leaf.
+	bare := func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
+		return []LifecycleStep{
+			{Name: "bare", Do: func(_ context.Context, rtx *Context) { unlabeled = rtx.Frame().Name }},
+		}
+	}
+	p := NewProgram(fDef(), fProg{}).WithLifecycle(bare).WithStdout(io.Discard).WithStderr(io.Discard)
+	if _, err := p.Run([]string{"mid", "leaf"}); err != nil {
+		t.Fatal(err)
+	}
+	if unlabeled != "leaf" {
+		t.Errorf("an unlabeled step saw Frame() = %q, want the leaf %q", unlabeled, "leaf")
+	}
+
+	// The same plan with AtFrame applied opts in explicitly.
+	opted := func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
+		return []LifecycleStep{
+			{Name: "opted", Do: AtFrame(0, func(_ context.Context, rtx *Context) { labeled = rtx.Frame().Name })},
+		}
+	}
+	p2 := NewProgram(fDef(), fProg{}).WithLifecycle(opted).WithStdout(io.Discard).WithStderr(io.Discard)
+	if _, err := p2.Run([]string{"mid", "leaf"}); err != nil {
+		t.Fatal(err)
+	}
+	if labeled != "root" {
+		t.Errorf("AtFrame(0) saw Frame() = %q, want %q", labeled, "root")
+	}
+}
+
+// TestAtFrame_restoresThePreviousFrame: a hook that drives another hook must not leave the
+// Context describing the wrong command.
+func TestAtFrame_restoresThePreviousFrame(t *testing.T) {
+	var outer, inner, after string
+	runF(t, []string{"mid", "leaf"}, func(rtx *Context) {
+		outer = rtx.Frame().Name
+		AtFrame(0, func(_ context.Context, r *Context) { inner = r.Frame().Name })(context.Background(), rtx)
+		after = rtx.Frame().Name
+	}, nil)
+
+	if outer != "mid" || inner != "root" || after != "mid" {
+		t.Errorf("frames = outer:%q inner:%q after:%q, want mid/root/mid", outer, inner, after)
+	}
+}
+
+// TestLifecycle_nilDoIsATeardownOnlyStep: nil Undo was documented and safe; nil Do was a nil
+// dereference reported as "invalid memory address", which is an opaque diagnostic for a plain
+// wiring mistake — and it ruled out a legitimate shape, a teardown that pairs with no setup.
+func TestLifecycle_nilDoIsATeardownOnlyStep(t *testing.T) {
+	var order []string
+	p := NewProgram(testDef(), seamProgram{ran: new([]string)}).
+		WithLifecycle(func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
+			return []LifecycleStep{
+				{Name: "teardown-only", Undo: func(context.Context, *Context) {
+					order = append(order, "undo")
+				}},
+				{Name: "work", Do: func(context.Context, *Context) {
+					order = append(order, "do")
+				}},
+			}
+		}).WithStdout(io.Discard).WithStderr(io.Discard)
+
+	code, err := p.Run([]string{"run", "x"})
+	if code != 0 || err != nil {
+		t.Fatalf("(%d, %v), want a clean run", code, err)
+	}
+	if strings.Join(order, ",") != "do,undo" {
+		t.Errorf("order = %v, want the work then the teardown-only step's Undo", order)
+	}
+}
+
+// TestLifecycle_emptyPlanIsACleanNoOp.
+func TestLifecycle_emptyPlanIsACleanNoOp(t *testing.T) {
+	var ran []string
+	p := NewProgram(testDef(), seamProgram{ran: &ran}).
+		WithLifecycle(func([]ResolvedCommand, []Handlers) []LifecycleStep { return nil }).
+		WithStdout(io.Discard).WithStderr(io.Discard)
+
+	if code, err := p.Run([]string{"run", "x"}); code != 0 || err != nil {
+		t.Errorf("(%d, %v), want a plan with no steps to do nothing, quietly", code, err)
+	}
+	if len(ran) != 0 {
+		t.Errorf("an empty plan still ran %v", ran)
+	}
 }

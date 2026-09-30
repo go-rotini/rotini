@@ -253,3 +253,52 @@ func TestInheritScalarRefConstraints(t *testing.T) {
 		t.Errorf("an object ref was flattened: %+v", c.Flags[2].Schema.BaseSchema)
 	}
 }
+
+// TestPatternMessage_travelsWithItsPattern pins how pattern_message is inherited: it comes
+// along with a pattern taken from a named schema or from `items`, and an input that words the
+// inherited pattern itself keeps its own sentence.
+func TestPatternMessage_travelsWithItsPattern(t *testing.T) {
+	spec := &Spec{Command: Command{
+		Name: "app",
+		Schemas: map[string]Schema{
+			"Kind": {BaseSchema: BaseSchema{Type: "string", Pattern: "^[a-z]+$", PatternMessage: "must be lowercase"}},
+		},
+		Flags: []FlagInput{
+			{Name: "kind", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "Kind"}}},
+			{Name: "mine", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "Kind", PatternMessage: "must be a kind"}}},
+			{Name: "tags", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Type: "string", Pattern: "^t", PatternMessage: "must start with t"}}}}},
+		},
+	}}
+	spec.normalize()
+	for i, want := range []string{"must be lowercase", "must be a kind", "must start with t"} {
+		if got := spec.Command.Flags[i].Schema.PatternMessage; got != want {
+			t.Errorf("flag %s: pattern_message = %q, want %q", spec.Command.Flags[i].Name, got, want)
+		}
+	}
+}
+
+// TestDefinitionType_namedScalarSchema proves the parser sees a named scalar schema's own type.
+// The Definition used to carry "Kind", which matched no type family, so the pattern, lengths and
+// bounds the input inherited from the schema were never checked at run time.
+func TestDefinitionType_namedScalarSchema(t *testing.T) {
+	schemas := map[string]Schema{
+		"Kind": {BaseSchema: BaseSchema{Type: "string", Pattern: "^[a-z]+$"}},
+		"Port": {BaseSchema: BaseSchema{Type: "integer"}},
+		"Cfg":  {BaseSchema: BaseSchema{Type: "existingfile"}},
+		"DB":   {BaseSchema: BaseSchema{Type: "object"}},
+	}
+	for _, tt := range []struct {
+		schema *InputSchema
+		want   string
+	}{
+		{&InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/Kind"}}, "string"},
+		{&InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/Port"}}, "int"},
+		{&InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/Cfg"}}, "existingfile"},
+		{&InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Ref: "#/schemas/Kind"}}}}, "[]string"},
+		{&InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"}}, "DB"}, // an object keeps its name: it is decoded, not checked
+	} {
+		if got := definitionType(tt.schema, schemas); got != tt.want {
+			t.Errorf("definitionType(%+v) = %q, want %q", tt.schema.BaseSchema, got, tt.want)
+		}
+	}
+}

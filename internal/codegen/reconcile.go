@@ -157,6 +157,11 @@ func inheritScalarRefConstraints(s *Spec) {
 		}
 		if b.Pattern == "" {
 			b.Pattern = src.Pattern
+			// The message describes that pattern, so it comes along — unless the input
+			// words the inherited pattern itself.
+			if b.PatternMessage == "" {
+				b.PatternMessage = src.PatternMessage
+			}
 		}
 		if b.MinLength == 0 {
 			b.MinLength = src.MinLength
@@ -253,6 +258,9 @@ func hoistItemConstraints(spec *Spec) {
 			}
 			if schema.Pattern == "" {
 				schema.Pattern = it.Pattern
+				if schema.PatternMessage == "" {
+					schema.PatternMessage = it.PatternMessage
+				}
 			}
 			if schema.Minimum == nil {
 				schema.Minimum = it.Minimum
