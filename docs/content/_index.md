@@ -8,7 +8,7 @@ title: "rotini"
 
 <p class="hero_beats">Validate. Generate. Ship.</p>
 
-<p class="hero_sub">Describe your CLI in one spec file and rotini turns it into typed, validated Go — so the only code you write is what each command does.</p>
+<p class="hero_sub">Rotini is a spec-driven CLI package for Go, with a codegen tool and a runtime library. You declare your commands, flags and arguments in a spec file (YAML, JSON, JSONC or TOML). Rotini validates it and generates the typed Go, the command tree and a handler stub per command. You write each command's handler, and the runtime parses and validates input before calling it. The loop is: edit the spec, generate, provide/update handler implementations, build.</p>
 
 ---
 
