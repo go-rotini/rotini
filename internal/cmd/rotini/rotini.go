@@ -72,12 +72,7 @@ func ResolveVersion(ldflagVersion string) string {
 func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	inputs, err := rotini.Collect[RotiniInputs](rtx)
 	flags := inputs.Rotini.Flags
-	env := inputs.Rotini.Env
-
 	help := HelpRotini
-	if flags.Nostyles || env.Nostyles || env.Ci {
-		help = rotini.Strip(HelpRotini)
-	}
 
 	if err != nil {
 		fmt.Fprintf(rtx.Stderr, "Error: %s\n\n", err.Error())

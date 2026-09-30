@@ -31,13 +31,8 @@ Commands:
   version             print version
 
 Flags:
-  --no-styles      disable output styles
   -v, --version    print version
   -h, --help       print help
-
-Environment:
-  ROTINI_NO_STYLES    disable output styles
-  CI                  set in CI; disables output styles
 
 Examples:
   rotini init mycli

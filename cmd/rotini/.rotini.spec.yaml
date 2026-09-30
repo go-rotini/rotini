@@ -12,12 +12,6 @@ command:
     - rotini generate ./path/to/.rotini.spec.json
   footer: Use "rotini help <command>" for more information about a command.
   flags:
-    - name: nostyles
-      summary: disable output styles
-      identifiers:
-        - --no-styles
-      schema:
-        type: bool
     - name: version
       summary: print version
       identifiers:
@@ -32,17 +26,6 @@ command:
         - --help
       schema:
         type: bool
-  env:
-    - name: nostyles
-      summary: disable output styles
-      schema:
-        type: bool
-        variable: ROTINI_NO_STYLES
-    - name: ci
-      summary: set in CI; disables output styles
-      schema:
-        type: bool
-        variable: CI
   commands:
     - name: initialize
       aliases:

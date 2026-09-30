@@ -21,7 +21,6 @@ var definition = rotini.Definition{
 	Name:    "rotini",
 	Handler: "Rotini",
 	Flags: []rotini.FlagDef{
-		{Name: "nostyles", Identifiers: []string{"--no-styles"}, Summary: "disable output styles", Type: "bool"},
 		{Name: "version", Identifiers: []string{"-v", "--version"}, Summary: "print version", Type: "bool"},
 		{Name: "help", Identifiers: []string{"-h", "--help"}, Summary: "print help", Type: "bool"},
 	},
@@ -87,22 +86,15 @@ var definition = rotini.Definition{
 }
 
 type RotiniFlags struct {
-	Nostyles bool `rotini:"nostyles"`
-	Version  bool `rotini:"version"`
-	Help     bool `rotini:"help"`
+	Version bool `rotini:"version"`
+	Help    bool `rotini:"help"`
 }
 
 type RotiniArguments struct{}
 
-type RotiniEnv struct {
-	Nostyles bool `rotini:"nostyles" recon:"nostyles" env:"ROTINI_NO_STYLES"`
-	Ci       bool `rotini:"ci" recon:"ci" env:"CI"`
-}
-
 type RotiniCommandInputs struct {
 	Flags     RotiniFlags
 	Arguments RotiniArguments
-	Env       RotiniEnv
 }
 
 type RotiniInputs struct {
@@ -260,7 +252,7 @@ func (*handlers) RotiniVersion() rotini.Handlers {
 	return &rotiniVersionHandlers{}
 }
 
-var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize, init    scaffold a cli program\n  generate, gen       generate a cli program\n  validate, val       validate a spec file\n  help                print help\n  version             print version\n\nFlags:\n  --no-styles      disable output styles\n  -v, --version    print version\n  -h, --help       print help\n\nEnvironment:\n  ROTINI_NO_STYLES    disable output styles\n  CI                  set in CI; disables output styles\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
+var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize, init    scaffold a cli program\n  generate, gen       generate a cli program\n  validate, val       validate a spec file\n  help                print help\n  version             print version\n\nFlags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."
 
 var HelpRotiniInitialize = "Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.\n\nUsage:\n  rotini initialize [name] [flags]\n\nArguments:\n  [name]    the root command name written to the created spec file (expected binary name)\n\nFlags:\n  --format string    the created rotini spec file format (defaults to yaml) [yaml|json|jsonc|toml]\n  --force            force re-initialization if files exist that init would overwrite\n  -h, --help         print help\n\nExamples:\n  rotini initialize mycli\n  rotini init mycli --format json\n  rotini init mycli --force\n\nUse \"rotini help <command>\" for more information about a command."
 

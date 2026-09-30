@@ -20,9 +20,7 @@ generate:
     - type: help
       enabled: true
       embed: false
-      embed_dir: internal/cmd/rotini/renders
       template: false
-      template_dir: internal/cmd/rotini/templates
     - type: completion
       enabled: false
       embed: false
@@ -40,6 +38,5 @@ generate:
       embed: false
       embed_dir: internal/cmd/rotini/renders
       template: false
-      template_dir: internal/cmd/rotini/templates
 validate:
   fail: collect

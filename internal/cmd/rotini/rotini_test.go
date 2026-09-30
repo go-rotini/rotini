@@ -380,46 +380,6 @@ func TestCLI_rootVersionFlag(t *testing.T) {
 	}
 }
 
-// Styling is suppressed on request — by flag, by the program's own env var, and by
-// CI — because a styled help page in a log file is noise, not emphasis.
-func TestCLI_noStyles(t *testing.T) {
-	styled := func(t *testing.T) string {
-		t.Helper()
-		p, out, _ := newTestCLI(t)
-		if _, err := p.Run([]string{"--help"}); err != nil {
-			t.Fatal(err)
-		}
-		return out.String()
-	}
-	if !strings.Contains(styled(t), "\x1b") {
-		t.Skip("the generated help carries no styling, so there is nothing to strip")
-	}
-
-	cases := []struct {
-		name string
-		argv []string
-		env  map[string]string
-	}{
-		{name: "--no-styles flag", argv: []string{"--no-styles", "--help"}},
-		{name: "ROTINI_NO_STYLES env", argv: []string{"--help"}, env: map[string]string{"ROTINI_NO_STYLES": "1"}},
-		{name: "CI env", argv: []string{"--help"}, env: map[string]string{"CI": "true"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			for k, v := range tc.env {
-				t.Setenv(k, v)
-			}
-			p, out, _ := newTestCLI(t)
-			if _, err := p.Run(tc.argv); err != nil {
-				t.Fatalf("Run: %v", err)
-			}
-			if strings.Contains(out.String(), "\x1b") {
-				t.Errorf("%s did not strip styling from the help page", tc.name)
-			}
-		})
-	}
-}
-
 // `help` with no argument is the same request as `--help` on the root.
 func TestCLI_bareHelpCommand(t *testing.T) {
 	p, out, _ := newTestCLI(t)
