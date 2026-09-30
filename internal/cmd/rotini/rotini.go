@@ -76,7 +76,7 @@ func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	inputs, err := rotini.Collect[RotiniInputs](rtx)
 	if err != nil {
-		rtx.HaltWith(err)
+		haltWithInputError(rtx, err)
 		return
 	}
 

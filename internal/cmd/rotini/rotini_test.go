@@ -535,3 +535,40 @@ func TestCLI_bannerNamesTheFilesRead(t *testing.T) {
 		t.Errorf("banner does not say the conf defaults apply:\n%s", out.String())
 	}
 }
+
+// The companion opts in to "did you mean" for its own input: a near-miss command, flag, value
+// or help topic names the nearest accepted spelling, and a word that is near nothing gets no
+// guess.
+func TestCLI_suggestsNearestSpelling(t *testing.T) {
+	cases := []struct {
+		argv []string
+		want string // "" means no hint
+	}{
+		{argv: []string{"genrate"}, want: `unknown command "genrate" for "rotini"; did you mean "generate"?`},
+		{argv: []string{"hlep"}, want: `did you mean "help"?`},
+		{argv: []string{"validate", "--fial", "fast"}, want: `unknown flag "--fial"; did you mean "--fail"?`},
+		{argv: []string{"init", "x", "--format", "jsn"}, want: `did you mean "json"?`},
+		{argv: []string{"help", "genrate"}, want: `no help for command "genrate"; did you mean "generate"?`},
+		{argv: []string{"kubernetes"}},
+		{argv: []string{"init", "x", "--bogus"}},
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
+			p, _, errb := newTestCLI(t)
+			code, _ := p.Run(tc.argv)
+			if code == 0 {
+				t.Fatalf("Run(%q) exit = 0, want non-zero", tc.argv)
+			}
+			got := errb.String()
+			if tc.want == "" {
+				if strings.Contains(got, "did you mean") {
+					t.Errorf("Run(%q) guessed at a word near nothing:\n%s", tc.argv, got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("Run(%q) stderr = %q, want it to contain %q", tc.argv, got, tc.want)
+			}
+		})
+	}
+}

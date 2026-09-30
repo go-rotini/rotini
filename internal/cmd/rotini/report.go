@@ -24,6 +24,49 @@ func answerHelp[T any](rtx *rotini.Context, help func(T) bool) bool {
 	return true
 }
 
+// suggestor ranks a mistyped command, flag or value against what the companion accepts.
+// rotini the framework suggests nothing on its own; this program opts in, the same way any
+// program built with rotini can.
+var suggestor = rotini.NewSuggestor()
+
+// haltWithInputError stops the run on an input error, naming the nearest accepted spelling when
+// one is close: `unknown command "genrate" for "rotini"; did you mean "generate"?`. The hint
+// reads like the ones `rotini validate` gives for a spec.
+func haltWithInputError(rtx *rotini.Context, err error) {
+	rtx.HaltWith(withSuggestion(err, suggestor.For(err)))
+}
+
+// withSuggestion appends the nearest of hits to err's message, keeping err itself reachable so
+// its category and [*rotini.ParseError] details survive. No hits leaves err as it is.
+func withSuggestion(err error, hits []string) error {
+	if len(hits) == 0 {
+		return err
+	}
+	return &suggestedError{err: err, hint: hits[0]}
+}
+
+type suggestedError struct {
+	err  error
+	hint string
+}
+
+func (e *suggestedError) Error() string { return fmt.Sprintf("%s; did you mean %q?", e.err, e.hint) }
+func (e *suggestedError) Unwrap() error { return e.err }
+
+// commandNames lists every name and alias the companion's sub-commands answer to, for ranking
+// a `rotini help <topic>` that names no command.
+func commandNames() []string {
+	var names []string
+	for _, c := range definition.Commands {
+		if c.Hidden {
+			continue
+		}
+		names = append(names, c.Name)
+		names = append(names, c.Aliases...)
+	}
+	return names
+}
+
 // resolveInputs resolves the spec and conf a generate or validate reads, and prints them, so a
 // failing run says which files it read. A conf that was not given and is not beside the spec is
 // reported as such: the conf defaults apply.

@@ -23,7 +23,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	inputs, err := rotini.Collect[RotiniValidateInputs](rtx)
 	if err != nil {
-		rtx.HaltWith(err)
+		haltWithInputError(rtx, err)
 		return
 	}
 	args := inputs.RotiniValidate.Arguments

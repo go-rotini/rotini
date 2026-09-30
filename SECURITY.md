@@ -71,9 +71,10 @@ Pillar 1 of rotini's design is that the runtime injects nothing you did not ask 
 - **No telemetry.** The runtime emits no logs, metrics, or network calls of its own.
 - **No auto-injected behavior.** No implicit `--help`/`--version`/`--color`/`--no-*`
   flags; declare the ones you want in the spec.
-- **No "did you mean" suggestions.** rotini prints none. A `ParseError` carries the
-  rejected token and its candidates, and a program may rank them with `Suggestor` in
-  its own funnel — the program author's choice, never rotini's default.
+- **No "did you mean" suggestions by default.** A program built with rotini prints
+  none. A `ParseError` carries the rejected token and its candidates, and a program may
+  rank them with `Suggestor` — the program author's choice, never rotini's default. The
+  `rotini` tool itself makes that choice, as any program can.
 - **No network during generation.** rotini has no fetcher at all: `generate` and
   `validate` read only the filesystem and the Go module cache.
 - **One runtime default.** Interrupt/SIGTERM handling is on by default (so a CLI

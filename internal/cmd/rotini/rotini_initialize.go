@@ -27,7 +27,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	inputs, err := rotini.Collect[RotiniInitializeInputs](rtx)
 	if err != nil {
-		rtx.HaltWith(err)
+		haltWithInputError(rtx, err)
 		return
 	}
 	args := inputs.RotiniInitialize.Arguments

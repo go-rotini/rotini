@@ -22,7 +22,7 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	if _, err := rotini.Collect[RotiniVersionInputs](rtx); err != nil {
-		rtx.HaltWith(err)
+		haltWithInputError(rtx, err)
 		return
 	}
 

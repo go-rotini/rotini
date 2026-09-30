@@ -9,7 +9,8 @@ import (
 
 // Nearness: turning a token the parser rejected into the candidate the user probably meant.
 //
-// rotini itself suggests NOTHING. A framework that guesses at a user's intent and prints the
+// rotini itself suggests NOTHING in the programs built with it (its own companion tool opts in,
+// the way any program can). A framework that guesses at a user's intent and prints the
 // guess in its own voice is making an editorial decision that belongs to the program — so what
 // rotini does is hand over the facts ([*ParseError] carries the Token that failed and the
 // Candidates it failed against) plus a ranker, and the program decides whether to speak.

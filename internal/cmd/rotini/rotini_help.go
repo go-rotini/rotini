@@ -3,6 +3,7 @@ package rotini
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-rotini/rotini"
 )
@@ -23,13 +24,15 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	inputs, err := rotini.Collect[RotiniHelpInputs](rtx)
 	if err != nil {
-		rtx.HaltWith(err)
+		haltWithInputError(rtx, err)
 		return
 	}
 
-	help, err := Help(inputs.RotiniHelp.Arguments.Command...)
+	topic := inputs.RotiniHelp.Arguments.Command
+	help, err := Help(topic...)
 	if err != nil {
-		rtx.HaltWith(rotini.UsageError(err))
+		hits := suggestor.Suggest(strings.Join(topic, " "), commandNames())
+		rtx.HaltWith(withSuggestion(rotini.UsageError(err), hits))
 		return
 	}
 

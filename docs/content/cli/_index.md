@@ -12,6 +12,8 @@ go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
 
 Invoke it with `go tool rotini <command>`, or install it globally and call `rotini` directly.
 
+A mistyped command, flag or value names the nearest one it accepts — `unknown command "genrate" for "rotini"; did you mean "generate"?`. That is the tool's own choice, made with rotini's `Suggestor`; a CLI built with rotini suggests nothing unless its author opts in the same way.
+
 ## rotini
 
 {{< code title="$ rotini --help" language="text" open="true" collapsible="false" copy="false" >}}

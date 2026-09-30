@@ -23,7 +23,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	inputs, err := rotini.Collect[RotiniGenerateInputs](rtx)
 	if err != nil {
-		rtx.HaltWith(err)
+		haltWithInputError(rtx, err)
 		return
 	}
 	args := inputs.RotiniGenerate.Arguments
