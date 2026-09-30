@@ -56,7 +56,11 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		// The entrypoint sets this with rotini.Program.WithVersion, from whatever the
 		// binary was built with.
 		if argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
-			fmt.Fprintln(rtx.Stdout, rtx.Version())
+			version := rtx.Version()
+			if version == "" {
+				version = "unknown" // the entrypoint does not call WithVersion
+			}
+			fmt.Fprintln(rtx.Stdout, version)
 			rtx.HaltWithCode(0)
 			return
 		}
@@ -87,7 +91,12 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, page)
 {{- else if .VersionOnly}}
 
-	fmt.Fprintln(rtx.Stdout, rtx.Version())
+	// The entrypoint sets this with rotini.Program.WithVersion; rotini never invents one.
+	version := rtx.Version()
+	if version == "" {
+		version = "unknown" // the entrypoint does not call WithVersion
+	}
+	fmt.Fprintln(rtx.Stdout, version)
 {{- else if .PrintHelpWhenBare}}
 
 	// Nothing to do yet: show this command's own help rather than an empty run.

@@ -46,7 +46,9 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		flags.Watch,
 		func(result string, err error) {
 			if err != nil {
-				fmt.Fprintln(rtx.Stderr, "Error:", err)
+				for _, problem := range flatten(err) {
+					fmt.Fprintln(rtx.Stderr, "Error:", problem)
+				}
 				return
 			}
 			fmt.Fprintln(rtx.Stdout, result)
@@ -61,7 +63,13 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	)
 
 	if err != nil {
-		rtx.HaltWith(err)
+		// One outcome per problem, as validate records them: the generator joins its findings
+		// into one error, and the funnel's "Error: %s" would mark only the first line.
+		problems := flatten(err)
+		for _, problem := range problems[:len(problems)-1] {
+			rtx.RecordError(problem)
+		}
+		rtx.HaltWith(problems[len(problems)-1])
 		return
 	}
 

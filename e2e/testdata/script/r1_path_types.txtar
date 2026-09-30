@@ -44,13 +44,16 @@ stderr '<dir>: "conf\.yaml" is not a directory'
 
 # The same for a flag, labelled by the identifier the user typed rather than the input name.
 ! exec ./paths$exe scan . --config missing.yaml
-stderr '-c: no such file: "missing\.yaml"'
+stderr '--config: no such file: "missing\.yaml"'
 
 # ...and a directory is not a file. The name has to satisfy the pattern for the KIND check to
 # be what fails, since shape is checked first — see below.
 mkdir adir.yaml
 ! exec ./paths$exe scan . --config adir.yaml
-stderr '-c: "adir\.yaml" is a directory, not a file'
+stderr '--config: "adir\.yaml" is a directory, not a file'
+# Typed short, reported short: the label is whatever the user wrote.
+! exec ./paths$exe scan . -c adir.yaml
+stderr '^Error: -c: "adir\.yaml" is a directory, not a file'
 
 # A path type is still a string, so a declared pattern applies to it — and applies FIRST, so a
 # path that could never be valid is rejected on its shape rather than on its absence. Skipping

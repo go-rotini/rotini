@@ -42,6 +42,17 @@ func (p *parsedInputs) setOnArgv(idx int, name string) bool {
 type scopeInputs struct {
 	flags map[string][]string
 	args  []string
+	// typed is the identifier the user typed for each flag set on argv ("--due", "-d",
+	// "--no-color", "--db.host"), so an error about its value names what they wrote.
+	typed map[string]string
+}
+
+// label is how an error names flag fd: as the user typed it, else by its preferred identifier.
+func (si scopeInputs) label(fd FlagDef) string {
+	if t := si.typed[fd.Name]; t != "" {
+		return t
+	}
+	return flagLabel(fd)
 }
 
 // ParseKind classifies a [ParseError] so a funnel can branch on the failure without matching
@@ -322,7 +333,7 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 // A token matching no declared identifier is retried as a POSIX short cluster (-vh → -v -h,
 // -n5 → -n 5). Long flags never cluster, so an unmatched one is an unknown-flag error carrying
 // the chain's vocabulary for a [Suggestor].
-func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int, addFlag func(int, FlagDef, string) error) (int, error) {
+func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int, addFlag func(int, FlagDef, string, string) error) (int, error) {
 	name, inline, hasInline := splitFlag(tok)
 
 	fdef, idx, negated, ok := findFlagMatch(chain, name)
@@ -333,7 +344,9 @@ func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int,
 			if err != nil {
 				return 0, err
 			}
-			return next - i, addFlag(oidx, ofd, quotePair(field, value))
+			// Errors name the object flag (--db), not the field spelling: the field is named
+			// in the message itself ("unknown key \"nope\"").
+			return next - i, addFlag(oidx, ofd, quotePair(field, value), strings.TrimSuffix(name, "."+field))
 		}
 		if isShortCluster(name) {
 			return parseCluster(chain, name[1:], inline, hasInline, argv, i, addFlag)
@@ -357,14 +370,56 @@ func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int,
 				Flag: name,
 			}
 		}
-		return 0, addFlag(idx, fdef, "false")
+		return 0, addFlag(idx, fdef, "false", name)
 	}
 
 	value, next, err := flagTokenValue(fdef, name, inline, hasInline, argv, i)
 	if err != nil {
 		return 0, err
 	}
-	return next - i, addFlag(idx, fdef, value)
+	return next - i, addFlag(idx, fdef, value, name)
+}
+
+// recordArgvFlag records one argv occurrence of flag fd at chain frame idx: the identifier the
+// user typed (for error labels), the value resolved through the flag's acquisition modes and
+// split on its separator, and the fact that argv set it.
+func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, stdin io.Reader) error {
+	si := &p.scopes[idx]
+	if si.typed == nil {
+		si.typed = map[string]string{}
+	}
+	si.typed[fd.Name] = typed
+	value, err := resolveFlagValue(fd, typed, value, stdin)
+	if err != nil {
+		return err
+	}
+	values, err := splitValue(value, fd.Separator)
+	if err != nil {
+		return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", typed, err), Flag: typed}
+	}
+	if si.flags == nil {
+		si.flags = map[string][]string{}
+	}
+	si.flags[fd.Name] = append(si.flags[fd.Name], values...)
+	if p.argvSet[idx] == nil {
+		p.argvSet[idx] = map[string]bool{}
+	}
+	p.argvSet[idx][fd.Name] = true
+	return nil
+}
+
+// recordArg records one positional of the leaf command, split on the separator of the variadic
+// argument it lands in, if that declares one.
+func (p *parsedInputs) recordArg(leaf ResolvedCommand, idx int, value string) error {
+	values := []string{value}
+	if def, ok := variadicAt(leaf.Arguments, len(p.scopes[idx].args)); ok && def.Separator != "" {
+		var err error
+		if values, err = splitValue(value, def.Separator); err != nil {
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("<%s>: %v", def.Name, err)}
+		}
+	}
+	p.scopes[idx].args = append(p.scopes[idx].args, values...)
+	return nil
 }
 
 // parseArgvTokens is parseInto minus defaults: exactly what argv supplied. It records each
@@ -381,35 +436,11 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 	startedArgs := false   // a positional has been seen: command descent is over
 	terminated := false    // "--" has been seen: flag parsing is over too
 
-	addFlag := func(idx int, fd FlagDef, value string) error {
-		value, err := resolveFlagValue(fd, value, stdin)
-		if err != nil {
-			return err
-		}
-		values, err := splitValue(value, fd.Separator)
-		if err != nil {
-			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", flagLabel(fd), err), Flag: flagLabel(fd)}
-		}
-		if store.scopes[idx].flags == nil {
-			store.scopes[idx].flags = map[string][]string{}
-		}
-		store.scopes[idx].flags[fd.Name] = append(store.scopes[idx].flags[fd.Name], values...)
-		if store.argvSet[idx] == nil {
-			store.argvSet[idx] = map[string]bool{}
-		}
-		store.argvSet[idx][fd.Name] = true
-		return nil
+	addFlag := func(idx int, fd FlagDef, value, typed string) error {
+		return store.recordArgvFlag(idx, fd, value, typed, stdin)
 	}
 	addArg := func(value string) error {
-		values := []string{value}
-		if def, ok := variadicAt(chain[leaf].Arguments, len(store.scopes[leaf].args)); ok && def.Separator != "" {
-			var err error
-			if values, err = splitValue(value, def.Separator); err != nil {
-				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("<%s>: %v", def.Name, err)}
-			}
-		}
-		store.scopes[leaf].args = append(store.scopes[leaf].args, values...)
-		return nil
+		return store.recordArg(chain[leaf], leaf, value)
 	}
 
 	// Passthrough: once the chain's passthrough leaf has been entered, every
@@ -488,21 +519,22 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 		fsi := store.scopes[i]
 		for _, fd := range f.Flags {
 			vals := fsi.flags[fd.Name]
+			label := fsi.label(fd)
 			for _, v := range vals {
 				if len(fd.Enum) > 0 && !enumHas(fd.Enum, v, fd.IgnoreCase) {
 					return &ParseError{
 						Kind:       ParseKindEnumViolation,
-						Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), flagLabel(fd), strings.Join(fd.Enum, ", ")),
-						Flag:       flagLabel(fd),
+						Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), label, strings.Join(fd.Enum, ", ")),
+						Flag:       label,
 						Token:      redactValue(v, fd.Secret),
 						Candidates: fd.Enum,
 					}
 				}
 				if isMapType(fd.Type) && !strings.Contains(v, "=") {
-					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", flagLabel(fd), redactValue(v, fd.Secret)), Flag: flagLabel(fd)}
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, fd.Secret)), Flag: label}
 				}
 			}
-			if err := checkConstraints(flagLabel(fd), fd.Type, fd.Constraints, vals, fd.Secret); err != nil {
+			if err := checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret); err != nil {
 				return err
 			}
 		}
@@ -933,7 +965,14 @@ func requiredErrors(chain []ResolvedCommand, store *parsedInputs) error {
 	return nil
 }
 
+// flagLabel names a flag when nothing the user typed can: its first long identifier ("--due"
+// reads better than "-d"), else its first identifier, else --<name>.
 func flagLabel(f FlagDef) string {
+	for _, id := range f.Identifiers {
+		if strings.HasPrefix(id, "--") {
+			return id
+		}
+	}
 	if len(f.Identifiers) > 0 {
 		return f.Identifiers[0]
 	}
@@ -953,28 +992,28 @@ func plural(word string, n int) string {
 // trailing line ending removed (see trimAcquiredPayload — the same rule the stdin channel
 // uses) and then flows through the same coercion and validation as a literal value. Without the matching mode, '@' and '-' are ordinary characters, and defaults and
 // fallbacks never resolve — sentinels are argv grammar.
-func resolveFlagValue(fd FlagDef, value string, stdin io.Reader) (string, error) {
+func resolveFlagValue(fd FlagDef, label, value string, stdin io.Reader) (string, error) {
 	switch {
 	case strings.HasPrefix(value, "@") && slices.Contains(fd.From, "file"):
 		data, err := os.ReadFile(value[1:])
 		if err != nil {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  fmt.Sprintf("%s: cannot read %q: %v", flagLabel(fd), value, err),
-				Flag: flagLabel(fd), Token: value,
+				Msg:  fmt.Sprintf("%s: cannot read %q: %v", label, value, err),
+				Flag: label, Token: value,
 			}
 		}
 		return trimAcquiredPayload(string(data)), nil
 	case value == "-" && slices.Contains(fd.From, "stdin"):
 		data, err := readStdin(stdin)
 		if err != nil {
-			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: read stdin: %v", flagLabel(fd), err), Flag: flagLabel(fd)}
+			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: read stdin: %v", label, err), Flag: label}
 		}
 		if len(data) == 0 {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  fmt.Sprintf("%s: stdin is empty — %q asks for a piped value", flagLabel(fd), "-"),
-				Flag: flagLabel(fd),
+				Msg:  fmt.Sprintf("%s: stdin is empty — %q asks for a piped value", label, "-"),
+				Flag: label,
 			}
 		}
 		return trimAcquiredPayload(string(data)), nil
@@ -992,7 +1031,7 @@ func isShortCluster(name string) bool {
 // short flag: booleans are set in turn, and the first value-taking flag consumes the rest of
 // the cluster, else the inline "=value", else the next argv token. It returns how many extra
 // argv tokens it consumed.
-func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value string) error) (int, error) {
+func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value, typed string) error) (int, error) {
 	for k := range len(body) {
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
@@ -1004,7 +1043,7 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 			if fdef.Type == "count" {
 				v = "1"
 			}
-			if err := addFlag(idx, fdef, v); err != nil {
+			if err := addFlag(idx, fdef, v, short); err != nil {
 				return 0, err
 			}
 			continue
@@ -1012,16 +1051,16 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 		// A value-taking flag ends the cluster: its value is whatever follows.
 		switch rest := body[k+1:]; {
 		case rest != "":
-			return 0, addFlag(idx, fdef, rest)
+			return 0, addFlag(idx, fdef, rest, short)
 		case hasInline:
-			return 0, addFlag(idx, fdef, inline)
+			return 0, addFlag(idx, fdef, inline, short)
 		case fdef.ImplicitValue != "":
-			return 0, addFlag(idx, fdef, fdef.ImplicitValue)
+			return 0, addFlag(idx, fdef, fdef.ImplicitValue, short)
 		default:
 			if i+1 >= len(argv) {
 				return 0, &ParseError{Kind: ParseKindNeedsValue, Msg: fmt.Sprintf("flag %q needs a value", short), Flag: short}
 			}
-			return 1, addFlag(idx, fdef, argv[i+1])
+			return 1, addFlag(idx, fdef, argv[i+1], short)
 		}
 	}
 	// Every flag in the cluster was boolean; a trailing "=value" has nothing to bind.
@@ -1284,7 +1323,7 @@ func bindCommandInputs(v reflect.Value, si scopeInputs, frame ResolvedCommand) e
 	for i := range v.NumField() {
 		switch t.Field(i).Name {
 		case "Flags":
-			if err := bindFlags(v.Field(i), si.flags, frame.Flags); err != nil {
+			if err := bindFlags(v.Field(i), si, frame.Flags); err != nil {
 				return err
 			}
 		case "Arguments":
@@ -1298,7 +1337,8 @@ func bindCommandInputs(v reflect.Value, si scopeInputs, frame ResolvedCommand) e
 
 // bindFlags fills a <Cmd>Flags struct by matching each field's `rotini:"<name>"` tag against
 // the parsed values, surfacing a coercion failure as a usage error naming the flag.
-func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error {
+func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef) error {
+	flags := si.flags
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1316,12 +1356,12 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 			switch {
 			case def.DottedKeys:
 				if err := coerceMapDotted(v.Field(i), raw); err != nil {
-					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", labelForFlag(defs, name), coerceMessage(err, def.Secret)), Flag: labelForFlag(defs, name)}
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", flagErrLabel(si, defs, name), coerceMessage(err, def.Secret)), Flag: flagErrLabel(si, defs, name)}
 				}
 				continue
 			case isObjectFlag(def):
 				if err := bindObjectFlag(v.Field(i), raw, def); err != nil {
-					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err), Flag: labelForFlag(defs, name)}
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", flagErrLabel(si, defs, name), err), Flag: flagErrLabel(si, defs, name)}
 				}
 				continue
 			case def.Type == "count":
@@ -1344,7 +1384,7 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 			if def, ok := findFlagDef(defs, name); ok {
 				secret = def.Secret
 			}
-			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", labelForFlag(defs, name), coerceMessage(err, secret)), Flag: labelForFlag(defs, name)}
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", flagErrLabel(si, defs, name), coerceMessage(err, secret)), Flag: flagErrLabel(si, defs, name)}
 		}
 	}
 	return nil
@@ -1358,6 +1398,14 @@ func argSecret(defs []ArgDef, i int) bool {
 
 // labelForFlag is a flag's CLI label (its identifiers) for error messages, falling back
 // to the logical name when the definition isn't found.
+// flagErrLabel names flag name in a binding error: as typed on argv, else as [labelForFlag].
+func flagErrLabel(si scopeInputs, defs []FlagDef, name string) string {
+	if t := si.typed[name]; t != "" {
+		return t
+	}
+	return labelForFlag(defs, name)
+}
+
 func labelForFlag(defs []FlagDef, name string) string {
 	for _, d := range defs {
 		if d.Name == name {

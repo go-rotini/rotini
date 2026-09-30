@@ -38,6 +38,15 @@ stderr 'variadic'
 stderr 'declared twice'
 ! stderr 'variadic'
 
+# Every problem is its own "Error:" line, from validate and from generate alike — generate
+# used to mark only the first, leaving the rest looking like the informational banner.
+! exec rotini validate many.spec.yaml --config ok.conf.yaml --fail collect
+stderr '^Error: .*declared twice'
+stderr '^Error: .*variadic'
+! exec rotini generate many.spec.yaml --config ok.conf.yaml
+stderr '^Error: .*declared twice'
+stderr '^Error: .*variadic'
+
 # And the valid document passes, silently, with exit 0 — the control case that proves the
 # rejections above are about the documents and not about the harness.
 exec rotini validate ok.spec.yaml --config ok.conf.yaml

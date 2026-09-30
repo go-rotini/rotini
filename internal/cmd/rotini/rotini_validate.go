@@ -48,7 +48,9 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		flags.Fail,
 		func(result string, err error) {
 			if err != nil {
-				fmt.Fprintln(rtx.Stderr, "Error:", err)
+				for _, problem := range flatten(err) {
+					fmt.Fprintln(rtx.Stderr, "Error:", problem)
+				}
 				return
 			}
 			fmt.Fprintln(rtx.Stdout, result)

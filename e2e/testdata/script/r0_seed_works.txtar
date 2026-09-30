@@ -62,3 +62,23 @@ stderr 'nope'
 exec ./demo$exe __complete ''
 stdout 'help'
 stdout 'version'
+
+# An entrypoint that never calls WithVersion: --version says so rather than printing a blank
+# line. rotini does not invent a version; "unknown" is the generated handler being honest.
+cp nover.go cmd/demo/main.go
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe --version
+stdout '^unknown$'
+exec ./demo$exe version
+stdout '^unknown$'
+
+-- nover.go --
+package main
+
+import (
+	demo "example.com/demo/internal/cmd/demo"
+)
+
+func main() {
+	demo.Program.Execute()
+}

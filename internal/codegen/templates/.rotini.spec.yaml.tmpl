@@ -7,18 +7,12 @@ command:
   flags:
     - name: help
       summary: print help
-      identifiers:
-        - -h
-        - --help
-      schema:
-        type: bool
+      identifiers: [-h, --help]
+      schema: { type: bool }
     - name: version
       summary: print version
-      identifiers:
-        - -v
-        - --version
-      schema:
-        type: bool
+      identifiers: [-v, --version]
+      schema: { type: bool }
   commands:
     - name: help
       summary: print help
@@ -26,24 +20,17 @@ command:
       arguments:
         - name: command
           summary: the command path to print help for
-          schema:
-            type: '[]string'
+          schema: { type: '[]string' }
       flags:
         - name: help
           summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
+          identifiers: [-h, --help]
+          schema: { type: bool }
     - name: version
       summary: print version
       description: Print the {{.Package}} version.
       flags:
         - name: help
           summary: print help
-          identifiers:
-            - -h
-            - --help
-          schema:
-            type: bool
+          identifiers: [-h, --help]
+          schema: { type: bool }

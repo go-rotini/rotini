@@ -2396,3 +2396,49 @@ func TestParse_dateLayout(t *testing.T) {
 		t.Errorf("due=%v skip=%v since=%v", f.Due, f.Skip, a.Since)
 	}
 }
+
+// An error about a value names the flag as the user typed it — long, short, or inside a short
+// cluster — on every path a value is checked; with nothing typed (a missing required flag) the
+// long identifier names it, since --due says more than -d.
+func TestParse_errorsNameTheTypedIdentifier(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "due", Identifiers: []string{"-d", "--due"}, Type: "time.Time", Layout: "2006-01-02"},
+			{Name: "mode", Identifiers: []string{"-m", "--mode"}, Type: "string", Enum: []string{"fast", "slow"}},
+			{Name: "port", Identifiers: []string{"-p", "--port"}, Type: "int", Constraints: Constraints{Maximum: Ptr(10.0)}},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+			{Name: "name", Identifiers: []string{"-n", "--name"}, Type: "string", Required: true},
+		},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Due     time.Time `rotini:"due"`
+				Mode    string    `rotini:"mode"`
+				Port    int       `rotini:"port"`
+				Verbose bool      `rotini:"verbose"`
+				Name    string    `rotini:"name"`
+			}
+		}
+	}
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"-n", "x", "--due", "10/01/2026"}, "--due: "},
+		{[]string{"-n", "x", "-d", "10/01/2026"}, "-d: "},
+		{[]string{"-n", "x", "--due=10/01/2026"}, "--due: "},
+		{[]string{"-n", "x", "-vd", "10/01/2026"}, "-d: "},
+		{[]string{"-n", "x", "--mode", "turbo"}, "for --mode "},
+		{[]string{"-n", "x", "-m", "turbo"}, "for -m "},
+		{[]string{"-n", "x", "-p", "99"}, "-p must be <= 10"},
+		{[]string{"-n", "x", "--port", "abc"}, "--port: "},
+		{nil, "--name"},
+	} {
+		err := NewParser().Parse(NewContextFor(def, tc.argv), &in)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q: err = %v, want it to contain %q", tc.argv, err, tc.want)
+		}
+	}
+}

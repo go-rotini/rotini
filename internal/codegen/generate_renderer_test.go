@@ -379,3 +379,23 @@ func TestTemplateFailure(t *testing.T) {
 		})
 	}
 }
+
+// The seeded spec is the first rotini document anyone reads, so it is written the way every doc
+// and example writes one: inline identifier lists and inline one-key schemas.
+func TestSeedSpecUsesTheDocumentedStyle(t *testing.T) {
+	out, err := renderSpecFile("1.0.0", "app", formatYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := string(out)
+	for _, want := range []string{"identifiers: [-h, --help]", "identifiers: [-v, --version]", "schema: { type: bool }"} {
+		if !strings.Contains(seed, want) {
+			t.Errorf("seed missing %q", want)
+		}
+	}
+	for _, bad := range []string{"identifiers:\n", "schema:\n"} {
+		if strings.Contains(seed, bad) {
+			t.Errorf("seed writes %q expanded:\n%s", strings.TrimSpace(bad), seed)
+		}
+	}
+}
