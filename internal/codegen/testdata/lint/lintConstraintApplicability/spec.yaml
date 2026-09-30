@@ -15,3 +15,21 @@ command:
       schema:
         type: int
         minLength: 3
+    # Durations and sizes take bounds in their own spelling. A bare number on a duration has
+    # no unit; text that is not the type's spelling, or text on a plain number, is rejected.
+    - name: wait
+      identifiers: [--wait]
+      schema: {type: duration, minimum: 5}
+    - name: cache
+      identifiers: [--cache]
+      schema: {type: bytesize, maximum: 12XB}
+    - name: workers
+      identifiers: [--workers]
+      schema: {type: int, maximum: 1s}
+    # Fine: bounds in the type's spelling, and bytes as a number.
+    - name: timeout
+      identifiers: [--timeout]
+      schema: {type: duration, minimum: 1s, maximum: 1h30m}
+    - name: limit
+      identifiers: [--limit]
+      schema: {type: bytesize, minimum: 1024, maximum: 1Gi}

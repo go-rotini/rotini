@@ -251,6 +251,9 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 		if len(f.DeprecatedIdentifiers) > 0 {
 			b.WriteString(", DeprecatedIdentifiers: " + goStringSlice(f.DeprecatedIdentifiers))
 		}
+		if f.Deprecated != "" {
+			b.WriteString(", Deprecated: " + strconv.Quote(f.Deprecated))
+		}
 		if f.Schema != nil && f.Schema.Negatable {
 			b.WriteString(", Negatable: true")
 		}
@@ -399,6 +402,9 @@ func argDefsLiteral(in *Inputs) string {
 		if a.Hidden {
 			b.WriteString(", Hidden: true")
 		}
+		if a.Deprecated != "" {
+			b.WriteString(", Deprecated: " + strconv.Quote(a.Deprecated))
+		}
 	})
 }
 
@@ -446,14 +452,21 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 		if len(n.deprecatedIdentifiers) > 0 {
 			b.WriteString("DeprecatedIdentifiers: " + goStringSlice(n.deprecatedIdentifiers) + ",\n")
 		}
+		if n.deprecated != "" {
+			b.WriteString("Deprecated: " + strconv.Quote(n.deprecated) + ",\n")
+		}
 		writeInputDefsLiteral(b, n.inputs, schemas)
 		if cl := rnodesLiteral(host, n.children, schemas); cl != "" {
 			b.WriteString("Commands: " + cl + ",\n")
 		}
-		if rl := remoteDefsLiteral(host, n.remotes); rl != "" {
+		remoteHost := host
+		if n.remoteHost != "" {
+			remoteHost = n.remoteHost
+		}
+		if rl := remoteDefsLiteral(remoteHost, n.remotes); rl != "" {
 			b.WriteString("Remotes: " + rl + ",\n")
 		}
-		if dl := discoveryLiteral(host, n.discovery); dl != "" {
+		if dl := discoveryLiteral(remoteHost, n.discovery); dl != "" {
 			b.WriteString("Discovery: " + dl + ",\n")
 		}
 		if n.pluginPath != "" {

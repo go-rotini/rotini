@@ -394,7 +394,7 @@ func TestValidate_typeErrorsAreReportedByTheSchemaWithPositions(t *testing.T) {
 	msg := err.Error()
 	for _, want := range []string{
 		"/command/flags/0/schema/required", `"required" must be of type boolean`,
-		"/command/flags/1/schema/minimum", `"minimum" must be of type number`,
+		"/command/flags/1/schema/minimum", `"minimum" must look like`,
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("missing %q — both mistakes should be reported, each by the schema:\n%s", want, msg)

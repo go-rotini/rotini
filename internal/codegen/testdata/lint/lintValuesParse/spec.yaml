@@ -62,6 +62,13 @@ command:
       schema:
         type: date
         default: '2026-09-29'
+    # A duration default outside the duration's own bounds, read in its unit.
+    - name: grace
+      identifiers: [--grace]
+      schema:
+        type: duration
+        minimum: 1m
+        default: 30s
   arguments:
     - name: count
       schema:

@@ -201,13 +201,18 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 // no message and does nothing with it. It implements error so it can be returned or printed
 // directly.
 type Deprecation struct {
-	Kind       string // "flag" or "command"
-	Name       string // the input's logical name (the flag/command name)
-	Identifier string // the deprecated token actually used on argv (e.g. "--conf", "build")
+	Kind       string // "flag", "argument" or "command"
+	Name       string // the input's logical name (the flag/argument/command name)
+	Identifier string // the token actually used on argv (e.g. "--conf", "build"); an argument's <name>
+	Message    string // the spec's `deprecated:` message, when the input is deprecated as a whole
 }
 
-// Error renders the deprecation notice as a single line.
+// Error renders the deprecation notice as a single line, with the author's message when there
+// is one: `flag "--conf" is deprecated: use --config`.
 func (d Deprecation) Error() string {
+	if d.Message != "" {
+		return fmt.Sprintf("%s %q is deprecated: %s", d.Kind, d.Identifier, d.Message)
+	}
 	return fmt.Sprintf("deprecated %s identifier %q was used", d.Kind, d.Identifier)
 }
 
@@ -231,22 +236,82 @@ func Deprecations(rtx *Context) []Deprecation {
 	}
 	argv := rtx.Argv
 	var out []Deprecation
-	for _, frame := range rtx.Chain() {
-		// A command invoked via one of its deprecated aliases (frame.Matched is the token
-		// that resolved it).
-		for _, alias := range frame.DeprecatedIdentifiers {
-			if frame.Matched == alias {
-				out = append(out, Deprecation{Kind: "command", Name: frame.Name, Identifier: alias})
-				break
-			}
+	chain := rtx.Chain()
+	for _, frame := range chain {
+		// A command deprecated as a whole reports however it was invoked; one with only
+		// deprecated aliases reports when one of those resolved it (frame.Matched).
+		if frame.Matched != "" && deprecatedToken(frame.Matched, frame.DeprecatedIdentifiers, frame.Deprecated) {
+			out = append(out, Deprecation{Kind: "command", Name: frame.Name, Identifier: frame.Matched, Message: frame.Deprecated})
 		}
-		// A flag set via one of its deprecated identifiers.
 		for _, fd := range frame.Flags {
-			for _, id := range fd.DeprecatedIdentifiers {
-				if flagWasSet(argv, []string{id}) {
-					out = append(out, Deprecation{Kind: "flag", Name: fd.Name, Identifier: id})
-				}
-			}
+			out = append(out, flagDeprecations(fd, argv)...)
+		}
+	}
+	// A deprecated argument reports when a value was supplied for it.
+	if n := len(chain); n > 0 {
+		out = append(out, argumentDeprecations(chain, argv)...)
+	}
+	return out
+}
+
+// deprecatedToken reports whether using token deprecates: when some spellings are listed as
+// deprecated, only those are — the others are the ones to move to, and the message (if any) is
+// about the listed ones; with none listed, a message deprecates every spelling.
+func deprecatedToken(token string, deprecatedIDs []string, message string) bool {
+	if len(deprecatedIDs) > 0 {
+		return slices.Contains(deprecatedIDs, token)
+	}
+	return message != ""
+}
+
+// flagDeprecations reports a flag set on argv through a deprecated identifier — or through any
+// identifier when the flag as a whole is deprecated — once per identifier used, carrying the
+// spec's message.
+func flagDeprecations(fd FlagDef, argv []string) []Deprecation {
+	var out []Deprecation
+	for _, id := range fd.Identifiers {
+		if !flagWasSet(argv, []string{id}) {
+			continue
+		}
+		if deprecatedToken(id, fd.DeprecatedIdentifiers, fd.Deprecated) {
+			out = append(out, Deprecation{Kind: "flag", Name: fd.Name, Identifier: id, Message: fd.Deprecated})
+		}
+	}
+	return out
+}
+
+// positionals are the leaf's positional tokens in argv, by the parser's own tokenizing — on a
+// copy of the chain with value acquisition off, so asking never reads a file or stdin.
+func positionals(chain []ResolvedCommand, argv []string) []string {
+	quiet := make([]ResolvedCommand, len(chain))
+	for i, frame := range chain {
+		flags := make([]FlagDef, len(frame.Flags))
+		for j, fd := range frame.Flags {
+			fd.From = nil
+			flags[j] = fd
+		}
+		frame.Flags = flags
+		quiet[i] = frame
+	}
+	store, err := parseArgvTokens(quiet, argv, nil)
+	if err != nil {
+		return nil
+	}
+	return store.scopes[len(quiet)-1].args
+}
+
+// argumentDeprecations reports each deprecated argument of the leaf that argv supplied a value
+// for, by position.
+func argumentDeprecations(chain []ResolvedCommand, argv []string) []Deprecation {
+	leaf := chain[len(chain)-1]
+	if !slices.ContainsFunc(leaf.Arguments, func(a ArgDef) bool { return a.Deprecated != "" }) {
+		return nil
+	}
+	supplied := len(positionals(chain, argv))
+	var out []Deprecation
+	for i, ad := range leaf.Arguments {
+		if ad.Deprecated != "" && i < supplied {
+			out = append(out, Deprecation{Kind: "argument", Name: ad.Name, Identifier: "<" + ad.Name + ">", Message: ad.Deprecated})
 		}
 	}
 	return out
@@ -607,7 +672,10 @@ func checkConstraints(label, typ string, c Constraints, values []string, secret 
 		var err error
 		switch {
 		case isNumericType(elem):
-			err = checkNumericBounds(label, c, v, secret)
+			err = checkNumericBounds(label, c, v, secret, parseNumber, formatNum)
+		case measuredTypes[elem] != nil:
+			m := measuredTypes[elem]
+			err = checkNumericBounds(label, c, v, secret, m.parse, m.format)
 		case isPathType(elem):
 			// A path is still a string, so its declared length and pattern bounds
 			// apply — `pattern: '\.ya?ml$'` on a config path is a reasonable thing to
@@ -694,8 +762,8 @@ func checkItemCount(label string, c Constraints, n int) error {
 
 // checkNumericBounds enforces the numeric bounds on one value. An unparseable value is
 // skipped: coerce already reports it, and reporting it twice would be noise.
-func checkNumericBounds(label string, c Constraints, v string, secret bool) error {
-	n, numeric := parseNumber(v)
+func checkNumericBounds(label string, c Constraints, v string, secret bool, parse func(string) (float64, bool), formatNum func(float64) string) error {
+	n, numeric := parse(v)
 	if !numeric {
 		return nil
 	}
@@ -876,6 +944,32 @@ var numericFamily = map[string]bool{
 }
 
 func isNumericType(typ string) bool { return numericFamily[typ] }
+
+// measured is a type whose values are quantities in a unit of their own — a duration in
+// nanoseconds, a size in bytes — so numeric bounds apply once a value is read in that unit, and
+// print back in the type's spelling ("must be <= 1h0m0s", "<= 1Gi").
+type measured struct {
+	parse  func(string) (float64, bool)
+	format func(float64) string
+}
+
+// measuredTypes are the non-numeric types numeric bounds apply to, by definition type name.
+var measuredTypes = map[string]*measured{
+	"time.Duration": {
+		parse: func(s string) (float64, bool) {
+			d, err := parseDuration(strings.TrimSpace(s))
+			return float64(d), err == nil
+		},
+		format: func(f float64) string { return time.Duration(f).String() },
+	},
+	"rotini.ByteSize": {
+		parse: func(s string) (float64, bool) {
+			n, err := parseByteSize(s)
+			return float64(n), err == nil
+		},
+		format: func(f float64) string { return ByteSize(int64(f)).String() },
+	},
+}
 
 // constraintElemType is the type a constraint's per-value checks apply to: the element type
 // for a repeatable input, the type itself otherwise. Item-count bounds stay on the collection.

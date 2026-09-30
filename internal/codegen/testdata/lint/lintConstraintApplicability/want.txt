@@ -1,2 +1,5 @@
-spec: .rotini.spec.yaml:4:3: command demo: flag "force": minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf apply to numeric types only, not bool — the bound would be silently ignored
+spec: .rotini.spec.yaml:4:3: command demo: flag "force": minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf apply to numeric types, durations and sizes only, not bool — the bound would be silently ignored
 spec: .rotini.spec.yaml:4:3: command demo: flag "retries": minLength/maxLength/pattern apply to string types only, not int — the constraint would be silently ignored
+spec: .rotini.spec.yaml:4:3: command demo: flag "wait": minimum "5" is not a duration such as 30s or 1h30m
+spec: .rotini.spec.yaml:4:3: command demo: flag "cache": maximum "12XB" is not a size such as 512Mi, 10MB or 1073741824
+spec: .rotini.spec.yaml:4:3: command demo: flag "workers": maximum "1s" is text, but int takes a number — a string bound is for a duration or bytesize input

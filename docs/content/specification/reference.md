@@ -42,7 +42,7 @@ The MINIMUM rotini this spec requires (X.Y.Z) — the feature set it was written
 
 `string`
 
-Deprecation message; the argument is annotated as deprecated in generated help.
+Deprecation message. The argument is annotated as deprecated in generated help, and supplying it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing).
 
 ### `hidden`
 
@@ -71,7 +71,7 @@ Short one-liner shown next to this argument in the Arguments section of generate
 
 ## BaseSchema
 
-Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, description, …) is rejected too, since it would otherwise do nothing.
+Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, title, …) is rejected too, since it would otherwise do nothing. `description` is accepted on object schemas and their properties, where it becomes a Go doc comment.
 
 ### `$ref`
 
@@ -87,21 +87,21 @@ Allowed values, validated over the FULLY reconciled value (an env/config-supplie
 
 ### `exclusiveMaximum`
 
-`number` or `null`
+`number` or `string` or `null`
 
 Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'.
 
 ### `exclusiveMinimum`
 
-`number` or `null`
+`number` or `string` or `null`
 
-Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere). exclusiveMinimum: 0 expresses "positive" exactly.
+Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numbers, durations and sizes; per-element for arrays; rejected elsewhere). exclusiveMinimum: 0 expresses "positive" exactly.
 
 ### `import`
 
 `string`
 
-Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.
+Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID). Omit (or leave empty) for builtins and rotini's own type names (string, int, duration, url, ip, bytesize, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.
 
 ### `items`
 
@@ -123,9 +123,9 @@ Maximum string length in runes (string types only; for []string, each element) �
 
 ### `maximum`
 
-`number` or `null`
+`number` or `string` or `null`
 
-Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere); maximum: 0 is a real, enforced bound.
+Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound.
 
 ### `minItems`
 
@@ -141,15 +141,15 @@ Minimum string length in runes (string types only; for []string, each element) �
 
 ### `minimum`
 
-`number` or `null`
+`number` or `string` or `null`
 
-Minimum allowed value (inclusive). Numeric-family types only (int/uint/float variants and the integer/number aliases) — rejected on any other type, where it would be silently ignored; for a repeatable numeric input the bound applies to each ELEMENT. Duration/time bounds are rejected (validate in the handler, or wrap the value in a TextUnmarshaler type). minimum: 0 is a real, enforced bound (use uint when you want the type system to carry non-negativity instead).
+Minimum allowed value (inclusive). Numeric-family types (int/uint/float variants and the integer/number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes) — read by the same parser as the value, and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would be silently ignored. For a repeatable input the bound applies to each ELEMENT. minimum: 0 is a real, enforced bound.
 
 ### `multipleOf`
 
-`number` or `null`
+`number` or `string` or `null`
 
-The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numeric-family types only, per-element for arrays; must be strictly positive.
+The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numbers, durations and sizes, in their own spelling (`multipleOf: 1s`); per-element for arrays; must be strictly positive.
 
 ### `nullable`
 
@@ -184,7 +184,7 @@ A command node in the CLI command tree — the root command (under the document'
 
 `string`
 
-Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, header, footer, examples, help, headings, group, hidden, deprecated, deprecated_identifiers, filename) WIN over the child's when present — so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node — the composed command delegates to the child's handler, built against the child's own inputs/output — so rotini validation rejects them here (declare them in the child spec).
+Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) WIN over the child's when present, for that one composed node (the child's own sub-commands keep theirs) — so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). The child's own remote_commands, remote_discovery and passthrough travel with it. `handler:` on a $ref node points the composed command at a different handler package. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file. Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node — the composed command delegates to the child's handler, built against the child's own inputs/output — so rotini validation rejects them here (declare them in the child spec).
 
 ### `aliases`
 
@@ -220,7 +220,7 @@ Config-file SOURCES this command contributes — where config values come from (
 
 `string`
 
-Deprecation message; the command is annotated as deprecated in its parent's generated Commands list.
+Deprecation message. The command is annotated as deprecated in its parent's generated Commands list, and invoking it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those aliases report; without, every name does.
 
 ### `deprecated_identifiers`
 
@@ -316,7 +316,7 @@ Section heading overrides for the generated page; sane defaults fill any unset h
 
 `string`
 
-Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields.
+Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering; terminal styling kept) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields.
 
 ### `hidden`
 
@@ -328,13 +328,13 @@ When true, the command is omitted from its parent's generated Commands list (it 
 
 `string`
 
-Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template.
+Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it as given — byte-for-byte except that ANSI styling is removed, since a man page carries none — and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template.
 
 ### `markdown`
 
 `string`
 
-Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it byte-for-byte; when unset, the page is rendered from the structured doc-fields through the markdown template.
+Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it as given — byte-for-byte except that ANSI styling is removed; when unset, the page is rendered from the structured doc-fields through the markdown template.
 
 ### `name`
 
@@ -358,7 +358,7 @@ When true, every token after this command's own name binds as a raw positional �
 
 `string`
 
-Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
 
 ### `remote_commands`
 
@@ -376,7 +376,7 @@ Auto-expose external '<prefix>*' executables as remote sub-commands of this comm
 
 `object`
 
-Document-level (root only): reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package, which other packages may import.
+Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package, which other packages may import.
 
 ### `see_also`
 
@@ -415,7 +415,7 @@ Usage-line override. When omitted, rotini derives one from the command's shape. 
 
 `string`
 
-Deprecation message; the input is annotated as deprecated in generated help.
+Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries — commands, flags and arguments.)
 
 ### `hidden`
 
@@ -506,7 +506,7 @@ The file name to look for in each searched directory (e.g. '.acme.toml', 'config
 
 `string`
 
-Deprecation message; the input is annotated as deprecated in generated help.
+Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries — commands, flags and arguments.)
 
 ### `hidden`
 
@@ -594,13 +594,13 @@ When true, this flag is advertised in the generated help of every descendant com
 
 `string`
 
-Deprecation message; the flag is annotated as deprecated in generated help.
+Deprecation message. The flag is annotated as deprecated in generated help, and using it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those spellings report — the others are the ones to move to (`identifiers: [--db, --database]`, `deprecated_identifiers: [--database]`, `deprecated: use --db`); without, the whole flag is deprecated and every spelling reports.
 
 ### `deprecated_identifiers`
 
 array of string`
 
-CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input
+CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. Pair it with `deprecated:` to give the report a message; `deprecated:` alone deprecates every spelling
 
 ### `group`
 
@@ -620,7 +620,7 @@ When true, the flag is omitted from generated help (it still parses on the comma
 
 array of string`
 
-CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is auto-derived.
+CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run).
 
 ### `name`
 
@@ -731,7 +731,7 @@ Flag and env inputs only: names a config_files entry whose file PATH this input 
 
 ### `default`
 
-Default value applied when the input is not provided
+The value an input takes when no channel supplies one. A scalar for a single value; a list for a repeatable input, each element seeded as one occurrence (as if the flag were repeated); a mapping for a map input, seeded as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). It is written the way a user would write the value (a duration as 30s, a date as 2026-09-29 or under `layout:`), and `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that takes it. A supplied value REPLACES the default, never merges with it. `default_text:` changes only how help shows it.
 
 ### `default_text`
 
@@ -755,7 +755,7 @@ Config inputs only: pins this input to ONE named config_files entry — the valu
 
 array of string`
 
-Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text is whitespace-trimmed, then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text (a structured stdin payload is the stdin: channel's job, not a flag's). Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only.
+Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text has one trailing line ending removed (leading and interior whitespace is content), then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text. On an object-valued flag the resolved text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the command as a whole is the stdin: channel's job. Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only.
 
 ### `ignore_case`
 
@@ -819,7 +819,7 @@ When true, this input's value is treated as a secret: redacted in provenance/err
 
 `string`
 
-LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style — an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched.
+LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style — an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched. Not on env and config INPUTS: an env input's list is split on commas by rotini's configuration reader (TAGS=a,b), and a configuration file writes a list as a list.
 
 ### `variable`
 
@@ -844,7 +844,7 @@ Additional names that invoke this remote command.
 
 `string` · **required**
 
-Name of the remote command. The dispatched binary must be named <program>-<name> and located in the same directory as the host binary.
+Name of the remote command. The dispatched binary is named <program>-<name>, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree <program> is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
 
 ### `summary`
 
@@ -879,6 +879,12 @@ Executable-name prefix to discover. Default: the host binary name followed by '-
 ## Schema
 
 JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.
+
+### `description`
+
+`string`
+
+What this shape or property IS, in a sentence. rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema has `summary:` on the input instead.
 
 ### `required`
 

@@ -347,3 +347,119 @@ generate:
 `,
 	}
 }
+
+// ── what a composed child dispatches ────────────────────────────────────────
+
+// A composed child keeps everything its root dispatches — its remote commands, plugin
+// discovery, plugin path and passthrough — and its plugin binaries keep the child's name, so
+// one install serves `child deploy` and `root kid deploy` alike. The composed node was once
+// built from its presentation keys alone and dropped all of these: the child's own binary ran
+// its plugins, and through the parent the same command answered "takes no arguments".
+func TestCompose_keepsWhatTheChildDispatches(t *testing.T) {
+	emitted := composeModuleStaged(t, map[string]string{
+		"cmd/grand/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: grand
+  summary: the grandchild
+  remote_commands:
+    - name: sync
+`,
+		"cmd/grand/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/grand/zz_grand.go\n      package: grand\n",
+		"cmd/child/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: child
+  summary: the child
+  plugin_path: ./child-plugins
+  remote_commands:
+    - name: deploy
+  remote_discovery: {}
+  commands:
+    - name: exec
+      summary: runs a command
+      passthrough: true
+      arguments:
+        - name: argv
+          schema: {type: '[]string'}
+    - name: tools
+      summary: inline sub-command with its own remote
+      remote_commands:
+        - name: lint
+    - $ref: ../grand/.rotini.spec.yaml
+`,
+		"cmd/child/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/child/zz_child.go\n      package: child\n",
+		"cmd/root/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: root
+  summary: the root
+  commands:
+    - $ref: ../child/.rotini.spec.yaml
+      name: kid
+      plugin_path: ./parent-plugins
+`,
+		"cmd/root/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/root/zz_root.go\n      package: root\n",
+	})
+	root := emitted["internal/cmd/root/zz_root.go"]
+	for _, want := range []string{
+		`Binary: "child-deploy"`,                                   // the composed root's remote, named as the child names it
+		`Discovery:  &rotini.RemoteDiscoveryDef{Prefix: "child-"}`, // its discovery, with the child's default prefix
+		`PluginPath: "./parent-plugins"`,                           // plugin_path on the $ref node overlays the child's
+		`Binary: "child-lint"`,                                     // an inline sub-command inside the subtree: the child's name too
+		`Binary: "grand-sync"`,                                     // a transitive child's plugins keep ITS name
+		`Passthrough: true`,                                        // the child's passthrough command still forwards raw
+	} {
+		if !strings.Contains(root, want) {
+			t.Errorf("root definition missing %s:\n%s", want, root)
+		}
+	}
+	if strings.Contains(root, `"root-deploy"`) || strings.Contains(root, `"root-lint"`) {
+		t.Error("a composed child's plugin was renamed after the parent program")
+	}
+}
+
+// A child whose ROOT is passthrough (a wrapper CLI) still forwards raw tokens once composed.
+func TestCompose_passthroughRootSurvives(t *testing.T) {
+	emitted := composeModuleStaged(t, map[string]string{
+		"cmd/child/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: child
+  summary: a wrapper
+  passthrough: true
+  arguments:
+    - name: argv
+      schema: {type: '[]string'}
+`,
+		"cmd/child/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/child/zz_child.go\n      package: child\n",
+		"cmd/root/.rotini.spec.yaml":  "version: 0.0.0\ncommand:\n  name: root\n  summary: the root\n  commands:\n    - $ref: ../child/.rotini.spec.yaml\n",
+		"cmd/root/.rotini.conf.yaml":  "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/root/zz_root.go\n      package: root\n",
+	})
+	if root := emitted["internal/cmd/root/zz_root.go"]; !strings.Contains(root, "Passthrough: true") {
+		t.Errorf("the composed passthrough root lost Passthrough:\n%s", root)
+	}
+}
+
+// A composed child is judged with its parent: `validate root` reports a child's problems — and
+// a grandchild's — positioned in their own files, exactly as validating each alone would. It
+// used to pass clean over a child with an unknown key.
+func TestCompose_validatesComposedSpecs(t *testing.T) {
+	dir := t.TempDir()
+	for path, body := range map[string]string{
+		"cmd/grand/.rotini.spec.yaml": "version: 0.0.0\ncommand:\n  name: grand\n  summary: g\n  flags:\n    - name: n\n      identifiers: [--n]\n      schema: {type: int, default: abc}\n",
+		"cmd/child/.rotini.spec.yaml": "version: 0.0.0\ncommand:\n  name: child\n  summary: c\n  bogus_key: 1\n  commands:\n    - $ref: ../grand/.rotini.spec.yaml\n    - $ref: ../root/.rotini.spec.yaml\n",
+		"cmd/root/.rotini.spec.yaml":  "version: 0.0.0\ncommand:\n  name: root\n  summary: r\n  commands:\n    - $ref: ../child/.rotini.spec.yaml\n",
+	} {
+		writeTestFile(t, dir, path, body)
+	}
+	t.Chdir(dir)
+	err := NewProcessor("0.0.0").Validate("cmd/root/.rotini.spec.yaml", "", false, "collect", nil, nil)
+	if err == nil {
+		t.Fatal("the parent validated clean over broken composed specs")
+	}
+	for _, want := range []string{
+		`cmd/child/.rotini.spec.yaml:5:`, `unknown key "bogus_key"`,
+		`cmd/grand/.rotini.spec.yaml:`, `default "abc" is not a valid integer`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error missing %q:\n%v", want, err)
+		}
+	}
+}

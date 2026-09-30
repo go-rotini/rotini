@@ -396,8 +396,9 @@ func lintIgnoreCase(spec *Spec) []error {
 
 // lintSeparator enforces separator's contract. It splits one argv value into several, so it
 // means something only where several values can land — a list or map flag, or the variadic
-// argument — and only on argv-shaped channels: env and config inputs are decoded by recon,
-// which never reads it. The character itself must not collide with the syntax it splits: a
+// argument — and only on argv-shaped channels: env and config inputs are read by recon, which
+// splits an env list on commas and reads a config list as a list, and never consults it. The
+// character itself must not collide with the syntax it splits: a
 // double quote is CSV's quoting character, a line break ends a CSV record, and
 // '=' on a map is what separates each entry's key from its value.
 func lintSeparator(spec *Spec) []error {
@@ -415,7 +416,7 @@ func lintSeparator(spec *Spec) []error {
 			isList, isMap := strings.HasPrefix(t, "[]"), strings.HasPrefix(t, "map[")
 			switch {
 			case channel != "flag" && channel != "argument":
-				add("sets separator, which applies to flags and arguments only — " + channel + " values are decoded, not split")
+				add("sets separator, which applies to flags and arguments only — an env input's list splits on commas and a configuration file writes a list as a list, so there is nothing for it to choose")
 			case !isList && !isMap:
 				add(fmt.Sprintf("sets separator but its type is %s — only a list or map takes several values to split into", displayType(t)))
 			case schema.Separator == `"`:
@@ -788,13 +789,19 @@ func lintConstraintApplicability(spec *Spec) []error {
 			}
 			numericBounds := schema.Minimum != nil || schema.Maximum != nil ||
 				schema.ExclusiveMinimum != nil || schema.ExclusiveMaximum != nil || schema.MultipleOf != nil
-			if numericBounds && !constraintNumericFamily[elem] {
-				hint := ""
-				switch elem {
-				case "duration", "time.Duration":
-					hint = " (duration bounds are not supported — validate in the handler, or wrap the value in a TextUnmarshaler type that enforces the range)"
+			switch {
+			case numericBounds && measuredTypes[elem]:
+				for _, msg := range measuredBoundProblems(schema, elem) {
+					add(msg)
 				}
-				add(fmt.Sprintf("minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf apply to numeric types only, not %s — the bound would be silently ignored%s", typ, hint))
+			case numericBounds && !constraintNumericFamily[elem]:
+				add(fmt.Sprintf("minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf apply to numeric types, durations and sizes only, not %s — the bound would be silently ignored", typ))
+			case numericBounds:
+				for key, b := range boundsByKey(schema) {
+					if text, ok := b.(string); ok {
+						add(fmt.Sprintf("%s %q is text, but %s takes a number — a string bound is for a duration or bytesize input", key, text, typ))
+					}
+				}
 			}
 			if (schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "") && !stringValued(elem) {
 				add(fmt.Sprintf("minLength/maxLength/pattern apply to string types only, not %s — the constraint would be silently ignored", typ))
@@ -806,6 +813,30 @@ func lintConstraintApplicability(spec *Spec) []error {
 		})
 	})
 	return problems
+}
+
+// boundsByKey maps each numeric-bound key to its declared value, absent ones included as nil.
+func boundsByKey(s *InputSchema) map[string]any {
+	return map[string]any{
+		"minimum": s.Minimum, "maximum": s.Maximum, "exclusiveMinimum": s.ExclusiveMinimum,
+		"exclusiveMaximum": s.ExclusiveMaximum, "multipleOf": s.MultipleOf,
+	}
+}
+
+// measuredBoundProblems reports the bounds on a duration or bytesize input that normalizeBounds
+// could not read in the type's unit — they are still text — each with the spelling it wants.
+func measuredBoundProblems(s *InputSchema, elem string) []string {
+	want := "a size such as 512Mi, 10MB or 1073741824"
+	if elem == "time.Duration" {
+		want = "a duration such as 30s or 1h30m"
+	}
+	var out []string
+	for _, key := range []string{"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"} {
+		if text, ok := boundsByKey(s)[key].(string); ok {
+			out = append(out, fmt.Sprintf("%s %q is not %s", key, text, want))
+		}
+	}
+	return out
 }
 
 // stringValued reports whether a declared type's VALUE is a string, and so carries string
@@ -1780,16 +1811,16 @@ func defaultViolation(schema *InputSchema, label, v string) string {
 
 	if n, err := strconv.ParseFloat(v, 64); err == nil {
 		switch {
-		case schema.Minimum != nil && n < *schema.Minimum:
-			return fmt.Sprintf("%s %s is below the declared minimum %s", label, v, formatBound(*schema.Minimum))
-		case schema.Maximum != nil && n > *schema.Maximum:
-			return fmt.Sprintf("%s %s is above the declared maximum %s", label, v, formatBound(*schema.Maximum))
-		case schema.ExclusiveMinimum != nil && n <= *schema.ExclusiveMinimum:
-			return fmt.Sprintf("%s %s is not above the declared exclusiveMinimum %s", label, v, formatBound(*schema.ExclusiveMinimum))
-		case schema.ExclusiveMaximum != nil && n >= *schema.ExclusiveMaximum:
-			return fmt.Sprintf("%s %s is not below the declared exclusiveMaximum %s", label, v, formatBound(*schema.ExclusiveMaximum))
-		case schema.MultipleOf != nil && !isDefaultMultipleOf(n, *schema.MultipleOf):
-			return fmt.Sprintf("%s %s is not a multiple of the declared multipleOf %s", label, v, formatBound(*schema.MultipleOf))
+		case bound(schema.Minimum) != nil && n < *bound(schema.Minimum):
+			return fmt.Sprintf("%s %s is below the declared minimum %s", label, v, formatBound(*bound(schema.Minimum)))
+		case bound(schema.Maximum) != nil && n > *bound(schema.Maximum):
+			return fmt.Sprintf("%s %s is above the declared maximum %s", label, v, formatBound(*bound(schema.Maximum)))
+		case bound(schema.ExclusiveMinimum) != nil && n <= *bound(schema.ExclusiveMinimum):
+			return fmt.Sprintf("%s %s is not above the declared exclusiveMinimum %s", label, v, formatBound(*bound(schema.ExclusiveMinimum)))
+		case bound(schema.ExclusiveMaximum) != nil && n >= *bound(schema.ExclusiveMaximum):
+			return fmt.Sprintf("%s %s is not below the declared exclusiveMaximum %s", label, v, formatBound(*bound(schema.ExclusiveMaximum)))
+		case bound(schema.MultipleOf) != nil && !isDefaultMultipleOf(n, *bound(schema.MultipleOf)):
+			return fmt.Sprintf("%s %s is not a multiple of the declared multipleOf %s", label, v, formatBound(*bound(schema.MultipleOf)))
 		}
 	}
 
@@ -1873,11 +1904,11 @@ func lintItemConstraints(spec *Spec) []error {
 			}
 			conflict("enum", len(it.Enum) > 0 && !slices.Equal(it.Enum, schema.Enum))
 			conflict("pattern", it.Pattern != "" && it.Pattern != schema.Pattern)
-			conflict("minimum", floatBoundsDiffer(it.Minimum, schema.Minimum))
-			conflict("maximum", floatBoundsDiffer(it.Maximum, schema.Maximum))
-			conflict("exclusiveMinimum", floatBoundsDiffer(it.ExclusiveMinimum, schema.ExclusiveMinimum))
-			conflict("exclusiveMaximum", floatBoundsDiffer(it.ExclusiveMaximum, schema.ExclusiveMaximum))
-			conflict("multipleOf", floatBoundsDiffer(it.MultipleOf, schema.MultipleOf))
+			conflict("minimum", floatBoundsDiffer(bound(it.Minimum), bound(schema.Minimum)))
+			conflict("maximum", floatBoundsDiffer(bound(it.Maximum), bound(schema.Maximum)))
+			conflict("exclusiveMinimum", floatBoundsDiffer(bound(it.ExclusiveMinimum), bound(schema.ExclusiveMinimum)))
+			conflict("exclusiveMaximum", floatBoundsDiffer(bound(it.ExclusiveMaximum), bound(schema.ExclusiveMaximum)))
+			conflict("multipleOf", floatBoundsDiffer(bound(it.MultipleOf), bound(schema.MultipleOf)))
 			conflict("minLength", it.MinLength != 0 && it.MinLength != schema.MinLength)
 			conflict("maxLength", it.MaxLength != 0 && it.MaxLength != schema.MaxLength)
 		})

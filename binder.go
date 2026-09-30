@@ -1096,7 +1096,8 @@ func envSources(v reflect.Value, envPrefix string) []recon.Source {
 }
 
 // spellings gives env and config inputs the value spellings flags accept, which recon's own
-// decode does not: a bool field takes yes/no, on/off, y/n (see parseBool) — recon alone takes
+// decode does not: a duration takes days and weeks (7d); a bool field takes yes/no, on/off, y/n
+// (see parseBool) — recon alone takes
 // only true/false/1/0, so CACHE=yes was "expected bool" on an env input while working as a
 // flag's fallback — and a time field with a layout (`type: date`, `layout:`) parses under it
 // rather than as RFC 3339. Only those fields' keys are touched: a string input whose value
@@ -1110,8 +1111,9 @@ type spellings struct {
 // valueKeys maps the recon keys of an Env or Config struct's bool fields, and of its time
 // fields that declare a layout, to how their text is read.
 type valueKeys struct {
-	bools   map[string]bool
-	layouts map[string]string
+	bools     map[string]bool
+	layouts   map[string]string
+	durations map[string]bool
 }
 
 func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
@@ -1123,6 +1125,13 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 	if s.keys.bools[key] {
 		if b, perr := parseBool(v.String()); perr == nil {
 			return recon.NewValue(b), true, nil
+		}
+	}
+	// A duration reads with the days and weeks flags accept (7d, 2w3d); recon's own parser
+	// stops at hours, so TTL=3d was "expected time.Duration" on an env input.
+	if s.keys.durations[key] {
+		if d, perr := parseDuration(strings.TrimSpace(v.String())); perr == nil {
+			return recon.NewValue(d), true, nil
 		}
 	}
 	if layout := s.keys.layouts[key]; layout != "" {
@@ -1137,7 +1146,7 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 
 // channelValueKeys collects [valueKeys] from each command's Env or Config struct.
 func channelValueKeys(v reflect.Value, structName string) valueKeys {
-	keys := valueKeys{bools: map[string]bool{}, layouts: map[string]string{}}
+	keys := valueKeys{bools: map[string]bool{}, layouts: map[string]string{}, durations: map[string]bool{}}
 	if v.Kind() != reflect.Struct {
 		return keys
 	}
@@ -1159,6 +1168,8 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 			switch ft := derefType(sf.Type); {
 			case ft.Kind() == reflect.Bool:
 				keys.bools[key] = true
+			case ft == durationType:
+				keys.durations[key] = true
 			case ft == timeType && sf.Tag.Get("layout") != "":
 				keys.layouts[key] = sf.Tag.Get("layout")
 			}
@@ -1542,6 +1553,14 @@ func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 
 // channelGoType maps a channel field's Go type to the type string checkConstraints expects.
 func channelGoType(t reflect.Type) string {
+	// Measured types are named first: a duration or a size is an int64 underneath, and read as
+	// a plain integer its text ("5m", "1Gi") would not parse and its bounds would never apply.
+	switch t {
+	case durationType:
+		return "time.Duration"
+	case reflect.TypeFor[ByteSize]():
+		return "rotini.ByteSize"
+	}
 	switch t.Kind() {
 	case reflect.Pointer:
 		return channelGoType(t.Elem())

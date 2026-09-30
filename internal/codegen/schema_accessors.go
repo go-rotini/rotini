@@ -1,5 +1,7 @@
 package codegen
 
+import "encoding/json"
+
 // Hand-written typed accessors over the generated schema structs (schema_conf.go /
 // schema_spec.go): the conf's discriminated package/feature ARRAYS are looked up by
 // `type` through these helpers (so the discriminator lives in one place), and a
@@ -122,4 +124,38 @@ func variables(schema *InputSchema) []string {
 		return out
 	}
 	return nil
+}
+
+// bound reads a numeric bound (minimum, maximum, exclusiveMinimum, exclusiveMaximum,
+// multipleOf) as a number, or nil when it is absent or not a number. The keys take a number, or
+// — on a duration or bytesize input — a string in that type's spelling (`1s`, `512Mi`), which
+// normalizeBounds converts to the type's units right after decoding; a string still here is one
+// that did not convert, and lintConstraintApplicability reports it.
+func bound(v any) *float64 {
+	var f float64
+	switch n := v.(type) {
+	case *float64:
+		return n
+	case float64:
+		f = n
+	case float32:
+		f = float64(n)
+	case int:
+		f = float64(n)
+	case int64:
+		f = float64(n)
+	case int32:
+		f = float64(n)
+	case uint64:
+		f = float64(n)
+	case json.Number:
+		parsed, err := n.Float64()
+		if err != nil {
+			return nil
+		}
+		f = parsed
+	default:
+		return nil
+	}
+	return &f
 }

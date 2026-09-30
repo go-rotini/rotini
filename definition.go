@@ -133,15 +133,18 @@ type CommandDef struct {
 	Handler               string   // ProgramHandlers method, e.g. "RotiniGenerate"
 	Hidden                bool     // omitted from completion candidates (it still dispatches); help omission happens at codegen
 	DeprecatedIdentifiers []string // aliases (subset of Aliases) that [Deprecations] reports when used to invoke
-	Flags                 []FlagDef
-	Arguments             []ArgDef
-	FlagGroups            []FlagGroup      // cross-flag presence rules validated at parse time
-	FlagDependencies      []FlagDependency // conditional cross-flag requirements validated at parse time
-	Commands              []CommandDef
-	Remotes               []RemoteDef         // co-located remote binaries dispatched as sub-commands of this command
-	Discovery             *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
-	PluginPath            string              // extra directory searched for BOTH this command's declared remotes and its discovered plugins
-	Passthrough           bool                // every token after this command is a raw positional (no flag parsing)
+	// Deprecated is the command's deprecation message: invoking it by any name reports a
+	// [Deprecation] carrying it. Empty means the command is not deprecated as a whole.
+	Deprecated       string
+	Flags            []FlagDef
+	Arguments        []ArgDef
+	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
+	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
+	Commands         []CommandDef
+	Remotes          []RemoteDef         // co-located remote binaries dispatched as sub-commands of this command
+	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
+	PluginPath       string              // extra directory searched for BOTH this command's declared remotes and its discovered plugins
+	Passthrough      bool                // every token after this command is a raw positional (no flag parsing)
 }
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The
@@ -214,6 +217,9 @@ type FlagDef struct {
 	Secret                bool     // when true, the value is redacted in usage/validation error output
 	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen
 	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Deprecations] reports when used
+	// Deprecated is the flag's deprecation message: setting it by any identifier reports a
+	// [Deprecation] carrying it. Empty means the flag is not deprecated as a whole.
+	Deprecated string
 	// Negatable adds a "--no-<x>" form for every long identifier of a bool flag, which sets
 	// it false. It is how an author expresses "turn this off for one run" when a default, a
 	// config file or an environment variable already turned it on — the direction a plain
@@ -265,6 +271,9 @@ type ArgDef struct {
 	Separator string
 	// Layout is how a time argument's value is written; see [FlagDef.Layout].
 	Layout string
+	// Deprecated is the argument's deprecation message: supplying it reports a [Deprecation]
+	// carrying it.
+	Deprecated string
 	// Complete is the declarative shell-completion hint for this argument's value.
 	Complete Completion
 	Secret   bool // when true, the value is redacted in usage/validation error output

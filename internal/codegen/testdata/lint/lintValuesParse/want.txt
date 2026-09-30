@@ -4,4 +4,5 @@ spec: .rotini.spec.yaml:5:3: command demo: flag "limits": default "lots" is not 
 spec: .rotini.spec.yaml:5:3: command demo: flag "level": implicit_value "max" is not a valid integer — the flag given bare would always fail
 spec: .rotini.spec.yaml:5:3: command demo: flag "due": default "2026-13-01" is not a valid date (write it as 2006-01-02) — every run that leaves it unset would fail
 spec: .rotini.spec.yaml:5:3: command demo: flag "at": default "2026-09-29" is not a valid time (write it as RFC 3339, e.g. 2026-09-29T14:00:00Z — or declare `type: date` or a `layout:`) — every run that leaves it unset would fail
+spec: .rotini.spec.yaml:5:3: command demo: flag "grace": default "30s" must be >= 1m0s — every run that leaves it unset would fail
 spec: .rotini.spec.yaml:5:3: command demo: argument "count": default "-1" is not a valid non-negative integer — every run that leaves it unset would fail

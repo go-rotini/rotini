@@ -52,6 +52,7 @@ type rnode struct {
 	passthrough           bool                // every token after this command is a raw positional
 	composed              bool                // grafted from a $ref'd child (its types live in the child's cmd)
 	remotes               []RemoteCommandSpec // co-located remote sub-commands declared on this command
+	remoteHost            string              // program name remote binaries are named after ("" = this program's)
 	pluginPath            string              // extra directory searched for BOTH this command's remote kinds
 	children              []rnode
 }
@@ -85,6 +86,10 @@ type composeCtx struct {
 	childPascal string // root method name the subtree delegates under (child's name, or the handler convention)
 	alias       string // import alias of the handler package (composed child cli, or a passthrough package)
 	passthrough bool   // delegate via alias.method() (passthrough) instead of alias.Handlers().method()
+	// remoteHost is the program name the subtree's plugin binaries are named after: the
+	// composed spec's own root name, so a plugin serves `child cmd` and `parent child cmd`
+	// alike. "" outside a composed subtree (the program's own name).
+	remoteHost string
 }
 
 // resolveTree resolves spec into a program, loading any `$ref`'d child specs relative to
@@ -275,6 +280,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			passthrough:           c.Passthrough,
 			composed:              ctx.composed,
 			remotes:               c.RemoteCommands,
+			remoteHost:            ctx.remoteHost,
 			pluginPath:            c.PluginPath,
 			children:              children,
 		})
@@ -348,6 +354,10 @@ func overlayCommand(child, parent Command) Command {
 	}
 	if parent.Filename != "" {
 		m.Filename = parent.Filename
+	}
+	// Where the grafted command's plugins are installed is the parent's call to make.
+	if parent.PluginPath != "" {
+		m.PluginPath = parent.PluginPath
 	}
 	return m
 }
@@ -423,7 +433,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		config: configFields(childRoot.inputs()),
 	})
 
-	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough}
+	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, remoteHost: childRoot.Name}
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
@@ -442,7 +452,18 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 			return rnode{}, err
 		}
 	}
-	return rnode{name: graftName, prefix: prefix, aliases: merged.Aliases, inputs: childRoot.inputs(), help: commandHelp(merged), hidden: merged.Hidden, group: merged.Group, deprecated: merged.Deprecated, deprecatedIdentifiers: merged.DeprecatedIdentifiers, composed: true, children: children}, nil
+	// The composed node is the child's root, so it carries what the child's root dispatches —
+	// its remote commands, plugin discovery and passthrough — named as the child names them.
+	// Building it from the presentation keys alone once dropped all of these: the child's own
+	// binary ran its plugins and `parent child <plugin>` was "takes no arguments".
+	return rnode{
+		name: graftName, prefix: prefix, aliases: merged.Aliases, inputs: childRoot.inputs(),
+		help: commandHelp(merged), hidden: merged.Hidden, group: merged.Group,
+		deprecated: merged.Deprecated, deprecatedIdentifiers: merged.DeprecatedIdentifiers,
+		passthrough: childRoot.Passthrough, remotes: childRoot.RemoteCommands,
+		discovery: childRoot.RemoteDiscovery, pluginPath: merged.PluginPath,
+		remoteHost: childRoot.Name, composed: true, children: children,
+	}, nil
 }
 
 // adoptComposedMeta folds a composed child's document-level binding metadata into the parent's:
@@ -528,7 +549,10 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	synth := overlayCommand(gc, c)
 	synth.Ref = ""
 	synth.Commands = gc.Commands // overlayCommand left Commands == gc's; siblings merge below
-	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, ctx)
+	// The grandchild's plugins are named after the grandchild, as its own binary names them.
+	gcCtx := ctx
+	gcCtx.remoteHost = gc.Name
+	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, gcCtx)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,9 @@ package codegen
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-rotini/jsonschema"
@@ -144,10 +147,70 @@ func (p *Processor) explainDecodeFailure(kind string, err error) error {
 // validateAndLintSpec schema-validates the spec, then — only when it is schema-valid (the lint
 // rules assume a valid shape) — lints it. It returns every problem found.
 func (p *Processor) validateAndLintSpec(rs *reconciledSpec) []error {
+	problems := p.validateAndLintOne(rs)
+	// A composed child is part of this program, so it is judged with it. Before, a parent
+	// validated clean over a child holding an unknown key and an unparseable default: the child
+	// was checked for cycles and collisions only, unless someone validated it on its own.
+	return append(problems, p.validateComposedSpecs(rs, map[string]bool{})...)
+}
+
+// validateAndLintOne is the schema gate then the lint rules, for one spec document.
+func (p *Processor) validateAndLintOne(rs *reconciledSpec) []error {
 	if problems := p.validateSpec(rs); len(problems) > 0 {
 		return problems
 	}
 	return p.lintSpec(rs)
+}
+
+// validateComposedSpecs validates every LOCAL spec rs composes with `$ref`, transitively, exactly
+// as `rotini validate <child>` would — each problem positioned in the child's own file. A mod://
+// child belongs to another module and was validated by its author; a git::/https:// ref is
+// refused at composition. A spec that does not read at all is left to composition, which
+// reports it where the $ref sits.
+func (p *Processor) validateComposedSpecs(rs *reconciledSpec, seen map[string]bool) []error {
+	if rs == nil || rs.spec == nil {
+		return nil
+	}
+	seen[rs.path] = true
+	var problems []error
+	base := filepath.Dir(rs.path)
+	for _, ref := range localSpecRefs(&rs.spec.Command) {
+		locator, err := locateRef(base, ref)
+		if err != nil || seen[locator] {
+			continue
+		}
+		seen[locator] = true
+		child, err := reconcileSpec(displayPath(locator))
+		if err != nil {
+			continue
+		}
+		problems = append(problems, p.validateAndLintOne(child)...)
+		problems = append(problems, p.validateComposedSpecs(child, seen)...)
+	}
+	return problems
+}
+
+// localSpecRefs lists the local spec files a command tree composes directly.
+func localSpecRefs(c *Command) []string {
+	var refs []string
+	for i := range c.Commands {
+		sub := &c.Commands[i]
+		if sub.Ref != "" && !strings.HasPrefix(sub.Ref, modScheme) && !isExternalLocator(sub.Ref) {
+			refs = append(refs, sub.Ref)
+		}
+		refs = append(refs, localSpecRefs(sub)...)
+	}
+	return refs
+}
+
+// displayPath shortens an absolute path to one relative to the working directory, for messages.
+func displayPath(abs string) string {
+	if wd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(wd, abs); err == nil && !strings.HasPrefix(rel, "..") {
+			return rel
+		}
+	}
+	return abs
 }
 
 // validateAndLintConf is validateAndLintSpec for the conf.

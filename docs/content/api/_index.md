@@ -330,10 +330,14 @@ If you write your own `ProgramHandlers` and a method returns a **shared** value 
 
 Detection is opt-in too: `IsTerminal`, `EnvNoColor` and `TerminalSize` exist, but nothing calls them for you — the program decides and feeds the result in.
 
-`Parser` and `Binder` are overrides, not prerequisites: `Collect` builds its own. In particular **`rotini.Deprecations(rtx)` needs nothing bound** — it reports the deprecated aliases and identifiers this invocation actually used, reading the resolved chain and the argv that produced it straight off the `Context`.
+`Parser` and `Binder` are overrides, not prerequisites: `Collect` builds its own. In particular **`rotini.Deprecations(rtx)` needs nothing bound** — it reports the deprecated commands, flags and arguments this invocation actually used, reading the resolved chain and the argv that produced it straight off the `Context`. Each carries the spec's `deprecated:` message when there is one, and renders it: `flag "--database" is deprecated: use --db`.
 
 {{< code title="reporting a deprecated spelling" language="golang" open="true" collapsible="false" copy="true" >}}
 for _, d := range rotini.Deprecations(rtx) {
+	if d.Message != "" { // the spec already says what to use instead
+		rtx.RecordWarning(d)
+		continue
+	}
 	replacement := d.Name
 	if d.Kind == "flag" {
 		replacement = "--" + d.Name

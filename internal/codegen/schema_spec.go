@@ -13,7 +13,7 @@ type Spec struct {
 }
 
 type ArgumentInput struct {
-	// Deprecation message; the argument is annotated as deprecated in generated help.
+	// Deprecation message. The argument is annotated as deprecated in generated help, and supplying it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing).
 	Deprecated string `json:"deprecated,omitempty"`
 	// When true, the argument is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
@@ -25,17 +25,17 @@ type ArgumentInput struct {
 	Summary string `json:"summary,omitempty"`
 }
 
-// Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, description, …) is rejected too, since it would otherwise do nothing.
+// Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, title, …) is rejected too, since it would otherwise do nothing. `description` is accepted on object schemas and their properties, where it becomes a Go doc comment.
 type BaseSchema struct {
 	// Reference to a named schema in the root command's "schemas" map, by its name (`$ref: DB`) or as a JSON pointer (`$ref: '#/schemas/DB'`) — the two mean the same; the pointer is what JSON Schema tooling reads. Resolved at codegen time. On a FLAG, a named object schema makes the flag object-valued: its generated field is the schema's struct, and it takes JSON (`--db '{"host":"h","port":5}'`), key=value pairs (`--db host=h,port=5`; dotted keys nest, `pool.max=9`; a repeated key appends to a list field; quotes keep a comma, `host="a,b"`), a JSON or YAML file with `from: [file]` (`--db @db.yaml`), or one field per flag (`--db.host=h --db.port=5`). Occurrences MERGE in argv order, a later key winning. Declared as `type: array, items: {$ref: …}`, the flag is a list of objects and each occurrence is one element (per-field flags do not apply). A flag's environment fallback takes the same spellings (DB='{"host":"h"}'), and its configuration-file fallback is the object as a mapping (or a list of mappings). Every spelling is validated against the named schema — the same schema, and validator, a stdin payload of that shape meets — and errors name the flag and the key (`--db: port: value must be >= 1`, `unknown key "bogus"`). A `default` is written as a mapping (a list of mappings for a list) and is checked against the schema at validate time; a supplied value replaces it rather than merging. Scalar-shaping keys (enum, separator, ignore_case, implicit_value, negatable, dotted_keys, bounds, pattern) do not apply — an object's rules live in its schema. Arguments cannot be object-valued.
 	Ref string `json:"$ref,omitempty"`
 	// Allowed values, validated over the FULLY reconciled value (an env/config-supplied flag value is enum-checked too). At least one member — an empty list would mean the same as absent.
 	Enum []string `json:"enum,omitempty"`
 	// Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'.
-	ExclusiveMaximum *float64 `json:"exclusiveMaximum,omitempty"`
-	// Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere). exclusiveMinimum: 0 expresses "positive" exactly.
-	ExclusiveMinimum *float64 `json:"exclusiveMinimum,omitempty"`
-	// Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.
+	ExclusiveMaximum any `json:"exclusiveMaximum,omitempty"`
+	// Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numbers, durations and sizes; per-element for arrays; rejected elsewhere). exclusiveMinimum: 0 expresses "positive" exactly.
+	ExclusiveMinimum any `json:"exclusiveMinimum,omitempty"`
+	// Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID). Omit (or leave empty) for builtins and rotini's own type names (string, int, duration, url, ip, bytesize, …) — codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.
 	Import string `json:"import,omitempty"`
 	// Element schema for an array type: 'array' + items int generates []int, items $ref a named-type slice; omitted items default to string elements. Per-value constraints (enum, pattern, minimum/maximum, exclusiveMinimum/exclusiveMaximum, multipleOf, minLength/maxLength) apply to EVERY element and may be written either here, JSON-Schema style, or on the list itself — the two spellings mean the same thing, and declaring the same constraint in both places with different values is an error. minItems/maxItems belong on the list (they count elements) and are rejected here on flags, arguments, env and config. The TextUnmarshaler contract also applies per element (see 'type').
 	Items *Schema `json:"items,omitempty"`
@@ -43,16 +43,16 @@ type BaseSchema struct {
 	MaxItems int `json:"maxItems,omitempty"`
 	// Maximum string length in runes (string types only; for []string, each element) — rejected on non-string types.
 	MaxLength int `json:"maxLength,omitempty"`
-	// Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere); maximum: 0 is a real, enforced bound.
-	Maximum *float64 `json:"maximum,omitempty"`
+	// Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound.
+	Maximum any `json:"maximum,omitempty"`
 	// Minimum number of values for a repeatable (array or map) input — rejected on scalar types.
 	MinItems int `json:"minItems,omitempty"`
 	// Minimum string length in runes (string types only; for []string, each element) — rejected on non-string types.
 	MinLength int `json:"minLength,omitempty"`
-	// Minimum allowed value (inclusive). Numeric-family types only (int/uint/float variants and the integer/number aliases) — rejected on any other type, where it would be silently ignored; for a repeatable numeric input the bound applies to each ELEMENT. Duration/time bounds are rejected (validate in the handler, or wrap the value in a TextUnmarshaler type). minimum: 0 is a real, enforced bound (use uint when you want the type system to carry non-negativity instead).
-	Minimum *float64 `json:"minimum,omitempty"`
-	// The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numeric-family types only, per-element for arrays; must be strictly positive.
-	MultipleOf *float64 `json:"multipleOf,omitempty"`
+	// Minimum allowed value (inclusive). Numeric-family types (int/uint/float variants and the integer/number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes) — read by the same parser as the value, and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would be silently ignored. For a repeatable input the bound applies to each ELEMENT. minimum: 0 is a real, enforced bound.
+	Minimum any `json:"minimum,omitempty"`
+	// The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numbers, durations and sizes, in their own spelling (`multipleOf: 1s`); per-element for arrays; must be strictly positive.
+	MultipleOf any `json:"multipleOf,omitempty"`
 	// Generate the field as a pointer (*T): nil means the input was not provided, distinguishable from its zero value. Defaults/values coerce through the pointer.
 	Nullable bool `json:"nullable,omitempty"`
 	// Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match.
@@ -65,7 +65,7 @@ type BaseSchema struct {
 
 // A command node in the CLI command tree — the root command (under the document's 'command' key) and every sub-command share this recursive shape. Declared inline (with 'name') or composed from another spec file (with '$ref'). The root must use 'name' (not '$ref'). The two root-command-level keys (env_prefix, schemas) are accepted on this shape but are valid only on the root command — rotini validation rejects them on a sub-command.
 type Command struct {
-	// Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, header, footer, examples, help, headings, group, hidden, deprecated, deprecated_identifiers, filename) WIN over the child's when present — so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node — the composed command delegates to the child's handler, built against the child's own inputs/output — so rotini validation rejects them here (declare them in the child spec).
+	// Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) WIN over the child's when present, for that one composed node (the child's own sub-commands keep theirs) — so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). The child's own remote_commands, remote_discovery and passthrough travel with it. `handler:` on a $ref node points the composed command at a different handler package. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file. Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node — the composed command delegates to the child's handler, built against the child's own inputs/output — so rotini validation rejects them here (declare them in the child spec).
 	Ref string `json:"$ref,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.
 	Aliases []string `json:"aliases,omitempty"`
@@ -77,7 +77,7 @@ type Command struct {
 	Config []ConfigInput `json:"config,omitempty"`
 	// Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins. COMPOSITION: a $ref'd child's sources travel with its command tree, re-scoped to the path the graft occupies, so `parent child cmd` reads what `child cmd` reads without the parent re-declaring anything.
 	ConfigFiles []ConfigurationFile `json:"config_files,omitempty"`
-	// Deprecation message; the command is annotated as deprecated in its parent's generated Commands list.
+	// Deprecation message. The command is annotated as deprecated in its parent's generated Commands list, and invoking it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those aliases report; without, every name does.
 	Deprecated string `json:"deprecated,omitempty"`
 	// Aliases of this command that are deprecated (a subset of 'aliases'). When the command is invoked via one of these, rotini's Deprecations surfaces it for the handler to act on; invoking via the name or a non-listed alias is unaffected. Sub-commands only, like 'aliases' — rejected on the root by rotini validation.
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
@@ -109,13 +109,13 @@ type Command struct {
 	Header string `json:"header,omitempty"`
 	// Section heading overrides for the generated page; sane defaults fill any unset heading. Ignored when 'help' is set.
 	Headings *HelpHeadings `json:"headings,omitempty"`
-	// Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields.
+	// Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering; terminal styling kept) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields.
 	Help string `json:"help,omitempty"`
 	// When true, the command is omitted from its parent's generated Commands list (it still dispatches on the command line).
 	Hidden bool `json:"hidden,omitempty"`
-	// Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template.
+	// Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it as given — byte-for-byte except that ANSI styling is removed, since a man page carries none — and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template.
 	Man string `json:"man,omitempty"`
-	// Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it byte-for-byte; when unset, the page is rendered from the structured doc-fields through the markdown template.
+	// Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it as given — byte-for-byte except that ANSI styling is removed; when unset, the page is rendered from the structured doc-fields through the markdown template.
 	Markdown string `json:"markdown,omitempty"`
 	// Command name used in routing. As the root command (the document itself) this is the binary name and must be set — the root cannot use '$ref'.
 	Name string `json:"name,omitempty"`
@@ -123,13 +123,13 @@ type Command struct {
 	Output *Schema `json:"output,omitempty"`
 	// When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no remote commands or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
 	Passthrough bool `json:"passthrough,omitempty"`
-	// Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+	// Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
 	PluginPath string `json:"plugin_path,omitempty"`
 	// Co-located remote binaries dispatched as first-class sub-commands of this command.
 	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
 	// Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery.
 	RemoteDiscovery *RemoteDiscovery `json:"remote_discovery,omitempty"`
-	// Document-level (root only): reusable named schema definitions. Referenced elsewhere via "$ref": "#/schemas/<Name>". Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package, which other packages may import.
+	// Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package, which other packages may import.
 	Schemas map[string]Schema `json:"schemas,omitempty"`
 	// Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.
 	SeeAlso []string `json:"see_also,omitempty"`
@@ -144,7 +144,7 @@ type Command struct {
 }
 
 type ConfigInput struct {
-	// Deprecation message; the input is annotated as deprecated in generated help.
+	// Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries — commands, flags and arguments.)
 	Deprecated string `json:"deprecated,omitempty"`
 	// When true, the input is omitted from generated help (it is still bound).
 	Hidden bool `json:"hidden,omitempty"`
@@ -182,7 +182,7 @@ type ConfigurationFileDiscover struct {
 }
 
 type EnvInput struct {
-	// Deprecation message; the input is annotated as deprecated in generated help.
+	// Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries — commands, flags and arguments.)
 	Deprecated string `json:"deprecated,omitempty"`
 	// When true, the input is omitted from generated help (it is still bound).
 	Hidden bool `json:"hidden,omitempty"`
@@ -220,9 +220,9 @@ type FlagGroup struct {
 type FlagInput struct {
 	// When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: all flags already resolve up the command chain at runtime regardless of this setting; cascading controls whether descendants document it.
 	Cascading bool `json:"cascading,omitempty"`
-	// Deprecation message; the flag is annotated as deprecated in generated help.
+	// Deprecation message. The flag is annotated as deprecated in generated help, and using it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those spellings report — the others are the ones to move to (`identifiers: [--db, --database]`, `deprecated_identifiers: [--database]`, `deprecated: use --db`); without, the whole flag is deprecated and every spelling reports.
 	Deprecated string `json:"deprecated,omitempty"`
-	// CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input
+	// CLI tokens for this input that are deprecated — a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. Pair it with `deprecated:` to give the report a message; `deprecated:` alone deprecates every spelling
 	DeprecatedIdentifiers []string `json:"deprecated_identifiers,omitempty"`
 	// Group label that buckets this flag under its own heading in generated help, exactly as a command's 'group' buckets it in the Commands list: flags sharing a group appear together, groups appear in the order their first member is declared, and ungrouped flags fall under the default Flags heading.
 	//
@@ -230,7 +230,7 @@ type FlagInput struct {
 	Group string `json:"group,omitempty"`
 	// When true, the flag is omitted from generated help (it still parses on the command line).
 	Hidden bool `json:"hidden,omitempty"`
-	// CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is auto-derived.
+	// CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run).
 	Identifiers []string `json:"identifiers,omitempty"`
 	// Logical name for the flag
 	Name string `json:"name"`
@@ -277,7 +277,7 @@ type InputSchema struct {
 	Complete *InputSchemaComplete `json:"complete,omitempty"`
 	// Flag and env inputs only: names a config_files entry whose file PATH this input supplies — the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist — unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry.
 	ConfigSource string `json:"config_source,omitempty"`
-	// Default value applied when the input is not provided
+	// The value an input takes when no channel supplies one. A scalar for a single value; a list for a repeatable input, each element seeded as one occurrence (as if the flag were repeated); a mapping for a map input, seeded as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). It is written the way a user would write the value (a duration as 30s, a date as 2026-09-29 or under `layout:`), and `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that takes it. A supplied value REPLACES the default, never merges with it. `default_text:` changes only how help shows it.
 	Default any `json:"default,omitempty"`
 	// The default as help, man and markdown SHOW it, in place of the value itself. For a default that reads badly verbatim (`default_text: 'the number of CPUs'`, `default_text: '$HOME/.cache/app'`) or that the handler computes when the input is unset, so there is no literal to show. Display only: the value the input takes is still `default`, or nothing.
 	DefaultText string `json:"default_text,omitempty"`
@@ -285,7 +285,7 @@ type InputSchema struct {
 	DottedKeys bool `json:"dotted_keys,omitempty"`
 	// Config inputs only: pins this input to ONE named config_files entry — the value (and its 'required') is read from that file ONLY, never from the merged precedence chain, so a key present in another file does not satisfy it. Omit to read through the declared precedence order (first file with the key wins).
 	File string `json:"file,omitempty"`
-	// Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text is whitespace-trimmed, then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text (a structured stdin payload is the stdin: channel's job, not a flag's). Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only.
+	// Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text has one trailing line ending removed (leading and interior whitespace is content), then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text. On an object-valued flag the resolved text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the command as a whole is the stdin: channel's job. Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only.
 	From []string `json:"from,omitempty"`
 	// With 'enum' only: match a value against the enum without regard to case, so `--mode FAST` is accepted against [fast, slow]. The value binds as the DECLARED spelling (fast), so a handler compares against one form. Applies on every channel the input reads: argv, a flag's env and config fallbacks, and env and config inputs.
 	IgnoreCase bool `json:"ignore_case,omitempty"`
@@ -309,7 +309,7 @@ type InputSchema struct {
 	Required bool `json:"required,omitempty"`
 	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag. rotini ships no interactive secret prompt (the UX layer is deliberately out of scope): a handler wanting one reads rtx.Stdin with any prompt library; for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 	Secret bool `json:"secret,omitempty"`
-	// LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style — an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched.
+	// LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style — an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched. Not on env and config INPUTS: an env input's list is split on commas by rotini's configuration reader (TAGS=a,b), and a configuration file writes a list as a list.
 	Separator string `json:"separator,omitempty"`
 	// The EXACT environment variable this input reads, instead of the name rotini would derive — or a LIST of names, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on FLAGS (as a flag's env fallback); rejected on arguments, config inputs and stdin, which have no environment channel.
 	//
@@ -332,7 +332,7 @@ type InputSchemaComplete struct {
 type RemoteCommandSpec struct {
 	// Additional names that invoke this remote command.
 	Aliases []string `json:"aliases,omitempty"`
-	// Name of the remote command. The dispatched binary must be named <program>-<name> and located in the same directory as the host binary.
+	// Name of the remote command. The dispatched binary is named <program>-<name>, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree <program> is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
 	Name string `json:"name"`
 	// Short one-liner shown next to this remote command in its parent's generated Commands list.
 	Summary string `json:"summary,omitempty"`
@@ -351,6 +351,8 @@ type RemoteDiscovery struct {
 // JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.
 type Schema struct {
 	BaseSchema
+	// What this shape or property IS, in a sentence. rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema has `summary:` on the input instead.
+	Description string `json:"description,omitempty"`
 	// Required property names for object schemas (standard JSON Schema semantics).
 	Required []string `json:"required,omitempty"`
 }

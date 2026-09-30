@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 )
 
@@ -101,6 +102,37 @@ type normalizer interface{ normalize() }
 func (s *Spec) normalize() {
 	qualifySchemaRefs(reflect.ValueOf(s).Elem())
 	hoistItemConstraints(s)
+	normalizeBounds(s)
+}
+
+// normalizeBounds converts a bound written in a measured type's own spelling — `minimum: 1s` on a
+// duration, `maximum: 1Gi` on a bytesize — to a number in that type's unit (nanoseconds,
+// bytes), which is what the generated constraint and every lint rule compare against. The
+// runtime's own parser reads the text, so `1h30m` or `1.5Gi` means here exactly what it means
+// on the command line. A string that does not convert stays a string for
+// lintConstraintApplicability to report.
+func normalizeBounds(s *Spec) {
+	walkCommands(s, func(c *Command, _ string) {
+		eachInputSchema(c.inputs(), func(_, _ string, schema *InputSchema) {
+			if schema == nil {
+				return
+			}
+			elem := strings.TrimPrefix(getSchemaType(schema), "[]")
+			for _, b := range []*any{&schema.Minimum, &schema.Maximum, &schema.ExclusiveMinimum, &schema.ExclusiveMaximum, &schema.MultipleOf} {
+				if text, ok := (*b).(string); ok {
+					if n, ok := measuredValue(elem, text); ok {
+						*b = n
+					}
+					continue
+				}
+				// A bare number on a duration has no unit — 5 what? It is kept as text so the
+				// lint reports it and asks for 5s, rather than reading it as nanoseconds.
+				if n := bound(*b); n != nil && elem == "time.Duration" {
+					*b = strconv.FormatFloat(*n, 'g', -1, 64)
+				}
+			}
+		})
+	})
 }
 
 // qualifySchemaRefs rewrites every bare schema reference (`$ref: DB`) to its pointer form

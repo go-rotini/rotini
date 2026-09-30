@@ -24,6 +24,7 @@ const StreamStdout
 field ArgDef.Complete
 field ArgDef.Constraints
 field ArgDef.Default
+field ArgDef.Deprecated
 field ArgDef.Enum
 field ArgDef.Hidden
 field ArgDef.IgnoreCase
@@ -45,6 +46,7 @@ field BindMeta.StdinSchemas
 field CommandDef.Aliases
 field CommandDef.Arguments
 field CommandDef.Commands
+field CommandDef.Deprecated
 field CommandDef.DeprecatedIdentifiers
 field CommandDef.Discovery
 field CommandDef.FlagDependencies
@@ -97,6 +99,7 @@ field Definition.PluginPath
 field Definition.RemoteCommands
 field Deprecation.Identifier
 field Deprecation.Kind
+field Deprecation.Message
 field Deprecation.Name
 field DiscoverDef.App
 field DiscoverDef.File
@@ -105,6 +108,7 @@ field FlagDef.Complete
 field FlagDef.Constraints
 field FlagDef.Default
 field FlagDef.Defaults
+field FlagDef.Deprecated
 field FlagDef.DeprecatedIdentifiers
 field FlagDef.DottedKeys
 field FlagDef.Enum
@@ -174,6 +178,7 @@ field Resolution.Chain
 field Resolution.Remote
 field ResolvedCommand.Arguments
 field ResolvedCommand.Commands
+field ResolvedCommand.Deprecated
 field ResolvedCommand.DeprecatedIdentifiers
 field ResolvedCommand.Discovery
 field ResolvedCommand.FlagDependencies

@@ -50,15 +50,15 @@ func TestHoistItemConstraints_everyPerValueConstraintReachesTheList(t *testing.T
 		t.Errorf("enum = %v", s.Enum)
 	case s.Pattern != "^[0-9]+$":
 		t.Errorf("pattern = %q", s.Pattern)
-	case s.Minimum == nil || *s.Minimum != 1:
+	case bound(s.Minimum) == nil || *bound(s.Minimum) != 1:
 		t.Errorf("minimum = %v", s.Minimum)
-	case s.Maximum == nil || *s.Maximum != 99:
+	case bound(s.Maximum) == nil || *bound(s.Maximum) != 99:
 		t.Errorf("maximum = %v", s.Maximum)
-	case s.ExclusiveMinimum == nil || *s.ExclusiveMinimum != 0:
+	case bound(s.ExclusiveMinimum) == nil || *bound(s.ExclusiveMinimum) != 0:
 		t.Errorf("exclusiveMinimum = %v", s.ExclusiveMinimum)
-	case s.ExclusiveMaximum == nil || *s.ExclusiveMaximum != 100:
+	case bound(s.ExclusiveMaximum) == nil || *bound(s.ExclusiveMaximum) != 100:
 		t.Errorf("exclusiveMaximum = %v", s.ExclusiveMaximum)
-	case s.MultipleOf == nil || *s.MultipleOf != 10:
+	case bound(s.MultipleOf) == nil || *bound(s.MultipleOf) != 10:
 		t.Errorf("multipleOf = %v", s.MultipleOf)
 	case s.MinLength != 1 || s.MaxLength != 3:
 		t.Errorf("minLength/maxLength = %d/%d", s.MinLength, s.MaxLength)
@@ -96,8 +96,8 @@ func TestHoistItemConstraints_neverOverwritesTheList(t *testing.T) {
       schema: { type: array, enum: [a], minimum: 5, items: { type: string, enum: [x], minimum: 9 } }
 `)
 	s := spec.Command.Flags[0].Schema
-	if !slices.Equal(s.Enum, []string{"a"}) || *s.Minimum != 5 {
-		t.Errorf("list-level values overwritten: enum=%v minimum=%v", s.Enum, *s.Minimum)
+	if !slices.Equal(s.Enum, []string{"a"}) || *bound(s.Minimum) != 5 {
+		t.Errorf("list-level values overwritten: enum=%v minimum=%v", s.Enum, *bound(s.Minimum))
 	}
 }
 
@@ -187,6 +187,35 @@ func TestQualifySchemaRefs(t *testing.T) {
 	} {
 		if got != want {
 			t.Errorf("ref = %q, want %q", got, want)
+		}
+	}
+}
+
+// A bound written in a measured type's spelling is read in its unit right after decoding —
+// through the runtime's parser, so 1h30m and 1.5Gi mean what they mean on the command line — and
+// a bare number on a duration is kept as text for the lint to reject rather than read as
+// nanoseconds.
+func TestNormalizeBounds(t *testing.T) {
+	spec := &Spec{Command: Command{Name: "app", Flags: []FlagInput{
+		{Name: "wait", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "duration", Minimum: "1s", Maximum: "1h30m"}}},
+		{Name: "size", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "bytesize", Maximum: "1.5Gi", Minimum: float64(1024)}}},
+		{Name: "bare", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "duration", Minimum: float64(5)}}},
+		{Name: "bad", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "bytesize", Maximum: "lots"}}},
+		{Name: "plain", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "int", Maximum: "1s"}}},
+	}}}
+	spec.normalize()
+	f := spec.Command.Flags
+	for name, tc := range map[string]struct{ got, want any }{
+		"wait min": {f[0].Schema.Minimum, 1e9},
+		"wait max": {f[0].Schema.Maximum, 90 * 60 * 1e9},
+		"size max": {f[1].Schema.Maximum, float64(3 << 29)},
+		"size min": {f[1].Schema.Minimum, float64(1024)},
+		"bare":     {f[2].Schema.Minimum, "5"},
+		"bad":      {f[3].Schema.Maximum, "lots"},
+		"plain":    {f[4].Schema.Maximum, "1s"},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s = %#v, want %#v", name, tc.got, tc.want)
 		}
 	}
 }

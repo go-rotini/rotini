@@ -220,3 +220,45 @@ func TestFlagRow_implicitValueAndDefaultText(t *testing.T) {
 		t.Errorf("row = %+v", row)
 	}
 }
+
+// `description` on an object schema or its properties becomes the Go doc comment on the
+// generated type and field. On an input's own schema it would do nothing — the input has
+// `summary:` — so it is still rejected there.
+func TestSchemaDescriptionsBecomeDocComments(t *testing.T) {
+	emitted := composeModuleStaged(t, map[string]string{
+		"cmd/root/.rotini.spec.yaml": `version: 0.0.0
+command:
+  name: root
+  summary: r
+  schemas:
+    DB:
+      description: The database the command connects to.
+      type: object
+      properties:
+        host: {type: string, description: Hostname or IP of the primary.}
+  output:
+    type: object
+    description: What root reports.
+    properties:
+      ok: {type: boolean, description: Whether it worked.}
+`,
+		"cmd/root/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/root/zz_root.go\n      package: root\n",
+	})
+	gen := emitted["internal/cmd/root/zz_root.go"]
+	for _, want := range []string{
+		"// The database the command connects to.\ntype DB struct",
+		"// Hostname or IP of the primary.\n\tHost string",
+		"// Whether it worked.\n\tOk ",
+	} {
+		if !strings.Contains(gen, want) {
+			t.Errorf("generated code missing %q:\n%s", want, gen)
+		}
+	}
+
+	err, _ := validateInModule(t, blockSpecHead+
+		"  flags:\n    - name: a\n      identifiers: [--a]\n      summary: s\n      schema: { type: string, description: nope }\n",
+		goldenConf, "")
+	if err == nil || !strings.Contains(err.Error(), `unknown key "description"`) {
+		t.Errorf("description on an input schema: err = %v, want it rejected", err)
+	}
+}

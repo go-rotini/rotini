@@ -2442,3 +2442,81 @@ func TestParse_errorsNameTheTypedIdentifier(t *testing.T) {
 		}
 	}
 }
+
+// A `deprecated:` message reaches the runtime: using a deprecated command (by any name), flag
+// (by any identifier) or argument reports a Deprecation carrying it — where before the message
+// reached the help page only, and a handler could not tell the input was deprecated at all.
+// Deprecated identifiers alone still report, without a message.
+func TestDeprecations_carryTheMessage(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{{
+			Name: "build", Aliases: []string{"b", "mk"}, Handler: "AppBuild", Deprecated: "use app make",
+			DeprecatedIdentifiers: []string{"mk"},
+			Flags: []FlagDef{
+				{Name: "conf", Identifiers: []string{"-c", "--conf"}, Type: "string", Deprecated: "use --config"},
+				{Name: "out", Identifiers: []string{"-o", "--out", "--output"}, Type: "string", DeprecatedIdentifiers: []string{"--out"}},
+			},
+			Arguments: []ArgDef{{Name: "target", Type: "string"}, {Name: "legacy", Type: "string", Deprecated: "no longer read"}},
+		}},
+	}
+	got := Deprecations(NewContextFor(def, []string{"mk", "-c", "x", "--out", "y", "t1", "t2"}))
+	want := []Deprecation{
+		{Kind: "command", Name: "build", Identifier: "mk", Message: "use app make"},
+		{Kind: "flag", Name: "conf", Identifier: "-c", Message: "use --config"},
+		{Kind: "flag", Name: "out", Identifier: "--out"},
+		{Kind: "argument", Name: "legacy", Identifier: "<legacy>", Message: "no longer read"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Deprecations =\n %+v\nwant\n %+v", got, want)
+	}
+	if got := got[1].Error(); got != `flag "-c" is deprecated: use --config` {
+		t.Errorf("Error() = %q", got)
+	}
+	// When some spellings are listed as deprecated, only those are: the command reached by its
+	// name or a live alias, and --output (the flag's live spelling), report nothing — they are
+	// what the message tells the user to move to. The unused argument is not reported either.
+	if got := Deprecations(NewContextFor(def, []string{"b", "--output", "y", "t1"})); len(got) != 0 {
+		t.Errorf("got %+v, want nothing: only the listed spellings are deprecated", got)
+	}
+}
+
+// Bounds on a duration or size apply in the type's own unit, element-wise for a list, and the
+// message prints the bound the way the type is written.
+func TestParse_measuredBounds(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "wait", Identifiers: []string{"--wait"}, Type: "time.Duration",
+				Constraints: Constraints{Minimum: Ptr(float64(time.Second)), Maximum: Ptr(float64(90 * time.Minute))}},
+			{Name: "size", Identifiers: []string{"--size"}, Type: "rotini.ByteSize",
+				Constraints: Constraints{Maximum: Ptr(float64(1 << 30))}},
+			{Name: "sizes", Identifiers: []string{"--sizes"}, Type: "[]rotini.ByteSize",
+				Constraints: Constraints{Maximum: Ptr(float64(1 << 20))}},
+		},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Wait  time.Duration `rotini:"wait"`
+				Size  ByteSize      `rotini:"size"`
+				Sizes []ByteSize    `rotini:"sizes"`
+			}
+		}
+	}
+	if err := NewParser().Parse(NewContextFor(def, []string{"--wait", "1h", "--size", "512Mi", "--sizes", "1Ki", "--sizes", "1Mi"}), &in); err != nil {
+		t.Fatalf("in-range values rejected: %v", err)
+	}
+	for argv, want := range map[string]string{
+		"--wait=2h":    "--wait must be <= 1h30m0s (got 2h)",
+		"--wait=500ms": "--wait must be >= 1s (got 500ms)",
+		"--size=2Gi":   "--size must be <= 1Gi (got 2Gi)",
+		"--sizes=2Mi":  "--sizes must be <= 1Mi (got 2Mi)",
+		"--wait=1d":    "--wait must be <= 1h30m0s (got 1d)",
+	} {
+		err := NewParser().Parse(NewContextFor(def, []string{argv}), &in)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", argv, err, want)
+		}
+	}
+}

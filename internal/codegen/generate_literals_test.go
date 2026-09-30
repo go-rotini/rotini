@@ -157,3 +157,21 @@ func TestLayoutFor(t *testing.T) {
 		t.Errorf("channel tags = %q", tags)
 	}
 }
+
+// A `deprecated:` message is compiled into the definition, where rotini.Deprecations reads it.
+func TestDefsLiteral_deprecatedMessages(t *testing.T) {
+	in := &Inputs{
+		Flags:     []FlagInput{{Name: "conf", Identifiers: []string{"--conf"}, Deprecated: "use --config"}},
+		Arguments: []ArgumentInput{{Name: "legacy", Deprecated: "no longer read"}},
+	}
+	lit := flagDefsLiteral(in, nil) + argDefsLiteral(in)
+	for _, want := range []string{`Deprecated: "use --config"`, `Deprecated: "no longer read"`} {
+		if !strings.Contains(lit, want) {
+			t.Errorf("literal missing %s:\n%s", want, lit)
+		}
+	}
+	cmds := rnodesLiteral("app", []rnode{{name: "build", prefix: "AppBuild", deprecated: "use app make"}}, nil)
+	if !strings.Contains(cmds, `Deprecated: "use app make"`) {
+		t.Errorf("command literal missing its message:\n%s", cmds)
+	}
+}

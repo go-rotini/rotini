@@ -1742,3 +1742,44 @@ func TestBinder_channelTimeLayouts(t *testing.T) {
 		t.Error("SINCE=yesterday accepted")
 	}
 }
+
+// An env or config duration reads days and weeks like a flag does, and a duration or size bound
+// applies on those channels too — recon's own parser stops at hours, and a duration read as a
+// plain integer never met its bound.
+func TestBinder_channelDurationsAndBounds(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Env       struct {
+				TTL time.Duration `rotini:"ttl" recon:"ttl" env:"TTL" max:"604800000000000"`
+			}
+			Config struct {
+				Cache ByteSize `rotini:"cache" recon:"cache" max:"1073741824"`
+			}
+		}
+	}
+	bind := func(t *testing.T, cfg string) (inputs, error) {
+		t.Helper()
+		var in inputs
+		meta := BindMeta{}
+		if cfg != "" {
+			meta.ConfigFiles = []ConfigFile{{Name: "app", Path: writeConfig(t, cfg), Format: "yaml"}}
+		}
+		err := NewBinder(meta).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+		return in, err
+	}
+	t.Setenv("TTL", "3d")
+	in, err := bind(t, "cache: 512Mi\n")
+	if err != nil || in.App.Env.TTL != 72*time.Hour || in.App.Config.Cache != 512<<20 {
+		t.Fatalf("ttl=%v cache=%v err=%v", in.App.Env.TTL, in.App.Config.Cache, err)
+	}
+	t.Setenv("TTL", "8d")
+	if _, err := bind(t, ""); err == nil || !strings.Contains(err.Error(), "TTL must be <= 168h0m0s") {
+		t.Errorf("TTL=8d: err = %v, want the 7d bound", err)
+	}
+	t.Setenv("TTL", "1h")
+	if _, err := bind(t, "cache: 2Gi\n"); err == nil || !strings.Contains(err.Error(), "cache must be <= 1Gi") {
+		t.Errorf("cache 2Gi: err = %v, want the 1Gi bound", err)
+	}
+}

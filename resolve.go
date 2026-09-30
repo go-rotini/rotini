@@ -20,6 +20,7 @@ type ResolvedCommand struct {
 	Handler               string
 	Matched               string   // the argv token that resolved this command (name or an alias); "" for the root
 	DeprecatedIdentifiers []string // aliases of this command that are deprecated
+	Deprecated            string   // the command's deprecation message, when it is deprecated as a whole
 	Flags                 []FlagDef
 	Arguments             []ArgDef
 	FlagGroups            []FlagGroup
@@ -46,7 +47,7 @@ func rootFrame(def Definition) ResolvedCommand {
 
 func cmdFrame(c CommandDef) ResolvedCommand {
 	return ResolvedCommand{
-		Name: c.Name, Handler: c.Handler, DeprecatedIdentifiers: c.DeprecatedIdentifiers,
+		Name: c.Name, Handler: c.Handler, DeprecatedIdentifiers: c.DeprecatedIdentifiers, Deprecated: c.Deprecated,
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Remotes: c.Remotes, Discovery: c.Discovery,

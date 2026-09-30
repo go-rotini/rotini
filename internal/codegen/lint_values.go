@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,14 +77,41 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 		{Name: "Arguments", Type: reflect.TypeFor[struct{}]()},
 	})
 	inputs := reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}})
-	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{{Name: "v", Identifiers: []string{"--v"}, Type: defType, Layout: layoutFor(schema)}}}
+	fd := rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: defType, Layout: layoutFor(schema)}
+	// A measured type's bounds are checked here too: the numeric default rule cannot read
+	// "3s", so without this a default outside a duration's bounds would validate clean and fail
+	// every run that took it.
+	if measuredTypes[strings.TrimPrefix(getSchemaType(schema), "[]")] {
+		fd.Constraints = rotini.Constraints{
+			Minimum: bound(schema.Minimum), Maximum: bound(schema.Maximum),
+			ExclusiveMinimum: bound(schema.ExclusiveMinimum), ExclusiveMaximum: bound(schema.ExclusiveMaximum),
+			MultipleOf: bound(schema.MultipleOf),
+		}
+	}
+	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{fd}}
 	for _, v := range values {
 		err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"--v=" + v}), reflect.New(inputs).Interface())
 		if err != nil {
-			return strings.TrimPrefix(err.Error(), "--v: ")
+			return runtimeComplaint(err.Error(), v)
 		}
 	}
 	return ""
+}
+
+// runtimeComplaint rephrases the runtime's error about the placeholder flag --v into one about
+// the value: `--v: "abc" is not a valid integer` loses its label, and a bound violation
+// `--v must be >= 1m0s (got 30s)` becomes `"30s" must be >= 1m0s`.
+func runtimeComplaint(msg, value string) string {
+	if rest, ok := strings.CutPrefix(msg, "--v: "); ok {
+		return rest
+	}
+	if rest, ok := strings.CutPrefix(msg, "--v "); ok {
+		if i := strings.LastIndex(rest, " (got "); i >= 0 {
+			rest = rest[:i]
+		}
+		return strconv.Quote(value) + " " + rest
+	}
+	return msg
 }
 
 // valueTypes are the Go types a spec's type names resolve to whose reflect.Type codegen knows —
@@ -297,4 +325,25 @@ func layoutProblem(layout string) string {
 		return fmt.Sprintf("sets layout %q, which cannot read back the times it writes (%v)", layout, err)
 	}
 	return ""
+}
+
+// measuredTypes are the non-numeric types numeric bounds apply to, read in their own unit —
+// a duration in nanoseconds, a bytesize in bytes. The runtime keeps the matching table.
+var measuredTypes = map[string]bool{"time.Duration": true, rotiniPkgName + ".ByteSize": true}
+
+// measuredValue reads text as a measured type's value in its unit, through the runtime's own
+// parser, so a bound written `1h30m` or `1.5Gi` means what the same text means as a value.
+func measuredValue(goType, text string) (float64, bool) {
+	rt, ok := valueTypes[goType]
+	if !ok || !measuredTypes[goType] {
+		return 0, false
+	}
+	flags := reflect.StructOf([]reflect.StructField{{Name: "V", Type: rt, Tag: `rotini:"v"`}})
+	cmd := reflect.StructOf([]reflect.StructField{{Name: "Flags", Type: flags}, {Name: "Arguments", Type: reflect.TypeFor[struct{}]()}})
+	out := reflect.New(reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}}))
+	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{{Name: "v", Identifiers: []string{"--v"}, Type: goType}}}
+	if err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"--v=" + text}), out.Interface()); err != nil {
+		return 0, false
+	}
+	return float64(out.Elem().Field(0).Field(0).Field(0).Int()), true
 }

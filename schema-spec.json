@@ -48,7 +48,7 @@
         },
         "schemas": {
           "type": "object",
-          "description": "Document-level (root only): reusable named schema definitions. Referenced elsewhere via \"$ref\": \"#/schemas/<Name>\". Names must be PascalCase Go-exportable identifiers \u2014 each becomes a generated Go type in the cmd package, which other packages may import.",
+          "description": "Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: \"#/schemas/<Name>\"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers \u2014 each becomes a generated Go type in the cmd package, which other packages may import.",
           "additionalProperties": {
             "$ref": "#/definitions/Schema"
           },
@@ -63,7 +63,7 @@
         },
         "$ref": {
           "type": "string",
-          "description": "Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, header, footer, examples, help, headings, group, hidden, deprecated, deprecated_identifiers, filename) WIN over the child's when present \u2014 so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node \u2014 the composed command delegates to the child's handler, built against the child's own inputs/output \u2014 so rotini validation rejects them here (declare them in the child spec)."
+          "description": "Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command. OVERLAY model: the composed child is the base, and identity/presentation keys declared alongside the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) WIN over the child's when present, for that one composed node (the child's own sub-commands keep theirs) \u2014 so a parent tailors the child for its tree without forking it. A 'commands:' authored next to the $ref is MERGED additively onto the child's own subtree (its inline entries get their own stubs; its $ref entries compose as further children). The child's own remote_commands, remote_discovery and passthrough travel with it. `handler:` on a $ref node points the composed command at a different handler package. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file. Handler-coupled keys (flags/arguments/env/config/config_files/stdin/flag_groups/flag_dependencies/output/remote_commands/remote_discovery/passthrough) CANNOT be overlaid on a $ref node \u2014 the composed command delegates to the child's handler, built against the child's own inputs/output \u2014 so rotini validation rejects them here (declare them in the child spec)."
         },
         "aliases": {
           "type": "array",
@@ -172,11 +172,11 @@
         },
         "help": {
           "type": "string",
-          "description": "Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields."
+          "description": "Exact, verbatim help page for this command. When set, rotini writes it byte-for-byte (no rendering; terminal styling kept) and ignores the structured help fields (description/usage/header/footer/examples/headings); 'summary' is still used in the parent's Commands list. When unset, rotini generates the page from the structured fields."
         },
         "man": {
           "type": "string",
-          "description": "Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it byte-for-byte and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template."
+          "description": "Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it as given \u2014 byte-for-byte except that ANSI styling is removed, since a man page carries none \u2014 and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template."
         },
         "output": {
           "$ref": "#/definitions/Schema",
@@ -193,7 +193,7 @@
         },
         "deprecated": {
           "type": "string",
-          "description": "Deprecation message; the command is annotated as deprecated in its parent's generated Commands list."
+          "description": "Deprecation message. The command is annotated as deprecated in its parent's generated Commands list, and invoking it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those aliases report; without, every name does."
         },
         "filename": {
           "type": "string",
@@ -209,7 +209,7 @@
         },
         "plugin_path": {
           "type": "string",
-          "description": "Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds \u2014 they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH \u2014 so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched."
+          "description": "Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds \u2014 they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH \u2014 so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched."
         },
         "remote_commands": {
           "type": "array",
@@ -242,7 +242,7 @@
         },
         "markdown": {
           "type": "string",
-          "description": "Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it byte-for-byte; when unset, the page is rendered from the structured doc-fields through the markdown template."
+          "description": "Exact, verbatim markdown reference page for this command (the markdown feature's per-command escape, mirroring 'help'/'man'). When set, rotini writes it as given \u2014 byte-for-byte except that ANSI styling is removed; when unset, the page is rendered from the structured doc-fields through the markdown template."
         },
         "handler": {
           "$ref": "#/definitions/HandlerSource",
@@ -329,7 +329,7 @@
     },
     "BaseSchema": {
       "type": "object",
-      "description": "Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema \u2014 with the same positioned \"unknown key\" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, description, \u2026) is rejected too, since it would otherwise do nothing.",
+      "description": "Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema \u2014 with the same positioned \"unknown key\" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, title, \u2026) is rejected too, since it would otherwise do nothing. `description` is accepted on object schemas and their properties, where it becomes a Go doc comment.",
       "properties": {
         "$ref": {
           "type": "string",
@@ -342,7 +342,7 @@
         },
         "import": {
           "type": "string",
-          "description": "Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID; 'net/url' for *url.URL). Omit (or leave empty) for builtins and rotini's own type aliases (string, int, duration, \u2026) \u2014 codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.",
+          "description": "Optional Go import path backing 'type'. Set it when 'type' references a stdlib or third-party package whose name rotini does not already know (e.g. 'github.com/google/uuid' for uuid.UUID). Omit (or leave empty) for builtins and rotini's own type names (string, int, duration, url, ip, bytesize, \u2026) \u2014 codegen treats omitted/empty as 'no import'. The aliased form 'alias path' renames the import to avoid a clash (e.g. 'urlx github.com/me/url'). Codegen dedupes identical entries across the spec.",
           "pattern": "^\\S+( \\S+)?$", "examples": ["github.com/google/uuid", "u github.com/google/uuid"]
         },
         "nullable": {
@@ -365,38 +365,58 @@
         "minimum": {
           "type": [
             "number",
+            "string",
             "null"
           ],
-          "description": "Minimum allowed value (inclusive). Numeric-family types only (int/uint/float variants and the integer/number aliases) \u2014 rejected on any other type, where it would be silently ignored; for a repeatable numeric input the bound applies to each ELEMENT. Duration/time bounds are rejected (validate in the handler, or wrap the value in a TextUnmarshaler type). minimum: 0 is a real, enforced bound (use uint when you want the type system to carry non-negativity instead)."
+          "pattern": "^([0-9]*\\.?[0-9]+ ?[a-zA-Z\u00b5]+)+$",
+          "examples": ["30s", "1h30m", "512Mi"],
+          "x-hint": "a string bound is a duration (30s, 1h30m) or a size (512Mi, 10MB), for a duration or bytesize input; any other type takes a number",
+          "description": "Minimum allowed value (inclusive). Numeric-family types (int/uint/float variants and the integer/number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes) \u2014 read by the same parser as the value, and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would be silently ignored. For a repeatable input the bound applies to each ELEMENT. minimum: 0 is a real, enforced bound."
         },
         "maximum": {
           "type": [
             "number",
+            "string",
             "null"
           ],
-          "description": "Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere); maximum: 0 is a real, enforced bound."
+          "pattern": "^([0-9]*\\.?[0-9]+ ?[a-zA-Z\u00b5]+)+$",
+          "examples": ["30s", "1h30m", "512Mi"],
+          "x-hint": "a string bound is a duration (30s, 1h30m) or a size (512Mi, 10MB), for a duration or bytesize input; any other type takes a number",
+          "description": "Maximum allowed value (inclusive). Same applicability rules as 'minimum' (numbers, durations and sizes, each in its own spelling; per-element for arrays; rejected elsewhere); maximum: 0 is a real, enforced bound."
         },
         "exclusiveMinimum": {
           "type": [
             "number",
+            "string",
             "null"
           ],
-          "description": "Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numeric-family only, per-element for arrays, rejected elsewhere). exclusiveMinimum: 0 expresses \"positive\" exactly."
+          "pattern": "^([0-9]*\\.?[0-9]+ ?[a-zA-Z\u00b5]+)+$",
+          "examples": ["30s", "1h30m", "512Mi"],
+          "x-hint": "a string bound is a duration (30s, 1h30m) or a size (512Mi, 10MB), for a duration or bytesize input; any other type takes a number",
+          "description": "Exclusive lower bound: the value must be strictly greater. Same applicability rules as 'minimum' (numbers, durations and sizes; per-element for arrays; rejected elsewhere). exclusiveMinimum: 0 expresses \"positive\" exactly."
         },
         "exclusiveMaximum": {
           "type": [
             "number",
+            "string",
             "null"
           ],
+          "pattern": "^([0-9]*\\.?[0-9]+ ?[a-zA-Z\u00b5]+)+$",
+          "examples": ["30s", "1h30m", "512Mi"],
+          "x-hint": "a string bound is a duration (30s, 1h30m) or a size (512Mi, 10MB), for a duration or bytesize input; any other type takes a number",
           "description": "Exclusive upper bound: the value must be strictly less. Same applicability rules as 'maximum'."
         },
         "multipleOf": {
           "type": [
             "number",
+            "string",
             "null"
           ],
+          "pattern": "^([0-9]*\\.?[0-9]+ ?[a-zA-Z\u00b5]+)+$",
+          "examples": ["30s", "1h30m", "512Mi"],
+          "x-hint": "a string bound is a duration (30s, 1h30m) or a size (512Mi, 10MB), for a duration or bytesize input; any other type takes a number",
           "exclusiveMinimum": 0,
-          "description": "The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numeric-family types only, per-element for arrays; must be strictly positive."
+          "description": "The value must be an integer multiple of this (JSON Schema semantics: the division yields an integer). Numbers, durations and sizes, in their own spelling (`multipleOf: 1s`); per-element for arrays; must be strictly positive."
         },
         "minLength": {
           "type": "integer",
@@ -440,6 +460,10 @@
         {
           "type": "object",
           "properties": {
+            "description": {
+              "type": "string",
+              "description": "What this shape or property IS, in a sentence. rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema has `summary:` on the input instead."
+            },
             "required": {
               "type": "array",
               "x-hint": "on an object schema, required lists property names (required: [host]); true or false belongs on an input's own schema (flags, arguments, env, config, stdin)",
@@ -468,7 +492,7 @@
               "description": "When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean \u2014 unlike the string-array 'required' on Schema."
             },
             "default": {
-              "description": "Default value applied when the input is not provided"
+              "description": "The value an input takes when no channel supplies one. A scalar for a single value; a list for a repeatable input, each element seeded as one occurrence (as if the flag were repeated); a mapping for a map input, seeded as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). It is written the way a user would write the value (a duration as 30s, a date as 2026-09-29 or under `layout:`), and `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that takes it. A supplied value REPLACES the default, never merges with it. `default_text:` changes only how help shows it."
             },
             "variable": {
               "type": ["string", "array"],
@@ -503,7 +527,7 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 1,
-              "description": "LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style \u2014 an item in double quotes keeps the separator (`--tags '\"a,b\",c'`), leading spaces are trimmed, and an empty value (`--tags \"\"`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched.",
+              "description": "LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style \u2014 an item in double quotes keeps the separator (`--tags '\"a,b\",c'`), leading spaces are trimmed, and an empty value (`--tags \"\"`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched. Not on env and config INPUTS: an env input's list is split on commas by rotini's configuration reader (TAGS=a,b), and a configuration file writes a list as a list.",
               "$comment": "Enforced by lintSeparator: list/map types on flags and arguments only; not a double quote, a line break, or '=' on a map."
             },
             "implicit_value": {
@@ -552,7 +576,7 @@
                   "stdin"
                 ]
               },
-              "description": "Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' \u2014 a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' \u2014 a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer \u2014 validation rejects it). 'value' is implicit and always allowed \u2014 listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text is whitespace-trimmed, then flows through normal typed coercion, enum, and constraint checks \u2014 the flag's value IS the resolved text (a structured stdin payload is the stdin: channel's job, not a flag's). Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal \u2014 sentinels apply to argv-supplied values only."
+              "description": "Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' \u2014 a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' \u2014 a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer \u2014 validation rejects it). 'value' is implicit and always allowed \u2014 listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text has one trailing line ending removed (leading and interior whitespace is content), then flows through normal typed coercion, enum, and constraint checks \u2014 the flag's value IS the resolved text. On an object-valued flag the resolved text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the command as a whole is the stdin: channel's job. Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal \u2014 sentinels apply to argv-supplied values only."
             },
             "config_source": {
               "type": "string",
@@ -637,11 +661,11 @@
         },
         "deprecated": {
           "type": "string",
-          "description": "Deprecation message; the flag is annotated as deprecated in generated help."
+          "description": "Deprecation message. The flag is annotated as deprecated in generated help, and using it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing). With `deprecated_identifiers`, only those spellings report \u2014 the others are the ones to move to (`identifiers: [--db, --database]`, `deprecated_identifiers: [--database]`, `deprecated: use --db`); without, the whole flag is deprecated and every spelling reports."
         },
         "identifiers": {
           "type": "array",
-          "description": "CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is auto-derived.",
+          "description": "CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' \u2192 --dry-run).",
           "minItems": 1,
           "items": {
             "type": "string",
@@ -654,7 +678,7 @@
             "type": "string",
             "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$", "examples": ["--out"]
           },
-          "description": "CLI tokens for this input that are deprecated \u2014 a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. List every token to deprecate the whole input"
+          "description": "CLI tokens for this input that are deprecated \u2014 a subset of its identifiers (flags) or aliases (commands). When one of these is used on the command line, rotini's Deprecations surfaces it as a data point for the handler to act on (warn, emit telemetry, etc.); the framework itself does nothing. Tokens not listed here are unaffected. Pair it with `deprecated:` to give the report a message; `deprecated:` alone deprecates every spelling"
         }
       }
     },
@@ -685,7 +709,7 @@
         },
         "deprecated": {
           "type": "string",
-          "description": "Deprecation message; the argument is annotated as deprecated in generated help."
+          "description": "Deprecation message. The argument is annotated as deprecated in generated help, and supplying it is reported at run time by rotini.Deprecations with this message (a data feed for the handler; rotini itself prints nothing)."
         }
       }
     },
@@ -712,7 +736,7 @@
         },
         "deprecated": {
           "type": "string",
-          "description": "Deprecation message; the input is annotated as deprecated in generated help."
+          "description": "Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries \u2014 commands, flags and arguments.)"
         },
         "schema": {
           "$ref": "#/definitions/InputSchema",
@@ -743,7 +767,7 @@
         },
         "deprecated": {
           "type": "string",
-          "description": "Deprecation message; the input is annotated as deprecated in generated help."
+          "description": "Deprecation message; the input is annotated as deprecated in generated help. (Run-time deprecation reporting covers what argv carries \u2014 commands, flags and arguments.)"
         },
         "schema": {
           "$ref": "#/definitions/InputSchema",
@@ -839,7 +863,7 @@
         "name": {
           "type": "string",
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$", "examples": ["deploy"],
-          "description": "Name of the remote command. The dispatched binary must be named <program>-<name> and located in the same directory as the host binary."
+          "description": "Name of the remote command. The dispatched binary is named <program>-<name>, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree <program> is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it."
         },
         "aliases": {
           "type": "array",
