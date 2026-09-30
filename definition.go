@@ -105,7 +105,7 @@ type ConfigFile struct {
 // default, then the entry's own path or discover. A path supplied this way must exist.
 type PathFromDef struct {
 	Flag string // logical flag name searched across the resolved chain
-	Env  string // environment variable read directly
+	Env  string // environment variable read directly; comma-separated names: the first one set wins
 }
 
 // DiscoverDef locates a configuration file at run time. The strategy orders the directories
@@ -189,8 +189,19 @@ type FlagDef struct {
 	// It exists because Default is one string: before it, a repeatable flag could not
 	// express a multi-value default at all, and the only advice was to seed it in the
 	// handler, which is the one thing declaring inputs in a spec exists to avoid.
-	Defaults              []string
-	Enum                  []string
+	Defaults []string
+	Enum     []string
+	// IgnoreCase matches a value against Enum without regard to case (`--mode FAST` against
+	// fast/slow) and binds the declared spelling, so a handler compares against one form.
+	IgnoreCase bool
+	// Separator splits each value of a list or map flag into several (`--tags a,b` is two
+	// tags), CSV-style: a quoted item keeps the separator (`--tags '"a,b",c'`). Empty means
+	// one value per occurrence.
+	Separator string
+	// ImplicitValue is the value a flag takes when given without one (`--color` means
+	// "always"), making its value optional: a value must then be attached (`--color=never`),
+	// since the next argument is never consumed. Empty means the flag requires a value.
+	ImplicitValue         string
 	Secret                bool     // when true, the value is redacted in usage/validation error output
 	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen
 	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Deprecations] reports when used
@@ -238,6 +249,11 @@ type ArgDef struct {
 	Variadic bool
 	Default  string
 	Enum     []string
+	// IgnoreCase matches a value against Enum without regard to case and binds the declared
+	// spelling; see [FlagDef.IgnoreCase].
+	IgnoreCase bool
+	// Separator splits each value of a variadic argument into several; see [FlagDef.Separator].
+	Separator string
 	// Complete is the declarative shell-completion hint for this argument's value.
 	Complete Completion
 	Secret   bool // when true, the value is redacted in usage/validation error output

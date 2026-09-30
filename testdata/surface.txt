@@ -26,9 +26,11 @@ field ArgDef.Constraints
 field ArgDef.Default
 field ArgDef.Enum
 field ArgDef.Hidden
+field ArgDef.IgnoreCase
 field ArgDef.Name
 field ArgDef.Required
 field ArgDef.Secret
+field ArgDef.Separator
 field ArgDef.Type
 field ArgDef.Variadic
 field BindError.Cause
@@ -108,11 +110,14 @@ field FlagDef.Enum
 field FlagDef.From
 field FlagDef.Hidden
 field FlagDef.Identifiers
+field FlagDef.IgnoreCase
+field FlagDef.ImplicitValue
 field FlagDef.KeyPaths
 field FlagDef.Name
 field FlagDef.Negatable
 field FlagDef.Required
 field FlagDef.Secret
+field FlagDef.Separator
 field FlagDef.Summary
 field FlagDef.Type
 field FlagDependency.Requires
@@ -223,9 +228,15 @@ func Strip(text string) string
 func TerminalSize(file *os.File) (cols, rows int, ok bool)
 func UsageError(err error) error
 method ArgValueCompleter.CompleteArgValue
+method Base64Bytes.MarshalText() ([]byte, error)
+method Base64Bytes.String() string
+method Base64Bytes.UnmarshalText(text []byte) error
 method BindError.Error() string
 method BindError.Unwrap() []error
 method Binder.Bind(rtx *Context, out any) error
+method ByteSize.MarshalText() ([]byte, error)
+method ByteSize.String() string
+method ByteSize.UnmarshalText(text []byte) error
 method Category.String() string
 method Context.Bind(key string, value any) *Context
 method Context.BindIfAbsent(key string, value any) *Context
@@ -263,6 +274,9 @@ method Handlers.CascadingPreRun
 method Handlers.PostRun
 method Handlers.PreRun
 method Handlers.Run
+method HexBytes.MarshalText() ([]byte, error)
+method HexBytes.String() string
+method HexBytes.UnmarshalText(text []byte) error
 method Key.BindTo(rtx *Context, value T)
 method Key.Get(rtx *Context) (T, bool)
 method Key.MustGet(rtx *Context) T
@@ -345,9 +359,11 @@ method WiringError.Error() string
 method WiringError.Unwrap() error
 type ArgDef
 type ArgValueCompleter
+type Base64Bytes
 type BindError
 type BindMeta
 type Binder
+type ByteSize
 type Category
 type CommandDef
 type Completion
@@ -370,6 +386,7 @@ type FlagGroupKind
 type FlagValueCompleter
 type FunnelFunc
 type Handlers
+type HexBytes
 type Key
 type Layer
 type Lifecycle

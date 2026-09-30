@@ -38,12 +38,12 @@
 {{end -}}
 {{- range .FlagGroups}}## {{if .Title}}{{.Title}}{{else}}Flags{{end}}
 
-{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
+{{range .Flags}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
 {{end}}
 {{end -}}
 {{- with .Cascading}}## Inherited Flags
 
-{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
+{{range .}}- `{{join .Identifiers ", "}}`{{with .Type}} `{{.}}`{{end}} — {{.Summary}}{{with .Default}} (default `{{.}}`){{end}}{{with .Implicit}} (implicit `{{.}}`){{end}}{{with .Enum}} (one of {{join . ", "}}){{end}}{{with .Deprecated}} *(deprecated: {{.}})*{{end}}
 {{end}}
 {{end -}}
 {{- with .Environment}}## Environment

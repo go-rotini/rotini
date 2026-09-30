@@ -1,10 +1,14 @@
 package codegen
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/go-rotini/jsonschema"
@@ -31,6 +35,7 @@ func (p *Processor) validateSpec(rs *reconciledSpec) []error {
 		problems = append(problems, vp)
 	}
 	problems = append(problems, validateInstance("spec", rs.json, p.specSchema)...)
+	problems = append(problems, schemaBlockProblems(rs.json)...)
 	locateProblems(problems, rs.path, rs.locate)
 	return problems
 }
@@ -300,4 +305,185 @@ func quotedOrList(keys []string) string {
 	default:
 		return strings.Join(quoted[:len(quoted)-1], ", ") + " or " + quoted[len(quoted)-1]
 	}
+}
+
+// ─── strictness inside schema blocks ──────────────────────────────────────────.
+
+// Every other object in a spec is closed with additionalProperties:false, so a misspelled key
+// is reported with its position. The `schema:` blocks were not, and could not be: Schema and
+// InputSchema inherit BaseSchema through allOf, and JSON Schema Draft 7 cannot combine allOf
+// with additionalProperties:false (each branch would reject the other's keys). The schema's own
+// comment said Go's DisallowUnknownFields enforced it at parse time — nothing ever set that
+// option, so any key at all was silently accepted:
+//
+//	schema: { type: string, uniqueItems: true, totallyMadeUpKey: 42 }   // validated clean
+//
+// schemaBlockProblems closes the gap in the validate stage, where it produces the same
+// positioned "unknown key" message the schema validator produces everywhere else.
+
+// schemaBlockKeySets are the keys each kind of schema block may carry. They are DERIVED from the
+// embedded spec schema — BaseSchema's properties plus each definition's own additions — so the
+// check can never disagree with the schema it enforces.
+type schemaBlockKeySets struct {
+	input  map[string]bool // InputSchema: flags, arguments, env, config, stdin
+	object map[string]bool // Schema: output, schemas, config_files, properties, items
+}
+
+var loadSchemaBlockKeys = sync.OnceValues(func() (schemaBlockKeySets, error) {
+	var doc struct {
+		Definitions map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+			AllOf      []struct {
+				Properties map[string]json.RawMessage `json:"properties"`
+			} `json:"allOf"`
+		} `json:"definitions"`
+	}
+	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
+		return schemaBlockKeySets{}, fmt.Errorf("read embedded spec schema: %w", err)
+	}
+	keysOf := func(def string) map[string]bool {
+		out := map[string]bool{}
+		for k := range doc.Definitions["BaseSchema"].Properties {
+			out[k] = true
+		}
+		for _, branch := range doc.Definitions[def].AllOf {
+			for k := range branch.Properties {
+				out[k] = true
+			}
+		}
+		return out
+	}
+	sets := schemaBlockKeySets{input: keysOf("InputSchema"), object: keysOf("Schema")}
+	if len(sets.input) == 0 || len(sets.object) == 0 {
+		return schemaBlockKeySets{}, errors.New("embedded spec schema has no BaseSchema/Schema/InputSchema properties")
+	}
+	return sets, nil
+})
+
+// jsonSchemaOnlyKeywords are JSON Schema keywords rotini's schema blocks do not implement. They
+// get a sharper message than an ordinary typo, because the author wrote them expecting them to
+// DO something — uniqueItems to deduplicate, format to validate — and silence would have told
+// them it did.
+var jsonSchemaOnlyKeywords = map[string]bool{
+	"uniqueItems": true, "const": true, "format": true, "contains": true, "minContains": true,
+	"maxContains": true, "additionalProperties": true, "patternProperties": true,
+	"propertyNames": true, "minProperties": true, "maxProperties": true, "dependencies": true,
+	"dependentRequired": true, "dependentSchemas": true, "if": true, "then": true, "else": true,
+	"allOf": true, "anyOf": true, "oneOf": true, "not": true, "additionalItems": true,
+	"unevaluatedItems": true, "unevaluatedProperties": true, "$id": true, "$defs": true,
+	"definitions": true, "title": true, "description": true, "examples": true, "$comment": true,
+	"readOnly": true, "writeOnly": true, "deprecated": true, "contentMediaType": true,
+	"contentEncoding": true, "default": true,
+}
+
+// schemaBlockProblems reports every key in a spec's schema blocks that the block's kind does not
+// define, positioned by JSON pointer. It walks every place a schema block can appear — input
+// schemas on each channel, output, the document-level schemas, config file schemas — and
+// recurses through properties and items.
+func schemaBlockProblems(instance []byte) []error {
+	sets, err := loadSchemaBlockKeys()
+	if err != nil {
+		return []error{err}
+	}
+	var doc map[string]any
+	if json.Unmarshal(instance, &doc) != nil {
+		return nil // a malformed document is the schema validator's to report
+	}
+	w := &schemaBlockWalker{sets: sets}
+	w.command(doc["command"], "/command")
+	return w.problems
+}
+
+// schemaBlockWalker accumulates schemaBlockProblems' findings as it descends the command tree.
+type schemaBlockWalker struct {
+	sets     schemaBlockKeySets
+	problems []error
+}
+
+// inputChannels are the command keys whose entries each carry an InputSchema under `schema`.
+var inputChannels = []struct{ key, noun string }{
+	{"flags", "a flag schema"}, {"arguments", "an argument schema"},
+	{"env", "an env schema"}, {"config", "a config schema"},
+}
+
+// command checks every schema block one command owns, then its sub-commands.
+func (w *schemaBlockWalker) command(node any, ptr string) {
+	c, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	for _, ch := range inputChannels {
+		w.entrySchemas(c[ch.key], true, ptr+"/"+ch.key, ch.noun)
+	}
+	w.entrySchemas(c["config_files"], false, ptr+"/config_files", "a config file schema")
+	if stdin, ok := c["stdin"].(map[string]any); ok {
+		if s, ok := stdin["schema"]; ok {
+			w.block(s, true, ptr+"/stdin/schema", "the stdin schema")
+		}
+	}
+	if out, ok := c["output"]; ok {
+		w.block(out, false, ptr+"/output", "the output schema")
+	}
+	if named, ok := c["schemas"].(map[string]any); ok {
+		for _, n := range slices.Sorted(maps.Keys(named)) {
+			w.block(named[n], false, ptr+"/schemas/"+escapePointer(n), "a named schema")
+		}
+	}
+	subs, _ := c["commands"].([]any)
+	for i, sub := range subs {
+		w.command(sub, fmt.Sprintf("%s/commands/%d", ptr, i))
+	}
+}
+
+// entrySchemas checks the `schema` of each entry in a list such as flags or config_files.
+func (w *schemaBlockWalker) entrySchemas(list any, input bool, ptr, noun string) {
+	entries, _ := list.([]any)
+	for i, entry := range entries {
+		if e, ok := entry.(map[string]any); ok {
+			if s, ok := e["schema"]; ok {
+				w.block(s, input, fmt.Sprintf("%s/%d/schema", ptr, i), noun)
+			}
+		}
+	}
+}
+
+// block checks one schema block's keys, then recurses into its properties and items — which are
+// always object schemas, whatever kind of block contains them.
+func (w *schemaBlockWalker) block(node any, input bool, ptr, noun string) {
+	m, ok := node.(map[string]any)
+	if !ok {
+		return
+	}
+	allowed := w.sets.object
+	if input {
+		allowed = w.sets.input
+	}
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		if !allowed[k] {
+			w.problems = append(w.problems, &problem{kind: "spec", loc: ptr + "/" + escapePointer(k), msg: unknownSchemaKey(k, noun)})
+		}
+	}
+	if props, ok := m["properties"].(map[string]any); ok {
+		for _, k := range slices.Sorted(maps.Keys(props)) {
+			w.block(props[k], false, ptr+"/properties/"+escapePointer(k), "a property schema")
+		}
+	}
+	if items, ok := m["items"].(map[string]any); ok {
+		w.block(items, false, ptr+"/items", "an items schema")
+	}
+}
+
+// unknownSchemaKey renders the message, sharpening it for a JSON Schema keyword the author
+// clearly expected to work.
+func unknownSchemaKey(key, noun string) string {
+	msg := fmt.Sprintf("unknown key %q in %s", key, noun)
+	if jsonSchemaOnlyKeywords[key] {
+		msg += fmt.Sprintf(" — %q is a JSON Schema keyword rotini's schema blocks do not implement, so it would have done nothing", key)
+	}
+	return msg
+}
+
+// escapePointer escapes one JSON pointer segment (RFC 6901).
+func escapePointer(seg string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(seg, "~", "~0"), "/", "~1")
 }

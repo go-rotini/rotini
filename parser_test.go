@@ -545,6 +545,31 @@ func TestParse_secretValueRedactedInErrors(t *testing.T) {
 	}
 }
 
+// A value type's parser quotes what it rejected, so its message must not ride along on a secret.
+func TestParse_secretValueRedactedFromParserCause(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "key", Identifiers: []string{"--key"}, Type: "rotini.HexBytes", Secret: true}},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Key HexBytes `rotini:"key"`
+			}
+		}
+	}
+	err := NewParser().Parse(NewContextFor(def, []string{"--key", "topsecretzz"}), &in)
+	if err == nil {
+		t.Fatal("expected a coercion error")
+	}
+	if strings.Contains(err.Error(), "topsecret") {
+		t.Errorf("secret value leaked through the parser's own message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "is not a valid hex value") {
+		t.Errorf("error should still name the type: %v", err)
+	}
+}
+
 func TestParse_secretConstraintValueRedacted(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -2190,4 +2215,153 @@ func TestParse_multiValueDefaults(t *testing.T) {
 			t.Errorf("flagDefaults with no default = %q, want nil — absent stays absent", got)
 		}
 	})
+}
+
+// ignore_case: a value matches an enum member regardless of case and binds the declared
+// spelling, on flags and arguments alike; without it matching stays exact.
+func TestParse_enumIgnoreCase(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"fast", "slow"}, IgnoreCase: true},
+			{Name: "strict", Identifiers: []string{"--strict"}, Type: "string", Enum: []string{"on", "off"}},
+		},
+		Arguments: []ArgDef{{Name: "env", Type: "string", Enum: []string{"prod", "dev"}, IgnoreCase: true}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Mode   string `rotini:"mode"`
+				Strict string `rotini:"strict"`
+			}
+			Arguments struct {
+				Env string `rotini:"env"`
+			}
+		}
+	}
+	var in inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--mode", "FAST", "PROD"}), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.App.Flags.Mode != "fast" || in.App.Arguments.Env != "prod" {
+		t.Errorf("mode = %q, env = %q; want the declared spellings fast, prod", in.App.Flags.Mode, in.App.Arguments.Env)
+	}
+	var in2 inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--strict", "ON"}), &in2); err == nil {
+		t.Error("--strict ON accepted without ignore_case")
+	}
+	var in3 inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--mode", "medium"}), &in3); err == nil {
+		t.Error("a non-member accepted under ignore_case")
+	}
+}
+
+func TestSplitValue(t *testing.T) {
+	for _, tc := range []struct {
+		in, sep string
+		want    []string
+	}{
+		{"a,b,c", ",", []string{"a", "b", "c"}},
+		{"a, b,  c", ",", []string{"a", "b", "c"}}, // leading spaces trimmed
+		{`"a,b",c`, ",", []string{"a,b", "c"}},     // a quoted item keeps the separator
+		{`it's,5"`, ",", []string{"it's", `5"`}},   // a stray quote is literal
+		{"a;b", ";", []string{"a", "b"}},
+		{"a|b", "|", []string{"a", "b"}},
+		{"", ",", nil},               // an empty value is an empty list
+		{"a,b", "", []string{"a,b"}}, // no separator: untouched
+		{"k=1,j=2", ",", []string{"k=1", "j=2"}},
+	} {
+		got, err := splitValue(tc.in, tc.sep)
+		if err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("splitValue(%q, %q) = %q, %v; want %q", tc.in, tc.sep, got, err, tc.want)
+		}
+	}
+}
+
+// Items are split before validation, so enum and item counts see each one; repeating the flag
+// still appends; and the variadic argument splits the same way.
+func TestParse_separator(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", Enum: []string{"a", "b", "c"},
+				Constraints: Constraints{MaxItems: 3}},
+			{Name: "raw", Identifiers: []string{"--raw"}, Type: "[]string"},
+		},
+		Arguments: []ArgDef{{Name: "first", Type: "string"}, {Name: "rest", Type: "[]string", Variadic: true, Separator: ","}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Tags []string `rotini:"tags"`
+				Raw  []string `rotini:"raw"`
+			}
+			Arguments struct {
+				First string   `rotini:"first"`
+				Rest  []string `rotini:"rest"`
+			}
+		}
+	}
+	var in inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--tags", "a,b", "--tags", "c", "--raw", "x,y", "one,two", "p,q", "r"}), &in); err != nil {
+		t.Fatal(err)
+	}
+	f, a := in.App.Flags, in.App.Arguments
+	if !slices.Equal(f.Tags, []string{"a", "b", "c"}) || !slices.Equal(f.Raw, []string{"x,y"}) ||
+		a.First != "one,two" || !slices.Equal(a.Rest, []string{"p", "q", "r"}) {
+		t.Errorf("tags=%q raw=%q first=%q rest=%q", f.Tags, f.Raw, a.First, a.Rest)
+	}
+	for _, argv := range [][]string{{"--tags", "a,z"}, {"--tags", "a,b,c,a"}} {
+		var bad inputs
+		if err := NewParser().Parse(NewContextFor(def, argv), &bad); err == nil {
+			t.Errorf("%q accepted — split items must be validated one by one", argv)
+		}
+	}
+}
+
+// implicit_value: a bare flag takes the implicit value, an attached one wins, and the next word
+// is never consumed — on long flags and at the end of a short cluster alike.
+func TestParse_implicitValue(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"-c", "--color"}, Type: "string", Default: "auto", ImplicitValue: "always"},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+		},
+		Arguments: []ArgDef{{Name: "rest", Type: "[]string", Variadic: true}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Color   string `rotini:"color"`
+				Verbose bool   `rotini:"verbose"`
+			}
+			Arguments struct {
+				Rest []string `rotini:"rest"`
+			}
+		}
+	}
+	for _, tc := range []struct {
+		argv       []string
+		color      string
+		rest       []string
+		verboseSet bool
+	}{
+		{nil, "auto", nil, false},
+		{[]string{"--color"}, "always", nil, false},
+		{[]string{"--color=never"}, "never", nil, false},
+		{[]string{"--color", "never"}, "always", []string{"never"}, false},
+		{[]string{"-c"}, "always", nil, false},
+		{[]string{"-cnever"}, "never", nil, false},
+		{[]string{"-vc", "x"}, "always", []string{"x"}, true},
+	} {
+		var in inputs
+		if err := NewParser().Parse(NewContextFor(def, tc.argv), &in); err != nil {
+			t.Fatalf("%q: %v", tc.argv, err)
+		}
+		f, a := in.App.Flags, in.App.Arguments
+		if f.Color != tc.color || !slices.Equal(a.Rest, tc.rest) || f.Verbose != tc.verboseSet {
+			t.Errorf("%q → color=%q rest=%q verbose=%v; want %q %q %v", tc.argv, f.Color, a.Rest, f.Verbose, tc.color, tc.rest, tc.verboseSet)
+		}
+	}
 }

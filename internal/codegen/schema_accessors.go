@@ -97,3 +97,29 @@ func (c *Command) inputs() *Inputs {
 		FlagDependencies: c.FlagDependencies,
 	}
 }
+
+// variables is an input's `variable:` as a list. The key takes one name or several — the
+// schema types it string-or-array, which decodes as a string or a []any — and every consumer
+// wants the same thing: the names, in order, first preferred.
+func variables(schema *InputSchema) []string {
+	if schema == nil {
+		return nil
+	}
+	switch v := schema.Variable.(type) {
+	case string:
+		if v != "" {
+			return []string{v}
+		}
+	case []string:
+		return v
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, e := range v {
+			if s, ok := e.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
+}

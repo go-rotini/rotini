@@ -71,7 +71,7 @@ Short one-liner shown next to this argument in the Arguments section of generate
 
 ## BaseSchema
 
-Shared fields for Schema and InputSchema. JSON Schema Draft 7 does not support additionalProperties: false on schemas that use allOf for inheritance — strictness is enforced by Go's DisallowUnknownFields at parse time.
+Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine allOf inheritance with additionalProperties: false, so an unknown key inside a schema block is rejected by `rotini validate` itself rather than by the schema — with the same positioned "unknown key" message as anywhere else in the spec. A JSON Schema keyword rotini does not implement (uniqueItems, format, description, …) is rejected too, since it would otherwise do nothing.
 
 ### `$ref`
 
@@ -107,7 +107,7 @@ Optional Go import path backing 'type'. Set it when 'type' references a stdlib o
 
 [`Schema`](#schema)
 
-Element schema for an array type: 'array' + items int generates []int, items $ref a named-type slice; omitted items default to string elements. Per-value constraints and the TextUnmarshaler contract apply per element (see 'type').
+Element schema for an array type: 'array' + items int generates []int, items $ref a named-type slice; omitted items default to string elements. Per-value constraints (enum, pattern, minimum/maximum, exclusiveMinimum/exclusiveMaximum, multipleOf, minLength/maxLength) apply to EVERY element and may be written either here, JSON-Schema style, or on the list itself — the two spellings mean the same thing, and declaring the same constraint in both places with different values is an error. minItems/maxItems belong on the list (they count elements) and are rejected here on flags, arguments, env and config. The TextUnmarshaler contract also applies per element (see 'type').
 
 ### `maxItems`
 
@@ -173,7 +173,7 @@ Property schemas for an object shape. Used by document shapes (output, stdin pay
 
 `string`
 
-The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. 'count' (FLAG inputs only) declares a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv → 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, …) is rejected — the tally is computed, never parsed. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). 'existingfile' and 'existingdir' are string-valued PATH types: the generated field is a plain string, and rotini checks at parse time that the path exists and is that kind of thing, so a bad path is a usage error naming the flag the user typed rather than an *os.PathError three layers into a handler. The check is existence and kind ONLY — expanding '~', cleaning, following symlinks and deciding whether a missing file should be created are policy, and policy belongs to the handler. For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.) The contract applies element-wise to arrays: 'array' with items naming a non-builtin type — including items: { $ref: "#/schemas/X" }, which generates a named-type slice — parses argv elements only if that Go type implements encoding.TextUnmarshaler. Named schemas are primarily for 'output' and 'stdin' document shapes, which DECODE structured documents rather than parse argv text.
+The type used to parse and store the value. Accepts both Go type names (bool, int, float64, []string, duration, map) and JSON Schema standard names (boolean, integer, number, array, object) — both are equivalent. A bool accepts true/false, yes/no, on/off, y/n, t/f and 1/0, in any case, so `--cache=off` and CACHE=yes both work. Value types parse a kind of value and generate the matching Go field: 'duration' (time.Duration; Go units plus 'd' days and 'w' weeks, e.g. 7d, 2w3d), 'time'/'datetime' (RFC 3339), 'date', 'url' (*url.URL; needs a scheme and host), 'email' (mail.Address; 'Name <a@b.c>' or a bare address), 'timezone' (*time.Location; an IANA name such as Europe/Berlin), 'mac' (net.HardwareAddr), 'ip' (netip.Addr), 'cidr' (netip.Prefix), 'hostport' (netip.AddrPort), 'bytesize' (rotini.ByteSize; 512Mi, 10MB, 1.5GiB — an 'i' makes the unit binary), 'hexbytes' (rotini.HexBytes; optional 0x) and 'base64bytes' (rotini.Base64Bytes; standard or URL-safe, padded or not). A value type works inside Go spellings too: '[]bytesize', 'map[string]duration'. Help shows the name as written ('--limit bytesize'), not the Go type. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion. 'count' (FLAG inputs only) declares a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv → 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, …) is rejected — the tally is computed, never parsed. A '[]…'/array flag is repeatable (--tag a --tag b → slice); 'items' declares the element type ('array' + items int → []int, items duration → []time.Duration), defaulting to string. A map flag (e.g. 'map[string]string', or 'map'/'object' → map[string]any) is repeatable too and takes 'key=value' pairs (--label k=v --label a=b → map; split on the first '='; value coerced to the element type). 'existingfile' and 'existingdir' are string-valued PATH types: the generated field is a plain string, and rotini checks at parse time that the path exists and is that kind of thing, so a bad path is a usage error naming the flag the user typed rather than an *os.PathError three layers into a handler. The check is existence and kind ONLY — expanding '~', cleaning, following symlinks and deciding whether a missing file should be created are policy, and policy belongs to the handler. For a stdlib or third-party Go type (e.g. time.Time, uuid.UUID), set 'import' to the backing package path. Contract for any non-builtin type: it must implement encoding.TextUnmarshaler — that method is its parser and validator. rotini coerces input text through it and refuses a type without it at parse time with a loud error, never a silently zeroed field. (This cannot be checked at validate time — it would mean type-checking foreign Go packages — so the first parse exercises it.) The contract applies element-wise to arrays: 'array' with items naming a non-builtin type — including items: { $ref: "#/schemas/X" }, which generates a named-type slice — parses argv elements only if that Go type implements encoding.TextUnmarshaler. Named schemas are primarily for 'output' and 'stdin' document shapes, which DECODE structured documents rather than parse argv text.
 
 
 ## Command
@@ -733,6 +733,12 @@ Flag and env inputs only: names a config_files entry whose file PATH this input 
 
 Default value applied when the input is not provided
 
+### `default_text`
+
+`string`
+
+The default as help, man and markdown SHOW it, in place of the value itself. For a default that reads badly verbatim (`default_text: 'the number of CPUs'`, `default_text: '$HOME/.cache/app'`) or that the handler computes when the input is unset, so there is no literal to show. Display only: the value the input takes is still `default`, or nothing.
+
 ### `dotted_keys`
 
 `boolean` · default `false`
@@ -750,6 +756,18 @@ Config inputs only: pins this input to ONE named config_files entry — the valu
 array of string`
 
 Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text. 'file' — a value starting with '@' is replaced by the named file's contents (--token @/run/secret resolves the file; pair with secret: true for the blessed token-file idiom). 'stdin' — a value of exactly '-' is replaced by the piped stdin (kubectl-style -f -); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel (stdin has one consumer — validation rejects it). 'value' is implicit and always allowed — listing it is documentation only; any value not matching an enabled sentinel stays literal. Resolved file/stdin text is whitespace-trimmed, then flows through normal typed coercion, enum, and constraint checks — the flag's value IS the resolved text (a structured stdin payload is the stdin: channel's job, not a flag's). Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — sentinels apply to argv-supplied values only.
+
+### `ignore_case`
+
+`boolean` · default `false`
+
+With 'enum' only: match a value against the enum without regard to case, so `--mode FAST` is accepted against [fast, slow]. The value binds as the DECLARED spelling (fast), so a handler compares against one form. Applies on every channel the input reads: argv, a flag's env and config fallbacks, and env and config inputs.
+
+### `implicit_value`
+
+`string` or `number` or `boolean`
+
+FLAGS only: the value a flag takes when it is given WITHOUT one, which makes its value optional — the `--color[=when]` shape. With `implicit_value: always`, a bare `--color` means always, `--color=never` sets never, and a flag left out takes its `default` as usual. Because the value is optional it must be attached: `--color never` leaves `never` as the next argument, not the flag's value (a short flag attaches too: `-cnever`, `-c=never`). Help shows the flag as `--color[=<type>]` with `(implicit: always)`. For a scalar, non-bool flag — a bool already works this way, with true — and the value must satisfy the flag's type, enum and constraints.
 
 ### `key`
 
@@ -791,11 +809,17 @@ When true, the input must be provided (or stdin must not be empty for stdin inpu
 
 When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. Maps to recon's 'secret' tag. rotini ships no interactive secret prompt (the UX layer is deliberately out of scope): a handler wanting one reads rtx.Stdin with any prompt library; for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 
-### `variable`
+### `separator`
 
 `string`
 
-The EXACT environment variable this input reads, instead of the name rotini would derive. Valid on env inputs and on FLAGS (as a flag's env fallback); rejected on arguments, config inputs and stdin, which have no environment channel.
+LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style — an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched.
+
+### `variable`
+
+`string` or `array`
+
+The EXACT environment variable this input reads, instead of the name rotini would derive — or a LIST of names, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on FLAGS (as a flag's env fallback); rejected on arguments, config inputs and stdin, which have no environment channel.
 
 Exempt from `env_prefix` either way: an explicitly named variable is already exact, and prefixing it would silently make it a different variable.
 

@@ -3,6 +3,7 @@ package rotini
 import (
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -584,4 +585,33 @@ func ExampleOverlayInputsP() {
 	win, _ := report.Winner("App.Flags.Color")
 	fmt.Println(merged.App.Flags.Color, "from", win.Layer)
 	// Output: teal from env
+}
+
+// The env and files layers bind a flag's fallback exactly as the Binder does — they share
+// bindFlagFallback. Each case here was wrong on this path too: a config list bound as the one
+// string "[a b]", an env list ignored its separator, and a bad value was silently dropped.
+func TestOverlay_flagFallbacksMatchTheBinder(t *testing.T) {
+	cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v}\n")
+	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+
+	rtx := NewContextFor(tbListDef(), nil)
+	rtx.WithBindMeta(meta)
+	files, err := ParseFiles[tbListInputs](rtx)
+	if err != nil {
+		t.Fatalf("ParseFiles: %v", err)
+	}
+	if f := files.Values.App.Flags; !slices.Equal(f.Tags, []string{"a", "b"}) || f.Labels["k"] != "v" {
+		t.Errorf("files layer: tags=%q labels=%v", f.Tags, f.Labels)
+	}
+
+	t.Setenv("PORTS", "1,2")
+	env, err := ParseEnv[tbListInputs](rtx)
+	if err != nil || !slices.Equal(env.Values.App.Flags.Ports, []int{1, 2}) {
+		t.Errorf("env layer: ports=%v err=%v", env.Values.App.Flags.Ports, err)
+	}
+
+	t.Setenv("PORTS", "1,x")
+	if _, err := ParseEnv[tbListInputs](rtx); err == nil || !strings.Contains(err.Error(), "environment variable PORTS") {
+		t.Errorf("env layer with a bad value: err = %v, want it to name PORTS", err)
+	}
 }

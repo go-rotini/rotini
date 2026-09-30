@@ -1,0 +1,48 @@
+# A per-value constraint on an array input's `items` now applies to every element, exactly as the
+# same constraint on the list itself does. Two things can still say something that will not happen:
+#
+#   - the same constraint on both, with DIFFERENT values: the list-level one is kept, so the
+#     items-level one would be silently ignored — the failure hoisting exists to remove;
+#   - minItems/maxItems on `items`: that would count values inside ONE element, but an element of
+#     a flag list is a single value.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Conflict: two different allowed-value lists for the same elements.
+    - name: level
+      identifiers:
+        - --level
+      schema:
+        type: array
+        enum:
+          - low
+          - high
+        items:
+          type: string
+          enum:
+            - fast
+            - slow
+    # An item count on the element, where it can only mean a nested list.
+    - name: hosts
+      identifiers:
+        - --hosts
+      schema:
+        type: array
+        items:
+          type: string
+          minItems: 2
+    # Not a problem: the same rule written on both sides agrees with itself.
+    - name: mode
+      identifiers:
+        - --mode
+      schema:
+        type: array
+        enum:
+          - a
+          - b
+        items:
+          type: string
+          enum:
+            - a
+            - b

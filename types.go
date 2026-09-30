@@ -1,0 +1,266 @@
+package rotini
+
+import (
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"math"
+	"net"
+	"net/mail"
+	"net/netip"
+	"net/url"
+	"reflect"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Value types rotini parses for you: the input types CLIs commonly accept that neither Go's
+// builtins nor encoding.TextUnmarshaler cover.
+//
+// Two mechanisms, chosen by what the Go type can say about itself:
+//
+//   - A standard-library type that is already distinct — *url.URL, mail.Address, *time.Location,
+//     net.HardwareAddr — is parsed through [valueParsers], keyed on the type itself. A spec's
+//     `type: url` generates a `*url.URL` field and needs nothing else.
+//   - A value whose Go representation would be ambiguous — a byte size is an int64, hex and
+//     base64 are []byte — gets a small named type here that parses itself ([ByteSize], [HexBytes],
+//     [Base64Bytes]). A plain int64 field could not tell the parser that "512Mi" is a size.
+
+// ByteSize is a count of bytes that parses human sizes: `512Mi`, `10MB`, `1.5GiB`, `4096`.
+//
+// Suffixes follow the SI and IEC standards, so the `i` is what makes a unit binary:
+//
+//	B                  1
+//	K  KB   M  MB  …   1000, 1000², … (decimal, as kubectl reads them)
+//	Ki KiB  Mi MiB …   1024, 1024², … (binary)
+//
+// Letters are case-insensitive and fractions are allowed (`1.5Gi`); the result is rounded to a
+// whole number of bytes. Note that some tools — docker's `-m 512m`, notably — read a bare `m` as
+// binary. rotini follows the standard; write `512Mi` when a mebibyte is what you mean.
+//
+// A spec declares one with `type: bytesize`.
+type ByteSize int64
+
+// UnmarshalText implements [encoding.TextUnmarshaler].
+func (b *ByteSize) UnmarshalText(text []byte) error {
+	n, err := parseByteSize(string(text))
+	if err != nil {
+		return err
+	}
+	*b = ByteSize(n)
+	return nil
+}
+
+// MarshalText implements [encoding.TextMarshaler], rendering the size as [ByteSize.String] does.
+func (b ByteSize) MarshalText() ([]byte, error) { return []byte(b.String()), nil }
+
+// String renders the size in the largest binary unit it is an exact multiple of — `512Mi`, `2Gi`
+// — and in plain bytes otherwise, so it always parses back to the same value.
+func (b ByteSize) String() string {
+	n := int64(b)
+	if n == 0 {
+		return "0"
+	}
+	units := []string{"Ei", "Pi", "Ti", "Gi", "Mi", "Ki"}
+	for i, u := range units {
+		size := int64(1) << (10 * (len(units) - i))
+		if n%size == 0 {
+			return strconv.FormatInt(n/size, 10) + u
+		}
+	}
+	return strconv.FormatInt(n, 10)
+}
+
+var byteSizeSyntax = regexp.MustCompile(`^\s*(\d*\.?\d+)\s*([a-zA-Z]*)\s*$`)
+
+// byteSizeUnits maps a lowercased suffix to its multiplier. The trailing `b` is optional.
+var byteSizeUnits = map[string]float64{
+	"": 1, "b": 1,
+	"k": 1e3, "kb": 1e3, "m": 1e6, "mb": 1e6, "g": 1e9, "gb": 1e9,
+	"t": 1e12, "tb": 1e12, "p": 1e15, "pb": 1e15, "e": 1e18, "eb": 1e18,
+	"ki": 1 << 10, "kib": 1 << 10, "mi": 1 << 20, "mib": 1 << 20, "gi": 1 << 30, "gib": 1 << 30,
+	"ti": 1 << 40, "tib": 1 << 40, "pi": 1 << 50, "pib": 1 << 50, "ei": 1 << 60, "eib": 1 << 60,
+}
+
+func parseByteSize(s string) (int64, error) {
+	m := byteSizeSyntax.FindStringSubmatch(s)
+	if m == nil {
+		return 0, fmt.Errorf("%q is not a size — write a number with an optional unit, e.g. 512Mi, 10MB, 1.5GiB", s)
+	}
+	mult, ok := byteSizeUnits[strings.ToLower(m[2])]
+	if !ok {
+		return 0, fmt.Errorf("%q has an unknown unit %q — use B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB (decimal) or Ki, Mi, Gi, Ti, Pi, Ei (binary)", s, m[2])
+	}
+	n, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a size: %w", s, err)
+	}
+	bytes := math.Round(n * mult)
+	if bytes > math.MaxInt64 {
+		return 0, fmt.Errorf("%q is too large to count in bytes", s)
+	}
+	return int64(bytes), nil
+}
+
+// HexBytes is binary data written as hexadecimal, with or without a `0x` prefix: `deadbeef`,
+// `0xDEADBEEF`. A spec declares one with `type: hexbytes`.
+type HexBytes []byte
+
+// UnmarshalText implements [encoding.TextUnmarshaler].
+func (h *HexBytes) UnmarshalText(text []byte) error {
+	s := strings.TrimSpace(string(text))
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return fmt.Errorf("%q is not hexadecimal: %w", string(text), err)
+	}
+	*h = b
+	return nil
+}
+
+// MarshalText implements [encoding.TextMarshaler] as lowercase hex without a prefix.
+func (h HexBytes) MarshalText() ([]byte, error) { return []byte(h.String()), nil }
+
+// String renders the bytes as lowercase hexadecimal.
+func (h HexBytes) String() string { return hex.EncodeToString(h) }
+
+// Base64Bytes is binary data written as base64. Standard and URL-safe alphabets are both
+// accepted, padded or not. A spec declares one with `type: base64bytes`.
+type Base64Bytes []byte
+
+// UnmarshalText implements [encoding.TextUnmarshaler].
+func (b *Base64Bytes) UnmarshalText(text []byte) error {
+	s := strings.TrimSpace(string(text))
+	for _, enc := range []*base64.Encoding{
+		base64.StdEncoding, base64.RawStdEncoding, base64.URLEncoding, base64.RawURLEncoding,
+	} {
+		if out, err := enc.DecodeString(s); err == nil {
+			*b = out
+			return nil
+		}
+	}
+	return fmt.Errorf("%q is not base64", string(text))
+}
+
+// MarshalText implements [encoding.TextMarshaler] with the standard, padded alphabet.
+func (b Base64Bytes) MarshalText() ([]byte, error) { return []byte(b.String()), nil }
+
+// String renders the bytes as standard, padded base64.
+func (b Base64Bytes) String() string { return base64.StdEncoding.EncodeToString(b) }
+
+// valueParsers parse the standard-library types CLIs commonly take as input but that do not
+// implement encoding.TextUnmarshaler, keyed on the exact field type. [coerce] consults it before
+// anything else — including pointer dereferencing, since *url.URL and *time.Location are built by
+// their parsers rather than filled in place.
+var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
+	reflect.TypeFor[*url.URL](): func(s string) (reflect.Value, error) {
+		u, err := url.Parse(s)
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("want a URL such as https://example.com: %w", err)
+		}
+		if u.Scheme == "" || (u.Host == "" && u.Opaque == "") {
+			return reflect.Value{}, errors.New("a URL needs a scheme and a host, e.g. https://example.com")
+		}
+		return reflect.ValueOf(u), nil
+	},
+	reflect.TypeFor[mail.Address](): func(s string) (reflect.Value, error) {
+		a, err := mail.ParseAddress(s)
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("want ada@example.com or \"Ada <ada@example.com>\": %w", err)
+		}
+		return reflect.ValueOf(*a), nil
+	},
+	reflect.TypeFor[*time.Location](): func(s string) (reflect.Value, error) {
+		loc, err := time.LoadLocation(s)
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("want an IANA name such as Europe/Berlin: %w", err)
+		}
+		return reflect.ValueOf(loc), nil
+	},
+	reflect.TypeFor[net.HardwareAddr](): func(s string) (reflect.Value, error) {
+		mac, err := net.ParseMAC(s)
+		if err != nil {
+			return reflect.Value{}, fmt.Errorf("want hex pairs such as 01:23:45:67:89:ab: %w", err)
+		}
+		return reflect.ValueOf(mac), nil
+	},
+}
+
+// valueTypeLabels name the value types in a parse error the way a user thinks of them: "is not
+// a valid URL" rather than "is not a valid *url.URL".
+var valueTypeLabels = map[reflect.Type]string{
+	reflect.TypeFor[*url.URL]():         "URL",
+	reflect.TypeFor[mail.Address]():     "email address",
+	reflect.TypeFor[*time.Location]():   "time zone",
+	reflect.TypeFor[net.HardwareAddr](): "MAC address",
+	reflect.TypeFor[netip.Addr]():       "IP address",
+	reflect.TypeFor[netip.Prefix]():     "CIDR prefix",
+	reflect.TypeFor[netip.AddrPort]():   "address and port",
+	reflect.TypeFor[ByteSize]():         "size",
+	reflect.TypeFor[HexBytes]():         "hex value",
+	reflect.TypeFor[Base64Bytes]():      "base64 value",
+}
+
+// typeLabel names a field type for a parse error: its label when it has one, else its Go name.
+func typeLabel(t reflect.Type) string {
+	if l, ok := valueTypeLabels[t]; ok {
+		return l
+	}
+	return t.String()
+}
+
+// parseBool reads the spellings of true and false CLIs and config files use, case-insensitively:
+// true/false, t/f, 1/0, yes/no, y/n, on/off. strconv.ParseBool stops at the first three, so
+// `--cache=off` or `APP_DEBUG=yes` was an error.
+func parseBool(s string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "t", "1", "yes", "y", "on":
+		return true, nil
+	case "false", "f", "0", "no", "n", "off":
+		return false, nil
+	}
+	return false, fmt.Errorf("%q is not a boolean — use true/false, yes/no, on/off or 1/0", s)
+}
+
+// durationDays matches a day or week component of a duration: `7d`, `1.5w`.
+var durationDays = regexp.MustCompile(`(\d*\.?\d+)([dw])`)
+
+// parseDuration is [time.ParseDuration] plus days (`d`, 24h) and weeks (`w`, 168h), which Go's
+// parser stops short of and which retention, expiry and `--since` flags reach for constantly.
+// Components combine as usual: `1d12h`, `2w3d`, `1.5d`.
+func parseDuration(s string) (time.Duration, error) {
+	expanded := s
+	if strings.ContainsAny(s, "dw") {
+		var err error
+		if expanded, err = expandDays(s); err != nil {
+			return 0, err
+		}
+	}
+	d, err := time.ParseDuration(expanded)
+	if err != nil {
+		return 0, fmt.Errorf("%q is not a duration such as 90s, 1h30m or 7d: %w", s, err)
+	}
+	return d, nil
+}
+
+// expandDays rewrites each day and week component of a duration as hours.
+func expandDays(s string) (string, error) {
+	var convErr error
+	expanded := durationDays.ReplaceAllStringFunc(s, func(part string) string {
+		m := durationDays.FindStringSubmatch(part)
+		n, err := strconv.ParseFloat(m[1], 64)
+		if err != nil {
+			convErr = err
+			return part
+		}
+		hours := n * 24
+		if m[2] == "w" {
+			hours = n * 24 * 7
+		}
+		return strconv.FormatFloat(hours, 'f', -1, 64) + "h"
+	})
+	return expanded, convErr
+}

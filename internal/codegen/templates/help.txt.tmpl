@@ -19,7 +19,7 @@
                        resolved heading text, colon included (override is verbatim)
          .CommandGroups[] {.Title .Commands[]} — Title "" = default heading
          .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .Deprecated}
-         .Flags[]         {.Identifiers .Summary .Type .Required .Default .Enum .Deprecated}
+         .Flags[]         {.Identifiers .Summary .Type .Required .Default .Implicit .Enum .Deprecated}
          .Environment[]   {.Var .Summary .Type .Required .Default .Enum .Deprecated}
          .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum .Deprecated}
          .Cascading[]     same shape as .Flags — cascading flags inherited from ancestors
@@ -52,7 +52,7 @@
 {{end}}
 {{end -}}
 {{- range .FlagGroups}}{{if .Title}}{{.Title}}:{{else}}{{$.Headings.Flags}}{{end}}
-{{range .Flags}}  {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .Flags}}  {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Environment}}{{$.Headings.Environment}}
@@ -64,7 +64,7 @@
 {{end}}
 {{end -}}
 {{- with .Cascading}}{{$.Headings.Cascading}}
-{{range .}}  {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .}}  {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
 {{end}}
 {{end -}}
 {{- with .Examples}}{{$.Headings.Examples}}

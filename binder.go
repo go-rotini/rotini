@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -135,7 +137,7 @@ func (b *Binder) bind(rtx *Context, out any) error {
 		return err
 	}
 
-	cfgRegs, err := b.configRegs(chain, overrides)
+	cfgRegs, err := b.configRegs(chain, overrides, v)
 	if err != nil {
 		return err
 	}
@@ -342,39 +344,227 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 		}
 		ft := flags.Type()
 		for j := range flags.NumField() {
-			key := reconKey(ft.Field(j).Tag.Get("recon"))
-			if key == "" {
-				continue
+			if offset < 0 {
+				continue // a struct that does not fit the chain; checkFrameFit reports it
 			}
-			val, found, err := reg.Get(key)
-			if err != nil {
-				return reconBind(channelFlag, err)
-			}
-			if !found {
-				continue
-			}
-			// Value.String stringifies any kind; the strict AsString returns "" for
-			// non-strings, silently dropping a numeric or bool flag's fallback.
-			s := val.String()
-			coerce(flags.Field(j), []string{s})
-			if name := ft.Field(j).Tag.Get("rotini"); name != "" && offset >= 0 {
-				recordFlag(store, offset+i, name, s)
+			if err := reconcileFlag(reg, flags.Field(j), ft.Field(j), chain, store, offset+i); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
 }
 
+// firstSetEnv returns the first of an env tag's comma-separated variable names that is set
+// (non-empty) in the environment, or "" when none is. `variable: [GH_TOKEN, GITHUB_TOKEN]`
+// generates env:"GH_TOKEN,GITHUB_TOKEN": the first name is preferred, the rest are the
+// spellings other tools use for the same thing.
+func firstSetEnv(names string) string {
+	for name := range strings.SplitSeq(names, ",") {
+		if name != "" && os.Getenv(name) != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+// chosenEnv is the one variable an env tag binds to: the first of its names that is set, else
+// the first name — so an unset input still reports the preferred spelling.
+func chosenEnv(names string) string {
+	if set := firstSetEnv(names); set != "" {
+		return set
+	}
+	first, _, _ := strings.Cut(names, ",")
+	return first
+}
+
+// osEnvSourceName is what recon's OS environment source calls itself (a fixed name it exports
+// no constant for).
+const osEnvSourceName = "osenv"
+
+// reconcileFlag binds one fallback flag, at chain frame idx, from the registry: argv > env >
+// config. A flag the user set on the command line is left as the Parser bound it.
+func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructField, chain []ResolvedCommand, store *parsedInputs, idx int) error {
+	key := reconKey(sf.Tag.Get("recon"))
+	if key == "" {
+		return nil
+	}
+	name := sf.Tag.Get("rotini")
+	var def FlagDef
+	if idx < len(chain) {
+		def, _ = findFlagDef(chain[idx].Flags, name)
+	}
+	// Argv outranks every fallback, and the Parser already bound and recorded it. Re-reading
+	// it through the registry is how a list flag's argv values came back as the one string
+	// "[a b]".
+	if store != nil && idx < len(store.argvSet) && store.argvSet[idx][name] {
+		return nil
+	}
+	vals, err := bindFlagFallback(reg, field, sf.Tag, key, def, chain, idx)
+	if err != nil || vals == nil {
+		return err
+	}
+	recordFlag(store, idx, name, vals)
+	return nil
+}
+
+// bindFlagFallback reads one flag's fallback from reg and binds it into field, returning the
+// argv-shaped values it bound — nil when no source supplies one. The Binder and the overlay's
+// env and files layers share it, so a fallback means one thing on both paths: a list binds
+// item by item, a map from its leaves, a string splits on the flag's separator, a
+// case-insensitive enum binds its declared spelling, and a value the type cannot hold is an
+// error naming where it came from.
+func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []ResolvedCommand, idx int) ([]string, error) {
+	name := tag.Get("rotini")
+	val, found, err := reg.Get(key)
+	if err != nil {
+		return nil, reconBind(channelFlag, err)
+	}
+	var vals []string
+	source := val.Source()
+	switch {
+	case found:
+		if vals, err = fallbackValues(val, def.Separator); err != nil {
+			return nil, fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
+		}
+	case field.Kind() == reflect.Map:
+		// recon keeps a config map as its leaves (labels.k, labels.x), not at the map's key.
+		if vals, source, err = mapLeaves(reg, key); err != nil {
+			return nil, reconBind(channelFlag, err)
+		}
+		if len(vals) == 0 {
+			return nil, nil
+		}
+	default:
+		return nil, nil
+	}
+	if def.IgnoreCase {
+		vals = canonicalEnum(def.Enum, vals)
+	}
+	// A fallback value the flag's type cannot hold is the user's error exactly as a bad argv
+	// value is. Ignoring it — as this once did — left `PORT=abc` binding port 0.
+	if err := coerceFlagValues(field, def, vals); err != nil {
+		return nil, fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
+	}
+	if vals == nil {
+		vals = []string{} // supplied, and empty: still present
+	}
+	return vals, nil
+}
+
+// mapLeaves collects the registry's leaf keys under key as sorted key=value entries relative
+// to it (labels.k → k=v; deeper leaves keep their dots), with the source of the last one read.
+func mapLeaves(reg *recon.Registry, key string) (entries []string, source string, err error) {
+	prefix := key + "."
+	for _, k := range reg.AllKeys() {
+		rest, ok := strings.CutPrefix(k, prefix)
+		if !ok {
+			continue
+		}
+		v, found, err := reg.Get(k)
+		if err != nil {
+			return nil, "", err
+		}
+		if found {
+			entries = append(entries, rest+"="+v.String())
+			source = v.Source()
+		}
+	}
+	sort.Strings(entries)
+	return entries, source, nil
+}
+
+// fallbackValues renders a flag's reconciled fallback as the argv-shaped strings the Parser
+// would have produced: a list's items one by one, a map's entries as key=value (nested maps as
+// dotted keys), and anything else as one string, split on the flag's separator when it has
+// one. Value.String alone renders a list as "[a b]", which then bound as a single item.
+func fallbackValues(val recon.Value, sep string) ([]string, error) {
+	if items, err := val.AsSlice(); err == nil {
+		out := make([]string, len(items))
+		for i, it := range items {
+			out[i] = it.String()
+		}
+		return out, nil
+	}
+	if m, err := val.AsMap(); err == nil {
+		var out []string
+		flattenMap("", m, &out)
+		sort.Strings(out)
+		return out, nil
+	}
+	// Value.String stringifies any kind; the strict AsString returns "" for non-strings,
+	// silently dropping a numeric or bool flag's fallback.
+	return splitValue(val.String(), sep)
+}
+
+// flattenMap appends a reconciled map's leaves as dotted key=value pairs.
+func flattenMap(prefix string, m map[string]recon.Value, out *[]string) {
+	for k, v := range m {
+		key := k
+		if prefix != "" {
+			key = prefix + "." + k
+		}
+		if sub, err := v.AsMap(); err == nil {
+			flattenMap(key, sub, out)
+			continue
+		}
+		*out = append(*out, key+"="+v.String())
+	}
+}
+
+// coerceFlagValues binds fallback values into a flag's field the way [bindFlags] binds argv
+// values, dotted-key maps included.
+func coerceFlagValues(f reflect.Value, def FlagDef, vals []string) error {
+	if def.DottedKeys {
+		return coerceMapDotted(f, vals)
+	}
+	return coerce(f, vals)
+}
+
+// fallbackOrigin names where a flag's fallback value came from in the user's terms: the
+// environment variable they set, or the configuration file by its declared name. recon's own
+// source names ("osenv") mean nothing to them.
+func fallbackOrigin(source, envVar string) string {
+	switch source {
+	case "":
+		return ""
+	case osEnvSourceName:
+		if envVar == "" {
+			return "the environment"
+		}
+		return "environment variable " + chosenEnv(envVar)
+	}
+	return fmt.Sprintf("configuration file %q", source)
+}
+
+// fallbackCoerceError reports a flag's env or config fallback value that its type cannot hold,
+// naming the flag the way argv errors do and the source the value came from, since the user
+// did not type it and would otherwise look for it on the command line.
+func fallbackCoerceError(chain []ResolvedCommand, idx int, name, source string, err error) error {
+	label, secret := name, false
+	if idx >= 0 && idx < len(chain) {
+		label = labelForFlag(chain[idx].Flags, name)
+		if def, ok := findFlagDef(chain[idx].Flags, name); ok {
+			secret = def.Secret
+		}
+	}
+	msg := fmt.Sprintf("%s: %s", label, coerceMessage(err, secret))
+	if source != "" {
+		msg += " (from " + source + ")"
+	}
+	return usageBind(channelFlag, name, msg, err)
+}
+
 // recordFlag writes a reconciled flag value into the parsed store at its chain frame, so
 // deferred validation treats it as present.
-func recordFlag(store *parsedInputs, idx int, name, value string) {
+func recordFlag(store *parsedInputs, idx int, name string, values []string) {
 	if store == nil || idx < 0 || idx >= len(store.scopes) {
 		return
 	}
 	if store.scopes[idx].flags == nil {
 		store.scopes[idx].flags = map[string][]string{}
 	}
-	store.scopes[idx].flags[name] = []string{value}
+	store.scopes[idx].flags[name] = values
 }
 
 // hasReconFlags reports whether any command has an env/config fallback flag to reconcile.
@@ -547,10 +737,13 @@ func hasConfigChannel(v reflect.Value) bool {
 
 // configRegistry builds a recon registry over the configuration_files, first (highest
 // precedence) to last as declared. overrides carries any config_source-supplied paths.
-func (b *Binder) configRegistry(files []ConfigFile, overrides map[string]string) (*recon.Registry, error) {
+func (b *Binder) configRegistry(files []ConfigFile, overrides map[string]string, bools map[string]bool) (*recon.Registry, error) {
 	srcs, err := b.fileSources(files, overrides)
 	if err != nil {
 		return nil, err
+	}
+	for i, src := range srcs {
+		srcs[i] = boolWords{Source: src, keys: bools}
 	}
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
@@ -565,19 +758,21 @@ type cfgRegs struct {
 	binder    *Binder
 	files     []ConfigFile // sources in scope for the invoked chain, nearest-wins order
 	overrides map[string]string
+	bools     map[string]bool // recon keys of bool config fields; see boolWords
 	merged    *recon.Registry
 	perFile   map[string]*recon.Registry
 }
 
 // configRegs builds the merged config registry and the lazy per-file cache over the sources in
 // scope for chain.
-func (b *Binder) configRegs(chain []ResolvedCommand, overrides map[string]string) (*cfgRegs, error) {
+func (b *Binder) configRegs(chain []ResolvedCommand, overrides map[string]string, v reflect.Value) (*cfgRegs, error) {
 	files := b.chainConfigFiles(chain)
-	merged, err := b.configRegistry(files, overrides)
+	bools := boolKeys(v, "Config")
+	merged, err := b.configRegistry(files, overrides, bools)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{binder: b, files: files, overrides: overrides, merged: merged, perFile: map[string]*recon.Registry{}}, nil
+	return &cfgRegs{binder: b, files: files, overrides: overrides, bools: bools, merged: merged, perFile: map[string]*recon.Registry{}}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
@@ -623,7 +818,7 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		if err != nil {
 			return nil, err
 		}
-		reg, err := recon.New(recon.WithSource(src))
+		reg, err := recon.New(recon.WithSource(boolWords{Source: src, keys: c.bools}))
 		if err != nil {
 			return nil, internalBind(channelConfig, name, fmt.Sprintf("could not build the registry for configuration file %q", name), err)
 		}
@@ -789,8 +984,8 @@ func (b *Binder) pathOverrides(chain []ResolvedCommand, store *parsedInputs) map
 		switch {
 		case explicit != "":
 			out[f.Name] = explicit
-		case pf.Env != "" && os.Getenv(pf.Env) != "":
-			out[f.Name] = os.Getenv(pf.Env)
+		case firstSetEnv(pf.Env) != "":
+			out[f.Name] = os.Getenv(firstSetEnv(pf.Env))
 		case defaulted != "":
 			out[f.Name] = defaulted
 		}
@@ -859,7 +1054,57 @@ func envSources(v reflect.Value, envPrefix string) []recon.Source {
 	if envPrefix != "" {
 		opts = append(opts, recon.WithEnvPrefix(envPrefix+"_"))
 	}
-	return []recon.Source{recon.NewOSEnvSource(opts...)}
+	return []recon.Source{boolWords{Source: recon.NewOSEnvSource(opts...), keys: boolKeys(v, "Env")}}
+}
+
+// boolWords gives env and config inputs the bool spellings flags accept (see parseBool): a
+// string at the key of a bool field — yes/no, on/off, y/n — reaches recon as a real bool.
+// recon's own decode takes only true/false/1/0, so CACHE=yes was "expected bool" on an env
+// input while the same variable worked as a flag's fallback. Only bool fields' keys are
+// touched: a string input whose value happens to be "yes" keeps it.
+type boolWords struct {
+	recon.Source
+
+	keys map[string]bool
+}
+
+func (s boolWords) Get(path recon.Path) (recon.Value, bool, error) {
+	v, found, err := s.Source.Get(path)
+	if found && err == nil && v.Kind() == recon.StringKind && s.keys[path.String()] {
+		if b, perr := parseBool(v.String()); perr == nil {
+			return recon.NewValue(b), true, nil
+		}
+	}
+	return v, found, err
+}
+
+// boolKeys collects the recon keys of every bool (or *bool) field in each command's Env or
+// Config struct — the keys [boolWords] rewrites.
+func boolKeys(v reflect.Value, structName string) map[string]bool {
+	keys := map[string]bool{}
+	if v.Kind() != reflect.Struct {
+		return keys
+	}
+	for _, ci := range v.Fields() {
+		if ci.Kind() != reflect.Struct {
+			continue
+		}
+		ch := ci.FieldByName(structName)
+		if !ch.IsValid() || ch.Kind() != reflect.Struct {
+			continue
+		}
+		ct := ch.Type()
+		for j := range ch.NumField() {
+			ft := ct.Field(j).Type
+			if ft.Kind() == reflect.Pointer {
+				ft = ft.Elem()
+			}
+			if key := reconKey(ct.Field(j).Tag.Get("recon")); key != "" && ft.Kind() == reflect.Bool {
+				keys[key] = true
+			}
+		}
+	}
+	return keys
 }
 
 // flagEnvSource is the env source flag fallbacks read: the SNAKE_UPPER projection of each
@@ -876,7 +1121,21 @@ func flagEnvSource(v reflect.Value, envPrefix string) recon.Source {
 	if envPrefix != "" {
 		opts = append(opts, recon.WithEnvPrefix(envPrefix+"_"))
 	}
-	return recon.NewOSEnvSource(opts...)
+	return setEnvOnly{recon.NewOSEnvSource(opts...)}
+}
+
+// setEnvOnly reports an environment variable that is set but EMPTY as absent, so a flag's
+// fallback falls through to its configuration file and default — the convention CLIs follow,
+// and the one [firstSetEnv] already applies when choosing between names. Without it an empty
+// APP_PORT outranked the config file's port and then failed to parse as an integer.
+type setEnvOnly struct{ recon.Source }
+
+func (s setEnvOnly) Get(path recon.Path) (recon.Value, bool, error) {
+	v, found, err := s.Source.Get(path)
+	if found && err == nil && v.Kind() == recon.StringKind && v.String() == "" {
+		return recon.Value{}, false, nil
+	}
+	return v, found, err
 }
 
 // flagExplicitEnv collects the recon-key → explicit-variable mapping from every Flags field
@@ -895,7 +1154,7 @@ func flagExplicitEnv(v reflect.Value) map[string]string {
 		for j := range flags.NumField() {
 			vr := ft.Field(j).Tag.Get("env")
 			if key := reconKey(ft.Field(j).Tag.Get("recon")); vr != "" && key != "" {
-				m[key] = vr
+				m[key] = chosenEnv(vr)
 			}
 		}
 	}
@@ -974,7 +1233,7 @@ func envExplicit(v reflect.Value) map[string]string {
 		for j := range env.NumField() {
 			vr := et.Field(j).Tag.Get("env")
 			if key := reconKey(et.Field(j).Tag.Get("recon")); vr != "" && key != "" {
-				m[key] = vr
+				m[key] = chosenEnv(vr)
 			}
 		}
 	}
@@ -1052,7 +1311,8 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) e
 	for j := range s.NumField() {
 		f := st.Field(j)
 		c, has := channelConstraints(f.Tag)
-		if !has {
+		enum, ignoreCase := channelEnum(f.Tag)
+		if !has && len(enum) == 0 {
 			continue
 		}
 		key := reconKey(f.Tag.Get("recon"))
@@ -1082,11 +1342,85 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) e
 		if label == "" {
 			label = key
 		}
-		if err := checkConstraints(label, typ, c, channelValues(val, typ), reconHasSecret(f.Tag.Get("recon"))); err != nil {
+		// The user set a variable, not an input: name what they typed.
+		if v := f.Tag.Get("env"); v != "" && cfg == nil {
+			label = chosenEnv(v)
+		}
+		secret := reconHasSecret(f.Tag.Get("recon"))
+		vals := channelValues(val, typ)
+		if err := checkChannelEnum(channelOf(cfg), label, enum, ignoreCase, boundStrings(s.Field(j), vals), secret); err != nil {
+			return err
+		}
+		if ignoreCase {
+			canonicalizeField(s.Field(j), enum)
+		}
+		if err := checkConstraints(label, typ, c, vals, secret); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// channelOf names the channel validateChannelStruct is checking: config when it was handed the
+// config registries, env otherwise.
+func channelOf(cfg *cfgRegs) string {
+	if cfg != nil {
+		return channelConfig
+	}
+	return channelEnv
+}
+
+// channelEnum reads an env or config field's enum:"<json array>" and ignorecase:"true" tags.
+// Codegen writes the members as JSON so a member may contain any character.
+func channelEnum(tag reflect.StructTag) (enum []string, ignoreCase bool) {
+	if v := tag.Get("enum"); v != "" {
+		_ = json.Unmarshal([]byte(v), &enum) // codegen-written; a malformed tag means no enum
+	}
+	return enum, tag.Get("ignorecase") == "true"
+}
+
+// checkChannelEnum is the env and config counterpart of the argv enum check in [validate].
+// Before it, an enum on an env or config input was advertised in help and never enforced.
+func checkChannelEnum(channel, label string, enum []string, ignoreCase bool, vals []string, secret bool) error {
+	if len(enum) == 0 {
+		return nil
+	}
+	for _, v := range vals {
+		if !enumHas(enum, v, ignoreCase) {
+			return usageBind(channel, label, fmt.Sprintf("invalid value %q for %s (one of: %s)",
+				redactValue(v, secret), label, strings.Join(enum, ", ")), nil)
+		}
+	}
+	return nil
+}
+
+// boundStrings is the values an enum is checked against: a bound []string field's elements,
+// since an env list arrives as one "a,b" string that only binding splits; else the channel's
+// own rendering.
+func boundStrings(f reflect.Value, fallback []string) []string {
+	if f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String {
+		out := make([]string, f.Len())
+		for i := range f.Len() {
+			out[i] = f.Index(i).String()
+		}
+		return out
+	}
+	return fallback
+}
+
+// canonicalizeField rewrites a bound string, or each element of a bound []string, to the
+// declared spelling of the enum member it matched case-insensitively.
+func canonicalizeField(f reflect.Value, enum []string) {
+	switch {
+	case !f.CanSet():
+	case f.Kind() == reflect.String:
+		f.SetString(canonicalEnum(enum, []string{f.String()})[0])
+	case f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.String:
+		for i := range f.Len() {
+			e := f.Index(i)
+			e.SetString(canonicalEnum(enum, []string{e.String()})[0])
+		}
+	}
 }
 
 // channelConstraints reads the validation struct-tags codegen emits on a channel field into a

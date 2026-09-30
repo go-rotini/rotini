@@ -1,0 +1,44 @@
+# separator splits one argv value into several, so it means something only where several values
+# can land, and the character must not collide with the syntax it splits.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: name
+      identifiers: [--name]
+      schema:
+        type: string
+        separator: ','
+    - name: labels
+      identifiers: [--labels]
+      schema:
+        type: 'map[string]string'
+        separator: '='
+    - name: quoted
+      identifiers: [--quoted]
+      schema:
+        type: '[]string'
+        separator: '"'
+    # Fine: a list flag and a map flag split on commas.
+    - name: tags
+      identifiers: [--tags]
+      schema:
+        type: '[]string'
+        separator: ','
+    - name: env
+      identifiers: [--env]
+      schema:
+        type: 'map[string]string'
+        separator: ','
+  arguments:
+    # Fine: the variadic argument.
+    - name: files
+      schema:
+        type: array
+        items: {type: string}
+        separator: ','
+  env:
+    - name: hosts
+      schema:
+        type: '[]string'
+        separator: ','

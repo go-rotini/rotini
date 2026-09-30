@@ -8,6 +8,7 @@ package codegen
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
 // reconciledSpec is an end-user spec read + decoded, alongside the canonical-JSON
@@ -89,4 +90,74 @@ func reconcileConf(specPath, confPath string) (*reconciledConf, error) {
 	}
 	rc.path, rc.conf, rc.json, rc.locate = resolved, conf, instance, locate
 	return rc, nil
+}
+
+// normalizer is implemented by a decoded document that needs a canonicalizing pass before any
+// later stage sees it. decodeData calls it, so every path that decodes a spec — the root one and
+// each spec a `$ref` composes in — hands validation, lint and generation the same model.
+type normalizer interface{ normalize() }
+
+func (s *Spec) normalize() { hoistItemConstraints(s) }
+
+// hoistItemConstraints copies per-value constraints declared on an array input's `items` up onto
+// the input itself, where the runtime already applies them to every element.
+//
+// Before this, only the array-level spelling did anything:
+//
+//	schema: { type: array, items: { type: string }, enum: [low, high] }   // enforced
+//	schema: { type: array, items: { type: string, enum: [low, high] } }   // silently ignored
+//
+// The second is where JSON Schema puts an element constraint, and rotini's schema borrows JSON
+// Schema's vocabulary — so the natural spelling was the one that accepted `--level BOGUS`. Both
+// spellings now mean the same thing.
+//
+// An array-level value is never overwritten: when both are set and disagree, lintItemConstraints
+// reports it rather than one silently winning. stdin is exempt — its schema validates the piped
+// document with full JSON Schema semantics, where `items` constraints are already real — and so
+// are the document-level `schemas:` and `output:`, which are not inputs.
+func hoistItemConstraints(spec *Spec) {
+	if spec == nil {
+		return
+	}
+	walkCommandsAt(spec, func(c *Command, _, _ string) {
+		eachInputSchema(c.inputs(), func(channel, _ string, schema *InputSchema) {
+			if channel == "stdin" || schema == nil || schema.Items == nil || !isArrayInputSchema(schema) {
+				return
+			}
+			it := &schema.Items.BaseSchema
+			if len(schema.Enum) == 0 {
+				schema.Enum = it.Enum
+			}
+			if schema.Pattern == "" {
+				schema.Pattern = it.Pattern
+			}
+			if schema.Minimum == nil {
+				schema.Minimum = it.Minimum
+			}
+			if schema.Maximum == nil {
+				schema.Maximum = it.Maximum
+			}
+			if schema.ExclusiveMinimum == nil {
+				schema.ExclusiveMinimum = it.ExclusiveMinimum
+			}
+			if schema.ExclusiveMaximum == nil {
+				schema.ExclusiveMaximum = it.ExclusiveMaximum
+			}
+			if schema.MultipleOf == nil {
+				schema.MultipleOf = it.MultipleOf
+			}
+			if schema.MinLength == 0 {
+				schema.MinLength = it.MinLength
+			}
+			if schema.MaxLength == 0 {
+				schema.MaxLength = it.MaxLength
+			}
+		})
+	})
+}
+
+// isArrayInputSchema reports whether an input schema declares a list: `array`, or a Go-style
+// `[]T` spelling.
+func isArrayInputSchema(schema *InputSchema) bool {
+	return schema.Type == "array" || strings.HasPrefix(schema.Type, "[]")
 }

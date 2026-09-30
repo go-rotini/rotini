@@ -1427,3 +1427,281 @@ func TestCheckDescribed_noConfigInputsNeedsNoDescriptor(t *testing.T) {
 		t.Error("argv did not bind")
 	}
 }
+
+// ── fallback values the flag's type cannot hold ─────────────────────────.
+
+type tbFallbackInputs struct {
+	App struct {
+		Flags struct {
+			Port int `rotini:"port" recon:"port" env:"PORT"`
+		}
+		Arguments struct{}
+	}
+}
+
+func tbFallbackDef(secret bool) Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "port", Identifiers: []string{"--port"}, Type: "int", Secret: secret}},
+	}
+}
+
+// A bad env or config value for a flag is the user's error exactly as `--port abc` is. It used
+// to be dropped: `PORT=abc` bound port 0 and the command ran.
+func TestBinder_badFallbackValueIsAUsageError(t *testing.T) {
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("PORT", "abc")
+		var in tbFallbackInputs
+		err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(false), nil), &in)
+		var be *BindError
+		if !errors.As(err, &be) || CategoryOf(err) != CategoryUsage {
+			t.Fatalf("err = %v (%T), want a usage *BindError", err, err)
+		}
+		for _, want := range []string{"--port", `"abc" is not a valid integer`, "environment variable PORT"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("message %q missing %q", err, want)
+			}
+		}
+	})
+	t.Run("config", func(t *testing.T) {
+		cfg := writeConfig(t, "port: abc\n")
+		var in tbFallbackInputs
+		err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+			Bind(NewContextFor(tbFallbackDef(false), nil), &in)
+		if err == nil || !strings.Contains(err.Error(), `configuration file "app"`) {
+			t.Fatalf("err = %v, want it to name the configuration file", err)
+		}
+	})
+	t.Run("secret", func(t *testing.T) {
+		t.Setenv("PORT", "hunter2")
+		var in tbFallbackInputs
+		err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(true), nil), &in)
+		if err == nil || strings.Contains(err.Error(), "hunter2") {
+			t.Fatalf("err = %v, want an error that does not show the secret", err)
+		}
+	})
+	t.Run("good value still binds", func(t *testing.T) {
+		t.Setenv("PORT", "8080")
+		var in tbFallbackInputs
+		if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(false), nil), &in); err != nil || in.App.Flags.Port != 8080 {
+			t.Fatalf("Port = %d, err = %v; want 8080", in.App.Flags.Port, err)
+		}
+	})
+}
+
+// ── enums on env and config inputs ──────────────────────────────────────.
+
+type tbChannelEnumInputs struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Env       struct {
+			Mode  string   `rotini:"mode" recon:"mode" env:"MODE" enum:"[\"fast\",\"slow\"]"`
+			Level string   `rotini:"level" recon:"level" env:"LEVEL" enum:"[\"debug\",\"info\"]" ignorecase:"true"`
+			Tags  []string `rotini:"tags" recon:"tags" env:"TAGS" enum:"[\"a\",\"b\"]" ignorecase:"true"`
+		}
+		Config struct {
+			Tier string `rotini:"tier" recon:"tier" enum:"[\"gold\",\"silver\"]"`
+		}
+	}
+}
+
+// An enum on an env or config input was advertised in help and never checked: MODE=bogus bound
+// "bogus". It is now enforced there exactly as on argv.
+func TestBinder_channelEnumEnforced(t *testing.T) {
+	bind := func(t *testing.T, meta BindMeta) (tbChannelEnumInputs, error) {
+		t.Helper()
+		var in tbChannelEnumInputs
+		err := NewBinder(meta).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+		return in, err
+	}
+	t.Run("env rejects a non-member, naming the variable", func(t *testing.T) {
+		t.Setenv("MODE", "bogus")
+		_, err := bind(t, BindMeta{})
+		if err == nil || CategoryOf(err) != CategoryUsage || !strings.Contains(err.Error(), `invalid value "bogus" for MODE (one of: fast, slow)`) {
+			t.Fatalf("err = %v, want a usage error naming MODE and its members", err)
+		}
+	})
+	t.Run("env is case-sensitive by default", func(t *testing.T) {
+		t.Setenv("MODE", "FAST")
+		if _, err := bind(t, BindMeta{}); err == nil {
+			t.Fatal("MODE=FAST accepted without ignorecase")
+		}
+	})
+	t.Run("ignorecase binds the declared spelling", func(t *testing.T) {
+		t.Setenv("LEVEL", "INFO")
+		t.Setenv("TAGS", "A,b")
+		in, err := bind(t, BindMeta{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if in.App.Env.Level != "info" || !slices.Equal(in.App.Env.Tags, []string{"a", "b"}) {
+			t.Errorf("Level = %q, Tags = %v; want info, [a b]", in.App.Env.Level, in.App.Env.Tags)
+		}
+	})
+	t.Run("config rejects a non-member", func(t *testing.T) {
+		cfg := writeConfig(t, "tier: bronze\n")
+		_, err := bind(t, BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		if err == nil || !strings.Contains(err.Error(), `invalid value "bronze" for tier`) {
+			t.Fatalf("err = %v, want an enum violation for tier", err)
+		}
+	})
+}
+
+// ── list and map flags with a fallback ──────────────────────────────────.
+
+type tbListInputs struct {
+	App struct {
+		Flags struct {
+			Tags   []string          `rotini:"tags" recon:"tags" env:"TAGS"`
+			Labels map[string]string `rotini:"labels" recon:"labels" env:"LABELS"`
+			Ports  []int             `rotini:"ports" recon:"ports" env:"PORTS"`
+		}
+		Arguments struct{}
+	}
+}
+
+func tbListDef() Definition {
+	return Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string"},
+		{Name: "labels", Identifiers: []string{"--labels"}, Type: "map[string]string"},
+		{Name: "ports", Identifiers: []string{"--ports"}, Type: "[]int", Separator: ","},
+	}}
+}
+
+// A list or map flag that also declares a fallback (key: or variable:) was broken on every
+// channel: its argv values were re-read through the fallback registry and came back as the
+// single string "[a b]" (or "map[k:v]", which then failed as not key=value), and a config
+// file's YAML list bound the same way.
+func TestBinder_listAndMapFlagsWithAFallback(t *testing.T) {
+	bind := func(t *testing.T, argv []string, meta BindMeta) tbListInputs {
+		t.Helper()
+		var in tbListInputs
+		if err := NewBinder(meta).Bind(NewContextFor(tbListDef(), argv), &in); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		return in
+	}
+	t.Run("argv", func(t *testing.T) {
+		t.Setenv("TAGS", "from-env") // argv outranks it
+		in := bind(t, []string{"--tags", "a", "--tags", "b", "--labels", "k=v", "--ports", "1,2"}, BindMeta{})
+		if !slices.Equal(in.App.Flags.Tags, []string{"a", "b"}) || in.App.Flags.Labels["k"] != "v" || !slices.Equal(in.App.Flags.Ports, []int{1, 2}) {
+			t.Errorf("tags=%q labels=%v ports=%v", in.App.Flags.Tags, in.App.Flags.Labels, in.App.Flags.Ports)
+		}
+	})
+	t.Run("config list and map", func(t *testing.T) {
+		cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v, x: y}\nports: [8080, 9090]\n")
+		in := bind(t, nil, BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		if !slices.Equal(in.App.Flags.Tags, []string{"a", "b"}) || len(in.App.Flags.Labels) != 2 || in.App.Flags.Labels["x"] != "y" ||
+			!slices.Equal(in.App.Flags.Ports, []int{8080, 9090}) {
+			t.Errorf("tags=%q labels=%v ports=%v", in.App.Flags.Tags, in.App.Flags.Labels, in.App.Flags.Ports)
+		}
+	})
+	t.Run("env splits on the separator only when declared", func(t *testing.T) {
+		t.Setenv("PORTS", "1, 2,3")
+		t.Setenv("TAGS", "a,b") // no separator: one item, as written
+		in := bind(t, nil, BindMeta{})
+		if !slices.Equal(in.App.Flags.Ports, []int{1, 2, 3}) || !slices.Equal(in.App.Flags.Tags, []string{"a,b"}) {
+			t.Errorf("ports=%v tags=%q", in.App.Flags.Ports, in.App.Flags.Tags)
+		}
+	})
+}
+
+// ── several variable names ──────────────────────────────────────────────.
+
+type tbMultiEnvInputs struct {
+	App struct {
+		Flags struct {
+			Token string `rotini:"token" recon:"token" env:"GH_TOKEN,GITHUB_TOKEN"`
+		}
+		Arguments struct{}
+		Env       struct {
+			Region string `rotini:"region" recon:"region" env:"APP_REGION,AWS_REGION" enum:"[\"us\",\"eu\"]"`
+		}
+	}
+}
+
+// `variable: [GH_TOKEN, GITHUB_TOKEN]` generates env:"GH_TOKEN,GITHUB_TOKEN": the first name
+// that is set supplies the value, on a flag's fallback and on an env input alike.
+func TestBinder_severalVariableNames(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string"}}}
+	bind := func(t *testing.T) (tbMultiEnvInputs, error) {
+		t.Helper()
+		var in tbMultiEnvInputs
+		err := NewBinder(BindMeta{}).Bind(NewContextFor(def, nil), &in)
+		return in, err
+	}
+	t.Run("a later name when the first is unset", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "from-github")
+		t.Setenv("AWS_REGION", "eu")
+		in, err := bind(t)
+		if err != nil || in.App.Flags.Token != "from-github" || in.App.Env.Region != "eu" {
+			t.Fatalf("token=%q region=%q err=%v", in.App.Flags.Token, in.App.Env.Region, err)
+		}
+	})
+	t.Run("the first name wins when both are set", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "from-gh")
+		t.Setenv("GITHUB_TOKEN", "from-github")
+		t.Setenv("APP_REGION", "us")
+		t.Setenv("AWS_REGION", "eu")
+		in, err := bind(t)
+		if err != nil || in.App.Flags.Token != "from-gh" || in.App.Env.Region != "us" {
+			t.Fatalf("token=%q region=%q err=%v", in.App.Flags.Token, in.App.Env.Region, err)
+		}
+	})
+	t.Run("an error names the variable that was set", func(t *testing.T) {
+		t.Setenv("AWS_REGION", "mars")
+		if _, err := bind(t); err == nil || !strings.Contains(err.Error(), "for AWS_REGION") {
+			t.Fatalf("err = %v, want it to name AWS_REGION", err)
+		}
+	})
+}
+
+// An environment variable that is set but empty is unset, for a flag's fallback: the config file
+// and then the default supply the value, rather than "" outranking them and failing to parse.
+func TestBinder_emptyEnvFallsThrough(t *testing.T) {
+	cfg := writeConfig(t, "port: 9090\n")
+	t.Setenv("PORT", "")
+	var in tbFallbackInputs
+	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Bind(NewContextFor(tbFallbackDef(false), nil), &in)
+	if err != nil || in.App.Flags.Port != 9090 {
+		t.Fatalf("Port = %d, err = %v; want the config file's 9090", in.App.Flags.Port, err)
+	}
+}
+
+// An env or config input's bool takes the spellings a flag's does. recon alone accepts only
+// true/false/1/0, so CACHE=yes failed on an env input while working as a flag's fallback.
+// A string input whose value is "yes" is untouched.
+func TestBinder_boolSpellingsOnEnvAndConfig(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Env       struct {
+				Cache  bool   `rotini:"cache" recon:"cache" env:"CACHE"`
+				Answer string `rotini:"answer" recon:"answer" env:"ANSWER"`
+			}
+			Config struct {
+				Debug *bool `rotini:"debug" recon:"debug"`
+			}
+		}
+	}
+	cfg := writeConfig(t, "debug: 'on'\n")
+	t.Setenv("CACHE", "Yes")
+	t.Setenv("ANSWER", "yes")
+	var in inputs
+	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !in.App.Env.Cache || in.App.Env.Answer != "yes" || in.App.Config.Debug == nil || !*in.App.Config.Debug {
+		t.Errorf("cache=%v answer=%q debug=%v", in.App.Env.Cache, in.App.Env.Answer, in.App.Config.Debug)
+	}
+	t.Setenv("CACHE", "maybe")
+	var bad inputs
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
+		t.Error("CACHE=maybe accepted")
+	}
+}

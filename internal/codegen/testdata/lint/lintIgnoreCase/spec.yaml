@@ -1,0 +1,29 @@
+# ignore_case changes how a value is matched against an enum. Without an enum it does nothing,
+# and with two members that differ only in case, a value matching both could bind either.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: level
+      identifiers: [--level]
+      schema:
+        type: string
+        ignore_case: true
+    - name: mode
+      identifiers: [--mode]
+      schema:
+        type: string
+        enum: [Fast, fast, slow]
+        ignore_case: true
+    # Fine: distinct members.
+    - name: format
+      identifiers: [--format]
+      schema:
+        type: string
+        enum: [json, yaml]
+        ignore_case: true
+  env:
+    - name: region
+      schema:
+        type: string
+        ignore_case: true

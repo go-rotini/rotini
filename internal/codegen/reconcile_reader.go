@@ -102,10 +102,31 @@ func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) 
 		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, path)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("decode %s: %w", path, err)
+		return nil, &decodeError{path: path, format: format, data: data, err: err}
+	}
+	if n, ok := any(out).(normalizer); ok {
+		n.normalize()
 	}
 	return out, nil
 }
+
+// decodeError is a document that read fine but would not decode into rotini's Go types — almost
+// always a value of the wrong type, such as `minimum: "five"` or `required: [name]` on an input.
+//
+// It carries the raw bytes so the Processor can hand the same document to the schema validator,
+// which says what is wrong with a position and a JSON pointer. The decoder's own message says
+// neither, and leaks Go types to someone who wrote YAML:
+//
+//	decode spec.yaml: yaml: unmarshal errors: line 17: cannot unmarshal !!seq into Go value of type bool
+type decodeError struct {
+	path   string
+	format fileFormat
+	data   []byte
+	err    error
+}
+
+func (e *decodeError) Error() string { return fmt.Sprintf("decode %s: %v", e.path, e.err) }
+func (e *decodeError) Unwrap() error { return e.err }
 
 // bytesToJSON converts one read document to canonical JSON bytes, whatever its source
 // serialization, for the jsonschema validator. The raw instance is returned rather than a

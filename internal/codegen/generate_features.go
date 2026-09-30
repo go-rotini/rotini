@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -300,8 +301,9 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 // schema.variable, else the snake-upper form of its logical name (mirroring the
 // binder's default key→env-var derivation, e.g. "apiKey" → "API_KEY").
 func envVarLabel(e EnvInput, envPrefix string) string {
-	// One derivation, shared with the `env:` tag the binder pins — see [envVarFor].
-	return envVarName(e, envPrefix)
+	// One derivation, shared with the `env:` tag the binder pins — see [envVarFor]. Several
+	// names read as a list, first preferred.
+	return strings.ReplaceAll(envVarName(e, envPrefix), ",", ", ")
 }
 
 // configLocation is where a config input is read from, for display: "<file>.<key>"
@@ -391,7 +393,7 @@ func snakeUpper(name string) string {
 // flagRow builds the help-row for a single flag (shared by a command's own Flags
 // section and the Cascading section it contributes to its descendants).
 func flagRow(f FlagInput) templateDocFlagRow {
-	return templateDocFlagRow{
+	row := templateDocFlagRow{
 		Identifiers: displayIdentifiers(f),
 		Summary:     f.Summary,
 		Group:       f.Group,
@@ -401,6 +403,16 @@ func flagRow(f FlagInput) templateDocFlagRow {
 		Enum:        enumOf(f.Schema),
 		Deprecated:  f.Deprecated,
 	}
+	// An optional value is written attached, so the row says so: `-c, --color[=when]`, with the
+	// value token moved inside the brackets on the last identifier.
+	if f.Schema != nil && f.Schema.ImplicitValue != nil {
+		row.Implicit = defaultString(f.Schema.ImplicitValue)
+		if n := len(row.Identifiers); n > 0 && row.Type != "" {
+			row.Identifiers = append(slices.Clone(row.Identifiers[:n-1]), row.Identifiers[n-1]+"[="+row.Type+"]")
+			row.Type = ""
+		}
+	}
+	return row
 }
 
 // cascadingFlagsOf returns the help-rows for a command's own flags marked
@@ -469,12 +481,48 @@ func flagDisplayType(schema *InputSchema) string {
 	if schema != nil && schema.Placeholder != "" {
 		return schema.Placeholder
 	}
+	if schema != nil && schema.Ref == "" && schema.Type != "" {
+		if jsonSchemaTypeToGo(schema.Type) == "[]string" && schema.Items != nil && schema.Items.Ref == "" && schema.Items.Type != "" {
+			return "[]" + helpTypeName(schema.Items.Type)
+		}
+		return helpTypeName(schema.Type)
+	}
 	return t
 }
 
+// valueTypeAliases are the rotini type names that name a KIND of value — a duration, a URL, a
+// size — rather than a Go shape. Help shows them as the spec wrote them: `--timeout duration`
+// tells the user what to type, where `--timeout time.Duration` tells them how the program
+// stores it.
+var valueTypeAliases = []string{
+	"duration", "time", "datetime", "date",
+	"url", "email", "timezone", "mac", "ip", "cidr", "hostport",
+	"bytesize", "hexbytes", "base64bytes",
+}
+
+// helpTypeName renders a declared type for a help page: value aliases as written, everything
+// else resolved to Go, inside list and map spellings too — `[]bytesize`, `map[string]duration`.
+func helpTypeName(t string) string {
+	if elem, ok := strings.CutPrefix(t, "[]"); ok {
+		return "[]" + helpTypeName(elem)
+	}
+	if key, val, ok := splitMapType(t); ok {
+		return "map[" + helpTypeName(key) + "]" + helpTypeName(val)
+	}
+	if slices.Contains(valueTypeAliases, t) {
+		return t
+	}
+	return jsonSchemaTypeToGo(t)
+}
+
+// schemaDefaultString is the default a help page shows: the author's default_text when set,
+// else the default itself.
 func schemaDefaultString(schema *InputSchema) string {
 	if schema == nil {
 		return ""
+	}
+	if schema.DefaultText != "" {
+		return schema.DefaultText
 	}
 	return defaultString(schema.Default)
 }

@@ -1,0 +1,46 @@
+# implicit_value makes a flag's value optional. It is argv grammar, so flags only; it fits a flag
+# that takes exactly one value; and the value must pass the flag's own enum and constraints.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: verbose
+      identifiers: [--verbose]
+      schema:
+        type: bool
+        implicit_value: 'true'
+    - name: tags
+      identifiers: [--tags]
+      schema:
+        type: '[]string'
+        implicit_value: all
+    - name: color
+      identifiers: [--color]
+      schema:
+        type: string
+        enum: [always, never, auto]
+        implicit_value: sometimes
+    - name: jobs
+      identifiers: [-j, --jobs]
+      schema:
+        type: int
+        maximum: 64
+        implicit_value: 128
+    # Fine: git's --color[=when] shape, and an int with a sensible bare value.
+    - name: when
+      identifiers: [--when]
+      schema:
+        type: string
+        enum: [always, never, auto]
+        default: auto
+        implicit_value: always
+    - name: parallel
+      identifiers: [--parallel]
+      schema:
+        type: int
+        implicit_value: 4
+  arguments:
+    - name: target
+      schema:
+        type: string
+        implicit_value: here

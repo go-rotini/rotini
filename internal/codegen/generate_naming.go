@@ -33,12 +33,26 @@ func fieldImport(schema *InputSchema) string {
 }
 
 // builtinImport returns the import path rotini's own type vocabulary requires, or
-// "" when the type needs none. Only the time-family aliases (which jsonSchemaTypeToGo
-// maps to time.Time/time.Duration) carry an implicit import.
+// "" when the type needs none. The rotini-defined types (bytesize, hexbytes, base64bytes)
+// need no entry: the generated file already imports the runtime.
 func builtinImport(rotiniType string) string {
+	if elem, ok := strings.CutPrefix(rotiniType, "[]"); ok {
+		return builtinImport(elem)
+	}
+	if _, val, ok := splitMapType(rotiniType); ok {
+		return builtinImport(val)
+	}
 	switch rotiniType {
-	case "duration", "time", "datetime", "date":
+	case "duration", "time", "datetime", "date", "timezone":
 		return "time"
+	case "url":
+		return "net/url"
+	case "email":
+		return "net/mail"
+	case "mac":
+		return "net"
+	case "ip", "cidr", "hostport":
+		return "net/netip"
 	}
 	return ""
 }

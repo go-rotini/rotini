@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 )
@@ -71,7 +72,7 @@ func flagReconKey(name string, schema *InputSchema) string {
 	if schema.Key != "" {
 		return schema.Key
 	}
-	if schema.Variable != "" {
+	if len(variables(schema)) > 0 {
 		return name
 	}
 	return ""
@@ -96,6 +97,7 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 		// var — it rides in the envnest tag instead of env:, and rotini (not
 		// recon) enforces required, since recon resolves leaf keys only.
 		if e.Schema != nil && e.Schema.Nesting != "" {
+			// lintVariable allows one name here: a family prefix is not a choice of names.
 			fd.EnvNest = envVarName(e, envPrefix) + "," + e.Schema.Nesting
 			if e.Schema.Required {
 				fd.EnvNest += ",required"
@@ -112,11 +114,24 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 // validation struct-tags (e.g. `min:"1" max:"65535" pattern:"^x$"`) for the binder to
 // enforce, or "" when none are set. Mirrors the FlagDef/ArgDef constraints A1 enforces
 // for argv, but carried on the env/config field itself since channels have no Definition.
+//
+// Every value is written as a quoted Go string, because reflect reads a tag value back through
+// strconv.Unquote: a pattern written raw, like ^\d+$, is an invalid escape there, and the tag
+// silently read as absent — the pattern was never enforced. An enum rides along as a JSON array
+// so a member may hold any character.
 func constraintTags(schema *InputSchema) string {
 	var parts []string
 	eachConstraint(schema, func(tag, _, tagVal, _ string) {
-		parts = append(parts, tag+`:"`+tagVal+`"`)
+		parts = append(parts, tag+":"+strconv.Quote(tagVal))
 	})
+	if schema != nil && len(schema.Enum) > 0 {
+		if members, err := json.Marshal(schema.Enum); err == nil { // a []string always marshals
+			parts = append(parts, "enum:"+strconv.Quote(string(members)))
+		}
+		if schema.IgnoreCase {
+			parts = append(parts, `ignorecase:"true"`)
+		}
+	}
 	return strings.Join(parts, " ")
 }
 
@@ -158,11 +173,11 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 
 // envVarOf returns an env input's explicit environment variable (schema.variable),
 // or "" to let the binder use recon's snake-upper default for the key.
+//
+// Several names (`variable: [GH_TOKEN, GITHUB_TOKEN]`) ride in the one tag comma-joined; the
+// binder reads the first that is set.
 func envVarOf(schema *InputSchema) string {
-	if schema != nil {
-		return schema.Variable
-	}
-	return ""
+	return strings.Join(variables(schema), ",")
 }
 
 // flagEnvVar is a flag's pinned env-fallback variable: its explicit `variable:` when declared
@@ -314,6 +329,15 @@ func refTypeName(ref string) string {
 // accepts both JSON Schema standard names and Go names (the schema permits
 // both); unknown values pass through unchanged so custom types are usable.
 func jsonSchemaTypeToGo(t string) string {
+	// A Go-style list or map spelling resolves the names INSIDE it too, so `[]bytesize` and
+	// `map[string]duration` mean what they say. Before this only a bare name was translated, and
+	// `[]duration` generated a `[]duration` field that failed to compile.
+	if elem, ok := strings.CutPrefix(t, "[]"); ok {
+		return "[]" + jsonSchemaTypeToGo(elem)
+	}
+	if key, val, ok := splitMapType(t); ok {
+		return "map[" + jsonSchemaTypeToGo(key) + "]" + jsonSchemaTypeToGo(val)
+	}
 	switch t {
 	case "boolean", "bool":
 		return "bool"
@@ -333,9 +357,62 @@ func jsonSchemaTypeToGo(t string) string {
 		return "time.Duration"
 	case "time", "datetime", "date":
 		return "time.Time"
+	case "url":
+		return "*url.URL"
+	case "email":
+		return "mail.Address"
+	case "timezone":
+		return "*time.Location"
+	case "mac":
+		return "net.HardwareAddr"
+	case "ip":
+		return "netip.Addr"
+	case "cidr":
+		return "netip.Prefix"
+	case "hostport":
+		return "netip.AddrPort"
+	case "bytesize":
+		return "rotini.ByteSize"
+	case "hexbytes":
+		return "rotini.HexBytes"
+	case "base64bytes":
+		return "rotini.Base64Bytes"
 	default:
 		return t
 	}
+}
+
+// splitMapType splits a `map[K]V` spelling into its key and value, matching brackets so a key or
+// value that itself contains brackets is kept whole.
+func splitMapType(t string) (key, val string, ok bool) {
+	rest, ok := strings.CutPrefix(t, "map[")
+	if !ok {
+		return "", "", false
+	}
+	depth := 1
+	for i, r := range rest {
+		switch r {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return rest[:i], rest[i+1:], rest[i+1:] != ""
+			}
+		}
+	}
+	return "", "", false
+}
+
+// rotiniTypeAliases are the type names a spec may write that are rotini's own vocabulary rather
+// than Go's — every non-Go name jsonSchemaTypeToGo resolves. lintSchemaTypes uses it to tell a
+// real alias from a typo, and TestRotiniTypeAliasesMatchTheResolver keeps it and the switch above
+// in step.
+var rotiniTypeAliases = []string{
+	"boolean", "integer", "number", "array", "object", "map", "count",
+	"existingfile", "existingdir", "duration", "time", "datetime", "date",
+	"url", "email", "timezone", "mac", "ip", "cidr", "hostport",
+	"bytesize", "hexbytes", "base64bytes",
 }
 
 // toTemplateFields converts resolved fieldDefs to renderer input fields,

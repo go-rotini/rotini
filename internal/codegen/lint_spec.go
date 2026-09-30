@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -72,6 +73,12 @@ var specLints = []func(*Spec) []error{
 	lintComplete,
 	lintDefaultScalar,
 	lintDefaultConstraints,
+	lintItemConstraints,
+	lintRequiredArgumentOrder,
+	lintIgnoreCase,
+	lintSeparator,
+	lintImplicitValue,
+	lintValuesParse,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -311,6 +318,168 @@ func lintVariadicArguments(spec *Spec) []error {
 		}
 	})
 	return problems
+}
+
+// lintRequiredArgumentOrder rejects a required positional argument declared after an optional
+// one.
+//
+// Positionals fill strictly in order, so with
+//
+//	arguments:
+//	  - name: source              # optional
+//	  - name: dest                # required
+//
+// a single value always lands in `source`, and the run then fails with `missing required input:
+// <dest>`. The "optional" argument can never actually be left out — the spec says one thing and
+// the parser does another. A variadic that must receive at least one value (minItems > 0) is
+// required in the same sense.
+func lintRequiredArgumentOrder(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		in := c.inputs()
+		if in == nil {
+			return
+		}
+		firstOptional := ""
+		for _, a := range in.Arguments {
+			if !argumentRequired(a) {
+				if firstOptional == "" {
+					firstOptional = a.Name
+				}
+				continue
+			}
+			if firstOptional != "" {
+				problems = append(problems, &problem{
+					kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("argument %q is required but comes after optional argument %q — positionals fill in order, so the first value always goes to %q and it can never be left out. Make %q required too, or move %q before it",
+						a.Name, firstOptional, firstOptional, firstOptional, a.Name),
+				})
+			}
+		}
+	})
+	return problems
+}
+
+// lintIgnoreCase enforces ignore_case's contract. It changes how a value is matched against an
+// enum, so without an enum it does nothing — and an author who wrote it expected something to
+// happen. With it, two members that differ only in case are indistinguishable: `FAST` would
+// match both, and which spelling binds would depend on declaration order.
+func lintIgnoreCase(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || !schema.IgnoreCase {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q %s", channel, name, msg)})
+			}
+			if len(schema.Enum) == 0 {
+				add("sets ignore_case but declares no enum — ignore_case changes how a value is matched against enum members, so without one it does nothing")
+				return
+			}
+			seen := map[string]string{}
+			for _, m := range schema.Enum {
+				if prev, ok := seen[strings.ToLower(m)]; ok && prev != m {
+					add(fmt.Sprintf("sets ignore_case but enum members %q and %q differ only in case — a value matching both could bind either", prev, m))
+					return
+				}
+				seen[strings.ToLower(m)] = m
+			}
+		})
+	})
+	return problems
+}
+
+// lintSeparator enforces separator's contract. It splits one argv value into several, so it
+// means something only where several values can land — a list or map flag, or the variadic
+// argument — and only on argv-shaped channels: env and config inputs are decoded by recon,
+// which never reads it. The character itself must not collide with the syntax it splits: a
+// double quote is CSV's quoting character, a line break ends a CSV record, and
+// '=' on a map is what separates each entry's key from its value.
+func lintSeparator(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Separator == "" {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q %s", channel, name, msg)})
+			}
+			t := getSchemaType(schema)
+			isList, isMap := strings.HasPrefix(t, "[]"), strings.HasPrefix(t, "map[")
+			switch {
+			case channel != "flag" && channel != "argument":
+				add("sets separator, which applies to flags and arguments only — " + channel + " values are decoded, not split")
+			case !isList && !isMap:
+				add(fmt.Sprintf("sets separator but its type is %s — only a list or map takes several values to split into", displayType(t)))
+			case schema.Separator == `"`:
+				add(`sets separator to a double quote, which is how an item that contains the separator is quoted`)
+			case strings.ContainsAny(schema.Separator, "\r\n"):
+				add("sets separator to a line break, which ends a CSV record rather than separating items in one")
+			case isMap && schema.Separator == "=":
+				add(`sets separator to "=", which already separates each map entry's key from its value`)
+			}
+		})
+	})
+	return problems
+}
+
+// enumMember reports whether v is one of schema's enum members, the way the runtime matches:
+// exactly, or regardless of case under ignore_case.
+func enumMember(schema *InputSchema, v string) bool {
+	if schema.IgnoreCase {
+		return slices.ContainsFunc(schema.Enum, func(m string) bool { return strings.EqualFold(m, v) })
+	}
+	return slices.Contains(schema.Enum, v)
+}
+
+// lintImplicitValue enforces implicit_value's contract. It makes a flag's value optional, which
+// is argv grammar, so it applies to flags only; and only to a flag that takes exactly one value
+// — a bool already behaves this way with true, a count takes no value, and a list or map
+// collects several, where a bare occurrence adding a fixed item is a different feature. The
+// value itself is held to the flag's enum and constraints exactly as a default is, since a bare
+// flag that always fails validation is a flag that cannot be used bare.
+func lintImplicitValue(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.ImplicitValue == nil {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q %s", channel, name, msg)})
+			}
+			t := getSchemaType(schema)
+			switch {
+			case channel != "flag":
+				add("sets implicit_value, which applies to flags only — it is what a flag given without a value takes")
+			case t == "bool" || schema.Type == "count":
+				add(fmt.Sprintf("sets implicit_value but is %s, which already takes no value", displayType(schema.Type)))
+			case strings.HasPrefix(t, "[]") || strings.HasPrefix(t, "map["):
+				add(fmt.Sprintf("sets implicit_value but its type is %s — an optional value applies to a flag that takes exactly one", displayType(t)))
+			default:
+				if v := defaultViolation(schema, "implicit_value", defaultString(schema.ImplicitValue)); v != "" {
+					problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+						msg: fmt.Sprintf("%s %q: %s — the flag given bare would always fail", channel, name, v)})
+				}
+			}
+		})
+	})
+	return problems
+}
+
+// argumentRequired reports whether a positional must be supplied: declared required, or a
+// variadic that needs at least one value.
+func argumentRequired(a ArgumentInput) bool {
+	if a.Schema == nil {
+		return false
+	}
+	return a.Schema.Required || (strings.HasPrefix(getSchemaType(a.Schema), "[]") && a.Schema.MinItems > 0)
 }
 
 // lintDottedKeys enforces dotted_keys' documented scope: it is a flag-only
@@ -708,7 +877,7 @@ func lintCountFlags(spec *Spec) []error {
 				"placeholder":     schema.Placeholder != "",
 				"key":             schema.Key != "",
 				"file":            schema.File != "",
-				"variable":        schema.Variable != "",
+				"variable":        len(variables(schema)) > 0,
 				"from":            len(schema.From) > 0,
 				"config_source":   schema.ConfigSource != "",
 				"dotted_keys":     schema.DottedKeys,
@@ -744,10 +913,18 @@ func lintVariable(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
-			if schema == nil || schema.Variable == "" {
+			vars := variables(schema)
+			if schema == nil || len(vars) == 0 {
 				return
 			}
 			if channel == "env" || channel == "flag" {
+				// A nested env input's variable is its family's PREFIX, which one name has to be.
+				if len(vars) > 1 && schema.Nesting != "" {
+					problems = append(problems, &problem{
+						kind: "spec", ptr: ptr, loc: "command " + path,
+						msg: fmt.Sprintf("%s %q sets nesting with %d variables — a nested input reads the family of variables under ONE prefix, so name one", channel, name, len(vars)),
+					})
+				}
 				return
 			}
 			problems = append(problems, &problem{
@@ -1378,6 +1555,16 @@ func lintSchemaTypes(spec *Spec) []error {
 				add(fmt.Sprintf("type %q is not a Go type — use a builtin (string, int, bool, []string, map[string]int), a rotini alias (count, duration, date), a JSON Schema name (integer, number, array, object), or an imported type with `import:`", schema.Type))
 				return
 			}
+			// Any bare word parses as a Go type, so `type: strin` used to validate and then
+			// fail to COMPILE with "undefined: strin". A lowercase unqualified name can only
+			// be a Go builtin or a rotini alias; anything else is a typo or an unsupported
+			// name. A capitalized one is allowed — it may be a type the author defines in the
+			// generated package.
+			if name := unknownLowercaseTypeName(expr); name != "" {
+				add(didYouMean(fmt.Sprintf("type %q is not a type rotini knows — %q is neither a Go builtin nor a rotini type", schema.Type, name),
+					name, knownTypeNames()))
+				return
+			}
 			// A qualified type the AUTHOR wrote (not one an alias resolved to) needs an
 			// explicit import: rotini only knows the import for its own vocabulary, so
 			// without it the generated file references a package it never imports.
@@ -1387,6 +1574,40 @@ func lintSchemaTypes(spec *Spec) []error {
 		})
 	})
 	return problems
+}
+
+// goPredeclaredTypes are the type names Go makes available in every package.
+var goPredeclaredTypes = []string{
+	"bool", "string", "int", "int8", "int16", "int32", "int64",
+	"uint", "uint8", "uint16", "uint32", "uint64", "uintptr",
+	"float32", "float64", "complex64", "complex128", "byte", "rune", "any",
+}
+
+// knownTypeNames is every name a spec may write unqualified: Go's builtins and rotini's aliases.
+func knownTypeNames() []string {
+	return append(slices.Clone(goPredeclaredTypes), rotiniTypeAliases...)
+}
+
+// unknownLowercaseTypeName returns the first unqualified, lowercase identifier in a type
+// expression that is not a Go builtin — the shape of a typo — or "". Qualified names (pkg.Type)
+// and capitalized ones are left to the compiler and to lintSchemaTypes' import check.
+func unknownLowercaseTypeName(expr ast.Expr) string {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		if e.Name != "" && unicode.IsLower(rune(e.Name[0])) && !slices.Contains(goPredeclaredTypes, e.Name) {
+			return e.Name
+		}
+	case *ast.StarExpr:
+		return unknownLowercaseTypeName(e.X)
+	case *ast.ArrayType:
+		return unknownLowercaseTypeName(e.Elt)
+	case *ast.MapType:
+		if n := unknownLowercaseTypeName(e.Key); n != "" {
+			return n
+		}
+		return unknownLowercaseTypeName(e.Value)
+	}
+	return ""
 }
 
 // isGoTypeExpr reports whether a parsed expression denotes a Go TYPE rather than a
@@ -1550,7 +1771,7 @@ func lintDefaultConstraints(spec *Spec) []error {
 // not coerce is left alone — coercion reports that itself, and lintSchemaTypes already guards
 // the type.
 func defaultViolation(schema *InputSchema, label, v string) string {
-	if len(schema.Enum) > 0 && !slices.Contains(schema.Enum, v) {
+	if len(schema.Enum) > 0 && !enumMember(schema, v) {
 		return fmt.Sprintf("%s %q is not one of the declared enum values (%s)",
 			label, v, strings.Join(schema.Enum, ", "))
 	}
@@ -1608,4 +1829,61 @@ func isDefaultMultipleOf(n, m float64) bool {
 	}
 	q := n / m
 	return math.Abs(q-math.Round(q)) < 1e-9*math.Max(1, math.Abs(q))
+}
+
+// lintItemConstraints reports the two ways an array input's `items` can still say something
+// that will not happen, now that hoistItemConstraints honors per-value constraints written there.
+//
+// A CONFLICT: the same constraint on the array and on its items, with different values. The
+// array-level value is kept (hoisting never overwrites it), so without this the items-level one
+// would be silently ignored — the exact failure hoisting exists to remove.
+//
+// An ITEM COUNT on items: minItems/maxItems there would count values inside one element, but an
+// element of an argv, env or config list is a single value. The bound belongs on the list.
+//
+// stdin is exempt for the same reason it is exempt from hoisting: its schema validates a whole
+// document with JSON Schema semantics, where both are meaningful.
+func lintItemConstraints(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if channel == "stdin" || schema == nil || schema.Items == nil || !isArrayInputSchema(schema) {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{
+					kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q: %s", channel, name, msg),
+				})
+			}
+			it := &schema.Items.BaseSchema
+
+			if it.MinItems > 0 || it.MaxItems > 0 {
+				add("minItems/maxItems on `items` would count values inside ONE element, but an element of a " +
+					channel + " list is a single value — put the bound on the list itself")
+			}
+
+			conflict := func(key string, differ bool) {
+				if differ {
+					add(fmt.Sprintf("%s is declared on both the list and its `items`, with different values — "+
+						"they mean the same thing (a rule every element must pass), so declare it once", key))
+				}
+			}
+			conflict("enum", len(it.Enum) > 0 && !slices.Equal(it.Enum, schema.Enum))
+			conflict("pattern", it.Pattern != "" && it.Pattern != schema.Pattern)
+			conflict("minimum", floatBoundsDiffer(it.Minimum, schema.Minimum))
+			conflict("maximum", floatBoundsDiffer(it.Maximum, schema.Maximum))
+			conflict("exclusiveMinimum", floatBoundsDiffer(it.ExclusiveMinimum, schema.ExclusiveMinimum))
+			conflict("exclusiveMaximum", floatBoundsDiffer(it.ExclusiveMaximum, schema.ExclusiveMaximum))
+			conflict("multipleOf", floatBoundsDiffer(it.MultipleOf, schema.MultipleOf))
+			conflict("minLength", it.MinLength != 0 && it.MinLength != schema.MinLength)
+			conflict("maxLength", it.MaxLength != 0 && it.MaxLength != schema.MaxLength)
+		})
+	})
+	return problems
+}
+
+// floatBoundsDiffer reports whether an items-level bound is set and disagrees with the list's.
+func floatBoundsDiffer(item, list *float64) bool {
+	return item != nil && (list == nil || *item != *list)
 }

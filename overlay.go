@@ -542,7 +542,7 @@ func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 	if store, err := parseInto(chain, rtx.Argv, rtx.Stdin); err == nil {
 		overrides = b.pathOverrides(chain, store)
 	}
-	cfg, err := b.configRegs(chain, overrides)
+	cfg, err := b.configRegs(chain, overrides, v)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -570,7 +570,9 @@ func channelLayer(v reflect.Value, chain []ResolvedCommand, anchor int, layerNam
 			bindErr = err
 			return
 		}
-		recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg)
+		if err := recordFlagFallbacks(set, store, ci, chain, scope, topName, layerName, flagReg); err != nil {
+			bindErr = err
+		}
 	})
 	if bindErr != nil {
 		return nil, nil, bindErr
@@ -648,28 +650,33 @@ func recordChannelField(set Presence, ci reflect.Value, topName, structName, lay
 
 // recordFlagFallbacks fills the flags that declare a recon key and records their provenance
 // and raw text, so a later argv layer can still override them.
-func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []ResolvedCommand, scope int, topName, layerName string, flagReg *recon.Registry) {
+func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []ResolvedCommand, scope int, topName, layerName string, flagReg *recon.Registry) error {
+	var bindErr error
 	eachTaggedField(ci, "Flags", func(fieldName, logical string, f reflect.Value) {
-		key := reconKey(taggedFieldTag(ci, "Flags", fieldName).Get("recon"))
+		if bindErr != nil {
+			return
+		}
+		tag := taggedFieldTag(ci, "Flags", fieldName)
+		key := reconKey(tag.Get("recon"))
 		if key == "" {
 			return
 		}
-		val, found, err := flagReg.Get(key)
-		if err != nil || !found {
+		fd, _ := findFlagDef(chain[scope].Flags, logical)
+		vals, err := bindFlagFallback(flagReg, f, tag, key, fd, chain, scope)
+		if err != nil || vals == nil {
+			bindErr = err
 			return
 		}
-		s := val.String()
-		_ = coerce(f, []string{s})
-		fd, _ := findFlagDef(chain[scope].Flags, logical)
 		set[fieldPath(topName, "Flags", fieldName)] = Provenance{
 			Layer: layerName,
-			Raw:   redactValue(s, fd.Secret),
+			Raw:   redactValue(strings.Join(vals, ","), fd.Secret),
 		}
 		if store.scopes[scope].flags == nil {
 			store.scopes[scope].flags = map[string][]string{}
 		}
-		store.scopes[scope].flags[logical] = []string{s}
+		store.scopes[scope].flags[logical] = vals
 	})
+	return bindErr
 }
 
 // stdinLayer acquires the stdin channel into v.

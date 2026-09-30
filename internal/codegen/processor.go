@@ -97,13 +97,48 @@ func (p *Processor) Initialize(name, format string, force bool) error {
 func (p *Processor) reconcile(specPath, confPath string) (*reconciledSpec, *reconciledConf, error) {
 	rs, err := reconcileSpec(specPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, p.explainDecodeFailure("spec", err)
 	}
 	rc, err := reconcileConf(rs.path, confPath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, p.explainDecodeFailure("conf", err)
 	}
 	return rs, rc, nil
+}
+
+// explainDecodeFailure turns a document that would not decode into the schema validator's
+// account of why, so a mistyped value is reported like every other mistake: every problem at
+// once, each with a file:line:col and a JSON pointer.
+//
+// The Go decode runs first and stops at its first type mismatch, before validation ever sees
+// the document — so without this, `minimum: "five"` produced a raw decoder message with no
+// column and no key path, and a second mistake further down took another round trip to find.
+//
+// The decoder's own error is kept for the one case it is genuinely right about: the schema
+// accepts the document but the Go types reject it. That is a disagreement between rotini's
+// schema and rotini's types — a rotini bug — and it says so.
+func (p *Processor) explainDecodeFailure(kind string, err error) error {
+	var de *decodeError
+	if !errors.As(err, &de) {
+		return err
+	}
+	schema := p.specSchema
+	if kind == "conf" {
+		schema = p.confSchema
+	}
+	instance, convErr := bytesToJSON(de.format, de.data)
+	if convErr != nil || schema == nil {
+		return err
+	}
+	problems := validateInstance(kind, instance, schema)
+	if kind == "spec" {
+		problems = append(problems, schemaBlockProblems(instance)...)
+	}
+	if len(problems) == 0 {
+		return fmt.Errorf("%w — the %s schema accepts this document but rotini's types reject it, which is a rotini bug; please report it", err, kind)
+	}
+	locateProblems(problems, de.path, newSourceLocator(de.format, de.data))
+	return errors.Join(problems...)
 }
 
 // validateAndLintSpec schema-validates the spec, then — only when it is schema-valid (the lint

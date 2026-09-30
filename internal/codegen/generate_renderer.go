@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"go/format"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"text/template"
@@ -262,6 +263,11 @@ func inputFieldTag(f fieldDef) string {
 	if f.Constraint != "" {
 		tag += " " + f.Constraint
 	}
+	// A tag is any Go string literal. The raw form reads best, but a backquote inside a value
+	// (a pattern or enum member can hold one) would end it early.
+	if strings.Contains(tag, "`") {
+		return strconv.Quote(tag)
+	}
 	return "`" + tag + "`"
 }
 
@@ -381,6 +387,7 @@ type templateDocFlagRow struct {
 	Type        string // "" for bool flags
 	Required    bool
 	Default     string
+	Implicit    string // the value a bare flag takes (implicit_value); its identifier reads --x[=<type>]
 	Enum        []string
 	Deprecated  string
 	Group       string // the flag's `group` (buckets it in the Flags section)

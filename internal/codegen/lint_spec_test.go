@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,8 +16,8 @@ import (
 // TestLintRegistryCompleteness guards the lint_spec.go / lint_conf.go split: if a rule
 // is accidentally dropped while relocating funcs, the count regresses.
 func TestLintRegistryCompleteness(t *testing.T) {
-	if got := len(specLints); got != 35 {
-		t.Errorf("len(specLints) = %d, want 35 (a rule was dropped or added — update intentionally)", got)
+	if got := len(specLints); got != 41 {
+		t.Errorf("len(specLints) = %d, want 41 (a rule was dropped or added — update intentionally)", got)
 	}
 	if got := len(confLints); got != 6 {
 		t.Errorf("len(confLints) = %d, want 6", got)
@@ -80,6 +81,10 @@ func TestLintSchemaTypes_accepts(t *testing.T) {
 		{"[]string", ""}, {"[]int", ""}, {"map[string]int", ""}, {"map[string]any", ""},
 		{"count", ""},                                                  // the presence counter
 		{"duration", ""}, {"time", ""}, {"date", ""}, {"datetime", ""}, // aliases that resolve to time.*
+		{"url", ""}, {"email", ""}, {"timezone", ""}, {"mac", ""}, // value types
+		{"ip", ""}, {"cidr", ""}, {"hostport", ""},
+		{"bytesize", ""}, {"hexbytes", ""}, {"base64bytes", ""},
+		{"[]bytesize", ""}, {"map[string]duration", ""}, {"[]existingfile", ""}, // aliases inside Go spellings
 		{"any", ""}, {"*int", ""},
 		{"Widget", ""},                                       // a same-package generated type
 		{"uuid.UUID", "github.com/google/uuid"},              // imported, declared
@@ -111,6 +116,27 @@ func TestLintSchemaTypes_rejectsNonTypes(t *testing.T) {
 		}
 		if got := problems[0].Error(); !strings.Contains(got, `flag "v"`) || !strings.Contains(got, typ) {
 			t.Errorf("problem for %q must name the input and the value, got %q", typ, got)
+		}
+	}
+}
+
+// A lowercase name that is neither a Go builtin nor a rotini alias is a typo — before this rule
+// `strin` generated a `strin` field and failed at `go build`, far from the spec line.
+func TestLintSchemaTypes_rejectsTypos(t *testing.T) {
+	for typ, suggest := range map[string]string{
+		"strin":             "string",
+		"[]strin":           "string",
+		"map[string]nubmer": "number",
+		"*itn":              "int",
+		"bytsize":           "bytesize",
+	} {
+		problems := lintSchemaTypes(specWithFlagType(typ, ""))
+		if len(problems) == 0 {
+			t.Errorf("type %q accepted, want rejected", typ)
+			continue
+		}
+		if got := problems[0].Error(); !strings.Contains(got, fmt.Sprintf("did you mean %q", suggest)) {
+			t.Errorf("problem for %q should suggest %q, got %q", typ, suggest, got)
 		}
 	}
 }
@@ -397,5 +423,96 @@ func TestDefaultConstraintsAgreeWithRuntime(t *testing.T) {
 					lintRejects, runtimeRejects, runtimeErr)
 			}
 		})
+	}
+}
+
+// ── lintItemConstraints ──────────────────────────────────────────────────────
+
+func TestLintItemConstraints(t *testing.T) {
+	cases := []struct {
+		name, schema string
+		wantProblem  bool
+	}{
+		{"conflicting enum", `type: array, enum: [a, b], items: { type: string, enum: [x, y] }`, true},
+		{"conflicting minimum", `type: array, minimum: 5, items: { type: int, minimum: 9 }`, true},
+		{"conflicting pattern", `type: array, pattern: '^a', items: { type: string, pattern: '^b' }`, true},
+		{"item count on items", `type: array, items: { type: string, minItems: 2 }`, true},
+		{"identical on both", `type: array, enum: [a, b], items: { type: string, enum: [a, b] }`, false},
+		{"items only", `type: array, items: { type: string, enum: [a, b] }`, false},
+		{"list only", `type: array, enum: [a, b], items: { type: string }`, false},
+		{"item count on the list", `type: array, minItems: 2, items: { type: string }`, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := len(lintItemConstraints(defaultConstraintSpec(t, c.schema))) > 0
+			if got != c.wantProblem {
+				t.Errorf("problem reported = %v, want %v", got, c.wantProblem)
+			}
+		})
+	}
+}
+
+// ── lintRequiredArgumentOrder ────────────────────────────────────────────────
+
+func argumentsSpec(t *testing.T, args string) *Spec {
+	t.Helper()
+	spec, err := decodeData[Spec](formatYAML, []byte(
+		"version: 0.0.0\ncommand:\n  name: t\n  summary: s\n  arguments:\n"+args), "test.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec
+}
+
+func TestLintRequiredArgumentOrder(t *testing.T) {
+	cases := []struct {
+		name, args  string
+		wantProblem bool
+	}{
+		{"required after optional",
+			"    - name: a\n      schema: { type: string }\n    - name: b\n      schema: { type: string, required: true }\n", true},
+		{"variadic needing a value after optional",
+			"    - name: a\n      schema: { type: string }\n    - name: b\n      schema: { type: '[]string', minItems: 1 }\n", true},
+		{"required after optional-with-a-default",
+			"    - name: a\n      schema: { type: string, default: x }\n    - name: b\n      schema: { type: string, required: true }\n", true},
+		{"required then optional",
+			"    - name: a\n      schema: { type: string, required: true }\n    - name: b\n      schema: { type: string }\n", false},
+		{"optional variadic last",
+			"    - name: a\n      schema: { type: string }\n    - name: b\n      schema: { type: '[]string' }\n", false},
+		{"all required",
+			"    - name: a\n      schema: { type: string, required: true }\n    - name: b\n      schema: { type: string, required: true }\n", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := len(lintRequiredArgumentOrder(argumentsSpec(t, c.args))) > 0; got != c.wantProblem {
+				t.Errorf("problem reported = %v, want %v", got, c.wantProblem)
+			}
+		})
+	}
+}
+
+// TestRequiredArgumentOrderMatchesTheParser pins the claim the rule's message makes: with an
+// optional positional before a required one, a single value lands in the optional one and the run
+// fails. If the parser ever learns to skip an optional positional, this rule becomes wrong and
+// this test says so.
+func TestRequiredArgumentOrderMatchesTheParser(t *testing.T) {
+	type args struct {
+		Optional  string `rotini:"optional"`
+		Mandatory string `rotini:"mandatory"`
+	}
+	type inputs struct {
+		T struct{ Arguments args }
+	}
+	def := rotini.Definition{Name: "t", Handler: "App", Arguments: []rotini.ArgDef{
+		{Name: "optional", Type: "string"},
+		{Name: "mandatory", Type: "string", Required: true},
+	}}
+
+	var got inputs
+	err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"x"}), &got)
+	if got.T.Arguments.Optional != "x" || err == nil {
+		t.Errorf("one value: optional=%q err=%v — want it in the optional argument and a missing-input error; "+
+			"the parser no longer fills positionals strictly in order, so lintRequiredArgumentOrder is wrong",
+			got.T.Arguments.Optional, err)
 	}
 }

@@ -247,6 +247,9 @@ func flagDefsLiteral(in *Inputs) string {
 		if f.Schema != nil && f.Schema.Negatable {
 			b.WriteString(", Negatable: true")
 		}
+		if f.Schema != nil && f.Schema.ImplicitValue != nil {
+			b.WriteString(", ImplicitValue: " + strconv.Quote(defaultString(f.Schema.ImplicitValue)))
+		}
 		if f.Schema != nil && f.Schema.DottedKeys {
 			b.WriteString(", DottedKeys: true")
 		}
@@ -397,9 +400,15 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	}
 	if len(schema.Enum) > 0 {
 		b.WriteString(", Enum: " + goStringSlice(schema.Enum))
+		if schema.IgnoreCase {
+			b.WriteString(", IgnoreCase: true")
+		}
 	}
 	if schema.Secret {
 		b.WriteString(", Secret: true")
+	}
+	if schema.Separator != "" {
+		b.WriteString(", Separator: " + strconv.Quote(schema.Separator))
 	}
 	if c := constraintsLiteral(schema); c != "" {
 		b.WriteString(", Constraints: " + c)
@@ -436,6 +445,11 @@ func definitionType(schema *InputSchema) string {
 		return getSchemaType(schema)
 	}
 	if parserSignificantType(schema.Type) {
+		return schema.Type
+	}
+	// The Go-style list spelling, `[]existingfile`: resolving it would turn the element into a
+	// plain string and erase the existence check.
+	if elem, ok := strings.CutPrefix(schema.Type, "[]"); ok && parserSignificantType(elem) {
 		return schema.Type
 	}
 	// An array's ELEMENT can be parser-significant too: the parser checks each value of a

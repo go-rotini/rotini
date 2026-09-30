@@ -1,0 +1,38 @@
+# Positionals fill strictly in order. A required argument after an optional one means the first
+# value always lands in the "optional" one — so it can never actually be left out, and the spec
+# says something the parser will not do.
+version: 0.0.0
+command:
+  name: demo
+  arguments:
+    - name: source
+      schema:
+        type: string
+    - name: dest
+      schema:
+        type: string
+        required: true
+  commands:
+    # A variadic that needs at least one value is required in the same sense.
+    - name: pack
+      arguments:
+        - name: label
+          schema:
+            type: string
+        - name: files
+          schema:
+            type: '[]string'
+            minItems: 1
+    # Fine: required first, then optional, then an optional list.
+    - name: copy
+      arguments:
+        - name: from
+          schema:
+            type: string
+            required: true
+        - name: to
+          schema:
+            type: string
+        - name: extra
+          schema:
+            type: '[]string'

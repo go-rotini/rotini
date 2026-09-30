@@ -1,7 +1,9 @@
 package codegen
 
 import (
+	"encoding/json"
 	"errors"
+	"maps"
 	"strings"
 	"testing"
 )
@@ -229,5 +231,202 @@ func TestFailFast(t *testing.T) {
 				t.Errorf("failFast(%q, ...) = %v, want %v", tc.failMode, got, tc.want)
 			}
 		})
+	}
+}
+
+// ── strictness inside schema blocks ──────────────────────────────────────────
+//
+// Every object in a spec was closed to unknown keys except the `schema:` blocks, which could not
+// be: they inherit BaseSchema through allOf, and Draft 7 cannot combine that with
+// additionalProperties:false. The schema's comment said Go's DisallowUnknownFields covered it;
+// nothing set that option, so any key at all — a typo, or a JSON Schema keyword rotini does not
+// implement — was silently accepted.
+
+const blockSpecHead = "version: 0.0.0\ncommand:\n  name: t\n  summary: s\n"
+
+func blockProblems(t *testing.T, yamlBody string) []error {
+	t.Helper()
+	instance, err := bytesToJSON(formatYAML, []byte(blockSpecHead+yamlBody))
+	if err != nil {
+		t.Fatalf("to json: %v", err)
+	}
+	return schemaBlockProblems(instance)
+}
+
+// schemaBlockLocations maps every place the spec schema lets a schema block appear to a snippet
+// that plants a bogus key there. TestSchemaBlockProblems_reachesEveryBlockLocation derives the
+// real list FROM the schema, so a new schema-bearing key fails that test until it is added here —
+// and until schemaBlockProblems actually reaches it.
+var schemaBlockLocations = map[string]string{
+	"FlagInput.schema":         "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n      schema: { type: string, bogus: 1 }\n",
+	"ArgumentInput.schema":     "  arguments:\n    - name: a\n      schema: { type: string, bogus: 1 }\n",
+	"EnvInput.schema":          "  env:\n    - name: e\n      schema: { type: string, bogus: 1 }\n",
+	"ConfigInput.schema":       "  config:\n    - name: c\n      schema: { type: string, bogus: 1 }\n",
+	"StdinSpec.schema":         "  stdin:\n    format: json\n    schema: { type: object, bogus: 1 }\n",
+	"Command.output":           "  output: { type: object, bogus: 1 }\n",
+	"Command.schemas":          "  schemas:\n    X: { type: object, bogus: 1 }\n",
+	"ConfigurationFile.schema": "  config_files:\n    - name: main\n      path: c.yaml\n      schema: { type: object, bogus: 1 }\n",
+	"BaseSchema.properties":    "  output: { type: object, properties: { p: { type: string, bogus: 1 } } }\n",
+	"BaseSchema.items":         "  output: { type: array, items: { type: string, bogus: 1 } }\n",
+}
+
+func TestSchemaBlockProblems_reachesEveryBlockLocation(t *testing.T) {
+	var doc struct {
+		Definitions map[string]struct {
+			Properties map[string]map[string]any `json:"properties"`
+			AllOf      []struct {
+				Properties map[string]map[string]any `json:"properties"`
+			} `json:"allOf"`
+		} `json:"definitions"`
+	}
+	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
+		t.Fatal(err)
+	}
+	isBlock := func(v any) bool {
+		m, ok := v.(map[string]any)
+		ref, _ := m["$ref"].(string)
+		return ok && (ref == "#/definitions/Schema" || ref == "#/definitions/InputSchema")
+	}
+	var derived []string
+	for def, d := range doc.Definitions {
+		props := map[string]map[string]any{}
+		maps.Copy(props, d.Properties)
+		for _, b := range d.AllOf {
+			maps.Copy(props, b.Properties)
+		}
+		for name, p := range props {
+			if isBlock(p) || isBlock(p["items"]) || isBlock(p["additionalProperties"]) {
+				derived = append(derived, def+"."+name)
+			}
+		}
+	}
+	if len(derived) == 0 {
+		t.Fatal("derived no schema-block locations — the schema shape changed and this test no longer sees it")
+	}
+	for _, loc := range derived {
+		snippet, ok := schemaBlockLocations[loc]
+		if !ok {
+			t.Errorf("%s holds a schema block but has no case here — add one, and make sure schemaBlockProblems walks it", loc)
+			continue
+		}
+		if problems := blockProblems(t, snippet); len(problems) != 1 {
+			t.Errorf("%s: a bogus key produced %d problems, want exactly 1: %v", loc, len(problems), problems)
+		}
+	}
+}
+
+func TestSchemaBlockProblems_acceptsEveryDefinedKey(t *testing.T) {
+	sets, err := loadSchemaBlockKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every BaseSchema key is valid in both kinds of block; input blocks add input-only keys.
+	for _, k := range []string{"type", "enum", "minimum", "pattern", "items", "properties", "$ref", "import"} {
+		if !sets.input[k] || !sets.object[k] {
+			t.Errorf("shared key %q missing from a block kind", k)
+		}
+	}
+	for _, k := range []string{"default", "variable", "placeholder", "secret", "from"} {
+		if !sets.input[k] {
+			t.Errorf("input key %q missing from input blocks", k)
+		}
+		if sets.object[k] {
+			t.Errorf("input-only key %q allowed in an object schema", k)
+		}
+	}
+	if !sets.object["required"] || !sets.input["required"] {
+		t.Error("`required` is valid in both kinds (an array in one, a boolean in the other)")
+	}
+
+	clean := blockProblems(t, "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n"+
+		"      schema: { type: array, items: { type: string, enum: [a] }, minItems: 1, default: [a], placeholder: X }\n"+
+		"  output: { type: object, required: [id], properties: { id: { type: integer, minimum: 1 } } }\n")
+	if len(clean) != 0 {
+		t.Errorf("valid schema blocks reported problems: %v", clean)
+	}
+}
+
+// A JSON Schema keyword the author expected to DO something gets a sharper message than a typo.
+func TestSchemaBlockProblems_explainsUnimplementedJSONSchemaKeywords(t *testing.T) {
+	problems := blockProblems(t, "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n"+
+		"      schema: { type: array, uniqueItems: true, defualt: [x] }\n")
+	if len(problems) != 2 {
+		t.Fatalf("got %d problems, want 2: %v", len(problems), problems)
+	}
+	msgs := problems[0].Error() + "\n" + problems[1].Error()
+	if !strings.Contains(msgs, `"uniqueItems" is a JSON Schema keyword`) {
+		t.Errorf("uniqueItems not explained as an unimplemented keyword:\n%s", msgs)
+	}
+	if strings.Contains(msgs, `"defualt" is a JSON Schema keyword`) {
+		t.Errorf("a plain typo was described as a JSON Schema keyword:\n%s", msgs)
+	}
+}
+
+// The full workflow: strictness problems are positioned like every other schema problem.
+func TestValidate_rejectsUnknownKeysInSchemaBlocksWithPosition(t *testing.T) {
+	err, _ := validateInModule(t, blockSpecHead+"  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n"+
+		"      schema: { type: string, totallyMadeUpKey: 42 }\n", goldenConf, "")
+	if err == nil {
+		t.Fatal("an unknown key in a schema block validated clean")
+	}
+	if !strings.Contains(err.Error(), `.rotini.spec.yaml:9:`) || !strings.Contains(err.Error(), "/command/flags/0/schema/totallyMadeUpKey") {
+		t.Errorf("problem not positioned: %v", err)
+	}
+}
+
+// ── mistyped values: the decoder no longer gets the last word ────────────────
+//
+// A value of the wrong type failed in the Go decoder, which runs before validation and stops at
+// the first mismatch — so the user saw a raw decoder message with no column and Go type names,
+// one mistake per round trip:
+//
+//	decode spec.yaml: yaml: unmarshal errors: line 17: cannot unmarshal !!seq into Go value of type bool
+
+func TestValidate_typeErrorsAreReportedByTheSchemaWithPositions(t *testing.T) {
+	err, _ := validateInModule(t, blockSpecHead+
+		"  flags:\n"+
+		"    - name: a\n      identifiers: [--a]\n      summary: s\n      schema: { type: string, required: [a] }\n"+
+		"    - name: b\n      identifiers: [--b]\n      summary: s\n      schema: { type: int, minimum: \"five\" }\n",
+		goldenConf, "")
+	if err == nil {
+		t.Fatal("type errors validated clean")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"/command/flags/0/schema/required", `"required" must be of type boolean`,
+		"/command/flags/1/schema/minimum", `"minimum" must be of type number`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("missing %q — both mistakes should be reported, each by the schema:\n%s", want, msg)
+		}
+	}
+	for _, leak := range []string{"unmarshal", "Go value of type", "!!seq"} {
+		if strings.Contains(msg, leak) {
+			t.Errorf("the raw decoder message leaked through (%q):\n%s", leak, msg)
+		}
+	}
+}
+
+// When the schema accepts a document but the Go types reject it, the schema and the types
+// disagree. That is a rotini bug, and the message has to say so rather than blame the user.
+func TestExplainDecodeFailure_schemaAcceptsButTypesReject(t *testing.T) {
+	p := NewProcessor("0.0.0")
+	body := blockSpecHead + "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n" +
+		"      schema: { type: string, minLength: 99999999999999999999999 }\n"
+	_, err := decodeData[Spec](formatYAML, []byte(body), "s.yaml")
+	if err == nil {
+		t.Skip("this YAML library accepted the overflow; no schema/type disagreement to exercise")
+	}
+	got := p.explainDecodeFailure("spec", err)
+	if !strings.Contains(got.Error(), "rotini bug") {
+		t.Errorf("a schema-valid, type-invalid document was not reported as a rotini bug: %v", got)
+	}
+}
+
+// Errors that are not decode failures — a missing file, say — pass through untouched.
+func TestExplainDecodeFailure_passesOtherErrorsThrough(t *testing.T) {
+	orig := errors.New("no such file")
+	if got := NewProcessor("0.0.0").explainDecodeFailure("spec", orig); got != orig {
+		t.Errorf("a non-decode error was rewritten: %v", got)
 	}
 }

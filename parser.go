@@ -2,6 +2,7 @@ package rotini
 
 import (
 	"encoding"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
@@ -286,9 +287,10 @@ func parseInto(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsed
 // continue from, which advances only when the value came from the following token rather than
 // an inline "=value".
 //
-// Four shapes: a count flag takes no value, and an inline one is an error since the tally is
+// Five shapes: a count flag takes no value, and an inline one is an error since the tally is
 // computed; a bool defaults to "true" but honors an inline value; anything with an inline
-// value uses it; anything else consumes the next token, and running out is an error.
+// value uses it; a flag with an implicit value takes that and leaves the next token alone;
+// anything else consumes the next token, and running out is an error.
 func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []string, i int) (value string, next int, err error) {
 	switch {
 	case fdef.Type == "count":
@@ -303,6 +305,8 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 		return "true", i, nil
 	case hasInline:
 		return inline, i, nil
+	case fdef.ImplicitValue != "":
+		return fdef.ImplicitValue, i, nil // optional value, none attached: never consume the next word
 	default:
 		i++
 		if i >= len(argv) {
@@ -374,18 +378,30 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 		if err != nil {
 			return err
 		}
+		values, err := splitValue(value, fd.Separator)
+		if err != nil {
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", flagLabel(fd), err), Flag: flagLabel(fd)}
+		}
 		if store.scopes[idx].flags == nil {
 			store.scopes[idx].flags = map[string][]string{}
 		}
-		store.scopes[idx].flags[fd.Name] = append(store.scopes[idx].flags[fd.Name], value)
+		store.scopes[idx].flags[fd.Name] = append(store.scopes[idx].flags[fd.Name], values...)
 		if store.argvSet[idx] == nil {
 			store.argvSet[idx] = map[string]bool{}
 		}
 		store.argvSet[idx][fd.Name] = true
 		return nil
 	}
-	addArg := func(value string) {
-		store.scopes[leaf].args = append(store.scopes[leaf].args, value)
+	addArg := func(value string) error {
+		values := []string{value}
+		if def, ok := variadicAt(chain[leaf].Arguments, len(store.scopes[leaf].args)); ok && def.Separator != "" {
+			var err error
+			if values, err = splitValue(value, def.Separator); err != nil {
+				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("<%s>: %v", def.Name, err)}
+			}
+		}
+		store.scopes[leaf].args = append(store.scopes[leaf].args, values...)
+		return nil
 	}
 
 	// Passthrough: once the chain's passthrough leaf has been entered, every
@@ -398,7 +414,9 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 		tok := argv[i]
 
 		if passthrough() {
-			addArg(tok)
+			if err := addArg(tok); err != nil {
+				return nil, err
+			}
 			continue
 		}
 
@@ -426,7 +444,9 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 			}
 		}
 		startedArgs = true
-		addArg(tok)
+		if err := addArg(tok); err != nil {
+			return nil, err
+		}
 	}
 
 	return store, nil
@@ -461,7 +481,7 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 		for _, fd := range f.Flags {
 			vals := fsi.flags[fd.Name]
 			for _, v := range vals {
-				if len(fd.Enum) > 0 && !slices.Contains(fd.Enum, v) {
+				if len(fd.Enum) > 0 && !enumHas(fd.Enum, v, fd.IgnoreCase) {
 					return &ParseError{
 						Kind:       ParseKindEnumViolation,
 						Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), flagLabel(fd), strings.Join(fd.Enum, ", ")),
@@ -502,7 +522,7 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		}
 		for _, v := range vals {
-			if len(ad.Enum) > 0 && !slices.Contains(ad.Enum, v) {
+			if len(ad.Enum) > 0 && !enumHas(ad.Enum, v, ad.IgnoreCase) {
 				return &ParseError{
 					Kind:       ParseKindEnumViolation,
 					Msg:        fmt.Sprintf("invalid value %q for <%s> (one of: %s)", redactValue(v, ad.Secret), ad.Name, strings.Join(ad.Enum, ", ")),
@@ -987,6 +1007,8 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 			return 0, addFlag(idx, fdef, rest)
 		case hasInline:
 			return 0, addFlag(idx, fdef, inline)
+		case fdef.ImplicitValue != "":
+			return 0, addFlag(idx, fdef, fdef.ImplicitValue)
 		default:
 			if i+1 >= len(argv) {
 				return 0, &ParseError{Kind: ParseKindNeedsValue, Msg: fmt.Sprintf("flag %q needs a value", short), Flag: short}
@@ -1297,6 +1319,9 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 				continue
 			}
 		}
+		if def, ok := findFlagDef(defs, name); ok && def.IgnoreCase {
+			raw = canonicalEnum(def.Enum, raw)
+		}
 		if err := coerce(v.Field(i), raw); err != nil {
 			secret := false
 			if def, ok := findFlagDef(defs, name); ok {
@@ -1336,21 +1361,93 @@ func bindArgs(v reflect.Value, args []string, defs []ArgDef) error {
 	for i := range v.NumField() {
 		f := v.Field(i)
 		label := "<" + t.Field(i).Tag.Get("rotini") + ">"
+		var def ArgDef
+		if i < len(defs) {
+			def = defs[i]
+		}
 		if f.Kind() == reflect.Slice { // a slice argument is variadic, whatever its element type
-			if err := coerce(f, args[min(idx, len(args)):]); err != nil {
+			if err := coerce(f, canonicalFor(def, args[min(idx, len(args)):])); err != nil {
 				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, argSecret(defs, i)))}
 			}
 			idx = len(args)
 			continue
 		}
 		if idx < len(args) {
-			if err := coerce(f, args[idx:idx+1]); err != nil {
+			if err := coerce(f, canonicalFor(def, args[idx:idx+1])); err != nil {
 				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, argSecret(defs, i)))}
 			}
 			idx++
 		}
 	}
 	return nil
+}
+
+// splitValue splits one value on a list input's separator, CSV-style: an item in double quotes
+// keeps the separator ("a,b"), leading spaces are trimmed, and an empty value is no items — so
+// `--tags ""` clears to an empty list. With no separator the value is one item, untouched.
+func splitValue(value, sep string) ([]string, error) {
+	if sep == "" {
+		return []string{value}, nil
+	}
+	if value == "" {
+		return nil, nil
+	}
+	r := csv.NewReader(strings.NewReader(value))
+	r.Comma, _ = utf8.DecodeRuneInString(sep)
+	r.TrimLeadingSpace = true
+	r.LazyQuotes = true
+	r.FieldsPerRecord = -1
+	items, err := r.Read()
+	if err != nil {
+		return nil, fmt.Errorf("could not split %q on %q: %w", value, sep, err)
+	}
+	return items, nil
+}
+
+// variadicAt returns the variadic argument that positional number pos lands in, if any.
+// Positionals fill in declaration order and a variadic, always last, takes the rest.
+func variadicAt(args []ArgDef, pos int) (ArgDef, bool) {
+	for i, a := range args {
+		if a.Variadic && pos >= i {
+			return a, true
+		}
+	}
+	return ArgDef{}, false
+}
+
+// enumHas reports whether v is one of enum's members, ignoring case when asked.
+func enumHas(enum []string, v string, ignoreCase bool) bool {
+	if !ignoreCase {
+		return slices.Contains(enum, v)
+	}
+	return slices.ContainsFunc(enum, func(m string) bool { return strings.EqualFold(m, v) })
+}
+
+// canonicalEnum rewrites each value that matches an enum member case-insensitively to that
+// member's declared spelling, leaving any other value for validation to reject.
+func canonicalEnum(enum, vals []string) []string {
+	if len(enum) == 0 {
+		return vals
+	}
+	out := make([]string, len(vals))
+	for i, v := range vals {
+		out[i] = v
+		for _, m := range enum {
+			if strings.EqualFold(m, v) {
+				out[i] = m
+				break
+			}
+		}
+	}
+	return out
+}
+
+// canonicalFor applies an argument's case-insensitive enum, if it declares one.
+func canonicalFor(def ArgDef, vals []string) []string {
+	if !def.IgnoreCase {
+		return vals
+	}
+	return canonicalEnum(def.Enum, vals)
 }
 
 var (
@@ -1365,6 +1462,17 @@ func coerce(f reflect.Value, raw []string) error {
 	if len(raw) == 0 {
 		return nil
 	}
+	// Checked before pointer dereferencing: *url.URL and *time.Location are built by their
+	// parsers, not filled in place.
+	if parse, ok := valueParsers[f.Type()]; ok {
+		last := raw[len(raw)-1]
+		v, err := parse(last)
+		if err != nil {
+			return &coerceError{Value: last, TypeName: typeLabel(f.Type()), Cause: err}
+		}
+		f.Set(v)
+		return nil
+	}
 	if f.Kind() == reflect.Pointer {
 		if f.IsNil() {
 			f.Set(reflect.New(f.Type().Elem()))
@@ -1374,7 +1482,7 @@ func coerce(f reflect.Value, raw []string) error {
 	last := raw[len(raw)-1]
 
 	if f.Type() == durationType {
-		d, err := time.ParseDuration(last)
+		d, err := parseDuration(last)
 		if err != nil {
 			return notValid(last, "duration")
 		}
@@ -1383,14 +1491,14 @@ func coerce(f reflect.Value, raw []string) error {
 	}
 	if f.CanAddr() && f.Addr().Type().Implements(textUnmarshalerType) {
 		if err := f.Addr().Interface().(encoding.TextUnmarshaler).UnmarshalText([]byte(last)); err != nil {
-			return &coerceError{Value: last, TypeName: f.Type().String(), Cause: err}
+			return &coerceError{Value: last, TypeName: typeLabel(f.Type()), Cause: err}
 		}
 		return nil
 	}
 
 	switch f.Kind() {
 	case reflect.Bool:
-		b, err := strconv.ParseBool(last)
+		b, err := parseBool(last)
 		if err != nil {
 			return notValid(last, "boolean")
 		}
@@ -1470,7 +1578,10 @@ func (e *coerceError) Unwrap() error { return e.Cause }
 // render writes the message with the value redacted or not.
 func (e *coerceError) render(secret bool) string {
 	msg := fmt.Sprintf("%q is not a valid %s", redactValue(e.Value, secret), e.TypeName)
-	if e.Cause != nil {
+	// A parser's own message usually quotes the value it rejected ("12XB" has an unknown unit),
+	// so a secret's message stops at the type: redacting the value above and then printing the
+	// cause would put it straight back.
+	if e.Cause != nil && !secret {
 		msg += fmt.Sprintf(" (%v)", e.Cause)
 	}
 	return msg

@@ -112,7 +112,7 @@ Two more things an input can declare, neither of them a channel:
 `rotini validate` is the gate, and it runs before any code is generated:
 
 - the **JSON Schema** rejects what it can express — unknown keys, wrong types, bad patterns — and your editor shows it inline
-- **35 lint rules** reject what a schema cannot: duplicate flag identifiers across a chain, a `config_source` naming a file that does not exist, a `$ref` cycle, a `count` flag carrying a default, an input whose `type` is not a Go type, a variadic argument that is not last
+- **41 lint rules** reject what a schema cannot: duplicate flag identifiers across a chain, a `config_source` naming a file that does not exist, a `$ref` cycle, a `count` flag carrying a default, an input whose `type` is not a Go type, a variadic argument that is not last
 
 Problems are reported with a `file:line:col` in YAML, JSON and JSONC — and in TOML.
 
