@@ -2,143 +2,119 @@
 title: "docs"
 ---
 
-# Getting Started
+# Using rotini
 
-## Quick start
+This page walks through a rotini CLI from install to test. The [quick start](/) is the short
+version; the [spec](/specification) and [conf](/configuration) pages list every key.
 
-From an empty directory to a CLI that runs, with a command tree and help pages. rotini requires **Go 1.27 or newer**.
+## Install
 
-{{< code title="quick start" language="sh" open="true" collapsible="false" copy="true" >}}
+rotini is one module with two parts: the **tool** that generates your code and the **runtime**
+that code imports. Install the tool as a tool dependency, so every developer on the project
+resolves the same version through `go.mod`:
+
+{{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
 mkdir todo && cd todo
 go mod init github.com/me/todo
+go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
+{{< /code >}}
 
-go get -tool github.com/go-rotini/rotini/cmd/rotini@latest   # the generator
-go get github.com/go-rotini/rotini@latest                    # the runtime
+That also adds the runtime to `go.mod`. rotini requires Go 1.27 or later.
 
+The `version:` key at the top of your spec and conf is the minimum rotini they need. An older
+rotini, or a different major version, refuses to generate from them.
+
+## The files and the loop
+
+{{< code title="rotini init" language="sh" open="true" collapsible="false" copy="true" >}}
 go tool rotini init todo
 {{< /code >}}
 
-{{< code title="what you get" language="text" open="true" collapsible="false" copy="false" >}}
-$ go build ./cmd/todo && ./todo --help
-TODO — the long description at the top of `todo --help`
+| File | What it is | Who edits it |
+|---|---|---|
+| `cmd/todo/.rotini.spec.yaml` | the [spec](/specification): commands, flags, arguments and every other input | you |
+| `cmd/todo/.rotini.conf.yaml` | the [conf](/configuration): where code is written, which extras are on | you |
+| `cmd/todo/main.go` | the entrypoint, with the `//go:generate` line | you (created once) |
+| `internal/cmd/todo/zz_rotini.go` | the [generated](/generated) types and wiring | rotini, on every `go generate` |
+| `internal/cmd/todo/todo*.go` | one handler file per command | you (created once) |
 
-Usage:
-  todo <command> [flags]
+Specs and confs can also be JSON, JSONC or TOML: `rotini init todo --format toml`.
 
-Commands:
-  help       print help
-  version    print version
-
-Flags:
-  -h, --help       print help
-  -v, --version    print version
-
-Use "todo help <command>" for more information about a command.
-{{< /code >}}
-
-Open `cmd/todo/.rotini.spec.yaml`, add a command, run `go generate ./...`, and a handler stub is waiting for you. The rest of this page explains each of those steps; the [guides](/guides) pick up from there.
-
-## Concepts
-
-Three files and one loop. Everything else on this site is detail on one of them.
-
-| | |
-|---|---|
-| **The spec** — `.rotini.spec.*` | your CLI as data: the command tree, and every input each command accepts. YAML, JSON, JSONC or TOML. |
-| **The conf** — `.rotini.conf.*` | codegen settings: where generated code is written, which derived outputs (help, completion, man, markdown) are on. |
-| **Your handlers** | ordinary Go, one file per command, seeded once and then yours. |
-
-{{< code title="the loop" language="text" open="true" collapsible="false" copy="false" >}}
-edit the spec  →  rotini validate  →  rotini generate  →  write the handler  →  go build
-                  (schema + lints)     (types, wiring,
-                                        help, stubs)
-{{< /code >}}
-
-Two ideas are worth holding onto before you read further:
-
-- **rotini is commands all the way down.** The root command is the binary itself; a sub-command is the same object one level in. Every key that works on one works on the other.
-- **Declared, then generated, then implemented.** A flag exists because the spec says so. The generator turns that into a typed field, a help line, a completion entry and a validation rule — so a handler receives values that are already parsed, coerced and checked, and never writes parsing code.
-
-Nothing runs behind your back: rotini adds no flags you did not declare, detects nothing about the terminal, and wires no service you did not bind. The one default is a trap for interrupt and terminate signals, so teardown still runs on Ctrl-C; `Program.WithoutSignalHandling` turns it off.
-
-## 1. Set up the module
-
-The rest of this page is the quick start, slowed down. Adding rotini to an existing project? Skip to step 2.
-
-Create a new directory and initialize a Go module.
-
-{{< code title="go mod init" language="text" open="true" collapsible="false" copy="true" >}}
-mkdir todo
-cd todo
-go mod init github.com/me/todo
-{{< /code >}}
-
-## 2. Install rotini
-
-rotini is one module with two faces. You need both: the **tool** generates your code, and the **runtime** is what that code imports.
-
-{{< alert type="info" title="NOTE:" >}}
-Because the tool and the runtime are the same module, `go get -tool` and `go get` resolve to a single `require` line at a single version — they cannot drift apart. rotini also checks the `version:` key in your spec and conf against the binary running `generate`. The key is a minimum: any rotini of the same major version at or beyond it is accepted, while an *older* rotini or a different major is refused rather than emitting code from a definition it may not understand.
-{{< /alert >}}
-
-### As a tool dependency <small>(recommended)</small>
-
-A <cite>tool dependency[^1]</cite> records the rotini version in your `go.mod` under the `tool` directive, so every developer resolves the same CLI through the module graph. There is no separate installation step — `go tool` fetches and caches the binary.
-
-{{< code title="go get" language="text" open="true" collapsible="false" copy="true" >}}
-go get -tool github.com/go-rotini/rotini/cmd/rotini@latest   # the tool
-go get github.com/go-rotini/rotini@latest                    # the runtime
-{{< /code >}}
-
-{{< alert type="warning" title="THE TWO PATHS DIFFER:" >}}
-The tool is the **command** at `.../rotini/cmd/rotini`; the runtime is the **module root**. `-tool` takes a package path and the root is a library, so `go get -tool github.com/go-rotini/rotini` fails with `not a main package`. Same module, same version, two package paths.
-{{< /alert >}}
-
-### As a global binary
-
-Installing globally places the binary in your `GOBIN`. This suits prototyping across several projects, but the version is not tracked in any module graph, so each developer must keep their binary at or beyond each project's `version:` key (and on the same major version) themselves.
-
-{{< code title="go install" language="text" open="true" collapsible="false" copy="true" >}}
-go install github.com/go-rotini/rotini/cmd/rotini@latest
-{{< /code >}}
-
-## 3. Initialize the project
-
-`init` scaffolds the spec, the conf, the entrypoint and a first handler stub, then runs the same `generate` every later pass runs.
-
-{{< code title="rotini init" language="text" open="true" collapsible="false" copy="true" >}}
-go tool rotini init todo
-{{< /code >}}
-
-Your project now contains:
-
-- **`cmd/todo/.rotini.spec.yaml`** — the [specification](/specification): commands, flags, arguments, and every other input channel
-- **`cmd/todo/.rotini.conf.yaml`** — the [configuration](/configuration): where code is written and which features are on
-- **`cmd/todo/main.go`** — the entrypoint, carrying the `//go:generate` directive (create-once: never overwritten)
-- **`cmd/todo/.rotini-schema.spec.json`** and **`.rotini-schema.conf.json`** — copies of rotini's JSON Schemas for your editor, written because the seeded conf's `generate.schemas` block asks for them. The seeded spec and conf already name them in their `$schema` key, so your editor checks and completes keys from the first edit
-- **`internal/cmd/todo/`** — the [generated](/generated) framework file plus one editable handler stub per command (the seed has three: the root, `help` and `version`, already wired)
-
-## 4. The development loop
-
-Edit the spec, regenerate, build. The `//go:generate` directive in `main.go` means you never have to remember the command.
-
-{{< code title="workflow" language="sh" open="true" collapsible="false" copy="true" >}}
-# validate the spec without generating (fast; use it in CI)
-go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
-
-# regenerate after a spec change
+{{< code title="the loop" language="sh" open="true" collapsible="false" copy="true" >}}
+go tool rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml   # optional
 go generate ./...
-
-# build and run
 go build ./cmd/todo
-./todo --help
 {{< /code >}}
 
-## 5. Write a handler
+`validate` checks the spec against its JSON Schema and 43 lint rules and reports each problem
+with a `file:line:col`. `generate` runs the same checks first, so `validate` is mostly for CI.
 
-Each command gets one stub, created once and then yours. It implements the five lifecycle hooks; embed the `Default*` types for the ones you do not need.
+## Commands, flags and arguments
 
-To implement one later, declare a method with the same name. The embed can stay where it is — your method takes precedence over it.
+The root command is the binary; `commands:` nests sub-commands to any depth. Each command
+declares its own `flags:` and `arguments:`, and each input has a `schema:` saying its type
+and rules:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+commands:
+  - name: add
+    summary: add a task
+    aliases: [a]
+    arguments:
+      - name: title
+        summary: the task title
+        schema: { type: string, required: true, minLength: 1 }
+    flags:
+      - name: priority
+        summary: how urgent
+        identifiers: [-p, --priority]
+        schema: { type: string, default: normal, enum: [low, normal, high] }
+      - name: tag
+        summary: a label (repeatable)
+        identifiers: [--tag]
+        schema: { type: '[]string' }
+{{< /code >}}
+
+- **Types** are Go names (`string`, `int`, `bool`, `[]string`, `map[string]string`) or value
+  types rotini parses for you: `duration`, `date`, `url`, `ip`, `bytesize` and
+  [more](/specification#type).
+- **Rules** — `required`, `default`, `enum`, `pattern`, `minimum`/`maximum`, lengths and item
+  counts — are checked before your handler runs, and a bad value is a usage error naming the
+  flag the user typed.
+- **A flag works anywhere after the command that declares it**, including after a
+  sub-command's name. A flag written *before* a sub-command's name belongs to a parent.
+
+## Where values come from
+
+A flag can also be read from an environment variable and a configuration file. Give it a
+`key:` and declare the file:
+
+{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
+command:
+  name: todo
+  env_prefix: TODO
+  config_files:
+    - name: user
+      discover: { strategy: xdg, app: todo, file: config.yaml }
+  commands:
+    - name: add
+      flags:
+        - name: priority
+          identifiers: [-p, --priority]
+          schema: { type: string, default: normal, key: defaults.priority }
+{{< /code >}}
+
+`--priority` now falls back to `TODO_DEFAULTS_PRIORITY`, then to `defaults.priority` in
+`~/.config/todo/config.yaml`, then to its default. The command line always wins. Use
+`variable:` to name the environment variable exactly instead of deriving it.
+
+Commands can also declare pure `env:` and `config:` inputs, and a typed `stdin:` payload; they
+all land in the same generated struct.
+
+## Handlers
+
+`go generate` creates one handler file per command, once — after that it is yours. Fill in
+`Run`:
 
 {{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
 package todo
@@ -173,30 +149,74 @@ func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 }
 {{< /code >}}
 
-Two things worth noticing, because they are the conventions the rest of the docs assume:
+- **`TodoAddInputs` is generated** from the spec, so the compiler holds the handler to it.
+- **Five hooks run for every command**: `CascadingPreRun` (also for each descendant), `PreRun`,
+  `Run`, `PostRun`, `CascadingPostRun`. The `Default*` embeds are no-ops; declare a method to
+  use one.
+- **Write to `rtx.Stdout`**, not `os.Stdout`, so tests and REPLs can capture it.
+- **Record results and errors** (`rtx.RecordSuccess`, `rtx.RecordWarning`, `rtx.HaltWith`)
+  rather than printing them — the runtime reports them once, after teardown.
 
-- **Write to `rtx.Stdout`, never `os.Stdout`.** The streams come from the `Program`, so the same handler works under a test, a REPL, or a parent CLI that composed you.
-- **Record, do not print, results and errors.** The runtime reports them once, after teardown, through one funnel — so a handler carries no reporting code and a program changes its reporting in one place.
+A service the handlers share — a database, an API client — is bound once in `main.go` and read
+in any hook:
 
-`TodoAddInputs` is generated from the spec — you never declare it.
+{{< code title="sharing a service" language="golang" open="true" collapsible="false" copy="true" >}}
+var StoreKey = rotini.NewKey[Store]("todo.store")   // in the cmd package
 
-{{< alert type="info" title="A MISSPELLED HOOK IS CAUGHT FOR YOU:" >}}
-`var _ rotini.Handlers` at the top of the stub is a compile-time check: remove an embed without replacing it, or give a hook the wrong signature, and the build fails by name.
+cmd.StoreKey.Provide(cmd.Program, openStore())       // in main.go
+store := StoreKey.MustGet(rtx)                       // in a handler
+{{< /code >}}
 
-A misspelled hook name is the one case it cannot see — the embed still satisfies the interface, so `CascadingPrerun` compiles, and never runs. `rotini generate` reports that one:
+## Errors and exit codes
 
-```text
-Note: internal/cmd/todo/todo_add.go:33: method "CascadingPrerun" on todoAddHandlers is not a
-lifecycle hook, so it will never run — rotini.DefaultCascadingPreRun is what supplies
-CascadingPreRun; did you mean "CascadingPreRun"?
-```
-{{< /alert >}}
+A handler that fails calls `rtx.HaltWith(err)`. By default the runtime prints each recorded
+error to stderr as `Error: …` and exits 1. Every error carries a category —
+`rotini.UsageError(err)` marks one as the user's to fix — so a program that wants distinct exit
+codes installs its own reporting with `Program.WithFunnel` and maps `rotini.CategoryOf(err)` to
+a code. Declare `exit_status:` in the spec to document a command's codes in its help.
 
-## Next
+## Help, completion and docs
 
-- [Guides](/guides) — adding commands and inputs, configuration, errors, testing, composition
-- [Examples](/examples) — twelve complete CLIs, and what each one shows
-- [Specification](/specification) — every key of the spec file
-- [API](/api) — what a handler is handed
+The conf's `features:` turn on output generated from the spec:
 
-[^1]: Tool directives were added in <a href="https://go.dev/doc/go1.24#tools" target="_blank">Go 1.24</a>
+| Feature | What you get |
+|---|---|
+| `help` (on by default) | `Help(path...)` pages, printed by `--help` and `help <command>` |
+| `completion` | `Completion(shell)` scripts for bash, zsh, fish and PowerShell |
+| `man` | `Man(path...)` man pages |
+| `markdown` | `Markdown(path...)` reference pages |
+
+A command exposes one with a single line, e.g. a `completion` command whose handler prints
+`Completion(shell)`.
+
+## Testing
+
+Build a fresh `Program` per test and run it with arguments — no process, no `os.Exit`:
+
+{{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func TestAdd(t *testing.T) {
+	var out bytes.Buffer
+	code, err := NewProgram(Handlers()).WithStdout(&out).Run([]string{"add", "buy milk"})
+	if err != nil || code != 0 {
+		t.Fatalf("code %d, err %v", code, err)
+	}
+	if !strings.Contains(out.String(), "added: buy milk") {
+		t.Errorf("stdout = %q", out.String())
+	}
+}
+{{< /code >}}
+
+## Composing CLIs
+
+A command can be another CLI's spec: `- $ref: ../db/.rotini.spec.yaml` mounts it as a
+sub-command, and it still builds and ships on its own. Keys set next to the `$ref` (a new
+`name`, `summary`, `group` …) adjust it for its new parent.
+
+## Versions
+
+`main.go` passes `version` to `WithVersion`; stamp it at build time:
+
+{{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
+go build -ldflags "-X main.version=1.2.3" ./cmd/todo
+./todo --version   # 1.2.3
+{{< /code >}}

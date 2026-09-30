@@ -8,177 +8,107 @@ title: "rotini"
 
 <p class="hero_beats">Validate. Generate. Ship.</p>
 
-<p class="hero_sub">A spec-first CLI framework for Go. Your command tree, inputs, help, completion and docs are declared once and validated before a line of your code exists — then generated as small, legible Go you own.</p>
+<p class="hero_sub">A spec-driven CLI framework for Go. Declare your commands, flags and arguments in a spec file; rotini validates it and generates the typed Go, the command tree and a handler stub for each command. You write what each command does.</p>
 
 <div class="hero_actions">
-  <a class="primary" href="/docs">Setup</a>
-  <a href="/specification">Reference</a>
-  <a href="/batteries">Toolkit</a>
+  <a class="primary" href="/docs">Get started</a>
+  <a href="/specification">Spec</a>
+  <a href="/api">API</a>
 </div>
-
-{{< code title="install" language="bash" open="true" collapsible="false" copy="true" >}}
-go get -tool github.com/go-rotini/rotini/cmd/rotini   # the codegen tool
-go get github.com/go-rotini/rotini                    # the runtime your code imports
-{{< /code >}}
-
-Requires Go 1.27 or newer. One module, one version, both faces. The tool that generates your code and the runtime that code imports are the same dependency — so they cannot drift apart.
 
 ---
 
-## How it works
+## Quick start
 
-<div class="split">
+Requires Go 1.27 or later.
 
-{{< code title="cmd/todo/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
-version: 0.0.0
-command:
-  name: todo
-  summary: a task list
-  commands:
-    - name: add
-      summary: add a task
-      arguments:
-        - name: title
-          summary: what to do
-          schema: {type: string, required: true, minLength: 1}
-      flags:
-        - name: priority
-          summary: how urgent
-          identifiers: [-p, --priority]
-          schema:
-            type: string
-            default: normal
-            enum: [low, normal, high]
-        - name: tag
-          summary: label it (repeatable)
-          identifiers: [--tag]
-          schema:
-            type: '[]string'
-            default: [inbox]
+### 1. Initialize
+
+{{< code title="terminal" language="bash" open="true" collapsible="false" copy="true" >}}
+mkdir helloworld && cd helloworld
+go mod init github.com/me/helloworld
+
+go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
+go tool rotini init helloworld
 {{< /code >}}
 
-{{< code title="internal/cmd/todo/todo_add.go — yours to fill in" language="go" open="true" collapsible="false" copy="true" >}}
-func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[TodoAddInputs](rtx)
+{{< code title="what init writes" language="text" open="true" collapsible="false" copy="false" >}}
+cmd/helloworld/
+  .rotini.spec.yaml        the spec — what the CLI accepts
+  .rotini.conf.yaml        the conf — where generated code goes
+  .rotini-schema.*.json    schemas for editor completion
+  main.go                  the entrypoint
+internal/cmd/helloworld/
+  zz_rotini.go             generated on every `go generate` — don't edit
+  helloworld*.go           one handler file per command — yours to edit
+{{< /code >}}
+
+### 2. Add a command to the spec
+
+{{< code title="cmd/helloworld/.rotini.spec.yaml — under commands:" language="yaml" open="true" collapsible="false" copy="true" >}}
+    - name: hello
+      summary: say hello
+      arguments:
+        - name: name
+          summary: who to greet
+          schema: { type: string, default: world }
+      flags:
+        - name: shout
+          summary: greet in capitals
+          identifiers: [-s, --shout]
+          schema: { type: bool }
+        - name: help
+          summary: print help
+          identifiers: [-h, --help]
+          schema: { type: bool }
+{{< /code >}}
+
+### 3. Generate, and fill in the handler
+
+`go generate ./...` creates `internal/cmd/helloworld/helloworld_hello.go`. Replace its `TODO` with the command's work:
+
+{{< code title="internal/cmd/helloworld/helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
+func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	if argv, err := rotini.ParseArgv[HelloworldHelloInputs](rtx); err == nil {
+		if argv.Values.HelloworldHello.Flags.Help {
+			fmt.Fprintln(rtx.Stdout, rtx.Help())
+			rtx.HaltWithCode(0)
+			return
+		}
+	}
+
+	inputs, err := rotini.Collect[HelloworldHelloInputs](rtx)
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
-	add := in.TodoAdd
 
-	// Parsed, coerced and validated before you see it:
-	//   Title    is non-empty       (minLength)
-	//   Priority is one of three    (enum, defaulted to "normal")
-	//   Tag      is []string        and already holds ["inbox"]
-	rtx.RecordSuccess(fmt.Sprintf("added %q [%s] %v",
-		add.Arguments.Title, add.Flags.Priority, add.Flags.Tag))
+	greeting := "hello, " + inputs.HelloworldHello.Arguments.Name
+	if inputs.HelloworldHello.Flags.Shout {
+		greeting = strings.ToUpper(greeting)
+	}
+	fmt.Fprintln(rtx.Stdout, greeting)
 }
 {{< /code >}}
 
-</div>
+### 4. Build and run
 
-`go generate ./...` turns the spec into a typed `TodoAddInputs`, the command tree, the help pages, the completion scripts — and one editable handler stub per command. You write the body; rotini writes everything around it.
+{{< code title="terminal" language="bash" open="true" collapsible="false" copy="true" >}}
+go generate ./...
+go build ./cmd/...
 
-{{< code title="and it already behaves" language="bash" open="true" collapsible="false" copy="true" >}}
-$ todo add "write the docs"
-added "write the docs" [normal] [inbox]
-
-$ todo add "ship it" -p high --tag release --tag urgent
-added "ship it" [high] [release urgent]
-
-$ todo add "x" -p urgent
-Error: invalid value "urgent" for -p (one of: low, normal, high)
+./helloworld hello --shout rotini   # HELLO, ROTINI
+./helloworld --help
 {{< /code >}}
 
-Nothing above was hand-written except the body of `Run`. The enum, the default, the repeatable flag and the error message all come from the spec.
+Change the spec, `go generate ./...`, fill in any new handler, build — that's the whole loop.
 
 ---
 
-## What you get
+## Next
 
-<div class="feature_grid">
-
-<div class="feature_card">
-<h3>Typed inputs</h3>
-<p>One generated struct per command, already parsed and validated — <code>time.Duration</code>, slices, maps, enums, your own <code>TextUnmarshaler</code>. Four channels reconcile into it: argv, environment, config files and stdin, in one documented precedence.</p>
-</div>
-
-<div class="feature_card">
-<h3>Checked before it compiles</h3>
-<p>A JSON Schema, 43 spec lint rules and reference resolution reject a misspelled key, a duplicate identifier, a <code>$ref</code> cycle or a bound that can never fire — each with a <code>file:line:col</code>, from <code>rotini validate</code>.</p>
-</div>
-
-<div class="feature_card">
-<h3>Composition</h3>
-<p>One CLI grafts another in whole, by local path or by a published module pinned in <code>go.sum</code>. Ship the children on their own, the umbrella, or both — from one codebase.</p>
-</div>
-
-<div class="feature_card">
-<h3>Docs and completion</h3>
-<p>Help, man pages, markdown and completion for bash, zsh, fish and PowerShell, rendered from the same spec — so they cannot disagree with the binary. Bring your own template if you want to.</p>
-</div>
-
-<div class="feature_card">
-<h3>Lifecycle and outcomes</h3>
-<p>Five hooks per command, cascading down and unwinding in reverse — teardown runs after a failure or a panic. Every result reaches one funnel that decides what prints and what the process exits with.</p>
-</div>
-
-<div class="feature_card">
-<h3>Batteries, all opt-in</h3>
-<p>Subprocesses, plugins, terminal detection, a <code>Service</code> that knows how a daemon <em>ends</em>, and a <code>REPL</code> — all resting on <code>Program.Run</code> being re-entrant. No styler, no table, no prompt, no JSON-RPC, no scheduler: drawing, protocols and timers are yours. Importing rotini starts none of it.</p>
-</div>
-
-</div>
-
----
-
-## Why rotini
-
-### Checked before your code exists
-
-The spec is validated by a JSON Schema plus 43 spec lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, an input whose type is not a Go type — and every `$ref` is resolved, so a cycle is caught too. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
-
-These are mistakes a compiler has no reason to notice, so catching them is the spec's job — in CI, without building anything.
-
-### CLIs compose
-
-A rotini CLI can graft in another rotini CLI, whole, by reference:
-
-{{< code title="one umbrella, three CLIs that also ship on their own" language="yaml" open="true" collapsible="false" copy="true" >}}
-commands:
-  - $ref: ../db/.rotini.spec.yaml            # a sibling in this repo
-    name: db                                  # renamed on the way in
-  - $ref: ../cache/.rotini.spec.yaml
-    name: cache
-  - $ref: mod://example.com/tools@v1.2.0/scan/.rotini.spec.yaml
-{{< /code >}}
-
-`acme db migrate` runs the identical code `acme-db migrate` runs, because it *is* that code — one generated package, one set of handlers. A `mod://` reference is an ordinary Go dependency, pinned in `go.mod` and verified by `go.sum`.
-
-### The generated code is yours
-
-`rotini init` writes a working CLI — one that already answers `--help`, `--version`, `help <command>` and `version`, because the seeded spec declares them and the seeded handlers are wired to the pages codegen just produced. It is short enough to read in one sitting and review in a diff, and every line of it is yours to edit or delete.
-
-The machinery stays an ordinary import you upgrade with `go get -u`, not a vendored copy you must never edit.
-
-## The trade-off
-
-rotini adds a **codegen step**: a tool dependency, a `go generate` pass, and generated files in version control. That is real overhead, and it is the price of everything above being checked and generated rather than written.
-
-The cost is fixed; the benefit scales with the CLI. For a three-command internal script, rotini is heavier than it is worth. For a long-lived, multi-command tool with configuration files, environment variables, documentation and shell completion to keep in sync, the spec becomes the single place all of it is declared — and checked.
-
-{{< alert type="info" title="TRY IT IN TWO MINUTES:" >}}
-With Go 1.27 or newer, `go get -tool github.com/go-rotini/rotini/cmd/rotini` then `go tool rotini init mycli` writes a working CLI you can build and run immediately. The [setup guide](/docs) walks the whole loop, and its commands are executed by rotini's own test suite — so the guide cannot quietly stop being true.
-{{< /alert >}}
-
-## Start here
-
-- [docs](/docs) — set up a project, end to end
-- [guides](/guides) — commands, inputs, configuration, errors, testing, composition
-- [specification](/specification) — the `.rotini.spec.*` file
-- [configuration](/configuration) — the `.rotini.conf.*` file
-- [generated](/generated) — what rotini writes into your project
-- [examples](/examples) — twelve complete CLIs, and what each one shows
-- [batteries](/batteries) — what else ships, and what deliberately does not
-- [api](/api) — the runtime contract
-- [cli](/cli) — the `rotini` command itself
+- [README.md](/docs) — using rotini in depth: inputs, handlers, errors, testing, composition
+- [.rotini.spec.yaml](/specification) — every spec key
+- [.rotini.conf.yaml](/configuration) — every conf key
+- [api.go](/api) — what you call from `main.go` and your handlers
+- [cli](/cli) — the `rotini` command

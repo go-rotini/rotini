@@ -2,356 +2,98 @@
 title: "api"
 ---
 
-# Runtime Contract
+# api.go
 
-The package overview lives in `doc.go`, and every exported name carries its own godoc. This page is the shape of it: what a handler is handed, how input arrives, and how a result gets out.
+The parts of the runtime you will use in `main.go` and your handler files. The complete API is
+on [pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini).
 
-## Program
+## In main.go
 
-The generated entrypoint builds a `Program` and calls `Execute`, which resolves the command from argv, runs its lifecycle, and exits.
+The generated package exports a ready `Program`. `main.go` configures it and calls `Execute`:
 
-{{< code title="program" language="golang" open="true" collapsible="false" copy="true" >}}
-cmd.Program.
-	WithVersion(version).    // what --version reports
-	Execute()
+{{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func main() {
+	cmd.StoreKey.Provide(cmd.Program, openStore()) // a service your handlers share
+	cmd.Program.
+		WithVersion(version). // what --version prints
+		Execute()             // runs the command, then exits with its code
+}
 {{< /code >}}
 
-`Execute` ends the process. **`Run(argv)` does not** — it returns the exit code instead, which is what makes a `Program` reusable by a REPL, a daemon, or a test driving the whole binary end to end. Each `Run` gets a fresh `Context`, so one invocation never inherits another's outcomes; `RunContext(ctx, argv)` scopes a single invocation without changing the program.
+| Method | Use it to |
+|---|---|
+| `WithVersion(v)` | set what `--version` and `version` print |
+| `Key.Provide(p, v)` / `Bind(key, v)` | give handlers a service (a store, a client) |
+| `WithStdin` / `WithStdout` / `WithStderr` | redirect the program's streams |
+| `WithFunnel(fn)` | replace how outcomes are reported and which exit code is used |
+| `WithoutSignalHandling()` | turn off the default Ctrl-C / SIGTERM handling |
+| `Execute()` | run with `os.Args` and exit |
+| `Run(argv)` | run once and return the exit code instead of exiting — for tests |
 
-{{< alert type="info" title="EXECUTE RETURNS AN ERROR YOU USUALLY CANNOT SEE:" >}}
-It is the run's own failure — every recorded error and every recovered fault, joined, so `errors.Is` and `errors.As` reach each one.
+## In a handler
 
-But it arrives **only when the exit action returns**. Under the default, `os.Exit`, the process is gone before the return statement runs, which is why the generated entrypoint discards it. Install a `WithExit` that returns — a test, or a host embedding the CLI — and it arrives.
-
-It is not the reporting channel: the funnel has already printed everything by then. The return is there so an embedder can *act* on the failure rather than re-derive it from a stream.
-{{< /alert >}}
-
-Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, `WithVersion`/`WithHelp`/`WithParser`/`WithBindMeta`/`WithBinder`, and `With` for options that cannot be methods.
-
-## Lifecycle
-
-Five hooks per command, sharing one `Context`:
+Each command's handler has five hooks, run in this order; embed the `Default*` types for the
+ones you don't need:
 
 `CascadingPreRun` → `PreRun` → `Run` → `PostRun` → `CascadingPostRun`
 
-Cascading hooks run for every command in the resolved chain, root to leaf, so a parent can set up what its children need. A panic or a deliberate exit halts forward progress while **every begun teardown still runs**. Embed the `Default*` types for hooks you do not implement.
-
-## Context
-
-One per invocation, passed to every hook.
+The cascading hooks run for the command and every sub-command beneath it, so a parent can set
+up what its children need. Every hook receives a `*rotini.Context`:
 
 | | |
 |---|---|
-| `rtx.Argv` | the raw argument vector — command names and flags included, unparsed. Not to be confused with a command's **declared positionals**, which are `inputs.X.Arguments`, already parsed and typed |
-| `rtx.Chain()` | the resolved command path, root → leaf — a **copy**, so editing it cannot reach the run |
-| `rtx.Stdin` `rtx.Stdout` `rtx.Stderr` | the program's streams — write through these, never `os.Std*`, and your handler tests cleanly |
-| `rtx.Command()` / `rtx.CommandPath()` | the command the user **invoked** (the leaf), and its full path |
-| `rtx.Frame()` | the command whose **hook is running** — the leaf in `Run`, an ancestor in a cascading hook |
-| `rtx.IsLeaf()` | whether those two are the same — the question a cascading hook asks, since `Frame() == Command()` will not compile |
-| `rtx.Help()` | the help page of the command being run — what a generated `--help` prints. A composed command gets the page of the program it is running in, with its full path there |
-| `rtx.Version()` | what `WithVersion` set, or `""` |
-| `rtx.Bind` / `rtx.Get[T]` / `rtx.MustGet[T]` | the service registry (generic methods, Go 1.27) |
-| `rtx.RecordInfo` / `RecordSuccess` / `RecordWarning` / `RecordError` | outcomes |
-| `rtx.Failed()` | has anything failed so far — the one bit a teardown needs |
-| `rtx.HaltWith(err)` | fail: record and stop, in one call — see below |
-| `rtx.Halt()` / `rtx.HaltWithCode(code)` / `rtx.Exit(code)` | stop — see below |
+| `rotini.Collect[T](rtx)` | the command's inputs — argv, env, config files, stdin and defaults — typed and validated |
+| `rtx.Stdout` / `rtx.Stderr` / `rtx.Stdin` | the streams; write to these, not `os.Stdout` |
+| `Key.MustGet(rtx)` / `rtx.MustGet[T](key)` | a service bound in `main.go` |
+| `rtx.RecordSuccess` / `RecordWarning` / `RecordInfo` | report an outcome, printed once after the command finishes |
+| `rtx.HaltWith(err)` | fail: record the error and stop |
+| `rtx.Failed()` | whether anything has failed yet — for a teardown deciding to commit or roll back |
+| `rtx.Help()` / `rtx.Version()` | the command's help page, and the program's version |
 
-### Failing, and stopping
-
-A hook has no return value, so failing is something you *say* rather than something you return. One call says it:
-
-{{< code title="the one you want, in any hook" language="golang" open="true" collapsible="false" copy="true" >}}
-if err := store.Save(task); err != nil {
-	rtx.HaltWith(err) // records it, stops the run; the funnel decides the cost
-	return
-}
-{{< /code >}}
-
-Each intent has one spelling, and nothing is taken away:
-
-| Intent | Call |
-|---|---|
-| **fail here, stop the run** | `HaltWith(err)` — `RecordError` + `Halt` as one act, claiming no exit code |
-| record a problem and **keep going** — collect several, or let a later hook decide | `RecordError(err)` on its own |
-| stop cleanly, nothing failed | `Halt()` |
-| stop **and** claim a code, when the number is the point — a filter reporting "no match" as 1, a wrapper passing a child's status through | `HaltWithCode(n)` |
-| stop now and **skip pending teardown**, when remaining cleanup must not run | `Exit(n)` |
-
-One rule covers the four: **everything named `Halt*` leaves teardown intact; `Exit` does not** — which is why it is spelled like `os.Exit`, whose deferred functions do not run either.
-
-{{< alert type="warning" title="HALT STOPS FORWARD PROGRESS — WHICH IS ONLY TWO OF THE FIVE HOOKS:" >}}
-| Hook | What `Halt()` does there |
-|---|---|
-| `CascadingPreRun` | **stops the run** — no further setup, no `PreRun`, no `Run` |
-| `PreRun` | **stops the run** — no `Run` |
-| `Run` | nothing: `Run` is the last forward step |
-| `PostRun` | nothing: the unwind runs to completion |
-| `CascadingPostRun` | nothing |
-
-So `Halt` is how a **setup** hook refuses to let a command proceed, and its failure mode is omission. A setup hook that records an error and returns *without* halting exits with the same code and the same stderr as one that halts — the only difference is that the command went on to do the work its setup had just established it must not do.
-
-`HaltWith` is the answer: it is correct in all five hooks, so failing never depends on knowing which one you are in, and one call cannot be half-written.
-{{< /alert >}}
-
-`Failed()` is what makes a teardown decision possible — commit or roll back, keep or discard:
-
-{{< code title="the decision a teardown exists to make" language="golang" open="true" collapsible="false" copy="true" >}}
-func (h *dbHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
-	if rtx.Failed() { // panics count, which is the case a hand-kept flag misses
-		h.tx.Rollback()
+{{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
+func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[TodoAddInputs](rtx)
+	if err != nil {
+		rtx.HaltWith(err)
 		return
 	}
-	h.tx.Commit()
+	if err := StoreKey.MustGet(rtx).Add(in.TodoAdd.Arguments.Title); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	rtx.RecordSuccess("task added")
 }
 {{< /code >}}
 
-The `Outcome` a funnel receives answers the same question — but a funnel runs *after* every teardown has finished, which is the right place to report a failure and far too late to undo one.
+## Stopping
 
-## Input
-
-`Collect[T]` is the whole story for most handlers: every declared channel — argv, environment, configuration files, stdin, defaults — reconciled and validated in one line.
-
-{{< code title="input" language="golang" open="true" collapsible="false" copy="true" >}}
-inputs, err := rotini.Collect[TodoAddInputs](rtx)
-
-// CollectP adds provenance: which channel won, per field.
-inputs, report, err := rotini.CollectP[TodoAddInputs](rtx)
-
-// Or take one channel at a time, for custom precedence.
-argv, _ := rotini.ParseArgv[TodoAddInputs](rtx)
-env,  _ := rotini.ParseEnv[TodoAddInputs](rtx)
-merged  := rotini.OverlayInputs(argv, env)
-{{< /code >}}
-
-**A handler collects the type generated for its own command, in any hook.** That is the whole rule, and there is only one call.
-
-An inputs type describes a command and its ancestors: its last field is the collecting command, the fields before it are that command's lineage. `Collect` anchors the struct on `rtx.Frame()` — the command whose hook is running — so the same call is correct in a leaf's `Run`, in a cascading hook three frames up, and in a composed child mounted under someone else's umbrella.
-
-{{< code title="a cascading hook reading its own flags — the same call a leaf uses" language="golang" open="true" collapsible="false" copy="true" >}}
-func (*rootHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	// Anchored on this command, not the leaf, because that is whose hook this is.
-	in, err := rotini.Collect[MycliInputs](rtx)
-	...
-}
-{{< /code >}}
-
-{{< alert type="info" title="COMMAND() IS THE LEAF; FRAME() IS WHOSE HOOK YOU ARE IN:" >}}
-For `mig db status`, `rtx.Command()` is `status` in **every** hook of the run — it is the command the user invoked. `rtx.Frame()` is the command this particular hook belongs to: `mig` in mig's cascading hook, `db` in db's, `status` in the leaf's `PreRun`/`Run`/`PostRun`.
-
-That distinction is what lets a composed child's cascading hook read its own flags: its inputs type spans only its own lineage, so it has to be anchored on the frame whose hook is running — neither the leaf nor the root would line up with it.
-{{< /alert >}}
-
-A struct that describes more commands than the collecting command is deep is rejected — that check is exact, because the anchor is known rather than inferred. To read the chain directly rather than bind against it, use `rtx.Chain()`.
-
-Flags bind **by position**. A flag belongs to the deepest command typed *before* it that declares it, so a flag typed before a sub-command's name belongs to an ancestor, never to that sub-command. When `app` and `app get` both declare `-o`:
-
-{{< code title="where a flag lands" language="text" open="true" collapsible="false" copy="false" >}}
-app -o root get -o leaf    # app's -o is "root", get's -o is "leaf"
-app --wide get             # rejected: --wide is get's flag, and get had not been typed yet
-{{< /code >}}
-
-## Outcomes
-
-{{< alert type="info" title="RECORD, DON'T PRINT:" >}}
-A handler does not print its results or its errors. It **records** them, and the runtime reports them once, after teardown, through a single funnel. A generated handler therefore carries zero reporting code — and a program that wants different reporting changes one function instead of every command.
-{{< /alert >}}
-
-Five channels reach the funnel, together in one `Outcome`: `Infos`, `Successes`, `Warnings`, `Errors`, and `Panics` (recovered panics plus rotini-detected faults — there is no record call for those).
-
-The default funnel prints them in that severity order — `info → warning → error → panic → success` — with infos and successes on **stdout** and unlabelled, and warnings, errors and panics on **stderr** behind `Warning:`, `Error:` and `Fatal Error:`. It then applies a flat exit floor: any recorded error or panic exits **1**, unless a handler already set a deliberate code, which it never downgrades.
-
-That floor is flat on purpose. rotini *labels* an error's category — `CategoryOf`, `UsageError`, `InternalError` — and leaves the code to you. There is no built-in category→exit-code table, because which number means what is a program's contract with its users, not a framework's.
-
-`WithFunnel` replaces all of it, receiving every channel at once so cross-channel logic, print order and the exit code live in one place. **All of it includes the floor**: a custom funnel that sets no code exits 0, even for a run that recorded errors — which is why the example below calls `Exit`.
-
-{{< code title="a custom funnel" language="golang" open="true" collapsible="false" copy="true" >}}
-cmd.Program.WithFunnel(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
-    for _, e := range out.Errors {
-        fmt.Fprintf(rtx.Stderr, "%s: %v\n", rtx.CommandPath(), e)
-    }
-    if out.Failed() {
-        rtx.Exit(2) // the funnel is the final authority on the exit code
-    }
-}).Execute()
-{{< /code >}}
-
-The channels arrive as a struct rather than as five parameters for a reason that matters to code written against a frozen v1: the two `[]string` channels and the two `[]error` channels cannot be silently transposed at a call site, and a sixth channel added later is an additive field instead of a breaking change to every custom funnel in existence.
+| To | Call |
+|---|---|
+| fail and stop | `rtx.HaltWith(err)` |
+| record an error and keep going | `rtx.RecordError(err)` |
+| stop cleanly | `rtx.Halt()` |
+| stop with a specific exit code | `rtx.HaltWithCode(n)` |
+| stop now, skipping teardown hooks | `rtx.Exit(n)` |
 
 ## Errors
 
-Every class below — except a plugin timeout, covered under [Plugins](#plugins) — is both `errors.Is`-able against the `ErrUsage` / `ErrInternal` sentinels — so `CategoryOf` classifies it — and `errors.As`-able to a typed value with structured fields. rotini's own messages never leak internals, and a value declared `secret:` is replaced with `[redacted]` in every rejection it can cause.
+By default each recorded error is printed as `Error: …` and the program exits 1. Mark an error
+as the user's to fix with `rotini.UsageError(err)`; `rotini.CategoryOf(err)` tells a funnel which
+kind it has, so a program can map usage and internal errors to different exit codes.
 
-`CategoryOf` answers for one error, and tests `ErrUsage` first, so a value carrying both sentinels reports usage. To classify a whole run, walk `out.Errors` and keep the most severe — the categories are ordered `none < usage < internal` for exactly that comparison.
+## Testing
 
-| Type | Channel |
-|---|---|
-| `*ParseError` | argv — with a `Kind` you can branch on, plus the token and candidates `Suggestor.For` turns into "did you mean". One kind, `ParseKindInternal`, is the program's mistake rather than the user's — collecting an inputs type that does not describe the running command, say — and categorizes as internal |
-| `*BindError` | environment / configuration / stdin |
-| `*RemoteError` | plugin dispatch |
-| `*WiringError` `*ServiceError` `*PanicError` | rotini-detected faults, arriving as panics. A recovered panic is `CategoryInternal` — unless the value thrown was itself a usage error, which `CategoryOf` reports as usage |
-
-`*SubprocessError` reports a child process that failed, carrying its `ExitCode` and the `Stderr` that explains it. It categorizes as internal: a program that shells out owns the command it chose to run.
-
-rotini ships **no opinions on top**: no automatic "did you mean", no help dump on error. A program that wants either writes its own funnel.
-
-### Nearness, when you want it
-
-`Suggestor` ranks a rejected token against the vocabulary it was rejected against. Constructing one is the entire opt-in — nothing is wired, nothing is printed, and what to say stays yours:
-
-{{< code title="did you mean" language="golang" open="true" collapsible="false" copy="true" >}}
-var suggestor = rotini.NewSuggestor()
-
-func funnel(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
-	for _, err := range out.Errors {
-		fmt.Fprintf(rtx.Stderr, "Error: %s\n", err)
-		if hits := suggestor.For(err); len(hits) > 0 {
-			fmt.Fprintf(rtx.Stderr, "Did you mean %q?\n", hits[0])
-		}
-	}
-}
+{{< code title="internal/cmd/todo/todo_test.go" language="golang" open="true" collapsible="false" copy="true" >}}
+var out bytes.Buffer
+code, err := NewProgram(Handlers()).WithStdout(&out).Run([]string{"add", "buy milk"})
 {{< /code >}}
 
-`For` does the `errors.As`, the token check and the vocabulary check in one call — rotini owns the error, so it is the one place that knows both what was typed and what would have been valid there. It returns nothing for an error that is not a parse failure, or a token that is not near anything: **offering nothing is a real answer.**
+Build a fresh program per test with `NewProgram(Handlers())`: the `With*` methods change the
+program they are called on.
 
-There is **one algorithm and no menu**, and the defaults are the answer rather than a starting point: optimal string alignment at a 0.75 minimum, always case-insensitive.
+## Also in the box
 
-It was measured over 30 realistic CLI typos and 22 words that were *not* typos. The second set matters more, because a confident wrong guess is what makes people stop trusting the feature:
-
-| | correct | **wrong guesses** |
-|---|---:|---:|
-| **optimal string alignment @ 0.75** | **30/30** | **0/22** |
-| damerau-levenshtein @ 0.75 | 30/30 | 0/22 (≈3× the cost) |
-| jaro-winkler @ 0.80 | 30/30 | 3/22 |
-| jaro-winkler @ 0.70 | 30/30 | 7/22 |
-| levenshtein @ 0.80 | 18/30 | 0/22 |
-
-{{< alert type="info" title="WHY 0.75 AND NOT 0.80:" >}}
-0.80 looked perfect on that corpus and was **silently useless for short commands**, which the corpus had none of. A 0.80 threshold allows one edit per five characters, so `help`, `list`, `show` and `init` tolerate none — `hlep` suggested nothing at all. Against a second corpus of short commands: **0/14 at 0.80, 13/14 at 0.75**, both with zero wrong guesses. It was found by running a real binary, not by reading the table.
-
-The remaining miss is a three-character command, where one edit is a third of the word and genuinely ambiguous. Catching those needs ~0.65, which starts inventing matches — so rotini stays silent there, which is the correct end to fail on.
-{{< /alert >}}
-
-`WithMinScore` and `WithMaxResults` are there for a program that wants to suggest more freely, or to offer two candidates when both are genuinely close — `--vers` really is ambiguous between `--verbose` and `--version`, and that is the user's call.
-
-## Plugins
-
-A sub-command can be **another binary**. Declare it in the spec and rotini locates it, passes all three streams through, honours a timeout, and returns the plugin's own exit code untouched.
-
-Two kinds, and the difference decides whose fault a missing binary is:
-
-| | in help when missing? | missing means | category |
-|---|---|---|---|
-| `remote_commands` — **declared** | yes; it is published interface | a broken install | `CategoryInternal` |
-| `remote_discovery` — **discovered** `yourcli-*` | no; it appears only when present | a typo | `CategoryUsage` |
-
-A timeout is neither party's fault, so it is `CategoryNone` — still reachable with `errors.As` as a `*RemoteError` whose `Kind` is `RemoteTimeout`.
-
-Both kinds search the same three places in the same order: next to the host binary (the git/kubectl convention), then the command's `plugin_path`, then `PATH`. A `plugin_path` expands a leading `~` and `$VAR` references the way a shell would; a relative one is relative to the working directory.
-
-{{< code title="what rotini hands you, and what you render" language="golang" open="true" collapsible="false" copy="true" >}}
-root := rtx.Chain()[0]
-
-rotini.DiscoveredPlugins(root)      // name + path of each found now, minus any shadowing a real command
-rotini.DiscoveryDiagnostics(root)   // why the configured plugin_path could not be scanned (a missing one is fine)
-rotini.RemoteBinaryPath(root, name) // would this resolve, and to what — searched as dispatch searches
-{{< /code >}}
-
-rotini renders none of it. Generated help lists the **declared** remotes, because those are known at build time; a handler that wants to list what is installed *now* asks for it. `RemoteBinaryPath` exists because `exec.LookPath` only sees `PATH` — it reports every conventionally installed plugin as missing.
-
-A discovered plugin may never shadow a declared command, so dropping a binary on `PATH` cannot take over part of a CLI's published interface.
-
-## Services
-
-**The registry is yours alone.** `Bind` and `Provide` write to it; nothing rotini depends on lives there.
-
-That is a deliberate split. rotini's own seams are typed methods on the `Program`, not keys in your namespace, so no name you choose can collide with one and no binding of yours can quietly switch an input channel off.
-
-| rotini's seam | supply | read back |
-|---|---|---|
-| the generated descriptor | `WithBindMeta(meta)` — the generated `NewProgram` does this | internal |
-| the binder | `WithBinder(func(BindMeta) *Binder)` — it **receives** the descriptor | internal |
-| the version | `WithVersion(v)` | `rtx.Version()` |
-| the help pages | `WithHelp(Help)` — the generated `NewProgram` does this | `rtx.Help()` |
-| the parser | `WithParser(p)` | `rtx.Parser()` — never nil |
-
-`WithBinder` takes a function of the descriptor rather than a `*Binder` for exactly that reason — an override now starts *from* what the spec declared instead of having to reproduce it.
-
-Your own services use a **typed key**, so the registry string and the type it was bound as cannot drift apart and a handler needs neither a literal nor an assertion:
-
-{{< code title="a typed key" language="golang" open="true" collapsible="false" copy="true" >}}
-// declared once, beside the thing it names
-var StoreKey = rotini.NewKey[*Store]("store")
-
-// main.go — the type is checked here, where the value is supplied
-StoreKey.Provide(cmd.Program, NewStore()).Execute()
-
-// any handler — no string, no assertion, no comma-ok
-store := StoreKey.MustGet(rtx)
-{{< /code >}}
-
-The key already carries the type, so `Key.Provide` takes the program rather than the program taking a type parameter. For more than one service, `Provide` returns an option and **`With`** applies any number without leaving the chain:
-
-{{< code title="several services, one expression" language="golang" open="true" collapsible="false" copy="true" >}}
-cmd.Program.
-	With(
-		rotini.Provide(StoreKey, NewStore()),
-		rotini.Provide(ClientKey, NewClient()),
-	).
-	WithVersion(version).
-	Execute()
-{{< /code >}}
-
-Options apply left to right, so a later one overwrites an earlier one binding the same key. An `Option` is just a `func(*Program)`, so a program can bundle its own configuration into one value and pass it around.
-
-`Provide` binds program-wide, so every invocation sees it — including every line of a REPL session. `BindTo` binds on one `Context`, for something a hook computes per run.
-
-### Where should state live?
-
-Not everything needs the registry. The runtime asks your handlers for a command's handler **once per command, per run**, and that value serves all of that command's hooks — so a plain field is often the right answer:
-
-| State flows… | Use |
-|---|---|
-| between **one command's own** hooks — `PreRun` → `Run` → `PostRun`, or a frame's `CascadingPreRun` → `CascadingPostRun` | **a field on the handler.** No key, no lookup, and the compiler checks the type |
-| between **different commands** in the chain — `db` opens it, `db migrate` uses it | `Key.BindTo(rtx, v)` — different commands are different handler values, so a field cannot reach |
-| across **every run** of the program — a client, a store, a config | `Provide` / `Program.Bind` |
-
-{{< code title="a transaction that lives in a field, because it never leaves this command" language="golang" open="true" collapsible="false" copy="true" >}}
-type migrateHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultCascadingPostRun
-	tx *sql.Tx // set in PreRun, used in Run, resolved in PostRun
-}
-
-func (h *migrateHandlers) PreRun(ctx context.Context, rtx *rotini.Context)  { h.tx, _ = db.Begin() }
-func (h *migrateHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
-	if rtx.Failed() {
-		h.tx.Rollback()
-		return
-	}
-	h.tx.Commit()
-}
-{{< /code >}}
-
-{{< alert type="warning" title="IF YOU SUPPLY YOUR OWN PROGRAMHANDLERS, RETURN A NEW VALUE PER CALL:" >}}
-Generated wiring returns a fresh handler from every method, which is what makes a handler's fields *per-run* state.
-
-If you write your own `ProgramHandlers` and a method returns a **shared** value — a field on your aggregate, a package variable — then that handler's fields are shared across runs. For a stateless handler that is harmless and common. For one that keeps state in fields it is a bug, and under concurrent runs (a REPL, a server answering a peer, or `Program.Run` from several goroutines) it is a data race.
-{{< /alert >}}
-
-`Parser` and `Binder` are overrides, not prerequisites: `Collect` builds its own. In particular **`rotini.Deprecations(rtx)` needs nothing bound** — it reports the deprecated commands, flags and arguments this invocation actually used, reading the resolved chain and the argv that produced it straight off the `Context`. Each carries the spec's `deprecated:` message when there is one, and renders it: `flag "--database" is deprecated: use --db`.
-
-{{< code title="reporting a deprecated spelling" language="golang" open="true" collapsible="false" copy="true" >}}
-for _, d := range rotini.Deprecations(rtx) {
-	if d.Message != "" { // the spec already says what to use instead
-		rtx.RecordWarning(d)
-		continue
-	}
-	replacement := d.Name
-	if d.Kind == "flag" {
-		replacement = "--" + d.Name
-	}
-	rtx.RecordWarning(fmt.Errorf("%s; use %s", d, replacement))
-}
-{{< /code >}}
-
-rotini prints none of it: which deprecations cost a warning, a telemetry event or nothing at all is the program's call.
+For a handler that needs more than parsing, the runtime also carries `Subprocess` (run another
+program), `Service` (long-running workers with ordered shutdown), `REPL` (your commands as an
+interactive shell), `ReadSecret` (read input without echo), and `IsTerminal` / `TerminalSize`.
+See [pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini) for each.

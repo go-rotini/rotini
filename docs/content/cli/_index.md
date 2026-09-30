@@ -53,8 +53,10 @@ Scaffolds a new CLI: writes the seed spec and conf under `cmd/<name>/`, then run
 
 The entrypoint is **create-once**: it carries your build metadata, so it is never overwritten. Use `--force` to re-seed the spec and conf.
 
+`init` prints nothing when it succeeds. The one thing it warns about is a `go.mod` that does not yet require the rotini runtime, since the first build would fail without it.
+
 {{< code title="$ rotini help initialize" language="text" open="true" collapsible="false" copy="false" >}}
-Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, empty handler stubs, codegen) so it is ready to build.
+Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
 
 Usage:
   rotini initialize [name] [flags]

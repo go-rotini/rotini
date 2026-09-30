@@ -9,7 +9,9 @@
 gomodinit example.com/demo
 
 exec rotini init demo
-stdout 'initialized cmd/demo'
+# Success is silent: the module already requires rotini, so there is nothing to warn about.
+! stdout .
+! stderr .
 
 # The seed writes exactly these, and nothing else is required to build.
 exists cmd/demo/main.go

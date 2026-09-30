@@ -10,24 +10,32 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/go-rotini/yaml"
 )
 
 // updateSchemaDocs rewrites the generated reference pages:
 // `go test ./internal/codegen -run SchemaDocs -update-schema-docs`.
 var updateSchemaDocs = flag.Bool("update-schema-docs", false, "rewrite the generated schema reference pages")
 
-// schemaDocPages maps each generated Hugo page to the schema it renders and the weight that
-// orders it within its section.
-func schemaDocPages() []struct {
-	path, title, weight string
-	raw                 []byte
-} {
-	return []struct {
-		path, title, weight string
-		raw                 []byte
-	}{
-		{filepath.Join("docs", "content", "specification", "reference.md"), "spec reference", "20", schemaSpecFileBytes},
-		{filepath.Join("docs", "content", "configuration", "reference.md"), "conf reference", "20", schemaConfFileBytes},
+// schemaDocPage is one generated Hugo page: the spec page or the conf page. Each shows an
+// example file using every key, the JSON Schema itself, and an explanation of every key.
+type schemaDocPage struct {
+	path     string // where the page is written, from the repository root
+	title    string // the Hugo title (the nav and URL name)
+	fileName string // the file the page documents, as its heading
+	example  string // asset path of the every-key example file (docs/assets/…)
+	schema   string // asset path of the JSON Schema, mounted from the repository root
+	raw      []byte
+}
+
+// schemaDocPages lists the generated pages.
+func schemaDocPages() []schemaDocPage {
+	return []schemaDocPage{
+		{filepath.Join("docs", "content", "specification", "_index.md"), "specification", ".rotini.spec.yaml",
+			"examples/rotini.spec.yaml", "schemas/schema-spec.json", schemaSpecFileBytes},
+		{filepath.Join("docs", "content", "configuration", "_index.md"), "configuration", ".rotini.conf.yaml",
+			"examples/rotini.conf.yaml", "schemas/schema-conf.json", schemaConfFileBytes},
 	}
 }
 
@@ -46,7 +54,7 @@ func TestSchemaDocsInSync(t *testing.T) {
 		if strings.HasPrefix(page.title, "spec") {
 			channels = table
 		}
-		got, err := renderSchemaMarkdown(page.title, page.weight, page.raw, channels)
+		got, err := renderSchemaMarkdown(page, channels)
 		if err != nil {
 			t.Fatalf("render %s: %v", page.path, err)
 		}
@@ -78,7 +86,7 @@ func TestSchemaDocsInSync(t *testing.T) {
 // every definition and every key the schema declares has to appear, or the page is a partial
 // reference presented as a full one.
 func TestSchemaDocsAreComplete(t *testing.T) {
-	page, err := renderSchemaMarkdown("spec reference", "20", schemaSpecFileBytes, "")
+	page, err := renderSchemaMarkdown(schemaDocPages()[0], "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,25 +161,26 @@ type schemaDoc struct {
 
 // renderSchemaMarkdown renders one schema as a Hugo content page: the document's own keys
 // first, then a section per definition, each a table of keys with their full descriptions.
-func renderSchemaMarkdown(title, weight string, raw []byte, channelTable string) (string, error) {
+func renderSchemaMarkdown(page schemaDocPage, channelTable string) (string, error) {
 	var doc schemaDoc
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return "", fmt.Errorf("parse schema for %s: %w", title, err)
+	if err := json.Unmarshal(page.raw, &doc); err != nil {
+		return "", fmt.Errorf("parse schema for %s: %w", page.fileName, err)
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "---\ntitle: %q\nweight: %s\n---\n\n", title, weight)
-	fmt.Fprintf(&b, "<!-- Code generated from the rotini JSON Schema; DO NOT EDIT.\n")
-	fmt.Fprintf(&b, "     Edit the schema's descriptions instead, then run:\n")
-	fmt.Fprintf(&b, "       go test ./internal/codegen -run SchemaDocs -update-schema-docs -->\n\n")
+	fmt.Fprintf(&b, "---\ntitle: %q\n---\n\n", page.title)
+	b.WriteString("<!-- Code generated from the rotini JSON Schema; DO NOT EDIT.\n")
+	b.WriteString("     Edit the schema's descriptions, or the example in docs/assets/examples, then run:\n")
+	b.WriteString("       go test ./internal/codegen -run SchemaDocs -update-schema-docs -->\n\n")
 
-	fmt.Fprintf(&b, "# %s\n\n", doc.Title)
+	fmt.Fprintf(&b, "# %s\n\n", page.fileName)
 	if doc.Description != "" {
 		fmt.Fprintf(&b, "%s\n\n", doc.Description)
 	}
-	b.WriteString("Every key below is checked by `rotini validate` before a line of Go is\n")
-	b.WriteString("generated. This page is rendered from the schema itself, so it cannot drift\n")
-	b.WriteString("from what the tool actually accepts.\n\n")
+	fmt.Fprintf(&b, "{{< code title=\"%s — every key\" language=\"yaml\" file=%q open=\"true\" copy=\"true\" >}}{{< /code >}}\n\n", page.fileName, page.example)
+	fmt.Fprintf(&b, "{{< code title=\"the JSON Schema\" language=\"json\" file=%q open=\"false\" copy=\"true\" >}}{{< /code >}}\n\n", page.schema)
+	b.WriteString("Below, every key. `rotini validate` checks all of them before any code is generated, and\n")
+	b.WriteString("this list is rendered from the schema, so it always matches what the tool accepts.\n\n")
 
 	b.WriteString("## Document\n\n")
 	b.WriteString(renderKeyList(doc, doc.Required, keyOrder(doc, doc.Required), "###"))
@@ -559,4 +568,72 @@ func TestInputChannelTableCoversEveryKey(t *testing.T) {
 			t.Errorf("schema key %q has no sample in inputKeySamples, so the reference's channel table omits it", key)
 		}
 	}
+}
+
+// TestEveryKeyExamplesAreValidAndComplete keeps the "every key" examples on the spec and conf
+// pages honest: each must pass `rotini validate` with no problems, and each must use every key
+// its schema declares. A new key fails this until it is added to the example.
+func TestEveryKeyExamplesAreValidAndComplete(t *testing.T) {
+	root := filepath.Join("..", "..")
+	mod := t.TempDir()
+	writeTestFile(t, mod, "go.mod", "module example.com/deploy\n\ngo 1.26\n")
+	for _, page := range schemaDocPages() {
+		body, err := os.ReadFile(filepath.Join(root, "docs", "assets", page.example))
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeTestFile(t, mod, "cmd/deploy/"+page.fileName, string(body))
+
+		var used map[string]any
+		if err := yaml.Unmarshal(body, &used); err != nil {
+			t.Fatalf("%s: %v", page.example, err)
+		}
+		keys := map[string]bool{}
+		collectYAMLKeys(used, keys)
+		var doc schemaDoc
+		if err := json.Unmarshal(page.raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		for _, k := range schemaKeyNames(doc) {
+			if !keys[k] {
+				t.Errorf("%s does not use the key %q — add it, so the page shows every key", page.example, k)
+			}
+		}
+	}
+	var warnings []error
+	err := NewProcessor("0.0.0").Validate(filepath.Join(mod, "cmd/deploy/.rotini.spec.yaml"), filepath.Join(mod, "cmd/deploy/.rotini.conf.yaml"),
+		false, "collect", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+	if err != nil || len(warnings) > 0 {
+		t.Errorf("the every-key examples do not validate cleanly: %v %v", err, warnings)
+	}
+}
+
+// collectYAMLKeys records every mapping key in a decoded YAML document.
+func collectYAMLKeys(v any, into map[string]bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, e := range x {
+			into[k] = true
+			collectYAMLKeys(e, into)
+		}
+	case []any:
+		for _, e := range x {
+			collectYAMLKeys(e, into)
+		}
+	}
+}
+
+// schemaKeyNames lists every property name a schema declares, at the root and in every
+// definition.
+func schemaKeyNames(doc schemaDoc) []string {
+	names := map[string]bool{}
+	for k := range doc.Properties {
+		names[k] = true
+	}
+	for _, def := range doc.Definitions {
+		for k := range flattenAllOf(def).Properties {
+			names[k] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(names))
 }

@@ -48,7 +48,7 @@ command:
       aliases:
         - init
       summary: scaffold a cli program
-      description: Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, empty handler stubs, codegen) so it is ready to build.
+      description: Scaffold a new rotini CLI — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
       examples:
         - rotini initialize mycli
         - rotini init mycli --format json

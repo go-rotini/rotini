@@ -1,0 +1,204 @@
+# Every key the spec accepts, in one valid file. `rotini validate` checks it on every test run.
+$schema: ./.rotini-schema.spec.json
+version: 0.0.0
+command:
+  name: deploy
+  summary: ship services to environments
+  description: Deploy builds, ships and rolls back services.
+  usage: deploy <command> [flags]
+  header: deploy — internal tooling
+  footer: Use "deploy help <command>" for more about a command.
+  examples:
+    - deploy ship api --env prod
+  see_also: [kubectl, helm]
+  headings:
+    usage: "Usage:"
+    commands: "Commands:"
+    arguments: "Arguments:"
+    flags: "Flags:"
+    cascading: "Global Flags:"
+    environment: "Environment:"
+    configuration: "Configuration:"
+    examples: "Examples:"
+  exit_status:
+    - code: 0
+      summary: success
+    - code: 1
+      summary: the deploy failed
+  env_prefix: DEPLOY
+  plugin_path: ~/.deploy/plugins
+  remote_discovery:
+    prefix: deploy-
+    hidden: false
+  remote_commands:
+    - name: audit
+      summary: run the audit plugin
+      aliases: [au]
+      timeout: 30s
+  schemas:
+    Target:
+      type: object
+      description: Where a service is shipped.
+      required: [host]
+      properties:
+        host: { type: string, pattern: '^[a-z0-9.-]+$', pattern_message: must be a lowercase hostname }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        tags: { type: array, items: { type: string }, minItems: 1, maxItems: 8 }
+    Region:
+      type: string
+      enum: [eu, us, ap]
+  config_files:
+    - name: project
+      discover: { strategy: walk-up, file: .deploy.yaml }
+      format: yaml
+    - name: user
+      discover: { strategy: xdg, app: deploy, file: config.yaml }
+    - name: pinned
+      path: ./deploy.lock.yaml
+      schema:
+        type: object
+        properties:
+          digest: { type: string }
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      schema: { type: bool }
+    - name: config
+      summary: a config file to read instead of discovering one
+      identifiers: [--config]
+      schema: { type: existingfile, config_source: project }
+    - name: verbose
+      summary: more output (repeat for more)
+      identifiers: [-v, --verbose]
+      cascading: true
+      group: Output
+      schema: { type: count }
+  env:
+    - name: token
+      summary: the API token
+      schema: { type: string, variable: DEPLOY_TOKEN, secret: true, required: false }
+    - name: labels
+      summary: extra labels, as DEPLOY_LABELS__<NAME>=value
+      schema: { type: map, nesting: __ }
+  config:
+    - name: region
+      summary: the default region
+      schema: { $ref: Region, key: defaults.region, default: eu, ignore_case: true }
+    - name: digest
+      summary: the pinned image digest
+      schema: { type: string, file: pinned, key: digest }
+  commands:
+    - name: ship
+      summary: ship a service
+      aliases: [s, push]
+      deprecated_identifiers: [push]
+      deprecated: use ship
+      group: Deploying
+      filename: ship.go
+      arguments:
+        - name: service
+          summary: the service to ship
+          schema: { type: string, required: true, minLength: 1, maxLength: 63, placeholder: SERVICE }
+        - name: extra
+          summary: extra build arguments
+          hidden: true
+          schema: { type: '[]string' }
+      flags:
+        - name: env
+          summary: the environment
+          identifiers: [-e, --env]
+          schema: { type: string, enum: [dev, staging, prod], default: dev, default_text: the dev environment, complete: { kind: none } }
+        - name: target
+          summary: where to ship
+          identifiers: [--target]
+          schema: { $ref: Target, from: [file] }
+        - name: color
+          summary: color output
+          identifiers: [--color]
+          schema: { type: string, implicit_value: always, enum: [always, never, auto] }
+        - name: cache
+          summary: use the build cache
+          identifiers: [--cache]
+          schema: { type: bool, negatable: true, default: true }
+        - name: tag
+          summary: image tags
+          identifiers: [--tag]
+          schema: { type: '[]string', separator: ',', minItems: 1 }
+        - name: set
+          summary: override values (a.b=c)
+          identifiers: [--set]
+          schema: { type: map, dotted_keys: true, properties: { replicas: { type: integer } } }
+        - name: timeout
+          summary: how long to wait
+          identifiers: [--timeout]
+          schema: { type: duration, minimum: 1s, maximum: 1h, default: 5m }
+        - name: when
+          summary: when to ship
+          identifiers: [--when]
+          schema: { type: date, layout: '2006-01-02', nullable: true }
+        - name: replicas
+          summary: how many replicas
+          identifiers: [--replicas]
+          schema: { type: int, exclusiveMinimum: 0, exclusiveMaximum: 100, multipleOf: 1 }
+        - name: id
+          summary: a request id
+          identifiers: [--id]
+          schema: { type: uuid.UUID, import: github.com/google/uuid }
+        - name: force
+          summary: skip safety checks
+          identifiers: [--force]
+          hidden: true
+          deprecated: no longer needed
+          deprecated_identifiers: [--force]
+          schema: { type: bool }
+        - name: dry-run
+          summary: print instead of shipping
+          identifiers: [--dry-run]
+          schema: { type: bool }
+        - name: plan
+          summary: write the plan to this file
+          identifiers: [--plan]
+          schema: { type: string, complete: { kind: file, extensions: [json] } }
+      flag_groups:
+        - kind: mutually_exclusive
+          flags: [dry-run, force]
+      flag_dependencies:
+        - when: plan
+          requires: [dry-run]
+      output:
+        type: object
+        properties:
+          service: { type: string }
+          url: { type: string }
+    - name: apply
+      summary: apply a manifest read from stdin
+      stdin:
+        format: yaml
+        schema:
+          type: object
+          required: true
+          properties:
+            service: { type: string }
+    - name: logs
+      summary: stream a service's logs
+      handler:
+        import: github.com/example/deploy/internal/logs
+        convention: Logs
+    - name: exec
+      summary: run a command in a service
+      passthrough: true
+      arguments:
+        - name: argv
+          summary: the command and its arguments
+          schema: { type: '[]string' }
+    - name: status
+      summary: show what is deployed
+      help: |
+        status — show what is deployed.
+
+        This page is written by hand, verbatim.
+      man: |
+        .TH STATUS 1
+      markdown: |
+        # status

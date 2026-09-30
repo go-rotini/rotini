@@ -29,7 +29,7 @@ the diff is intentional. If it changes the spec or conf schema, keep
 `internal/codegen/schema-spec.json` / `internal/codegen/schema-conf.json`, the
 root-level published copies (`schema-spec.json` / `schema-conf.json`, which a release
 tag serves as the `$schema` URL), and the generated reference pages under
-`docs/content/*/reference.md` in sync (`go generate ./cmd/rotini`, then
+`docs/content/specification/_index.md` and `docs/content/configuration/_index.md`, plus the every-key examples in `docs/assets/examples/`, in sync (`go generate ./cmd/rotini`, then
 `go test ./internal/codegen -run SchemaDocs -update-schema-docs`).
 `TestPublishedSchemasInSync` and `TestSchemaDocsInSync` fail until they are.
 

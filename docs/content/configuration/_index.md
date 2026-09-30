@@ -2,159 +2,184 @@
 title: "configuration"
 ---
 
-# Configuration File
+<!-- Code generated from the rotini JSON Schema; DO NOT EDIT.
+     Edit the schema's descriptions, or the example in docs/assets/examples, then run:
+       go test ./internal/codegen -run SchemaDocs -update-schema-docs -->
 
-{{< alert type="info" title="EVERY KEY:" >}}
-This page is the tour. [**The conf reference**](reference/) is the complete list — every key, rendered from the schema itself, so it cannot drift from what `rotini validate` accepts.
-{{< /alert >}}
+# .rotini.conf.yaml
 
-The `.rotini.conf.*` file controls **codegen**, not your CLI's behavior. Where generated code is written, which derived outputs are produced, and how validation reports problems. Same four formats as the spec.
+Schema for a Rotini CLI configuration file.
 
-{{< code title=".rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
-version: 0.0.0
+{{< code title=".rotini.conf.yaml — every key" language="yaml" file="examples/rotini.conf.yaml" open="true" copy="true" >}}{{< /code >}}
 
-generate:
-  # Opt-in: write rotini's own JSON Schemas into the project so an editor
-  # `# yaml-language-server: $schema=<path>` comment resolves locally.
-  schemas:
-    spec:
-      file: cmd/acme/.rotini-schema.spec.json
-    conf:
-      file: cmd/acme/.rotini-schema.conf.json
+{{< code title="the JSON Schema" language="json" file="schemas/schema-conf.json" open="false" copy="true" >}}{{< /code >}}
 
-  packages:
-    - type: main                              # the entrypoint — CREATE-ONCE
-      file: cmd/acme/main.go
-      package: main
-    - type: cmd                               # generated file + editable stubs
-      file: internal/cmd/acme/zz_acme.go
-      package: acme
+Below, every key. `rotini validate` checks all of them before any code is generated, and
+this list is rendered from the schema, so it always matches what the tool accepts.
 
-  features:
-    - type: help
-      enabled: true
-    - type: completion
-      enabled: true
-    - type: man
-      enabled: false
-    - type: markdown
-      enabled: false
+## Document
 
-validate:
-  fail: collect                               # or `fast` — stop at the first problem
-{{< /code >}}
+### `version`
 
-## Packages
+`string` · **required** · default `0.0.0`
 
-Two targets, plus an optional third. Everything rotini writes goes to one of them.
+The MINIMUM rotini this conf requires (X.Y.Z) — the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. A rotini older than this, or a different major, is an error. The check is skipped when the binary carries no parseable version (a dev build). Mirrors the spec document's `version` key.
 
-| `type` | Contents | Overwritten? |
-|---|---|---|
-| `main` | the binary entrypoint, carrying the `//go:generate` directive | **never** — it holds your build metadata |
-| `cmd` | the one generated file, plus one editable handler stub per command | the generated file every pass; stubs never |
-| `models` | **optional** — the typed input/output structs, in their own package | every pass |
+### `$schema`
 
-### When you need `models`
+`string`
 
-A command can source its handler from another package instead of a generated stub:
+Optional URI identifying the rotini conf schema, for editor tooling ONLY — rotini never fetches it, and the version check reads the `version` key below. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-conf.json — note the 'v', matching the git tag), a path written into your project by `generate.schemas.conf.file`, or a fork's own URL.
 
-{{< code title="handler passthrough" language="yaml" open="true" collapsible="false" copy="true" >}}
-commands:
-  - name: deploy
-    handler:
-      import: deployh example.com/acme/handlers
-      convention: Deploy
-{{< /code >}}
+### `generate`
 
-That makes the **cmd package import the handler package**. If the handler then needs its own generated input type — and `rotini.Collect[T]` means it does — it would have to import `cmd` back. That is an import cycle, and Go rejects it.
+[`GenerateConfig`](#generateconfig)
 
-Declaring a `models` target moves the typed structs into a package that imports nothing local, so `cmd` and the handler package can both import it:
+Controls `rotini generate`: package targets and derived features. Omitted entirely → the defaults (merged single-file layout under internal/cmd/<root>, all features off).
 
-{{< code title="models target" language="yaml" open="true" collapsible="false" copy="true" >}}
-  packages:
-    - type: cmd
-      file: internal/cmd/acme/zz_acme.go
-      package: acme
-    - type: models
-      file: internal/models/zz_models.go
-      package: models
-{{< /code >}}
+### `validate`
 
-{{< alert type="info" title="YOUR HANDLER CODE DOES NOT CHANGE:" >}}
-The cmd package re-exports every model as a **type alias**, so a handler living in `cmd` still writes `rotini.Collect[AcmeDeployInputs](rtx)` whether the split is on or off. Only an outside handler package qualifies them — `models.AcmeDeployInputs`.
-{{< /alert >}}
+[`ValidateConfig`](#validateconfig)
 
-Omit the target — the default — and the structs stay in the cmd file. Pointing it at the cmd file itself is a legal no-op.
+Controls how `rotini validate` reports problems (collect everything vs. fail fast).
 
-{{< alert type="info" title="NO RUNTIME TARGET:" >}}
-The rotini runtime is an ordinary library dependency your generated code imports — `go get github.com/go-rotini/rotini` — not emitted code. Nothing here decides where it lands, because it does not land anywhere.
-{{< /alert >}}
 
-When a command is removed from the spec, the next `generate` deletes the files rotini wrote for it — an orphaned handler stub, recognized by the generated marker it still carries — and names each one. Files you wrote are never touched, whatever they are called, and neither are test files or your templates. `keep` is the exception list for the rare case in between: a stub you adopted as your own *without* removing its marker, or a rendered output under an `embed_dir`. Most projects never need it.
+## GenerateConfig
 
-{{< code title="keep" language="yaml" open="true" collapsible="false" copy="true" >}}
-    - type: cmd
-      file: internal/cmd/acme/zz_acme.go
-      package: acme
-      keep: [acme_legacy.go]     # paths relative to the package directory
-{{< /code >}}
+Controls `rotini generate`: where rotini's JSON Schemas are written ('schemas'), where the generated code is written ('packages'), and which derived doc/completion outputs are emitted ('features').
 
-### File headers
+### `features`
 
-`header` is written verbatim at the top of every Go file a target produces — the generated file, the editable stubs and the entrypoint alike. On the generated file it sits above rotini's own `Code generated by rotini` line.
+array of [`Feature`](#feature)
 
-{{< code title="a license header, and a build constraint" language="yaml" open="true" collapsible="false" copy="true" >}}
-generate:
-  packages:
-    - type: cmd
-      file: internal/cmd/acme/zz_acme.go
-      package: acme
-      header: |
-        // Copyright 2026 Acme, Inc.
-        // SPDX-License-Identifier: Apache-2.0
-{{< /code >}}
+The derived codegen outputs, one per `type` (help / completion / man / markdown), each an opt-in toggle plus its embed/template sourcing knobs.
 
-For many organizations this is the difference between "we can adopt rotini" and "our CI rejects every generated file". Write complete comment lines yourself — the text goes in untouched, and a header that is not valid Go fails at generate time rather than producing a file the go tool will not read. Create-once files get it when they are first written, so editing the header later does not rewrite a stub you already own.
+### `packages`
 
-## Features
+array of [`PackageConfig`](#packageconfig)
 
-Four derived outputs — `help`, `completion`, `man`, `markdown` — each **off by default** (the conf `rotini init` seeds turns `help` on, so `--help` works from the first build), each with two orthogonal sourcing knobs:
+Generated code targets, one per `type` (main / cmd / models). 'main' is the binary entrypoint (create-once). 'cmd' is the cli package: the editable per-command handler stubs PLUS the one generated file (the framework glue, the handlers rollup, and — unless 'models' splits them out — the typed input/output structs). 'models' is OPTIONAL: declare it to put the typed structs in their own package, which a handler package sourced via a command's `handler:` can import without an import cycle. The rotini runtime is NOT generated — it is an ordinary library dependency the generated code imports (`go get github.com/go-rotini/rotini`).
 
-| Knob | `false` (default) | `true` |
-|---|---|---|
-| `embed` | content is an inline string literal; the generated `.go` is self-contained | content is rendered to a file under `embed_dir` and referenced with `//go:embed` |
-| `template` | pages render from rotini's built-in template | an editable `*.tmpl` is seeded into `template_dir` and pages render from it |
+### `schemas`
 
-`help`, `man` and `markdown` are **render-or-verbatim**: a command that sets that key in its spec has the string written exactly; otherwise the page is rendered from the command's structured doc fields.
+[`SchemasConfig`](#schemasconfig)
 
-`completion` is the exception — per-shell scripts generated from the program name, with no editable template. It has no `template`, and setting one is a warning.
+Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so an editor `# yaml-language-server: $schema=<path>` comment can resolve them locally instead of fetching a remote URL.
 
-### Owning the template
 
-`template: true` is how you take over rotini's output rather than accepting it. The template is seeded **when missing**, so it becomes your file the moment it exists — a later `generate` never overwrites it.
+## ValidateConfig
 
-{{< code title="cmd/acme/.rotini.conf.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
-  features:
-    - type: help
-      enabled: true
-      template: true
-      template_dir: templates    # templates/help.txt.tmpl is seeded here
-{{< /code >}}
+Controls how `rotini validate` reports problems. Strictness is fixed (validation is always strict); only the failure-reporting mode is configurable. The `--fail` flag overrides this.
 
-The seeded file documents its own data in a header comment — `.Header`, `.Summary`, `.Description`, `.Invocation`, `.CommandGroups`, `.Flags`, `.Arguments`, and the rest — plus the helpers available (`join`, `indent`, `upper`, `trim`, …). Templates are never `//go:embed`-ed: they are an input to codegen, not an output of it.
+### `fail`
 
-A template that does not execute fails at **generate** time, naming the line and the field:
+`string` · one of `fast`, `collect` · default `collect`
 
-{{< code title="a bad field reference" language="text" open="true" collapsible="false" copy="true" >}}
-Error: render help for "acme": help.txt.tmpl:78:2: can't evaluate field NoSuchField
-  — the fields available to this template are listed in the comment at the top of help.txt.tmpl
-{{< /code >}}
+fast = stop at and report the first problem; collect = run to completion and report every problem at once (default).
 
-## Validation reporting
 
-Strictness is not configurable; validation is always strict. Only the reporting mode is:
+## Feature
 
-- **`collect`** (default) — run to completion and report every problem at once
-- **`fast`** — stop at the first
+One rendered/derived codegen feature, discriminated by 'type' (help/completion/man/markdown): a toggle (enabled) plus two orthogonal sourcing knobs — embed (//go:embed a rendered file in 'embed_dir' vs an inline string literal) and template (seed the editable rendering template into 'template_dir' vs render from the built-in). The two dirs default from the cmd package — embed_dir to '<cmd-package>/renders', template_dir to '<cmd-package>/templates'. In embed mode embed_dir must resolve under the cmd package (//go:embed cannot reach outside it); inline features and template_dir have no such constraint. Output files never collide: help pages are 'help_*.txt', man pages 'man_*.txt', markdown 'markdown_*.md', completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.
 
-The `--fail` flag overrides the file.
+### `type`
+
+`string` · **required** · one of `help`, `completion`, `man`, `markdown`
+
+Which derived output this entry configures. help/man/markdown are per-command render-or-verbatim doc pages (rendered from the command's structured doc-fields via the editable template, or written verbatim when the command sets that string in the spec), each emitting a '<Prefix>' var + 'Help/Man/Markdown(path ...string) (string, error)' resolver. completion is the exception: per-shell scripts (bash/zsh/fish/powershell) generated from the program name, with no editable template and no verbatim escape, emitting 'Completion<Shell>' vars + a 'Completion(shell string) (string, error)' resolver; the scripts call the binary's hidden '__complete' entry.
+
+### `embed`
+
+`boolean` · default `false`
+
+How this feature's generated content is sourced into the cmd package's generated file. true: the rendered content is written to a file under 'embed_dir' and the Go var is backed by a //go:embed directive. false (the default): no output file is written — the Go var is a hardcoded string literal holding the content inline, so the generated .go is self-contained. Var names and the resolver are identical either way.
+
+### `embed_dir`
+
+`string`
+
+Directory (relative to the module root) where this feature's rendered OUTPUT files (help_*.txt / man_*.txt / markdown_*.md / completion_<shell>.txt) are written in embed mode (embed: true) and sourced via //go:embed — so in embed mode it MUST resolve under the cmd package (//go:embed cannot reach outside it). In inline mode (embed: false) no output files are written and this is unused — rotini validation WARNS (non-fatal) if you set it there. Defaults to '<cmd-package>/renders'.
+
+### `enabled`
+
+`boolean` · default `false`
+
+When true, rotini generates this feature's outputs into the cmd package and emits the embed vars + resolver. Opt-in only.
+
+### `template`
+
+`boolean` · default `false`
+
+Whether the editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded into 'template_dir' for customization. true: the template is seeded when missing and pages render from it. false (the default): no template is seeded and pages render from rotini's built-in default. Has no effect on completion (which has no editable template) — rotini validation WARNS if you set it there. A template you have already edited is never pruned — flipping this to false leaves it in place but inert.
+
+### `template_dir`
+
+`string`
+
+Directory (relative to the module root) where this feature's editable rendering template (help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl) is seeded when template: true. Templates are never //go:embed'd, so this is unconstrained — it may resolve anywhere. Unused when no template is seeded (template: false, or completion which has none) — rotini validation WARNS (non-fatal) if you set it there. Defaults to '<cmd-package>/templates'.
+
+
+## PackageConfig
+
+One generated code target, discriminated by 'type'. 'file' is the module-root-relative path ending in '.go' the rotini-controlled code is written to; 'package' is the Go package name at its top; 'keep' lists package-relative paths the pruner must spare.
+
+### `type`
+
+`string` · **required** · one of `main`, `cmd`, `models`
+
+Which generated category this target receives. main = the binary entrypoint (main.go, create-once: never overwritten). cmd = the cli package: it locates the editable per-command handler stubs AND the single generated file written into that directory — the typed input/output structs (Collect[T]/Parse* targets), the framework glue (Definition, NewProgram, ProgramHandlers, BindMeta), and the handlers rollup (handlers struct, Program, Handlers(), command→handler wiring), all merged into the one 'file'. models = ONLY the typed input/output structs, in their own package. Optional: without it they live in the cmd file. Declare it when a command sources its handler from another package (`handler:`) AND that package needs its own input types — the cmd package imports the handler package, so the handler package cannot import cmd back. With models, both import it instead. The cmd package re-exports every model as a type alias, so handler code inside cmd is unaffected either way. There is no 'runtime' target: the rotini runtime is imported from github.com/go-rotini/rotini, not emitted.
+
+### `file`
+
+`string`
+
+Module-root-relative path (no leading slash) ending in '.go' for the rotini-controlled file this category is written to. Its parent directory is the target package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.gen.go' (the cli package's generated file); main has no default and is only written when 'file' is set.
+
+### `header`
+
+`string`
+
+Text written at the very top of every Go file this target produces — the generated file, the editable handler stubs, and the entrypoint — ABOVE rotini's own 'Code generated by rotini' line. Verbatim and unformatted, so write complete comment lines yourself (each starting with '//' or wrapped in /* */); a build constraint needs its own blank line after it, as Go requires. Intended for a license or copyright header a repository mandates on every .go file, and for a '//go:build' constraint. Re-applied on every generate, and applied to a create-once file only when that file is first written — editing the header later does not rewrite a stub or an entrypoint you already own.
+
+### `keep`
+
+array of `string`
+
+Package-relative paths (e.g. 'helpers.go') that pruning must never remove.
+
+You rarely need it: pruning only ever removes files ROTINI WROTE — an orphaned handler stub, identified by the generated marker it carries — and reports each one. A file you wrote is never a candidate, whatever it is named, and neither are test files or the editable per-feature templates. Reach for 'keep' when you have adopted a generated stub as your own AND kept its marker, or to protect a rendered output file under an embed_dir.
+
+### `package`
+
+`string`
+
+Go package name written at the top of 'file'. Defaults to the file's parent-directory name (sanitized to a valid Go identifier). For type 'main' it must be 'main'. Targets that resolve to the same 'file' must declare the same 'package'.
+
+
+## SchemasConfig
+
+Where to write rotini's embedded JSON Schemas into this project. Each entry is opt-in: declare 'conf' and/or 'spec' with a 'file' to have `rotini generate` write that schema there (overwriting it from the embedded bytes each pass). The files are not pruned. Intended target for a local editor `# yaml-language-server: $schema=<path>` reference.
+
+### `conf`
+
+[`SchemaConfig`](#schemaconfig)
+
+Where to write rotini's conf-schema (the schema for this .rotini.conf file).
+
+### `spec`
+
+[`SchemaConfig`](#schemaconfig)
+
+Where to write rotini's spec-schema (the schema for .rotini.spec files).
+
+
+## SchemaConfig
+
+A single schema write target: the project-relative path the embedded JSON Schema is written to.
+
+### `file`
+
+`string` · **required**
+
+Module-root-relative path file (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a `# yaml-language-server: $schema=<path>` comment at it for local IDE syntax highlighting.
+

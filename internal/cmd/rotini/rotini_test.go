@@ -203,26 +203,46 @@ func TestCLI_validateWarningsDoNotFail(t *testing.T) {
 func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	var gotName, gotFormat string
 	var gotForce bool
-	t.Chdir(t.TempDir()) // no go.mod requiring rotini: the `go get` step is due
+	t.Chdir(t.TempDir()) // no go.mod requiring rotini: the runtime warning is due
 
-	p, out, _ := newTestCLI(t)
+	p, out, errb := newTestCLI(t)
 	p.Bind("initialize", codegen.InitializeFn(func(name, format string, force bool) error {
 		gotName, gotFormat, gotForce = name, format, force
 		return nil
 	}))
 
-	if _, err := p.Run([]string{"init", "mycli", "--format", "json", "--force"}); err != nil {
-		t.Fatalf("Run: %v", err)
+	code, err := p.Run([]string{"init", "mycli", "--format", "json", "--force"})
+	if err != nil || code != 0 {
+		t.Fatalf("Run: code %d, %v", code, err)
 	}
 	if gotName != "mycli" || gotFormat != "json" || !gotForce {
 		t.Errorf("initialize got (%q, %q, force=%v), want the parsed argv", gotName, gotFormat, gotForce)
 	}
-	// Init tells the user what to do next; without it the following `go build` fails
-	// on a missing module with no hint.
-	for _, want := range []string{"initialized cmd/mycli", "go get github.com/go-rotini/rotini", "go build ./cmd/mycli"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("init output missing %q:\n%s", want, out.String())
-		}
+	// Success is silent; the only thing said is a warning, and only because the next
+	// `go build` would fail on a missing module.
+	if out.Len() != 0 {
+		t.Errorf("init printed on success:\n%s", out.String())
+	}
+	if want := "run `go get github.com/go-rotini/rotini` before building ./cmd/mycli"; !strings.Contains(errb.String(), want) {
+		t.Errorf("stderr = %q, want the runtime warning", errb.String())
+	}
+}
+
+// TestCLI_initializeIsSilentWhenTheRuntimeIsRequired: with the runtime already in go.mod there
+// is nothing to warn about, so a successful init prints nothing at all.
+func TestCLI_initializeIsSilentWhenTheRuntimeIsRequired(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	p, out, errb := newTestCLI(t)
+	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) error { return nil }))
+	if code, err := p.Run([]string{"init", "mycli"}); err != nil || code != 0 {
+		t.Fatalf("Run: code %d, %v", code, err)
+	}
+	if out.Len() != 0 || errb.Len() != 0 {
+		t.Errorf("init printed on success: stdout %q, stderr %q", out.String(), errb.String())
 	}
 }
 

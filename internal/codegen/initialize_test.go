@@ -65,4 +65,3 @@ func TestInitialize_endToEnd(t *testing.T) {
 		}
 	}
 }
-

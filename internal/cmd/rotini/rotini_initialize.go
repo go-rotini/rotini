@@ -53,17 +53,14 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	// The scaffold imports the rotini runtime but rotini does not touch the user's
-	// go.mod — adding a require is a network operation with a side effect on a file
-	// rotini does not own, so it is reported, not performed. Without this the next
-	// `go build` fails on a missing module with no hint of what to do. It is reported only
-	// when it is needed: telling a module that already requires rotini to `go get` it sends
-	// the user to do something that changes nothing.
-	fmt.Fprintf(rtx.Stdout, "initialized cmd/%s\n\nNext steps:\n", args.Name)
+	// Success is silent. The one thing worth saying is a problem the next step would hit: the
+	// scaffold imports the rotini runtime, and rotini does not add it to the user's go.mod —
+	// that is a network operation with a side effect on a file rotini does not own. So when
+	// the module does not require it yet, the next `go build` would fail on a missing module,
+	// and the warning says what to run instead.
 	if !requiresRuntime(".") {
-		fmt.Fprintln(rtx.Stdout, "  go get github.com/go-rotini/rotini    # the runtime the generated code imports")
+		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet — run `go get %s` before building ./cmd/%s", runtimeModule, runtimeModule, args.Name))
 	}
-	fmt.Fprintf(rtx.Stdout, "  go build ./cmd/%s\n", args.Name)
 }
 
 // runtimeModule is the module the generated code imports.

@@ -1,0 +1,35 @@
+# Every key the conf accepts, in one valid file. `rotini validate` checks it on every test run.
+$schema: ./.rotini-schema.conf.json
+version: 0.0.0
+generate:
+  schemas:
+    spec:
+      file: cmd/deploy/.rotini-schema.spec.json
+    conf:
+      file: cmd/deploy/.rotini-schema.conf.json
+  packages:
+    - type: main
+      file: cmd/deploy/main.go
+    - type: cmd
+      file: internal/cmd/deploy/zz_rotini.go
+      package: deploy
+      header: "// Copyright 2026 Example, Inc."
+      keep: [store.go]
+    - type: models
+      file: internal/models/zz_models.go
+      package: models
+  features:
+    - type: help
+      enabled: true
+      embed: true
+      embed_dir: internal/cmd/deploy/help
+      template: true
+      template_dir: internal/cmd/deploy/templates
+    - type: completion
+      enabled: true
+    - type: man
+      enabled: false
+    - type: markdown
+      enabled: false
+validate:
+  fail: collect

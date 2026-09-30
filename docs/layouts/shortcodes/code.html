@@ -4,6 +4,11 @@
 {{ $opts := .Get "opts" }}
 {{ $collapsible := ne (.Get "collapsible") "false" }}
 {{ $copy := ne (.Get "copy") "false" }}
+{{/* file="<asset path>" shows an asset's contents instead of the block's own body. */}}
+{{ $inner := .Inner }}
+{{ with .Get "file" }}
+  {{ with resources.Get . }}{{ $inner = .Content }}{{ else }}{{ errorf "code shortcode: no asset %q" . }}{{ end }}
+{{ end }}
 
 {{- if $lang -}}
 {{- if $collapsible -}}
@@ -14,7 +19,7 @@
     {{- if $copy }}<button class="copy_btn" data-code-id="code-{{ $id }}" title="copy to clipboard">copy</button>{{ end
     -}}
   </summary>
-  {{ $trInner := trim .Inner "\n" }}
+  {{ $trInner := trim $inner "\n" }}
   <div id="code-{{ $id }}" class="code-content">
     {{- transform.Highlight $trInner $lang $opts -}}
   </div>
@@ -26,7 +31,7 @@
     {{- if $copy }}<button class="copy_btn" data-code-id="code-{{ $id }}" title="copy to clipboard">copy</button>{{ end
     -}}
   </summary>
-  {{ $trInner := trim .Inner "\n" }}
+  {{ $trInner := trim $inner "\n" }}
   <div id="code-{{ $id }}" class="code-content">
     {{- transform.Highlight $trInner $lang $opts -}}
   </div>
