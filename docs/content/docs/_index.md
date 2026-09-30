@@ -115,7 +115,7 @@ Your project now contains:
 - **`cmd/todo/.rotini.spec.yaml`** — the [specification](/specification): commands, flags, arguments, and every other input channel
 - **`cmd/todo/.rotini.conf.yaml`** — the [configuration](/configuration): where code is written and which features are on
 - **`cmd/todo/main.go`** — the entrypoint, carrying the `//go:generate` directive (create-once: never overwritten)
-- **`cmd/todo/.rotini-schema.spec.json`** and **`.rotini-schema.conf.json`** — copies of rotini's JSON Schemas for your editor, written because the seeded conf's `generate.schemas` block asks for them
+- **`cmd/todo/.rotini-schema.spec.json`** and **`.rotini-schema.conf.json`** — copies of rotini's JSON Schemas for your editor, written because the seeded conf's `generate.schemas` block asks for them. The seeded spec and conf already name them in their `$schema` key, so your editor checks and completes keys from the first edit
 - **`internal/cmd/todo/`** — the [generated](/generated) framework file plus one editable handler stub per command (the seed has three: the root, `help` and `version`, already wired)
 
 ## 4. The development loop
