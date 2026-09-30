@@ -62,11 +62,6 @@ type rnode struct {
 // set, the call is alias.method() — the package exports
 // the constructor directly; otherwise it is alias.Handlers().method() (a generated cli).
 type composedCmd struct {
-	prefix         string
-	delegateAlias  string
-	delegateMethod string
-	passthrough    bool
-
 	// The composed command's own declared inputs, kept so its typed structs can be emitted
 	// when an OWN command sits beneath it. A composed node normally needs none — it
 	// delegates to the child's handler, which uses the child package's types. But a
@@ -74,6 +69,11 @@ type composedCmd struct {
 	// and its <Prefix>Inputs names every ancestor, composed ones included. Without these
 	// the parent emits a field whose type nothing declares and the package does not build.
 	inputFields
+
+	prefix         string
+	delegateAlias  string
+	delegateMethod string
+	passthrough    bool
 }
 
 // composeCtx threads composition state down a composed subtree.
@@ -694,6 +694,8 @@ func (f inputFields) addImports(set map[string]bool) {
 }
 
 type genCommand struct {
+	inputFields // the generated fields of the command's declared inputs
+
 	prefix     string // PascalCase type prefix, e.g. "RotiniGenerate"
 	invocation string // how a user types it, e.g. "rotini generate"
 	handler    string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
@@ -701,10 +703,9 @@ type genCommand struct {
 	// dashedFilename is the stub's pre-underscore name ("app_get-thing.go"), "" when it has
 	// none; a stub already seeded under it stays the command's stub (see stubFileFor).
 	dashedFilename string
-	inputFields
-	stdinType   string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
-	stdinFormat string     // stdin decode format, e.g. "yaml"; "" when no stdin
-	inputs      []fieldDef // InputsFields for this command's <Prefix>Inputs
+	stdinType      string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
+	stdinFormat    string     // stdin decode format, e.g. "yaml"; "" when no stdin
+	inputs         []fieldDef // InputsFields for this command's <Prefix>Inputs
 
 	// Inline-command passthrough: the command's structure + inputs are
 	// generated locally (this is still an own command), but its handler delegates to a

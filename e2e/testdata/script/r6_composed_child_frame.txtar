@@ -50,7 +50,7 @@ stdout 'kid cascading: loud=false'
 # before a sub-command's name belongs to an ancestor. Both frames declare --shared: before `kid`
 # it is the umbrella's, after `kid` it is the child's. (It once bound to the DEEPEST declaration
 # wherever it sat, which made `umbrella --shared kid` set the child's flag and misattributed
-# deprecations — rubectl register R-22.)
+# deprecations.)
 exec ./umbrella$exe --shared kid work
 stdout 'shared=false'
 exec ./umbrella$exe kid --shared work

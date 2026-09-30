@@ -33,3 +33,12 @@ command:
     - name: limit
       identifiers: [--limit]
       schema: {type: bytesize, minimum: 1024, maximum: 1Gi}
+  # Keys that apply to some kinds of input only: accepted elsewhere, they would do nothing.
+  env:
+    - name: loud
+      schema: {type: bool, negatable: true}
+    - name: region
+      schema: {type: string, key: deploy.region}
+  arguments:
+    - name: labels
+      schema: {type: map, properties: {team: {type: string}}}

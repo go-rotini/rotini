@@ -119,7 +119,7 @@ func TestReadSecret_emptyLineIsAnAnswer(t *testing.T) {
 
 // TestTerminalHelpers_takeTheStreamsAHandlerHas proves the two terminal helpers accept rtx.Stdin
 // and rtx.Stdout as they are. They used to take *os.File, so every prompt guard began with a
-// type assertion and a script- or test-friendly fallback reader (rubectl R-14, R-38).
+// type assertion and a script- or test-friendly fallback reader.
 func TestTerminalHelpers_takeTheStreamsAHandlerHas(t *testing.T) {
 	var nilFile *os.File
 	for name, stream := range map[string]any{

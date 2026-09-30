@@ -476,8 +476,7 @@ func TestCLIPageMatchesGeneratedHelp(t *testing.T) {
 
 // TestRequiresRuntime decides whether `rotini init` tells the user to `go get` the runtime: only
 // when the module governing the directory does not already require it. It once printed the step
-// unconditionally, sending users with rotini in go.mod to run a command that changes nothing
-// (rubectl R-2).
+// unconditionally, sending users with rotini in go.mod to run a command that changes nothing.
 func TestRequiresRuntime(t *testing.T) {
 	root := t.TempDir()
 	write := func(dir, gomod string) string {

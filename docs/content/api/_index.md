@@ -4,7 +4,7 @@ title: "api"
 
 # Runtime Contract
 
-The full godoc lives in `doc.go`. This page is the shape of it: what a handler is handed, how input arrives, and how a result gets out.
+The package overview lives in `doc.go`, and every exported name carries its own godoc. This page is the shape of it: what a handler is handed, how input arrives, and how a result gets out.
 
 ## Program
 
@@ -26,7 +26,7 @@ But it arrives **only when the exit action returns**. Under the default, `os.Exi
 It is not the reporting channel: the funnel has already printed everything by then. The return is there so an embedder can *act* on the failure rather than re-derive it from a stream.
 {{< /alert >}}
 
-Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, `WithVersion`/`WithParser`/`WithBindMeta`/`WithBinder`, and `With` for options that cannot be methods.
+Seams, all optional: `WithStdin`/`WithStdout`/`WithStderr`, `WithArgs`, `WithExit`, `WithContext`, `WithSignals`/`WithoutSignalHandling`, `WithTeardownOnPanic`/`WithPanicRecover`, `WithFunnel`, `WithResolver`, `WithLifecycle`, `WithVersion`/`WithHelp`/`WithParser`/`WithBindMeta`/`WithBinder`, and `With` for options that cannot be methods.
 
 ## Lifecycle
 
@@ -48,6 +48,8 @@ One per invocation, passed to every hook.
 | `rtx.Command()` / `rtx.CommandPath()` | the command the user **invoked** (the leaf), and its full path |
 | `rtx.Frame()` | the command whose **hook is running** — the leaf in `Run`, an ancestor in a cascading hook |
 | `rtx.IsLeaf()` | whether those two are the same — the question a cascading hook asks, since `Frame() == Command()` will not compile |
+| `rtx.Help()` | the help page of the command being run — what a generated `--help` prints. A composed command gets the page of the program it is running in, with its full path there |
+| `rtx.Version()` | what `WithVersion` set, or `""` |
 | `rtx.Bind` / `rtx.Get[T]` / `rtx.MustGet[T]` | the service registry (generic methods, Go 1.27) |
 | `rtx.RecordInfo` / `RecordSuccess` / `RecordWarning` / `RecordError` | outcomes |
 | `rtx.Failed()` | has anything failed so far — the one bit a teardown needs |
@@ -94,12 +96,12 @@ So `Halt` is how a **setup** hook refuses to let a command proceed, and its fail
 `Failed()` is what makes a teardown decision possible — commit or roll back, keep or discard:
 
 {{< code title="the decision a teardown exists to make" language="golang" open="true" collapsible="false" copy="true" >}}
-func (*migrateHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (h *dbHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 	if rtx.Failed() { // panics count, which is the case a hand-kept flag misses
-		tx.Rollback()
+		h.tx.Rollback()
 		return
 	}
-	tx.Commit()
+	h.tx.Commit()
 }
 {{< /code >}}
 
@@ -136,10 +138,17 @@ func (*rootHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 {{< alert type="info" title="COMMAND() IS THE LEAF; FRAME() IS WHOSE HOOK YOU ARE IN:" >}}
 For `mig db status`, `rtx.Command()` is `status` in **every** hook of the run — it is the command the user invoked. `rtx.Frame()` is the command this particular hook belongs to: `mig` in mig's cascading hook, `db` in db's, `status` in the leaf's `PreRun`/`Run`/`PostRun`.
 
-A cascading hook had no way to ask that question before, which is why an inputs struct used to be aligned by counting its fields against the chain — and why a composed child's cascading hook could not read its own flags at all. Its type spans only its own lineage, so counting from the leaf landed below it and counting from the root landed above it. Both returned zeros with a nil error.
+That distinction is what lets a composed child's cascading hook read its own flags: its inputs type spans only its own lineage, so it has to be anchored on the frame whose hook is running — neither the leaf nor the root would line up with it.
 {{< /alert >}}
 
 A struct that describes more commands than the collecting command is deep is rejected — that check is exact, because the anchor is known rather than inferred. To read the chain directly rather than bind against it, use `rtx.Chain()`.
+
+Flags bind **by position**. A flag belongs to the deepest command typed *before* it that declares it, so a flag typed before a sub-command's name belongs to an ancestor, never to that sub-command. When `app` and `app get` both declare `-o`:
+
+{{< code title="where a flag lands" language="text" open="true" collapsible="false" copy="false" >}}
+app -o root get -o leaf    # app's -o is "root", get's -o is "leaf"
+app --wide get             # rejected: --wide is get's flag, and get had not been typed yet
+{{< /code >}}
 
 ## Outcomes
 
@@ -170,18 +179,18 @@ The channels arrive as a struct rather than as five parameters for a reason that
 
 ## Errors
 
-Every class below is both `errors.Is`-able against the `ErrUsage` / `ErrInternal` sentinels — so `CategoryOf` classifies it — and `errors.As`-able to a typed value with structured fields. rotini's own messages never leak internals, and a value declared `secret:` is replaced with `[redacted]` in every rejection it can cause.
+Every class below — except a plugin timeout, covered under [Plugins](#plugins) — is both `errors.Is`-able against the `ErrUsage` / `ErrInternal` sentinels — so `CategoryOf` classifies it — and `errors.As`-able to a typed value with structured fields. rotini's own messages never leak internals, and a value declared `secret:` is replaced with `[redacted]` in every rejection it can cause.
 
 `CategoryOf` answers for one error, and tests `ErrUsage` first, so a value carrying both sentinels reports usage. To classify a whole run, walk `out.Errors` and keep the most severe — the categories are ordered `none < usage < internal` for exactly that comparison.
 
 | Type | Channel |
 |---|---|
-| `*ParseError` | argv — with a `Kind` you can branch on, plus the token and candidates `Suggestor.For` turns into "did you mean" |
+| `*ParseError` | argv — with a `Kind` you can branch on, plus the token and candidates `Suggestor.For` turns into "did you mean". One kind, `ParseKindInternal`, is the program's mistake rather than the user's — collecting an inputs type that does not describe the running command, say — and categorizes as internal |
 | `*BindError` | environment / configuration / stdin |
 | `*RemoteError` | plugin dispatch |
-| `*WiringError` `*ServiceError` `*PanicError` | rotini-detected faults, arriving as panics. A recovered panic is `CategoryInternal` whatever was thrown |
+| `*WiringError` `*ServiceError` `*PanicError` | rotini-detected faults, arriving as panics. A recovered panic is `CategoryInternal` — unless the value thrown was itself a usage error, which `CategoryOf` reports as usage |
 
-`*SubprocessError` sits outside this taxonomy: it reports a child process's exit, carrying the code and the stderr that explains it.
+`*SubprocessError` reports a child process that failed, carrying its `ExitCode` and the `Stderr` that explains it. It categorizes as internal: a program that shells out owns the command it chose to run.
 
 rotini ships **no opinions on top**: no automatic "did you mean", no help dump on error. A program that wants either writes its own funnel.
 
@@ -237,13 +246,13 @@ Two kinds, and the difference decides whose fault a missing binary is:
 
 A timeout is neither party's fault, so it is `CategoryNone` — still reachable with `errors.As` as a `*RemoteError` whose `Kind` is `RemoteTimeout`.
 
-Both kinds search the same three places in the same order: next to the host binary (the git/kubectl convention), then the command's `plugin_path`, then `PATH`.
+Both kinds search the same three places in the same order: next to the host binary (the git/kubectl convention), then the command's `plugin_path`, then `PATH`. A `plugin_path` expands a leading `~` and `$VAR` references the way a shell would; a relative one is relative to the working directory.
 
 {{< code title="what rotini hands you, and what you render" language="golang" open="true" collapsible="false" copy="true" >}}
 root := rtx.Chain()[0]
 
 rotini.DiscoveredPlugins(root)      // name + path of each found now, minus any shadowing a real command
-rotini.DiscoveryDiagnostics(root)   // why the configured plugin_path could not be scanned
+rotini.DiscoveryDiagnostics(root)   // why the configured plugin_path could not be scanned (a missing one is fine)
 rotini.RemoteBinaryPath(root, name) // would this resolve, and to what — searched as dispatch searches
 {{< /code >}}
 
@@ -255,13 +264,14 @@ A discovered plugin may never shadow a declared command, so dropping a binary on
 
 **The registry is yours alone.** `Bind` and `Provide` write to it; nothing rotini depends on lives there.
 
-That is a deliberate split. rotini's own seams used to be string keys in the same flat namespace — `"parser"`, `"version"`, `"binder"` — with nothing reserving them and every read discarding its comma-ok, so a name you chose or a type you got wrong degraded an input channel in silence. The worst case was reachable by accident: binding a `Binder` built from an empty `BindMeta`, the only way it could be written without knowing about a key you had never seen, switched the configuration-file channel off without a word.
+That is a deliberate split. rotini's own seams are typed methods on the `Program`, not keys in your namespace, so no name you choose can collide with one and no binding of yours can quietly switch an input channel off.
 
 | rotini's seam | supply | read back |
 |---|---|---|
 | the generated descriptor | `WithBindMeta(meta)` — the generated `NewProgram` does this | internal |
 | the binder | `WithBinder(func(BindMeta) *Binder)` — it **receives** the descriptor | internal |
 | the version | `WithVersion(v)` | `rtx.Version()` |
+| the help pages | `WithHelp(Help)` — the generated `NewProgram` does this | `rtx.Help()` |
 | the parser | `WithParser(p)` | `rtx.Parser()` — never nil |
 
 `WithBinder` takes a function of the descriptor rather than a `*Binder` for exactly that reason — an override now starts *from* what the spec declared instead of having to reproduce it.
@@ -279,7 +289,7 @@ StoreKey.Provide(cmd.Program, NewStore()).Execute()
 store := StoreKey.MustGet(rtx)
 {{< /code >}}
 
-Go does not allow type parameters on methods, so `p.Provide[T](key, value)` cannot exist — which is why `Key.Provide` takes the program instead of chaining off it. For more than one service, `Provide` returns an option and **`With`** applies any number without leaving the chain:
+The key already carries the type, so `Key.Provide` takes the program rather than the program taking a type parameter. For more than one service, `Provide` returns an option and **`With`** applies any number without leaving the chain:
 
 {{< code title="several services, one expression" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.
@@ -327,8 +337,6 @@ Generated wiring returns a fresh handler from every method, which is what makes 
 
 If you write your own `ProgramHandlers` and a method returns a **shared** value — a field on your aggregate, a package variable — then that handler's fields are shared across runs. For a stateless handler that is harmless and common. For one that keeps state in fields it is a bug, and under concurrent runs (a REPL, a server answering a peer, or `Program.Run` from several goroutines) it is a data race.
 {{< /alert >}}
-
-Detection is opt-in too: `IsTerminal`, `EnvNoColor` and `TerminalSize` exist, but nothing calls them for you — the program decides and feeds the result in.
 
 `Parser` and `Binder` are overrides, not prerequisites: `Collect` builds its own. In particular **`rotini.Deprecations(rtx)` needs nothing bound** — it reports the deprecated commands, flags and arguments this invocation actually used, reading the resolved chain and the argv that produced it straight off the `Context`. Each carries the spec's `deprecated:` message when there is one, and renders it: `flag "--database" is deprecated: use --db`.
 

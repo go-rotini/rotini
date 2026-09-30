@@ -28,9 +28,10 @@ If your change alters generated output, update the golden fixtures under
 the diff is intentional. If it changes the spec or conf schema, keep
 `internal/codegen/schema-spec.json` / `internal/codegen/schema-conf.json`, the
 root-level published copies (`schema-spec.json` / `schema-conf.json`, which a release
-tag serves as the `$schema` URL), and the annotated references in
-`reference/.rotini.spec.yaml` / `reference/.rotini.conf.yaml` in sync.
-`TestReferenceDocsValidate` and `TestPublishedSchemasInSync` fail until they are.
+tag serves as the `$schema` URL), and the generated reference pages under
+`docs/content/*/reference.md` in sync (`go generate ./cmd/rotini`, then
+`go test ./internal/codegen -run SchemaDocs -update-schema-docs`).
+`TestPublishedSchemasInSync` and `TestSchemaDocsInSync` fail until they are.
 
 If you add a lint rule, add its fixture directory under
 `internal/codegen/testdata/lint/<ruleName>/` — `TestLintFixturesComplete` fails until

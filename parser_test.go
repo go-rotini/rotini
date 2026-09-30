@@ -1679,7 +1679,7 @@ func TestParse_dottedKeys(t *testing.T) {
 		t.Errorf("Set[image] = %#v, want nested {tag: v2, pull: Always}", in.App.Flags.Set["image"])
 	}
 	// A dotted_keys map says nothing about its values, so each is read as the JSON spelling of
-	// it would be: 3 is the number JSON gives, not the text "3" (rubectl R-13).
+	// it would be: 3 is the number JSON gives, not the text "3".
 	if in.App.Flags.Set["replicas"] != float64(3) {
 		t.Errorf("Set[replicas] = %#v, want float64(3)", in.App.Flags.Set["replicas"])
 	}
@@ -2670,7 +2670,7 @@ func TestParse_flagsBindByPosition(t *testing.T) {
 // TestParse_detachedOptionalValueHint pins the hint for the likeliest mistake with an
 // optional-value flag: writing its value detached. `--dry-run server` leaves server as a
 // positional by the documented rule (the value must be attached), and the error used to be only
-// `"apply" takes no arguments (got 1)` — true, and no help at all (rubectl R-18).
+// `"apply" takes no arguments (got 1)` — true, and no help at all.
 func TestParse_detachedOptionalValueHint(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{
 		{Name: "apply", Handler: "AppApply", Flags: []FlagDef{
@@ -2823,7 +2823,7 @@ func mustNotLeak(t *testing.T, what string, err error) {
 // categorized internal. It used to read as the end user's invalid value, and a map with
 // non-string keys was silently left empty.
 func TestParse_authorMistakesAreInternal(t *testing.T) {
-	type opaque struct{ n int }
+	type opaque struct{}
 	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
 		{Name: "thing", Identifiers: []string{"--thing"}, Type: "opaque"},
 		{Name: "ids", Identifiers: []string{"--ids"}, Type: "map[int]string"},

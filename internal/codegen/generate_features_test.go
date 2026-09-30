@@ -540,7 +540,7 @@ func TestHelpPage_fallsBackToSummary(t *testing.T) {
 // TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames pins where a deprecation shows. With
 // deprecated_identifiers, the run warns only when one of THOSE spellings is used — so help used
 // to contradict it, marking the whole command `(deprecated: …)` and listing the deprecated alias
-// beside it as though it were current (rubectl R-43). The row now drops the deprecated names
+// beside it as though it were current. The row now drops the deprecated names
 // and the marker; without the list, the message still deprecates the whole command or flag.
 func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 	t.Parallel()

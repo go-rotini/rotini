@@ -301,7 +301,7 @@ func TestCoerceWithLayout(t *testing.T) {
 
 // TestFormatDuration pins how a duration bound prints in an error: as a user writes one. A
 // `maximum: 30d` used to be reported as "must be <= 720h0m0s" — a spelling the user never wrote,
-// in hours because Go's formatter has no days (rubectl R-32). Every output parses back to the
+// in hours because Go's formatter has no days. Every output parses back to the
 // same duration.
 func TestFormatDuration(t *testing.T) {
 	for d, want := range map[time.Duration]string{

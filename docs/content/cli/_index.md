@@ -37,7 +37,7 @@ Flags:
 
 Environment:
   ROTINI_NO_STYLES    disable output styles
-  CI                  is cli environment
+  CI                  set in CI; disables output styles
 
 Examples:
   rotini init mycli
@@ -49,7 +49,7 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini initialize
 
-Scaffolds a new CLI: writes the seed spec and conf under `cmd/<name>/`, then runs the same `generate` every later pass runs — producing the entrypoint, the framework file, and one empty handler stub. The `name` argument becomes the root command name and the expected binary name.
+Scaffolds a new CLI: writes the seed spec and conf under `cmd/<name>/`, then runs the same `generate` every later pass runs — producing the entrypoint, the framework file, copies of rotini's JSON Schemas for your editor, and three handler stubs — the root, `help` and `version` — already wired so the new CLI answers `--help` and `--version` on its first build. The `name` argument becomes the root command name and the expected binary name.
 
 The entrypoint is **create-once**: it carries your build metadata, so it is never overwritten. Use `--force` to re-seed the spec and conf.
 
@@ -77,9 +77,9 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini generate
 
-Compiles a spec + conf into Go: the command tree as a `Definition` literal, the typed input structs, the handlers rollup, any enabled feature outputs, and one editable stub per new command. Generated files that no longer map to a command are pruned.
+Compiles a spec + conf into Go: the command tree as a `Definition` literal, the typed input structs, the table that maps each command to its handler, any enabled feature outputs, and one editable stub per new command. Generated files that no longer map to a command are pruned.
 
-`--watch` regenerates on every spec change, which pairs well with a running `go build`.
+`--watch` keeps running and regenerates on every spec change — leave it open in a terminal while you edit the spec.
 
 {{< code title="$ rotini help generate" language="text" open="true" collapsible="false" copy="false" >}}
 Generate a cli program from a rotini spec file.

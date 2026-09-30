@@ -1,23 +1,23 @@
 # go-rotini/rotini
 
-**Declare your CLI in a spec file. rotini checks it, generates the typed Go, and
-ships the rest of the binary.**
+**Declare your CLI in a spec file. rotini checks it, generates the typed Go, and ships the
+runtime your handlers are written against.**
 
-`rotini` is two-faced, and one module serves both faces at one version:
+One module, two faces, one version — so the tool and the runtime cannot drift:
 
-- **As a tool** — `go get -tool github.com/go-rotini/rotini/cmd/rotini` — it installs the
-  codegen binary: `go tool rotini init`, `generate`, `validate`.
-- **As a library** — `go get github.com/go-rotini/rotini` — it is the runtime your
-  generated code imports and your handlers are written against.
+- **the tool** — `go get -tool github.com/go-rotini/rotini/cmd/rotini` — `rotini init`,
+  `generate` and `validate`;
+- **the library** — `go get github.com/go-rotini/rotini` — the runtime the generated code
+  imports.
 
-Because both come from the same module, the tool and the runtime **cannot drift**.
+## The whole idea, in one example
 
 ```yaml
 # cmd/todo/.rotini.spec.yaml
 version: 0.0.0
 command:
   name: todo
-  description: a task list
+  summary: a task list
   commands:
     - name: add
       summary: add a task
@@ -30,149 +30,52 @@ command:
           schema: {type: date}
 ```
 
-`go generate ./...` turns that into a typed `TodoAddInputs` struct, the command tree,
-and an editable handler stub. You fill in the body.
+`rotini validate` checks that spec against a JSON Schema and 43 lint rules, each problem
+reported with a `file:line:col`. `go generate ./...` turns it into a typed `TodoAddInputs`
+struct, the command tree, help pages, and a handler stub that already answers `--help`. The
+part you write is the command itself:
 
-## Three things that are actually different
+```go
+in, err := rotini.Collect[TodoAddInputs](rtx) // argv, env, config and defaults, validated
+if err != nil {
+	rtx.HaltWith(err)
+	return
+}
+fmt.Fprintf(rtx.Stdout, "added %q, due %s\n", in.TodoAdd.Arguments.Title, in.TodoAdd.Flags.Due.Format(time.DateOnly))
+```
 
-**1. Your CLI is checked before your code exists.** The spec is validated by a JSON
-Schema plus 43 rotini lint rules — a misspelled key, a duplicate flag identifier, a
-config file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each
-is reported with a `file:line:col`, by `rotini validate`, before a line of Go is
-generated. Frameworks that declare the CLI *in Go* can only catch what the compiler
-happens to notice.
-
-**2. One import covers the whole binary, not just its front door — and stops where your
-UI begins.** Parsing is the first 10% of a CLI. rotini carries the rest of the *dispatch*
-problem in the same import, and every piece is opt-in, wired only because your handler
-constructed it:
-
-| | |
-|---|---|
-| `Subprocess` | `exec` with env/dir/timeout; a non-zero exit quotes the child's stderr, and output streams as a breakable iterator |
-| `REPL` | run your command tree as an interactive loop — dispatch, `^C` semantics and tab completion of your real commands; bring your own line editor |
-| `Program.Run` is re-entrant | each dispatch gets a fresh `Context`, so the same command tree serves a loop, a server answering a peer, or a test |
-| `Service` | daemon workers, ordered teardown that still runs after a Ctrl-C, and one budget for both halves |
-| `IsTerminal` `EnvNoColor` `TerminalSize` | the questions that come before any drawing decision, and that the standard library will not answer |
-| `ReadSecret` | read a line with terminal echo off, and put it back on every path |
-| `Strip` | remove ANSI escapes, so styled text is safe in a man page or a completion description |
-| `Suggestor` | rank a rejected token against the vocabulary it failed against — `For(err)` in one call, opt-in, never emitted by rotini itself |
-
-**rotini ships no styler, no table, no spinner, no prompt and no pager.** Drawing to a
-terminal is a design decision belonging to your program, and lipgloss, huh, bubbles,
-bubbletea and `text/tabwriter` do it better than a CLI framework would on the side. A
-framework that shipped its own would hand you two vocabularies for the same screen.
-[`example-flow`](https://github.com/go-rotini/example-flow) is the worked boundary: the
-whole asking layer, written out, is about eighty lines.
-
-Three more things live elsewhere in the same ecosystem: **file watching** is
-`fs.NewWatcher` and a **single-instance lock** is `fs.PIDLock`, both in
-[`go-rotini/fs`](https://github.com/go-rotini/fs); caching for a long-running program is
-[`go-rotini/memcache`](https://github.com/go-rotini/memcache). rotini does not wrap them —
-a facade would put another package's API inside rotini's frozen surface and put its
-documentation in the wrong place.
-
-**3. The generated code is small, legible, and yours.** `rotini init` generates
-**398 lines across 5 files** — and they are a CLI that already answers `--help`,
-`--version`, `help <command>` and `version`, because the seeded spec declares them and
-the seeded handlers are wired to the pages codegen just produced. Nothing is injected at
-run time; every line is in your repo, and every line is yours to delete. The machinery is
-an ordinary import you upgrade with `go get -u` — not a vendored copy you must never edit.
+A rotini CLI is four kinds of file, each easy to reason about on its own: the **spec** (what
+the CLI accepts), the **conf** (where the generated code goes), **`main.go`** (the entrypoint),
+and one **handler file** per command (what it does). `rotini init` writes a working CLI —
+**398 lines across 5 files**, already answering `--help`, `--version`, `help` and `version`
+— and every line of it is yours to read and change.
 
 ## The cost, stated up front
 
-rotini adds a **codegen step**: a tool dependency, a `go generate` pass, and generated
-files in version control. Frameworks driven by struct tags ask for none of that.
-
-That cost is fixed; the benefits scale with the CLI. For a three-command internal
-script, rotini is heavier than it is worth. For a long-lived, multi-command tool with
-config files, environment variables, docs and shell completion to keep in sync, the
-spec becomes the single place all of it is declared — and checked.
+rotini adds a **codegen step**: a tool dependency, a `go generate` pass, and generated files
+in version control. That cost is fixed while the benefit grows with the CLI: for a
+three-command script it is more than you need; for a long-lived tool with configuration
+files, environment variables, docs and shell completion to keep in step, the spec is the one
+place all of it is declared — and checked.
 
 ## Install
 
 Requires **Go 1.27** or later.
 
-```
-go get -tool github.com/go-rotini/rotini/cmd/rotini@latest   # the codegen tool
-go get github.com/go-rotini/rotini@latest                    # the runtime
-```
-
-(Your own module may still declare an older Go version — calling rotini's generic
-methods does not require 1.27 in the caller, only declaring them does.)
-
-## Quickstart
-
 ```bash
-mkdir todo && cd todo
-go mod init github.com/me/todo
+mkdir todo && cd todo && go mod init example.com/todo
 go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
-
 go tool rotini init todo
-# Scaffolds:
-#   cmd/todo/.rotini.spec.yaml   — declare commands / flags / arguments here
-#   cmd/todo/.rotini.conf.yaml   — codegen settings (packages, features)
-#   cmd/todo/main.go             — entrypoint (carries the //go:generate directive)
-#   internal/cmd/todo/           — generated framework + one handler stub per command
-
-go get github.com/go-rotini/rotini   # the runtime the generated code imports
-
-# grow the CLI by editing the spec, then regenerate:
-go generate ./...                # re-runs `rotini generate` via the directive in main.go
-
-# write your handler bodies in internal/cmd/todo/*.go, then build:
-go build ./cmd/todo
-./todo --help
+go generate ./... && go build ./cmd/todo && ./todo --help
 ```
 
-## Commands
+## Learn more
 
-| Command      | Aliases | Purpose                                                         |
-|--------------|---------|-----------------------------------------------------------------|
-| `initialize` | `init`  | Scaffold a new CLI (spec + conf + entrypoint + first generate). |
-| `generate`   | `gen`   | Generate the framework/wiring from a spec + conf.               |
-| `validate`   | `val`   | Validate a spec + conf without generating.                      |
-| `help`       |         | Help for any command.                                           |
-| `version`    |         | Print the tool version.                                         |
-
-## What you declare in a spec
-
-Every way data reaches your CLI is declared, not wired by hand:
-
-- **argv** — flags (typed, clustering, count, repeatable, groups, dependencies) and
-  positional arguments (variadic, passthrough)
-- **environment** — explicit variables, an `env_prefix`, or nested families
-- **configuration files** — a fixed path, a walk-up search, XDG, or a path supplied at
-  run time by a flag or env var (`config_source`)
-- **stdin** — a typed, schema-validated payload, or the `-` and `@file` value sentinels
-- **defaults**, with a documented precedence chain and per-field provenance
-
-`rotini.Collect[T](rtx)` reconciles all of it in one line.
-
-## Documentation
-
-- **Runtime contract** — `Program`/`Execute`, the lifecycle hooks, the outcome funnel
-  and typed error taxonomy, and the opt-in services: [`doc.go`](doc.go).
-- **Exhaustive, annotated schema references**:
-  [`reference/.rotini.spec.yaml`](reference/.rotini.spec.yaml) and
-  [`reference/.rotini.conf.yaml`](reference/.rotini.conf.yaml). Both are validated by
-  the test suite, so they cannot drift from the schemas.
-- **Editor support** — point your spec's `$schema` at a released schema and every key is
-  completed and checked as you type:
-
-  ```yaml
-  $schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json
-  ```
-
-  Offline or forked? `generate.schemas` in the conf writes a local copy to point at instead.
-- **What a version number promises** — [`COMPATIBILITY.md`](COMPATIBILITY.md).
-- **Taking a new version** — [`UPGRADING.md`](UPGRADING.md).
-
-## Contributing
-
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). For vulnerability reports, see
-[`SECURITY.md`](SECURITY.md).
-
-## License
-
-MIT. See [`LICENSE`](LICENSE).
+- **[rotini.dev](https://rotini.dev)** — the guide: setup, the spec language, worked
+  examples, and the [spec](https://rotini.dev/specification/reference/) and
+  [conf](https://rotini.dev/configuration/reference/) references.
+- **[pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini)** — the runtime API.
+- **[COMPATIBILITY.md](COMPATIBILITY.md)** — what a version number promises;
+  **[UPGRADING.md](UPGRADING.md)** — taking a new one.
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[SECURITY.md](SECURITY.md)** · MIT
+  **[LICENSE](LICENSE)**.

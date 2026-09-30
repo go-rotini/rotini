@@ -1,6 +1,6 @@
 # pattern_message — the sentence a user sees when a value fails a `pattern`, in place of the
 # regex. The regex is written for the program; `-o must match ^(json|yaml|wide|...)$` asks the
-# person at the keyboard to read it (rubectl R-7). Driven through generated code on every path
+# person at the keyboard to read it. Driven through generated code on every path
 # a pattern is checked: a flag, each element of a list, a named schema the flag refers to, an
 # env input, and a property inside an object-valued flag.
 

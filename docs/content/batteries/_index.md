@@ -4,7 +4,7 @@ title: "batteries"
 
 # Batteries
 
-Parsing is the first 10% of a CLI. rotini carries the rest of the *dispatch* problem in the same import — and **nothing is wired unless you wire it**. Importing rotini starts no goroutine, touches no terminal, and changes no behavior; each battery does something only because a handler constructed it and called it.
+Parsing is the first 10% of a CLI. rotini carries the rest of the *dispatch* problem in the same import — and **no battery is wired unless you wire it**. Importing rotini starts no goroutine, touches no terminal, and changes no behavior; each battery does something only because a handler constructed it and called it. (The one runtime default is a signal trap: `Execute` turns SIGINT/SIGTERM into a graceful stop, and `WithoutSignalHandling` turns that off.)
 
 {{< alert type="info" title="NOTE:" >}}
 The shelf is deliberately **short**. rotini ships no styler, no table, no spinner, no prompt and no pager — see [what rotini does not ship](#what-rotini-does-not-ship). What is here is the part underneath those decisions: process work that is subtly wrong in most hand-rolled versions, and platform questions the standard library will not answer.
@@ -62,7 +62,8 @@ out, err := rotini.NewSubprocess("git", "rev-parse", "HEAD").
 // and the run's error arrives in the loop rather than in a callback.
 for line, err := range rotini.NewSubprocess("go", "test", "./...").Lines(ctx) {
 	if err != nil {
-		return err
+		rtx.HaltWith(err)
+		return
 	}
 	if line.Stream == rotini.StreamStderr {
 		fmt.Fprintln(rtx.Stderr, line.Text)
@@ -81,7 +82,7 @@ Each typed line is tokenized like a shell command line and dispatched against th
 State that should survive a command is bound on the **Program** with `Provide`, so every line sees it; state that should not goes on the **Context**, which is fresh each line.
 
 {{< code title="repl" language="golang" open="true" collapsible="false" copy="true" >}}
-rotini.NewREPL(Program).WithPrompt("todo> ").Run(ctx)
+rotini.NewREPL(cmd.Program).WithPrompt("todo> ").Run(ctx)
 {{< /code >}}
 
 The program's funnel already reports a failing command, so the REPL adds nothing of its own. `WithErrorEcho(true)` turns on a second report for a program whose funnel is deliberately silent.
@@ -126,7 +127,7 @@ rotini wires no signal itself: only your program knows whether its `^C` means "a
 
 **`Complete` is the reason a rotini REPL beats a hand-rolled readline loop.** It is the same completion the generated shell scripts use — sub-commands, flag names, enum values, and anything a `FlagValueCompleter` or `ArgValueCompleter` supplies dynamically — from the same `Definition`, against the same handlers. No general-purpose line editor can offer it, because it does not know your commands.
 
-`example-daemon`'s `syncd shell` is the worked version: readline with history and tab completion at a terminal, the built-in reader over a pipe, guarded by one `rotini.IsTerminal` check so the same handler serves a human, a pipe and its own tests.
+`example-daemon`'s `syncd shell` is the worked version: readline with history and tab completion at a terminal, the built-in reader over a pipe, guarded by one `rotini.IsTerminal` check so the same handler serves a human, a pipe and its own tests. `rubectl shell` is a second one, over a much larger command tree.
 
 ### Service
 
@@ -145,7 +146,7 @@ Three behaviours, all about the shutdown, and none of them free anywhere else:
 
 - **Teardown runs on a context that is not already dead.** Hooks get a context derived with `context.WithoutCancel`, under a fresh budget. After a Ctrl-C the run context is *already cancelled*, so naive cleanup — `db.Close(ctx)`, `flush(ctx)` — fails instantly and silently, taking the buffer you were trying to flush with it.
 - **A context *ended* from outside is a graceful stop, so `Run` returns nil.** `errgroup.Wait` returns `context.Canceled`, which a CLI would turn into a non-zero exit for a clean SIGTERM. "Ended" covers a deadline as well as a cancel, so a worker writing the idiomatic `<-ctx.Done(); return ctx.Err()` does not fail a bounded run merely because the bound was a timeout.
-- **One budget across both halves, surfaced as `ErrShutdownTimeout`.** Workers that will not stop and hooks that overrun both produce the same typed sentinel, because the question a supervisor asks is the same either way: did teardown complete, or is this process exiting with work possibly unflushed? It exists to become an **exit code** — and it **names what overran**: `shutdown timed out: worker "indexer" did not stop`, or `shutdown timed out: shutdown hook 2 (of 3, in registration order) did not finish`. The budget holds even for a hook that never looks at its context (a bare `conns.Wait()`): `Run` stops waiting for it when the budget ends, still runs the hooks after it, and returns on time.
+- **One budget across both halves, surfaced as `ErrShutdownTimeout`.** Workers that will not stop and hooks that overrun both produce the same typed sentinel, because the question a supervisor asks is the same either way: did teardown complete, or is this process exiting with work possibly unflushed? It exists to become an **exit code** — and it **names what overran**: `shutdown timed out: worker "indexer" did not stop`, or `shutdown timed out: shutdown hook 2 (of 3, in registration order) did not finish`. The budget holds even for a hook that never looks at its context (a bare `conns.Wait()`): `Run` stops waiting for it when the budget ends, still runs the hooks after it, and returns on time. When a worker has already failed, that failure is what `Run` returns — even if a hook also overran — because it is the cause and the overrun is a consequence.
 
 Hooks run in **reverse** registration order, like deferred calls, so a resource is released before whatever it depends on. They run in every case — clean stop, worker failure, cancellation alike.
 
@@ -158,7 +159,7 @@ Without containment, one worker panic ends the binary with Go's panic dump on st
 Because the runtime already cancels the run context on SIGINT/SIGTERM, a handler that builds a Service on its own `ctx` gets signal-driven graceful shutdown for free.
 
 {{< alert type="info" title="THERE IS NO SCHEDULER:" >}}
-`rotini.Scheduler` was removed — it was a *consumer* of this seam rather than a peer of it, and everything it added was a `time.Timer` loop and a jitter multiplication. Run your timers as workers, or put a real scheduler inside one: `svc.Go("cron", func(ctx) error { c.Start(); <-ctx.Done(); <-c.Stop().Done(); return nil })`. [robfig/cron](https://github.com/robfig/cron) and [go-co-op/gocron](https://github.com/go-co-op/gocron) give you cron expressions, timezones and skip-if-still-running, none of which rotini's version had. `example-daemon` shows both halves.
+Periodic work is a worker: run your own timer loop inside `Go`, or put a real scheduler inside one — `svc.Go("cron", func(ctx context.Context) error { c.Start(); <-ctx.Done(); <-c.Stop().Done(); return nil })`. [robfig/cron](https://github.com/robfig/cron) and [go-co-op/gocron](https://github.com/go-co-op/gocron) give you cron expressions, timezones and skip-if-still-running. `example-daemon`'s `syncd schedule` shows the first kind: its own timers, run as workers.
 {{< /alert >}}
 
 ## What rotini does not ship
@@ -179,7 +180,7 @@ A framework that shipped its own would either be worse than they are or grow int
 | aligned columns | `text/tabwriter`, in the standard library |
 | paging, `$EDITOR` round-trips | a dozen lines of `os/exec` — see [example-txt](https://github.com/go-rotini/example-txt) and [example-flow](https://github.com/go-rotini/example-flow) |
 
-`example-flow` is the worked version of this boundary: the whole asking layer, written out, is about eighty lines.
+`example-flow` is the worked version of this boundary: the whole asking layer, written out, is one file of about 130 lines.
 
 ### Elsewhere in the family
 

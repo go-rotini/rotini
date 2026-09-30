@@ -86,6 +86,13 @@ func canceledExitCode(ctx context.Context) int {
 //     [Program.WithHelp]
 //   - replace a phase — [Program.WithResolver], [Program.WithLifecycle]
 //
+// Which of the two a setting is follows one rule: if rotini itself reads it — the runtime or
+// the code it generates — it is a typed option on the Program; if only your code reads it, it
+// is a registry binding. rotini's own settings are typed so that a key you choose can never
+// shadow one of them, and a wrong type is a compile error rather than an input channel that
+// quietly stops working. Your services live in the registry because rotini has no business
+// knowing their types.
+//
 // A Program is reusable: [Program.Run] dispatches one invocation and returns instead of
 // exiting, giving each call a fresh [Context]. That is what lets a [REPL], a test, or a server
 // answering a peer drive the same program many times.

@@ -241,7 +241,7 @@ func TestSplitPairs(t *testing.T) {
 
 // TestInferScalar pins what a value means where the schema says nothing about it: exactly what
 // the JSON spelling of the same value means, and nothing looser. The same patch used to store
-// the number 5 when written as JSON and the text "5" when written as key=value (rubectl R-13).
+// the number 5 when written as JSON and the text "5" when written as key=value.
 func TestInferScalar(t *testing.T) {
 	for text, want := range map[string]any{
 		"true": true, "false": false, "null": nil,

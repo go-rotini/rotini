@@ -3,3 +3,6 @@ spec: .rotini.spec.yaml:4:3: command demo: flag "retries": minLength/maxLength/p
 spec: .rotini.spec.yaml:4:3: command demo: flag "wait": minimum "5" is not a duration such as 30s or 1h30m
 spec: .rotini.spec.yaml:4:3: command demo: flag "cache": maximum "12XB" is not a size such as 512Mi, 10MB or 1073741824
 spec: .rotini.spec.yaml:4:3: command demo: flag "workers": maximum "1s" is text, but int takes a number — a string bound is for a duration or bytesize input
+spec: .rotini.spec.yaml:4:3: command demo: argument "labels": sets properties, which applies only to a map flag, whose property names feed shell completion (an object's shape belongs in a named schema) — here it would do nothing
+spec: .rotini.spec.yaml:4:3: command demo: env "loud": sets negatable, which applies only to bool flags (it derives a --no-<name> form) — here it would do nothing
+spec: .rotini.spec.yaml:4:3: command demo: env "region": sets key, which applies only to config inputs and a flag's configuration fallback — here it would do nothing

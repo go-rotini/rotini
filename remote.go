@@ -172,9 +172,8 @@ func (p *Program) remoteFailure(ctx context.Context, rtx *Context, re *RemoteErr
 //
 // A plugin host's first extra command is always a doctor — "what is installed, what is
 // missing" — and without this it has to reimplement rotini's search order from the outside.
-// That order is three steps, two of which depend on the remote's KIND: a declared remote looks
-// next to the host binary and on PATH, while a discovered one also looks in the configured
-// discovery path. Reaching for exec.LookPath, which is the obvious thing, reports every plugin
+// That order is three steps, the same for both kinds of remote: next to the host binary, then
+// the command's plugin_path, then PATH. Reaching for exec.LookPath, which is the obvious thing, reports every plugin
 // installed beside the host binary as missing — the git/kubectl convention and the first
 // location rotini tries.
 //

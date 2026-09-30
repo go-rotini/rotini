@@ -73,7 +73,7 @@ func TestDiscoveredPlugins(t *testing.T) {
 	}
 
 	// The path is the one dispatch would run: a copy earlier in the search order shadows a
-	// later one, so listing the later one would name a binary that never runs (rubectl R-37).
+	// later one, so listing the later one would name a binary that never runs.
 	earlier := t.TempDir()
 	if err := os.WriteFile(filepath.Join(earlier, "acme-foo"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestDiscoveryDiagnostics(t *testing.T) {
 	}
 
 	// A path that does not exist YET is not a problem: it is where plugins go once one is
-	// installed. Reporting it made every fresh install look misconfigured (rubectl R-36).
+	// installed. Reporting it made every fresh install look misconfigured.
 	absent := bad
 	absent.PluginPath = filepath.Join(t.TempDir(), "no-such-subdir")
 	if probs := DiscoveryDiagnostics(absent); len(probs) != 0 {
@@ -835,7 +835,7 @@ func (lenientHandlers) AppShow() Handlers { return lenientShow{} }
 // TestComplete_lenientParseOfAnAncestorsFlags proves the documented way a completer reads what
 // the user has said so far: a root flag on the line, else its environment fallback, though the
 // line is half-typed and a required flag is missing. rubectl hand-copied the env lookup instead,
-// and its first attempt missed it and completed nothing (rubectl R-40).
+// and its first attempt missed it and completed nothing.
 func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",

@@ -774,6 +774,27 @@ func inputProblem(ptr, path, channel, name, msg string) *problem {
 	return &problem{kind: "spec", ptr: ptr, loc: "command " + path, msg: fmt.Sprintf("%s %q: %s", channel, name, msg)}
 }
 
+// inertKeyProblems reports keys that mean something on some kinds of input only. Elsewhere they
+// would be accepted and silently do nothing, which is the one outcome validation exists to
+// prevent; the reference's per-channel table is produced by asking this validator.
+func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []error {
+	var problems []error
+	inert := func(key, where string) {
+		problems = append(problems, inputProblem(ptr, path, channel, name,
+			fmt.Sprintf("sets %s, which applies only to %s — here it would do nothing", key, where)))
+	}
+	if schema.Negatable && channel != "flag" {
+		inert("negatable", "bool flags (it derives a --no-<name> form)")
+	}
+	if schema.Key != "" && channel != "flag" && channel != "config" {
+		inert("key", "config inputs and a flag's configuration fallback")
+	}
+	if len(schema.Properties) > 0 && channel != "flag" {
+		inert("properties", "a map flag, whose property names feed shell completion (an object's shape belongs in a named schema)")
+	}
+	return problems
+}
+
 // lintConstraintApplicability rejects a constraint declared on a type it can never check:
 // numeric bounds on non-numerics, length or pattern on non-strings, item counts on
 // non-collections. For arrays the per-value constraints apply to the element type, matching
@@ -787,6 +808,7 @@ func lintConstraintApplicability(spec *Spec) []error {
 			if channel == "stdin" || schema == nil {
 				return
 			}
+			problems = append(problems, inertKeyProblems(ptr, path, channel, name, schema)...)
 			typ := getSchemaType(schema)
 			if t := namedScalarType(typ, spec.Command.Schemas); t != "" {
 				typ = t // checked as the type the named schema declares, as the runtime does

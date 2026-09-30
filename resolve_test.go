@@ -196,7 +196,7 @@ func TestResolveChain_negativeNumberAsFlagValue(t *testing.T) {
 // TestResolve_pluginPathExpandsHome proves a declared plugin_path means what a shell would make
 // of it: `~/.app/plugins` is under the user's home and `$VAR` reads the environment, as a
 // configuration file's path does. Unexpanded, the search looked in a directory literally named
-// "~" and the not-found message claimed to have searched "~/.app/plugins" (rubectl R-36).
+// "~" and the not-found message claimed to have searched "~/.app/plugins".
 func TestResolve_pluginPathExpandsHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

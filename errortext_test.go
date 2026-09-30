@@ -58,7 +58,7 @@ func TestErrorStrings(t *testing.T) {
 // TestUserFacingErrorsDoNotNameTheFramework pins the text a CLI's USERS can see when rotini
 // reports on their behalf. It used to lead with "rotini: " — `Error: rotini: shutdown timed
 // out` — so every CLI had to catch and reword each one to avoid telling its users about its
-// implementation (rubectl R-16, R-29). Messages about a mistake in the program itself (a nil
+// implementation. Messages about a mistake in the program itself (a nil
 // context, an inputs type for the wrong command) keep the name: there it tells the developer
 // where to look.
 func TestUserFacingErrorsDoNotNameTheFramework(t *testing.T) {

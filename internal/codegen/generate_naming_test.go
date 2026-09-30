@@ -9,7 +9,7 @@ import (
 // TestGeneratedNamesKeepGoInitialisms pins the casing of every name codegen makes up — the names
 // a user's handler code types. Go writes initialisms in capitals (APIGroup, URL, IP), and so do
 // its linters; generated code used to produce ApiGroup and Url, which a user could not change
-// and a linter would flag in their own code that referenced it (rubectl R-34).
+// and a linter would flag in their own code that referenced it.
 func TestGeneratedNamesKeepGoInitialisms(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{
@@ -58,7 +58,7 @@ func TestGeneratedNamesKeepGoInitialisms(t *testing.T) {
 }
 
 // TestCommandStubFilename_underscoresDashes pins Go's file-name convention for the stubs: a
-// command's '-' is written '_' (rubectl R-26). The reserved-suffix escape still applies to the
+// command's '-' is written '_'. The reserved-suffix escape still applies to the
 // result, so a dashed name that ENDS in a reserved token after the rewrite is escaped too.
 func TestCommandStubFilename_underscoresDashes(t *testing.T) {
 	t.Parallel()

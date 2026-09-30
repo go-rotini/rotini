@@ -6,7 +6,7 @@ title: "docs"
 
 ## Quick start
 
-From an empty directory to a CLI that runs, with a command tree and help pages.
+From an empty directory to a CLI that runs, with a command tree and help pages. rotini requires **Go 1.27 or newer**.
 
 {{< code title="quick start" language="sh" open="true" collapsible="false" copy="true" >}}
 mkdir todo && cd todo
@@ -59,7 +59,7 @@ Two ideas are worth holding onto before you read further:
 - **rotini is commands all the way down.** The root command is the binary itself; a sub-command is the same object one level in. Every key that works on one works on the other.
 - **Declared, then generated, then implemented.** A flag exists because the spec says so. The generator turns that into a typed field, a help line, a completion entry and a validation rule — so a handler receives values that are already parsed, coerced and checked, and never writes parsing code.
 
-Nothing runs behind your back: rotini adds no flags you did not declare, detects nothing about the terminal, and wires no service you did not bind.
+Nothing runs behind your back: rotini adds no flags you did not declare, detects nothing about the terminal, and wires no service you did not bind. The one default is a trap for interrupt and terminate signals, so teardown still runs on Ctrl-C; `Program.WithoutSignalHandling` turns it off.
 
 ## 1. Set up the module
 
@@ -78,7 +78,7 @@ go mod init github.com/me/todo
 rotini is one module with two faces. You need both: the **tool** generates your code, and the **runtime** is what that code imports.
 
 {{< alert type="info" title="NOTE:" >}}
-Because the tool and the runtime are the same module, `go get -tool` and `go get` resolve to a single `require` line at a single version — they cannot drift apart. rotini also checks the `version:` key in your spec and conf against the binary running `generate`, and refuses a mismatch rather than emitting code from a definition it does not understand.
+Because the tool and the runtime are the same module, `go get -tool` and `go get` resolve to a single `require` line at a single version — they cannot drift apart. rotini also checks the `version:` key in your spec and conf against the binary running `generate`. The key is a minimum: any rotini of the same major version at or beyond it is accepted, while an *older* rotini or a different major is refused rather than emitting code from a definition it may not understand.
 {{< /alert >}}
 
 ### As a tool dependency <small>(recommended)</small>
@@ -96,7 +96,7 @@ The tool is the **command** at `.../rotini/cmd/rotini`; the runtime is the **mod
 
 ### As a global binary
 
-Installing globally places the binary in your `GOBIN`. This suits prototyping across several projects, but the version is not tracked in any module graph, so each developer must keep their binary aligned with each project's `version:` key themselves.
+Installing globally places the binary in your `GOBIN`. This suits prototyping across several projects, but the version is not tracked in any module graph, so each developer must keep their binary at or beyond each project's `version:` key (and on the same major version) themselves.
 
 {{< code title="go install" language="text" open="true" collapsible="false" copy="true" >}}
 go install github.com/go-rotini/rotini/cmd/rotini@latest
@@ -115,7 +115,8 @@ Your project now contains:
 - **`cmd/todo/.rotini.spec.yaml`** — the [specification](/specification): commands, flags, arguments, and every other input channel
 - **`cmd/todo/.rotini.conf.yaml`** — the [configuration](/configuration): where code is written and which features are on
 - **`cmd/todo/main.go`** — the entrypoint, carrying the `//go:generate` directive (create-once: never overwritten)
-- **`internal/cmd/todo/`** — the [generated](/generated) framework file plus one editable handler stub per command
+- **`cmd/todo/.rotini-schema.spec.json`** and **`.rotini-schema.conf.json`** — copies of rotini's JSON Schemas for your editor, written because the seeded conf's `generate.schemas` block asks for them
+- **`internal/cmd/todo/`** — the [generated](/generated) framework file plus one editable handler stub per command (the seed has three: the root, `help` and `version`, already wired)
 
 ## 4. The development loop
 
@@ -194,7 +195,7 @@ CascadingPreRun; did you mean "CascadingPreRun"?
 ## Next
 
 - [Guides](/guides) — adding commands and inputs, configuration, errors, testing, composition
-- [Examples](/examples) — ten complete CLIs, and what each one shows
+- [Examples](/examples) — twelve complete CLIs, and what each one shows
 - [Specification](/specification) — every key of the spec file
 - [API](/api) — what a handler is handed
 

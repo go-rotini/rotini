@@ -7,7 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -40,8 +40,13 @@ func schemaDocPages() []struct {
 // there is no second copy to drift.
 func TestSchemaDocsInSync(t *testing.T) {
 	root := filepath.Join("..", "..")
+	table := inputChannelTable(t)
 	for _, page := range schemaDocPages() {
-		got, err := renderSchemaMarkdown(page.title, page.weight, page.raw)
+		channels := ""
+		if strings.HasPrefix(page.title, "spec") {
+			channels = table
+		}
+		got, err := renderSchemaMarkdown(page.title, page.weight, page.raw, channels)
 		if err != nil {
 			t.Fatalf("render %s: %v", page.path, err)
 		}
@@ -73,7 +78,7 @@ func TestSchemaDocsInSync(t *testing.T) {
 // every definition and every key the schema declares has to appear, or the page is a partial
 // reference presented as a full one.
 func TestSchemaDocsAreComplete(t *testing.T) {
-	page, err := renderSchemaMarkdown("spec reference", "20", schemaSpecFileBytes)
+	page, err := renderSchemaMarkdown("spec reference", "20", schemaSpecFileBytes, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +153,7 @@ type schemaDoc struct {
 
 // renderSchemaMarkdown renders one schema as a Hugo content page: the document's own keys
 // first, then a section per definition, each a table of keys with their full descriptions.
-func renderSchemaMarkdown(title, weight string, raw []byte) (string, error) {
+func renderSchemaMarkdown(title, weight string, raw []byte, channelTable string) (string, error) {
 	var doc schemaDoc
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return "", fmt.Errorf("parse schema for %s: %w", title, err)
@@ -169,30 +174,158 @@ func renderSchemaMarkdown(title, weight string, raw []byte) (string, error) {
 	b.WriteString("from what the tool actually accepts.\n\n")
 
 	b.WriteString("## Document\n\n")
-	b.WriteString(renderKeyList(doc, doc.Required))
+	b.WriteString(renderKeyList(doc, doc.Required, keyOrder(doc, doc.Required), "###"))
 
-	names := make([]string, 0, len(doc.Definitions))
-	for name := range doc.Definitions {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
+	for _, name := range definitionOrder(doc) {
 		def := doc.Definitions[name]
 		fmt.Fprintf(&b, "\n## %s\n\n", name)
 		if d := flattenedDescription(def); d != "" {
 			fmt.Fprintf(&b, "%s\n\n", d)
 		}
-		b.WriteString(renderKeyList(flattenAllOf(def), flattenedRequired(def)))
+		if name == "InputSchema" && channelTable != "" {
+			b.WriteString(channelTable)
+		}
+		flat, required := flattenAllOf(def), flattenedRequired(def)
+		if name == "Command" {
+			b.WriteString(renderGroupedKeys(flat, required))
+			continue
+		}
+		b.WriteString(renderKeyList(flat, required, keyOrder(flat, required), "###"))
 	}
 	return b.String(), nil
 }
 
-// renderKeyList renders a schema's properties as a definition list — one entry per key, its
-// type and whether it is required on one line, and the schema's own paragraph beneath.
+// commandKeyGroups orders a command's keys by the job each does, most-reached-for first — the
+// command section is the one an author reads most, and alphabetical order put `name` 27th.
+// TestCommandKeyGroupsCoverTheSchema fails until a new Command key is placed in a group.
+var commandKeyGroups = []struct {
+	title string
+	keys  []string
+}{
+	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers"}},
+	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies"}},
+	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "remote_commands", "remote_discovery", "plugin_path", "timeout"}},
+	{"Documentation", []string{"summary", "description", "usage", "examples", "exit_status", "see_also", "group", "header", "footer", "headings", "help", "man", "markdown"}},
+	{"Output and shared types", []string{"output", "schemas"}},
+	{"Generated code", []string{"filename"}},
+}
+
+// renderGroupedKeys renders the Command section under commandKeyGroups' headings.
+func renderGroupedKeys(doc schemaDoc, required []string) string {
+	var b strings.Builder
+	for _, g := range commandKeyGroups {
+		fmt.Fprintf(&b, "### %s\n\n", g.title)
+		b.WriteString(renderKeyList(doc, required, g.keys, "####"))
+	}
+	return b.String()
+}
+
+// keyOrder lists a shape's keys required first, in the order the schema requires them, then
+// the rest alphabetically — what a reader needs to write a valid document comes before what
+// refines it.
+func keyOrder(doc schemaDoc, required []string) []string {
+	out := make([]string, 0, len(doc.Properties))
+	seen := map[string]bool{}
+	for _, r := range required {
+		if _, ok := doc.Properties[r]; ok && !seen[r] {
+			out, seen[r] = append(out, r), true
+		}
+	}
+	for _, k := range slices.Sorted(maps.Keys(doc.Properties)) {
+		if !seen[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// definitionOrder lists the definitions in the order a reader meets them, walking from the
+// document's own keys through every reference — so Command follows the document, and the
+// shapes a command's keys name follow it. A definition nothing references comes last.
+func definitionOrder(doc schemaDoc) []string {
+	var out []string
+	seen := map[string]bool{}
+	enqueue := func(ref string) {
+		name := ref[strings.LastIndex(ref, "/")+1:]
+		if _, ok := doc.Definitions[name]; ok && !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	var visit func(d schemaDoc, order []string)
+	visit = func(d schemaDoc, order []string) {
+		if d.Ref != "" {
+			enqueue(d.Ref)
+		}
+		flat := flattenAllOf(d)
+		if order == nil {
+			order = keyOrder(flat, flattenedRequired(d))
+		}
+		for _, k := range order {
+			visit(flat.Properties[k], nil)
+		}
+		for _, part := range d.AllOf {
+			if part.Ref != "" {
+				enqueue(part.Ref)
+			}
+		}
+		if d.Items != nil {
+			visit(*d.Items, nil)
+		}
+		for _, alt := range d.AnyOf {
+			visit(alt, nil)
+		}
+	}
+	visit(doc, nil)
+	for i := 0; i < len(out); i++ { // breadth-first through what each definition names
+		var order []string
+		if out[i] == "Command" { // walked in the order its section presents its keys
+			for _, g := range commandKeyGroups {
+				order = append(order, g.keys...)
+			}
+		}
+		visit(doc.Definitions[out[i]], order)
+	}
+	for _, name := range slices.Sorted(maps.Keys(doc.Definitions)) {
+		if !seen[name] {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// TestCommandKeyGroupsCoverTheSchema: every Command key is placed in exactly one group.
+func TestCommandKeyGroupsCoverTheSchema(t *testing.T) {
+	var doc schemaDoc
+	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
+		t.Fatal(err)
+	}
+	placed := map[string]int{}
+	for _, g := range commandKeyGroups {
+		for _, k := range g.keys {
+			placed[k]++
+		}
+	}
+	props := flattenAllOf(doc.Definitions["Command"]).Properties
+	for k := range props {
+		if placed[k] != 1 {
+			t.Errorf("Command key %q is in %d groups of commandKeyGroups, want exactly 1", k, placed[k])
+		}
+	}
+	for k := range placed {
+		if _, ok := props[k]; !ok {
+			t.Errorf("commandKeyGroups names %q, which Command does not declare", k)
+		}
+	}
+}
+
+// renderKeyList renders the named properties of a schema, in the order given, as a definition
+// list — one entry per key under a heading of the given level, its type and whether it is
+// required on one line, and the schema's own paragraph beneath.
 //
 // A list rather than a table: these descriptions are paragraphs, and a table cell is the wrong
 // shape for a paragraph.
-func renderKeyList(doc schemaDoc, required []string) string {
+func renderKeyList(doc schemaDoc, required, names []string, heading string) string {
 	if len(doc.Properties) == 0 {
 		return "_No keys._\n"
 	}
@@ -200,16 +333,11 @@ func renderKeyList(doc schemaDoc, required []string) string {
 	for _, r := range required {
 		req[r] = true
 	}
-	names := make([]string, 0, len(doc.Properties))
-	for name := range doc.Properties {
-		names = append(names, name)
-	}
-	sort.Strings(names)
 
 	var b strings.Builder
 	for _, name := range names {
 		p := doc.Properties[name]
-		fmt.Fprintf(&b, "### `%s`\n\n", name)
+		fmt.Fprintf(&b, "%s `%s`\n\n", heading, name)
 
 		var facts []string
 		if t := typeLabel(p); t != "" {
@@ -244,7 +372,7 @@ func typeLabel(p schemaDoc) string {
 	switch t := p.Type.(type) {
 	case string:
 		if t == "array" && p.Items != nil {
-			return "array of " + strings.TrimPrefix(typeLabel(*p.Items), "`")
+			return "array of " + typeLabel(*p.Items)
 		}
 		return "`" + t + "`"
 	case []any:
@@ -311,4 +439,124 @@ func joinLiterals(vals []any) string {
 		parts = append(parts, fmt.Sprintf("`%v`", v))
 	}
 	return strings.Join(parts, ", ")
+}
+
+// probeChannels are the four places an input is declared, with the YAML that declares one whose
+// schema is %s.
+var probeChannels = []struct{ name, decl string }{
+	{"flag", "  flags:\n    - name: x\n      identifiers: [--x]\n      summary: s\n      schema: %s\n"},
+	{"argument", "  arguments:\n    - name: x\n      summary: s\n      schema: %s\n"},
+	{"env", "  env:\n    - name: x\n      summary: s\n      schema: %s\n"},
+	{"config", "  config:\n    - name: x\n      summary: s\n      schema: %s\n"},
+}
+
+// inputKeySamples is one valid use of each input-schema key, with whatever companion key it
+// needs (ignore_case needs an enum, negatable a bool). TestInputChannelTableCoversEveryKey fails
+// until a new key gets one here, so the reference's channel table never silently omits a key.
+var inputKeySamples = map[string]string{
+	"$ref":             `{"$ref": "Name"}`,
+	"complete":         `{"type": "string", "complete": {"kind": "file"}}`,
+	"config_source":    `{"type": "string", "config_source": "main"}`,
+	"default":          `{"type": "string", "default": "a"}`,
+	"default_text":     `{"type": "string", "default_text": "the default"}`,
+	"dotted_keys":      `{"type": "map", "dotted_keys": true}`,
+	"enum":             `{"type": "string", "enum": ["a"]}`,
+	"exclusiveMaximum": `{"type": "int", "exclusiveMaximum": 5}`,
+	"exclusiveMinimum": `{"type": "int", "exclusiveMinimum": 1}`,
+	"file":             `{"type": "string", "file": "main"}`,
+	"from":             `{"type": "string", "from": ["file"]}`,
+	"ignore_case":      `{"type": "string", "enum": ["a"], "ignore_case": true}`,
+	"implicit_value":   `{"type": "string", "implicit_value": "a"}`,
+	"import":           `{"type": "uuid.UUID", "import": "github.com/google/uuid"}`,
+	"items":            `{"type": "array", "items": {"type": "int"}}`,
+	"key":              `{"type": "string", "key": "k"}`,
+	"layout":           `{"type": "date", "layout": "2006-01-02"}`,
+	"maxItems":         `{"type": "array", "maxItems": 3}`,
+	"maxLength":        `{"type": "string", "maxLength": 5}`,
+	"maximum":          `{"type": "int", "maximum": 5}`,
+	"minItems":         `{"type": "array", "minItems": 1}`,
+	"minLength":        `{"type": "string", "minLength": 1}`,
+	"minimum":          `{"type": "int", "minimum": 1}`,
+	"multipleOf":       `{"type": "int", "multipleOf": 2}`,
+	"negatable":        `{"type": "bool", "negatable": true}`,
+	"nesting":          `{"type": "map", "nesting": "__"}`,
+	"nullable":         `{"type": "string", "nullable": true}`,
+	"pattern":          `{"type": "string", "pattern": "^a"}`,
+	"pattern_message":  `{"type": "string", "pattern": "^a", "pattern_message": "must start with a"}`,
+	"placeholder":      `{"type": "string", "placeholder": "X"}`,
+	"properties":       `{"type": "map", "properties": {"k": {"type": "string"}}}`,
+	"required":         `{"type": "string", "required": true}`,
+	"secret":           `{"type": "string", "secret": true}`,
+	"separator":        `{"type": "array", "separator": ","}`,
+	"type":             `{"type": "string"}`,
+	"variable":         `{"type": "string", "variable": "X_VAR"}`,
+}
+
+// inputChannelTable renders which input-schema keys each input channel accepts, by ASKING the
+// validator: every sample above is validated on every channel. The rules live in a dozen lint
+// rules, and a table written by hand would drift from them silently; this one cannot.
+func inputChannelTable(t *testing.T) string {
+	t.Helper()
+	accepts := func(schema, decl string) bool {
+		dir := t.TempDir()
+		writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
+		spec := "version: 0.0.0\ncommand:\n  name: demo\n  summary: s\n" +
+			"  schemas:\n    Name: {type: string}\n" +
+			"  config_files:\n    - name: main\n      path: c.yaml\n" +
+			fmt.Sprintf(decl, schema)
+		writeTestFile(t, dir, ".rotini.spec.yaml", spec)
+		writeTestFile(t, dir, ".rotini.conf.yaml", lintFixtureConf)
+		var warnings []error
+		err := NewProcessor("0.0.0").Validate(filepath.Join(dir, ".rotini.spec.yaml"), filepath.Join(dir, ".rotini.conf.yaml"),
+			false, "collect", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
+		return err == nil && len(warnings) == 0
+	}
+	// Every channel must accept a plain input, or a rejection below would be the probe's fault
+	// rather than the key's.
+	for _, ch := range probeChannels {
+		if !accepts(inputKeySamples["type"], ch.decl) {
+			t.Fatalf("the probe's plain %s input is rejected — fix the probe before trusting the table", ch.name)
+		}
+	}
+	keys := slices.Sorted(maps.Keys(inputKeySamples))
+	var b strings.Builder
+	b.WriteString("### Which keys each kind of input accepts\n\n")
+	b.WriteString("An input's `schema:` block takes the keys below, but not every key means something on every\n")
+	b.WriteString("kind of input — a flag's `negatable` has no meaning for an environment variable, and\n")
+	b.WriteString("`rotini validate` rejects it there. This table is produced by validating each key on each\n")
+	b.WriteString("kind of input, so it is what the validator actually accepts. `stdin:` takes a JSON Schema\n")
+	b.WriteString("document instead; see [StdinSpec](#stdinspec).\n\n")
+	b.WriteString("| Key | flag | argument | env | config |\n|---|:-:|:-:|:-:|:-:|\n")
+	for _, k := range keys {
+		fmt.Fprintf(&b, "| `%s` |", k)
+		for _, ch := range probeChannels {
+			mark := "—"
+			if accepts(inputKeySamples[k], ch.decl) {
+				mark = "✓"
+			}
+			fmt.Fprintf(&b, " %s |", mark)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// TestInputChannelTableCoversEveryKey keeps the channel table complete: every key an input's
+// schema accepts needs a sample in inputKeySamples.
+func TestInputChannelTableCoversEveryKey(t *testing.T) {
+	var doc schemaDoc
+	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for key := range flattenAllOf(doc.Definitions["InputSchema"]).Properties {
+		if _, ok := inputKeySamples[key]; !ok {
+			t.Errorf("input-schema key %q has no sample in inputKeySamples, so the reference's channel table omits it", key)
+		}
+	}
+	for key := range flattenAllOf(doc.Definitions["BaseSchema"]).Properties {
+		if _, ok := inputKeySamples[key]; !ok {
+			t.Errorf("schema key %q has no sample in inputKeySamples, so the reference's channel table omits it", key)
+		}
+	}
 }

@@ -1,0 +1,19 @@
+# The docs site (rotini.dev) is the Hugo project in docs/. Netlify builds it from the repository
+# on every push: main deploys to production, and each pull request gets a preview URL.
+
+[build]
+  base    = "docs"
+  command = "hugo --gc --minify"
+  publish = "public"
+
+[build.environment]
+  HUGO_VERSION = "0.159.2"
+
+# A preview is served from its own URL, so links must be built against it rather than against
+# the production baseURL in hugo.toml. Previews also build drafts, so an unpublished post (the
+# launch post, until the release) can be read before it goes live.
+[context.deploy-preview]
+  command = "hugo --gc --minify --buildDrafts --baseURL $DEPLOY_PRIME_URL"
+
+[context.branch-deploy]
+  command = "hugo --gc --minify --buildDrafts --baseURL $DEPLOY_PRIME_URL"

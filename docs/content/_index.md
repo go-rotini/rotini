@@ -21,7 +21,7 @@ go get -tool github.com/go-rotini/rotini/cmd/rotini   # the codegen tool
 go get github.com/go-rotini/rotini                    # the runtime your code imports
 {{< /code >}}
 
-One module, one version, both faces. The tool that generates your code and the runtime that code imports are the same dependency — so they cannot drift apart.
+Requires Go 1.27 or newer. One module, one version, both faces. The tool that generates your code and the runtime that code imports are the same dependency — so they cannot drift apart.
 
 ---
 
@@ -105,7 +105,7 @@ Nothing above was hand-written except the body of `Run`. The enum, the default, 
 
 <div class="feature_card">
 <h3>Checked before it compiles</h3>
-<p>A JSON Schema and 43 spec lint rules reject a misspelled key, a duplicate identifier, a <code>$ref</code> cycle or a bound that can never fire — each with a <code>file:line:col</code>, from <code>rotini validate</code>.</p>
+<p>A JSON Schema, 43 spec lint rules and reference resolution reject a misspelled key, a duplicate identifier, a <code>$ref</code> cycle or a bound that can never fire — each with a <code>file:line:col</code>, from <code>rotini validate</code>.</p>
 </div>
 
 <div class="feature_card">
@@ -136,7 +136,7 @@ Nothing above was hand-written except the body of `Run`. The enum, the default, 
 
 ### Checked before your code exists
 
-The spec is validated by a JSON Schema plus 43 spec lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
+The spec is validated by a JSON Schema plus 43 spec lint rules — a misspelled key, a duplicate flag identifier, a configuration file nothing reads, an input whose type is not a Go type — and every `$ref` is resolved, so a cycle is caught too. Each is reported with a `file:line:col`, by `rotini validate`, before a line of Go is generated.
 
 These are mistakes a compiler has no reason to notice, so catching them is the spec's job — in CI, without building anything.
 
@@ -168,7 +168,7 @@ rotini adds a **codegen step**: a tool dependency, a `go generate` pass, and gen
 The cost is fixed; the benefit scales with the CLI. For a three-command internal script, rotini is heavier than it is worth. For a long-lived, multi-command tool with configuration files, environment variables, documentation and shell completion to keep in sync, the spec becomes the single place all of it is declared — and checked.
 
 {{< alert type="info" title="TRY IT IN TWO MINUTES:" >}}
-`go get -tool github.com/go-rotini/rotini/cmd/rotini` then `go tool rotini init mycli` writes a working CLI you can build and run immediately. The [setup guide](/docs) walks the whole loop, and its commands are executed by rotini's own test suite — so the guide cannot quietly stop being true.
+With Go 1.27 or newer, `go get -tool github.com/go-rotini/rotini/cmd/rotini` then `go tool rotini init mycli` writes a working CLI you can build and run immediately. The [setup guide](/docs) walks the whole loop, and its commands are executed by rotini's own test suite — so the guide cannot quietly stop being true.
 {{< /alert >}}
 
 ## Start here
@@ -178,7 +178,7 @@ The cost is fixed; the benefit scales with the CLI. For a three-command internal
 - [specification](/specification) — the `.rotini.spec.*` file
 - [configuration](/configuration) — the `.rotini.conf.*` file
 - [generated](/generated) — what rotini writes into your project
-- [examples](/examples) — ten complete CLIs, and what each one shows
+- [examples](/examples) — twelve complete CLIs, and what each one shows
 - [batteries](/batteries) — what else ships, and what deliberately does not
 - [api](/api) — the runtime contract
 - [cli](/cli) — the `rotini` command itself

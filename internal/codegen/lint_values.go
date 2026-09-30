@@ -83,8 +83,8 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 		}
 	}
 	for _, v := range values {
-		if _, err := parseAsRuntime(rt, fd, v); err != nil {
-			return runtimeComplaint(err.Error(), v)
+		if _, complaint := parseAsRuntime(rt, fd, v); complaint != "" {
+			return runtimeComplaint(complaint, v)
 		}
 	}
 	return ""
@@ -92,8 +92,8 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 
 // parseAsRuntime parses text as the value of the flag fd, into a field of type rt, exactly as a
 // run would — through the runtime's own parser, on a one-flag program whose flag is --v — and
-// returns the field.
-func parseAsRuntime(rt reflect.Type, fd rotini.FlagDef, text string) (reflect.Value, error) {
+// returns the field, or the runtime's complaint about the value ("" when it parsed).
+func parseAsRuntime(rt reflect.Type, fd rotini.FlagDef, text string) (field reflect.Value, complaint string) {
 	flags := reflect.StructOf([]reflect.StructField{{Name: "V", Type: rt, Tag: `rotini:"v"`}})
 	cmd := reflect.StructOf([]reflect.StructField{
 		{Name: "Flags", Type: flags},
@@ -102,9 +102,9 @@ func parseAsRuntime(rt reflect.Type, fd rotini.FlagDef, text string) (reflect.Va
 	out := reflect.New(reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}}))
 	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{fd}}
 	if err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"--v=" + text}), out.Interface()); err != nil {
-		return reflect.Value{}, err
+		return reflect.Value{}, err.Error()
 	}
-	return out.Elem().Field(0).Field(0).Field(0), nil
+	return out.Elem().Field(0).Field(0).Field(0), ""
 }
 
 // runtimeComplaint rephrases the runtime's error about the placeholder flag --v into one about
@@ -347,8 +347,8 @@ func measuredValue(goType, text string) (float64, bool) {
 	if !ok || !measuredTypes[goType] {
 		return 0, false
 	}
-	v, err := parseAsRuntime(rt, rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: goType}, text)
-	if err != nil {
+	v, complaint := parseAsRuntime(rt, rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: goType}, text)
+	if complaint != "" {
 		return 0, false
 	}
 	return float64(v.Int()), true

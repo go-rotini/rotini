@@ -6,16 +6,16 @@ title: "specification"
 
 The `.rotini.spec.*` file is your CLI, as data. It is written in **YAML, JSON, JSONC or TOML** — the format is your choice; the schema is identical.
 
-Two top-level keys: `version` (checked against the rotini binary running `generate`) and `command` (the root command — the binary itself). Everything else is a command key, because **rotini is commands all the way down**: the root is just the outermost one.
+Two required top-level keys (plus an optional `$schema`, below): `version` (checked against the rotini binary running `generate`) and `command` (the root command — the binary itself). Everything else is a command key, because **rotini is commands all the way down**: the root is just the outermost one.
 
 {{< alert type="info" title="EDITOR SUPPORT:" >}}
 Point your editor at the schema and every key is completed and checked as you type. Either add a `$schema` key to the spec —
 
 ```yaml
-$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json
+$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/heads/main/schema-spec.json
 ```
 
-— or, for an offline or forked setup, have `rotini generate` write the schema into your project with the conf's `generate.schemas` block and point at that copy instead, either with `$schema` or a `# yaml-language-server: $schema=<path>` comment on the first line.
+(`main` tracks the latest schema; once you depend on a released rotini, replace `refs/heads/main` with `refs/tags/<your version>` so the editor checks against the same schema your `rotini` does) — or, for an offline or forked setup, have `rotini generate` write the schema into your project with the conf's `generate.schemas` block and point at that copy instead, either with `$schema` or a `# yaml-language-server: $schema=<path>` comment on the first line.
 {{< /alert >}}
 
 {{< alert type="info" title="EVERY KEY:" >}}
@@ -93,7 +93,7 @@ Every way data reaches your CLI is declared. `rotini.Collect[T]` reconciles all 
 | argv positionals | `arguments` — variadic, `passthrough` |
 | value sentinels | `from: [file]` (`@path`), `from: [stdin]` (`-`) |
 | environment | `env`, `env_prefix`, a nested family via `nesting`, or an exact `variable` |
-| **a flag's own env variable** | `variable:` on a flag — `--token` reads `$GITHUB_TOKEN`, exempt from `env_prefix` |
+| **an input's exact env variable** | `variable:` in an input's `schema` — the exact name to read instead of the derived one, exempt from `env_prefix` (`variable: ACME_TOKEN` above); a list such as `[GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set |
 | configuration files | `config_files` — a fixed `path`, `walk-up`, or `xdg` |
 | **config path from a flag or env var** | `config_source` — the declarative two-phase parse |
 | configuration values | `config` — read by dotted `key`, optionally pinned to one `file` |
@@ -112,7 +112,10 @@ Two more things an input can declare, neither of them a channel:
 `rotini validate` is the gate, and it runs before any code is generated:
 
 - the **JSON Schema** rejects what it can express — unknown keys, wrong types, bad patterns — and your editor shows it inline
-- **43 lint rules** reject what a schema cannot: duplicate flag identifiers across a chain, a `config_source` naming a file that does not exist, a `$ref` cycle, a `count` flag carrying a default, an input whose `type` is not a Go type, a variadic argument that is not last
+- **43 lint rules** reject what a schema cannot: duplicate flag identifiers across a chain, a `config_source` naming no `config_files` entry in scope, a `count` flag carrying a default, an input whose `type` is not a Go type, a variadic argument that is not last
+- **reference resolution** follows every `$ref` and rejects a cycle
+
+What the *end user* is told when a value is rejected comes from the spec too. A `pattern` alone would print the regex, which is written for the program, not the person typing; add `pattern_message` beside it to say what the value should look like instead.
 
 Problems are reported with a `file:line:col` in YAML, JSON and JSONC — and in TOML.
 
@@ -126,12 +129,6 @@ A command can be pulled in from another spec instead of being written inline:
 | Inline + passthrough | `name:` plus `handler: {import, convention}` — own types, delegated handler code |
 | Local `$ref` | `$ref: ../child/.rotini.spec.yaml` — same module; auto-delegates to the child's package |
 | Module `$ref` | `$ref: mod://example.com/m@v1.2.3/cli/.rotini.spec.yaml` — read from the Go module cache, pinned by `go.sum` |
-| Remote command | `remote_commands` (declared) / `remote_discovery` (found) — dispatch to a sibling **binary** at run time, `git`-style. `plugin_path` says where those binaries live, for both kinds |
+| Remote command | `remote_commands` (declared) / `remote_discovery` (found) — dispatch to a sibling **binary** at run time, `git`-style. `plugin_path` adds one extra directory to search, for both kinds — after the host binary's own directory, before `PATH`; a leading `~` and `$VAR` references are expanded at run time, and a directory that does not exist is simply treated as empty |
 
 `git::` and raw `https://` refs are **refused**: rotini has no fetcher, so codegen never reaches the network.
-
-## Full reference
-
-Every key, every shape, with commentary — and validated by the test suite, so it cannot drift from the schema:
-
-**[`reference/.rotini.spec.yaml`](https://github.com/go-rotini/rotini/blob/main/reference/.rotini.spec.yaml)**

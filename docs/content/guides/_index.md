@@ -23,19 +23,21 @@ Commands are spec entries. Write one, regenerate, and rotini seeds a stub for it
 {{< code title="regenerate" language="text" open="true" collapsible="false" copy="true" >}}
 $ go generate ./...
 $ ls internal/cmd/todo/
-todo.go  todo_add.go  todo_done.go  todo_help.go  todo_list.go  zz_rotini.go
+todo.go  todo_add.go  todo_done.go  todo_help.go  todo_version.go  zz_rotini.go
 {{< /code >}}
 
-`todo_done.go` is new and now yours — later passes never touch it. Everything rotini owns is in the one `zz_` file.
+`todo_done.go` is new and now yours — later passes never overwrite it. Everything rotini owns is in the one `zz_` file.
 
-Deleting the command from the spec reverses this, and says so rather than doing it silently:
+Deleting a command from the spec reverses this: the next pass deletes that command's stub — even one you edited — and says so rather than doing it silently. Delete the `version` command from the spec and regenerate:
 
 {{< code title="removing a command" language="text" open="true" collapsible="false" copy="true" >}}
 Note: pruned todo_version.go — its command is no longer in the spec
 {{< /code >}}
 
+A stub is recognized by its `var _ rotini.Handlers = (…)` line. To keep a file whose command you removed, delete that line or list the file under the cmd target's `keep`.
+
 {{< alert type="info" title="TRY IT WITHOUT GENERATING:" >}}
-`rotini validate` runs the schema and all 43 lint rules and writes nothing. It is the right thing to put in CI, and fast enough to bind to a keystroke.
+`rotini validate` runs the schema, the 43 spec lint rules and the 6 conf lint rules, and writes nothing. It is the right thing to put in CI, and fast enough to bind to a keystroke.
 {{< /alert >}}
 
 ## Declare inputs
@@ -110,13 +112,13 @@ $ todo add
 Error: missing required input: <title>
 
 $ todo add "x" --priority nope
-Error: invalid value "nope" for -p (one of: low, normal, high)
+Error: invalid value "nope" for --priority (one of: low, normal, high)
 {{< /code >}}
 
 A list `default` seeds one occurrence per element, and an explicit `--tag` replaces the whole list rather than appending to it.
 
-{{< alert type="info" title="COUNT FLAGS CASCADE:" >}}
-`schema: {type: count}` with `cascading: true` on the root is the conventional `-v`/`-vv`: declared once, reachable from every command as `inputs.Todo.Flags.Verbose`, an `int`.
+{{< alert type="info" title="ROOT FLAGS REACH EVERY COMMAND:" >}}
+A flag declared on the root — say `name: verbose`, `identifiers: [--verbose]`, `schema: {type: count}` — is in every command's inputs as `inputs.Todo.Flags.Verbose`, an `int` counting occurrences. It may be written anywhere after `todo`, including after a sub-command's name (`todo add x --verbose --verbose`), but never before the name of the command that declares it. `cascading: true` only lists it under every sub-command's help as well. The seeded root already uses `-v` for `--version`, so give a verbosity flag a different short form or none.
 {{< /alert >}}
 
 See [the spec reference](/specification) for the other channels — `stdin`, value sentinels (`@file`, `-`), `passthrough`, flag groups and dependencies.
@@ -163,11 +165,11 @@ $ todo list
 limit=5 editor=vi
 {{< /code >}}
 
-`variable: EDITOR` names an exact variable, exempt from `env_prefix`; without it, `env_prefix` plus the input name is the variable. `discover` replaces a fixed `path` with a search: `walk-up` from the working directory, or `xdg` under `$XDG_CONFIG_HOME/<app>`.
+`variable: EDITOR` names an exact variable, exempt from `env_prefix`; without it, `env_prefix` plus the input name is the variable. `discover` replaces a fixed `path` with a search: `walk-up` from the working directory, or `xdg` under `$XDG_CONFIG_HOME/<app>` (defaulting to `~/.config/<app>`), which also needs `app:` — `discover: { strategy: xdg, file: config.yaml, app: todo }`.
 
 ### One input, several sources
 
-A **flag** can fall back through the other channels. Give it a `key:` (a dotted configuration path) and a `variable:`, and it reads from all three:
+A **flag** can fall back through the other channels. Give it a `key:` (a dotted configuration path) and it reads from all three: the configuration file at that key, and an environment variable named from `env_prefix` plus the key (`TODO_DEFAULTS_PRIORITY` here). Add `variable:` to name the variable exactly instead:
 
 {{< code title="a flag with fallbacks" language="yaml" open="true" collapsible="false" copy="true" >}}
         - name: priority
@@ -229,7 +231,7 @@ rotini.CategoryOf(err)           // CategoryUsage | CategoryInternal | CategoryN
 errors.Is(err, rotini.ErrUsage)  // or match the sentinel directly
 {{< /code >}}
 
-The default funnel prints each channel with a severity label and exits non-zero when anything failed, never downgrading a code a handler deliberately set. Replace it to own reporting and exit codes outright:
+The default funnel prints infos and successes to stdout as they are, and warnings, errors and panics to stderr labeled `Warning:`, `Error:` and `Fatal Error:`. It exits 1 when anything failed, never downgrading a code a handler deliberately set. Replace it to own reporting and exit codes outright:
 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 cmd.Program.
@@ -263,10 +265,9 @@ package todo_test
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
-
-	"github.com/go-rotini/rotini"
 
 	todo "github.com/me/todo/internal/cmd/todo"
 )
@@ -278,7 +279,7 @@ func run(t *testing.T, argv ...string) (stdout, stderr string, code int) {
 	code = -1
 	todo.NewProgram(todo.Handlers()).
 		WithVersion("0.0.0-test").
-			WithArgs(argv).
+		WithArgs(argv).
 		WithStdin(strings.NewReader("")).
 		WithStdout(&out).
 		WithStderr(&errs).
@@ -334,12 +335,17 @@ Three details make this work, and they are worth knowing before you write the fi
 
 - **`WithExit`** replaces `os.Exit`, so `Execute` returns to the test with the code recorded instead of killing the test binary. It is also the only way to see the error `Execute` returns — the run's recorded failures, joined — since under `os.Exit` the process ends before the return runs.
 - **`WithStdout` / `WithStderr`** are why handlers write to `rtx.Stdout`. A handler that reaches for `os.Stdout` is the one thing that will not be captured.
-- **A fresh `Program` per call.** Each run gets its own `Context`, so one test never inherits another's recorded outcomes. Build it in the helper, not in a package variable.
+- **A fresh `Program` per call.** `WithStdout`, `WithExit` and the other `With*` options change the `Program` they are called on, in place and unsynchronized. Configure the shared package-level `todo.Program` from a test and its buffers and exit function carry over into the next test — and race under `t.Parallel`. Build a new one in the helper with `todo.NewProgram(todo.Handlers())`.
 
-For a handler with dependencies, bind a fake through the same registry the entrypoint uses:
+For a handler with dependencies, bind a fake through the same registry the entrypoint uses. The key is declared once in the cmd package, and a handler reads it back with `StoreKey.MustGet(rtx)`:
+
+{{< code title="internal/cmd/todo/store.go" language="golang" open="true" collapsible="false" copy="true" >}}
+// StoreKey names the task store in the program's registry.
+var StoreKey = rotini.NewKey[Store]("todo.store")
+{{< /code >}}
 
 {{< code title="substituting a dependency" language="golang" open="true" collapsible="false" copy="true" >}}
-StoreKey.Provide(todo.NewProgram(todo.Handlers()), newFakeStore()).
+todo.StoreKey.Provide(todo.NewProgram(todo.Handlers()), newFakeStore()).
 	WithArgs(argv).
 	WithStdout(&out).
 	WithExit(func(c int) { code = c }).
@@ -363,6 +369,25 @@ One codebase can ship several binaries that share command implementations. A par
 `acme db migrate` and the standalone `acme-db migrate` then run the same handler, because they *are* the same handler. Inputs bind to the **end** of the command chain, so a child's generated type lands on its own frames whichever tree it was grafted into.
 
 A child's **input channels come with it**, not just its commands. `config_files` and `env_prefix` declared on the child travel with the graft — its configuration sources re-scoped to where the graft sits — so the parent re-declares nothing and both binaries read the same file and the same variables. A parent that declares its own `env_prefix` wins; two children that disagree are rejected at generate time, because one descriptor carries one prefix.
+
+What does **not** come across is the parent's own flags. The child is generated on its own, so its input types start at its own root and cannot see a flag `acme` declares. Hand the value across with a `Key`: the child's package declares it, and the parent — which imports the child, never the other way — collects its own inputs in `CascadingPreRun` and binds them. Collecting there judges only the parent's inputs, so a descendant's `--help` and required inputs are unaffected:
+
+{{< code title="passing a parent flag to a composed child" language="golang" open="true" collapsible="false" copy="true" >}}
+// package db (the child)
+var ProfileKey = rotini.NewKey[string]("db.profile")
+
+// package acme (the parent), in the root handler's CascadingPreRun
+func (*acmeHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[AcmeInputs](rtx)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	db.ProfileKey.BindTo(rtx, in.Acme.Flags.Profile)
+}
+{{< /code >}}
+
+A `db` handler then reads it with `ProfileKey.Get(rtx)`, which reports `false` when the child runs standalone and nothing bound it.
 
 To keep the handlers in a package other CLIs import, point the command at it. If that package also needs the generated input types, declare a `models` target so the structs live somewhere both packages can import — the cmd package imports the handler package, so the handler package cannot import it back:
 
@@ -397,7 +422,7 @@ func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 Generated stubs keep the four embeds written out, because the stub is where the hook vocabulary is introduced and four names show a reader the menu that one name hides.
 
-The five composition modes — inline, passthrough, local `$ref`, module `$ref`, and dispatch to a sibling binary — are laid out on the [specification page](/specification#composition).
+The five composition modes — standalone, inline + passthrough, local `$ref`, module `$ref`, and remote command (dispatch to a sibling binary) — are laid out on the [specification page](/specification#composition).
 
 ## Ship it
 
@@ -408,12 +433,13 @@ A rotini CLI is an ordinary Go binary, so `go build` and `go install` are the wh
 The entrypoint binds whatever the binary was built with, and `--version` reports it:
 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
-var version = "0.0.0" // overridden at build time
+// version is what `--version` reports. Stamp it at build time.
+var version = "0.0.0"
 
 func main() {
 	cmd.Program.
 		WithVersion(version).
-			Execute()
+		Execute()
 }
 {{< /code >}}
 
@@ -480,9 +506,9 @@ Same shape, one page per command. `Man(path...)` and `Markdown(path...)` resolve
 `embed: true` is the one to choose when a packaging step needs the files on disk — an `.rpm` shipping `man/man_todo.txt`, or a docs site publishing the markdown. `embed: false`, the default, keeps the generated `.go` self-contained.
 
 {{< alert type="info" title="EMBED PATHS ARE CHECKED:" >}}
-`//go:embed` cannot reach outside its own package, so rotini rejects an `embed_dir` that resolves elsewhere rather than emitting code that will not compile:
+`//go:embed` cannot reach outside its own package, so rotini rejects an `embed_dir` that resolves elsewhere rather than emitting code that will not compile. `rotini validate` reports it at the offending line of the conf:
 
-`generate.features.man.embed_dir: "docs/man" must resolve under the cmd package "internal/cmd/todo" so //go:embed can reach it`
+`conf: cmd/todo/.rotini.conf.yaml:<line>:<col>: generate.features.man.embed_dir: "docs/man" must resolve under the cmd package "internal/cmd/todo" so //go:embed can reach it`
 {{< /alert >}}
 
 ### Build for other platforms
