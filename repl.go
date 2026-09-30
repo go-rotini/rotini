@@ -262,7 +262,7 @@ func (r *REPL) Run(ctx context.Context) error {
 	read := r.readLine
 	if read == nil {
 		if r.in == nil {
-			return UsageError(errors.New("rotini: repl has no input"))
+			return InternalError(errors.New("rotini: repl has no input"))
 		}
 		builtin := newLineReader(r.in)
 		read = func(ctx context.Context, _ string) (string, error) { return builtin.read(ctx) }

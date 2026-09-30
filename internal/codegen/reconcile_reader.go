@@ -3,7 +3,7 @@ package codegen
 // This file owns reading inputs: spec/conf file decoding (serialization chosen
 // from the extension, via go-rotini/fs), raw-JSON conversion for schema
 // validation, the spec/conf discovery fallbacks, and module resolution.
-// Writing outputs lives in writer.go.
+// Writing outputs lives in generate_writer.go.
 
 import (
 	"encoding/json"
@@ -58,7 +58,7 @@ func detectFileFormat(path string) fileFormat {
 
 // readRaw detects path's serialization format from its extension and reads the
 // file's bytes, erroring on an unknown extension or a read failure. It is the shared
-// preamble of readFile and bytesToJSON.
+// preamble of readFile and reconcileDoc.
 func readRaw(path string) (fileFormat, []byte, error) {
 	format := detectFileFormat(path)
 	if format == formatUnknown {

@@ -256,9 +256,9 @@ func TestRenderTemplate_errors(t *testing.T) {
 }
 
 func TestRenderGoFile_gofmtError(t *testing.T) {
-	_, err := renderGoFile("invalid", "package x\nfunc {", nil)
+	_, err := renderGoFileWithHeader("", "invalid", "package x\nfunc {", nil)
 	if err == nil || !strings.Contains(err.Error(), "gofmt") {
-		t.Errorf("renderGoFile(invalid Go) = %v, want a gofmt error with source context", err)
+		t.Errorf("renderGoFileWithHeader(invalid Go) = %v, want a gofmt error with source context", err)
 	}
 }
 
@@ -397,5 +397,32 @@ func TestSeedSpecUsesTheDocumentedStyle(t *testing.T) {
 		if strings.Contains(seed, bad) {
 			t.Errorf("seed writes %q expanded:\n%s", strings.TrimSpace(bad), seed)
 		}
+	}
+}
+
+// TestHelpPage_groupedFlagSummaryStaysOnItsRow renders a real help page: a flag summary holding a
+// tab or a newline must not break the page's columns. The sanitizer cleaned the flat Flags list,
+// but the templates render flags from their GROUPS, which kept the raw text.
+func TestHelpPage_groupedFlagSummaryStaysOnItsRow(t *testing.T) {
+	t.Parallel()
+	tmpl, err := parseDocTemplate("help", templateHelp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := &Inputs{Flags: []FlagInput{{Name: "mode", Identifiers: []string{"--mode"}, Summary: "first\tsecond\nthird", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "string"}}}}}
+	data := buildHelpData("app", cmdHelp{}, in, nil, nil, nil, "")
+	data.Headings.Usage, data.Headings.Flags = "Usage:", "Flags:"
+	page, err := renderDocText(tmpl, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row string
+	for line := range strings.SplitSeq(page, "\n") {
+		if strings.Contains(line, "--mode") {
+			row = line
+		}
+	}
+	if !strings.Contains(row, "first second third") || strings.Contains(page, "\nthird") {
+		t.Errorf("the summary broke its row:\n%s", page)
 	}
 }

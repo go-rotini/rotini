@@ -21,7 +21,7 @@ import (
 // itself stays immutable and one instance safely drives many passes — watch mode re-runs the
 // pipeline on every change.
 type Processor struct {
-	version    string             // running binary version ("vX.Y.Z" / "v0.0.0"; "" → version check skipped)
+	version    string             // running binary version ("X.Y.Z", a leading v tolerated; "" → version check skipped)
 	specSchema *jsonschema.Schema // compiled embedded spec JSON Schema
 	confSchema *jsonschema.Schema // compiled embedded conf JSON Schema
 }
@@ -243,10 +243,10 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 }
 
 // validateAndEmit is the gate-then-emit step: validation must pass (the gate — invalid input
-// never reaches codegen), then the conf defaults are applied and the program emitted.
-// validateAndEmit validates then emits, returning any NOTICES the emit produced: the orphaned
-// stubs it pruned, which the caller reports rather than deleting them silently, and what the
-// hook audit found in the handler files it did not write.
+// never reaches codegen), then the conf defaults are applied and the program emitted. It
+// returns any NOTICES the emit produced: the orphaned stubs it pruned, which the caller reports
+// rather than deleting them silently, and what the hook audit found in the handler files it
+// did not write.
 func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) ([]error, error) {
 	if _, err := p.validateDocuments(rs, rc, ""); err != nil {
 		return nil, err
@@ -257,11 +257,11 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf) ([]e
 		return nil, err
 	}
 	err = prog.generate()
-	notices := make([]error, 0, len(prog.pruned)+len(prog.hookWarnings))
+	notices := make([]error, 0, len(prog.pruned)+len(prog.auditWarnings))
 	for _, name := range prog.pruned {
 		notices = append(notices, fmt.Errorf("pruned %s — its command is no longer in the spec", name))
 	}
-	notices = append(notices, prog.hookWarnings...)
+	notices = append(notices, prog.auditWarnings...)
 	return notices, err
 }
 
@@ -295,7 +295,7 @@ func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPat
 		start := time.Now()
 		warnings, err := pass(resolvedSpec, resolvedConf)
 		// Surface warnings on every pass (success or failure), independent of the
-		// pass/fail result onResult carries. nil when the workflow has none (generate).
+		// pass/fail result onResult carries.
 		if onWarnings != nil && len(warnings) > 0 {
 			onWarnings(warnings)
 		}

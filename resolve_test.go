@@ -284,3 +284,32 @@ func TestResolver_errorIsRoutedNotPanicked(t *testing.T) {
 		t.Errorf("(%d, %v), want the resolver's error routed through the funnel", code, err)
 	}
 }
+
+// TestResolve_agreesWithTheParserOnFlagValues pins command resolution to the parser's rule for
+// which word is a flag's value. They used to disagree: the resolver skipped the word after ANY
+// value-taking flag, so `app --color sub` (an optional value, which must be attached) never
+// reached sub, and it skipped nothing after a short cluster, so in `app -vn 5 sub` the 5 ended
+// descent and sub was never reached either.
+func TestResolve_agreesWithTheParserOnFlagValues(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"--color"}, Type: "string", ImplicitValue: "always"},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+			{Name: "num", Identifiers: []string{"-n"}, Type: "int"},
+			{Name: "db", Identifiers: []string{"--db"}, Type: "DB", ObjectSchema: `{"type":"object"}`},
+		},
+		Commands: []CommandDef{{Name: "sub", Handler: "AppSub"}}}
+	for _, argv := range [][]string{
+		{"--color", "sub"},
+		{"--color=never", "sub"},
+		{"-vn", "5", "sub"},
+		{"-n", "5", "sub"},
+		{"-v", "sub"},
+		{"--db.host", "h", "sub"},
+	} {
+		chain, _ := resolveChain(def, argv)
+		if leaf := chain[len(chain)-1].Name; leaf != "sub" {
+			t.Errorf("resolve %q → %q, want sub", argv, leaf)
+		}
+	}
+}

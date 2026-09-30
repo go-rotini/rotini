@@ -190,10 +190,9 @@ func lintFeatureDirs(conf *Conf) []error {
 			})
 		}
 	}
-	check("help", conf.Generate.featureOf("help"))
-	check("man", conf.Generate.featureOf("man"))
-	check("markdown", conf.Generate.featureOf("markdown"))
-	check("completion", conf.Generate.featureOf("completion"))
+	for _, cf := range featureConfigs(conf) {
+		check(cf.desc.name, cf.cfg)
+	}
 	return problems
 }
 

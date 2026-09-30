@@ -274,3 +274,24 @@ func TestObjectFlag_freeFormValuesTypeLikeJSON(t *testing.T) {
 		t.Errorf("key=value gave %#v, JSON gave %#v — one value, two meanings", fromPairs, fromJSON)
 	}
 }
+
+// TestObjectFlag_uint8FieldFromPairs: every integer width takes key=value. uint8 alone fell
+// through to text — the signed branch listed int8, the unsigned one skipped uint8 — and the
+// value then failed to decode into the field.
+func TestObjectFlag_uint8FieldFromPairs(t *testing.T) {
+	type pool struct {
+		Level uint8 `json:"level"`
+		Small int8  `json:"small"`
+	}
+	doc, err := decodeObject("level=7,small=-3", reflect.TypeFor[pool]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got pool
+	if err := validateAndBindObject(reflect.ValueOf(&got).Elem(), doc, `{"type":"object"}`); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if got.Level != 7 || got.Small != -3 {
+		t.Errorf("got %+v, want level 7, small -3", got)
+	}
+}

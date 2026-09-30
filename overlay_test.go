@@ -994,3 +994,25 @@ func TestCollect_leafRunIsUnchanged(t *testing.T) {
 		t.Errorf("leaf Run got leaf=%v mid=%v, want both true", got.Leaf.Flags.LeafOnly, got.Mid.Flags.MidOnly)
 	}
 }
+
+// TestProvenance_listRawIsTheSameFromEveryLayer: a report shows a list the same way whichever
+// layer supplied it. The argv layer joined values with ", " and the env and config fallbacks
+// with ",", so one list printed two ways in the same report.
+func TestProvenance_listRawIsTheSameFromEveryLayer(t *testing.T) {
+	t.Setenv("PORTS", "1,2")
+	rtx := NewContextFor(tbListDef(), []string{"--ports", "1,2"})
+	rtx.WithBindMeta(BindMeta{})
+	argv, err := ParseArgv[tbListInputs](rtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := ParseEnv[tbListInputs](rtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rep := OverlayInputsP(env, argv)
+	hist := rep.History("App.Flags.Ports")
+	if len(hist) != 2 || hist[0].Raw != hist[1].Raw || hist[0].Raw != "1, 2" {
+		t.Errorf("ports history = %+v, want both layers to read %q", hist, "1, 2")
+	}
+}

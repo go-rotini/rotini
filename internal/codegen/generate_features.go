@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"iter"
 	"os"
 	"path/filepath"
 	"slices"
@@ -41,7 +42,7 @@ type docFeature struct {
 	ext        string               // output file suffix, e.g. ".txt"
 	filePrefix string               // feature-unique output file prefix, e.g. "help_"
 	tmplFile   string               // editable template file name in the feature dir ("" = none)
-	embedded   string               // embedded default template text, from renderer.go ("" = none)
+	embedded   string               // embedded default template text, from generate_renderer.go ("" = none)
 	verbatim   func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
 	perShell   bool                 // completion: keyed by shell name, not command path
 	strip      bool                 // strip spec-authored ANSI from the output (man/markdown — never help)
@@ -159,7 +160,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 // completionNodes produces one node per supported shell for the completion
 // feature: keyed by shell name (the resolver case), file
 // completion_<shell>.txt, embed var Completion<Shell>. No doc-data or
-// verbatim — the script comes from writeCompletionFiles.
+// verbatim — the script comes from completionContents (completionScript per shell).
 func completionNodes() []helpNode {
 	out := make([]helpNode, 0, len(completionShells))
 	for _, sh := range completionShells {
@@ -335,19 +336,9 @@ func configLocation(c ConfigInput) string {
 // appears. Ungrouped rows form a bucket with an empty Title, which each template heads with
 // its own default, so a spec that declares no groups renders one bucket of every command.
 func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
-	if len(rows) == 0 {
-		return nil
-	}
-	idx := map[string]int{}
 	var groups []templateDocCommandGroup
-	for _, r := range rows {
-		i, ok := idx[r.Group]
-		if !ok {
-			i = len(groups)
-			idx[r.Group] = i
-			groups = append(groups, templateDocCommandGroup{Title: r.Group})
-		}
-		groups[i].Commands = append(groups[i].Commands, r)
+	for title, members := range groupByTitle(rows, func(r templateDocCommandRow) string { return r.Group }) {
+		groups = append(groups, templateDocCommandGroup{Title: title, Commands: members})
 	}
 	return groups
 }
@@ -357,21 +348,37 @@ func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
 // with its default Flags heading. A command declaring no flag groups therefore renders exactly
 // one bucket — identical output to before the key existed.
 func groupFlags(rows []templateDocFlagRow) []templateDocFlagGroup {
-	if len(rows) == 0 {
-		return nil
-	}
-	idx := map[string]int{}
 	var groups []templateDocFlagGroup
-	for _, r := range rows {
-		i, ok := idx[r.Group]
-		if !ok {
-			i = len(groups)
-			idx[r.Group] = i
-			groups = append(groups, templateDocFlagGroup{Title: r.Group})
-		}
-		groups[i].Flags = append(groups[i].Flags, r)
+	for title, members := range groupByTitle(rows, func(r templateDocFlagRow) string { return r.Group }) {
+		groups = append(groups, templateDocFlagGroup{Title: title, Flags: members})
 	}
 	return groups
+}
+
+// groupByTitle buckets rows by the title group returns, yielding each bucket once in the order
+// its first row appears.
+func groupByTitle[T any](rows []T, group func(T) string) iter.Seq2[string, []T] {
+	return func(yield func(string, []T) bool) {
+		idx := map[string]int{}
+		var titles []string
+		var buckets [][]T
+		for _, r := range rows {
+			t := group(r)
+			i, ok := idx[t]
+			if !ok {
+				i = len(buckets)
+				idx[t] = i
+				titles = append(titles, t)
+				buckets = append(buckets, nil)
+			}
+			buckets[i] = append(buckets[i], r)
+		}
+		for i, t := range titles {
+			if !yield(t, buckets[i]) {
+				return
+			}
+		}
+	}
 }
 
 // snakeUpper converts a logical name to the conventional SCREAMING_SNAKE_CASE env-var
@@ -665,11 +672,10 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 	return h
 }
 
-// writeFeatureFiles produces each command's rendered page for one feature. A verbatim spec
-// string is written byte-exact; otherwise the page renders from the shared doc-data through
-// the feature's template. Either way the file is rotini-managed: rewritten every pass, skipped
-// when already identical. The template is loaded, seeding the editable default when missing,
-// only when at least one command renders.
+// docFeatureContents returns each command's page for one feature, in node order. A verbatim spec
+// string is used byte-exact; otherwise the page renders from the shared doc-data through the
+// feature's template. The template is loaded — seeding the editable default when missing — only
+// when at least one command renders; writing the pages is the caller's.
 func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedTemplate bool) ([]string, error) {
 	renders := false
 	for _, hn := range nodes {

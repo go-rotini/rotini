@@ -295,7 +295,7 @@ func schemaNode(location string) any {
 	for _, doc := range schemaDocuments() {
 		node := doc
 		for _, seg := range path {
-			seg = strings.ReplaceAll(strings.ReplaceAll(seg, "~1", "/"), "~0", "~")
+			seg = unescapePointer(seg)
 			switch n := node.(type) {
 			case map[string]any:
 				node = n[seg]
@@ -324,9 +324,7 @@ func pointerLeaf(pointer string) string {
 	if i < 0 || i == len(pointer)-1 {
 		return ""
 	}
-	seg := pointer[i+1:]
-	seg = strings.ReplaceAll(seg, "~1", "/")
-	return strings.ReplaceAll(seg, "~0", "~")
+	return unescapePointer(pointer[i+1:])
 }
 
 // definitionNoun turns a schema keyword location into the English noun for the shape that
@@ -587,4 +585,9 @@ func unknownSchemaKey(key, noun string) string {
 // escapePointer escapes one JSON pointer segment (RFC 6901).
 func escapePointer(seg string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(seg, "~", "~0"), "/", "~1")
+}
+
+// unescapePointer undoes escapePointer: "~1" first, then "~0", the order RFC 6901 requires.
+func unescapePointer(seg string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(seg, "~1", "/"), "~0", "~")
 }

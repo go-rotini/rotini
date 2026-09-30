@@ -73,10 +73,7 @@ type composedCmd struct {
 	// `commands:` authored beside a `$ref` is grafted in as an own command of the PARENT,
 	// and its <Prefix>Inputs names every ancestor, composed ones included. Without these
 	// the parent emits a field whose type nothing declares and the package does not build.
-	flags  []fieldDef
-	args   []fieldDef
-	env    []fieldDef
-	config []fieldDef
+	inputFields
 }
 
 // composeCtx threads composition state down a composed subtree.
@@ -92,17 +89,16 @@ type composeCtx struct {
 	remoteHost string
 }
 
-// resolveTree resolves spec into a program, loading any `$ref`'d child specs relative to
-// specPath and grafting them as composed subtrees.
+// scopedConfigFile is one config_files entry with the command path that declared it, which the
+// binder needs to load only the files along the invoked chain.
 type scopedConfigFile struct {
 	ConfigurationFile
 
 	Scope string
 }
 
-// allScopedConfigFiles gathers every command's config_files across the tree,
-// tagging each with its command path. Replaces the Phase-1 flat allConfigFiles
-// for the descriptor: the binder needs the scope to chain-scope loading.
+// allScopedConfigFiles gathers every command's config_files across the tree, tagging each with
+// its command path: the binder needs the scope to load only what the invoked chain declares.
 func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
 	var out []scopedConfigFile
 	walkCommands(spec, func(c *Command, path string) {
@@ -162,10 +158,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		handler:        lowerFirst(gp.rootPascal) + "Handlers",
 		filename:       commandStubFilename(root.Name, "", root.Filename),
 		dashedFilename: dashedStubFilename(root.Name, "", root.Filename),
-		flags:          flagFields(root.inputs(), gp.envPrefix),
-		args:           argFields(root.inputs()),
-		env:            envFields(root.inputs(), gp.envPrefix),
-		config:         configFields(root.inputs()),
+		inputFields:    gp.inputFieldsOf(root.inputs()),
 		stdinType:      stdinTypeExpr(gp.rootPascal, root.inputs()),
 		stdinFormat:    stdinFormatExpr(root.inputs()),
 		inputs:         []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
@@ -228,10 +221,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				delegateAlias:  ctx.alias,
 				delegateMethod: ctx.childPascal + toPascalCase(rel),
 				passthrough:    ctx.passthrough,
-				flags:          flagFields(c.inputs(), gp.envPrefix),
-				args:           argFields(c.inputs()),
-				env:            envFields(c.inputs(), gp.envPrefix),
-				config:         configFields(c.inputs()),
+				inputFields:    gp.inputFieldsOf(c.inputs()),
 			})
 		} else {
 			gc := genCommand{
@@ -240,10 +230,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 				handler:        lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
 				filename:       commandStubFilename(gp.rootName, path, c.Filename),
 				dashedFilename: dashedStubFilename(gp.rootName, path, c.Filename),
-				flags:          flagFields(c.inputs(), gp.envPrefix),
-				args:           argFields(c.inputs()),
-				env:            envFields(c.inputs(), gp.envPrefix),
-				config:         configFields(c.inputs()),
+				inputFields:    gp.inputFieldsOf(c.inputs()),
 				stdinType:      stdinTypeExpr(prefix, c.inputs()),
 				stdinFormat:    stdinFormatExpr(c.inputs()),
 				inputs:         inputsFields(gp.rootPascal, path),
@@ -364,29 +351,41 @@ func overlayCommand(child, parent Command) Command {
 	return m
 }
 
+// loadComposedSpec locates and loads the spec a `$ref` command names, relative to base, and
+// marks it in seen so a cycle back to it is reported. The caller defers release, which unmarks
+// it once the subtree is resolved: a spec may appear twice in a tree, just not inside itself.
+func loadComposedSpec(base, ref, moduleName string, seen map[string]bool) (rr resolvedRef, release func(), err error) {
+	locator, err := locateRef(base, ref)
+	if err != nil {
+		return rr, nil, fmt.Errorf("compose %q: %w", ref, err)
+	}
+	if seen[locator] {
+		return rr, nil, fmt.Errorf("cyclic $ref: %q", ref)
+	}
+	seen[locator] = true
+	release = func() { delete(seen, locator) }
+	if rr, err = loadRef(locator, moduleName); err != nil {
+		release()
+		return rr, nil, fmt.Errorf("compose %q: %w", ref, err)
+	}
+	if rr.spec.Command.Name == "" {
+		release()
+		return rr, nil, fmt.Errorf("composed spec %q has no name", ref)
+	}
+	return rr, release, nil
+}
+
 // composeRef loads a `$ref`'d child spec and grafts its command tree as a composed subtree,
 // applying the overlay model and additively merging any `commands:` the parent authored next
 // to the `$ref`. Delegation always targets the child's real handler methods. Transitive refs
 // are handled by composeNestedRef during the walk.
 func (gp *program) composeRef(c Command, parentPath, base, moduleName string, seen map[string]bool) (rnode, error) {
-	locator, err := locateRef(base, c.Ref)
+	rr, release, err := loadComposedSpec(base, c.Ref, moduleName, seen)
 	if err != nil {
-		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
+		return rnode{}, err
 	}
-	if seen[locator] {
-		return rnode{}, fmt.Errorf("cyclic $ref: %q", c.Ref)
-	}
-	seen[locator] = true
-	defer delete(seen, locator)
-
-	rr, err := loadRef(locator, moduleName)
-	if err != nil {
-		return rnode{}, fmt.Errorf("compose %q: %w", c.Ref, err)
-	}
+	defer release()
 	childRoot := rr.spec.Command
-	if childRoot.Name == "" {
-		return rnode{}, fmt.Errorf("composed spec %q has no name", c.Ref)
-	}
 
 	// Resolve the handler source for the composed subtree. An explicit `handler:`
 	// (the package-import passthrough) wins: handlers come from the declared package via
@@ -429,10 +428,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 
 	gp.composed = append(gp.composed, composedCmd{
 		prefix: prefix, delegateAlias: alias, delegateMethod: delegateRoot, passthrough: passthrough,
-		flags:  flagFields(childRoot.inputs(), gp.envPrefix),
-		args:   argFields(childRoot.inputs()),
-		env:    envFields(childRoot.inputs(), gp.envPrefix),
-		config: configFields(childRoot.inputs()),
+		inputFields: gp.inputFieldsOf(childRoot.inputs()),
 	})
 
 	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, remoteHost: childRoot.Name}
@@ -440,7 +436,8 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	if err != nil {
 		return rnode{}, err
 	}
-	// Merge the `commands:` the parent authored next to the `$ref` (the croot/c3 case):
+	// Merge the `commands:` the parent authored next to the `$ref` (a parent adding its own
+	// sub-commands under a composed child):
 	// they are NOT the child's — they resolve against the PARENT base and are own
 	// commands / new compositions (the outer, non-composed context), grafted alongside
 	// the child's own subtree. A name/alias collision across the merged set is an error.
@@ -478,9 +475,8 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 // the child's root segment is swapped for the path the graft actually occupies. An overlay
 // rename is exactly why this cannot be a straight copy.
 //
-// The parent's own env_prefix wins when it declares one. Otherwise the children's is adopted,
-// and a disagreement between two children is reported rather than silently resolved — one
-// descriptor cannot carry two prefixes, and picking one would break the other child.
+// It also records the child's env_prefix; resolveEnvPrefix decides which one the document
+// adopts.
 func (gp *program) adoptComposedMeta(child *Spec, childRootName, composeRootPath string) {
 	scope := gp.rootName + "/" + strings.ReplaceAll(composeRootPath, "_", "/")
 	for _, cf := range allScopedConfigFiles(child) {
@@ -525,24 +521,12 @@ func (gp *program) resolveEnvPrefix() (string, error) {
 // normal composed walk delegate each node back to the direct child. Parent overlay keys win,
 // and any `commands:` next to the nested ref are merged additively.
 func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName string, seen map[string]bool, ctx composeCtx) ([]rnode, error) {
-	locator, err := locateRef(base, c.Ref)
+	rr, release, err := loadComposedSpec(base, c.Ref, moduleName, seen)
 	if err != nil {
-		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
+		return nil, err
 	}
-	if seen[locator] {
-		return nil, fmt.Errorf("cyclic $ref: %q", c.Ref)
-	}
-	seen[locator] = true
-	defer delete(seen, locator)
-
-	rr, err := loadRef(locator, moduleName)
-	if err != nil {
-		return nil, fmt.Errorf("compose %q: %w", c.Ref, err)
-	}
+	defer release()
 	gc := rr.spec.Command
-	if gc.Name == "" {
-		return nil, fmt.Errorf("composed spec %q has no name", c.Ref)
-	}
 
 	// Graft the grandchild as a named command in the current composed subtree: overlay
 	// the parent's $ref-node keys, then run it (and its descendants) through the normal
@@ -667,7 +651,7 @@ type fieldDef struct {
 	Tag     string
 	Import  string // Go import path backing GoType ("" for builtins); aliased form "alias path"
 	Recon   string // recon struct-tag body for env/config fields (key + default/required/secret); "" otherwise
-	EnvVar  string // explicit environment variable name for an env field (schema.variable); "" = snake-upper default
+	EnvVar  string // the environment variable an env field reads — explicit (schema.variable) or derived (envVarFor); "" for other fields
 	EnvNest string // "<BASE>,<sep>" for a nested env input (schema.nesting): the var-family prefix and separator
 	CfgFile string // a config input's pinned source file (schema.file): the value is read from that configuration_files entry ONLY
 	Comment string // trailing line-comment on the generated field ("" for none) — e.g. the TextUnmarshaler contract nudge on explicitly-imported argv types
@@ -679,6 +663,36 @@ type fieldDef struct {
 
 // genCommand is the fully resolved description of one command node (root or
 // sub-command) that the renderers consume.
+// inputFields are the generated struct fields of a command's declared inputs, one set per
+// channel.
+type inputFields struct {
+	flags  []fieldDef
+	args   []fieldDef
+	env    []fieldDef // <Prefix>Env fields (pure environment inputs)
+	config []fieldDef // <Prefix>Config fields (pure config-file inputs)
+}
+
+// inputFieldsOf derives in's generated struct fields under the program's env prefix.
+func (gp *program) inputFieldsOf(in *Inputs) inputFields {
+	return inputFields{
+		flags:  flagFields(in, gp.envPrefix),
+		args:   argFields(in),
+		env:    envFields(in, gp.envPrefix),
+		config: configFields(in),
+	}
+}
+
+// addImports records in set every import a field of f needs.
+func (f inputFields) addImports(set map[string]bool) {
+	for _, fs := range [][]fieldDef{f.flags, f.args, f.env, f.config} {
+		for _, fd := range fs {
+			if fd.Import != "" {
+				set[fd.Import] = true
+			}
+		}
+	}
+}
+
 type genCommand struct {
 	prefix     string // PascalCase type prefix, e.g. "RotiniGenerate"
 	invocation string // how a user types it, e.g. "rotini generate"
@@ -687,13 +701,10 @@ type genCommand struct {
 	// dashedFilename is the stub's pre-underscore name ("app_get-thing.go"), "" when it has
 	// none; a stub already seeded under it stays the command's stub (see stubFileFor).
 	dashedFilename string
-	flags          []fieldDef
-	args           []fieldDef
-	env            []fieldDef // <Prefix>Env fields (pure environment inputs)
-	config         []fieldDef // <Prefix>Config fields (pure config-file inputs)
-	stdinType      string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
-	stdinFormat    string     // stdin decode format, e.g. "yaml"; "" when no stdin
-	inputs         []fieldDef // InputsFields for this command's <Prefix>Inputs
+	inputFields
+	stdinType   string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
+	stdinFormat string     // stdin decode format, e.g. "yaml"; "" when no stdin
+	inputs      []fieldDef // InputsFields for this command's <Prefix>Inputs
 
 	// Inline-command passthrough: the command's structure + inputs are
 	// generated locally (this is still an own command), but its handler delegates to a

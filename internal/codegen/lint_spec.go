@@ -524,7 +524,7 @@ func lintDottedKeys(spec *Spec) []error {
 // uniqueness is chain-scoped and lives in lintConfigFilesScope.
 func lintConfigurationFiles(spec *Spec) []error {
 	var problems []error
-	// Walked per command rather than over the flattened allConfigFiles, so each entry
+	// Walked per command rather than over a flattened list, so each entry
 	// carries the pointer that places the message on the line the author wrote.
 	walkCommandsAt(spec, func(c *Command, _, ptr string) {
 		if c.inputs() == nil {
@@ -592,11 +592,6 @@ func lintEnvNesting(spec *Spec) []error {
 	return problems
 }
 
-// lintConfigFilesScope enforces config_files name and physical-file uniqueness along a chain,
-// matching the runtime cascade. Logical names are how file: pins and config_source target an
-// entry, so a duplicate within the cascade reaching a command is an error — the nearer would
-// shadow the farther, leaving the pin ambiguous. Two entries resolving to the same physical
-// file are a warning for the same reason. Sibling chains are independent.
 // ancestorConfigIndex summarizes the config_files an ancestor chain puts in scope: each
 // logical name and physical location mapped to the ancestor that declared it. Any match is a
 // violation, so first-seen wins.
@@ -627,6 +622,11 @@ func ancestorConfigIndex(ancestors []*Command) (names, locs map[string]string) {
 	return names, locs
 }
 
+// lintConfigFilesScope enforces config_files name and physical-file uniqueness along a chain,
+// matching the runtime cascade. Logical names are how file: pins and config_source target an
+// entry, so a duplicate within the cascade reaching a command is an error — the nearer would
+// shadow the farther, leaving the pin ambiguous. Two entries resolving to the same physical
+// file are a warning for the same reason. Sibling chains are independent.
 func lintConfigFilesScope(spec *Spec) []error {
 	var problems []error
 	walkChainsAt(spec, func(chain []*Command, path, ptr string) {
@@ -769,6 +769,11 @@ var constraintNumericFamily = map[string]bool{
 	"integer": true, "number": true,
 }
 
+// inputProblem is a spec problem about one input, placed on its command: `flag "port": …`.
+func inputProblem(ptr, path, channel, name, msg string) *problem {
+	return &problem{kind: "spec", ptr: ptr, loc: "command " + path, msg: fmt.Sprintf("%s %q: %s", channel, name, msg)}
+}
+
 // lintConstraintApplicability rejects a constraint declared on a type it can never check:
 // numeric bounds on non-numerics, length or pattern on non-strings, item counts on
 // non-collections. For arrays the per-value constraints apply to the element type, matching
@@ -896,10 +901,7 @@ func lintCountFlags(spec *Spec) []error {
 			if schema == nil || schema.Type != "count" {
 				return
 			}
-			add := func(msg string) {
-				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
-					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
-			}
+			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			if channel != "flag" {
 				add("type count counts argv flag occurrences — it applies to flags only")
 				return
@@ -1078,10 +1080,7 @@ func lintComplete(spec *Spec) []error {
 			if schema == nil || schema.Complete == nil || schema.Complete.Kind == "" {
 				return
 			}
-			add := func(msg string) {
-				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
-					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
-			}
+			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			if channel != "flag" && channel != "argument" {
 				add("sets complete, which describes a value typed on the command line — only flags and arguments are, so here it would be silently ignored")
 				return
@@ -1169,7 +1168,7 @@ func defaultKindName(v any) string {
 func lintPatternCompiles(spec *Spec) []error {
 	var problems []error
 	orphans := func(path, ptr, where string, b BaseSchema) {
-		walkSchemaRefs(b, func(s BaseSchema) {
+		walkSchemaTree(b, func(s BaseSchema) {
 			if s.PatternMessage != "" && s.Pattern == "" {
 				problems = append(problems, &problem{
 					kind: "spec", ptr: ptr, loc: "command " + path,
@@ -1364,16 +1363,16 @@ func lintImportConsistency(spec *Spec) []error {
 	walkCommandsAt(spec, func(c *Command, _, ptr string) {
 		eachInputSchema(c.inputs(), func(_, _ string, s *InputSchema) {
 			if s != nil {
-				walkSchemaImports(s.BaseSchema, record)
+				walkSchemaTree(s.BaseSchema, func(b BaseSchema) { record(b.Type, b.Import) })
 			}
 		})
 		if c.Output != nil {
-			walkSchemaImports(c.Output.BaseSchema, record)
+			walkSchemaTree(c.Output.BaseSchema, func(b BaseSchema) { record(b.Type, b.Import) })
 		}
 	})
 	for name := range spec.Command.Schemas {
 		s := spec.Command.Schemas[name]
-		walkSchemaImports(s.BaseSchema, record)
+		walkSchemaTree(s.BaseSchema, func(b BaseSchema) { record(b.Type, b.Import) })
 	}
 
 	var problems []error
@@ -1534,15 +1533,15 @@ func lintSchemaRefs(spec *Spec) []error {
 			if name != "" {
 				loc += " " + name
 			}
-			walkSchemaRefs(s.BaseSchema, checkAt(loc, ptr))
+			walkSchemaTree(s.BaseSchema, checkAt(loc, ptr))
 		})
 		if c.Output != nil {
-			walkSchemaRefs(c.Output.BaseSchema, checkAt("command "+path+" output", ptr))
+			walkSchemaTree(c.Output.BaseSchema, checkAt("command "+path+" output", ptr))
 		}
 	})
 	for name := range spec.Command.Schemas {
 		s := spec.Command.Schemas[name]
-		walkSchemaRefs(s.BaseSchema, checkAt("schema "+name, rootPointer+"/schemas/"+name))
+		walkSchemaTree(s.BaseSchema, checkAt("schema "+name, rootPointer+"/schemas/"+name))
 	}
 	return problems
 }
@@ -1609,10 +1608,7 @@ func lintSchemaTypes(spec *Spec) []error {
 			if schema == nil || schema.Type == "" {
 				return
 			}
-			add := func(msg string) {
-				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
-					msg: fmt.Sprintf("%s %q: %s", channel, name, msg)})
-			}
+			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			resolved := jsonSchemaTypeToGo(schema.Type)
 			expr, err := parser.ParseExpr(resolved)
 			if err != nil || !isGoTypeExpr(expr) {
@@ -1783,12 +1779,7 @@ func lintDefaultConstraints(spec *Spec) []error {
 			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.Default == nil {
 				return // an object input: lintObjectFlags
 			}
-			add := func(msg string) {
-				problems = append(problems, &problem{
-					kind: "spec", ptr: ptr, loc: "command " + path,
-					msg: fmt.Sprintf("%s %q: %s", channel, name, msg),
-				})
-			}
+			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 
 			values := defaultList(schema.Default)
 			multi := len(values) > 0
@@ -1914,12 +1905,7 @@ func lintItemConstraints(spec *Spec) []error {
 			if channel == "stdin" || schema == nil || schema.Items == nil || !isArrayInputSchema(schema) {
 				return
 			}
-			add := func(msg string) {
-				problems = append(problems, &problem{
-					kind: "spec", ptr: ptr, loc: "command " + path,
-					msg: fmt.Sprintf("%s %q: %s", channel, name, msg),
-				})
-			}
+			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			it := &schema.Items.BaseSchema
 
 			if it.MinItems > 0 || it.MaxItems > 0 {

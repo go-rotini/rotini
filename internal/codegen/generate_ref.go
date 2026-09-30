@@ -21,13 +21,13 @@ import (
 
 const (
 	modScheme   = "mod://"   // module-resolved ref / locator
-	gitScheme   = "git::"    // git-resolved ref / locator: git::<url>@<ref>/<path>
-	httpsScheme = "https://" // raw URL ref / locator
+	gitScheme   = "git::"    // a git locator — recognized only so it can be refused
+	httpsScheme = "https://" // a raw URL locator — recognized only so it can be refused
 )
 
-// isExternalLocator reports whether a locator is a lock-pinned external source
-// (git:: or raw https://) — as opposed to a local path or a module-resolved (mod://)
-// ref, which ride the filesystem and go.sum respectively.
+// isExternalLocator reports whether a locator names an unsupported external source (git:: or a
+// raw https:// URL), which loadRef refuses — as opposed to a local path or a module-resolved
+// (mod://) ref, which ride the filesystem and go.sum respectively.
 func isExternalLocator(locator string) bool {
 	return strings.HasPrefix(locator, gitScheme) || strings.HasPrefix(locator, httpsScheme)
 }

@@ -170,8 +170,9 @@ func TestREPL_requiresAProgramAndInput(t *testing.T) {
 		t.Errorf("REPL with no program = %v, want an internal error", err)
 	}
 	p, _ := replProgram(t, func(*Context) {})
-	if err := NewREPL(p).WithInput(nil).Run(context.Background()); !errors.Is(err, ErrUsage) {
-		t.Errorf("REPL with no input = %v, want a usage error", err)
+	// No input is a wiring mistake too — the end user can do nothing about it.
+	if err := NewREPL(p).WithInput(nil).Run(context.Background()); !errors.Is(err, ErrInternal) {
+		t.Errorf("REPL with no input = %v, want an internal error", err)
 	}
 }
 

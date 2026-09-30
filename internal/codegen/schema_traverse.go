@@ -131,26 +131,15 @@ func eachInputSchema(in *Inputs, visit func(channel, name string, schema *InputS
 	}
 }
 
-// walkSchemaRefs invokes visit for a schema and recurses into its object properties and
-// array items, so a "$ref" at any nesting depth is seen.
-func walkSchemaRefs(b BaseSchema, visit func(BaseSchema)) {
+// walkSchemaTree invokes visit for a schema and every schema nested in it — its object
+// properties and array items, at any depth — so a check (a "$ref", a pattern_message) sees them
+// all.
+func walkSchemaTree(b BaseSchema, visit func(BaseSchema)) {
 	visit(b)
 	for _, p := range b.Properties {
-		walkSchemaRefs(p.BaseSchema, visit)
+		walkSchemaTree(p.BaseSchema, visit)
 	}
 	if b.Items != nil {
-		walkSchemaRefs(b.Items.BaseSchema, visit)
-	}
-}
-
-// walkSchemaImports records (type, import) for a schema and recurses into its object
-// properties and array items.
-func walkSchemaImports(b BaseSchema, record func(typ, imp string)) {
-	record(b.Type, b.Import)
-	for _, p := range b.Properties {
-		walkSchemaImports(p.BaseSchema, record)
-	}
-	if b.Items != nil {
-		walkSchemaImports(b.Items.BaseSchema, record)
+		walkSchemaTree(b.Items.BaseSchema, visit)
 	}
 }

@@ -8,7 +8,7 @@ import (
 
 // Typed-input field derivation: turning a command's Inputs (flags/args/env/config/
 // stdin) into the generated struct fields, plus the schema→Go type mapping. The Go-
-// literal emission those fields feed into lives in literals.go.
+// literal emission those fields feed into lives in generate_literals.go.
 
 // inputsFields returns the fields of a command's <Prefix>Inputs struct: one per ancestor plus
 // the command itself, in root→leaf order, each named after the command's PascalCase prefix.
@@ -78,8 +78,9 @@ func flagReconKey(name string, schema *InputSchema) string {
 	return ""
 }
 
-// envFields returns the <Prefix>Env struct fields: one per pure environment input.
-// The recon key is the input name (recon's env source maps it to SNAKE_UPPER).
+// envFields returns the <Prefix>Env struct fields: one per pure environment input. The recon
+// key is the input name, and the variable is always written into the field's `env:` tag (see
+// envVarFor), so the binder never re-derives it.
 func envFields(in *Inputs, envPrefix string) []fieldDef {
 	if in == nil {
 		return nil
@@ -112,7 +113,7 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 
 // constraintTags renders an input's numeric/string/array constraints as space-separated
 // validation struct-tags (e.g. `min:"1" max:"65535" pattern:"^x$"`) for the binder to
-// enforce, or "" when none are set. Mirrors the FlagDef/ArgDef constraints A1 enforces
+// enforce, or "" when none are set. Mirrors the FlagDef/ArgDef constraints the parser enforces
 // for argv, but carried on the env/config field itself since channels have no Definition.
 //
 // Every value is written as a quoted Go string, because reflect reads a tag value back through
@@ -177,8 +178,8 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 	}
 }
 
-// envVarOf returns an env input's explicit environment variable (schema.variable),
-// or "" to let the binder use recon's snake-upper default for the key.
+// envVarOf returns an input's explicit environment variable (schema.variable), or "" when it
+// declares none and the caller derives one (envVarFor).
 //
 // Several names (`variable: [GH_TOKEN, GITHUB_TOKEN]`) ride in the one tag comma-joined; the
 // binder reads the first that is set.
@@ -435,4 +436,75 @@ func toTemplateFields(fs []fieldDef) []templateInputField {
 		out = append(out, tf)
 	}
 	return out
+}
+
+// collectPathFrom maps each configuration_files name to the inputs supplying its path, across
+// the whole tree: a flag claims by logical name, an env input by its variable. Validation
+// guarantees single claims per channel and that the named entry exists.
+func collectPathFrom(gp *program) map[string]pathFromClaim {
+	out := map[string]pathFromClaim{}
+	add := func(in *Inputs) {
+		if in == nil {
+			return
+		}
+		for _, f := range in.Flags {
+			if f.Schema != nil && f.Schema.ConfigSource != "" {
+				c := out[f.Schema.ConfigSource]
+				c.flag = f.Name
+				out[f.Schema.ConfigSource] = c
+			}
+		}
+		for _, e := range in.Env {
+			if e.Schema != nil && e.Schema.ConfigSource != "" {
+				c := out[e.Schema.ConfigSource]
+				c.env = envVarName(e, gp.envPrefix)
+				out[e.Schema.ConfigSource] = c
+			}
+		}
+	}
+	add(gp.rootInputs)
+	eachOwnNode(gp.tree, func(n *rnode) { add(n.inputs) })
+	return out
+}
+
+// contractComment is the TextUnmarshaler nudge emitted on flag and argument fields whose type
+// comes from an explicit spec `import:`, putting the contract where the user reads their own
+// generated code. Builtin aliases parse themselves, and env and config fields decode through
+// recon, so neither gets one.
+func contractComment(schema *InputSchema) string {
+	if schema == nil || strings.TrimSpace(schema.Import) == "" {
+		return ""
+	}
+	return "// parsed via its encoding.TextUnmarshaler (see the spec schema's `type` docs)"
+}
+
+// envVarName is an env input's environment variable: the explicit `variable:` when declared,
+// else the derived name [envVarFor] builds from its logical name.
+func envVarName(e EnvInput, envPrefix string) string {
+	if v := envVarOf(e.Schema); v != "" {
+		return v // explicit variable: exempt from env_prefix — already exact
+	}
+	return envVarFor(e.Name, envPrefix)
+}
+
+// envVarFor derives the environment variable a recon key binds to under envPrefix — the ONE
+// place that derivation happens.
+//
+// It used to happen in three: this function's old body, [envVarLabel] for the help page, and
+// recon's own SnakeUpperTransform inside the binder. They disagreed, and a reader had no way
+// to tell. An input named "base_url" under env_prefix MUSAK was PRINTED in help as
+// MUSAK_BASE_URL and BOUND from nothing at all, because recon's inverse projection splits on
+// every underscore and so read MUSAK_BASE_URL back as the two-segment path base/url, which
+// never met the one-segment key. "apiKey" had the same disagreement the other way: help said
+// API_KEY, the binder read APIKEY.
+//
+// The cure is not a fourth spelling. It is emitting the name this function returns into the
+// generated field's `env:` tag, so the binder PINS it — exempt from any prefix, both
+// directions — instead of re-deriving it. Help and the binder then read one fact.
+func envVarFor(key, envPrefix string) string {
+	derived := snakeUpper(strings.ReplaceAll(key, ".", "_"))
+	if envPrefix != "" {
+		return envPrefix + "_" + derived
+	}
+	return derived
 }

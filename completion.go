@@ -116,7 +116,7 @@ func completePendingFlagValue(cc completionContext, context, words []string, par
 		return nil, false
 	}
 	fd, owner, found := findFlag(cc.chain, name)
-	if !found || !takesValue(fd) {
+	if !found || !takesSeparateValue(fd) {
 		return nil, false
 	}
 	return filterPrefix(flagValueCandidates(handlers, rtx, cc.chain, words, owner, fd, partial), partial), true
@@ -204,13 +204,10 @@ func walkContext(def Definition, context []string) completionContext {
 			continue
 		}
 		if isFlag(tok) {
-			name, _, hasInline := splitFlag(tok)
-			// Skip a separate value token so it is not mistaken for a command —
-			// unless it is the "=" glue, which the next iteration handles.
-			if fd, _, ok := findFlag(cc.chain, name); ok && takesValue(fd) && !hasInline {
-				if i+1 < len(context) && context[i+1] != "=" {
-					i++
-				}
+			// Skip a separate value word so it is not mistaken for a command — unless it is
+			// the "=" glue, which the next iteration handles.
+			if i+1 < len(context) && context[i+1] != "=" {
+				i += flagTokenWidth(cc.chain, context, i)
 			}
 			continue
 		}
@@ -562,7 +559,7 @@ func completionHint(def Definition, words []string) string {
 
 	// "--flag <TAB>": the word is the preceding flag's value.
 	if name, ok := pendingValueFlag(context); ok {
-		if fd, _, found := findFlag(cc.chain, name); found && takesValue(fd) {
+		if fd, _, found := findFlag(cc.chain, name); found && takesSeparateValue(fd) {
 			return directiveFor(fd.Complete)
 		}
 		return ""

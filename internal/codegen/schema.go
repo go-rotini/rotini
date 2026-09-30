@@ -3,7 +3,7 @@ package codegen
 // This file owns loading and compiling the embedded rotini JSON Schemas the validate
 // stage uses (each compiled once and cached). NewProcessor compiles both up front and
 // holds them; validateSpec/validateConf judge the reconciled documents against them.
-// Reading the end-user's documents lives in reader.go / reconcile.go.
+// Reading the end-user's documents lives in reconcile_reader.go / reconcile.go.
 
 import (
 	_ "embed"

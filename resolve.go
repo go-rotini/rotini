@@ -98,11 +98,8 @@ func resolveChain(def Definition, argv []string) ([]ResolvedCommand, *RemoteDisp
 			break // the rest are positional; no further command descent
 		}
 		if isFlag(tok) {
-			name, _, hasInline := splitFlag(tok)
-			// Skip a separate value token so it is not mistaken for a command.
-			if fd, _, ok := findFlag(chain, name); ok && takesValue(fd) && !hasInline {
-				i++
-			}
+			// Skip a separate value word so it is not mistaken for a command.
+			i += flagTokenWidth(chain, argv, i)
 			continue
 		}
 		// A non-flag token that still begins with "-" (a negative-number argument like

@@ -193,77 +193,6 @@ type pathFromClaim struct {
 	env  string
 }
 
-// collectPathFrom maps each configuration_files name to the inputs supplying its path, across
-// the whole tree: a flag claims by logical name, an env input by its variable. Validation
-// guarantees single claims per channel and that the named entry exists.
-func collectPathFrom(gp *program) map[string]pathFromClaim {
-	out := map[string]pathFromClaim{}
-	add := func(in *Inputs) {
-		if in == nil {
-			return
-		}
-		for _, f := range in.Flags {
-			if f.Schema != nil && f.Schema.ConfigSource != "" {
-				c := out[f.Schema.ConfigSource]
-				c.flag = f.Name
-				out[f.Schema.ConfigSource] = c
-			}
-		}
-		for _, e := range in.Env {
-			if e.Schema != nil && e.Schema.ConfigSource != "" {
-				c := out[e.Schema.ConfigSource]
-				c.env = envVarName(e, gp.envPrefix)
-				out[e.Schema.ConfigSource] = c
-			}
-		}
-	}
-	add(gp.rootInputs)
-	eachOwnNode(gp.tree, func(n *rnode) { add(n.inputs) })
-	return out
-}
-
-// contractComment is the TextUnmarshaler nudge emitted on flag and argument fields whose type
-// comes from an explicit spec `import:`, putting the contract where the user reads their own
-// generated code. Builtin aliases parse themselves, and env and config fields decode through
-// recon, so neither gets one.
-func contractComment(schema *InputSchema) string {
-	if schema == nil || strings.TrimSpace(schema.Import) == "" {
-		return ""
-	}
-	return "// parsed via its encoding.TextUnmarshaler (see the spec schema's `type` docs)"
-}
-
-// envVarName is an env input's environment variable: the explicit `variable:` when declared,
-// else the derived name [envVarFor] builds from its logical name.
-func envVarName(e EnvInput, envPrefix string) string {
-	if v := envVarOf(e.Schema); v != "" {
-		return v // explicit variable: exempt from env_prefix — already exact
-	}
-	return envVarFor(e.Name, envPrefix)
-}
-
-// envVarFor derives the environment variable a recon key binds to under envPrefix — the ONE
-// place that derivation happens.
-//
-// It used to happen in three: this function's old body, [envVarLabel] for the help page, and
-// recon's own SnakeUpperTransform inside the binder. They disagreed, and a reader had no way
-// to tell. An input named "base_url" under env_prefix MUSAK was PRINTED in help as
-// MUSAK_BASE_URL and BOUND from nothing at all, because recon's inverse projection splits on
-// every underscore and so read MUSAK_BASE_URL back as the two-segment path base/url, which
-// never met the one-segment key. "apiKey" had the same disagreement the other way: help said
-// API_KEY, the binder read APIKEY.
-//
-// The cure is not a fourth spelling. It is emitting the name this function returns into the
-// generated field's `env:` tag, so the binder PINS it — exempt from any prefix, both
-// directions — instead of re-deriving it. Help and the binder then read one fact.
-func envVarFor(key, envPrefix string) string {
-	derived := snakeUpper(strings.ReplaceAll(key, ".", "_"))
-	if envPrefix != "" {
-		return envPrefix + "_" + derived
-	}
-	return derived
-}
-
 // collectStdinSchemas builds the per-command stdin validation schemas for BindMeta: each own
 // command declaring a stdin payload maps its "<Prefix>Stdin" type name to a self-contained
 // JSON Schema the binder validates the decoded payload against.
@@ -273,7 +202,8 @@ func collectStdinSchemas(gp *program) map[string]string {
 		if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
 			return
 		}
-		if js := stdinValidationSchema(in.Stdin.Schema, gp.schemas); js != "" {
+		// Only the schema's shape (its BaseSchema) validates, matching the generated type.
+		if js := validationSchema(Schema{BaseSchema: in.Stdin.Schema.BaseSchema}, gp.schemas); js != "" {
 			out[prefix+"Stdin"] = js
 		}
 	}
@@ -283,13 +213,6 @@ func collectStdinSchemas(gp *program) map[string]string {
 		return nil
 	}
 	return out
-}
-
-// stdinValidationSchema renders the stdin payload's load-time validation
-// schema. It uses only the schema-shape of the InputSchema (the BaseSchema),
-// matching the generated type.
-func stdinValidationSchema(stdin *InputSchema, docSchemas map[string]Schema) string {
-	return validationSchema(Schema{BaseSchema: stdin.BaseSchema}, docSchemas)
 }
 
 // validationSchema renders a self-contained JSON Schema for load-time document validation,

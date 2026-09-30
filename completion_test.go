@@ -853,3 +853,28 @@ func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 		t.Errorf("flag on the line: candidates = %v, want [from-line] — argv outranks env", got)
 	}
 }
+
+// TestComplete_followsTheParsersFlagValueRule: completion walks the line with the parser's rule
+// for which word is a flag's value, so it descends where dispatch will (`--color sub <TAB>`,
+// `-vn 5 sub <TAB>`), and a bare optional-value flag is not waiting for a value — its value must
+// be attached — so the next word completes as a command.
+func TestComplete_followsTheParsersFlagValueRule(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"--color"}, Type: "string", ImplicitValue: "always", Enum: []string{"always", "never"}},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+			{Name: "num", Identifiers: []string{"-n"}, Type: "int"},
+		},
+		Commands: []CommandDef{{Name: "sub", Handler: "AppSub", Commands: []CommandDef{{Name: "leaf", Handler: "AppSubLeaf"}}}}}
+	for _, words := range [][]string{{"--color", "sub", "l"}, {"-vn", "5", "sub", "l"}} {
+		if got := complete(def, words, nil, nil); !reflect.DeepEqual(got, []string{"leaf"}) {
+			t.Errorf("complete %q = %v, want [leaf]", words, got)
+		}
+	}
+	if got := complete(def, []string{"--color", "s"}, nil, nil); !reflect.DeepEqual(got, []string{"sub"}) {
+		t.Errorf("complete --color s = %v, want [sub] — the optional value must be attached", got)
+	}
+	if got := complete(def, []string{"--color=n"}, nil, nil); !reflect.DeepEqual(got, []string{"--color=never"}) {
+		t.Errorf("complete --color=n = %v, want [--color=never]", got)
+	}
+}

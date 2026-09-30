@@ -39,10 +39,11 @@ type program struct {
 	// as notices. Deleting a file the author can see is not a silent operation.
 	pruned []string
 
-	// hookWarnings are what auditHooks found in the handler files rotini does not own —
-	// a method that looks like a lifecycle hook but is not one. Surfaced as notices
-	// alongside pruned, never as an error: an unused method is legal Go.
-	hookWarnings []error
+	// auditWarnings are what auditHooks found in the handler files rotini does not own — a
+	// method that looks like a lifecycle hook but is not one, or a call acquiring another
+	// command's inputs type. Surfaced as notices alongside pruned, never as an error: both
+	// are legal Go.
+	auditWarnings []error
 
 	// handlerImports are the Go import paths a spec's `handler:` blocks point at — the
 	// bring-your-own seam, where an author writes a Handlers implementation by hand. The
@@ -56,7 +57,7 @@ type program struct {
 
 	// context — where the program lives and where its output goes.
 	module module // the Go module the spec belongs to (root dir + import path)
-	layout layout // resolved output locations (the cmd package, the runtime, the entrypoint)
+	layout layout // resolved output locations (the cmd package, the models file, the entrypoint)
 
 	// resolved command tree — spec (+ $ref composition) → the model the renderers consume.
 	rootName        string
@@ -414,13 +415,7 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 			StdinFormat:  c.stdinFormat,
 			InputsFields: toTemplateFields(c.inputs),
 		})
-		for _, fs := range [][]fieldDef{c.flags, c.args, c.env, c.config} {
-			for _, f := range fs {
-				if f.Import != "" {
-					imports[f.Import] = true
-				}
-			}
-		}
+		c.addImports(imports)
 	}
 
 	// A composed node declares no <Prefix>Inputs of its own — it delegates to the child's
@@ -443,13 +438,7 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 			// No InputsFields: nothing collects a composed command's inputs through the
 			// parent — its handler lives in the child package and uses the child's type.
 		})
-		for _, fs := range [][]fieldDef{c.flags, c.args, c.env, c.config} {
-			for _, f := range fs {
-				if f.Import != "" {
-					imports[f.Import] = true
-				}
-			}
-		}
+		c.addImports(imports)
 	}
 
 	return blocks, imports

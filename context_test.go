@@ -1011,3 +1011,20 @@ func TestIsLeaf_outsideAHook(t *testing.T) {
 		t.Error("a hookless Context reported IsLeaf() = false")
 	}
 }
+
+// TestServiceError_saysWhichMissItIs: MustGet fails two ways — nothing bound, or something of
+// another type bound — and they send the reader to different code. The message used to say "no
+// service bound" for both, which is false for the second.
+func TestServiceError_saysWhichMissItIs(t *testing.T) {
+	miss := func(rtx *Context) (msg string) {
+		defer func() { msg = recover().(*ServiceError).Error() }()
+		rtx.MustGet[int]("n")
+		return ""
+	}
+	if got := miss(newContext()); got != `rotini: no service bound under key "n"` {
+		t.Errorf("unbound: %q", got)
+	}
+	if got := miss(newContext().Bind("n", "seven")); got != `rotini: the service under key "n" is a string, not the int requested` {
+		t.Errorf("wrong type: %q", got)
+	}
+}

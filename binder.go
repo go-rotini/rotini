@@ -600,6 +600,9 @@ func fallbackCoerceError(chain []ResolvedCommand, idx int, name, source string, 
 			secret = def.Secret
 		}
 	}
+	if mistake, ok := errors.AsType[authorMistake](err); ok {
+		return internalBind(channelFlag, name, fmt.Sprintf("%s: %s", label, mistake), err)
+	}
 	msg := fmt.Sprintf("%s: %s", label, coerceMessage(err, secret))
 	if source != "" {
 		msg += " (from " + source + ")"

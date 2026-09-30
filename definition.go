@@ -176,6 +176,11 @@ func Ptr[T any](v T) *T { return new(v) }
 // flags, bool (inline value form only) and count.
 func takesValue(fd FlagDef) bool { return fd.Type != "bool" && fd.Type != "count" }
 
+// takesSeparateValue reports whether fd's value may be the NEXT word: a value-taking flag whose
+// value is not optional. An optional value (ImplicitValue) must be attached, so `--color <TAB>`
+// completes whatever comes next, not the flag's values.
+func takesSeparateValue(fd FlagDef) bool { return takesValue(fd) && fd.ImplicitValue == "" }
+
 // FlagDef describes a single flag of a command. Name is the logical name and
 // matches the `rotini:"<name>"` tag on the corresponding generated input field.
 type FlagDef struct {

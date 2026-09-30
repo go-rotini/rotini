@@ -53,8 +53,9 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 			}
 			fmt.Fprintln(rtx.Stdout, result)
 		},
-		// Anything the pass removed. Generating is not supposed to be destructive, so
-		// on the rare occasion it is, it says so.
+		// Notices from the pass: files it removed — generating is not supposed to be
+		// destructive, so on the rare occasion it is, it says so — and what the handler-hook
+		// audit found in files rotini did not write.
 		func(notices []error) {
 			for _, n := range notices {
 				fmt.Fprintln(rtx.Stderr, "Note:", n)

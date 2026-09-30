@@ -11,10 +11,10 @@ import (
 
 // Go-literal SOURCE emission: the Definition / BindMeta / *Def builders the generated
 // framework file embeds. The typed-input field derivation that feeds these (and the
-// shared eachConstraint enumerator) lives in inputs_fields.go.
+// shared eachConstraint enumerator) lives in generate_inputs.go.
 
-// literal fields an Inputs contributes to a Definition or CommandDef literal,
-// omitting any that render empty. Shared by renderDefinition (the root) and
+// writeInputDefsLiteral writes the literal fields an Inputs contributes to a Definition or
+// CommandDef literal, omitting any that render empty. Shared by renderDefinition (the root) and
 // rnodesLiteral (each command node) so the field set is enumerated once.
 func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Schema) {
 	if fl := flagDefsLiteral(in, schemas); fl != "" {
@@ -351,7 +351,7 @@ func completionLiteral(schema *InputSchema) string {
 	if schema == nil || schema.Complete == nil || schema.Complete.Kind == "" {
 		return ""
 	}
-	out := ", Complete: rotini.Completion{Kind: " + strconv.Quote(schema.Complete.Kind)
+	out := ", Complete: " + rotiniPkgName + ".Completion{Kind: " + strconv.Quote(schema.Complete.Kind)
 	if len(schema.Complete.Extensions) > 0 {
 		out += ", Extensions: " + goStringSlice(schema.Complete.Extensions)
 	}
@@ -634,10 +634,8 @@ func goStringSlice(ss []string) string {
 	return "[]string{" + strings.Join(quoted, ", ") + "}"
 }
 
-// defaultString renders an input's decoded default value as a string.
 // defaultList renders a multi-value default as the argv occurrences it seeds: one per list
-// element, or one `key=value` per map entry. nil when the default is a scalar, or nil when the default is not a
-// list. Each element becomes one seeded occurrence, so the elements are stringified
+// element, or one `key=value` per map entry; nil when the default is a scalar. Each element becomes one seeded occurrence, so the elements are stringified
 // individually rather than the list being stringified as a whole — which is what produced
 // `Default: "[a b c]"`, a single flag value spelled like Go debug output.
 func defaultList(v any) []string {
@@ -667,6 +665,7 @@ func defaultList(v any) []string {
 	}
 }
 
+// defaultString renders an input's decoded default value as a string.
 func defaultString(v any) string {
 	switch x := v.(type) {
 	case nil:

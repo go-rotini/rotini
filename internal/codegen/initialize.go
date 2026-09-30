@@ -17,13 +17,13 @@ import (
 )
 
 // baselineVersion is the version stamped into a new spec/conf's `version` key when
-// the running rotini binary is unreleased (its bound version is "v0.0.0", or empty).
+// the running rotini binary is unreleased (its bound version is "0.0.0", or empty).
 // A real release stamps its own tag instead.
 const baselineVersion = "0.0.0"
 
 // seedVersion resolves the bare "X.Y.Z" version stamped into a scaffolded spec/conf's
-// `version` key from the binary's bound version string ("vX.Y.Z" / "v0.0.0"): the
-// leading "v" is stripped, falling back to the baseline when empty.
+// `version` key from the binary's bound version string — "X.Y.Z", with a leading "v"
+// tolerated and stripped — falling back to the baseline when empty.
 func seedVersion(version string) string {
 	if seg := strings.TrimPrefix(version, "v"); seg != "" {
 		return seg

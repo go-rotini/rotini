@@ -152,30 +152,7 @@ func inheritScalarRefConstraints(s *Spec) {
 		if !ok || src.Type == "object" || len(src.Properties) > 0 {
 			return
 		}
-		if len(b.Enum) == 0 {
-			b.Enum = src.Enum
-		}
-		if b.Pattern == "" {
-			b.Pattern = src.Pattern
-			// The message describes that pattern, so it comes along — unless the input
-			// words the inherited pattern itself.
-			if b.PatternMessage == "" {
-				b.PatternMessage = src.PatternMessage
-			}
-		}
-		if b.MinLength == 0 {
-			b.MinLength = src.MinLength
-		}
-		if b.MaxLength == 0 {
-			b.MaxLength = src.MaxLength
-		}
-		for _, pair := range [][2]*any{{&b.Minimum, &src.Minimum}, {&b.Maximum, &src.Maximum},
-			{&b.ExclusiveMinimum, &src.ExclusiveMinimum}, {&b.ExclusiveMaximum, &src.ExclusiveMaximum},
-			{&b.MultipleOf, &src.MultipleOf}} {
-			if *pair[0] == nil {
-				*pair[0] = *pair[1]
-			}
-		}
+		fillUnsetConstraints(b, &src.BaseSchema)
 	}
 	walkCommands(s, func(c *Command, _ string) {
 		eachInputSchema(c.inputs(), func(_, _ string, schema *InputSchema) {
@@ -252,39 +229,37 @@ func hoistItemConstraints(spec *Spec) {
 			if channel == "stdin" || schema == nil || schema.Items == nil || !isArrayInputSchema(schema) {
 				return
 			}
-			it := &schema.Items.BaseSchema
-			if len(schema.Enum) == 0 {
-				schema.Enum = it.Enum
-			}
-			if schema.Pattern == "" {
-				schema.Pattern = it.Pattern
-				if schema.PatternMessage == "" {
-					schema.PatternMessage = it.PatternMessage
-				}
-			}
-			if schema.Minimum == nil {
-				schema.Minimum = it.Minimum
-			}
-			if schema.Maximum == nil {
-				schema.Maximum = it.Maximum
-			}
-			if schema.ExclusiveMinimum == nil {
-				schema.ExclusiveMinimum = it.ExclusiveMinimum
-			}
-			if schema.ExclusiveMaximum == nil {
-				schema.ExclusiveMaximum = it.ExclusiveMaximum
-			}
-			if schema.MultipleOf == nil {
-				schema.MultipleOf = it.MultipleOf
-			}
-			if schema.MinLength == 0 {
-				schema.MinLength = it.MinLength
-			}
-			if schema.MaxLength == 0 {
-				schema.MaxLength = it.MaxLength
-			}
+			fillUnsetConstraints(&schema.BaseSchema, &schema.Items.BaseSchema)
 		})
 	})
+}
+
+// fillUnsetConstraints copies src's value constraints — enum, pattern, lengths and bounds — onto
+// dst wherever dst leaves them unset, so what dst declares itself always wins. A pattern_message
+// comes with the pattern it describes, unless dst words the inherited pattern itself.
+func fillUnsetConstraints(dst, src *BaseSchema) {
+	if len(dst.Enum) == 0 {
+		dst.Enum = src.Enum
+	}
+	if dst.Pattern == "" {
+		dst.Pattern = src.Pattern
+		if dst.PatternMessage == "" {
+			dst.PatternMessage = src.PatternMessage
+		}
+	}
+	if dst.MinLength == 0 {
+		dst.MinLength = src.MinLength
+	}
+	if dst.MaxLength == 0 {
+		dst.MaxLength = src.MaxLength
+	}
+	for _, pair := range [][2]*any{{&dst.Minimum, &src.Minimum}, {&dst.Maximum, &src.Maximum},
+		{&dst.ExclusiveMinimum, &src.ExclusiveMinimum}, {&dst.ExclusiveMaximum, &src.ExclusiveMaximum},
+		{&dst.MultipleOf, &src.MultipleOf}} {
+		if *pair[0] == nil {
+			*pair[0] = *pair[1]
+		}
+	}
 }
 
 // isArrayInputSchema reports whether an input schema declares a list: `array`, or a Go-style

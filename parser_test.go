@@ -1564,12 +1564,24 @@ func TestParse_fromFile(t *testing.T) {
 		t.Errorf("inline Token = %q, want the file's contents", in2.App.Flags.Token)
 	}
 
-	// An unreadable file is a usage error naming the flag and the @path — never
-	// a silent literal.
+	// An unreadable file is a usage error naming the flag and the path, in rotini's words —
+	// never a silent literal, and never the OS's own error text ("open …: permission denied").
 	var in3 fromInputs
 	err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token", "@/nonexistent/nope"}), &in3)
-	if err == nil || !strings.Contains(err.Error(), "--token") || !strings.Contains(err.Error(), "@/nonexistent/nope") {
-		t.Errorf("Parse(missing file) = %v, want a cannot-read usage error", err)
+	if err == nil || err.Error() != `--token: no such file: "/nonexistent/nope"` {
+		t.Errorf("Parse(missing file) = %v, want the flag and the path named", err)
+	}
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.WriteFile(locked, []byte("x"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if f, openErr := os.Open(locked); openErr == nil { // running as root: nothing is unreadable
+		_ = f.Close()
+	} else {
+		err = NewParser().Parse(NewContextFor(fromDef(), []string{"--token", "@" + locked}), &in3)
+		if err == nil || !strings.Contains(err.Error(), "permission denied reading") || strings.Contains(err.Error(), "open ") {
+			t.Errorf("Parse(unreadable file) = %v, want a permission error in rotini's words", err)
+		}
 	}
 
 	// STDIN-04 conformance: a plain path (no '@') stays literal even on a
@@ -1863,24 +1875,24 @@ func TestParseKind_String(t *testing.T) {
 
 // ── usage rendering ─────────────────────────────────────────────.
 
-// rtk's parse/bind failures (usageError) carry the usage category, so a single
-// CategoryOf call in an OnError funnel classifies them as the end-user's fault.
-func TestUsageError_categorizedAsUsage(t *testing.T) {
-	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+// A parse failure the end user caused carries the usage category, so a single CategoryOf call
+// in a funnel classifies it as theirs; a misuse of the parser API is the author's bug and
+// carries the internal one, as ParseKindInternal's own doc has always said.
+func TestParseError_category(t *testing.T) {
+	var in struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+		}
+	}
+	err := NewParser().Parse(NewContextFor(Definition{Name: "app", Handler: "App"}, []string{"--nope"}), &in)
+	if CategoryOf(err) != CategoryUsage || !errors.Is(err, ErrUsage) || errors.Is(err, ErrInternal) {
+		t.Errorf("unknown flag: %v is %v, want usage", err, CategoryOf(err))
+	}
 
-	// A non-pointer out is the simplest parse-time usageError.
-	err := NewParser().Parse(rtx, 42)
-	if err == nil {
-		t.Fatal("expected a usage error from Parse with a non-pointer out")
-	}
-	if got := CategoryOf(err); got != CategoryUsage {
-		t.Errorf("CategoryOf(parse error) = %v, want usage", got)
-	}
-	if !errors.Is(err, ErrUsage) {
-		t.Error("a parse usageError should match ErrUsage")
-	}
-	if errors.Is(err, ErrInternal) {
-		t.Error("a usage error must not match ErrInternal")
+	err = NewParser().Parse(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), 42) // a non-pointer out
+	if CategoryOf(err) != CategoryInternal || !errors.Is(err, ErrInternal) || errors.Is(err, ErrUsage) {
+		t.Errorf("non-pointer out: %v is %v, want internal", err, CategoryOf(err))
 	}
 }
 
@@ -2803,5 +2815,56 @@ func mustNotLeak(t *testing.T, what string, err error) {
 	}
 	if !strings.Contains(err.Error(), "[redacted]") {
 		t.Errorf("%s does not mark the value redacted, so the message is unhelpful:\n  %v", what, err)
+	}
+}
+
+// TestParse_authorMistakesAreInternal: a field whose TYPE cannot hold what the Definition
+// declares fails for every value, so it is the program author's bug, reported as rotini's and
+// categorized internal. It used to read as the end user's invalid value, and a map with
+// non-string keys was silently left empty.
+func TestParse_authorMistakesAreInternal(t *testing.T) {
+	type opaque struct{ n int }
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "thing", Identifiers: []string{"--thing"}, Type: "opaque"},
+		{Name: "ids", Identifiers: []string{"--ids"}, Type: "map[int]string"},
+	}}
+	var in struct {
+		App struct {
+			Flags struct {
+				Thing opaque         `rotini:"thing"`
+				IDs   map[int]string `rotini:"ids"`
+			}
+			Arguments struct{}
+		}
+	}
+	for _, argv := range [][]string{{"--thing", "x"}, {"--ids", "1=a"}} {
+		err := NewParser().Parse(NewContextFor(def, argv), &in)
+		pe, ok := errors.AsType[*ParseError](err)
+		if !ok || pe.Kind != ParseKindInternal || !strings.HasPrefix(pe.Msg, "rotini: ") || CategoryOf(err) != CategoryInternal {
+			t.Errorf("%v: err = %v, want an internal error named as rotini's", argv, err)
+		}
+	}
+}
+
+// TestParse_unknownFlagInAClusterCarriesTheVocabulary: an unknown flag carries the declared
+// identifiers for a Suggestor wherever it is found — including inside a short cluster (-vx),
+// which used to report it with none.
+func TestParse_unknownFlagInAClusterCarriesTheVocabulary(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+		{Name: "quiet", Identifiers: []string{"-q"}, Type: "bool"},
+	}}
+	var in struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+		}
+	}
+	for _, argv := range [][]string{{"-x"}, {"-vx"}} {
+		err := NewParser().Parse(NewContextFor(def, argv), &in)
+		pe, ok := errors.AsType[*ParseError](err)
+		if !ok || pe.Kind != ParseKindUnknownFlag || !slices.Contains(pe.Candidates, "-q") {
+			t.Errorf("%v: err = %+v, want an unknown flag carrying the declared identifiers", argv, pe)
+		}
 	}
 }

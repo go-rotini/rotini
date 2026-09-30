@@ -71,12 +71,6 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 	if !ok {
 		return ""
 	}
-	flags := reflect.StructOf([]reflect.StructField{{Name: "V", Type: rt, Tag: `rotini:"v"`}})
-	cmd := reflect.StructOf([]reflect.StructField{
-		{Name: "Flags", Type: flags},
-		{Name: "Arguments", Type: reflect.TypeFor[struct{}]()},
-	})
-	inputs := reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}})
 	fd := rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: defType, Layout: layoutFor(schema)}
 	// A measured type's bounds are checked here too: the numeric default rule cannot read
 	// "3s", so without this a default outside a duration's bounds would validate clean and fail
@@ -88,19 +82,34 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 			MultipleOf: bound(schema.MultipleOf),
 		}
 	}
-	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{fd}}
 	for _, v := range values {
-		err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"--v=" + v}), reflect.New(inputs).Interface())
-		if err != nil {
+		if _, err := parseAsRuntime(rt, fd, v); err != nil {
 			return runtimeComplaint(err.Error(), v)
 		}
 	}
 	return ""
 }
 
+// parseAsRuntime parses text as the value of the flag fd, into a field of type rt, exactly as a
+// run would — through the runtime's own parser, on a one-flag program whose flag is --v — and
+// returns the field.
+func parseAsRuntime(rt reflect.Type, fd rotini.FlagDef, text string) (reflect.Value, error) {
+	flags := reflect.StructOf([]reflect.StructField{{Name: "V", Type: rt, Tag: `rotini:"v"`}})
+	cmd := reflect.StructOf([]reflect.StructField{
+		{Name: "Flags", Type: flags},
+		{Name: "Arguments", Type: reflect.TypeFor[struct{}]()},
+	})
+	out := reflect.New(reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}}))
+	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{fd}}
+	if err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"--v=" + text}), out.Interface()); err != nil {
+		return reflect.Value{}, err
+	}
+	return out.Elem().Field(0).Field(0).Field(0), nil
+}
+
 // runtimeComplaint rephrases the runtime's error about the placeholder flag --v into one about
 // the value: `--v: "abc" is not a valid integer` loses its label, and a bound violation
-// `--v must be >= 1m0s (got 30s)` becomes `"30s" must be >= 1m0s`.
+// `--v must be >= 1m (got 30s)` becomes `"30s" must be >= 1m`.
 func runtimeComplaint(msg, value string) string {
 	if rest, ok := strings.CutPrefix(msg, "--v: "); ok {
 		return rest
@@ -338,12 +347,9 @@ func measuredValue(goType, text string) (float64, bool) {
 	if !ok || !measuredTypes[goType] {
 		return 0, false
 	}
-	flags := reflect.StructOf([]reflect.StructField{{Name: "V", Type: rt, Tag: `rotini:"v"`}})
-	cmd := reflect.StructOf([]reflect.StructField{{Name: "Flags", Type: flags}, {Name: "Arguments", Type: reflect.TypeFor[struct{}]()}})
-	out := reflect.New(reflect.StructOf([]reflect.StructField{{Name: "App", Type: cmd}}))
-	def := rotini.Definition{Name: "app", Handler: "App", Flags: []rotini.FlagDef{{Name: "v", Identifiers: []string{"--v"}, Type: goType}}}
-	if err := rotini.NewParser().Parse(rotini.NewContextFor(def, []string{"--v=" + text}), out.Interface()); err != nil {
+	v, err := parseAsRuntime(rt, rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: goType}, text)
+	if err != nil {
 		return 0, false
 	}
-	return float64(out.Elem().Field(0).Field(0).Field(0).Int()), true
+	return float64(v.Int()), true
 }

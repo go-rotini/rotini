@@ -147,7 +147,7 @@ func typedField(t reflect.Type, path []string, text string) (value any, list boo
 			return nil, false, fmt.Errorf("%s: %q is not an integer", strings.Join(path, "."), text)
 		}
 		return n, false, nil
-	case reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		n, err := strconv.ParseUint(text, 10, 64)
 		if err != nil {
 			return nil, false, fmt.Errorf("%s: %q is not a non-negative integer", strings.Join(path, "."), text)

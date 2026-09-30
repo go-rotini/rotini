@@ -8,7 +8,7 @@ import (
 )
 
 // Layout resolution: the conf's package targets → absolute output dirs, package
-// names, and import paths (pruning lives in prune.go, naming in naming.go).
+// names, and import paths (pruning lives in generate_prune.go, naming in generate_naming.go).
 
 // resolveLayout turns the defaulted conf package settings into absolute output directories,
 // package names and import paths.

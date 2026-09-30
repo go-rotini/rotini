@@ -29,7 +29,7 @@ type FieldPath string
 // pre-redacted for inputs the spec marks secret.
 type Provenance struct {
 	Layer string // the supplying layer's name: "defaults", "files", "env", "argv", "stdin", or custom
-	Raw   string // the supplied text ("" when non-textual, e.g. a decoded stdin document); "[redacted]" for secrets
+	Raw   string // the supplied text, a list's values joined with ", " whichever layer supplied it ("" when non-textual, e.g. a decoded stdin document); "[redacted]" for secrets
 }
 
 // Presence maps each field a layer actually supplied to its provenance. It is what makes
@@ -653,7 +653,7 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 		}
 		set[fieldPath(topName, "Flags", fieldName)] = Provenance{
 			Layer: layerName,
-			Raw:   redactValue(strings.Join(vals, ","), fd.Secret),
+			Raw:   redactValue(strings.Join(vals, ", "), fd.Secret),
 		}
 		if store.scopes[scope].flags == nil {
 			store.scopes[scope].flags = map[string][]string{}

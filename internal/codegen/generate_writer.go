@@ -3,7 +3,7 @@ package codegen
 // This file owns writing generated artifacts (Go files, doc pages, completion
 // scripts, seeds) through go-rotini/fs — atomic (temp file then rename, so an
 // interrupted pass never leaves a torn file) and parent-creating. Reading inputs
-// lives in reader.go.
+// lives in reconcile_reader.go.
 
 import (
 	"fmt"

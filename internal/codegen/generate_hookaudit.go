@@ -24,6 +24,10 @@ import (
 // This is the remaining gap, and it is reported where every other "you wrote something that
 // will not do what you meant" problem in rotini is: at generate time, with a file:line, as a
 // warning rather than an error, because an unused method is legal Go.
+//
+// The same pass makes a second check that also needs the author's code: a handler that
+// acquires a DIFFERENT command's generated inputs type (see wrongInputsTypes), which compiles
+// and then fails, or binds the wrong command, only when it runs.
 
 // auditedHooks are the hook names a near-miss is measured against.
 //
@@ -34,7 +38,8 @@ import (
 // helper names.
 var auditedHooks = []string{"CascadingPreRun", "PreRun", "PostRun", "CascadingPostRun"}
 
-// auditHooks reports methods on a handler type whose names are near-misses of a lifecycle hook.
+// auditHooks reports methods on a handler type whose names are near-misses of a lifecycle hook,
+// and calls that acquire another command's inputs type.
 // It is the last generate step: by then every stub this pass created exists and every orphan is
 // gone, so the audit sees exactly the files the author will build.
 //
@@ -81,10 +86,10 @@ func (p *program) auditHooks() error {
 		return nil
 	}
 
-	p.hookWarnings = nearMissHooks(fset, files, handlerTypes, p.module.root)
+	p.auditWarnings = nearMissHooks(fset, files, handlerTypes, p.module.root)
 
 	expected, known := p.inputsTypeExpectations()
-	p.hookWarnings = append(p.hookWarnings, wrongInputsTypes(fset, files, expected, known, p.module.root)...)
+	p.auditWarnings = append(p.auditWarnings, wrongInputsTypes(fset, files, expected, known, p.module.root)...)
 	return nil
 }
 
@@ -282,12 +287,7 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 		hook[h] = true
 	}
 
-	type finding struct {
-		file string
-		line int
-		msg  string
-	}
-	var found []finding
+	var found []auditFinding
 
 	for _, f := range files {
 		for _, d := range f.Decls {
@@ -307,31 +307,16 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 			if match == "" {
 				continue
 			}
-			pos := fset.Position(fd.Name.Pos())
-			rel := pos.Filename
-			if r, err := filepath.Rel(moduleRoot, pos.Filename); err == nil {
-				rel = filepath.ToSlash(r)
-			}
-			msg := fmt.Sprintf(
+			at := findingAt(fset, fd.Name.Pos(), moduleRoot)
+			at.msg = didYouMean(fmt.Sprintf(
 				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run — rotini.Default%s is what supplies %s",
-				rel, pos.Line, name, recv, match, match,
-			)
-			found = append(found, finding{file: rel, line: pos.Line, msg: didYouMean(msg, name, auditedHooks)})
+				at.file, at.line, name, recv, match, match,
+			), name, auditedHooks)
+			found = append(found, at)
 		}
 	}
 
-	sort.Slice(found, func(i, j int) bool {
-		if found[i].file != found[j].file {
-			return found[i].file < found[j].file
-		}
-		return found[i].line < found[j].line
-	})
-
-	warnings := make([]error, 0, len(found))
-	for _, f := range found {
-		warnings = append(warnings, fmt.Errorf("%s", f.msg))
-	}
-	return warnings
+	return sortedWarnings(found)
 }
 
 // receiverTypeName is the bare type name of a method receiver: T, *T, or a generic T[…].
@@ -394,12 +379,7 @@ func (p *program) inputsTypeExpectations() (expected map[string]string, known ma
 // An unrecognized type argument is ignored on purpose: a hand-written handler package declares
 // its own struct (see the `handler:` seam), and that is a supported shape, not a mistake.
 func wrongInputsTypes(fset *token.FileSet, files map[string]*ast.File, expected map[string]string, known map[string]bool, moduleRoot string) []error {
-	type finding struct {
-		file string
-		line int
-		msg  string
-	}
-	var found []finding
+	var found []auditFinding
 
 	for _, f := range files {
 		for _, d := range f.Decls {
@@ -421,21 +401,42 @@ func wrongInputsTypes(fset *token.FileSet, files map[string]*ast.File, expected 
 				if !ok || !collectFuncs[fn] || arg == want || !known[arg] {
 					return true
 				}
-				pos := fset.Position(call.Pos())
-				rel := pos.Filename
-				if r, err := filepath.Rel(moduleRoot, pos.Filename); err == nil {
-					rel = filepath.ToSlash(r)
-				}
-				found = append(found, finding{file: rel, line: pos.Line, msg: fmt.Sprintf(
+				at := findingAt(fset, call.Pos(), moduleRoot)
+				at.msg = fmt.Sprintf(
 					"%s:%d: %s in %s acquires %s, but this handler implements the command whose inputs are %s. "+
 						"An inputs type binds to the command whose hook is running, so another command's type "+
 						"reads THIS command's frame through the wrong shape — silently, when the two share a flag name",
-					rel, pos.Line, fn, recv, arg, want)})
+					at.file, at.line, fn, recv, arg, want)
+				found = append(found, at)
 				return true
 			})
 		}
 	}
 
+	return sortedWarnings(found)
+}
+
+// auditFinding is one thing the audit reports, placed by its module-relative file and line.
+type auditFinding struct {
+	file string
+	line int
+	msg  string
+}
+
+// findingAt places a finding at pos, naming the file relative to the module root so the
+// message reads the way the author's editor shows the path.
+func findingAt(fset *token.FileSet, pos token.Pos, moduleRoot string) auditFinding {
+	p := fset.Position(pos)
+	rel := p.Filename
+	if r, err := filepath.Rel(moduleRoot, p.Filename); err == nil {
+		rel = filepath.ToSlash(r)
+	}
+	return auditFinding{file: rel, line: p.Line}
+}
+
+// sortedWarnings orders findings by file then line, so a report reads top to bottom and is
+// stable across runs, and returns them as warnings.
+func sortedWarnings(found []auditFinding) []error {
 	sort.Slice(found, func(i, j int) bool {
 		if found[i].file != found[j].file {
 			return found[i].file < found[j].file

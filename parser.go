@@ -166,8 +166,15 @@ type ParseError struct {
 // Error renders the parse failure as a single, user-facing line.
 func (e *ParseError) Error() string { return e.Msg }
 
-// Unwrap exposes the category sentinel, so [CategoryOf] and errors.Is reach it.
-func (e *ParseError) Unwrap() error { return ErrUsage }
+// Unwrap exposes the category sentinel, so [CategoryOf] and errors.Is reach it: [ErrInternal]
+// for [ParseKindInternal] — the author's bug, not the user's — and [ErrUsage] for every other
+// kind.
+func (e *ParseError) Unwrap() error {
+	if e.Kind == ParseKindInternal {
+		return ErrInternal
+	}
+	return ErrUsage
+}
 
 // Parser is rotini's argv parser: given a resolved chain, it parses and validates the command
 // line against what those commands declare — GNU/POSIX grammar, typed coercion, enum and
@@ -421,6 +428,20 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 		}
 		return argv[i], i, nil
 	}
+}
+
+// flagTokenWidth reports how many words after argv[i] the flag token argv[i] takes as its value
+// on chain — the commands reached so far. It is the parser's own rule (consumeFlagToken, with
+// nothing recorded), so the command resolver and completion can never disagree with the parse
+// about which word is a flag's value: an optional value is never a separate word, a short
+// cluster's last flag can take the next one, and `--db.host h` takes h. An unknown or malformed
+// flag takes none; the parse reports it.
+func flagTokenWidth(chain []ResolvedCommand, argv []string, i int) int {
+	extra, err := consumeFlagToken(chain, argv[i], argv, i, func(int, FlagDef, string, string) error { return nil })
+	if err != nil {
+		return 0
+	}
+	return extra
 }
 
 // consumeFlagToken parses one flag token from argv[i], records it, and reports how many extra
@@ -1200,7 +1221,7 @@ func resolveFlagValue(fd FlagDef, label, value string, stdin io.Reader) (string,
 		if err != nil {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  fmt.Sprintf("%s: cannot read %q: %v", label, value, err),
+				Msg:  label + ": " + unreadableFile(value[1:], err),
 				Flag: label, Token: value,
 			}
 		}
@@ -1208,7 +1229,7 @@ func resolveFlagValue(fd FlagDef, label, value string, stdin io.Reader) (string,
 	case value == "-" && slices.Contains(fd.From, "stdin"):
 		data, err := readStdin(stdin)
 		if err != nil {
-			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: read stdin: %v", label, err), Flag: label}
+			return "", &ParseError{Kind: ParseKindInvalidValue, Msg: label + ": could not read stdin", Flag: label}
 		}
 		if len(data) == 0 {
 			return "", &ParseError{
@@ -1220,6 +1241,22 @@ func resolveFlagValue(fd FlagDef, label, value string, stdin io.Reader) (string,
 		return trimAcquiredPayload(string(data)), nil
 	}
 	return value, nil
+}
+
+// unreadableFile says why an `@file` value could not be read, in rotini's words: the OS error
+// text is the platform's, carries a syscall name ("open …: permission denied") the user did
+// not ask about, and differs by OS. The same rule checkPathExists follows.
+func unreadableFile(path string, err error) string {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return fmt.Sprintf("no such file: %q", path)
+	case errors.Is(err, fs.ErrPermission):
+		return fmt.Sprintf("permission denied reading %q", path)
+	}
+	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
+		return fmt.Sprintf("%q is a directory, not a file", path)
+	}
+	return fmt.Sprintf("cannot read %q", path)
 }
 
 // isShortCluster reports whether name is a candidate POSIX short-flag cluster: a single-dash
@@ -1237,7 +1274,7 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
 		if !ok {
-			return 0, &ParseError{Kind: ParseKindUnknownFlag, Msg: fmt.Sprintf("unknown flag %q", short), Flag: short, Token: short}
+			return 0, &ParseError{Kind: ParseKindUnknownFlag, Msg: fmt.Sprintf("unknown flag %q", short), Flag: short, Token: short, Candidates: chainFlagIdentifiers(chain)}
 		}
 		if fdef.Type == "bool" || fdef.Type == "count" {
 			v := "true"
@@ -1546,7 +1583,7 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef) error {
 			switch {
 			case def.DottedKeys:
 				if err := coerceMapDotted(v.Field(i), raw); err != nil {
-					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, def.Secret)), Flag: label}
+					return coerceFailure(label, label, err, def.Secret)
 				}
 				continue
 			case isObjectFlag(def):
@@ -1566,7 +1603,7 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef) error {
 			raw = canonicalEnum(def.Enum, raw)
 		}
 		if err := coerceWithLayout(v.Field(i), raw, def.Layout); err != nil {
-			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, def.Secret)), Flag: label}
+			return coerceFailure(label, label, err, def.Secret)
 		}
 	}
 	return nil
@@ -1615,14 +1652,14 @@ func bindArgs(v reflect.Value, args []string, defs []ArgDef) error {
 		}
 		if f.Kind() == reflect.Slice { // a slice argument is variadic, whatever its element type
 			if err := coerceWithLayout(f, canonicalFor(def, args[min(idx, len(args)):]), def.Layout); err != nil {
-				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, argSecret(defs, i)))}
+				return coerceFailure(label, "", err, argSecret(defs, i))
 			}
 			idx = len(args)
 			continue
 		}
 		if idx < len(args) {
 			if err := coerceWithLayout(f, canonicalFor(def, args[idx:idx+1]), def.Layout); err != nil {
-				return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, argSecret(defs, i)))}
+				return coerceFailure(label, "", err, argSecret(defs, i))
 			}
 			idx++
 		}
@@ -1789,7 +1826,24 @@ func coerce(f reflect.Value, raw []string) error {
 // unsupportedType is the loud refusal for a field type coerce has no rule for: silence would
 // zero the field and hide a codegen mistake. The fix is to give the type an UnmarshalText.
 func unsupportedType(t reflect.Type) error {
-	return fmt.Errorf("cannot parse into %s — the type must implement encoding.TextUnmarshaler", t)
+	return authorMistake(fmt.Sprintf("cannot parse into %s — the type must implement encoding.TextUnmarshaler", t))
+}
+
+// authorMistake is a coercion failure no value could have avoided: the field's TYPE is wrong for
+// what the Definition declares. It is the program author's bug, so it is reported as one — an
+// internal error, named as rotini's — rather than as the end user's invalid value.
+type authorMistake string
+
+func (e authorMistake) Error() string { return string(e) }
+
+// coerceFailure is the error for a value that could not be coerced into its field: the user's
+// invalid value, or — for an [authorMistake] — the program's bug. label names the input as the
+// user wrote it; flag is the flag label, "" for an argument.
+func coerceFailure(label, flag string, err error, secret bool) *ParseError {
+	if mistake, ok := errors.AsType[authorMistake](err); ok {
+		return &ParseError{Kind: ParseKindInternal, Msg: fmt.Sprintf("rotini: %s: %s", label, mistake), Flag: flag}
+	}
+	return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, secret)), Flag: flag}
 }
 
 // coerceSlice fills a slice field from the raw values — one per repeated flag occurrence, or
@@ -1857,7 +1911,7 @@ func notValid(value, typeName string) error {
 func coerceMapDotted(f reflect.Value, raw []string) error {
 	m := map[string]any{}
 	if !reflect.TypeFor[map[string]any]().AssignableTo(f.Type()) {
-		return fmt.Errorf("dotted keys need a map[string]any flag, not %s", f.Type())
+		return authorMistake(fmt.Sprintf("dotted keys need a map[string]any flag, not %s", f.Type()))
 	}
 	for _, pair := range raw {
 		k, v, ok := strings.Cut(pair, "=")
@@ -1890,7 +1944,8 @@ func coerceMapDotted(f reflect.Value, raw []string) error {
 func coerceMap(f reflect.Value, raw []string) error {
 	kt := f.Type().Key()
 	if kt.Kind() != reflect.String {
-		return nil // only string-keyed maps are supported
+		// Silence would leave the field zeroed as though nothing were supplied.
+		return authorMistake(fmt.Sprintf("cannot parse into %s — a map flag's keys must be strings", f.Type()))
 	}
 	et := f.Type().Elem()
 	m := reflect.MakeMapWithSize(f.Type(), len(raw))

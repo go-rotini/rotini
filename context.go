@@ -7,6 +7,7 @@ import (
 	"io"
 	"maps"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -21,10 +22,18 @@ var ErrServiceNotFound = errors.New("rotini: service not found")
 // type. It unwraps to [ErrServiceNotFound]; recover the key with errors.As.
 type ServiceError struct {
 	Key string // the registry key that was requested
+
+	// got and want are the bound value's type and the requested one, when the key IS bound —
+	// to the wrong type. Both empty: nothing is bound.
+	got, want string
 }
 
-// Error renders the fault as a single line.
+// Error renders the fault as a single line, saying which of the two it is: an unbound key
+// sends the reader to the binding code, a wrong type to the declaration.
 func (e *ServiceError) Error() string {
+	if e.got != "" {
+		return fmt.Sprintf("rotini: the service under key %q is a %s, not the %s requested", e.Key, e.got, e.want)
+	}
 	return fmt.Sprintf("rotini: no service bound under key %q", e.Key)
 }
 
@@ -887,7 +896,11 @@ func (rtx *Context) bindMeta() (BindMeta, bool) {
 func (rtx *Context) MustGet[T any](key string) T {
 	v, ok := rtx.Get[T](key)
 	if !ok {
-		panic(&ServiceError{Key: key})
+		se := &ServiceError{Key: key}
+		if bound := rtx.Value(key); bound != nil {
+			se.got, se.want = fmt.Sprintf("%T", bound), reflect.TypeFor[T]().String()
+		}
+		panic(se)
 	}
 	return v
 }
