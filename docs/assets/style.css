@@ -1483,11 +1483,17 @@ h2 + .blog_post {
 
 .footer_content {
   border: 1px solid var(--border);
-  /* 
-    TODO: eventually the footer content will be added to and the 400px top padding can be replaced with 20px top padding
-    For now this allows the "content" menu headings to work for the bottom heading by having enough space on the screen
-  */
-  padding: 400px 0px 10px 0px;
+  padding: 20px;
+}
+
+/* The companion-CLI demo (docs/vhs/rotini.tape). It always spans the footer box exactly, so it
+   follows the width preference and the window; it is recorded at the largest container width,
+   so it only ever scales down. */
+.footer_demo {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
 }
 
 .footer_subcontent {

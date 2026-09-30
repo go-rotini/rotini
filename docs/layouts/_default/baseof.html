@@ -5,7 +5,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>{{ if not .IsHome }}{{ .Title }} · {{ end }}{{ .Site.Title }}</title>
-  <link rel="stylesheet" href="{{ "style.css" | relURL }}">
+  {{- /* Fingerprinted, so a changed stylesheet gets a new URL and no browser keeps an old copy. */}}
+  {{- $css := resources.Get "style.css" | fingerprint }}
+  <link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
   <link rel="alternate" type="application/rss+xml" title="rotini blog" href="/blog/rss.xml">
   {{ range .Site.RegularPages }}
   <link rel="prefetch" href="{{ .RelPermalink }}">
