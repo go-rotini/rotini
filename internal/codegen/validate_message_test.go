@@ -194,7 +194,7 @@ func TestHumanizeSchemaError_patternQuotesExamples(t *testing.T) {
 			`"$ref" must look like "DB" or "#/schemas/DB"`},
 		{jsonschema.ValidationError{Keyword: "pattern", InstanceLocation: "/command/flags/0/identifiers/1",
 			KeywordLocation: "#/definitions/FlagInput/properties/identifiers/items/pattern"},
-			`"identifiers" item 1 must look like "-o" or "--output"`},
+			`"identifiers" item 1 must look like "-o", "--output" or "--dry-run" — one or two dashes, then a letter, then letters, digits, - or _. No dots: --db.host is how a user sets field host of an object flag --db (declare --db with $ref to a named object schema), so a declared --db.host would compete with it; to name a flag after a nested setting, write --db-host`},
 		{jsonschema.ValidationError{Keyword: "pattern", InstanceLocation: "/generate/packages/0/package",
 			KeywordLocation: "#/definitions/PackageConfig/allOf/0/properties/package/pattern"},
 			`"package" must look like "app"`},
@@ -252,6 +252,24 @@ func TestHumanizeSchemaError_article(t *testing.T) {
 		ve := jsonschema.ValidationError{Keyword: "false", InstanceLocation: "/command/x", KeywordLocation: loc}
 		if got := humanizeSchemaError(&ve); got != want {
 			t.Errorf("got %q, want %q", got, want)
+		}
+	}
+}
+
+// `required` is a list on an object schema and a boolean on an input; the type error for either
+// mix-up says which form belongs where, from the key's own x-hint.
+func TestHumanizeSchemaError_typeHint(t *testing.T) {
+	for loc, want := range map[string]string{
+		"#/definitions/InputSchema/allOf/1/properties/required/type": `"required" must be of type boolean — on an input, required is true or false; a list of property names (required: [host]) belongs on an object schema under schemas`,
+		"#/definitions/Schema/allOf/1/properties/required/type":      `"required" must be of type array — on an object schema, required lists property names (required: [host]); true or false belongs on an input's own schema (flags, arguments, env, config, stdin)`,
+	} {
+		typ := "boolean"
+		if strings.Contains(loc, "/Schema/") {
+			typ = "array"
+		}
+		ve := jsonschema.ValidationError{Keyword: "type", InstanceLocation: "/x/required", KeywordLocation: loc, Message: "value is not of type " + typ}
+		if got := humanizeSchemaError(&ve); got != want {
+			t.Errorf("got  %q\nwant %q", got, want)
 		}
 	}
 }

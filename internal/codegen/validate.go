@@ -201,15 +201,25 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 		// without saying of what.
 		if key := pointerLeaf(ve.InstanceLocation); key != "" {
 			if want, ok := strings.CutPrefix(ve.Message, "value is not of type "); ok {
-				return fmt.Sprintf("%q must be of type %s", key, want)
+				msg := fmt.Sprintf("%q must be of type %s", key, want)
+				if hint := schemaHint(strings.TrimSuffix(ve.KeywordLocation, "/type")); hint != "" {
+					msg += " — " + hint
+				}
+				return msg
 			}
 		}
 	case "pattern":
 		// A regex is how the schema checks a value, not how anyone should learn what to write.
 		// Every patterned key in rotini's schemas declares `examples` (a guard keeps it so), and
 		// those are what the reader needs.
-		if ex := schemaExamples(strings.TrimSuffix(ve.KeywordLocation, "/pattern")); len(ex) > 0 {
-			return fmt.Sprintf("%s must look like %s", patternSubject(ve.InstanceLocation), quotedOrList(ex))
+		node := strings.TrimSuffix(ve.KeywordLocation, "/pattern")
+		if ex := schemaExamples(node); len(ex) > 0 {
+			msg := fmt.Sprintf("%s must look like %s", patternSubject(ve.InstanceLocation), quotedOrList(ex))
+			// A key whose likeliest mistake needs more than examples says so in its schema.
+			if hint := schemaHint(node); hint != "" {
+				msg += " — " + hint
+			}
+			return msg
 		}
 	case "anyOf":
 		// Every branch failed. In rotini's schemas an anyOf is a choice between required
@@ -251,9 +261,36 @@ var schemaDocuments = sync.OnceValue(func() []any {
 	return docs
 })
 
+// schemaHint returns the rotini-specific `x-hint` of the schema node at a keyword location: the
+// explanation a pattern failure adds when examples alone would leave the reader guessing.
+func schemaHint(location string) string {
+	if m, ok := schemaNode(location).(map[string]any); ok {
+		if h, ok := m["x-hint"].(string); ok {
+			return h
+		}
+	}
+	return ""
+}
+
 // schemaExamples returns the `examples` of the schema node at a keyword location
 // ("#/definitions/BaseSchema/properties/$ref"), looked up in either embedded schema.
 func schemaExamples(location string) []string {
+	m, ok := schemaNode(location).(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, _ := m["examples"].([]any)
+	out := make([]string, 0, len(raw))
+	for _, e := range raw {
+		if s, ok := e.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// schemaNode resolves a keyword location in whichever embedded schema has it.
+func schemaNode(location string) any {
 	path := strings.Split(strings.TrimPrefix(location, "#/"), "/")
 	for _, doc := range schemaDocuments() {
 		node := doc
@@ -264,7 +301,7 @@ func schemaExamples(location string) []string {
 				node = n[seg]
 			case []any:
 				i, err := strconv.Atoi(seg)
-				if err != nil || i >= len(n) {
+				if err != nil || i < 0 || i >= len(n) {
 					node = nil
 				} else {
 					node = n[i]
@@ -273,16 +310,8 @@ func schemaExamples(location string) []string {
 				node = nil
 			}
 		}
-		if m, ok := node.(map[string]any); ok {
-			if raw, ok := m["examples"].([]any); ok {
-				out := make([]string, 0, len(raw))
-				for _, e := range raw {
-					if s, ok := e.(string); ok {
-						out = append(out, s)
-					}
-				}
-				return out
-			}
+		if node != nil {
+			return node
 		}
 	}
 	return nil

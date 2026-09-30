@@ -442,6 +442,7 @@
           "properties": {
             "required": {
               "type": "array",
+              "x-hint": "on an object schema, required lists property names (required: [host]); true or false belongs on an input's own schema (flags, arguments, env, config, stdin)",
               "description": "Required property names for object schemas (standard JSON Schema semantics).",
               "items": {
                 "type": "string"
@@ -462,6 +463,7 @@
           "properties": {
             "required": {
               "type": "boolean",
+              "x-hint": "on an input, required is true or false; a list of property names (required: [host]) belongs on an object schema under schemas",
               "default": false,
               "description": "When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean \u2014 unlike the string-array 'required' on Schema."
             },
@@ -643,7 +645,7 @@
           "minItems": 1,
           "items": {
             "type": "string",
-            "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$", "examples": ["-o", "--output"]
+            "pattern": "^-{1,2}[a-zA-Z][a-zA-Z0-9_-]*$", "examples": ["-o", "--output", "--dry-run"], "x-hint": "one or two dashes, then a letter, then letters, digits, - or _. No dots: --db.host is how a user sets field host of an object flag --db (declare --db with $ref to a named object schema), so a declared --db.host would compete with it; to name a flag after a nested setting, write --db-host"
           }
         },
         "deprecated_identifiers": {
