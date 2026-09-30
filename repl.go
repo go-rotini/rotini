@@ -60,8 +60,8 @@ type REPL struct {
 // rather than an end of session.
 //
 // A [REPL.WithLineReader] returns it to say "discard this line and prompt again"; the session
-// survives, which is what every interactive shell does and what the built-in loop could not
-// express before. chzyer/readline's ErrInterrupt maps onto it directly.
+// survives, which is what every interactive shell does. chzyer/readline's ErrInterrupt maps
+// onto it directly.
 //
 // It is NOT how a session ends. That is end of input ([ErrNotInteractive] or io.EOF), an exit
 // word, or the session context finishing.
@@ -69,7 +69,8 @@ var ErrInterrupted = errors.New("interrupted")
 
 // NewREPL returns a loop dispatching to program. Input and output default to the
 // program's own streams, so a REPL inherits whatever [Program.WithStdin] and
-// friends configured (including a test's buffers).
+// friends configured (including a test's buffers). A nil program yields a REPL whose
+// [REPL.Run] returns an internal error and whose [REPL.Complete] returns nil.
 func NewREPL(program *Program) *REPL {
 	r := &REPL{
 		program: program,
@@ -132,9 +133,8 @@ func (r *REPL) WithLineReader(fn func(ctx context.Context, prompt string) (strin
 
 // WithInterrupts makes a ^C cancel the RUNNING COMMAND instead of the session.
 //
-// This is the defect the seam exists to fix. Without it the REPL runs every line on the
-// session's own context, so an interrupt that should abort one command tears down the shell —
-// and in every interactive tool anyone has used (bash, python, psql, redis-cli) ^C returns you
+// Without it the REPL runs every line on the session's own context, so an interrupt that should
+// abort one command tears down the shell — and in every interactive tool anyone has used (bash, python, psql, redis-cli) ^C returns you
 // to the prompt. It is the most-pressed key in a REPL.
 //
 // **Send on a buffered channel, without blocking.** A receive cancels the line in flight;
@@ -218,11 +218,13 @@ func (r *REPL) Complete(line string, pos int) []string {
 	return out
 }
 
-// WithInput overrides the line source.
+// WithInput overrides the line source. A nil reader, with no [REPL.WithLineReader] installed,
+// makes [REPL.Run] return an error.
 func (r *REPL) WithInput(in io.Reader) *REPL { r.in = in; return r }
 
 // WithOutput overrides where the prompt and loop diagnostics are written. It does
-// NOT redirect command output, which goes to the program's own streams.
+// NOT redirect command output, which goes to the program's own streams. A nil writer writes
+// neither the prompt nor the [REPL.WithErrorEcho] echo.
 func (r *REPL) WithOutput(out io.Writer) *REPL { r.out = out; return r }
 
 // WithExitCommands replaces the words that end the loop (default exit, quit).
@@ -313,13 +315,12 @@ func (r *REPL) Run(ctx context.Context) error {
 // dispatch runs one line on its own cancellable context, watching for an interrupt only while
 // the command is actually running.
 //
-// The ordering is the whole design, and a background watcher got it wrong: it received an
-// interrupt from the channel and THEN took a lock to find the line to cancel, so a ^C pressed
-// at an empty prompt could win that race against the next line and kill a command the user
-// typed afterwards. Found by `-race -count=2`, which is the only reason it did not ship.
+// The ordering is the whole design. A single background watcher that received an interrupt and
+// THEN looked up the line to cancel would race: a ^C pressed at an empty prompt could win against
+// the next line and kill a command the user typed afterwards.
 //
-// So the window is explicit instead. Anything already pending when a line is submitted arrived
-// BEFORE the command existed and is dropped; only what arrives after it starts can cancel it.
+// So the window is explicit. Anything already pending when a line is submitted arrived BEFORE
+// the command existed and is dropped; only what arrives after it starts can cancel it.
 func (r *REPL) dispatch(ctx context.Context, argv []string) {
 	lineCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -355,6 +356,7 @@ func (r *REPL) promptText() string {
 	return r.prompt
 }
 
+// isExit reports whether word is one of the exit commands, ignoring case.
 func (r *REPL) isExit(word string) bool {
 	for _, e := range r.exits {
 		if strings.EqualFold(word, e) {
@@ -375,6 +377,7 @@ const (
 	readFailed                  // a real I/O failure
 )
 
+// classifyRead maps a line reader's error onto what the loop does next.
 func classifyRead(err error) readOutcome {
 	switch {
 	case err == nil:
@@ -455,6 +458,7 @@ func splitArgs(line string) []string {
 // them starts.
 type lineReader struct{ in io.ByteReader }
 
+// newLineReader wraps in, reading it directly when it is already an io.ByteReader.
 func newLineReader(in io.Reader) lineReader {
 	if br, ok := in.(io.ByteReader); ok {
 		return lineReader{in: br}
@@ -465,6 +469,7 @@ func newLineReader(in io.Reader) lineReader {
 // byteAtATime adapts an io.Reader to io.ByteReader without reading ahead.
 type byteAtATime struct{ r io.Reader }
 
+// ReadByte reads exactly one byte from the underlying reader.
 func (b byteAtATime) ReadByte() (byte, error) {
 	if b.r == nil {
 		return 0, io.EOF

@@ -36,14 +36,15 @@
 // generated file goes), and the module it is written into. The program's generate() method
 // runs the emit steps in order:
 //
-//	emit schemas → emit runtime → emit cmd file → emit feature pages →
+//	emit schemas → emit models file → emit cmd file → emit feature outputs →
 //	emit handler stubs → emit entrypoint → prune orphans → audit handler hooks
 //
 // The last step is the only one that READS the author's code rather than writing rotini's: it
 // reports a method on a handler type whose name is a near-miss of a lifecycle hook, the one way
-// a hook can go wrong that the generated `var _ rotini.Handlers` assertion cannot catch.
+// a hook can go wrong that the generated `var _ rotini.Handlers` assertion cannot catch, and a
+// handler that acquires another command's generated inputs type.
 //
 // Read program.generate() and you have read, top to bottom, exactly what `rotini generate`
-// does. The generate_* renderers (literals, schema codegen, templates, the runtime merge)
-// are the tools those steps call.
+// does. The generate_* renderers (literals, schema codegen, templates) are the tools those
+// steps call. The runtime is an ordinary imported library, never emitted.
 package codegen

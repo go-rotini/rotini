@@ -81,9 +81,9 @@ func canceledExitCode(ctx context.Context) int {
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithFunnel]
 //   - YOUR dependencies — [Program.Bind] for a key you name, [Program.With] with [Provide]
 //     for a type-checked one
-//   - rotini's own seams — [Program.WithVersion], [Program.WithParser],
-//     and the three the generated code handles for you,
-//     [Program.WithBindMeta], [Program.WithBinder] and [Program.WithHelp]
+//   - rotini's own seams — [Program.WithVersion], [Program.WithParser], [Program.WithBinder],
+//     and the two the generated code handles for you, [Program.WithBindMeta] and
+//     [Program.WithHelp]
 //   - replace a phase — [Program.WithResolver], [Program.WithLifecycle]
 //
 // A Program is reusable: [Program.Run] dispatches one invocation and returns instead of
@@ -132,7 +132,8 @@ type Program struct {
 
 // NewProgram wires a generated command tree and its aggregate handler set to the runtime.
 // handlers is any so the runtime need not import the generated package; dispatch resolves the
-// per-command handlers from it by the Handler names recorded in def.
+// per-command handlers from it by the Handler names recorded in def. A nil handlers value is
+// not rejected here; a run that reaches handler dispatch then fails with a [*WiringError].
 func NewProgram(def Definition, handlers any) *Program {
 	return &Program{
 		args:            os.Args[1:],
@@ -159,7 +160,8 @@ func (p *Program) WithStdin(r io.Reader) *Program {
 }
 
 // WithStdout overrides the program's standard output (default os.Stdout), where the runtime
-// writes help, completion output and usage. A nil writer is ignored.
+// writes completion candidates and the default funnel writes infos and successes. A nil writer
+// is ignored.
 func (p *Program) WithStdout(w io.Writer) *Program {
 	if w != nil {
 		p.stdout = w
@@ -205,11 +207,6 @@ func (p *Program) WithExit(fn func(int)) *Program {
 // [Context.Exit] would.
 //
 // Where the panic GOES is the separate [Program.WithPanicRecover] knob; the two compose.
-//
-// This was called WithPanicForward, which named the wrong thing: "forward" reads as
-// forwarding the panic onward, and forwarding the panic is what WithPanicRecover(false) does.
-// These are the options someone reaches for while debugging a crash, so a name that has to be
-// unlearned from its doc is worse than a long one.
 func (p *Program) WithTeardownOnPanic(enabled bool) *Program {
 	p.teardownOnPanic = enabled
 	return p
@@ -300,13 +297,11 @@ func (p *Program) WithSignals(sigs ...os.Signal) *Program {
 }
 
 // Option is one configuration step, in a form that composes. Every seam below is also a
-// method, and for a single step the method reads better; Option exists for the steps that
-// cannot be methods.
+// method, and for a single step the method reads better; Option exists for steps that are
+// values — passed around, collected into a slice, or grouped under one [Program.With].
 //
-// The case that forced it is the typed registry. Go does not allow type parameters on
-// methods, so a type-checked bind cannot be written as p.Provide[T](key, value) — it has to
-// take the program as an argument ([Key.Provide]), which ends the chain. [Provide] returns an
-// Option instead, and [Program.With] applies any number of them without breaking it.
+// The typed registry is the main user: [Provide] returns an Option binding a [Key]'s value, so
+// several type-checked binds sit together in one With call inside the chain.
 //
 // An Option is an ordinary function, so a program can carry its own:
 //
@@ -339,15 +334,9 @@ func (p *Program) With(opts ...Option) *Program {
 
 // ── rotini's own seams ──────────────────────────────────────────────────────.
 //
-// Everything in this block used to be a string key in the same registry [Program.Bind] writes
-// to. That made rotini's internals indistinguishable from the program's own services: the keys
-// were bare words ("parser", "version", "binder"), nothing reserved them, and every one was
-// read with a discarded comma-ok — so a name collision, or a wrong type, silently produced a
-// zero value instead of an error. The worst of it was reachable by accident: binding a
-// [Binder] built from an empty [BindMeta], the only way it could be written without knowing
-// about a key the user had never seen, turned the configuration-file channel off in silence.
-//
-// They are typed options now, and the registry belongs to the user alone.
+// These are typed options rather than registry entries so the registry belongs to the user
+// alone: a key the program chooses can never collide with one rotini reads, and a wrong type
+// is a compile error rather than a zero value that silently degrades an input channel.
 
 // WithBindMeta supplies the generated binding descriptor — the configuration sources, the
 // env prefix and the stdin schemas [Collect] reconciles from. The generated NewProgram calls
@@ -369,9 +358,8 @@ func (p *Program) WithBindMeta(meta BindMeta) *Program {
 //		return rotini.NewBinder(meta)
 //	})
 //
-// That signature is the point. The previous shape — bind a *Binder under a key — meant the
-// caller had to find the generated descriptor and pass it themselves, and a caller who did not
-// silently lost every configuration file the spec declared. A nil fn is ignored.
+// That signature is the point: a replacement binder starts from the descriptor, so it cannot
+// silently lose the configuration files the spec declared. A nil fn is ignored.
 func (p *Program) WithBinder(fn func(BindMeta) *Binder) *Program {
 	if fn != nil {
 		p.binderFn = fn
@@ -520,6 +508,9 @@ func (p *Program) WithFunnel(fn FunnelFunc) *Program {
 // passed to panic, Stack the goroutine stack captured at the recovery point. Error renders
 // Value alone, so default output stays one line; a funnel that wants the stack asks for it
 // with errors.As.
+//
+// It also carries the faults rotini detects rather than recovers — a [*WiringError], a resolver
+// failure — with the error as Value and a nil Stack, since nothing was unwound.
 type PanicError struct {
 	Value any
 	Stack []byte
@@ -553,6 +544,9 @@ func (e *PanicError) Unwrap() []error {
 // implement [Handlers]. It is a build-time bug surfaced at run time, always
 // [CategoryInternal], and names the offending command and method so a funnel need not match on
 // the message.
+//
+// Command and Handler are empty when the fault is not about one command — [NewProgram] was
+// given a nil handlers value.
 type WiringError struct {
 	Command string // the command whose handler wiring is broken
 	Handler string // the handler method name the Definition referenced
@@ -689,23 +683,13 @@ func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
 // decides the default signal trap.
 func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (int, error) {
 	if len(argv) > 0 && argv[0] == completeCommand {
-		rtx := p.newRunContext()
-		for _, c := range complete(p.def, argv[1:], p.handlers, rtx) {
-			fmt.Fprintln(p.stdout, c)
-		}
-		// The declarative hint, when the input being completed declares one, goes last:
-		// a generated script reads the final line and translates it into that shell's
-		// own path completion.
-		if d := completionHint(p.def, argv[1:]); d != "" {
-			fmt.Fprintln(p.stdout, d)
-		}
-		return 0, nil
+		return p.runComplete(argv[1:])
 	}
 
 	// Run context and signal trapping are independent axes: signalAuto traps iff the caller
 	// supplied no context, and WithSignals/WithoutSignalHandling override that.
 	ctx := runCtx
-	trap := !hasCtx // signalAuto: trap iff the caller supplied no context
+	trap := !hasCtx
 	switch p.signalMode {
 	case signalOff:
 		trap = false
@@ -723,29 +707,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	}
 
 	if trap {
-		sigs := p.signalSet
-		if len(sigs) == 0 {
-			sigs = trapSignals
-		}
-		sigCh := make(chan os.Signal, 2)
-		signal.Notify(sigCh, sigs...)
-		defer signal.Stop(sigCh)
-
-		done := make(chan struct{})
-		defer close(done)
-		go func() {
-			select {
-			case s := <-sigCh: // first signal → cancel with the signal's exit code; dispatch halts the lifecycle
-				cancel(exitCodeError{code: signalExitCode(s)})
-			case <-done:
-				return
-			}
-			select {
-			case <-sigCh: // second signal → force exit, skipping remaining teardown
-				p.exit(forceExitCode)
-			case <-done:
-			}
-		}()
+		defer p.installTrap(cancel)()
 	}
 
 	resolve := p.resolver
@@ -775,6 +737,54 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	}
 	rtx.chain = res.Chain
 	return p.dispatch(ctx, res.Chain, rtx)
+}
+
+// runComplete answers the hidden __complete entry the generated shell scripts call: one
+// candidate per line on stdout, for the words after it.
+func (p *Program) runComplete(words []string) (int, error) {
+	rtx := p.newRunContext()
+	for _, c := range complete(p.def, words, p.handlers, rtx) {
+		fmt.Fprintln(p.stdout, c)
+	}
+	// The declarative hint, when the input being completed declares one, goes last:
+	// a generated script reads the final line and translates it into that shell's
+	// own path completion.
+	if d := completionHint(p.def, words); d != "" {
+		fmt.Fprintln(p.stdout, d)
+	}
+	return 0, nil
+}
+
+// installTrap starts rotini's signal trap for one run and returns the function that removes
+// it. The first signal cancels the run through cancel, with the signal's exit code as the
+// cause, so dispatch halts the lifecycle and teardown runs; a second forces exit, skipping
+// what teardown remains.
+func (p *Program) installTrap(cancel context.CancelCauseFunc) (stop func()) {
+	sigs := p.signalSet
+	if len(sigs) == 0 {
+		sigs = trapSignals
+	}
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, sigs...)
+
+	done := make(chan struct{})
+	go func() {
+		select {
+		case s := <-sigCh:
+			cancel(exitCodeError{code: signalExitCode(s)})
+		case <-done:
+			return
+		}
+		select {
+		case <-sigCh:
+			p.exit(forceExitCode)
+		case <-done:
+		}
+	}()
+	return func() {
+		close(done)
+		signal.Stop(sigCh)
+	}
 }
 
 // internalUnlessTagged tags err [CategoryInternal] unless its producer already categorized it:
@@ -871,11 +881,46 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, out Outcome) {
 	}
 }
 
+// resolveHandlers asks the program's handler set for each frame's [Handlers], by the Handler
+// name the Definition recorded. A wiring failure is returned for the caller to route as a
+// fault, never panicked.
+func (p *Program) resolveHandlers(chain []ResolvedCommand) ([]Handlers, *WiringError) {
+	hv := reflect.ValueOf(p.handlers)
+	if !hv.IsValid() {
+		// reflect.ValueOf(nil) is the zero Value, whose MethodByName panics with a
+		// reflect-internal message; report it as wiring instead. The generated NewProgram takes
+		// an interface, so NewProgram(nil) compiles.
+		return nil, &WiringError{
+			Msg: "no handlers: NewProgram was given a nil handlers value",
+		}
+	}
+	handlers := make([]Handlers, len(chain))
+	for i, f := range chain {
+		m := hv.MethodByName(f.Handler)
+		if !m.IsValid() {
+			return nil, &WiringError{
+				Command: f.Name, Handler: f.Handler,
+				Msg: fmt.Sprintf("no handler for command %q (missing method %q)", f.Name, f.Handler),
+			}
+		}
+		out := m.Call(nil)
+		h, ok := reflect.TypeAssert[Handlers](out[0])
+		if !ok || h == nil {
+			return nil, &WiringError{
+				Command: f.Name, Handler: f.Handler,
+				Msg: fmt.Sprintf("handler %q does not implement Handlers", f.Handler),
+			}
+		}
+		handlers[i] = h
+	}
+	return handlers, nil
+}
+
 // dispatch resolves each command in the chain to its [Handlers], asks the lifecycle planner
 // for the step plan, and executes it as a balanced LIFO setup/teardown:
 //
-//   - Forward: each step's Do in plan order, halting the moment a hook calls HaltWithCode or
-//     Exit, panics, or a trapped signal cancels ctx.
+//   - Forward: each step's Do in plan order, halting the moment a hook calls Halt, HaltWith,
+//     HaltWithCode or Exit, panics, or ctx is canceled (by a trapped signal or the caller).
 //   - Unwind: the Undo of every step whose Do began, in reverse, to completion. A panic or
 //     HaltWithCode inside an Undo neither aborts the rest nor displaces the first failure; a
 //     hard Exit skips what remains, and so does a panic under WithTeardownOnPanic(false).
@@ -885,39 +930,10 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, out Outcome) {
 // exit code is the cancellation cause's or 0. That conversion happens only on the dispatch
 // goroutine, so rtx stays single-writer.
 func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (int, error) {
-	hv := reflect.ValueOf(p.handlers)
-	if !hv.IsValid() {
-		// A nil handlers value. reflect.ValueOf(nil) is the ZERO Value, and MethodByName on
-		// it panics with a reflect-internal message — so the promise one line below was
-		// broken for exactly this input, and the panic escaped Run rather than reaching the
-		// funnel. nil is the one thing a caller can pass that is not a wiring mistake it can
-		// see: the generated NewProgram takes an interface, so NewProgram(nil) compiles.
-		rtx.recordFault(asFault(&WiringError{
-			Msg: "no handlers: NewProgram was given a nil handlers value",
-		}))
+	handlers, werr := p.resolveHandlers(chain)
+	if werr != nil {
+		rtx.recordFault(asFault(werr))
 		return p.settle(ctx, rtx)
-	}
-	handlers := make([]Handlers, len(chain))
-	for i, f := range chain {
-		// A wiring failure is detected and routed as a fault, never panicked.
-		m := hv.MethodByName(f.Handler)
-		if !m.IsValid() {
-			rtx.recordFault(asFault(&WiringError{
-				Command: f.Name, Handler: f.Handler,
-				Msg: fmt.Sprintf("no handler for command %q (missing method %q)", f.Name, f.Handler),
-			}))
-			return p.settle(ctx, rtx)
-		}
-		out := m.Call(nil)
-		h, ok := reflect.TypeAssert[Handlers](out[0])
-		if !ok || h == nil {
-			rtx.recordFault(asFault(&WiringError{
-				Command: f.Name, Handler: f.Handler,
-				Msg: fmt.Sprintf("handler %q does not implement Handlers", f.Handler),
-			}))
-			return p.settle(ctx, rtx)
-		}
-		handlers[i] = h
 	}
 
 	// Wiring happened first, so a custom lifecycle orders already-resolved handlers and cannot
@@ -929,8 +945,8 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	steps := plan(chain, handlers)
 
 	// run wraps every hook so a panic leaves the lifecycle in control. The one combination not
-	// recovered is recover=false and forward=false, where the hook runs unguarded so the panic
-	// propagates with its original stack. panicValue holds the first panic when it will be
+	// recovered is panicRecover=false with teardownOnPanic=false, where the hook runs unguarded
+	// so the panic propagates with its original stack. panicValue holds the first panic when it will be
 	// re-panicked after teardown rather than funneled.
 	panicked := false
 	var panicValue any
@@ -986,7 +1002,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 		}
 	}
 
-	// recover=false, forward=true: the panic was caught only so teardown could run.
+	// panicRecover=false, teardownOnPanic=true: the panic was caught only so teardown could run.
 	if panicked && !p.panicRecover {
 		panic(panicValue)
 	}

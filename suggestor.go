@@ -254,6 +254,7 @@ func nearness(a, b string) float64 {
 	return 1 - float64(optimalStringAlignment(a, b))/float64(length)
 }
 
+// runeLength is the length of s in runes.
 func runeLength(s string) int { return len([]rune(s)) }
 
 // optimalStringAlignment returns the Optimal String Alignment distance (restricted

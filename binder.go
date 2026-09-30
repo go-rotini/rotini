@@ -80,7 +80,9 @@ func NewBinder(meta BindMeta) *Binder {
 // still enum-checked.
 //
 // It returns the first error: a [*ParseError] from the argv channel or a [*BindError] from the
-// others, both categorized and non-leaky, with the recon cause reachable via errors.As.
+// others, both categorized and non-leaky, with the recon cause reachable via errors.As — or a
+// [*WiringError] when a command declares config: inputs but the program was built without a
+// [BindMeta].
 func (b *Binder) Bind(rtx *Context, out any) error { return b.bind(rtx, out) }
 
 func (b *Binder) bind(rtx *Context, out any) error {
@@ -115,13 +117,7 @@ func (b *Binder) bind(rtx *Context, out any) error {
 	if anchor >= 0 {
 		store.span = &[2]int{anchor, anchor + v.NumField()}
 	}
-	if err := validate(chain, store); err != nil {
-		return err
-	}
-	if err := validateFlagGroups(chain, store); err != nil {
-		return err
-	}
-	if err := validateFlagDependencies(chain, store); err != nil {
+	if err := validateStore(chain, store); err != nil {
 		return err
 	}
 
@@ -159,6 +155,18 @@ func (b *Binder) bind(rtx *Context, out any) error {
 
 	// 5. stdin → the leaf command's typed payload. Stdin has exactly one consumer.
 	return b.fillStdin(rtx, v)
+}
+
+// validateStore runs the argv channel's declarative checks over a reconciled store — required,
+// enum and constraints, then flag groups, then flag dependencies — returning the first failure.
+func validateStore(chain []ResolvedCommand, store *parsedInputs) error {
+	if err := validate(chain, store); err != nil {
+		return err
+	}
+	if err := validateFlagGroups(chain, store); err != nil {
+		return err
+	}
+	return validateFlagDependencies(chain, store)
 }
 
 // fillStdin decodes piped stdin into the leaf command's Stdin payload field, per its
@@ -326,7 +334,7 @@ func readStdin(r io.Reader) ([]byte, error) {
 // config files. A flag present in no source keeps what the Parser bound, and argv-only flags
 // are untouched. Each reconciled value is written back into store so the deferred validate
 // pass sees it as present.
-func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv []string, store *parsedInputs, overrides map[string]string, offset int) error {
+func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv []string, store *parsedInputs, overrides map[string]string, anchor int) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
@@ -335,7 +343,7 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 		return err
 	}
 	srcs := make([]recon.Source, 0, 2+len(files))
-	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, argv, offset)), flagEnvSource(v, b.envPrefix))
+	srcs = append(srcs, recon.NewMapSource("flags", flagOverrides(v, chain, argv, anchor)), flagEnvSource(v, b.envPrefix))
 	srcs = append(srcs, files...)
 	reg, err := recon.New(recon.WithSources(srcs...))
 	if err != nil {
@@ -343,6 +351,9 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 	}
 	defer reg.Close()
 
+	if anchor < 0 {
+		return nil // a struct that does not fit the chain; checkFrameFit reports it
+	}
 	for i := range v.NumField() {
 		flags := commandFlags(v.Field(i))
 		if !flags.IsValid() {
@@ -350,10 +361,7 @@ func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv [
 		}
 		ft := flags.Type()
 		for j := range flags.NumField() {
-			if offset < 0 {
-				continue // a struct that does not fit the chain; checkFrameFit reports it
-			}
-			if err := reconcileFlag(reg, flags.Field(j), ft.Field(j), chain, store, offset+i); err != nil {
+			if err := reconcileFlag(reg, flags.Field(j), ft.Field(j), chain, store, anchor+i); err != nil {
 				return err
 			}
 		}
@@ -456,7 +464,7 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 		vals = canonicalEnum(def.Enum, vals)
 	}
 	// A fallback value the flag's type cannot hold is the user's error exactly as a bad argv
-	// value is. Ignoring it — as this once did — left `PORT=abc` binding port 0.
+	// value is; ignoring it would leave `PORT=abc` binding port 0.
 	if err := coerceFlagValues(field, def, vals); err != nil {
 		return nil, fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
 	}
@@ -659,16 +667,7 @@ func flagOverrides(v reflect.Value, chain []ResolvedCommand, argv []string, offs
 // setNested stores val at a dotted key path in m, creating nested maps as needed: recon walks
 // nested maps, so a flat "create.color" key would not resolve.
 func setNested(m map[string]any, key string, val any) {
-	segs := strings.Split(key, ".")
-	for _, seg := range segs[:len(segs)-1] {
-		next, ok := m[seg].(map[string]any)
-		if !ok {
-			next = map[string]any{}
-			m[seg] = next
-		}
-		m = next
-	}
-	m[segs[len(segs)-1]] = val
+	setObjectPath(m, strings.Split(key, "."), val, false)
 }
 
 // commandFlags returns the Flags sub-struct of a <Prefix>CommandInputs value, or an
@@ -1104,19 +1103,18 @@ func envSources(v reflect.Value, envPrefix string) []recon.Source {
 
 // spellings gives env and config inputs the value spellings flags accept, which recon's own
 // decode does not: a duration takes days and weeks (7d); a bool field takes yes/no, on/off, y/n
-// (see parseBool) — recon alone takes
-// only true/false/1/0, so CACHE=yes was "expected bool" on an env input while working as a
-// flag's fallback — and a time field with a layout (`type: date`, `layout:`) parses under it
-// rather than as RFC 3339. Only those fields' keys are touched: a string input whose value
-// happens to be "yes" keeps it.
+// (see parseBool), where recon alone takes only true/false/1/0; and a time field with a layout
+// (`type: date`, `layout:`) parses under it rather than as RFC 3339. Without it CACHE=yes would
+// be "expected bool" on an env input while working as a flag's fallback. Only those fields' keys
+// are touched: a string input whose value happens to be "yes" keeps it.
 type spellings struct {
 	recon.Source
 
 	keys valueKeys
 }
 
-// valueKeys maps the recon keys of an Env or Config struct's bool fields, and of its time
-// fields that declare a layout, to how their text is read.
+// valueKeys maps the recon keys of an Env or Config struct's bool fields, its duration fields,
+// and its time fields that declare a layout, to how their text is read.
 type valueKeys struct {
 	bools     map[string]bool
 	layouts   map[string]string
@@ -1406,11 +1404,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) e
 		}
 		val, found, err := fieldReg.Get(key)
 		if err != nil {
-			channel := channelEnv
-			if cfg != nil {
-				channel = channelConfig
-			}
-			return reconBind(channel, err)
+			return reconBind(channelOf(cfg), err)
 		}
 		if !found {
 			continue // only provided values are constraint-checked
@@ -1439,7 +1433,7 @@ func validateChannelStruct(s reflect.Value, reg *recon.Registry, cfg *cfgRegs) e
 	return nil
 }
 
-// channelOf names the channel validateChannelStruct is checking: config when it was handed the
+// channelOf names the channel an Env/Config pass is working on: config when it was handed the
 // config registries, env otherwise.
 func channelOf(cfg *cfgRegs) string {
 	if cfg != nil {
@@ -1457,8 +1451,8 @@ func channelEnum(tag reflect.StructTag) (enum []string, ignoreCase bool) {
 	return enum, tag.Get("ignorecase") == "true"
 }
 
-// checkChannelEnum is the env and config counterpart of the argv enum check in [validate].
-// Before it, an enum on an env or config input was advertised in help and never enforced.
+// checkChannelEnum is the env and config counterpart of the argv enum check in [validate], so an
+// enum advertised in help is enforced whichever channel supplied the value.
 func checkChannelEnum(channel, label string, enum []string, ignoreCase bool, vals []string, secret bool) error {
 	if len(enum) == 0 {
 		return nil
@@ -1507,51 +1501,25 @@ func canonicalizeField(f reflect.Value, enum []string) {
 func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 	var c Constraints
 	has := false
-	if v := tag.Get("min"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.Minimum, has = new(f), true
+	floatTag := func(name string, dst **float64) {
+		if f, err := strconv.ParseFloat(tag.Get(name), 64); err == nil {
+			*dst, has = new(f), true
 		}
 	}
-	if v := tag.Get("max"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.Maximum, has = new(f), true
+	intTag := func(name string, dst *int) {
+		if n, err := strconv.Atoi(tag.Get(name)); err == nil {
+			*dst, has = n, true
 		}
 	}
-	if v := tag.Get("xmin"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.ExclusiveMinimum, has = new(f), true
-		}
-	}
-	if v := tag.Get("xmax"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.ExclusiveMaximum, has = new(f), true
-		}
-	}
-	if v := tag.Get("multipleof"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			c.MultipleOf, has = new(f), true
-		}
-	}
-	if v := tag.Get("minlen"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.MinLength, has = n, true
-		}
-	}
-	if v := tag.Get("maxlen"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.MaxLength, has = n, true
-		}
-	}
-	if v := tag.Get("minitems"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.MinItems, has = n, true
-		}
-	}
-	if v := tag.Get("maxitems"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			c.MaxItems, has = n, true
-		}
-	}
+	floatTag("min", &c.Minimum)
+	floatTag("max", &c.Maximum)
+	floatTag("xmin", &c.ExclusiveMinimum)
+	floatTag("xmax", &c.ExclusiveMaximum)
+	floatTag("multipleof", &c.MultipleOf)
+	intTag("minlen", &c.MinLength)
+	intTag("maxlen", &c.MaxLength)
+	intTag("minitems", &c.MinItems)
+	intTag("maxitems", &c.MaxItems)
 	if v := tag.Get("pattern"); v != "" {
 		c.Pattern, has = v, true
 	}
@@ -1624,8 +1592,8 @@ const (
 // typed, categorized, non-leaky error a funnel can branch on.
 //
 // Error names the channel, the input, and what went wrong. The underlying recon, decode or OS
-// Cause stays reachable via errors.As but is deliberately kept out of the message, and values
-// are never echoed, so a secret cannot leak through one.
+// Cause stays reachable via errors.As but is deliberately kept out of the message, and the
+// value of an input marked secret is redacted, so a secret cannot leak through one.
 //
 // A bad value, a missing required input, or a malformed document the user supplied is
 // [CategoryUsage]; a registry build, schema compile, IO read, or codegen mismatch is
@@ -1644,7 +1612,8 @@ type BindError struct {
 	usage bool // true → CategoryUsage (ErrUsage); false → CategoryInternal
 }
 
-// Error names the channel and the input. Values are never echoed.
+// Error returns Msg: the channel, the input, and what went wrong. A secret input's value is
+// redacted.
 func (e *BindError) Error() string { return e.Msg }
 
 // Unwrap exposes the Cause and the category sentinel, so errors.Is/As reach both the original
@@ -1749,18 +1718,6 @@ func schemaDetail(err error) string {
 		return ve.Msg
 	}
 	return "does not match its schema"
-}
-
-// channelForStruct maps a generated channel sub-struct name to its [BindError] channel label.
-func channelForStruct(structName string) string {
-	switch structName {
-	case "Config":
-		return channelConfig
-	case "Stdin":
-		return channelStdin
-	default:
-		return channelEnv
-	}
 }
 
 // cleanType renders a recon target Go type for an end-user message, trimming a nullable

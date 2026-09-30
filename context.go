@@ -57,8 +57,8 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 //     and [Context.WithBinder] to set
 //
 // Inputs are NOT on this list. A handler reads them with [Collect], which takes the Context
-// rather than hanging off it, because parsing is opt-in: a CLI that wants raw argv binds
-// nothing and reads [Context.Argv].
+// rather than hanging off it, because parsing is opt-in: a CLI that wants raw argv never calls
+// it and reads [Context.Argv].
 //
 // The registry is the dependency-injection seam: bind a service with [Context.Bind] and
 // retrieve it with [Context.Get], [Context.MustGet] or the raw [Context.Value]. Bindings last
@@ -74,16 +74,17 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 // the run.
 //
 // A nil *Context is a caller bug, not a state to handle: the runtime always hands a real one
-// to every hook, and [NewContextFor] never returns nil, so every method here dereferences
-// rather than checking. That is the same rule [Program] follows, and for the same reason —
-// half these methods used to tolerate nil and half did not, which meant rtx.Chain() answered
-// while rtx.CommandPath() panicked, on three views of the same data. Tolerating it is the worse of
-// the two: a nil that reports "nothing recorded" or "no chain" hides the mistake and surfaces
-// it somewhere later, at a call that was not wrong.
+// to every hook, and [NewContextFor] never returns nil, so the methods a handler reads and
+// records through dereference rather than check. That is the same rule [Program] follows, and
+// for the same reason: a nil that reports "nothing recorded" or "no chain" hides the mistake
+// and surfaces it somewhere later, at a call that was not wrong. The standalone setters
+// ([Context.WithVersion] and its siblings) are the exception — on a nil Context they do nothing
+// and return nil.
 //
 // rotini's own entry points that ACCEPT a Context from a caller — [Deprecations], [Collect]
-// and the per-channel functions — still check it, and report a nil one as an error rather than
-// panicking. The guard belongs at the boundary, not on every method behind it.
+// and the per-channel functions — still check it: [Collect] and the per-channel functions
+// report a nil one as an error, and Deprecations reports none. The guard belongs at the
+// boundary, not on every method behind it.
 type Context struct {
 	mu sync.RWMutex
 
@@ -119,7 +120,7 @@ type Context struct {
 	exitNow     bool              // hard Exit: skip remaining teardown too
 	funnelStage bool              // the funnel is executing: Exit overrides, HaltWithCode is a no-op
 	infos       []string          // the five outcome channels, all private: they surface
-	recorded    []error           // only as the slices handed to the funnel. faults are
+	errs        []error           // only as the slices handed to the funnel. faults are
 	warnings    []error           // the lifecycle's to capture, never a handler's to record.
 	successes   []string
 	faults      []*PanicError
@@ -139,11 +140,11 @@ type Context struct {
 	help     HelpFunc
 	parser   *Parser
 
-	// acquired is stdin as the flag channel saw it: read once, the first time a `from: [stdin]`
+	// flagStdinMemo is stdin as the flag channel saw it: read once, the first time a `from: [stdin]`
 	// flag's "-" asks for it, and replayed to every later parse of the same run. Parsing argv
 	// resolves that sentinel, and argv is parsed more than once in a run — the generated --help
 	// check, a parent collecting its own inputs, Collect itself — while stdin can be read once.
-	acquired *stdinMemo
+	flagStdinMemo *stdinMemo
 }
 
 // stdinMemo reads a stream to EOF once and replays it.
@@ -161,10 +162,10 @@ func (rtx *Context) flagStdin() io.Reader {
 	if rtx.Stdin == nil {
 		return nil
 	}
-	if rtx.acquired == nil || rtx.acquired.src != rtx.Stdin {
-		rtx.acquired = &stdinMemo{src: rtx.Stdin}
+	if rtx.flagStdinMemo == nil || rtx.flagStdinMemo.src != rtx.Stdin {
+		rtx.flagStdinMemo = &stdinMemo{src: rtx.Stdin}
 	}
-	return &memoReader{m: rtx.acquired}
+	return &memoReader{m: rtx.flagStdinMemo}
 }
 
 type memoReader struct {
@@ -264,11 +265,9 @@ func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 // [Binder] read it to bind inputs against the command whose handler ran.
 //
 // The slice is a COPY, so reordering, reslicing or replacing a frame is a caller's own
-// business and cannot reach the run. It used to be the live slice with a doc asking callers to
-// treat it as read-only, which is a request rather than a guarantee: one `chain[1].Name = …`
-// silently rewrote [Context.CommandPath], [Context.Command], the binder's frame alignment and
-// configuration-file scoping for the rest of the run. Every other internal slice the Context
-// hands out — the outcome channels — has always been copied for the same reason.
+// business and cannot reach the run — [Context.CommandPath], [Context.Command], the binder's
+// frame alignment and configuration-file scoping all read the run's own chain. The outcome
+// channels are copied for the same reason.
 //
 // The copy is one level deep, which is the boundary that exists to defend. A frame's Flags,
 // Arguments and Commands are the [Definition]'s own slices, shared program-wide and read-only
@@ -313,10 +312,8 @@ const frameUnset = -1
 //	db's CascadingPostRun                db
 //	mig's CascadingPostRun               mig
 //
-// A cascading hook had no way to answer "which command am I?" before this existed, which is why
-// an inputs struct had to be aligned by counting fields against the chain, and why a composed
-// child's cascading hook could not read its own flags at all. [Collect] now anchors on this
-// frame, so it is correct in every hook.
+// [Collect] anchors an inputs struct on this frame, which is what makes it correct in every
+// hook — including a composed child's cascading hook reading its own flags.
 //
 // Outside a lifecycle step — a Context from [NewContextFor], or one reaching a funnel after the
 // run has settled — there is no hook, and Frame reports the leaf.
@@ -586,17 +583,7 @@ func (rtx *Context) RecordInfo(msg string) {
 
 // copyInfos snapshots the recorded infos, in recording order.
 func (rtx *Context) copyInfos() []string {
-	if rtx == nil {
-		return nil
-	}
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.infos) == 0 {
-		return nil
-	}
-	out := make([]string, len(rtx.infos))
-	copy(out, rtx.infos)
-	return out
+	return snapshot(rtx, func(c *Context) []string { return c.infos })
 }
 
 // RecordError records err as one of this run's errors — the end-user's own failures. It
@@ -624,22 +611,12 @@ func (rtx *Context) RecordError(err error) {
 	}
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
-	rtx.recorded = append(rtx.recorded, err)
+	rtx.errs = append(rtx.errs, err)
 }
 
 // copyErrors snapshots the recorded errors, in recording order.
 func (rtx *Context) copyErrors() []error {
-	if rtx == nil {
-		return nil
-	}
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.recorded) == 0 {
-		return nil
-	}
-	out := make([]error, len(rtx.recorded))
-	copy(out, rtx.recorded)
-	return out
+	return snapshot(rtx, func(c *Context) []error { return c.errs })
 }
 
 // RecordWarning records warn as a non-fatal warning of this run — a deprecation, a fallback,
@@ -677,47 +654,31 @@ func (rtx *Context) RecordSuccess(msg string) {
 
 // copyWarnings snapshots the recorded warnings, in recording order.
 func (rtx *Context) copyWarnings() []error {
-	if rtx == nil {
-		return nil
-	}
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.warnings) == 0 {
-		return nil
-	}
-	out := make([]error, len(rtx.warnings))
-	copy(out, rtx.warnings)
-	return out
+	return snapshot(rtx, func(c *Context) []error { return c.warnings })
 }
 
 // copySuccesses snapshots the recorded successes, in recording order.
 func (rtx *Context) copySuccesses() []string {
-	if rtx == nil {
-		return nil
-	}
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.successes) == 0 {
-		return nil
-	}
-	out := make([]string, len(rtx.successes))
-	copy(out, rtx.successes)
-	return out
+	return snapshot(rtx, func(c *Context) []string { return c.successes })
 }
 
 // copyFaults snapshots the captured faults, in capture order.
 func (rtx *Context) copyFaults() []*PanicError {
+	return snapshot(rtx, func(c *Context) []*PanicError { return c.faults })
+}
+
+// snapshot copies one outcome channel under the read lock, returning nil for an empty channel
+// or a nil Context.
+func snapshot[T any](rtx *Context, channel func(*Context) []T) []T {
 	if rtx == nil {
 		return nil
 	}
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
-	if len(rtx.faults) == 0 {
-		return nil
+	if s := channel(rtx); len(s) > 0 {
+		return slices.Clone(s)
 	}
-	out := make([]*PanicError, len(rtx.faults))
-	copy(out, rtx.faults)
-	return out
+	return nil
 }
 
 // Failed reports whether this invocation has recorded an error or suffered a fault SO FAR.
@@ -748,7 +709,7 @@ func (rtx *Context) copyFaults() []*PanicError {
 func (rtx *Context) Failed() bool {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
-	return len(rtx.recorded) > 0 || len(rtx.faults) > 0
+	return len(rtx.errs) > 0 || len(rtx.faults) > 0
 }
 
 // recordFault appends a recovered panic or detected fault. Unexported on purpose: faults are
@@ -766,7 +727,7 @@ func (rtx *Context) recordFault(pe *PanicError) {
 // or the bound value is not a T. It never panics; use [Context.MustGet] to route a miss
 // through the funnel instead of handling it inline, or a typed [Key], which supplies T for you.
 //
-//	parser := rtx.Parser()
+//	store, ok := rtx.Get[Store]("store")
 func (rtx *Context) Get[T any](key string) (T, bool) {
 	v, ok := rtx.Value(key).(T)
 	return v, ok
@@ -780,8 +741,8 @@ func (rtx *Context) Get[T any](key string) (T, bool) {
 //
 // A handler should not need any of them, and each says so, because a grouping comment in the
 // source is not what a reader sees: `go doc Context.WithParser` prints that method's own lines
-// and nothing else. The six sit in the same autocomplete list as [Context.Stdout], which is the
-// cost of the single vocabulary C1 bought, so each one carries the scope itself.
+// and nothing else. The five sit in the same autocomplete list as [Context.Stdout], which is the
+// cost of sharing one vocabulary with the Program, so each one carries the scope itself.
 
 // WithBindMeta supplies the generated descriptor [Collect] reconciles from. See
 // [Program.WithBindMeta].
@@ -906,7 +867,12 @@ func (rtx *Context) Parser() *Parser {
 
 // bindMeta is the generated descriptor for this run, and whether the program supplied one.
 func (rtx *Context) bindMeta() (BindMeta, bool) {
-	if rtx == nil || rtx.meta == nil {
+	if rtx == nil {
+		return BindMeta{}, false
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if rtx.meta == nil {
 		return BindMeta{}, false
 	}
 	return *rtx.meta, true
@@ -917,7 +883,7 @@ func (rtx *Context) bindMeta() (BindMeta, bool) {
 // routes it through the funnel, so a handler that cannot run without a service reaches for
 // MustGet rather than handling a miss inline.
 //
-//	parser := rtx.Parser()
+//	store := rtx.MustGet[Store]("store")
 func (rtx *Context) MustGet[T any](key string) T {
 	v, ok := rtx.Get[T](key)
 	if !ok {

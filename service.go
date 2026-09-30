@@ -63,6 +63,7 @@ type Service struct {
 	timeout  time.Duration
 }
 
+// serviceWorker is one named worker registered with [Service.Go].
 type serviceWorker struct {
 	name string
 	fn   func(context.Context) error
@@ -163,9 +164,7 @@ func (s *Service) Run(ctx context.Context) error {
 func runWorker(ctx context.Context, w serviceWorker) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			stack := make([]byte, 8192)
-			stack = stack[:runtime.Stack(stack, false)]
-			err = &PanicError{Value: r, Stack: stack}
+			err = recoveredPanic(r)
 		}
 	}()
 	if err := w.fn(ctx); err != nil && !contextEnded(err) {
@@ -175,8 +174,8 @@ func runWorker(ctx context.Context, w serviceWorker) (err error) {
 }
 
 // contextEnded reports whether err is just the context saying it is over. Cancellation and a
-// deadline are the same answer to a worker: stop. Treating only the first as graceful made a
-// bounded run fail for writing `return ctx.Err()`, which is the idiomatic thing to write.
+// deadline are the same answer to a worker: stop. Both count as graceful so that a bounded run
+// does not fail for writing `return ctx.Err()`, which is the idiomatic thing to write.
 func contextEnded(err error) bool {
 	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
@@ -198,6 +197,14 @@ func (s *Service) await(done <-chan struct{}, running *sync.Map) error {
 	}
 }
 
+// recoveredPanic wraps a value recovered on a goroutine the Service spawned as a [*PanicError],
+// with that goroutine's stack (truncated to 8 KiB).
+func recoveredPanic(r any) *PanicError {
+	stack := make([]byte, 8192)
+	stack = stack[:runtime.Stack(stack, false)]
+	return &PanicError{Value: r, Stack: stack}
+}
+
 // runHook calls one shutdown hook, containing a panic the same way [runWorker] does.
 //
 // A panicking hook is strictly worse than a panicking worker: it happens DURING the flush, so
@@ -207,9 +214,7 @@ func (s *Service) await(done <-chan struct{}, running *sync.Map) error {
 func runHook(ctx context.Context, hook func(context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			stack := make([]byte, 8192)
-			stack = stack[:runtime.Stack(stack, false)]
-			err = &PanicError{Value: r, Stack: stack}
+			err = recoveredPanic(r)
 		}
 	}()
 	return hook(ctx)
@@ -242,12 +247,11 @@ func stuckWorkers(running *sync.Map) string {
 // the ones after it: they are the flush, the unlock and the close, and teardown is the one phase
 // where best-effort beats fail-fast.
 //
-// The budget is still a promise to the CALLER: Run returns within it. A hook that does not
-// watch its ctx — waiting on a WaitGroup, a lock, a connection draining — used to hold Run for
-// as long as it blocked, since the budget was only checked once the hook returned. Each hook now
-// runs on its own goroutine and is waited for only until the budget runs out (and, past it, a
-// short grace for a hook to return the ctx error it was just handed). One that is still running
-// then is abandoned — it keeps going until it returns or the process exits — and named in the
+// The budget is still a promise to the CALLER: Run returns within it, even when a hook does not
+// watch its ctx — waiting on a WaitGroup, a lock, a connection draining. So each hook runs on its
+// own goroutine and is waited for only until the budget runs out (and, past it, a short grace
+// for a hook to return the ctx error it was just handed). One that is still running then is
+// abandoned — it keeps going until it returns or the process exits — and named in the
 // ErrShutdownTimeout. The hooks after it still run, each with the same grace, so an overrun
 // never skips the quick unlock or close that follows it.
 func (s *Service) runShutdown(ctx context.Context, prior error) error {
@@ -283,11 +287,10 @@ func (s *Service) runShutdown(ctx context.Context, prior error) error {
 		return firstOf(prior, fmt.Errorf("%w: %s", ErrShutdownTimeout, what))
 	}
 	// The budget applies to the hooks as well as to the workers, so overrunning it here is
-	// the condition ErrShutdownTimeout names. Without this it was reported only for the
-	// worker half: a hook that ran long returned whatever it happened to return — usually
-	// ctx.Err(), which is plain context.DeadlineExceeded — so a caller could not tell a
-	// dirty teardown from a bounded run reaching its own deadline normally, and the one
-	// question the sentinel exists to answer had a typed answer for half the budget.
+	// the condition ErrShutdownTimeout names. A hook that ran long returns whatever it
+	// happens to return — usually ctx.Err(), plain context.DeadlineExceeded — and without
+	// the sentinel a caller could not tell a dirty teardown from a bounded run reaching its
+	// own deadline normally.
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		if first != nil {
 			first = fmt.Errorf("%w: %w", ErrShutdownTimeout, first)

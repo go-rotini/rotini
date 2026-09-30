@@ -39,7 +39,8 @@ type Presence map[FieldPath]Provenance
 // Layer is one input channel's view of the inputs type T: the values it supplied — everything
 // else is T's zero value — and exactly which fields those are. Layers from rotini's channel
 // parsers also carry unexported data that [Report.Validate] uses; a hand-built Layer
-// participates in overlay and provenance but contributes nothing to validation.
+// participates in overlay and provenance but contributes nothing to validation. A nil or empty
+// Set means the layer supplied nothing: overlaying it leaves every field as it was.
 type Layer[T any] struct {
 	Name   string
 	Values T
@@ -79,14 +80,10 @@ type layerCore struct {
 // rule. An inputs struct's last field describes the collecting command and the fields before it
 // describe its ancestors, so Collect anchors the struct on [Context.Frame] — the command whose
 // hook is running. A leaf's Run, a cascading hook three frames up, a composed child mounted
-// under someone else's umbrella: same call, correct in each.
-//
-// It did not used to be one rule. The anchor was inferred from the struct's field count against
-// the chain, which made the correct call depend on how deep THIS invocation happened to go: a
-// cascading hook on a middle frame read a descendant's flags, and a composed child's cascading
-// hook could not read its own flags at all. Both returned zeros with a nil error. CollectRoot
-// existed for part of that gap, and Binder.BindRoot for the mechanism under it; both are gone,
-// and a caller who wants to read the chain directly has [Context.Chain].
+// under someone else's umbrella: same call, correct in each. Anchoring on the running frame,
+// rather than inferring it from the struct's shape, is what makes the answer independent of how
+// deep this invocation went; a type that cannot sit there is an error, never a silent zero. A
+// caller who wants to read the chain directly has [Context.Chain].
 //
 // It is [Binder.Bind] under the hood, so errors are the same data-shaped [*ParseError]s and
 // [*BindError]s. Use [CollectP] when "where did this value come from" matters.
@@ -124,12 +121,9 @@ func CollectP[T any](rtx *Context) (T, Report, error) {
 		return zero, Report{}, err
 	}
 	merged, report := OverlayInputsP(defaults, files, env, argv, stdin)
+	// No frame-fit check here: every layer above already ran it through layerAnchor, over the
+	// same type and chain, so a struct that cannot sit on the chain never reaches this point.
 	if err := report.Validate(); err != nil {
-		return merged, report, err
-	}
-	// Same frame-fit check Collect applies, after validation so a bad command line reports
-	// itself first. See checkFrameFit.
-	if err := checkFrameFit(reflect.ValueOf(&merged).Elem(), rtx.Chain(), rtx.frameIndex()); err != nil {
 		return merged, report, err
 	}
 	return merged, report, nil
@@ -243,7 +237,8 @@ func copyFieldByPath(dst, src reflect.Value, path FieldPath) {
 // ── the report ───────────────────────────────────────────────────────────────.
 
 // Report is the merged provenance of one overlay: which layer won each field,
-// every layer that set it (low → high), and validation over the merged values.
+// every layer that set it (low → high), and validation over the merged values. The zero Report
+// is usable: it reports no fields, and its Validate returns nil.
 type Report struct {
 	set     Presence
 	history map[FieldPath][]Provenance
@@ -291,13 +286,7 @@ func (r Report) Validate() error {
 	if r.chain == nil || r.store == nil {
 		return nil
 	}
-	if err := validate(r.chain, r.store); err != nil {
-		return err
-	}
-	if err := validateFlagGroups(r.chain, r.store); err != nil {
-		return err
-	}
-	return validateFlagDependencies(r.chain, r.store)
+	return validateStore(r.chain, r.store)
 }
 
 // absorb folds one layer's validation core into the report: later layers' flag values replace
@@ -367,12 +356,9 @@ func (p *parsedInputs) argvSetAt(idx int) map[string]bool {
 
 // layerAnchor is frameAnchor plus checkFrameFit, for the per-channel layer functions.
 //
-// Every layer goes through this rather than calling frameAnchor directly, and that is the whole
-// point of it existing: when the anchor moved from the leaf to the caller's own frame, the fit
-// check was added to [Collect] and [CollectP] and the four layers were left behind. They went on
-// accepting a struct that could not describe the running command and returning it zeroed, with a
-// nil error — the exact silent failure the anchor work existed to remove, left in the corner of
-// the same API. One helper means the next change to either cannot separate them.
+// Every layer goes through this rather than calling frameAnchor directly, so the anchor and the
+// fit check cannot drift apart: a layer computing the anchor alone would accept a struct that
+// cannot describe the running command and return it zeroed, with a nil error.
 //
 // Callers invoke it where they would have computed the anchor, which is after any parse step, so
 // a malformed command line still reports itself before this does.
@@ -406,7 +392,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	walkCommandStructs(v, chain, anchor, func(topName string, scope int, ci reflect.Value) {
 		frame := chain[scope]
 		si := store.scopes[scope]
-		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.Value) {
+		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, _ reflect.Value) {
 			vals, ok := si.flags[logical]
 			if !ok {
 				return
@@ -453,7 +439,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 	set := Presence{}
 	walkCommandStructs(v, chain, anchor, func(topName string, scope int, ci reflect.Value) {
 		frame := chain[scope]
-		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.Value) {
+		eachTaggedField(ci, "Flags", func(fieldName, logical string, _ reflect.StructTag, _ reflect.Value) {
 			if _, ok := store.scopes[scope].flags[logical]; !ok {
 				return
 			}
@@ -466,7 +452,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 		// Positional defaults: bind per-index into the Arguments struct.
 		if scope == len(chain)-1 {
 			idx := 0
-			eachTaggedField(ci, "Arguments", func(fieldName, logical string, f reflect.Value) {
+			eachTaggedField(ci, "Arguments", func(fieldName, _ string, _ reflect.StructTag, f reflect.Value) {
 				i := idx
 				idx++
 				d, ok := argDefaults[i]
@@ -486,8 +472,8 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 		}
 		// Env/Config defaults come from their recon `default=` tags.
 		for _, channel := range []string{"Env", "Config"} {
-			eachTaggedField(ci, channel, func(fieldName, logical string, f reflect.Value) {
-				body := taggedFieldTag(ci, channel, fieldName).Get("recon")
+			eachTaggedField(ci, channel, func(fieldName, _ string, tag reflect.StructTag, f reflect.Value) {
+				body := tag.Get("recon")
 				d := reconDefault(body)
 				if d == "" {
 					return
@@ -588,7 +574,7 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 		return nil
 	}
 	if err := reg.Bind(cs.Addr().Interface()); err != nil {
-		return reconBind(channelForStruct(structName), err)
+		return reconBind(channelOf(cfg), err)
 	}
 	if err := validateChannelStruct(cs, reg, cfg); err != nil {
 		return err
@@ -609,16 +595,15 @@ func fillChannelStruct(set Presence, ci reflect.Value, topName, structName, laye
 		}
 	}
 
-	eachTaggedField(ci, structName, func(fieldName, _ string, _ reflect.Value) {
-		recordChannelField(set, ci, topName, structName, layerName, fieldName, reg, cfg, nested)
+	eachTaggedField(ci, structName, func(fieldName, _ string, tag reflect.StructTag, _ reflect.Value) {
+		recordChannelField(set, tag, topName, structName, layerName, fieldName, reg, cfg, nested)
 	})
 	return nil
 }
 
 // recordChannelField records which layer supplied one channel field and its raw value,
 // redacted when the input is secret. A pinned field is read from its own file's registry alone.
-func recordChannelField(set Presence, ci reflect.Value, topName, structName, layerName, fieldName string, reg *recon.Registry, cfg *cfgRegs, nested map[string]bool) {
-	tag := taggedFieldTag(ci, structName, fieldName)
+func recordChannelField(set Presence, tag reflect.StructTag, topName, structName, layerName, fieldName string, reg *recon.Registry, cfg *cfgRegs, nested map[string]bool) {
 	body := tag.Get("recon")
 	key := reconKey(body)
 	if key == "" {
@@ -652,11 +637,10 @@ func recordChannelField(set Presence, ci reflect.Value, topName, structName, lay
 // and raw text, so a later argv layer can still override them.
 func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []ResolvedCommand, scope int, topName, layerName string, flagReg *recon.Registry) error {
 	var bindErr error
-	eachTaggedField(ci, "Flags", func(fieldName, logical string, f reflect.Value) {
+	eachTaggedField(ci, "Flags", func(fieldName, logical string, tag reflect.StructTag, f reflect.Value) {
 		if bindErr != nil {
 			return
 		}
-		tag := taggedFieldTag(ci, "Flags", fieldName)
 		key := reconKey(tag.Get("recon"))
 		if key == "" {
 			return
@@ -716,7 +700,8 @@ func layerChain(rtx *Context) ([]ResolvedCommand, error) {
 }
 
 // walkCommandStructs visits each per-command CommandInputs field with its Go field name and
-// chain scope index, aligned at the leaf exactly like bindInputs.
+// chain scope index, the struct's first field sitting at chain frame offset (the anchor
+// frameAnchor derives from the collecting command's own frame).
 func walkCommandStructs(v reflect.Value, chain []ResolvedCommand, offset int, visit func(topName string, scope int, ci reflect.Value)) {
 	if v.Kind() != reflect.Struct {
 		return
@@ -734,33 +719,21 @@ func walkCommandStructs(v reflect.Value, chain []ResolvedCommand, offset int, vi
 }
 
 // eachTaggedField visits each rotini-tagged field of one channel sub-struct
-// (Flags/Arguments/Env/Config) of a CommandInputs value.
-func eachTaggedField(ci reflect.Value, structName string, visit func(fieldName, logical string, f reflect.Value)) {
+// (Flags/Arguments/Env/Config) of a CommandInputs value, with its full struct tag.
+func eachTaggedField(ci reflect.Value, structName string, visit func(fieldName, logical string, tag reflect.StructTag, f reflect.Value)) {
 	s := ci.FieldByName(structName)
 	if !s.IsValid() || s.Kind() != reflect.Struct {
 		return
 	}
 	st := s.Type()
 	for j := range s.NumField() {
-		logical := st.Field(j).Tag.Get("rotini")
+		sf := st.Field(j)
+		logical := sf.Tag.Get("rotini")
 		if logical == "" {
 			continue
 		}
-		visit(st.Field(j).Name, logical, s.Field(j))
+		visit(sf.Name, logical, sf.Tag, s.Field(j))
 	}
-}
-
-// taggedFieldTag returns the full struct tag of one channel sub-struct field.
-func taggedFieldTag(ci reflect.Value, structName, fieldName string) reflect.StructTag {
-	s := ci.FieldByName(structName)
-	if !s.IsValid() || s.Kind() != reflect.Struct {
-		return ""
-	}
-	f, ok := s.Type().FieldByName(fieldName)
-	if !ok {
-		return ""
-	}
-	return f.Tag
 }
 
 // argPresence records presence for the positional fields that received values, mirroring

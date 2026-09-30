@@ -17,9 +17,12 @@ import (
 // command-tree data the runtime resolved for this invocation. It is exposed via
 // [Context.Chain] so opt-in tooling binds inputs against the exact command whose handler ran —
 // including a statically composed child, whose chain is relative to its own root.
+//
+// Fields copy the matching [Definition] (root) or [CommandDef] fields; an empty slice means the
+// command declares none of that kind.
 type ResolvedCommand struct {
 	Name                  string
-	Handler               string
+	Handler               string   // ProgramHandlers method for this command; see [CommandDef.Handler]
 	Matched               string   // the argv token that resolved this command (name or an alias); "" for the root
 	DeprecatedIdentifiers []string // aliases of this command that are deprecated
 	Deprecated            string   // the command's deprecation message, when it is deprecated as a whole
@@ -27,16 +30,16 @@ type ResolvedCommand struct {
 	Arguments             []ArgDef
 	FlagGroups            []FlagGroup
 	FlagDependencies      []FlagDependency
-	Commands              []CommandDef
-	Remotes               []RemoteDef
-	Discovery             *RemoteDiscoveryDef
+	Commands              []CommandDef        // sub-commands; empty for a leaf
+	Remotes               []RemoteDef         // co-located plugin binaries dispatched as sub-commands
+	Discovery             *RemoteDiscoveryDef // plugin auto-discovery (nil = off)
 	// PluginPath is the extra directory this command's plugin binaries may live in, searched
 	// for BOTH declared remotes and discovered plugins — they are the same binaries in the
 	// same place. Empty means only the host binary's directory and PATH are searched. It is the
 	// directory as searched: a leading ~ and $VAR references in the declared path are already
 	// expanded.
 	PluginPath  string
-	Passthrough bool
+	Passthrough bool // every token after this command is a raw positional (no flag parsing)
 }
 
 // expandPluginPath expands a leading ~ to the user's home directory and $VAR / ${VAR}
@@ -56,6 +59,7 @@ func expandPluginPath(dir string) string {
 	return dir
 }
 
+// rootFrame is the chain frame for the program's root command.
 func rootFrame(def Definition) ResolvedCommand {
 	return ResolvedCommand{
 		Name: def.Name, Handler: def.Handler,
@@ -66,6 +70,7 @@ func rootFrame(def Definition) ResolvedCommand {
 	}
 }
 
+// cmdFrame is the chain frame for sub-command c; the caller sets Matched.
 func cmdFrame(c CommandDef) ResolvedCommand {
 	return ResolvedCommand{
 		Name: c.Name, Handler: c.Handler, DeprecatedIdentifiers: c.DeprecatedIdentifiers, Deprecated: c.Deprecated,

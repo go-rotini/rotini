@@ -8,9 +8,9 @@ import "context"
 //
 //	Phase     Order                    Hook                Halts forward on        Runs during unwind when
 //	─────     ─────                    ────                ────────────────        ───────────────────────
-//	setup     root → leaf              CascadingPreRun     HaltWithCode/Exit,        —
-//	setup     leaf                     PreRun              a panic, or a           —
-//	work      leaf                     Run                 trapped signal          —
+//	setup     root → leaf              CascadingPreRun     Halt*/Exit, a panic,    —
+//	setup     leaf                     PreRun              or a canceled context   —
+//	work      leaf                     Run                 (e.g. a trapped signal) —
 //	teardown  leaf                     PostRun             —                       its PreRun began
 //	teardown  leaf → root              CascadingPostRun    —                       its CascadingPreRun began
 //
@@ -119,11 +119,13 @@ func DefaultLifecycle(chain []ResolvedCommand, handlers []Handlers) []LifecycleS
 //
 // A custom Lifecycle that builds steps from scratch should wrap its own hooks the same way. One
 // that does not is not broken: an unlabeled hook reports the LEAF, which is what every
-// non-cascading hook wants and what the whole API did before frames existed. The cost of
+// non-cascading hook wants. The cost of
 // skipping it falls only on a cascading hook that collects its own inputs.
 //
 // The previous frame is restored on return, so nesting — a hook that drives another hook — does
 // not leave the Context describing the wrong command.
+//
+// A nil hook yields a nil step half, which the engine skips.
 func AtFrame(i int, hook func(context.Context, *Context)) func(context.Context, *Context) {
 	if hook == nil {
 		return nil

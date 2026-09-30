@@ -21,8 +21,8 @@ import (
 // blocking on a stdin nobody is typing into. It is an [ErrUsage] — the environment, not the
 // program, is wrong.
 //
-// [REPL] returns it when its input ends, and a program driving its own prompts should adopt the
-// same contract.
+// A [REPL] line reader returns it to end the session cleanly, and a program driving its own
+// prompts should adopt the same contract.
 var ErrNotInteractive = UsageError(errors.New("no input available (not interactive)"))
 
 // ReadSecret reads one line from r without echoing it, for a password, token or passphrase.

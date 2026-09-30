@@ -329,9 +329,9 @@ func DiscoveredPlugins(cmd ResolvedCommand) []DiscoveredPlugin {
 // DiscoveryDiagnostics returns the problems encountered while scanning cmd's author-configured
 // discovery path — typically that it is unreadable, or not a directory — and nil when there is
 // no discovery, none is configured, or the path scanned cleanly. A path that does not exist is
-// not a problem: it is where plugins go once one is installed, and before that it is empty. The incidental locations, next
-// to the binary and the entries of $PATH, are deliberately not reported: a missing $PATH entry
-// is normal, not a misconfiguration.
+// not a problem: it is where plugins go once one is installed, and before that it is empty. The
+// incidental locations, next to the binary and the entries of $PATH, are deliberately not
+// reported: a missing $PATH entry is normal, not a misconfiguration.
 //
 // It is the data feed for a doctor or completion handler that wants to tell the author their
 // discovery path is wrong; rotini prints no warning itself, which would corrupt completion
@@ -488,6 +488,8 @@ func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]DiscoveredPlug
 	return out, problems
 }
 
+// filterPrefix keeps the candidates whose name starts with prefix, dropping empty names and
+// duplicate names, and returns them sorted.
 func filterPrefix(candidates []string, prefix string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(candidates))

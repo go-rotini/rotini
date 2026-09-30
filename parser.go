@@ -93,7 +93,7 @@ type ParseKind int
 // presentation, the kind is data.
 const (
 	// ParseKindUnspecified is the zero value: a [ParseError] whose construction
-	// site did not classify it (a hand-built error, or a path predating EH5).
+	// site did not classify it (a hand-built error that sets no Kind).
 	ParseKindUnspecified         ParseKind = iota
 	ParseKindUnknownFlag                   // an argv token looked like a flag no command on the chain declares
 	ParseKindUnknownCommand                // a stray positional on a branch-only command (a mistyped sub-command)
@@ -104,7 +104,7 @@ const (
 	ParseKindMissingRequired               // a required flag or argument was absent
 	ParseKindNoArguments                   // a positional was given to a command that accepts none
 	ParseKindTooManyArguments              // more positionals than the command's declared (non-variadic) arity
-	ParseKindInternal                      // a parser API misuse: nil parser/context, or a bad out argument
+	ParseKindInternal                      // a parser API misuse: nil parser/context, a bad out argument, or an inputs type that does not describe the running command
 )
 
 // String renders the kind as a short, stable label (for logs and tests).
@@ -193,12 +193,13 @@ func NewParser() *Parser {
 //	var in MycliInputs
 //	if err := parser.Parse(rtx, &in); err != nil { /* handler owns it */ }
 //
-// It applies declared defaults, validates required and enum, then fills out by reflection from
-// the `rotini:"…"` struct tags. Built-ins and any [encoding.TextUnmarshaler] are coerced, and
-// a trailing []string absorbs the remaining positionals.
+// It applies declared defaults, fills out by reflection from the `rotini:"…"` struct tags, then
+// validates. Built-ins and any [encoding.TextUnmarshaler] are coerced, and a trailing []string
+// absorbs the remaining positionals.
 //
 // It returns a [*ParseError] when out is not a non-nil pointer, a flag is unknown or missing
-// its value, a required input is absent, or a value falls outside a declared enum.
+// its value, a value cannot be coerced, a required input is absent, a value falls outside a
+// declared enum, or any declared constraint, flag group or flag dependency is violated.
 //
 // # It does not check that out describes the running command
 //
@@ -281,8 +282,12 @@ func Deprecations(rtx *Context) []Deprecation {
 		}
 	}
 	// A deprecated argument reports when a value was supplied for it.
-	if n := len(chain); n > 0 {
-		out = append(out, argumentDeprecations(chain, argv)...)
+	if len(chain) > 0 {
+		var supplied int
+		if store != nil {
+			supplied = len(store.scopes[len(chain)-1].args)
+		}
+		out = append(out, argumentDeprecations(chain[len(chain)-1], supplied)...)
 	}
 	return out
 }
@@ -331,22 +336,9 @@ func quietParse(chain []ResolvedCommand, argv []string) *parsedInputs {
 	return store
 }
 
-// positionals are the leaf's positional tokens in argv.
-func positionals(chain []ResolvedCommand, argv []string) []string {
-	if store := quietParse(chain, argv); store != nil {
-		return store.scopes[len(chain)-1].args
-	}
-	return nil
-}
-
 // argumentDeprecations reports each deprecated argument of the leaf that argv supplied a value
-// for, by position.
-func argumentDeprecations(chain []ResolvedCommand, argv []string) []Deprecation {
-	leaf := chain[len(chain)-1]
-	if !slices.ContainsFunc(leaf.Arguments, func(a ArgDef) bool { return a.Deprecated != "" }) {
-		return nil
-	}
-	supplied := len(positionals(chain, argv))
+// for, by position: supplied is how many positionals argv gave the leaf.
+func argumentDeprecations(leaf ResolvedCommand, supplied int) []Deprecation {
 	var out []Deprecation
 	for i, ad := range leaf.Arguments {
 		if ad.Deprecated != "" && i < supplied {
@@ -722,21 +714,27 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 		default:
 			continue // a non-variadic argument that was not provided — requiredErrors covers absence
 		}
-		for _, v := range vals {
-			if len(ad.Enum) > 0 && !enumHas(ad.Enum, v, ad.IgnoreCase) {
-				return &ParseError{
-					Kind:       ParseKindEnumViolation,
-					Msg:        fmt.Sprintf("invalid value %q for <%s> (one of: %s)", redactValue(v, ad.Secret), ad.Name, strings.Join(ad.Enum, ", ")),
-					Token:      redactValue(v, ad.Secret),
-					Candidates: ad.Enum,
-				}
-			}
-		}
-		if err := checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals, ad.Secret); err != nil {
+		if err := checkArgValues(ad, vals); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// checkArgValues checks one argument's values against its enum and its constraints — the
+// positional counterpart of [checkFlagValues].
+func checkArgValues(ad ArgDef, vals []string) error {
+	for _, v := range vals {
+		if len(ad.Enum) > 0 && !enumHas(ad.Enum, v, ad.IgnoreCase) {
+			return &ParseError{
+				Kind:       ParseKindEnumViolation,
+				Msg:        fmt.Sprintf("invalid value %q for <%s> (one of: %s)", redactValue(v, ad.Secret), ad.Name, strings.Join(ad.Enum, ", ")),
+				Token:      redactValue(v, ad.Secret),
+				Candidates: ad.Enum,
+			}
+		}
+	}
+	return checkConstraints("<"+ad.Name+">", ad.Type, ad.Constraints, vals, ad.Secret)
 }
 
 // hasVariadicArg reports whether any of a command's arguments is variadic — when one
@@ -858,7 +856,7 @@ func checkItemCount(label string, c Constraints, n int) error {
 
 // checkNumericBounds enforces the numeric bounds on one value. An unparseable value is
 // skipped: coerce already reports it, and reporting it twice would be noise.
-func checkNumericBounds(label string, c Constraints, v string, secret bool, parse func(string) (float64, bool), formatNum func(float64) string) error {
+func checkNumericBounds(label string, c Constraints, v string, secret bool, parse func(string) (float64, bool), format func(float64) string) error {
 	n, numeric := parse(v)
 	if !numeric {
 		return nil
@@ -866,15 +864,15 @@ func checkNumericBounds(label string, c Constraints, v string, secret bool, pars
 	got := redactValue(v, secret)
 	switch {
 	case c.Minimum != nil && n < *c.Minimum:
-		return constraintViolation("%s must be >= %s (got %s)", label, formatNum(*c.Minimum), got)
+		return constraintViolation("%s must be >= %s (got %s)", label, format(*c.Minimum), got)
 	case c.Maximum != nil && n > *c.Maximum:
-		return constraintViolation("%s must be <= %s (got %s)", label, formatNum(*c.Maximum), got)
+		return constraintViolation("%s must be <= %s (got %s)", label, format(*c.Maximum), got)
 	case c.ExclusiveMinimum != nil && n <= *c.ExclusiveMinimum:
-		return constraintViolation("%s must be > %s (got %s)", label, formatNum(*c.ExclusiveMinimum), got)
+		return constraintViolation("%s must be > %s (got %s)", label, format(*c.ExclusiveMinimum), got)
 	case c.ExclusiveMaximum != nil && n >= *c.ExclusiveMaximum:
-		return constraintViolation("%s must be < %s (got %s)", label, formatNum(*c.ExclusiveMaximum), got)
+		return constraintViolation("%s must be < %s (got %s)", label, format(*c.ExclusiveMaximum), got)
 	case c.MultipleOf != nil && !isMultipleOf(n, *c.MultipleOf):
-		return constraintViolation("%s must be a multiple of %s (got %s)", label, formatNum(*c.MultipleOf), got)
+		return constraintViolation("%s must be a multiple of %s (got %s)", label, format(*c.MultipleOf), got)
 	}
 	return nil
 }
@@ -991,7 +989,7 @@ func validateFlagDependencies(chain []ResolvedCommand, store *parsedInputs) erro
 				if len(missing) > 1 {
 					noun, verb = "flags", "are"
 				}
-				return &ParseError{Kind: ParseKindConstraintViolation, Msg: fmt.Sprintf("%s %s %s required when %s is set", noun, joinAnd(missing), verb, whenLabel)}
+				return constraintViolation("%s %s %s required when %s is set", noun, joinAnd(missing), verb, whenLabel)
 			}
 		}
 	}
@@ -1003,22 +1001,22 @@ func checkFlagGroup(kind FlagGroupKind, set, all []string) error {
 	switch kind {
 	case FlagGroupMutuallyExclusive:
 		if len(set) > 1 {
-			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "flags " + joinAnd(set) + " are mutually exclusive"}
+			return constraintViolation("flags %s are mutually exclusive", joinAnd(set))
 		}
 	case FlagGroupRequiredTogether:
 		if n := len(set); n > 0 && n < len(all) {
-			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "flags " + strings.Join(all, ", ") + " must be used together"}
+			return constraintViolation("flags %s must be used together", strings.Join(all, ", "))
 		}
 	case FlagGroupOneOf:
 		switch {
 		case len(set) == 0:
-			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "exactly one of " + strings.Join(all, ", ") + " is required"}
+			return constraintViolation("exactly one of %s is required", strings.Join(all, ", "))
 		case len(set) > 1:
-			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "flags " + joinAnd(set) + " are mutually exclusive"}
+			return constraintViolation("flags %s are mutually exclusive", joinAnd(set))
 		}
 	case FlagGroupAtLeastOne:
 		if len(set) == 0 {
-			return &ParseError{Kind: ParseKindConstraintViolation, Msg: "at least one of " + strings.Join(all, ", ") + " is required"}
+			return constraintViolation("at least one of %s is required", strings.Join(all, ", "))
 		}
 	}
 	return nil
@@ -1091,8 +1089,6 @@ func isMapType(typ string) bool { return strings.HasPrefix(typ, "map[") }
 // formatNum renders a numeric bound without a trailing ".000…".
 func formatNum(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
 
-// applyDefaults fills in declared flag and trailing-argument defaults for inputs
-// the user did not provide, so handlers and required-checks see them.
 // flagDefaults is the occurrences a flag's declared default seeds when the user supplied
 // none: every element of Defaults for a repeatable input, or the single Default. Both empty
 // means the flag has no default and is left unset, which is how "absent" stays distinguishable
@@ -1111,6 +1107,8 @@ func flagDefaults(fd FlagDef) []string {
 	return slices.Clone(fd.Defaults)
 }
 
+// applyDefaults fills in declared flag and trailing-argument defaults for inputs
+// the user did not provide, so handlers and required-checks see them.
 func applyDefaults(chain []ResolvedCommand, store *parsedInputs) {
 	for i, f := range chain {
 		for _, fd := range f.Flags {
@@ -1192,8 +1190,9 @@ func plural(word string, n int) string {
 // With "file", a value starting with '@' becomes the named file's contents; with "stdin", a
 // value of exactly "-" becomes the piped stdin, which must not be empty. Resolved text has one
 // trailing line ending removed (see trimAcquiredPayload — the same rule the stdin channel
-// uses) and then flows through the same coercion and validation as a literal value. Without the matching mode, '@' and '-' are ordinary characters, and defaults and
-// fallbacks never resolve — sentinels are argv grammar.
+// uses) and then flows through the same coercion and validation as a literal value. Without the
+// matching mode, '@' and '-' are ordinary characters, and defaults and fallbacks never resolve —
+// sentinels are argv grammar.
 func resolveFlagValue(fd FlagDef, label, value string, stdin io.Reader) (string, error) {
 	switch {
 	case strings.HasPrefix(value, "@") && slices.Contains(fd.From, "file"):
@@ -1350,9 +1349,9 @@ func chainFlagIdentifiers(chain []ResolvedCommand) []string {
 }
 
 // bindInputs fills a <Cmd>Inputs struct, one field per command on the resolved path in
-// root→leaf order. Fields bind to the tail of the chain aligned at the leaf, so each command's
-// inputs come from the right frame however deep it was reached; extra parent frames from a
-// statically-composed subtree simply go unbound.
+// root→leaf order. Field i binds to chain[offset+i], where offset ([frameAnchor]) places the last
+// field on the caller's own frame, so each command's inputs come from the right frame however
+// deep it was reached; extra parent frames from a statically-composed subtree simply go unbound.
 func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand, offset int) error {
 	if v.Kind() != reflect.Struct {
 		return nil
@@ -1385,20 +1384,13 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand, offse
 //
 // self is [Context.Frame]'s index — the command whose hook is running, which the lifecycle
 // records for every step (see [AtFrame]). For a leaf hook self is the last frame and this
-// reduces to len(chain) - n, which is what the anchor used to be for every hook.
+// reduces to len(chain) - n.
 //
-// It used to be that, for every hook, plus a boolean that forced index 0. Neither input
-// identified the caller, so the anchor was inferred from the struct's SHAPE — and a shorter
-// struct always aligns against something. A cascading hook on a middle frame got a descendant's
-// flags, and a composed child's cascading hook could not read its own flags at all: its type
-// spans only its own lineage, so leaf-anchoring landed below it and root-anchoring landed above
-// it. Both returned zeros and a nil error.
-//
-// There is no longer a way to pin the anchor at index 0. Root-anchoring existed for CollectRoot,
-// which frames replaced; BindRoot outlived it by one release as "the low-level escape", with no
-// caller and no test, and it was the only remaining route to the silent wrong-frame answer this
-// function exists to prevent. A caller who genuinely wants the first n frames has
-// [Context.Chain].
+// The anchor comes from the caller, never from the struct's SHAPE, because a shorter struct
+// always aligns against something: anchoring at the leaf would hand a cascading hook on a middle
+// frame a descendant's flags, and anchoring at the root would miss a composed child's own
+// frames. Both would return zeros and a nil error. There is deliberately no way to pin the
+// anchor at index 0; a caller who genuinely wants the first n frames has [Context.Chain].
 func frameAnchor(v reflect.Value, chain []ResolvedCommand, self int) int {
 	if v.Kind() != reflect.Struct {
 		return 0
@@ -1412,11 +1404,10 @@ func frameAnchor(v reflect.Value, chain []ResolvedCommand, self int) int {
 // checkFrameFit rejects an inputs struct that cannot sit on the chain at the caller's own frame
 // — it describes more ancestors than the running command has.
 //
-// This is an EXACT check rather than a heuristic, and it is only possible because the anchor is
-// now derived from the running frame instead of the struct's shape. It catches the mistake that
-// used to be entirely invisible: collecting a DESCENDANT's inputs type, which needs more
-// ancestors than the caller has. Under leaf-anchoring a struct of any size found somewhere to
-// sit, and an over-long one was skipped in silence and came back zeroed.
+// This is an EXACT check rather than a heuristic, possible because the anchor is derived from
+// the running frame instead of the struct's shape. It catches collecting a DESCENDANT's inputs
+// type, which needs more ancestors than the caller has; without it, [bindInputs] would skip the
+// over-long struct in silence and it would come back zeroed.
 //
 // It is called after argv has been parsed and validated, so a short chain caused by a bad
 // command line reports that instead of this.
@@ -1442,22 +1433,20 @@ func checkFrameFit(v reflect.Value, chain []ResolvedCommand, self int) error {
 
 // checkChainAlignment rejects an inputs struct that does not describe the running command.
 //
-// Fields map to chain frames by position, aligned at the LEAF — field i of an n-field struct
-// takes chain[len(chain)-n+i]. That is what lets a composed child's handler collect its own
-// short type (GrandInputs has one field; the chain is root→child→grand) without knowing which
-// parent tree it was mounted into.
+// Fields map to chain frames by position from offset ([frameAnchor]): field i takes
+// chain[offset+i], so the struct's last field is the caller's own frame. That is what lets a
+// composed child's handler collect its own short type (GrandInputs has one field; the chain is
+// root→child→grand) without knowing which parent tree it was mounted into.
 //
 // The cost is that a SHORTER type always aligns against something. Collecting an ancestor's
-// type from a deeper run — Collect[MigInputs] while `mig db status` runs — mapped Mig onto the
-// status frame and filled it from status's flags. The compiler is happy, the binder is happy,
-// and every field comes back zero (or, if the two commands happen to share a flag name, comes
-// back holding the WRONG command's value, which is worse). There is no signal at all.
+// type from a deeper command — Collect[MigInputs] while `mig db status` runs — would map Mig
+// onto a frame whose flags it does not describe, and every field would come back zero (or,
+// where the two commands share a flag name, holding the WRONG command's value). There would
+// be no signal at all.
 //
-// The test is DISJOINTNESS, not containment: a field that declares flags, landing on a frame
-// that declares flags, sharing not one name between them, is not describing that command.
-// Containment would be the stronger claim and is wrong — a hand-built struct may carry fields
-// for flags a particular Definition omits, and those simply stay zero. Overlap of even one
-// name means the struct is talking about this command, which is all that is being asked.
+// The test is that every flag a field names is declared by the frame it maps onto. A weaker
+// "shares some flag" test is not enough: every command shares `help`, so an ancestor's type
+// would bind partially — fallbacks filling its fields by key while its argv values were lost.
 //
 // Only flags are checked. They are named and unordered, so a mismatch is unambiguous;
 // positional arguments carry no names to compare.
@@ -1477,10 +1466,6 @@ func checkChainAlignment(v reflect.Value, chain []ResolvedCommand, offset int) e
 			if name == "" {
 				continue
 			}
-			// Every flag the type names must be one the command it maps onto declares. The
-			// check was once "the two share SOME flag" — and every command shares `help`, so an
-			// ancestor's type collected from a descendant bound partially: fallbacks filled its
-			// fields by key while its argv values were silently lost.
 			if _, ok := findFlagDef(frame.Flags, name); ok {
 				continue
 			}
@@ -1553,16 +1538,20 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef) error {
 		if !ok {
 			continue
 		}
-		if def, ok := findFlagDef(defs, name); ok {
+		// An undeclared tag leaves def zero: no special binding, no case folding, the default
+		// layout, not secret.
+		def, declared := findFlagDef(defs, name)
+		label := flagErrLabel(si, defs, name)
+		if declared {
 			switch {
 			case def.DottedKeys:
 				if err := coerceMapDotted(v.Field(i), raw); err != nil {
-					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", flagErrLabel(si, defs, name), coerceMessage(err, def.Secret)), Flag: flagErrLabel(si, defs, name)}
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, def.Secret)), Flag: label}
 				}
 				continue
 			case isObjectFlag(def):
 				if err := bindObjectFlag(v.Field(i), raw, def); err != nil {
-					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", flagErrLabel(si, defs, name), err), Flag: flagErrLabel(si, defs, name)}
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", label, err), Flag: label}
 				}
 				continue
 			case def.Type == "count":
@@ -1573,19 +1562,11 @@ func bindFlags(v reflect.Value, si scopeInputs, defs []FlagDef) error {
 				continue
 			}
 		}
-		if def, ok := findFlagDef(defs, name); ok && def.IgnoreCase {
+		if def.IgnoreCase {
 			raw = canonicalEnum(def.Enum, raw)
 		}
-		layout := ""
-		if def, ok := findFlagDef(defs, name); ok {
-			layout = def.Layout
-		}
-		if err := coerceWithLayout(v.Field(i), raw, layout); err != nil {
-			secret := false
-			if def, ok := findFlagDef(defs, name); ok {
-				secret = def.Secret
-			}
-			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", flagErrLabel(si, defs, name), coerceMessage(err, secret)), Flag: flagErrLabel(si, defs, name)}
+		if err := coerceWithLayout(v.Field(i), raw, def.Layout); err != nil {
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", label, coerceMessage(err, def.Secret)), Flag: label}
 		}
 	}
 	return nil
@@ -1597,9 +1578,8 @@ func argSecret(defs []ArgDef, i int) bool {
 	return i < len(defs) && defs[i].Secret
 }
 
-// labelForFlag is a flag's CLI label (its identifiers) for error messages, falling back
-// to the logical name when the definition isn't found.
-// flagErrLabel names flag name in a binding error: as typed on argv, else as [labelForFlag].
+// flagErrLabel names flag name in a binding error: as typed on argv, else as [labelForFlag]. It
+// is [scopeInputs.label] by logical name, for a tag whose definition may be missing.
 func flagErrLabel(si scopeInputs, defs []FlagDef, name string) string {
 	if t := si.typed[name]; t != "" {
 		return t
@@ -1607,6 +1587,8 @@ func flagErrLabel(si scopeInputs, defs []FlagDef, name string) string {
 	return labelForFlag(defs, name)
 }
 
+// labelForFlag is a flag's CLI label (its identifiers) for error messages, falling back
+// to the logical name when the definition isn't found.
 func labelForFlag(defs []FlagDef, name string) string {
 	for _, d := range defs {
 		if d.Name == name {
@@ -1868,10 +1850,6 @@ func notValid(value, typeName string) error {
 	return &coerceError{Value: value, TypeName: typeName}
 }
 
-// coerceMap fills a string-keyed map field from raw "key=value" pairs, splitting on the first
-// '='. The value is coerced into the map's element type; an `any` element stores the raw
-// string. Later pairs win on a duplicate key, and malformed pairs are skipped — validation
-// rejects them.
 // coerceMapDotted fills a map[string]any flag from "key=value" pairs whose keys are dotted
 // paths into nested maps: "image.tag=v2" → m["image"].(map[string]any)["tag"] = "v2". Each
 // assignment overwrites whatever sits at its path, creating intermediate maps as needed, so
@@ -1905,6 +1883,10 @@ func coerceMapDotted(f reflect.Value, raw []string) error {
 	return nil
 }
 
+// coerceMap fills a string-keyed map field from raw "key=value" pairs, splitting on the first
+// '='. The value is coerced into the map's element type; an `any` element gets [inferScalar]'s
+// reading of it (a bool, number, nil or the string). Later pairs win on a duplicate key, and
+// malformed pairs are skipped — validation rejects them.
 func coerceMap(f reflect.Value, raw []string) error {
 	kt := f.Type().Key()
 	if kt.Kind() != reflect.String {

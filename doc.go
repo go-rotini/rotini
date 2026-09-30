@@ -81,9 +81,9 @@
 // The generated entrypoint builds a [Program] with [NewProgram] and calls [Program.Execute]:
 // resolve the invoked command from argv, run its [Handlers] hooks, and exit. Each invocation
 // carries a [Context] — the argv, the resolved chain, the program's streams, and the service
-// registry. Stopping is deliberate ([Context.Halt], [Context.HaltWithCode], [Context.Exit]), and a recorded error,
-// recovered panic or detected fault is reported once, after teardown, through the outcome
-// funnel.
+// registry. Stopping is deliberate ([Context.HaltWith], [Context.Halt], [Context.HaltWithCode],
+// [Context.Exit]), and a recorded error, recovered panic or detected fault is reported once,
+// after teardown, through the outcome funnel.
 //
 // The runtime's only built-in behaviors, documented as the exceptions they are: a default
 // SIGINT/SIGTERM trap (see [Program.WithoutSignalHandling] and [Program.WithSignals]), the
@@ -152,13 +152,14 @@
 // independently, or simply returns. The funnel fires only when some channel is non-empty, so a
 // run that records nothing is a silent success.
 //
-// There are three ways to stop, and which one to reach for is decided by whether the exit code
-// is the point:
+// There are four ways to stop, and which one to reach for is decided by whether something
+// failed and whether the exit code is the point:
 //
-//   - [Context.Halt] stops forward progress and claims NO code, leaving the verdict to what the
-//     run recorded and to the funnel. This is the commonest stop — a handler that has recorded
-//     an error and has nothing further to do — and the one to prefer when a program centralizes
-//     its exit policy in a funnel.
+//   - [Context.HaltWith] records an error and stops forward progress as one act, claiming no
+//     code. This is the commonest stop — a hook that has failed — and the one to prefer when a
+//     program centralizes its exit policy in a funnel.
+//   - [Context.Halt] stops forward progress with nothing to record and claims NO code, leaving
+//     the verdict to what the run recorded and to the funnel.
 //   - [Context.HaltWithCode] stops AND claims a code, for when the number is the point: a filter
 //     reporting "no match" as 1, a wrapper passing a child's status through.
 //   - [Context.Exit] stops immediately and skips pending teardown, for when remaining cleanup
@@ -219,12 +220,13 @@
 //
 // # Opt-in services
 //
-// Everything else is a value a handler fetches from the registry — [Program.Bind] to provide,
-// [Context.Get] or [Context.MustGet] to consume.
+// Everything else is a function or type a handler calls when it wants it. None of it needs
+// binding: the registry — [Program.Bind] to provide, [Context.Get] or [Context.MustGet] to
+// consume — holds only the program's own services.
 //
 // rotini's OWN seams are not in that registry. [Program.WithBindMeta], [Program.WithBinder],
-// [Program.WithParser] and [Program.WithVersion] supply them; [Context.Parser] and
-// [Context.Version] read them back. The registry is yours alone, so nothing rotini depends
+// [Program.WithParser], [Program.WithVersion] and [Program.WithHelp] supply them;
+// [Context.Parser], [Context.Version] and [Context.Help] read them back. The registry is yours alone, so nothing rotini depends
 // on can be shadowed by a name you chose or a type you got wrong:
 //
 //   - [Collect] is the typical handler's whole input story: every declared channel reconciled
@@ -253,8 +255,6 @@
 //
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve and orchestration
 //     phases wholesale; [FlagValueCompleter] and [ArgValueCompleter] feed dynamic completion.
-//
-// None of these are wired unless the generated code — or yours — binds them.
 //
 // # Batteries
 //

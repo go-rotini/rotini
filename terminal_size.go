@@ -12,8 +12,8 @@ import (
 //
 // The platform half lives in terminal_size_unix.go and terminal_size_other.go behind build tags,
 // because asking the kernel how wide a terminal is needs an ioctl the standard library does not
-// export. That is sixty lines of platform tedium in exchange for keeping rotini's runtime free of
-// external dependencies — see the batteries audit's dependency decision.
+// export. That is a few dozen lines of platform tedium in exchange for keeping rotini's runtime
+// free of external dependencies: a CLI should not pull in a terminal library to learn one number.
 
 // TerminalSize reports the size of the terminal behind stream, in character cells. Like
 // [IsTerminal], it takes a handler's streams as they are — rtx.Stdout, not a type assertion.

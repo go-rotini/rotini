@@ -16,10 +16,13 @@ package rotini
 // error. What it removes is the duplicated string literal, the type assertion, and the
 // per-handler miss check — and a value bound as the wrong type now fails at the binding site
 // rather than inside a handler. The untyped [Context.Bind] remains for dynamic cases.
+//
+// The zero Key names the registry entry "" — usable, but shared by every zero Key of any type;
+// build keys with [NewKey].
 type Key[T any] struct{ name string }
 
 // NewKey returns a typed registry key. name is what the value is stored under, so it must be
-// unique within a program.
+// unique within a program; an empty name is not rejected, but is the same entry as the zero Key.
 func NewKey[T any](name string) Key[T] { return Key[T]{name: name} }
 
 // Name returns the underlying registry key, for interoperating with the untyped
@@ -43,10 +46,8 @@ func (k Key[T]) BindTo(rtx *Context, value T) { rtx.Bind(k.name, value) }
 // Provide is the composable form of [Key.Provide]: it returns an [Option] that binds value
 // under k, for [Program.With] to apply.
 //
-// It is a function rather than a method because Go does not allow type parameters on methods —
-// p.Provide[T](k, v) cannot be written. [Key.Provide] solves that by taking the program as an
-// argument, which type-checks correctly but ends the chain, so a program with two services had
-// to abandon the fluent form the generated entrypoint teaches. This keeps both:
+// Options compose: several services go into one [Program.With] call and read as a group, and a
+// helper can hand back a set of them for a caller to apply:
 //
 //	cmd.Program.
 //		With(

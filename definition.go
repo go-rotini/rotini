@@ -8,7 +8,7 @@ import (
 
 // Definition is the compiled command tree for a generated rotini program: codegen emits it as
 // a Go literal, and the runtime parses argv, dispatches, and renders help and completion
-// against it. Every shape in this file is data only, with no behavior, which is what lets the
+// against it. Every type in this file is data only, with no behavior, which is what lets the
 // generated file read as a description of the CLI rather than as code.
 type Definition struct {
 	Name             string
@@ -18,7 +18,7 @@ type Definition struct {
 	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
 	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
 	Commands         []CommandDef
-	RemoteCommands   []RemoteDef         // co-located plugin sub-commands (Model 3)
+	RemoteCommands   []RemoteDef         // co-located plugin binaries dispatched as sub-commands of the root
 	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on the root command (nil = off)
 	PluginPath       string              // extra directory searched for BOTH declared remotes and discovered plugins
 	Passthrough      bool                // every token after the program name is a raw positional (no flag parsing)

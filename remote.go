@@ -88,8 +88,9 @@ func (e *RemoteError) Unwrap() []error {
 	return out
 }
 
-// RemoteDispatch is a resolved remote sub-command invocation: Def.Binary run with Args, with
-// Dir an extra directory to search first (empty for a declared remote command). The default
+// RemoteDispatch is a resolved remote sub-command invocation: Def.Binary run with Args. Dir is
+// the command's plugin path, searched after the host binary's own directory and before PATH,
+// for declared remotes and discovered plugins alike; empty means no plugin path. The default
 // resolver produces one for declared remotes and discovered plugins.
 type RemoteDispatch struct {
 	Def  RemoteDef
@@ -126,14 +127,11 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 	}
 
 	cmd := exec.CommandContext(ctx, path, r.Args...)
-	// All three streams come from the Program, not from the process. Stdin used to read
-	// os.Stdin directly while stdout and stderr honored [Program.WithStdout]/[Program.WithStderr],
-	// so a host that redirected input — a test, a REPL feeding a plugin, an embedding
-	// program — had two streams wired and the third reaching around it.
+	// All three streams come from the Program, not from the process, so a host that redirects
+	// them — a test, a REPL feeding a plugin, an embedding program — redirects the plugin too.
 	//
-	// The default is unchanged: p.stdin IS os.Stdin unless a caller replaced it, and
-	// exec.Cmd hands an *os.File to the child as a raw descriptor, so an interactive
-	// plugin still gets the real terminal.
+	// By default p.stdin IS os.Stdin, and exec.Cmd hands an *os.File to the child as a raw
+	// descriptor, so an interactive plugin still gets the real terminal.
 	cmd.Stdin = p.stdin
 	cmd.Stdout = p.stdout
 	cmd.Stderr = p.stderr
@@ -205,17 +203,15 @@ func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool) {
 }
 
 // resolveRemoteBinary finds the plugin binary: first adjacent to the running
-// executable (the git/kubectl convention), then in dir (the remote_discovery.path,
+// executable (the git/kubectl convention), then in dir (the command's plugin_path,
 // when set), then anywhere on PATH.
 //
 // dir is the command's PluginPath, and it is the same for both kinds of remote — a declared
-// one and a discovered one are the same binaries in the same place. It used to belong to
-// remote_discovery, where only discovered plugins could reach it, so a declared remote could
-// be installed only next to the host binary or on PATH.
+// one and a discovered one are the same binaries in the same place, so either can be
+// installed in the plugin path.
 //
-// The failure message names the locations actually searched, and only those. It used to list
-// all three unconditionally, so a user whose plugin sat in a directory rotini had never
-// consulted for that remote was told it had looked there and come up empty.
+// The failure message names the locations actually searched, and only those: telling a user
+// rotini looked in a directory it never consulted would send them hunting in the wrong place.
 func resolveRemoteBinary(name, dir string) (string, error) {
 	searched := []string{}
 	if exe, err := os.Executable(); err == nil {

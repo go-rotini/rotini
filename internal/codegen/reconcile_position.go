@@ -14,8 +14,8 @@ import (
 	"github.com/go-rotini/yaml"
 )
 
-// sourceLocator resolves a JSON-pointer instance location ("/command/inputs/
-// flags/0/schema") to a 1-based line:column in the original source. ok is
+// sourceLocator resolves a JSON-pointer instance location ("/command/flags/0/schema")
+// to a 1-based line:column in the original source. ok is
 // false when the pointer cannot be resolved (or the document fails to parse);
 // callers then degrade to pointer-only reporting.
 type sourceLocator func(pointer string) (line, col int, ok bool)

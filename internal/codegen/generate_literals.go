@@ -60,8 +60,7 @@ func renderDefinition(gp *program) string {
 }
 
 // renderBindMeta renders the `var BindMeta = rotini.BindMeta{…}` descriptor the
-// default binder consumes — the document-level config-file sources. Returns "" when
-// there are none (so a CLI with no configuration_files stays unchanged).
+// default binder consumes — the env prefix, config-file sources and stdin schemas.
 func renderBindMeta(gp *program) string {
 	// Emitted UNCONDITIONALLY: an empty descriptor is the
 	// honest zero — handler and main.go code can reference BindMeta uniformly,

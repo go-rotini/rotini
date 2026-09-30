@@ -133,10 +133,10 @@ func renderGoFileWithHeader(header, name, text string, data any) ([]byte, error)
 	return groupImports(formatted)
 }
 
-// templateSeedData is the context for the spec and conf seed templates. The seed
-// is MINIMAL: a root-only spec and a conf declaring the entrypoint + packages with
-// every feature off. `rotini init` runs the standard generate over it, producing a
-// ready-to-build root-only CLI the author grows from there.
+// templateSeedData is the context for the spec and conf seed templates. The seed is
+// small: a root with --help/--version plus `help` and `version` sub-commands, and a conf
+// declaring the entrypoint + packages with only the help feature on. `rotini init` runs
+// the standard generate over it, producing a ready-to-build CLI the author grows from there.
 type templateSeedData struct {
 	Version string
 	Package string

@@ -8,7 +8,8 @@ import "context"
 //
 // # Instance lifetime
 //
-// The runtime asks your ProgramHandlers for a command's handler ONCE PER FRAME, PER RUN, and
+// The runtime asks your ProgramHandlers — the aggregate interface codegen generates, and the
+// value passed to [NewProgram] — for a command's handler ONCE PER FRAME, PER RUN, and
 // the value it gets back serves that frame's hooks for that run. Two consequences are worth
 // knowing before reaching for the registry:
 //

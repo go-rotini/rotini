@@ -76,6 +76,7 @@ func (e *SubprocessError) Error() string {
 // *exec.ExitError and CategoryOf reach through.
 func (e *SubprocessError) Unwrap() []error { return []error{e.Cause, ErrInternal} }
 
+// firstLine returns s up to its first newline.
 func firstLine(s string) string {
 	first, _, _ := strings.Cut(s, "\n")
 	return first
@@ -121,10 +122,12 @@ func (s *Subprocess) WithoutParentEnv() *Subprocess { s.inherit = false; return 
 // EOF rather than blocking on the parent's terminal).
 func (s *Subprocess) WithStdin(r io.Reader) *Subprocess { s.stdin = r; return s }
 
-// WithStdout streams the child's stdout to w as it is produced.
+// WithStdout streams the child's stdout to w as it is produced. A nil w (the default) discards
+// it for [Subprocess.Run]; [Subprocess.Output] captures it regardless.
 func (s *Subprocess) WithStdout(w io.Writer) *Subprocess { s.stdout = w; return s }
 
-// WithStderr streams the child's stderr to w as it is produced.
+// WithStderr streams the child's stderr to w as it is produced. A nil w (the default) captures
+// it instead, so a failure's [*SubprocessError] can quote it.
 func (s *Subprocess) WithStderr(w io.Writer) *Subprocess { s.stderr = w; return s }
 
 // WithTimeout kills the child if it has not exited within d. Zero — the default —
@@ -171,13 +174,10 @@ func (s *Subprocess) Run(ctx context.Context) (int, error) {
 	}
 
 	err := cmd.Run()
-	code := cmd.ProcessState.ExitCode()
 	if err == nil {
-		return code, nil
+		return cmd.ProcessState.ExitCode(), nil
 	}
-	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
-		code = -1
-	}
+	code := exitCodeOf(cmd, err)
 	return code, &SubprocessError{
 		Name: s.name, Args: s.args, ExitCode: code,
 		Stderr: captured.String(), Cause: err,
@@ -199,17 +199,27 @@ func (s *Subprocess) Output(ctx context.Context) (string, error) {
 // to a pipe nobody reads — which would hang cmd.Wait. Used only once the stream is
 // already known to be unusable, so the discarded bytes are of no value.
 func drain(r io.Reader) {
-	if _, err := io.Copy(io.Discard, r); err != nil {
-		return
+	_, _ = io.Copy(io.Discard, r) // the stream already failed; a second error adds nothing
+}
+
+// exitCodeOf is the exit code a failed run reports: the child's own status when it ran and
+// exited, else -1 (it never started, or failed in a way that left no exit status).
+func exitCodeOf(cmd *exec.Cmd, err error) int {
+	if _, ok := errors.AsType[*exec.ExitError](err); !ok {
+		return -1
 	}
+	return cmd.ProcessState.ExitCode()
+}
+
+// startFailure is the error for a child that could not be set up or started.
+func (s *Subprocess) startFailure(err error) *SubprocessError {
+	return &SubprocessError{Name: s.name, Args: s.args, ExitCode: -1, Cause: err}
 }
 
 // reap waits for a child we deliberately killed, releasing its process entry. The status is
 // meaningless — the kill was ours — so it is dropped rather than surfaced.
 func reap(cmd *exec.Cmd) {
-	if err := cmd.Wait(); err != nil {
-		return
-	}
+	_ = cmd.Wait() // the kill was ours, so the status it reports is expected
 }
 
 // Lines runs the command and yields its output one line at a time, tagged with the stream it
@@ -233,16 +243,16 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 
 		outPipe, err := cmd.StdoutPipe()
 		if err != nil {
-			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: -1, Cause: err})
+			yield(Line{}, s.startFailure(err))
 			return
 		}
 		errPipe, err := cmd.StderrPipe()
 		if err != nil {
-			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: -1, Cause: err})
+			yield(Line{}, s.startFailure(err))
 			return
 		}
 		if err := cmd.Start(); err != nil {
-			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: -1, Cause: err})
+			yield(Line{}, s.startFailure(err))
 			return
 		}
 
@@ -299,11 +309,7 @@ func (s *Subprocess) Lines(ctx context.Context) iter.Seq2[Line, error] {
 			return
 		}
 		if waitErr != nil {
-			code := cmd.ProcessState.ExitCode()
-			if _, isExit := errors.AsType[*exec.ExitError](waitErr); !isExit {
-				code = -1
-			}
-			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: code, Cause: waitErr})
+			yield(Line{}, &SubprocessError{Name: s.name, Args: s.args, ExitCode: exitCodeOf(cmd, waitErr), Cause: waitErr})
 		}
 	}
 }

@@ -13,6 +13,10 @@ import "errors"
 // rotini labels; the funnel decides what to do with the label. There are no named exit-code
 // constants and no forced category→code mapping: the default funnel exits 1 for any recorded
 // error or fault, and a program that wants distinct codes maps them in its own funnel.
+//
+// The constants are declared in increasing severity — none < usage < internal — so a funnel
+// summarizing several errors can keep the worst with a plain comparison. That ordering is part
+// of the contract; the numbers are not.
 type Category int
 
 const (
@@ -25,10 +29,6 @@ const (
 	// service, a wiring mistake. The end-user cannot fix it; the author must.
 	CategoryInternal
 )
-
-// The constants are declared in increasing severity — none < usage < internal — so a funnel
-// summarizing several errors can keep the worst with a plain comparison. That ordering is part
-// of the contract; the numbers are not.)
 
 // String renders the category as a short, stable label.
 func (c Category) String() string {

@@ -1,10 +1,11 @@
 package codegen
 
 // `rotini initialize`: scaffolding a new CLI's seed spec and conf under cmd/<name>/, then
-// running the standard generate over them. The seed is minimal — a root-only spec and a conf
-// with every feature off — and generate takes it from there, writing the entrypoint main.go
-// (which carries the //go:generate directive, so every later regen is `go generate ./...`),
-// the empty root stub, and the codegen files.
+// running the standard generate over them. The seed is small — a root with --help/--version
+// flags plus `help` and `version` sub-commands, and a conf with only the help feature on — and
+// generate takes it from there, writing the entrypoint main.go (which carries the
+// //go:generate directive, so every later regen is `go generate ./...`), the handler stubs
+// seeded to print help and version, and the codegen files.
 
 import (
 	"errors"
