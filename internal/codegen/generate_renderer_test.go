@@ -36,21 +36,21 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 	bodies := map[string]func(d templateHandlerData) templateHandlerData{
 		"plain": func(d templateHandlerData) templateHandlerData { return d },
 		"help flag": func(d templateHandlerData) templateHandlerData {
-			d.HelpVar, d.HelpFlag = "HelpAppSub", "Help"
+			d.HelpFlag, d.HelpFrame = "Help", d.Prefix
 			return d
 		},
 		"version flag": func(d templateHandlerData) templateHandlerData { d.VersionFlag = "Version"; return d },
 		"help command": func(d templateHandlerData) templateHandlerData {
-			d.HelpVar, d.HelpPathArg = "HelpAppSub", "Command"
+			d.HelpPathArg = "Command"
 			return d
 		},
 		"version cmd": func(d templateHandlerData) templateHandlerData { d.VersionOnly = true; return d },
 		"bare root help": func(d templateHandlerData) templateHandlerData {
-			d.HelpVar, d.PrintHelpWhenBare = "HelpApp", true
+			d.PrintHelpWhenBare = true
 			return d
 		},
 		"all flags": func(d templateHandlerData) templateHandlerData {
-			d.HelpVar, d.HelpFlag, d.VersionFlag = "HelpAppSub", "Help", "Version"
+			d.HelpFlag, d.HelpFrame, d.VersionFlag = "Help", d.Prefix, "Version"
 			return d
 		},
 	}

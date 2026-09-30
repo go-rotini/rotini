@@ -219,3 +219,37 @@ func TestNormalizeBounds(t *testing.T) {
 		}
 	}
 }
+
+// An input referring to a named scalar schema takes that schema's constraints where it sets none
+// of its own; before, `$ref: Kind` (a string enum) generated a Kind field and enforced nothing.
+// A named object schema is not flattened, and the input's own keys win.
+func TestInheritScalarRefConstraints(t *testing.T) {
+	spec := &Spec{Command: Command{
+		Name: "app",
+		Schemas: map[string]Schema{
+			"Kind": {BaseSchema: BaseSchema{Type: "string", Enum: []string{"pods", "services"}, Pattern: "^[a-z]+$"}},
+			"Port": {BaseSchema: BaseSchema{Type: "integer", Minimum: float64(1), Maximum: float64(65535)}},
+			"DB":   {BaseSchema: BaseSchema{Type: "object", Properties: map[string]Schema{"host": {BaseSchema: BaseSchema{Type: "string"}}}}},
+		},
+		Arguments: []ArgumentInput{{Name: "kind", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "Kind"}}}},
+		Flags: []FlagInput{
+			{Name: "port", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "Port", Maximum: float64(1024)}}},
+			{Name: "kinds", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Ref: "Kind"}}}}},
+			{Name: "db", Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "DB"}}},
+		},
+	}}
+	spec.normalize()
+	c := spec.Command
+	if got := c.Arguments[0].Schema.Enum; !slices.Equal(got, []string{"pods", "services"}) || c.Arguments[0].Schema.Pattern != "^[a-z]+$" {
+		t.Errorf("argument enum = %v, pattern = %q", got, c.Arguments[0].Schema.Pattern)
+	}
+	if p := c.Flags[0].Schema; *bound(p.Minimum) != 1 || *bound(p.Maximum) != 1024 {
+		t.Errorf("port bounds = %v..%v, want 1..1024 (the input's own maximum wins)", p.Minimum, p.Maximum)
+	}
+	if got := c.Flags[1].Schema.Enum; !slices.Equal(got, []string{"pods", "services"}) {
+		t.Errorf("list items did not inherit (hoisted) the enum: %v", got)
+	}
+	if len(c.Flags[2].Schema.Enum) != 0 || c.Flags[2].Schema.Pattern != "" {
+		t.Errorf("an object ref was flattened: %+v", c.Flags[2].Schema.BaseSchema)
+	}
+}

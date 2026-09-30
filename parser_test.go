@@ -24,7 +24,14 @@ func parserTestDef() Definition {
 				Name:    "run",
 				Handler: "AppRun",
 				Aliases: []string{"r"},
-				Flags:   []FlagDef{{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"}},
+				Flags: []FlagDef{
+					{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"},
+					{Name: "rate", Identifiers: []string{"--rate"}, Type: "float64"},
+					{Name: "wait", Identifiers: []string{"--wait"}, Type: "time.Duration"},
+					{Name: "when", Identifiers: []string{"--when"}, Type: "time.Time"},
+					{Name: "level", Identifiers: []string{"--level"}, Type: "int"},
+					{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string"},
+				},
 				Arguments: []ArgDef{
 					{Name: "name", Type: "string"},
 					{Name: "rest", Type: "[]string", Variadic: true},
@@ -1025,6 +1032,7 @@ func TestParse_multiCharShortVsCluster(t *testing.T) {
 func TestParse_repeatedNameOnPath(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool"}},
 		Commands: []CommandDef{{
 			Name: "cmd1", Handler: "AppCmd1",
 			Flags: []FlagDef{{Name: "mid", Identifiers: []string{"--mid"}, Type: "string"}},
@@ -1074,6 +1082,7 @@ func TestParse_repeatedNameOnPath(t *testing.T) {
 func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool"}},
 		Commands: []CommandDef{
 			{
 				Name: "cmd1", Handler: "AppCmd1",
@@ -1657,8 +1666,10 @@ func TestParse_dottedKeys(t *testing.T) {
 	if !ok || image["tag"] != "v2" || image["pull"] != "Always" {
 		t.Errorf("Set[image] = %#v, want nested {tag: v2, pull: Always}", in.App.Flags.Set["image"])
 	}
-	if in.App.Flags.Set["replicas"] != "3" {
-		t.Errorf("Set[replicas] = %#v, want %q", in.App.Flags.Set["replicas"], "3")
+	// A dotted_keys map says nothing about its values, so each is read as the JSON spelling of
+	// it would be: 3 is the number JSON gives, not the text "3" (rubectl R-13).
+	if in.App.Flags.Set["replicas"] != float64(3) {
+		t.Errorf("Set[replicas] = %#v, want float64(3)", in.App.Flags.Set["replicas"])
 	}
 	if in.App.Flags.Labels["team.name"] != "core" {
 		t.Errorf("plain map = %v, want the literal key team.name (dotted_keys is opt-in)", in.App.Flags.Labels)
@@ -1668,13 +1679,13 @@ func TestParse_dottedKeys(t *testing.T) {
 	// replaced by a subtree and a subtree replaced by a scalar.
 	if in, err := parse(t, "--set", "a=1", "--set", "a.b=2"); err != nil {
 		t.Errorf("Parse: %v", err)
-	} else if sub, ok := in.App.Flags.Set["a"].(map[string]any); !ok || sub["b"] != "2" {
+	} else if sub, ok := in.App.Flags.Set["a"].(map[string]any); !ok || sub["b"] != float64(2) {
 		t.Errorf("scalar→subtree: Set[a] = %#v, want map[b:2]", in.App.Flags.Set["a"])
 	}
 	if in, err := parse(t, "--set", "a.b=2", "--set", "a=1"); err != nil {
 		t.Errorf("Parse: %v", err)
-	} else if in.App.Flags.Set["a"] != "1" {
-		t.Errorf("subtree→scalar: Set[a] = %#v, want %q", in.App.Flags.Set["a"], "1")
+	} else if in.App.Flags.Set["a"] != float64(1) {
+		t.Errorf("subtree→scalar: Set[a] = %#v, want 1", in.App.Flags.Set["a"])
 	}
 
 	// An empty path segment is a usage error naming the flag.
@@ -2508,15 +2519,173 @@ func TestParse_measuredBounds(t *testing.T) {
 		t.Fatalf("in-range values rejected: %v", err)
 	}
 	for argv, want := range map[string]string{
-		"--wait=2h":    "--wait must be <= 1h30m0s (got 2h)",
+		"--wait=2h":    "--wait must be <= 1h30m (got 2h)",
 		"--wait=500ms": "--wait must be >= 1s (got 500ms)",
 		"--size=2Gi":   "--size must be <= 1Gi (got 2Gi)",
 		"--sizes=2Mi":  "--sizes must be <= 1Mi (got 2Mi)",
-		"--wait=1d":    "--wait must be <= 1h30m0s (got 1d)",
+		"--wait=1d":    "--wait must be <= 1h30m (got 1d)",
 	} {
 		err := NewParser().Parse(NewContextFor(def, []string{argv}), &in)
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: err = %v, want %q", argv, err, want)
+		}
+	}
+}
+
+// A `from: [stdin]` flag's "-" survives argv being parsed more than once in a run — the generated
+// --help check (ParseArgv) and a parent collecting its own inputs both parse argv before the leaf's
+// Collect. Each parse used to read stdin afresh, so the first drained it and the leaf failed with
+// "stdin is empty".
+func TestParse_stdinSentinelSurvivesReparsing(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "file", Identifiers: []string{"-f"}, Type: "string", From: []string{"stdin"}},
+			{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				File string `rotini:"file"`
+				Help bool   `rotini:"help"`
+			}
+		}
+	}
+	rtx := NewContextFor(def, []string{"-f", "-"})
+	rtx.Stdin = strings.NewReader("piped payload\n")
+	for i := range 3 {
+		var in inputs
+		if err := NewParser().Parse(rtx, &in); err != nil {
+			t.Fatalf("parse %d: %v", i+1, err)
+		}
+		if in.App.Flags.File != "piped payload" {
+			t.Errorf("parse %d: file = %q", i+1, in.App.Flags.File)
+		}
+	}
+}
+
+// Collecting an ancestor's inputs type from a descendant's handler is an error, even when the
+// two happen to share a flag. Every command shares `help`, so the old check ("they share some
+// flag") passed, and the root's type bound onto the leaf: fallbacks filled its fields by key while
+// argv values were lost — a silently wrong answer instead of a loud one.
+func TestParse_ancestorTypeFromDescendantIsAnError(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
+			{Name: "config", Identifiers: []string{"--config"}, Type: "string"},
+		},
+		Commands: []CommandDef{{
+			Name: "view", Handler: "AppView",
+			Flags: []FlagDef{{Name: "help", Identifiers: []string{"-h"}, Type: "bool"}},
+		}},
+	}
+	var root struct {
+		App struct {
+			Flags struct {
+				Help   bool   `rotini:"help"`
+				Config string `rotini:"config"`
+			}
+		}
+	}
+	err := NewParser().Parse(NewContextFor(def, []string{"--config", "x", "view"}), &root)
+	if err == nil || !strings.Contains(err.Error(), `declares no flag "config"`) {
+		t.Fatalf("err = %v, want the mismatch named", err)
+	}
+}
+
+// A token counts against the flag the parser bound it to. The root deprecates --store; a
+// sub-command declares its own --store. `app set --store x` used the sub-command's, and was
+// reported as the root's deprecated one because the report matched raw argv tokens against every
+// command's flags.
+func TestDeprecations_attributeTokensToTheBoundFlag(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "store", Identifiers: []string{"--store"}, Type: "string", Deprecated: "use a context"}},
+		Commands: []CommandDef{{
+			Name: "set", Handler: "AppSet",
+			Flags: []FlagDef{{Name: "store", Identifiers: []string{"--store"}, Type: "string"}},
+		}},
+	}
+	if got := Deprecations(NewContextFor(def, []string{"set", "--store", "x"})); len(got) != 0 {
+		t.Errorf("the sub-command's own --store was reported: %+v", got)
+	}
+	got := Deprecations(NewContextFor(def, []string{"--store", "x", "set"}))
+	if len(got) != 1 || got[0].Name != "store" || got[0].Message != "use a context" {
+		t.Errorf("the root's --store: %+v", got)
+	}
+}
+
+// A flag typed before a sub-command's name belongs to an ancestor: only the commands reached so
+// far are eligible, as in every CLI with sub-commands.
+func TestParse_flagsBindByPosition(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "out", Identifiers: []string{"-o"}, Type: "string"}},
+		Commands: []CommandDef{{
+			Name: "get", Handler: "AppGet",
+			Flags: []FlagDef{
+				{Name: "out", Identifiers: []string{"-o"}, Type: "string"},
+				{Name: "wide", Identifiers: []string{"--wide"}, Type: "bool"},
+			},
+		}},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Out string `rotini:"out"`
+			}
+		}
+		AppGet struct {
+			Flags struct {
+				Out  string `rotini:"out"`
+				Wide bool   `rotini:"wide"`
+			}
+		}
+	}
+	if err := NewParser().Parse(NewContextFor(def, []string{"-o", "root", "get", "-o", "leaf"}), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.App.Flags.Out != "root" || in.AppGet.Flags.Out != "leaf" {
+		t.Errorf("root -o = %q, get -o = %q", in.App.Flags.Out, in.AppGet.Flags.Out)
+	}
+	if err := NewParser().Parse(NewContextFor(def, []string{"--wide", "get"}), &in); err == nil {
+		t.Error("a sub-command's flag was accepted before the sub-command's name")
+	}
+}
+
+// TestParse_detachedOptionalValueHint pins the hint for the likeliest mistake with an
+// optional-value flag: writing its value detached. `--dry-run server` leaves server as a
+// positional by the documented rule (the value must be attached), and the error used to be only
+// `"apply" takes no arguments (got 1)` — true, and no help at all (rubectl R-18).
+func TestParse_detachedOptionalValueHint(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{
+		{Name: "apply", Handler: "AppApply", Flags: []FlagDef{
+			{Name: "dry-run", Identifiers: []string{"--dry-run"}, Type: "string", ImplicitValue: "client", Enum: []string{"none", "client", "server"}},
+			{Name: "color", Identifiers: []string{"--color"}, Type: "string", ImplicitValue: "always"},
+		}},
+		{Name: "cat", Handler: "AppCat", Arguments: []ArgDef{{Name: "file", Type: "string"}}, Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"--color"}, Type: "string", ImplicitValue: "always"},
+		}},
+	}}
+	for _, tt := range []struct {
+		argv []string
+		hint string // "" = no hint
+	}{
+		{[]string{"apply", "--dry-run", "server"}, "--dry-run takes its value attached: --dry-run=server"},
+		{[]string{"apply", "--dry-run", "bogus"}, ""},      // not a valid value: no guess
+		{[]string{"apply", "--dry-run=server", "x"}, ""},   // attached already
+		{[]string{"cat", "--color", "a.txt", "b.txt"}, ""}, // the detached word is a real argument
+		{[]string{"cat", "a.txt", "--color", "never"}, "--color takes its value attached: --color=never"},
+	} {
+		err := NewParser().Parse(NewContextFor(def, tt.argv), &struct{}{})
+		if err == nil {
+			t.Errorf("%v: parsed, want a usage error", tt.argv)
+			continue
+		}
+		if has := strings.Contains(err.Error(), "takes its value attached"); has != (tt.hint != "") || (tt.hint != "" && !strings.Contains(err.Error(), tt.hint)) {
+			t.Errorf("%v: err = %q, want hint %q", tt.argv, err, tt.hint)
 		}
 	}
 }

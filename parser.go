@@ -25,6 +25,32 @@ import (
 type parsedInputs struct {
 	scopes  []scopeInputs     // one entry per resolved chain frame, root → leaf
 	argvSet []map[string]bool // per frame: logical flag names explicitly set on argv (not defaults, not env/config fallback)
+
+	// span limits validation to the frames an inputs type describes, [lo, hi). A parent
+	// collecting its own inputs in CascadingPreRun describes only its own frames; judging the
+	// leaf's required inputs there failed `app sub --help` before sub's handler could answer
+	// the --help. Zero value: no limit.
+	span *[2]int
+
+	// detached is the likely mistake behind an unexpected positional: a word that directly
+	// followed a flag whose value is optional, and would have been a valid value for it —
+	// `--dry-run server`, where the value had to be attached (`--dry-run=server`). [0] is the
+	// flag as typed, [1] the word. nil when there is none.
+	detached *[2]string
+}
+
+// detachedHint is the hint an unexpected-positional error carries when one of the extra
+// words is the value of an optional-value flag written detached, else "".
+func (p *parsedInputs) detachedHint(extra []string) string {
+	if p == nil || p.detached == nil || !slices.Contains(extra, p.detached[1]) {
+		return ""
+	}
+	return fmt.Sprintf(" — %s takes its value attached: %s=%s", p.detached[0], p.detached[0], p.detached[1])
+}
+
+// covers reports whether chain frame i is one this validation pass judges.
+func (p *parsedInputs) covers(i int) bool {
+	return p == nil || p.span == nil || (i >= p.span[0] && i < p.span[1])
 }
 
 // setOnArgv reports whether the flag was explicitly provided on argv in chain frame idx — the
@@ -45,6 +71,9 @@ type scopeInputs struct {
 	// typed is the identifier the user typed for each flag set on argv ("--due", "-d",
 	// "--no-color", "--db.host"), so an error about its value names what they wrote.
 	typed map[string]string
+	// used is every identifier each flag was set through, in order — what Deprecations reports
+	// from, so a token counts against the flag the parser actually bound it to.
+	used map[string][]string
 }
 
 // label is how an error names flag fd: as the user typed it, else by its preferred identifier.
@@ -237,14 +266,18 @@ func Deprecations(rtx *Context) []Deprecation {
 	argv := rtx.Argv
 	var out []Deprecation
 	chain := rtx.Chain()
-	for _, frame := range chain {
+	store := quietParse(chain, argv)
+	for i, frame := range chain {
 		// A command deprecated as a whole reports however it was invoked; one with only
 		// deprecated aliases reports when one of those resolved it (frame.Matched).
 		if frame.Matched != "" && deprecatedToken(frame.Matched, frame.DeprecatedIdentifiers, frame.Deprecated) {
 			out = append(out, Deprecation{Kind: "command", Name: frame.Name, Identifier: frame.Matched, Message: frame.Deprecated})
 		}
+		if store == nil {
+			continue // argv does not parse; the parse error is what the user sees
+		}
 		for _, fd := range frame.Flags {
-			out = append(out, flagDeprecations(fd, argv)...)
+			out = append(out, flagDeprecations(fd, store.scopes[i].used[fd.Name])...)
 		}
 	}
 	// A deprecated argument reports when a value was supplied for it.
@@ -267,12 +300,9 @@ func deprecatedToken(token string, deprecatedIDs []string, message string) bool 
 // flagDeprecations reports a flag set on argv through a deprecated identifier — or through any
 // identifier when the flag as a whole is deprecated — once per identifier used, carrying the
 // spec's message.
-func flagDeprecations(fd FlagDef, argv []string) []Deprecation {
+func flagDeprecations(fd FlagDef, used []string) []Deprecation {
 	var out []Deprecation
-	for _, id := range fd.Identifiers {
-		if !flagWasSet(argv, []string{id}) {
-			continue
-		}
+	for _, id := range used {
 		if deprecatedToken(id, fd.DeprecatedIdentifiers, fd.Deprecated) {
 			out = append(out, Deprecation{Kind: "flag", Name: fd.Name, Identifier: id, Message: fd.Deprecated})
 		}
@@ -280,9 +310,10 @@ func flagDeprecations(fd FlagDef, argv []string) []Deprecation {
 	return out
 }
 
-// positionals are the leaf's positional tokens in argv, by the parser's own tokenizing — on a
-// copy of the chain with value acquisition off, so asking never reads a file or stdin.
-func positionals(chain []ResolvedCommand, argv []string) []string {
+// quietParse tokenizes argv against chain the way the parser does, on a copy of the chain with
+// value acquisition off, so asking what argv says never reads a file or stdin. nil when argv
+// does not parse.
+func quietParse(chain []ResolvedCommand, argv []string) *parsedInputs {
 	quiet := make([]ResolvedCommand, len(chain))
 	for i, frame := range chain {
 		flags := make([]FlagDef, len(frame.Flags))
@@ -297,7 +328,15 @@ func positionals(chain []ResolvedCommand, argv []string) []string {
 	if err != nil {
 		return nil
 	}
-	return store.scopes[len(quiet)-1].args
+	return store
+}
+
+// positionals are the leaf's positional tokens in argv.
+func positionals(chain []ResolvedCommand, argv []string) []string {
+	if store := quietParse(chain, argv); store != nil {
+		return store.scopes[len(chain)-1].args
+	}
+	return nil
 }
 
 // argumentDeprecations reports each deprecated argument of the leaf that argv supplied a value
@@ -336,7 +375,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 	if len(chain) == 0 {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}
-	store, err := parseInto(chain, rtx.Argv, rtx.Stdin)
+	store, err := parseInto(chain, rtx.Argv, rtx.flagStdin())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -454,6 +493,12 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 		si.typed = map[string]string{}
 	}
 	si.typed[fd.Name] = typed
+	if si.used == nil {
+		si.used = map[string][]string{}
+	}
+	if !slices.Contains(si.used[fd.Name], typed) {
+		si.used[fd.Name] = append(si.used[fd.Name], typed)
+	}
 	value, err := resolveFlagValue(fd, typed, value, stdin)
 	if err != nil {
 		return err
@@ -531,11 +576,15 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 		}
 
 		if !terminated && isFlag(tok) {
-			extra, err := consumeFlagToken(chain, tok, argv, i, addFlag)
+			// Only the commands reached so far are eligible: a flag typed before a sub-command's
+			// name belongs to one of its ancestors, never to it. (Searching the whole chain let
+			// `app --store x set` bind set's own --store.)
+			extra, err := consumeFlagToken(chain[:depth], tok, argv, i, addFlag)
 			if err != nil {
 				return nil, err
 			}
 			i += extra
+			noteDetached(store, chain[:depth], tok, argv, i)
 			continue
 		}
 
@@ -556,23 +605,85 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 	return store, nil
 }
 
+// noteDetached records, the first time it happens, a bare optional-value flag followed by a word
+// that would have been a valid value for it: the word will be a positional, and if that turns out
+// to be one too many, the error says what the user probably meant. See parsedInputs.detached.
+func noteDetached(store *parsedInputs, chain []ResolvedCommand, tok string, argv []string, i int) {
+	if store.detached != nil || strings.Contains(tok, "=") || i+1 >= len(argv) {
+		return
+	}
+	fd, _, ok := findFlagIndex(chain, tok)
+	next := argv[i+1]
+	if !ok || fd.ImplicitValue == "" || isFlag(next) || next == "--" {
+		return
+	}
+	if len(fd.Enum) > 0 && !enumHas(fd.Enum, next, fd.IgnoreCase) {
+		return
+	}
+	store.detached = &[2]string{tok, next}
+}
+
+// checkFlagValues checks one flag's argv values against its enum, its key=value shape when it
+// is a map, and its constraints. label is the flag as the user typed it.
+func checkFlagValues(fd FlagDef, label string, vals []string) error {
+	for _, v := range vals {
+		if len(fd.Enum) > 0 && !enumHas(fd.Enum, v, fd.IgnoreCase) {
+			return &ParseError{
+				Kind:       ParseKindEnumViolation,
+				Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), label, strings.Join(fd.Enum, ", ")),
+				Flag:       label,
+				Token:      redactValue(v, fd.Secret),
+				Candidates: fd.Enum,
+			}
+		}
+		if isMapType(fd.Type) && !strings.Contains(v, "=") {
+			return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, fd.Secret)), Flag: label}
+		}
+	}
+	return checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret)
+}
+
+// strayCommand reports a positional on a command that branches but takes no arguments: a
+// mistyped sub-command. The error carries the sibling vocabulary for a [Suggestor].
+func strayCommand(leaf ResolvedCommand, si scopeInputs, store *parsedInputs) error {
+	if len(leaf.Commands) == 0 || len(leaf.Arguments) > 0 || len(si.args) == 0 {
+		return nil
+	}
+	tok := si.args[0]
+	return &ParseError{
+		Kind:       ParseKindUnknownCommand,
+		Msg:        fmt.Sprintf("unknown command %q for %q", tok, leaf.Name) + store.detachedHint(si.args[:1]),
+		Command:    leaf.Name,
+		Token:      tok,
+		Candidates: childCommandNames(leaf),
+	}
+}
+
+// extraPositionals reports positionals the leaf has no argument for. With no variadic argument
+// to absorb them, extra positionals are a usage error rather than a silent drop.
+func extraPositionals(leaf ResolvedCommand, si scopeInputs, store *parsedInputs) error {
+	n := len(leaf.Arguments)
+	if hasVariadicArg(leaf.Arguments) || len(si.args) <= n {
+		return nil
+	}
+	hint := store.detachedHint(si.args[n:]) // only a word that is one too many
+	if n == 0 {
+		return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args)) + hint, Command: leaf.Name}
+	}
+	return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("%q accepts at most %d %s (got %d)", leaf.Name, n, plural("argument", n), len(si.args)) + hint, Command: leaf.Name}
+}
+
 // validate enforces the declarative constraints on the resolved chain against a parsed store:
 // a stray positional on a branch-only command is a mistyped sub-command, required inputs must
 // be present or defaulted, and any value must fall inside a declared enum.
 func validate(chain []ResolvedCommand, store *parsedInputs) error {
 	leaf := chain[len(chain)-1]
 	si := store.scopes[len(chain)-1]
+	leafCovered := store.covers(len(chain) - 1)
 
-	// A stray positional on a command that branches but takes no arguments is a mistyped
-	// sub-command. The error carries the sibling vocabulary for a [Suggestor].
-	if len(leaf.Commands) > 0 && len(leaf.Arguments) == 0 && len(si.args) > 0 {
-		tok := si.args[0]
-		return &ParseError{
-			Kind:       ParseKindUnknownCommand,
-			Msg:        fmt.Sprintf("unknown command %q for %q", tok, leaf.Name),
-			Command:    leaf.Name,
-			Token:      tok,
-			Candidates: childCommandNames(leaf),
+	if leafCovered {
+		if err := strayCommand(leaf, si, store); err != nil {
+			return err
 		}
 	}
 
@@ -581,37 +692,22 @@ func validate(chain []ResolvedCommand, store *parsedInputs) error {
 	}
 
 	for i, f := range chain {
+		if !store.covers(i) {
+			continue
+		}
 		fsi := store.scopes[i]
 		for _, fd := range f.Flags {
-			vals := fsi.flags[fd.Name]
-			label := fsi.label(fd)
-			for _, v := range vals {
-				if len(fd.Enum) > 0 && !enumHas(fd.Enum, v, fd.IgnoreCase) {
-					return &ParseError{
-						Kind:       ParseKindEnumViolation,
-						Msg:        fmt.Sprintf("invalid value %q for %s (one of: %s)", redactValue(v, fd.Secret), label, strings.Join(fd.Enum, ", ")),
-						Flag:       label,
-						Token:      redactValue(v, fd.Secret),
-						Candidates: fd.Enum,
-					}
-				}
-				if isMapType(fd.Type) && !strings.Contains(v, "=") {
-					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s expects key=value pairs (got %q)", label, redactValue(v, fd.Secret)), Flag: label}
-				}
-			}
-			if err := checkConstraints(label, fd.Type, fd.Constraints, vals, fd.Secret); err != nil {
+			if err := checkFlagValues(fd, fsi.label(fd), fsi.flags[fd.Name]); err != nil {
 				return err
 			}
 		}
 	}
 
-	// With no variadic argument to absorb them, extra positionals are a usage error rather
-	// than a silent drop.
-	if n := len(leaf.Arguments); !hasVariadicArg(leaf.Arguments) && len(si.args) > n {
-		if n == 0 {
-			return &ParseError{Kind: ParseKindNoArguments, Msg: fmt.Sprintf("%q takes no arguments (got %d)", leaf.Name, len(si.args)), Command: leaf.Name}
-		}
-		return &ParseError{Kind: ParseKindTooManyArguments, Msg: fmt.Sprintf("%q accepts at most %d %s (got %d)", leaf.Name, n, plural("argument", n), len(si.args)), Command: leaf.Name}
+	if !leafCovered {
+		return nil
+	}
+	if err := extraPositionals(leaf, si, store); err != nil {
+		return err
 	}
 
 	for i, ad := range leaf.Arguments {
@@ -835,6 +931,9 @@ func redactValue(v string, secret bool) string {
 // which unlike a raw argv re-scan also sees flags set inside short clusters.
 func validateFlagGroups(chain []ResolvedCommand, store *parsedInputs) error {
 	for i, f := range chain {
+		if !store.covers(i) {
+			continue
+		}
 		for _, g := range f.FlagGroups {
 			all := make([]string, 0, len(g.Flags))
 			var set []string
@@ -861,6 +960,9 @@ func validateFlagGroups(chain []ResolvedCommand, store *parsedInputs) error {
 // same explicit-argv convention as flag groups.
 func validateFlagDependencies(chain []ResolvedCommand, store *parsedInputs) error {
 	for i, f := range chain {
+		if !store.covers(i) {
+			continue
+		}
 		for _, dep := range f.FlagDependencies {
 			whenFD, ok := findFlagDef(f.Flags, dep.When)
 			if !ok {
@@ -947,7 +1049,7 @@ func isNumericType(typ string) bool { return numericFamily[typ] }
 
 // measured is a type whose values are quantities in a unit of their own — a duration in
 // nanoseconds, a size in bytes — so numeric bounds apply once a value is read in that unit, and
-// print back in the type's spelling ("must be <= 1h0m0s", "<= 1Gi").
+// print back in the type's spelling ("must be <= 30d", "<= 1Gi").
 type measured struct {
 	parse  func(string) (float64, bool)
 	format func(float64) string
@@ -960,7 +1062,7 @@ var measuredTypes = map[string]*measured{
 			d, err := parseDuration(strings.TrimSpace(s))
 			return float64(d), err == nil
 		},
-		format: func(f float64) string { return time.Duration(f).String() },
+		format: func(f float64) string { return formatDuration(time.Duration(f)) },
 	},
 	"rotini.ByteSize": {
 		parse: func(s string) (float64, bool) {
@@ -1037,6 +1139,9 @@ func applyDefaults(chain []ResolvedCommand, store *parsedInputs) {
 func requiredErrors(chain []ResolvedCommand, store *parsedInputs) error {
 	var missing []string
 	for i, f := range chain {
+		if !store.covers(i) {
+			continue
+		}
 		si := store.scopes[i]
 		for _, fd := range f.Flags {
 			if fd.Required {
@@ -1049,7 +1154,7 @@ func requiredErrors(chain []ResolvedCommand, store *parsedInputs) error {
 	leaf := chain[len(chain)-1]
 	si := store.scopes[len(chain)-1]
 	for i, ad := range leaf.Arguments {
-		if ad.Required && i >= len(si.args) {
+		if store.covers(len(chain)-1) && ad.Required && i >= len(si.args) {
 			missing = append(missing, "<"+ad.Name+">")
 		}
 	}
@@ -1360,31 +1465,30 @@ func checkChainAlignment(v reflect.Value, chain []ResolvedCommand, offset int) e
 			continue
 		}
 		frame := chain[offset+i]
-		if len(frame.Flags) == 0 {
-			continue // nothing to disagree with
+		if frame.Name == "" && len(frame.Flags) == 0 {
+			continue // an anonymous frame (a hand-built chain) declares nothing to check against
 		}
-		declared, shared := 0, 0
 		ft := flags.Type()
 		for j := range flags.NumField() {
 			name := ft.Field(j).Tag.Get("rotini")
 			if name == "" {
 				continue
 			}
-			declared++
+			// Every flag the type names must be one the command it maps onto declares. The
+			// check was once "the two share SOME flag" — and every command shares `help`, so an
+			// ancestor's type collected from a descendant bound partially: fallbacks filled its
+			// fields by key while its argv values were silently lost.
 			if _, ok := findFlagDef(frame.Flags, name); ok {
-				shared++
+				continue
 			}
-		}
-		if declared == 0 || shared > 0 {
-			continue
-		}
-		return &ParseError{
-			Kind: ParseKindInternal,
-			Msg: fmt.Sprintf(
-				"rotini: %s does not describe the running command %q: its %s field maps to %q, and the two share no flag. "+
-					"An inputs type binds to the END of the command chain, so a handler collects the type generated for ITS OWN "+
-					"command; an ancestor's type cannot be collected from a deeper command",
-				displayTypeName(v.Type()), pathOf(chain), v.Type().Field(i).Name, frame.Name),
+			return &ParseError{
+				Kind: ParseKindInternal,
+				Msg: fmt.Sprintf(
+					"rotini: %s does not describe the running command %q: its %s field maps to %q, which declares no flag %q. "+
+						"An inputs type binds to the END of the command chain, so a handler collects the type generated for ITS OWN "+
+						"command; an ancestor's type cannot be collected from a deeper command",
+					displayTypeName(v.Type()), pathOf(chain), v.Type().Field(i).Name, frame.Name, name),
+			}
 		}
 	}
 	return nil
@@ -1792,7 +1896,7 @@ func coerceMapDotted(f reflect.Value, raw []string) error {
 			}
 			cur = next
 		}
-		cur[segs[len(segs)-1]] = v
+		cur[segs[len(segs)-1]] = inferScalar(v)
 	}
 	f.Set(reflect.ValueOf(m))
 	return nil
@@ -1812,7 +1916,9 @@ func coerceMap(f reflect.Value, raw []string) error {
 		}
 		ev := reflect.New(et).Elem()
 		if ev.Kind() == reflect.Interface {
-			ev.Set(reflect.ValueOf(v))
+			if inferred := inferScalar(v); inferred != nil {
+				ev.Set(reflect.ValueOf(inferred))
+			}
 		} else if err := coerce(ev, []string{v}); err != nil {
 			return fmt.Errorf("value for key %q: %w", k, err)
 		}

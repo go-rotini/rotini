@@ -17,10 +17,7 @@ import (
 // Only files rotini itself could have WRITTEN are candidates — see stubLooksGenerated. A
 // hand-written helper in the same package is never touched, whatever it is called.
 func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)) error {
-	protected := map[string]bool{
-		gp.root.filename: true,
-		lay.cmdFile:      true,
-	}
+	protected := map[string]bool{lay.cmdFile: true}
 	if lay.entrypointDir == lay.cmdDir && lay.entrypointFile != "" {
 		protected[lay.entrypointFile] = true
 	}
@@ -29,8 +26,13 @@ func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)
 	if lay.splitModels && lay.modelsDir == lay.cmdDir {
 		protected[lay.modelsFile] = true
 	}
-	for _, c := range gp.own {
+	// A stub still under its old dashed name is the command's handler too, never an orphan:
+	// pruning it would delete the user's code (see dashedStubFilename).
+	for _, c := range gp.ownCommands() {
 		protected[c.filename] = true
+		if c.dashedFilename != "" {
+			protected[c.dashedFilename] = true
+		}
 	}
 	for _, k := range keepList {
 		protected[filepath.ToSlash(k)] = true

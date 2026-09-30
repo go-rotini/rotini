@@ -46,8 +46,8 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	// running it would need.
 	if argv, err := rotini.ParseArgv[{{.InputsType}}](rtx); err == nil {
 {{- if .HelpFlag}}
-		if argv.Values.{{.Prefix}}.Flags.{{.HelpFlag}} {
-			fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+		if argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
+			fmt.Fprintln(rtx.Stdout, rtx.Help())
 			rtx.HaltWithCode(0)
 			return
 		}
@@ -102,7 +102,7 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 	// Nothing to do yet: show this command's own help rather than an empty run.
 	// HaltWithCode here, not Halt: "invoked with no sub-command" is a deliberate non-zero
 	// verdict, so the code is the point rather than an artifact of stopping.
-	fmt.Fprintln(rtx.Stdout, {{.HelpVar}})
+	fmt.Fprintln(rtx.Stdout, rtx.Help())
 	rtx.HaltWithCode(1)
 {{- else}}
 

@@ -238,3 +238,39 @@ func TestSplitPairs(t *testing.T) {
 		}
 	}
 }
+
+// TestInferScalar pins what a value means where the schema says nothing about it: exactly what
+// the JSON spelling of the same value means, and nothing looser. The same patch used to store
+// the number 5 when written as JSON and the text "5" when written as key=value (rubectl R-13).
+func TestInferScalar(t *testing.T) {
+	for text, want := range map[string]any{
+		"true": true, "false": false, "null": nil,
+		"5": float64(5), "-2.5": -2.5, "1e3": float64(1000), "0": float64(0),
+		// Not JSON, so text: a shell user's "yes", a zero-padded id, Go's digit separators, hex.
+		"yes": "yes", "007": "007", "1_000": "1_000", "0x10": "0x10", "True": "True",
+		"": "", "v2": "v2", "-": "-", "5 ": "5 ", "NaN": "NaN",
+	} {
+		if got := inferScalar(text); got != want {
+			t.Errorf("inferScalar(%q) = %#v, want %#v", text, got, want)
+		}
+	}
+}
+
+// TestObjectFlag_freeFormValuesTypeLikeJSON proves one meaning per value across an object flag's
+// spellings: inside a free-form map, key=value and JSON agree.
+func TestObjectFlag_freeFormValuesTypeLikeJSON(t *testing.T) {
+	type patch struct {
+		Spec map[string]any `json:"spec"`
+	}
+	fromPairs, err := decodeObject("spec.replicas=5,spec.paused=true,spec.image=v2", reflect.TypeFor[patch]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromJSON, err := decodeObject(`{"spec":{"replicas":5,"paused":true,"image":"v2"}}`, reflect.TypeFor[patch]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fromPairs, fromJSON) {
+		t.Errorf("key=value gave %#v, JSON gave %#v — one value, two meanings", fromPairs, fromJSON)
+	}
+}

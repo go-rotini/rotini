@@ -1,6 +1,8 @@
 package rotini
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -30,9 +32,28 @@ type ResolvedCommand struct {
 	Discovery             *RemoteDiscoveryDef
 	// PluginPath is the extra directory this command's plugin binaries may live in, searched
 	// for BOTH declared remotes and discovered plugins — they are the same binaries in the
-	// same place. Empty means only the host binary's directory and PATH are searched.
+	// same place. Empty means only the host binary's directory and PATH are searched. It is the
+	// directory as searched: a leading ~ and $VAR references in the declared path are already
+	// expanded.
 	PluginPath  string
 	Passthrough bool
+}
+
+// expandPluginPath expands a leading ~ to the user's home directory and $VAR / ${VAR}
+// references from the environment, the way a shell would — so `plugin_path: ~/.app/plugins`
+// means what it says, as a configuration file's path does. When the home directory cannot be
+// found the ~ is left in place, and the search simply finds nothing there.
+func expandPluginPath(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	dir = os.ExpandEnv(dir)
+	if dir == "~" || strings.HasPrefix(dir, "~/") || strings.HasPrefix(dir, "~"+string(filepath.Separator)) {
+		if home, err := os.UserHomeDir(); err == nil {
+			dir = filepath.Join(home, dir[1:])
+		}
+	}
+	return dir
 }
 
 func rootFrame(def Definition) ResolvedCommand {
@@ -41,7 +62,7 @@ func rootFrame(def Definition) ResolvedCommand {
 		Flags: def.Flags, Arguments: def.Arguments,
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Remotes: def.RemoteCommands, Discovery: def.Discovery,
-		PluginPath: def.PluginPath, Passthrough: def.Passthrough,
+		PluginPath: expandPluginPath(def.PluginPath), Passthrough: def.Passthrough,
 	}
 }
 
@@ -51,7 +72,7 @@ func cmdFrame(c CommandDef) ResolvedCommand {
 		Flags: c.Flags, Arguments: c.Arguments,
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Remotes: c.Remotes, Discovery: c.Discovery,
-		PluginPath: c.PluginPath, Passthrough: c.Passthrough,
+		PluginPath: expandPluginPath(c.PluginPath), Passthrough: c.Passthrough,
 	}
 }
 

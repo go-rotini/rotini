@@ -27,7 +27,7 @@ func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.RotiniHelp.Flags
 
 	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, HelpRotiniHelp)
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 		return
 	}

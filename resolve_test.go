@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -186,5 +187,29 @@ func TestResolveChain_negativeNumberAsFlagValue(t *testing.T) {
 	chain, _ := resolveChain(def, []string{"--offset", "-5", "sub"})
 	if got := chainNames(chain); len(got) != 2 || got[1] != "sub" {
 		t.Errorf("chain = %v, want [app sub] (-5 was --offset's value)", got)
+	}
+}
+
+// TestResolve_pluginPathExpandsHome proves a declared plugin_path means what a shell would make
+// of it: `~/.app/plugins` is under the user's home and `$VAR` reads the environment, as a
+// configuration file's path does. Unexpanded, the search looked in a directory literally named
+// "~" and the not-found message claimed to have searched "~/.app/plugins" (rubectl R-36).
+func TestResolve_pluginPathExpandsHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("APP_PLUGINS", "/opt/app/plugins")
+	for decl, want := range map[string]string{
+		"~/.app/plugins": filepath.Join(home, ".app", "plugins"),
+		"~":              home,
+		"$APP_PLUGINS":   "/opt/app/plugins",
+		"./plugins":      "./plugins",
+		"":               "",
+	} {
+		root := rootFrame(Definition{Name: "app", PluginPath: decl})
+		sub := cmdFrame(CommandDef{Name: "sub", PluginPath: decl})
+		if root.PluginPath != want || sub.PluginPath != want {
+			t.Errorf("plugin_path %q resolved to %q (root) / %q (sub), want %q", decl, root.PluginPath, sub.PluginPath, want)
+		}
 	}
 }

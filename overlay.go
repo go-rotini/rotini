@@ -390,7 +390,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	store, err := parseArgvTokens(chain, rtx.Argv, rtx.Stdin)
+	store, err := parseArgvTokens(chain, rtx.Argv, rtx.flagStdin())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -539,7 +539,7 @@ func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 		return nil, nil, err
 	}
 	overrides := map[string]string{}
-	if store, err := parseInto(chain, rtx.Argv, rtx.Stdin); err == nil {
+	if store, err := parseInto(chain, rtx.Argv, rtx.flagStdin()); err == nil {
 		overrides = b.pathOverrides(chain, store)
 	}
 	cfg, err := b.configRegs(chain, overrides, v)

@@ -119,8 +119,12 @@ func decodeDocument(format, text string) (map[string]any, error) {
 func typedField(t reflect.Type, path []string, text string) (value any, list bool, err error) {
 	for i, seg := range path {
 		t = derefType(t)
+		if t.Kind() == reflect.Map {
+			t = t.Elem() // the key is free; the value type still applies
+			continue
+		}
 		if t.Kind() != reflect.Struct {
-			return text, false, nil // a free-form map below here: keep the text
+			return text, false, nil
 		}
 		field, ok := jsonField(t, seg)
 		if !ok {
@@ -157,8 +161,38 @@ func typedField(t reflect.Type, path []string, text string) (value any, list boo
 		return n, false, nil
 	case reflect.Struct:
 		return nil, false, fmt.Errorf("%s is an object — set its fields as %s.<key>=…", strings.Join(path, "."), strings.Join(path, "."))
+	case reflect.Interface:
+		return inferScalar(text), false, nil
 	}
 	return text, false, nil
+}
+
+// inferScalar reads key=value text where the schema says nothing about the value — inside a
+// free-form object, or a dotted_keys map — the way the JSON spelling of the same value reads:
+// true and false are booleans, null is null, a JSON number is a number (float64, as
+// encoding/json decodes one into any), and anything else is the text itself.
+//
+// Without it the same patch stored different things by spelling: -p '{"replicas":5}' stored
+// the number 5 while -p replicas=5 stored the string "5", so a handler had to re-infer types
+// that one spelling had already given it. Only the unambiguous JSON scalar forms are inferred;
+// "007", "1_000", "yes" and "0x10" are not JSON and stay text.
+func inferScalar(text string) any {
+	switch text {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "null":
+		return nil
+	}
+	if text == "" || !strings.ContainsAny(text[:1], "-0123456789") || strings.TrimSpace(text) != text {
+		return text
+	}
+	var n float64
+	if err := json.Unmarshal([]byte(text), &n); err == nil {
+		return n
+	}
+	return text
 }
 
 func derefType(t reflect.Type) reflect.Type {

@@ -1,6 +1,8 @@
 package rotini
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,6 +23,19 @@ const completeCommand = "__complete"
 //
 // rtx carries the resolved chain, the completion words in [Context.Argv], and every service
 // bound on the Program, so a completer can reach a bound API client or the filesystem.
+//
+// The line is half-typed, so a completer cannot [Collect]: required inputs are missing and
+// validation would fail. To read what the user has said so far — a --kubeconfig on the line, or
+// the environment variable that flag falls back to — overlay the lenient layers, which bind
+// without validating. Flags of an ancestor (a root's global flags, say) are read with that
+// ancestor's type at that ancestor's frame:
+//
+//	var in AppInputs
+//	rotini.AtFrame(0, func(_ context.Context, rtx *rotini.Context) {
+//		env, _ := rotini.ParseEnv[AppInputs](rtx)
+//		argv, _ := rotini.ParseArgv[AppInputs](rtx)
+//		in = rotini.OverlayInputs(env, argv) // argv wins, as it would at run time
+//	})(context.Background(), rtx)
 //
 // It is entirely opt-in, a panic in it is not recovered, and it may be called on every
 // keystroke — so it must be read-only and fast.
@@ -161,7 +176,10 @@ func dispatchableNames(cur ResolvedCommand) []string {
 			names = append(names, withDescription(a, r.Summary))
 		}
 	}
-	return append(names, DiscoveredPlugins(cur)...)
+	for _, p := range DiscoveredPlugins(cur) {
+		names = append(names, p.Name)
+	}
+	return names
 }
 
 // walkContext resolves the words preceding the completed one with dispatch's semantics,
@@ -275,37 +293,50 @@ func argValueCandidates(handlers any, rtx *Context, cc completionContext, words 
 	return ad.Enum
 }
 
-// DiscoveredPlugins returns the token each plugin discovered for cmd is invoked by — "foo" for
-// an executable "<prefix>foo" found next to the binary, in the discovery path, or on PATH —
-// deduped and sorted, with any name colliding with a declared sub-command, remote command or
-// alias removed. It returns nil when cmd has no discovery or discovery is hidden.
+// DiscoveredPlugin is one plugin discovery found: the token it is invoked by and the binary that
+// token runs.
+type DiscoveredPlugin struct {
+	// Name is the token a user types — "foo" for an executable "<prefix>foo".
+	Name string
+	// Path is the executable dispatch would run for Name right now: the first "<prefix>foo"
+	// in search order (next to the binary, then the plugin path, then PATH), so a copy
+	// shadowed by an earlier one is not the one listed.
+	Path string
+}
+
+// DiscoveredPlugins returns each plugin discovered for cmd — an executable "<prefix>foo" found
+// next to the binary, in the plugin path, or on PATH — deduped and sorted by name, with any
+// name colliding with a declared sub-command, remote command or alias removed. It returns nil
+// when cmd has no discovery or discovery is hidden.
 //
-// It is the data feed for surfacing runtime plugins in help, which codegen cannot know about.
-// rotini renders nothing itself; a help handler formats the result however it likes:
+// It is the data feed for surfacing runtime plugins in help or a `plugin list`, which codegen
+// cannot know about. rotini renders nothing itself; a handler formats the result however it
+// likes:
 //
 //	chain := rtx.Chain()
-//	for _, name := range rotini.DiscoveredPlugins(chain[len(chain)-1]) {
-//		fmt.Fprintf(out, "  %s\n", name)
+//	for _, p := range rotini.DiscoveredPlugins(chain[len(chain)-1]) {
+//		fmt.Fprintf(out, "  %s\t%s\n", p.Name, p.Path)
 //	}
 //
 // It touches the filesystem on every call and is best-effort: an unreadable directory
 // contributes nothing rather than erroring. See [DiscoveryDiagnostics] to learn whether the
 // author-configured path itself failed.
-func DiscoveredPlugins(cmd ResolvedCommand) []string {
+func DiscoveredPlugins(cmd ResolvedCommand) []DiscoveredPlugin {
 	plugins, _ := discoveredFor(cmd)
 	return plugins
 }
 
 // DiscoveryDiagnostics returns the problems encountered while scanning cmd's author-configured
-// discovery path — typically that it is missing or unreadable — and nil when there is no
-// discovery, none is configured, or the path scanned cleanly. The incidental locations, next
+// discovery path — typically that it is unreadable, or not a directory — and nil when there is
+// no discovery, none is configured, or the path scanned cleanly. A path that does not exist is
+// not a problem: it is where plugins go once one is installed, and before that it is empty. The incidental locations, next
 // to the binary and the entries of $PATH, are deliberately not reported: a missing $PATH entry
 // is normal, not a misconfiguration.
 //
 // It is the data feed for a doctor or completion handler that wants to tell the author their
 // discovery path is wrong; rotini prints no warning itself, which would corrupt completion
 // output. Each error carries the offending path and cause, so a caller can classify with
-// errors.Is(err, fs.ErrNotExist).
+// errors.Is(err, fs.ErrPermission).
 func DiscoveryDiagnostics(cmd ResolvedCommand) []error {
 	_, problems := discoveredFor(cmd)
 	return problems
@@ -313,7 +344,7 @@ func DiscoveryDiagnostics(cmd ResolvedCommand) []error {
 
 // discoveredFor is the shared core of [DiscoveredPlugins] and [DiscoveryDiagnostics]: the
 // collision-filtered plugin tokens plus any problems scanning the configured path.
-func discoveredFor(cmd ResolvedCommand) ([]string, []error) {
+func discoveredFor(cmd ResolvedCommand) ([]DiscoveredPlugin, []error) {
 	d := cmd.Discovery
 	if d == nil || d.Hidden {
 		return nil, nil
@@ -332,9 +363,9 @@ func discoveredFor(cmd ResolvedCommand) ([]string, []error) {
 		}
 	}
 	all, problems := discoverPlugins(d, cmd.PluginPath)
-	var out []string
+	var out []DiscoveredPlugin
 	for _, plugin := range all {
-		if !declared[plugin] {
+		if !declared[plugin.Name] {
 			out = append(out, plugin)
 		}
 	}
@@ -404,21 +435,24 @@ func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string
 	}
 }
 
-// discoverPlugins lists the post-prefix names of `<prefix>*` executables found next to the
-// host binary, in pluginPath, and on PATH, deduped and sorted. It also returns any errors
-// scanning pluginPath — the author-configured location, where a failure is a real
-// misconfiguration; failures scanning the incidental locations are ignored as normal.
-func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]string, []error) {
+// discoverPlugins lists the `<prefix>*` executables found next to the host binary, in
+// pluginPath, and on PATH — each under its post-prefix name, at the first path it was found —
+// deduped and sorted by name. It also returns any errors scanning pluginPath — the
+// author-configured location, where a failure is a real misconfiguration; failures scanning the
+// incidental locations are ignored as normal.
+func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]DiscoveredPlugin, []error) {
 	if d.Prefix == "" {
 		return nil, nil
 	}
 	seen := map[string]bool{}
-	var out []string
+	var out []DiscoveredPlugin
 	var problems []error
 	scan := func(dir string, report bool) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			if report {
+			// A plugin directory that does not exist yet is the normal state before the
+			// first plugin is installed, not a misconfiguration.
+			if report && !errors.Is(err, fs.ErrNotExist) {
 				problems = append(problems, err)
 			}
 			return
@@ -436,7 +470,7 @@ func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]string, []erro
 				continue
 			}
 			seen[plugin] = true
-			out = append(out, plugin)
+			out = append(out, DiscoveredPlugin{Name: plugin, Path: filepath.Join(dir, name)})
 		}
 	}
 	if exe, err := os.Executable(); err == nil {
@@ -450,7 +484,7 @@ func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]string, []erro
 			scan(dir, false)
 		}
 	}
-	sort.Strings(out)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, problems
 }
 

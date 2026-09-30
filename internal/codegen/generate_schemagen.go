@@ -3,6 +3,9 @@ package codegen
 import (
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"sort"
 	"strings"
 
@@ -43,7 +46,85 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("generate output types: %w", err)
 	}
-	return stripGenerated(string(src), outputRootSentinel), nil
+	fixed := map[string]bool{}
+	for name := range defs {
+		fixed[name] = true
+	}
+	return initialismIdents(stripGenerated(string(src), outputRootSentinel), fixed)
+}
+
+// initialismIdents gives the generated types' Go names the initialism casing the rest of the
+// generated file has: a property "apiVersion" becomes the field APIVersion, not ApiVersion.
+// The JSON tags keep the property's own spelling, so nothing about the wire format changes.
+//
+// It renames by position rather than by text, so a field and a type that share a name are each
+// renamed as what they are. fixed holds the top-level type names: those are the spec's schema
+// names, or rotini's own "<Prefix>Output", and are referenced from elsewhere in the program
+// exactly as written. A rename that would collide with a name already declared is skipped.
+func initialismIdents(src string, fixed map[string]bool) (string, error) {
+	const pkgClause = "package p\n\n"
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "", pkgClause+src, parser.ParseComments)
+	if err != nil {
+		return "", fmt.Errorf("parse generated types: %w", err)
+	}
+	// Which names are types, and which idents are field names (and in which struct).
+	types := map[string]bool{}
+	fieldOf := map[*ast.Ident]*ast.StructType{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch x := n.(type) {
+		case *ast.TypeSpec:
+			types[x.Name.Name] = true
+		case *ast.StructType:
+			for _, f := range x.Fields.List {
+				for _, id := range f.Names {
+					fieldOf[id] = x
+				}
+			}
+		}
+		return true
+	})
+	declared := func(st *ast.StructType, name string) bool {
+		for _, f := range st.Fields.List {
+			for _, id := range f.Names {
+				if id.Name == name {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	type edit struct {
+		off, end int
+		name     string
+	}
+	var edits []edit
+	ast.Inspect(file, func(n ast.Node) bool {
+		id, ok := n.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		renamed := initialismCase(id.Name)
+		if renamed == id.Name {
+			return true
+		}
+		if st, isField := fieldOf[id]; isField {
+			if declared(st, renamed) {
+				return true
+			}
+		} else if !types[id.Name] || fixed[id.Name] || types[renamed] {
+			return true
+		}
+		off := fset.Position(id.Pos()).Offset
+		edits = append(edits, edit{off, off + len(id.Name), renamed})
+		return true
+	})
+	out := pkgClause + src
+	sort.Slice(edits, func(i, j int) bool { return edits[i].off > edits[j].off })
+	for _, e := range edits {
+		out = out[:e.off] + e.name + out[e.end:]
+	}
+	return strings.TrimPrefix(out, pkgClause), nil
 }
 
 // outputTypeNames lists the top-level type names buildOutputTypes declares, sorted so

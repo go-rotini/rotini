@@ -131,7 +131,7 @@ itunes/            the HTTP client
 
 The three children differ in exactly one value — the API's `entity` — so they share one handler. Each binds its own identity in its own root hook, which is why the sharing works under the umbrella as well as standalone:
 
-{{< code title="internal/cmd/albums/musak-albums.go" language="golang" open="true" collapsible="false" copy="true" >}}
+{{< code title="internal/cmd/albums/musak_albums.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func (*musakAlbumsHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	// BindTo, not Provide: per-invocation, so `musak albums search` followed by
 	// `musak songs search` in one process cannot inherit the wrong entity.

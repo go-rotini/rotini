@@ -157,17 +157,18 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		adoptedPrefixes: map[string]string{},
 	}
 	gp.root = genCommand{
-		prefix:      gp.rootPascal,
-		invocation:  gp.rootName,
-		handler:     lowerFirst(gp.rootPascal) + "Handlers",
-		filename:    commandStubFilename(root.Name, "", root.Filename),
-		flags:       flagFields(root.inputs(), gp.envPrefix),
-		args:        argFields(root.inputs()),
-		env:         envFields(root.inputs(), gp.envPrefix),
-		config:      configFields(root.inputs()),
-		stdinType:   stdinTypeExpr(gp.rootPascal, root.inputs()),
-		stdinFormat: stdinFormatExpr(root.inputs()),
-		inputs:      []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
+		prefix:         gp.rootPascal,
+		invocation:     gp.rootName,
+		handler:        lowerFirst(gp.rootPascal) + "Handlers",
+		filename:       commandStubFilename(root.Name, "", root.Filename),
+		dashedFilename: dashedStubFilename(root.Name, "", root.Filename),
+		flags:          flagFields(root.inputs(), gp.envPrefix),
+		args:           argFields(root.inputs()),
+		env:            envFields(root.inputs(), gp.envPrefix),
+		config:         configFields(root.inputs()),
+		stdinType:      stdinTypeExpr(gp.rootPascal, root.inputs()),
+		stdinFormat:    stdinFormatExpr(root.inputs()),
+		inputs:         []fieldDef{{Field: gp.rootPascal, GoType: gp.rootPascal + "CommandInputs"}},
 	}
 
 	absSpec := specPath
@@ -234,17 +235,18 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			})
 		} else {
 			gc := genCommand{
-				prefix:      prefix,
-				invocation:  gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
-				handler:     lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
-				filename:    commandStubFilename(gp.rootName, path, c.Filename),
-				flags:       flagFields(c.inputs(), gp.envPrefix),
-				args:        argFields(c.inputs()),
-				env:         envFields(c.inputs(), gp.envPrefix),
-				config:      configFields(c.inputs()),
-				stdinType:   stdinTypeExpr(prefix, c.inputs()),
-				stdinFormat: stdinFormatExpr(c.inputs()),
-				inputs:      inputsFields(gp.rootPascal, path),
+				prefix:         prefix,
+				invocation:     gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
+				handler:        lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
+				filename:       commandStubFilename(gp.rootName, path, c.Filename),
+				dashedFilename: dashedStubFilename(gp.rootName, path, c.Filename),
+				flags:          flagFields(c.inputs(), gp.envPrefix),
+				args:           argFields(c.inputs()),
+				env:            envFields(c.inputs(), gp.envPrefix),
+				config:         configFields(c.inputs()),
+				stdinType:      stdinTypeExpr(prefix, c.inputs()),
+				stdinFormat:    stdinFormatExpr(c.inputs()),
+				inputs:         inputsFields(gp.rootPascal, path),
 			}
 			if c.Handler != nil {
 				// Inline-command passthrough: still an own command, but the handler
@@ -678,17 +680,20 @@ type fieldDef struct {
 // genCommand is the fully resolved description of one command node (root or
 // sub-command) that the renderers consume.
 type genCommand struct {
-	prefix      string // PascalCase type prefix, e.g. "RotiniGenerate"
-	invocation  string // how a user types it, e.g. "rotini generate"
-	handler     string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
-	filename    string // handler stub file name, e.g. "rotini_generate.go"
-	flags       []fieldDef
-	args        []fieldDef
-	env         []fieldDef // <Prefix>Env fields (pure environment inputs)
-	config      []fieldDef // <Prefix>Config fields (pure config-file inputs)
-	stdinType   string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
-	stdinFormat string     // stdin decode format, e.g. "yaml"; "" when no stdin
-	inputs      []fieldDef // InputsFields for this command's <Prefix>Inputs
+	prefix     string // PascalCase type prefix, e.g. "RotiniGenerate"
+	invocation string // how a user types it, e.g. "rotini generate"
+	handler    string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
+	filename   string // handler stub file name, e.g. "rotini_generate.go"
+	// dashedFilename is the stub's pre-underscore name ("app_get-thing.go"), "" when it has
+	// none; a stub already seeded under it stays the command's stub (see stubFileFor).
+	dashedFilename string
+	flags          []fieldDef
+	args           []fieldDef
+	env            []fieldDef // <Prefix>Env fields (pure environment inputs)
+	config         []fieldDef // <Prefix>Config fields (pure config-file inputs)
+	stdinType      string     // Stdin field type, e.g. "*RotiniGenerateStdin"; "" when no stdin
+	stdinFormat    string     // stdin decode format, e.g. "yaml"; "" when no stdin
+	inputs         []fieldDef // InputsFields for this command's <Prefix>Inputs
 
 	// Inline-command passthrough: the command's structure + inputs are
 	// generated locally (this is still an own command), but its handler delegates to a

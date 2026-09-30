@@ -15,12 +15,13 @@ import (
 // export. That is sixty lines of platform tedium in exchange for keeping rotini's runtime free of
 // external dependencies — see the batteries audit's dependency decision.
 
-// TerminalSize reports the size of the terminal behind file, in character cells.
+// TerminalSize reports the size of the terminal behind stream, in character cells. Like
+// [IsTerminal], it takes a handler's streams as they are — rtx.Stdout, not a type assertion.
 //
-// It answers ok=false when file is not a terminal, when the platform has no way to ask, or when
+// It answers ok=false when stream is not a terminal, when the platform has no way to ask, or when
 // the answer would be nonsense — so a caller can always write:
 //
-//	cols, _, ok := rotini.TerminalSize(os.Stdout)
+//	cols, _, ok := rotini.TerminalSize(rtx.Stdout)
 //	if !ok {
 //	    cols = 80
 //	}
@@ -33,13 +34,14 @@ import (
 //
 // Measure the stream you are about to write to. A program piping stdout to a file while a human
 // watches stderr has two different answers, and only the caller knows which one matters.
-func TerminalSize(file *os.File) (cols, rows int, ok bool) {
+func TerminalSize(stream any) (cols, rows int, ok bool) {
 	envCols, hasCols := positiveEnv("COLUMNS")
 	envRows, hasRows := positiveEnv("LINES")
 	if hasCols && hasRows {
 		return envCols, envRows, true
 	}
 
+	file, _ := stream.(*os.File) // only a file can be a terminal; a nil *os.File is handled below
 	c, r, got := terminalSize(file)
 	switch {
 	case hasCols && got:

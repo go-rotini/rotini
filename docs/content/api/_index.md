@@ -242,7 +242,7 @@ Both kinds search the same three places in the same order: next to the host bina
 {{< code title="what rotini hands you, and what you render" language="golang" open="true" collapsible="false" copy="true" >}}
 root := rtx.Chain()[0]
 
-rotini.DiscoveredPlugins(root)      // tokens found now, minus any shadowing a real command
+rotini.DiscoveredPlugins(root)      // name + path of each found now, minus any shadowing a real command
 rotini.DiscoveryDiagnostics(root)   // why the configured plugin_path could not be scanned
 rotini.RemoteBinaryPath(root, name) // would this resolve, and to what — searched as dispatch searches
 {{< /code >}}

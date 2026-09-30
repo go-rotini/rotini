@@ -46,11 +46,14 @@ exec ./umbrella$exe --quiet kid work
 stdout 'kid cascading: loud=false'
 
 # ── a shared flag NAME is a separate rule, and worth pinning next to this one ──
-# findFlagMatch walks the chain leaf-to-root, so the DEEPEST declaration of a name owns it for
-# the whole invocation, wherever the token sits in argv. Both frames declare --shared, so it
-# lands on the child even when written before the child's own name. That is flag shadowing, not
-# frame anchoring, and the two are easy to confuse when reading a failure.
+# A flag binds by POSITION: only the commands reached so far are eligible, so a flag written
+# before a sub-command's name belongs to an ancestor. Both frames declare --shared: before `kid`
+# it is the umbrella's, after `kid` it is the child's. (It once bound to the DEEPEST declaration
+# wherever it sat, which made `umbrella --shared kid` set the child's flag and misattributed
+# deprecations — rubectl register R-22.)
 exec ./umbrella$exe --shared kid work
+stdout 'shared=false'
+exec ./umbrella$exe kid --shared work
 stdout 'shared=true'
 
 -- cmd/umbrella/.rotini.spec.yaml --

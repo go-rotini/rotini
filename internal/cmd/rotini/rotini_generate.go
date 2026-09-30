@@ -30,7 +30,7 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.RotiniGenerate.Flags
 
 	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, HelpRotiniGenerate)
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		return
 	}
 

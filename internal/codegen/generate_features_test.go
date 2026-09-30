@@ -536,3 +536,45 @@ func TestHelpPage_fallsBackToSummary(t *testing.T) {
 		})
 	}
 }
+
+// TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames pins where a deprecation shows. With
+// deprecated_identifiers, the run warns only when one of THOSE spellings is used — so help used
+// to contradict it, marking the whole command `(deprecated: …)` and listing the deprecated alias
+// beside it as though it were current (rubectl R-43). The row now drops the deprecated names
+// and the marker; without the list, the message still deprecates the whole command or flag.
+func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
+	t.Parallel()
+	children := []rnode{
+		{name: "api-resources", aliases: []string{"api-versions", "ar"}, deprecatedIdentifiers: []string{"api-versions"}, deprecated: "use api-resources"},
+		{name: "old", aliases: []string{"o"}, deprecated: "use new"},
+		{name: "only", aliases: []string{"legacy"}, deprecatedIdentifiers: []string{"legacy"}, deprecated: "use only"},
+	}
+	rows := buildHelpData("app", cmdHelp{}, nil, children, nil, nil, "").CommandGroups[0].Commands
+	want := []templateDocCommandRow{
+		{Name: "api-resources", Aliases: []string{"ar"}},
+		{Name: "old", Aliases: []string{"o"}, Deprecated: "use new"},
+		{Name: "only", Aliases: []string{}},
+	}
+	for i, w := range want {
+		got := rows[i]
+		if got.Name != w.Name || strings.Join(got.Aliases, ",") != strings.Join(w.Aliases, ",") || got.Deprecated != w.Deprecated {
+			t.Errorf("row %d = {%s %v %q}, want {%s %v %q}", i, got.Name, got.Aliases, got.Deprecated, w.Name, w.Aliases, w.Deprecated)
+		}
+	}
+
+	for _, tt := range []struct {
+		f       FlagInput
+		ids     string
+		message string
+	}{
+		{FlagInput{Name: "output", Identifiers: []string{"-o", "--output", "--format"}, DeprecatedIdentifiers: []string{"--format"}, Deprecated: "use --output"}, "-o,--output", ""},
+		{FlagInput{Name: "store", Identifiers: []string{"--store"}, Deprecated: "use a context"}, "--store", "use a context"},
+		// Every spelling deprecated is the whole flag deprecated: listed, and marked.
+		{FlagInput{Name: "x", Identifiers: []string{"--x"}, DeprecatedIdentifiers: []string{"--x"}, Deprecated: "gone soon"}, "--x", "gone soon"},
+	} {
+		row := flagRow(tt.f)
+		if strings.Join(row.Identifiers, ",") != tt.ids || row.Deprecated != tt.message {
+			t.Errorf("flag %s row = %v %q, want %s %q", tt.f.Name, row.Identifiers, row.Deprecated, tt.ids, tt.message)
+		}
+	}
+}

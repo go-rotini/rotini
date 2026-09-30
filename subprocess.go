@@ -58,7 +58,7 @@ type SubprocessError struct {
 // of whatever it wrote to stderr — rather than a bare "exit status 1".
 func (e *SubprocessError) Error() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "rotini: %s", e.Name)
+	b.WriteString(e.Name)
 	if e.ExitCode >= 0 {
 		fmt.Fprintf(&b, " exited %d", e.ExitCode)
 	} else {

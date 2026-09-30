@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-rotini/fs"
 	"github.com/go-rotini/recon"
@@ -109,7 +110,11 @@ func (b *Binder) bind(rtx *Context, out any) error {
 	}
 
 	// 3. Validate the reconciled flags and arguments — the argv channel's single validation
-	//    locus. Argv errors surface before any channel error.
+	//    locus. Argv errors surface before any channel error. Only the frames out describes
+	//    are judged: a parent collecting its own inputs is not the place to demand the leaf's.
+	if anchor >= 0 {
+		store.span = &[2]int{anchor, anchor + v.NumField()}
+	}
 	if err := validate(chain, store); err != nil {
 		return err
 	}
@@ -1583,12 +1588,21 @@ func channelValues(val recon.Value, typ string) []string {
 		if items, err := val.AsSlice(); err == nil {
 			out := make([]string, len(items))
 			for i, it := range items {
-				out[i] = it.String()
+				out[i] = channelString(it)
 			}
 			return out
 		}
 	}
-	return []string{val.String()}
+	return []string{channelString(val)}
+}
+
+// channelString is a reconciled value as text. A duration arrives already decoded, so it is
+// written back the way a user writes one — TTL=8d is reported as "got 8d", not "got 192h0m0s".
+func channelString(val recon.Value) string {
+	if d, ok := val.Any().(time.Duration); ok {
+		return formatDuration(d)
+	}
+	return val.String()
 }
 
 // ── BindError ───────────────────────────────────────────────.

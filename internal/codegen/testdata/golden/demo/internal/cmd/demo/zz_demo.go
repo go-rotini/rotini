@@ -39,8 +39,8 @@ type DemoArguments struct{}
 
 type DemoEnv struct {
 	Home    string `rotini:"home" recon:"home" env:"DEMO_HOME"`
-	BaseUrl string `rotini:"base_url" recon:"base_url" env:"DEMO_BASE_URL"`
-	ApiKey  string `rotini:"apiKey" recon:"apiKey" env:"DEMO_API_KEY"`
+	BaseURL string `rotini:"base_url" recon:"base_url" env:"DEMO_BASE_URL"`
+	APIKey  string `rotini:"apiKey" recon:"apiKey" env:"DEMO_API_KEY"`
 }
 
 type DemoCommandInputs struct {

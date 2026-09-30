@@ -214,7 +214,8 @@ func NewProgram(handlers ProgramHandlers) *rotini.Program {
 	// BindMeta is a DESCRIPTION of this program, like the command tree above it, so it
 	// travels as a typed option rather than as a registry entry — the registry is yours.
 	return rotini.NewProgram(definition, handlers).
-		WithBindMeta(BindMeta)
+		WithBindMeta(BindMeta).
+		WithHelp(Help)
 }
 
 // handlers is the generated ProgramHandlers implementation: each method wires a command to its

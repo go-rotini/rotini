@@ -197,8 +197,8 @@ type templateHandlerData struct {
 	// `help` taking a variadic path — so the stub starts connected rather than starting with
 	// a TODO that reimplements what codegen just generated. Nothing here is injected at run
 	// time; it is starter code in a create-once file the author owns and may delete.
-	HelpVar             string // generated help page var for this command, e.g. "HelpRotini"; "" when the help feature is off
-	HelpFlag            string // Go field of this command's bool `help` flag; "" when there is none (or no HelpVar)
+	HelpFlag            string // Go field of this command's bool `help` flag; "" when there is none, or the help feature is off
+	HelpFrame           string // inputs frame holding HelpFlag: this command's prefix, or an ancestor's when the flag is inherited
 	HelpFlagName        string // that flag's logical name, for the comment explaining the ordering
 	AnswerBeforeCollect bool   // this command answers help/version from argv, ahead of Collect's validation
 	UsesInputs          bool   // the seeded body reads `inputs`; when false Collect still runs, for its validation
@@ -326,7 +326,11 @@ type templateRotiniData struct {
 	// so a program with only the completion feature on would otherwise import strings and
 	// not use it, and the generated file would not compile.
 	PathResolvers bool
-	Header        string // the target's conf-declared `header:`; "" for none
+	// HelpResolver is the help feature's resolver ("Help") when that feature is on, and ""
+	// otherwise. NewProgram hands it to the runtime so [rotini.Context.Help] can find the page
+	// of whatever command is running, composed ones included.
+	HelpResolver string
+	Header       string // the target's conf-declared `header:`; "" for none
 }
 
 func renderRotiniFile(data templateRotiniData) ([]byte, error) {

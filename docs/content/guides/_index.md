@@ -197,7 +197,7 @@ $ TODO_PRIORITY=low todo add "argv beats env" -p normal
 added "argv beats env" [normal] (inbox)
 {{< /code >}}
 
-When more than one configuration file is in scope, the nearest wins, and declaration order is precedence order. `CollectP` returns a provenance report if a handler needs to know which source actually supplied a value.
+When more than one configuration file is in scope, the one declared nearest the invoked command wins, and among one command's files the first declared wins — list the project's file before the user's. `CollectP` returns a provenance report if a handler needs to know which source actually supplied a value.
 
 ## Report errors and choose exit codes
 

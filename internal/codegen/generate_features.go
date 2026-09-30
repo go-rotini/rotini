@@ -224,12 +224,16 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		if c.hidden {
 			continue
 		}
+		// The command's own name is always current (deprecated_identifiers names aliases only),
+		// so it goes through with them and comes back off the front.
+		names, deprecated := undeprecated(append([]string{c.name}, c.aliases...), c.deprecatedIdentifiers, c.deprecated)
+		aliases := names[1:]
 		cmds = append(cmds, templateDocCommandRow{
 			Name:       c.name,
 			Summary:    c.help.Summary,
-			Aliases:    c.aliases,
+			Aliases:    aliases,
 			Group:      c.group,
-			Deprecated: c.deprecated,
+			Deprecated: deprecated,
 		})
 	}
 	for _, r := range remotes {
@@ -390,18 +394,41 @@ func snakeUpper(name string) string {
 	return b.String()
 }
 
+// undeprecated is what a help row shows of the names a command or flag answers to. With
+// deprecated_identifiers, the deprecation belongs to THOSE spellings, not to the command or
+// flag: the run warns only when one of them is used. So the row leaves them out — they still
+// work, and still warn — and carries no deprecation marker, since what it lists is current.
+// Only when every name is deprecated does the row list them all and keep the marker. Without
+// deprecated_identifiers, the message deprecates the whole thing and is shown as is.
+func undeprecated(names, deprecatedIDs []string, message string) ([]string, string) {
+	if len(deprecatedIDs) == 0 {
+		return names, message
+	}
+	var kept []string
+	for _, n := range names {
+		if !slices.Contains(deprecatedIDs, n) {
+			kept = append(kept, n)
+		}
+	}
+	if len(kept) == 0 && len(names) > 0 {
+		return names, message
+	}
+	return kept, ""
+}
+
 // flagRow builds the help-row for a single flag (shared by a command's own Flags
 // section and the Cascading section it contributes to its descendants).
 func flagRow(f FlagInput) templateDocFlagRow {
+	ids, deprecated := undeprecated(flagIdentifiers(f), f.DeprecatedIdentifiers, f.Deprecated)
 	row := templateDocFlagRow{
-		Identifiers: displayIdentifiers(f),
+		Identifiers: negatableIdentifiers(f, ids),
 		Summary:     f.Summary,
 		Group:       f.Group,
 		Type:        flagDisplayType(f.Schema),
 		Required:    f.Schema != nil && f.Schema.Required,
 		Default:     schemaDefaultString(f.Schema),
 		Enum:        enumOf(f.Schema),
-		Deprecated:  f.Deprecated,
+		Deprecated:  deprecated,
 	}
 	// An optional value is written attached, so the row says so: `-c, --color[=when]`, with the
 	// value token moved inside the brackets on the last identifier.
@@ -537,12 +564,11 @@ func enumOf(schema *InputSchema) []string {
 	return schema.Enum
 }
 
-// displayIdentifiers is how a flag reads in generated help. A negatable flag renders its long
-// forms as "--[no-]color" — one row for the pair, which is what every CLI that has the feature
-// does and what makes the negated form discoverable at all. Short forms are untouched: they
-// have no negated spelling.
-func displayIdentifiers(f FlagInput) []string {
-	ids := flagIdentifiers(f)
+// negatableIdentifiers is how a flag's identifiers read in generated help. A negatable flag
+// renders its long forms as "--[no-]color" — one row for the pair, which is what every CLI that
+// has the feature does and what makes the negated form discoverable at all. Short forms are
+// untouched: they have no negated spelling.
+func negatableIdentifiers(f FlagInput, ids []string) []string {
 	if f.Schema == nil || !f.Schema.Negatable {
 		return ids
 	}

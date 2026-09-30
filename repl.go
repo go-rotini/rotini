@@ -65,7 +65,7 @@ type REPL struct {
 //
 // It is NOT how a session ends. That is end of input ([ErrNotInteractive] or io.EOF), an exit
 // word, or the session context finishing.
-var ErrInterrupted = errors.New("rotini: interrupted")
+var ErrInterrupted = errors.New("interrupted")
 
 // NewREPL returns a loop dispatching to program. Input and output default to the
 // program's own streams, so a REPL inherits whatever [Program.WithStdin] and
@@ -514,7 +514,7 @@ func (l lineReader) read(ctx context.Context) (string, error) {
 
 	select {
 	case <-ctx.Done():
-		return "", fmt.Errorf("rotini: repl canceled: %w", ctx.Err())
+		return "", fmt.Errorf("canceled: %w", ctx.Err())
 	case r := <-ch:
 		line := strings.TrimRight(r.line, "\r\n")
 		if r.err != nil {
@@ -522,7 +522,7 @@ func (l lineReader) read(ctx context.Context) (string, error) {
 				return "", ErrNotInteractive
 			}
 			if !errors.Is(r.err, io.EOF) {
-				return "", fmt.Errorf("rotini: read line: %w", r.err)
+				return "", fmt.Errorf("read line: %w", r.err)
 			}
 		}
 		return line, nil

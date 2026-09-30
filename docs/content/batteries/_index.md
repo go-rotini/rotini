@@ -15,10 +15,10 @@ The shelf is deliberately **short**. rotini ships no styler, no table, no spinne
 Two questions come before any decision about how to write to a stream, and the standard library answers neither. rotini never asks them for you — nothing in the runtime calls these.
 
 {{< code title="detection" language="golang" open="true" collapsible="false" copy="true" >}}
-tty := rotini.IsTerminal(os.Stdout)  // a character device, not a pipe or a file
+tty := rotini.IsTerminal(rtx.Stdout) // a character device, not a pipe, a file or a buffer
 plain := rotini.EnvNoColor()         // NO_COLOR, with the CLICOLOR_FORCE override
 
-cols, rows, ok := rotini.TerminalSize(os.Stdout)
+cols, rows, ok := rotini.TerminalSize(rtx.Stdout)
 if !ok {
 	cols, rows = 80, 24 // a pipe, or a platform that cannot say
 }
@@ -34,11 +34,11 @@ The one piece of interactive input rotini keeps, because it is the one you canno
 
 {{< code title="read a secret" language="golang" open="true" collapsible="false" copy="true" >}}
 fmt.Fprint(rtx.Stdout, "token: ")
-secret, err := rotini.ReadSecret(os.Stdin)
+secret, err := rotini.ReadSecret(rtx.Stdin)
 fmt.Fprintln(rtx.Stdout) // the user's Enter was not echoed either
 {{< /code >}}
 
-Off a terminal — a pipe, a test, a CI runner — there is no echo to disable and the line is read normally, which keeps a secret-reading command testable. Input that ends without an answer is `ErrNotInteractive`, **never a hang**: that is what makes an interactive command safe to run in CI.
+All three take the streams a handler already holds — `rtx.Stdin`, `rtx.Stdout` — as they are: a stream that is not a file, like a test's buffer, is simply not a terminal. Off a terminal — a pipe, a test, a CI runner — there is no echo to disable and the line is read normally, which keeps a secret-reading command testable. Input that ends without an answer is `ErrNotInteractive`, **never a hang**: that is what makes an interactive command safe to run in CI.
 
 ### Stripping escapes
 
@@ -145,7 +145,7 @@ Three behaviours, all about the shutdown, and none of them free anywhere else:
 
 - **Teardown runs on a context that is not already dead.** Hooks get a context derived with `context.WithoutCancel`, under a fresh budget. After a Ctrl-C the run context is *already cancelled*, so naive cleanup — `db.Close(ctx)`, `flush(ctx)` — fails instantly and silently, taking the buffer you were trying to flush with it.
 - **A context *ended* from outside is a graceful stop, so `Run` returns nil.** `errgroup.Wait` returns `context.Canceled`, which a CLI would turn into a non-zero exit for a clean SIGTERM. "Ended" covers a deadline as well as a cancel, so a worker writing the idiomatic `<-ctx.Done(); return ctx.Err()` does not fail a bounded run merely because the bound was a timeout.
-- **One budget across both halves, surfaced as `ErrShutdownTimeout`.** Workers that will not stop and hooks that overrun both produce the same typed sentinel, because the question a supervisor asks is the same either way: did teardown complete, or is this process exiting with work possibly unflushed? It exists to become an **exit code** — and when workers are what overran, it **names them**: `rotini: shutdown timed out: worker "indexer" did not stop`.
+- **One budget across both halves, surfaced as `ErrShutdownTimeout`.** Workers that will not stop and hooks that overrun both produce the same typed sentinel, because the question a supervisor asks is the same either way: did teardown complete, or is this process exiting with work possibly unflushed? It exists to become an **exit code** — and it **names what overran**: `shutdown timed out: worker "indexer" did not stop`, or `shutdown timed out: shutdown hook 2 (of 3, in registration order) did not finish`. The budget holds even for a hook that never looks at its context (a bare `conns.Wait()`): `Run` stops waiting for it when the budget ends, still runs the hooks after it, and returns on time.
 
 Hooks run in **reverse** registration order, like deferred calls, so a resource is released before whatever it depends on. They run in every case — clean stop, worker failure, cancellation alike.
 

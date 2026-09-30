@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,10 +27,10 @@ import (
 // The service returns rather than hanging, so a supervisor's own kill timer is never the thing
 // that ends the process.
 //
-// When workers are what overran, the error NAMES THEM — "rotini: shutdown timed out: worker
+// When workers are what overran, the error NAMES THEM — "shutdown timed out: worker
 // \"indexer\" did not stop". An operator reading a log at 3am needs to know which worker to go
 // and fix, and "shutdown timed out" on its own sends them to read the whole binary.
-var ErrShutdownTimeout = InternalError(errors.New("rotini: shutdown timed out"))
+var ErrShutdownTimeout = InternalError(errors.New("shutdown timed out"))
 
 // Service runs a set of long-lived workers until the context ends or one of them fails, then
 // shuts them down in order. It is the daemon shape: the runtime's signal trap already cancels
@@ -132,7 +133,7 @@ func (s *Service) Run(ctx context.Context) error {
 			defer wg.Done()
 			defer running.Delete(w.name)
 			if err := runWorker(runCtx, w); err != nil {
-				once.Do(func() { failure = fmt.Errorf("rotini: service worker %q: %w", w.name, err) })
+				once.Do(func() { failure = fmt.Errorf("worker %q: %w", w.name, err) })
 				cancel() // one failure stops the rest
 			}
 		}(w)
@@ -240,6 +241,15 @@ func stuckWorkers(running *sync.Map) string {
 // Every hook runs, whatever the ones before it did. A hook that fails or panics must not cost
 // the ones after it: they are the flush, the unlock and the close, and teardown is the one phase
 // where best-effort beats fail-fast.
+//
+// The budget is still a promise to the CALLER: Run returns within it. A hook that does not
+// watch its ctx — waiting on a WaitGroup, a lock, a connection draining — used to hold Run for
+// as long as it blocked, since the budget was only checked once the hook returned. Each hook now
+// runs on its own goroutine and is waited for only until the budget runs out (and, past it, a
+// short grace for a hook to return the ctx error it was just handed). One that is still running
+// then is abandoned — it keeps going until it returns or the process exits — and named in the
+// ErrShutdownTimeout. The hooks after it still run, each with the same grace, so an overrun
+// never skips the quick unlock or close that follows it.
 func (s *Service) runShutdown(ctx context.Context, prior error) error {
 	if len(s.shutdown) == 0 {
 		return prior
@@ -250,10 +260,27 @@ func (s *Service) runShutdown(ctx context.Context, prior error) error {
 		defer cancel()
 	}
 	var first error
-	for _, hook := range slices.Backward(s.shutdown) {
-		if err := runHook(ctx, hook); err != nil && first == nil {
-			first = fmt.Errorf("rotini: service shutdown: %w", err)
+	var stuck []string
+	for i, hook := range slices.Backward(s.shutdown) {
+		finished, err := s.awaitHook(ctx, hook)
+		if !finished {
+			stuck = append(stuck, strconv.Itoa(i+1))
+			continue
 		}
+		if err != nil && first == nil {
+			first = fmt.Errorf("shutdown: %w", err)
+		}
+	}
+	if len(stuck) > 0 {
+		what := fmt.Sprintf("shutdown hook %s", stuck[0])
+		if len(stuck) > 1 {
+			what = "shutdown hooks " + strings.Join(stuck, ", ")
+		}
+		what += fmt.Sprintf(" (of %d, in registration order) did not finish", len(s.shutdown))
+		if first != nil {
+			return firstOf(prior, fmt.Errorf("%w: %s: %w", ErrShutdownTimeout, what, first))
+		}
+		return firstOf(prior, fmt.Errorf("%w: %s", ErrShutdownTimeout, what))
 	}
 	// The budget applies to the hooks as well as to the workers, so overrunning it here is
 	// the condition ErrShutdownTimeout names. Without this it was reported only for the
@@ -268,10 +295,40 @@ func (s *Service) runShutdown(ctx context.Context, prior error) error {
 			first = ErrShutdownTimeout
 		}
 	}
-	// A worker's own failure still wins: it is the cause, and a teardown cut short is
-	// usually its consequence.
+	return firstOf(prior, first)
+}
+
+// firstOf returns prior when set, else err. A worker's own failure wins over anything teardown
+// reports: it is the cause, and a teardown cut short is usually its consequence.
+func firstOf(prior, err error) error {
 	if prior != nil {
 		return prior
 	}
-	return first
+	return err
+}
+
+// hookGrace is how long a hook gets, once the budget is over, to return with the ctx error it
+// was just handed. It separates a hook that honors its ctx from one that is stuck; either way
+// the result is ErrShutdownTimeout, and this only decides which one the message describes.
+const hookGrace = 10 * time.Millisecond
+
+// awaitHook runs one hook and waits for it within ctx's budget. finished is false when the
+// budget ran out first; the hook is then left running. With no budget it simply calls the hook.
+func (s *Service) awaitHook(ctx context.Context, hook func(context.Context) error) (finished bool, err error) {
+	if s.timeout <= 0 {
+		return true, runHook(ctx, hook)
+	}
+	done := make(chan error, 1) // buffered: an abandoned hook must be able to finish and exit
+	go func() { done <- runHook(ctx, hook) }()
+	select {
+	case err := <-done:
+		return true, err
+	case <-ctx.Done():
+		select {
+		case err := <-done:
+			return true, err
+		case <-time.After(hookGrace):
+			return false, nil
+		}
+	}
 }

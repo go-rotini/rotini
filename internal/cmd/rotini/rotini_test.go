@@ -203,6 +203,7 @@ func TestCLI_validateWarningsDoNotFail(t *testing.T) {
 func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	var gotName, gotFormat string
 	var gotForce bool
+	t.Chdir(t.TempDir()) // no go.mod requiring rotini: the `go get` step is due
 
 	p, out, _ := newTestCLI(t)
 	p.Bind("initialize", codegen.InitializeFn(func(name, format string, force bool) error {
@@ -469,6 +470,35 @@ func TestCLIPageMatchesGeneratedHelp(t *testing.T) {
 		}
 		if quoted != want {
 			t.Errorf("$ rotini%s: the CLI page is stale.\n--- page\n%s\n--- binary\n%s", m[1], quoted, want)
+		}
+	}
+}
+
+// TestRequiresRuntime decides whether `rotini init` tells the user to `go get` the runtime: only
+// when the module governing the directory does not already require it. It once printed the step
+// unconditionally, sending users with rotini in go.mod to run a command that changes nothing
+// (rubectl R-2).
+func TestRequiresRuntime(t *testing.T) {
+	root := t.TempDir()
+	write := func(dir, gomod string) string {
+		t.Helper()
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(gomod), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	with := write(filepath.Join(root, "with"), "module example.com/a\n\ngo 1.26\n\nrequire (\n\tgithub.com/go-rotini/rotini v1.0.0 // a comment\n)\n")
+	without := write(filepath.Join(root, "without"), "module example.com/b\n\ngo 1.26\n\nrequire github.com/go-rotini/recon v1.0.2\n")
+	sub := filepath.Join(with, "cmd", "app")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for dir, want := range map[string]bool{with: true, sub: true, without: false, t.TempDir(): false} {
+		if got := requiresRuntime(dir); got != want {
+			t.Errorf("requiresRuntime(%s) = %v, want %v", dir, got, want)
 		}
 	}
 }

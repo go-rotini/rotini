@@ -1,7 +1,9 @@
 package rotini
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,5 +114,30 @@ func TestReadSecret_emptyLineIsAnAnswer(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("ReadSecret = %q, want an empty secret", got)
+	}
+}
+
+// TestTerminalHelpers_takeTheStreamsAHandlerHas proves the two terminal helpers accept rtx.Stdin
+// and rtx.Stdout as they are. They used to take *os.File, so every prompt guard began with a
+// type assertion and a script- or test-friendly fallback reader (rubectl R-14, R-38).
+func TestTerminalHelpers_takeTheStreamsAHandlerHas(t *testing.T) {
+	var nilFile *os.File
+	for name, stream := range map[string]any{
+		"a buffer": &bytes.Buffer{}, "a reader": strings.NewReader("x"), "nil": nil, "a nil *os.File": nilFile,
+	} {
+		if IsTerminal(stream) {
+			t.Errorf("IsTerminal(%s) = true", name)
+		}
+	}
+
+	rtx := newContext()
+	rtx.Stdin = strings.NewReader("s3cret\r\nnext line")
+	if got, err := ReadSecret(rtx.Stdin); err != nil || string(got) != "s3cret" {
+		t.Errorf("ReadSecret(a reader) = %q, %v, want the first line without its CRLF", got, err)
+	}
+	for name, r := range map[string]io.Reader{"empty": strings.NewReader(""), "nil": nil, "a nil *os.File": nilFile} {
+		if _, err := ReadSecret(r); !errors.Is(err, ErrNotInteractive) {
+			t.Errorf("ReadSecret(%s) = %v, want ErrNotInteractive", name, err)
+		}
 	}
 }

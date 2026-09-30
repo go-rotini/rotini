@@ -1775,11 +1775,61 @@ func TestBinder_channelDurationsAndBounds(t *testing.T) {
 		t.Fatalf("ttl=%v cache=%v err=%v", in.App.Env.TTL, in.App.Config.Cache, err)
 	}
 	t.Setenv("TTL", "8d")
-	if _, err := bind(t, ""); err == nil || !strings.Contains(err.Error(), "TTL must be <= 168h0m0s") {
+	if _, err := bind(t, ""); err == nil || !strings.Contains(err.Error(), "TTL must be <= 7d (got 8d)") {
 		t.Errorf("TTL=8d: err = %v, want the 7d bound", err)
 	}
 	t.Setenv("TTL", "1h")
 	if _, err := bind(t, "cache: 2Gi\n"); err == nil || !strings.Contains(err.Error(), "cache must be <= 1Gi") {
 		t.Errorf("cache 2Gi: err = %v, want the 1Gi bound", err)
+	}
+}
+
+// A parent collecting its own inputs (in CascadingPreRun, say) judges only its own frames: the
+// leaf's required flag is the leaf's handler's business. Judging it here failed `app sub --help`
+// before sub's handler could answer the --help.
+func TestBinder_validatesOnlyTheFramesTheTypeDescribes(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "config", Identifiers: []string{"--config"}, Type: "string"}},
+		Commands: []CommandDef{{
+			Name: "sub", Handler: "AppSub",
+			Flags: []FlagDef{
+				{Name: "file", Identifiers: []string{"-f"}, Type: "string", Required: true},
+				{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
+			},
+		}},
+	}
+	var root struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config"`
+			}
+			Arguments struct{}
+		}
+	}
+	rtx := NewContextFor(def, []string{"--config", "c.yaml", "sub", "-h"})
+	rtx.frame = 0 // collecting from the root's own hook
+	if err := NewBinder(BindMeta{}).Bind(rtx, &root); err != nil || root.App.Flags.Config != "c.yaml" {
+		t.Fatalf("root collect: config=%q err=%v", root.App.Flags.Config, err)
+	}
+	// The leaf's own collect still enforces its required flag.
+	var leaf struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config"`
+			}
+			Arguments struct{}
+		}
+		AppSub struct {
+			Flags struct {
+				File string `rotini:"file"`
+				Help bool   `rotini:"help"`
+			}
+			Arguments struct{}
+		}
+	}
+	rtx.frame = 1
+	if err := NewBinder(BindMeta{}).Bind(rtx, &leaf); err == nil || !strings.Contains(err.Error(), "-f") {
+		t.Errorf("leaf collect: err = %v, want the missing -f", err)
 	}
 }

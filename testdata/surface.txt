@@ -104,6 +104,8 @@ field Deprecation.Name
 field DiscoverDef.App
 field DiscoverDef.File
 field DiscoverDef.Strategy
+field DiscoveredPlugin.Name
+field DiscoveredPlugin.Path
 field FlagDef.Complete
 field FlagDef.Constraints
 field FlagDef.Default
@@ -207,12 +209,12 @@ func DefaultLifecycle(chain []ResolvedCommand, handlers []Handlers) []LifecycleS
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
 func Defaults[T any](rtx *Context) (Layer[T], error)
 func Deprecations(rtx *Context) []Deprecation
-func DiscoveredPlugins(cmd ResolvedCommand) []string
+func DiscoveredPlugins(cmd ResolvedCommand) []DiscoveredPlugin
 func DiscoveryDiagnostics(cmd ResolvedCommand) []error
 func EnvNoColor() bool
 func ExitCode(code int) error
 func InternalError(err error) error
-func IsTerminal(file *os.File) bool
+func IsTerminal(stream any) bool
 func NewBinder(meta BindMeta) *Binder
 func NewContextFor(def Definition, argv []string) *Context
 func NewKey[T any](name string) Key[T]
@@ -230,10 +232,10 @@ func ParseFiles[T any](rtx *Context) (Layer[T], error)
 func ParseStdin[T any](rtx *Context) (Layer[T], error)
 func Provide[T any](k Key[T], value T) Option
 func Ptr[T any](v T) *T
-func ReadSecret(file *os.File) ([]byte, error)
+func ReadSecret(r io.Reader) ([]byte, error)
 func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool)
 func Strip(text string) string
-func TerminalSize(file *os.File) (cols, rows int, ok bool)
+func TerminalSize(stream any) (cols, rows int, ok bool)
 func UsageError(err error) error
 method ArgValueCompleter.CompleteArgValue
 method Base64Bytes.MarshalText() ([]byte, error)
@@ -258,6 +260,7 @@ method Context.Get[T any](key string) (T, bool)
 method Context.Halt()
 method Context.HaltWith(err error)
 method Context.HaltWithCode(code int)
+method Context.Help() string
 method Context.IsLeaf() bool
 method Context.MustGet[T any](key string) T
 method Context.Parser() *Parser
@@ -269,6 +272,7 @@ method Context.Value(key string) any
 method Context.Version() string
 method Context.WithBindMeta(meta BindMeta) *Context
 method Context.WithBinder(fn func(BindMeta) *Binder) *Context
+method Context.WithHelp(help HelpFunc) *Context
 method Context.WithParser(parser *Parser) *Context
 method Context.WithVersion(version string) *Context
 method DefaultCascadingPostRun.CascadingPostRun(ctx context.Context, rtx *Context)
@@ -310,6 +314,7 @@ method Program.WithBinder(fn func(BindMeta) *Binder) *Program
 method Program.WithContext(ctx context.Context) *Program
 method Program.WithExit(fn func(int)) *Program
 method Program.WithFunnel(fn FunnelFunc) *Program
+method Program.WithHelp(help HelpFunc) *Program
 method Program.WithLifecycle(fn Lifecycle) *Program
 method Program.WithPanicRecover(enabled bool) *Program
 method Program.WithParser(parser *Parser) *Program
@@ -386,6 +391,7 @@ type DefaultPreRun
 type Definition
 type Deprecation
 type DiscoverDef
+type DiscoveredPlugin
 type FieldPath
 type FlagDef
 type FlagDependency
@@ -394,6 +400,7 @@ type FlagGroupKind
 type FlagValueCompleter
 type FunnelFunc
 type Handlers
+type HelpFunc
 type HexBytes
 type Key
 type Layer

@@ -253,5 +253,5 @@ func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 	fmt.Fprintf(rtx.Stdout, "port=%d region=%s token=%s color=%v base=%s key=%s sort=%s\n",
 		in.App.Flags.Port, in.App.Env.Region, in.App.Flags.Token, in.App.Flags.Color,
-		in.App.Env.BaseUrl, in.App.Env.ApiKey, in.App.Flags.SortBy)
+		in.App.Env.BaseURL, in.App.Env.APIKey, in.App.Flags.SortBy)
 }

@@ -1,6 +1,9 @@
 package rotini
 
-import "os"
+import (
+	"os"
+	"reflect"
+)
 
 // The two questions a program has to answer before it decides how to write to a stream: is
 // anyone watching, and do they want color. rotini never asks them for you — nothing in the
@@ -20,16 +23,30 @@ func EnvNoColor() bool {
 	return os.Getenv("NO_COLOR") != ""
 }
 
-// IsTerminal reports whether file is a character device — a terminal rather than a pipe, a
-// regular file, or /dev/null. A nil file is not a terminal. It is the check behind "is anyone
-// watching this?": paging, animating and prompting all become wrong when the answer is no.
-func IsTerminal(file *os.File) bool {
-	if file == nil {
+// IsTerminal reports whether stream is a terminal rather than a pipe, a regular file, a buffer
+// or /dev/null. It takes the streams a handler holds — rtx.Stdin, rtx.Stdout, rtx.Stderr — as
+// they are, so a prompt guard needs no type assertion: a stream that is not a file (a test's
+// bytes.Buffer, a nil) is not a terminal. It is the check behind "is anyone watching this?":
+// paging, animating and prompting all become wrong when the answer is no.
+//
+//	if !rotini.IsTerminal(rtx.Stdin) {
+//		return rotini.ErrNotInteractive
+//	}
+func IsTerminal(stream any) bool {
+	f, ok := stream.(interface{ Stat() (os.FileInfo, error) })
+	if !ok || f == nil || isNilPointer(stream) {
 		return false
 	}
-	info, err := file.Stat()
+	info, err := f.Stat()
 	if err != nil {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// isNilPointer reports whether v is a typed nil pointer, such as a nil *os.File, whose methods
+// would panic rather than fail.
+func isNilPointer(v any) bool {
+	rv := reflect.ValueOf(v)
+	return rv.Kind() == reflect.Pointer && rv.IsNil()
 }

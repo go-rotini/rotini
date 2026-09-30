@@ -141,7 +141,7 @@ func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 	f := in.App.Flags
-	fmt.Fprintf(rtx.Stdout, "db=%s:%d tls=%v mounts=%d", f.Db.Host, f.Db.Port, f.Db.Tls, len(f.Mount))
+	fmt.Fprintf(rtx.Stdout, "db=%s:%d tls=%v mounts=%d", f.Db.Host, f.Db.Port, f.Db.TLS, len(f.Mount))
 	if n := len(f.Mount); n > 0 {
 		fmt.Fprintf(rtx.Stdout, " first=%s->%s last=%s ro=%v", f.Mount[0].Src, f.Mount[0].Dst, f.Mount[n-1].Src, f.Mount[n-1].Readonly)
 	}

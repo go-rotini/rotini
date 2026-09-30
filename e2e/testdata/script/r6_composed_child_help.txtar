@@ -1,0 +1,102 @@
+# R6 — `--help` prints the page of the program being RUN, whoever generated the handler.
+#
+# Two ways the generated stubs used to answer --help wrongly, both driven here through stubs
+# exactly as `rotini generate` seeds them (no handler below is hand-written):
+#
+#   1. A composed child's own --help printed the page baked into the CHILD's package: the path
+#      without its parent (`kid work`) and none of the flags the parent passes down — while
+#      `umbrella help kid work`-style lookups printed the right one. The stub now asks the
+#      running program for the page (rtx.Help), and only the parent knows the full tree.
+#
+#   2. A --help declared once on the root was never answered by a sub-command that did not
+#      declare its own. Flags resolve up the chain, so `kid work --help` SET the root's flag —
+#      and the stub, checking only its own frame, ran the command and failed on the required
+#      argument the user never meant to supply. The stub now checks the nearest --help.
+
+gomodinit example.com/helppages
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/umbrella/.rotini.spec.yaml --config cmd/umbrella/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o kid$exe ./cmd/kid
+exec go build -o umbrella$exe ./cmd/umbrella
+
+# ── an inherited --help answers, before the required argument is demanded ──
+exec ./kid$exe work --help
+stdout '^  kid work <target>$'
+! stderr .
+
+# ── composed: the full path, and the parent's global flag, on the child's own --help ──
+exec ./umbrella$exe kid work --help
+stdout '^  umbrella kid work <target>$'
+stdout '--verbose'
+! stderr .
+exec ./umbrella$exe kid --help
+stdout '^  umbrella kid <command> \[flags\]'
+stdout '--verbose'
+
+# Without --help the required argument is still required: answering help did not loosen it.
+! exec ./umbrella$exe kid work
+stderr 'target'
+
+-- cmd/umbrella/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: umbrella
+  summary: mounts a child CLI
+  flags:
+    - name: verbose
+      summary: the umbrella's global flag
+      identifiers: [--verbose]
+      schema: { type: bool }
+      cascading: true
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      schema: { type: bool }
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/umbrella/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/umbrella/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/umbrella/zz_umbrella.go
+      package: umbrella
+  features:
+    - type: help
+      enabled: true
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: a child CLI
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      schema: { type: bool }
+      cascading: true
+  commands:
+    - name: work
+      summary: needs a target
+      arguments:
+        - name: target
+          summary: what to work on
+          schema: { type: string, required: true }
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kid/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/kid/zz_kid.go
+      package: kid
+  features:
+    - type: help
+      enabled: true

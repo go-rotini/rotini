@@ -338,6 +338,33 @@ func parseDuration(s string) (time.Duration, error) {
 	return d, nil
 }
 
+// formatDuration writes d the way a duration input is written: whole days as "d", and no zero
+// units — "30d", "1d12h", "1h30m", "90s" rather than Go's "720h0m0s". It is how a bound prints
+// in an error, so `maximum: 30d` is reported as "<= 30d", not in a spelling the user never wrote
+// and Go's formatter cannot produce (it has no days).
+func formatDuration(d time.Duration) string {
+	if d < 0 {
+		return "-" + formatDuration(-d)
+	}
+	const day = 24 * time.Hour
+	out := ""
+	if d >= day {
+		out = strconv.FormatInt(int64(d/day), 10) + "d"
+		d %= day
+		if d == 0 {
+			return out
+		}
+	}
+	s := d.String() // "1h0m0s", "2m0s", "1h30m0s", "90ms"
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return out + s
+}
+
 // expandDays rewrites each day and week component of a duration as hours.
 func expandDays(s string) (string, error) {
 	var convErr error

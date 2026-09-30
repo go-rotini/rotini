@@ -54,7 +54,7 @@ func ExitCode(code int) error { return exitCodeError{code: code} }
 type exitCodeError struct{ code int }
 
 func (e exitCodeError) Error() string {
-	return fmt.Sprintf("rotini: run canceled (exit code %d)", e.code)
+	return fmt.Sprintf("run canceled (exit code %d)", e.code)
 }
 
 // canceledExitCode returns the code carried by a run context's cancellation cause, or 0 when
@@ -82,8 +82,8 @@ func canceledExitCode(ctx context.Context) int {
 //   - YOUR dependencies — [Program.Bind] for a key you name, [Program.With] with [Provide]
 //     for a type-checked one
 //   - rotini's own seams — [Program.WithVersion], [Program.WithParser],
-//     and the two the generated code handles for you,
-//     [Program.WithBindMeta] and [Program.WithBinder]
+//     and the three the generated code handles for you,
+//     [Program.WithBindMeta], [Program.WithBinder] and [Program.WithHelp]
 //   - replace a phase — [Program.WithResolver], [Program.WithLifecycle]
 //
 // A Program is reusable: [Program.Run] dispatches one invocation and returns instead of
@@ -126,6 +126,7 @@ type Program struct {
 	meta     *BindMeta              // WithBindMeta: the generated descriptor; nil → none
 	binderFn func(BindMeta) *Binder // WithBinder: nil → NewBinder
 	version  string                 // WithVersion
+	help     HelpFunc               // WithHelp: nil → no pages
 	parser   *Parser                // WithParser: nil → a default, built per run
 }
 
@@ -388,6 +389,25 @@ func (p *Program) WithVersion(version string) *Program {
 	return p
 }
 
+// HelpFunc returns the help page of the command named by path — the canonical names below the
+// root, none for the root itself — or an error when there is no such command. It is the shape
+// of the Help function codegen generates.
+type HelpFunc func(path ...string) (string, error)
+
+// WithHelp sets where [Context.Help] finds a command's help page. The generated NewProgram
+// passes its own Help function, so a program built from a spec has its pages without setting
+// anything; a nil help is ignored.
+//
+// It is a seam on the Program rather than a page each handler holds because of composition: a
+// command composed from another spec prints the page of the program it is RUNNING in — with the
+// full command path and the flags its new ancestors pass down — and only the program knows it.
+func (p *Program) WithHelp(help HelpFunc) *Program {
+	if help != nil {
+		p.help = help
+	}
+	return p
+}
+
 // WithParser replaces the [Parser] returned by [Context.Parser] and used by the argv channel.
 // Parsing is never optional, so a program that sets nothing still has one; this overrides it.
 // A nil parser is ignored.
@@ -403,8 +423,8 @@ func (p *Program) WithParser(parser *Parser) *Program {
 // double in tests, and handler code retrieves either through [Context.Get] or
 // [Context.MustGet].
 //
-// It is YOUR namespace. rotini's own seams — the binder, the parser, the version, the
-// generated [BindMeta] — are typed options on the Program, not
+// It is YOUR namespace. rotini's own seams — the binder, the parser, the version, the help
+// pages, the generated [BindMeta] — are typed options on the Program, not
 // entries here, so a key you choose can never shadow one of them and a type you get wrong can
 // never degrade an input channel in silence.
 func (p *Program) Bind(key string, value any) *Program {
@@ -424,7 +444,7 @@ func (p *Program) newRunContext() *Context {
 	}
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.binderFn = p.meta, p.binderFn
-	rtx.version, rtx.parser = p.version, p.parser
+	rtx.version, rtx.parser, rtx.help = p.version, p.parser, p.help
 	return rtx
 }
 

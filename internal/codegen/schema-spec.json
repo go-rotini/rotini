@@ -102,7 +102,7 @@
         },
         "config_files": {
           "type": "array",
-          "description": "Config-file SOURCES this command contributes \u2014 where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root \u2192 leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded \u2014 off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins. COMPOSITION: a $ref'd child's sources travel with its command tree, re-scoped to the path the graft occupies, so `parent child cmd` reads what `child cmd` reads without the parent re-declaring anything.",
+          "description": "Config-file SOURCES this command contributes \u2014 where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root \u2192 leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded \u2014 off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins, and within one command's list the FIRST declared wins \u2014 so list the more specific file (a project's) before the more general one (the user's). COMPOSITION: a $ref'd child's sources travel with its command tree, re-scoped to the path the graft occupies, so `parent child cmd` reads what `child cmd` reads without the parent re-declaring anything.",
           "items": {
             "$ref": "#/definitions/ConfigurationFile"
           }
@@ -197,7 +197,7 @@
         },
         "filename": {
           "type": "string",
-          "description": "Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go'), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file \u2014 move your handler code first.",
+          "description": "Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file \u2014 move your handler code first.",
           "pattern": "^[^/\\\\]+\\.go$", "examples": ["deploy.go"]
         },
         "commands": {
@@ -209,7 +209,7 @@
         },
         "plugin_path": {
           "type": "string",
-          "description": "Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds \u2014 they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH \u2014 so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched."
+          "description": "Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time; a leading ~ and $VAR references are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds \u2014 they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH \u2014 so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched."
         },
         "remote_commands": {
           "type": "array",
@@ -564,7 +564,7 @@
             "dotted_keys": {
               "type": "boolean",
               "default": false,
-              "description": "Map-typed flags only, and only with 'any' values ('map'/'object' \u2192 map[string]any). When true, a '.'-separated key in a key=value pair assigns into nested maps, helm-style: --set image.tag=v2 \u2192 map[image][tag]=v2. Opt-in because '.' is a legal character in plain map keys \u2014 without it, --label a.b=c stores the literal key 'a.b'. Each assignment overwrites whatever is at its path (creating intermediate maps as needed), so later pairs win and --set a=1 --set a.b=2 leaves a nested map under 'a'. Declare 'properties' on the flag's schema to give shell completion the known key paths (offered up to the '=')."
+              "description": "Map-typed flags only, and only with 'any' values ('map'/'object' \u2192 map[string]any). When true, a '.'-separated key in a key=value pair assigns into nested maps, helm-style: --set image.tag=v2 \u2192 map[image][tag]=v2. Opt-in because '.' is a legal character in plain map keys \u2014 without it, --label a.b=c stores the literal key 'a.b'. Each assignment overwrites whatever is at its path (creating intermediate maps as needed), so later pairs win and --set a=1 --set a.b=2 leaves a nested map under 'a'. A value is read as its JSON spelling would be \u2014 true/false, null and JSON numbers are booleans, null and numbers; anything else is text \u2014 so --set replicas=3 stores the number 3, as a config file's replicas: 3 does. Declare 'properties' on the flag's schema to give shell completion the known key paths (offered up to the '=')."
             },
             "from": {
               "type": "array",
@@ -657,7 +657,7 @@
         "cascading": {
           "type": "boolean",
           "default": false,
-          "description": "When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: all flags already resolve up the command chain at runtime regardless of this setting; cascading controls whether descendants document it."
+          "description": "When true, this flag is advertised in the generated help of every descendant command (under the 'Global Flags' section), not only on its own command. Display-only: at run time a flag may be written anywhere after the name of the command that declares it \u2014 after its sub-commands' names too \u2014 regardless of this setting, but never before that name (a flag written before a sub-command's name belongs to an ancestor, which is how two commands may declare the same flag). cascading controls whether descendants document it."
         },
         "deprecated": {
           "type": "string",
@@ -923,7 +923,7 @@
       }
     },
     "ConfigurationFileDiscover": {
-      "description": "A run-time location strategy for a configuration file, instead of a fixed 'path'. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent, the same as a missing fixed path. Declared config_files order remains precedence order.",
+      "description": "A run-time location strategy for a configuration file, instead of a fixed 'path'. The first directory (in the strategy's order) containing 'file' wins; a file found nowhere is simply absent, the same as a missing fixed path. Among one command's config_files the first declared still wins, wherever each was found.",
       "allOf": [
         {
           "type": "object",

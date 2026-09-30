@@ -51,8 +51,8 @@ func (c Category) String() string {
 // Prefer the [UsageError] and [InternalError] constructors over wrapping these with fmt.Errorf
 // directly: they tag the category without prepending the sentinel's text to your message.
 var (
-	ErrUsage    = errors.New("rotini: usage error")
-	ErrInternal = errors.New("rotini: internal error")
+	ErrUsage    = errors.New("usage error")
+	ErrInternal = errors.New("internal error")
 )
 
 // CategoryOf returns the [Category] an error carries, or [CategoryNone] when it matches neither

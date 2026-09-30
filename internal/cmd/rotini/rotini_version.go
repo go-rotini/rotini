@@ -26,7 +26,7 @@ func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 	flags := inputs.RotiniVersion.Flags
 	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, HelpRotiniVersion)
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 		return
 	}

@@ -3,8 +3,6 @@ package rotini
 import (
 	"bytes"
 	"context"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -66,8 +64,26 @@ func TestDiscoveredPlugins(t *testing.T) {
 	}
 
 	got := DiscoveredPlugins(cmd)
-	if !reflect.DeepEqual(got, []string{"foo", "zip"}) {
-		t.Errorf("DiscoveredPlugins = %v, want [foo zip] (bar shadowed by declared command; unrelated unprefixed)", got)
+	want := []DiscoveredPlugin{
+		{Name: "foo", Path: filepath.Join(dir, "acme-foo")},
+		{Name: "zip", Path: filepath.Join(dir, "acme-zip")},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DiscoveredPlugins = %v, want %v (bar shadowed by declared command; unrelated unprefixed)", got, want)
+	}
+
+	// The path is the one dispatch would run: a copy earlier in the search order shadows a
+	// later one, so listing the later one would name a binary that never runs (rubectl R-37).
+	earlier := t.TempDir()
+	if err := os.WriteFile(filepath.Join(earlier, "acme-foo"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", earlier)
+	if got := DiscoveredPlugins(cmd); len(got) == 0 || got[0].Path != filepath.Join(dir, "acme-foo") {
+		t.Errorf("foo = %v, want the plugin-path copy (searched before PATH)", got)
+	}
+	if path, ok := RemoteBinaryPath(cmd, "foo"); !ok || path != filepath.Join(dir, "acme-foo") {
+		t.Errorf("RemoteBinaryPath(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
 	}
 
 	// Hidden discovery → nil (the section is suppressed).
@@ -85,25 +101,34 @@ func TestDiscoveredPlugins(t *testing.T) {
 	}
 }
 
-// TestDiscoveryDiagnostics surfaces a misconfigured discovery path as data: a missing or
-// unreadable author-configured `path` is reported (with the offending path + cause), a
-// clean path reports nothing, and listing still works (DiscoveredPlugins never errors).
+// TestDiscoveryDiagnostics surfaces a misconfigured discovery path as data: an unusable
+// author-configured path is reported (with the offending path + cause), a clean path reports
+// nothing, and listing still works (DiscoveredPlugins never errors).
 func TestDiscoveryDiagnostics(t *testing.T) {
-	// A bad CONFIGURED path is a real diagnostic.
+	// A path that is not a directory is a real diagnostic.
+	file := filepath.Join(t.TempDir(), "plugins")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	bad := ResolvedCommand{
 		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: filepath.Join(t.TempDir(), "no-such-subdir"),
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: file,
 	}
 	problems := DiscoveryDiagnostics(bad)
-	if len(problems) != 1 {
-		t.Fatalf("DiscoveryDiagnostics = %v, want exactly one problem for the missing path", problems)
-	}
-	if !errors.Is(problems[0], fs.ErrNotExist) {
-		t.Errorf("problem = %v, want a not-exist error a caller can classify", problems[0])
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), file) {
+		t.Fatalf("DiscoveryDiagnostics = %v, want exactly one problem naming %s", problems, file)
 	}
 	// Listing degrades gracefully: the bad path contributes nothing but never errors.
 	if got := DiscoveredPlugins(bad); got != nil {
 		t.Errorf("DiscoveredPlugins with only a bad path = %v, want nil", got)
+	}
+
+	// A path that does not exist YET is not a problem: it is where plugins go once one is
+	// installed. Reporting it made every fresh install look misconfigured (rubectl R-36).
+	absent := bad
+	absent.PluginPath = filepath.Join(t.TempDir(), "no-such-subdir")
+	if probs := DiscoveryDiagnostics(absent); len(probs) != 0 {
+		t.Errorf("a missing plugin directory produced diagnostics: %v", probs)
 	}
 
 	// A clean configured path reports no problems.
@@ -151,8 +176,8 @@ func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	rtx := NewContextFor(def, nil) // what the runtime hands a handler
 	chain := rtx.Chain()
 	got := DiscoveredPlugins(chain[len(chain)-1])
-	if !reflect.DeepEqual(got, []string{"bar", "foo"}) {
-		t.Errorf("DiscoveredPlugins via rtx.Chain() = %v, want [bar foo]", got)
+	if len(got) != 2 || got[0].Name != "bar" || got[1].Name != "foo" {
+		t.Errorf("DiscoveredPlugins via rtx.Chain() = %v, want bar and foo", got)
 	}
 }
 
@@ -774,5 +799,57 @@ func TestCompletionHint_noneIsNotTheSameAsEmpty(t *testing.T) {
 	}
 	if unset != "" {
 		t.Errorf("no hint = %q, want empty so the shell applies its own default", unset)
+	}
+}
+
+// lenientRootInputs is a root's generated inputs shape: one global flag with an env fallback,
+// and a required one that a half-typed line has not supplied yet.
+type lenientRootInputs struct {
+	App struct {
+		Flags struct {
+			Store string `rotini:"store" recon:"store" env:"LENIENT_STORE"`
+			Token string `rotini:"token"`
+		}
+		Arguments struct{}
+	}
+}
+
+type lenientHandlers struct{}
+
+type lenientShow struct{ deployArgCompleter }
+
+// CompleteArgValue is the recipe FlagValueCompleter's doc gives, verbatim in shape: the root's
+// flags, read at the root's frame, from the line and the environment, with nothing validated.
+func (lenientShow) CompleteArgValue(rtx *Context, arg, partial string) []string {
+	var in lenientRootInputs
+	AtFrame(0, func(_ context.Context, rtx *Context) {
+		env, _ := ParseEnv[lenientRootInputs](rtx)
+		argv, _ := ParseArgv[lenientRootInputs](rtx)
+		in = OverlayInputs(env, argv)
+	})(context.Background(), rtx)
+	return []string{"from-" + in.App.Flags.Store}
+}
+
+func (lenientHandlers) AppShow() Handlers { return lenientShow{} }
+
+// TestComplete_lenientParseOfAnAncestorsFlags proves the documented way a completer reads what
+// the user has said so far: a root flag on the line, else its environment fallback, though the
+// line is half-typed and a required flag is missing. rubectl hand-copied the env lookup instead,
+// and its first attempt missed it and completed nothing (rubectl R-40).
+func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "store", Identifiers: []string{"--store"}, Type: "string"},
+			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true},
+		},
+		Commands: []CommandDef{{Name: "show", Handler: "AppShow", Arguments: []ArgDef{{Name: "name", Type: "string"}}}},
+	}
+	t.Setenv("LENIENT_STORE", "env")
+	if got := complete(def, []string{"show", ""}, lenientHandlers{}, newContext()); !reflect.DeepEqual(got, []string{"from-env"}) {
+		t.Errorf("env fallback: candidates = %v, want [from-env]", got)
+	}
+	if got := complete(def, []string{"--store", "line", "show", ""}, lenientHandlers{}, newContext()); !reflect.DeepEqual(got, []string{"from-line"}) {
+		t.Errorf("flag on the line: candidates = %v, want [from-line] — argv outranks env", got)
 	}
 }

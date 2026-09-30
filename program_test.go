@@ -1410,3 +1410,42 @@ func TestDispatch_nilHandlersIsAWiringFault(t *testing.T) {
 		t.Errorf("stderr = %q, want it to name the actual mistake", errs.String())
 	}
 }
+
+// TestProgram_WithHelp_pageOfTheRunningCommand proves [Context.Help] asks the PROGRAM for the
+// running command's page, keyed by canonical names — so a command reached by an alias, or one
+// composed from another spec whose handler was generated knowing only its own tree, still
+// prints the page of the program it runs in. That last case is why it is a Program seam: a
+// composed child's handler used to print a page baked into its own package, which lacked the
+// parent's path and the flags the parent passes down.
+func TestProgram_WithHelp_pageOfTheRunningCommand(t *testing.T) {
+	var got []string
+	var asked [][]string
+	pages := func(path ...string) (string, error) {
+		asked = append(asked, path)
+		if len(path) == 1 && path[0] == "run" {
+			return "app run page", nil
+		}
+		return "", errors.New("no page")
+	}
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = append(got, rtx.Help()) }}
+	p := NewProgram(testDef(), h).WithHelp(pages).WithExit(func(int) {})
+
+	p.WithArgs([]string{"r", "x"}).Execute() // by alias
+	if len(got) != 1 || got[0] != "app run page" {
+		t.Fatalf("Help() = %q, want the run page", got)
+	}
+	if !reflect.DeepEqual(asked, [][]string{{"run"}}) {
+		t.Errorf("asked for %q, want the canonical path [run] — not the alias typed", asked)
+	}
+
+	// No pages, or none for this command: the empty string, never a panic or a guess.
+	got = nil
+	NewProgram(testDef(), h).WithArgs([]string{"run", "x"}).WithExit(func(int) {}).Execute()
+	if len(got) != 1 || got[0] != "" {
+		t.Errorf("Help() with no WithHelp = %q, want \"\"", got)
+	}
+	var nilCtx *Context
+	if nilCtx.WithHelp(pages) != nil {
+		t.Error("WithHelp on a nil Context should stay nil")
+	}
+}

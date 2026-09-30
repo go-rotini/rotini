@@ -55,8 +55,24 @@
 //     composed at codegen; a dispatch failure is a [*RemoteError]. Discovery dispatches an
 //     unmatched token to <prefix><token> the same way.
 //
-// `rotini validate` follows refs and collision-checks the assembled tree, so a duplicate name,
-// a cycle or a missing ref is caught before codegen. Generation is hermetic: rotini has no
+// A composed child is generated on its own, so its typed inputs start at its own root: its
+// handlers cannot see a parent's cascading flags through them. Hand those across with a [Key]:
+// the child's package declares it, and the parent — which imports the child, never the other
+// way — collects its own inputs in CascadingPreRun and binds them. That is the one place the
+// parent's inputs type describes the running command, and collecting there judges only the
+// parent's own inputs, so a descendant's --help and required inputs are unaffected:
+//
+//	// package child
+//	var KubeconfigKey = rotini.NewKey[string]("child.kubeconfig")
+//
+//	// package parent, in its CascadingPreRun
+//	in, err := rotini.Collect[ParentInputs](rtx)
+//	if err != nil { rtx.HaltWith(err); return }
+//	child.KubeconfigKey.BindTo(rtx, in.Parent.Flags.Kubeconfig)
+//
+// `rotini validate` follows refs, validates each locally composed spec as its own document and
+// collision-checks the assembled tree, so a duplicate name, a cycle, a missing ref or a mistake
+// inside a child is caught before codegen. Generation is hermetic: rotini has no
 // fetcher, a local ref reads the filesystem, a mod:// ref reads the module cache, and a git::
 // or raw https:// ref is refused.
 //
@@ -96,7 +112,11 @@
 //     nesting, quotes keeping a comma), a JSON or YAML file with `from: [file]` (--db @db.yaml),
 //     or one field per flag (--db.host=h). Occurrences merge in order, a later key winning; a
 //     list of objects takes one element per occurrence. Every spelling is validated against
-//     the named schema, the one a stdin payload of that shape meets.
+//     the named schema, the one a stdin payload of that shape meets. Where the schema says
+//     nothing about a value — inside a free-form map, or in a `dotted_keys:` map — key=value
+//     text is read as its JSON spelling would be: true, false, null and JSON numbers are
+//     typed, anything else stays text. So `-p spec.replicas=5` and `-p '{"spec":{"replicas":5}}'`
+//     store the same number.
 //
 // # Slices at the boundary
 //

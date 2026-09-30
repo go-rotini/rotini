@@ -371,6 +371,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 	return renderRotiniFile(templateRotiniData{
 		Package:       lay.cmdPkgName,
 		PathResolvers: hasPathResolver(features),
+		HelpResolver:  helpResolver(features),
 		Header:        lay.cmdHeader,
 		RuntimeImport: runtimeImport,
 		Imports:       renderImports(imports),
@@ -507,7 +508,7 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		if c.passthrough {
 			continue // inline-passthrough: the package owns the handler, no stub seeded
 		}
-		path := filepath.Join(lay.cmdDir, c.filename)
+		path := filepath.Join(lay.cmdDir, stubFileFor(lay.cmdDir, c))
 		if _, err := os.Stat(path); err == nil {
 			continue
 		} else if !os.IsNotExist(err) {
@@ -522,6 +523,16 @@ func writeHandlerStubs(gp *program, lay layout) error {
 		}
 	}
 	return nil
+}
+
+// helpResolver returns the help feature's resolver name, or "" when the help feature is off.
+func helpResolver(features []templateFeature) string {
+	for _, f := range features {
+		if f.Noun == "help" {
+			return f.Resolver
+		}
+	}
+	return ""
 }
 
 // hasPathResolver reports whether any enabled feature emits a resolver keyed by COMMAND PATH
@@ -544,17 +555,6 @@ func featureEnabled(conf *Conf, kind string) bool {
 		}
 	}
 	return false
-}
-
-// helpVarPrefix returns the help feature's embed-var prefix, so a seeded stub names the same
-// var the feature renderer emits rather than assuming it.
-func helpVarPrefix(conf *Conf) string {
-	for _, f := range enabledFeatures(conf) {
-		if f.desc.name == "help" {
-			return f.desc.varPrefix
-		}
-	}
-	return ""
 }
 
 // commandName returns the command's own name — the last token of its invocation.
@@ -586,6 +586,29 @@ func variadicStringArgField(c genCommand) string {
 	return c.args[0].Field
 }
 
+// helpFlagFor finds the `help` flag that asks command c for its page: c's own, else the nearest
+// ancestor's. Flags resolve up the command chain, so `app sub --help` sets the root's flag when
+// sub declares none — and a stub that only checked its own frame would run the command instead,
+// typically failing on a required input the user never meant to supply. It returns the flag's
+// Go field and the inputs frame (type prefix) that holds it, or "" and "".
+func helpFlagFor(gp *program, c genCommand) (field, frame string) {
+	if f := boolFlagField(c, "help"); f != "" {
+		return f, c.prefix
+	}
+	byPrefix := map[string]genCommand{}
+	for _, oc := range gp.ownCommands() {
+		byPrefix[oc.prefix] = oc
+	}
+	for i := len(c.inputs) - 2; i >= 0; i-- {
+		if anc, ok := byPrefix[c.inputs[i].Field]; ok {
+			if f := boolFlagField(anc, "help"); f != "" {
+				return f, anc.prefix
+			}
+		}
+	}
+	return "", ""
+}
+
 // stubBody assembles the handler stub's context, deciding which seeded body the command gets.
 //
 // Everything is derived from declarations that already exist; nothing is inferred about what
@@ -604,8 +627,7 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		Header:        cmdHeader,
 	}
 	if helpOn {
-		d.HelpVar = helpVarPrefix(gp.conf) + c.prefix
-		d.HelpFlag = boolFlagField(c, "help")
+		d.HelpFlag, d.HelpFrame = helpFlagFor(gp, c)
 	}
 	d.VersionFlag = boolFlagField(c, "version")
 

@@ -101,6 +101,7 @@ type normalizer interface{ normalize() }
 
 func (s *Spec) normalize() {
 	qualifySchemaRefs(reflect.ValueOf(s).Elem())
+	inheritScalarRefConstraints(s)
 	hoistItemConstraints(s)
 	normalizeBounds(s)
 }
@@ -130,6 +131,55 @@ func normalizeBounds(s *Spec) {
 				if n := bound(*b); n != nil && elem == "time.Duration" {
 					*b = strconv.FormatFloat(*n, 'g', -1, 64)
 				}
+			}
+		})
+	})
+}
+
+// inheritScalarRefConstraints gives an input that refers to a named SCALAR schema that schema's
+// constraints — enum, pattern, bounds, lengths — wherever the input leaves them unset. The $ref
+// still names the Go type. Before this, `$ref: Kind` where Kind is {type: string, enum: [...]}
+// generated a Kind field and enforced nothing: the enum lived on the named schema, and only the
+// input's own keys reached the definition. A named OBJECT schema is left alone; its rules are
+// validated as a document (see object-valued flags).
+func inheritScalarRefConstraints(s *Spec) {
+	named := s.Command.Schemas
+	inherit := func(b *BaseSchema) {
+		if b == nil || b.Ref == "" {
+			return
+		}
+		src, ok := named[strings.TrimPrefix(b.Ref, "#/schemas/")]
+		if !ok || src.Type == "object" || len(src.Properties) > 0 {
+			return
+		}
+		if len(b.Enum) == 0 {
+			b.Enum = src.Enum
+		}
+		if b.Pattern == "" {
+			b.Pattern = src.Pattern
+		}
+		if b.MinLength == 0 {
+			b.MinLength = src.MinLength
+		}
+		if b.MaxLength == 0 {
+			b.MaxLength = src.MaxLength
+		}
+		for _, pair := range [][2]*any{{&b.Minimum, &src.Minimum}, {&b.Maximum, &src.Maximum},
+			{&b.ExclusiveMinimum, &src.ExclusiveMinimum}, {&b.ExclusiveMaximum, &src.ExclusiveMaximum},
+			{&b.MultipleOf, &src.MultipleOf}} {
+			if *pair[0] == nil {
+				*pair[0] = *pair[1]
+			}
+		}
+	}
+	walkCommands(s, func(c *Command, _ string) {
+		eachInputSchema(c.inputs(), func(_, _ string, schema *InputSchema) {
+			if schema == nil {
+				return
+			}
+			inherit(&schema.BaseSchema)
+			if schema.Items != nil {
+				inherit(&schema.Items.BaseSchema)
 			}
 		})
 	})

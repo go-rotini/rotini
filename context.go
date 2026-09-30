@@ -1,6 +1,7 @@
 package rotini
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -50,9 +51,10 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 //     [Context.RecordWarning], [Context.RecordError], and [Context.Failed] to ask
 //   - stop — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] when
 //     the code is the point, [Context.Exit] to skip pending teardown
-//   - rotini's own seams — [Context.Version] and [Context.Parser] to read, and for a Context
-//     you built yourself rather than one the runtime handed you, [Context.WithVersion],
-//     [Context.WithParser], [Context.WithBindMeta] and [Context.WithBinder] to set
+//   - rotini's own seams — [Context.Version], [Context.Help] and [Context.Parser] to read, and
+//     for a Context you built yourself rather than one the runtime handed you,
+//     [Context.WithVersion], [Context.WithHelp], [Context.WithParser], [Context.WithBindMeta]
+//     and [Context.WithBinder] to set
 //
 // Inputs are NOT on this list. A handler reads them with [Collect], which takes the Context
 // rather than hanging off it, because parsing is opt-in: a CLI that wants raw argv binds
@@ -134,7 +136,53 @@ type Context struct {
 	meta     *BindMeta
 	binderFn func(BindMeta) *Binder
 	version  string
+	help     HelpFunc
 	parser   *Parser
+
+	// acquired is stdin as the flag channel saw it: read once, the first time a `from: [stdin]`
+	// flag's "-" asks for it, and replayed to every later parse of the same run. Parsing argv
+	// resolves that sentinel, and argv is parsed more than once in a run — the generated --help
+	// check, a parent collecting its own inputs, Collect itself — while stdin can be read once.
+	acquired *stdinMemo
+}
+
+// stdinMemo reads a stream to EOF once and replays it.
+type stdinMemo struct {
+	once sync.Once
+	src  io.Reader
+	data []byte
+	err  error
+}
+
+// flagStdin is the reader a parse resolves `from: [stdin]` against: each call returns a fresh
+// replay of one shared, lazily performed read of rtx.Stdin, so a second parse sees what the first
+// consumed. Nothing is read unless a "-" value actually asks.
+func (rtx *Context) flagStdin() io.Reader {
+	if rtx.Stdin == nil {
+		return nil
+	}
+	if rtx.acquired == nil || rtx.acquired.src != rtx.Stdin {
+		rtx.acquired = &stdinMemo{src: rtx.Stdin}
+	}
+	return &memoReader{m: rtx.acquired}
+}
+
+type memoReader struct {
+	m *stdinMemo
+	r io.Reader // this replay's position in m.data, once the read has happened
+}
+
+func (r *memoReader) Read(p []byte) (int, error) {
+	if r.r == nil {
+		// readStdin, not io.ReadAll: an interactive terminal is "nothing piped", not a read that
+		// blocks on the keyboard.
+		r.m.once.Do(func() { r.m.data, r.m.err = readStdin(r.m.src) })
+		if r.m.err != nil {
+			return 0, r.m.err
+		}
+		r.r = bytes.NewReader(r.m.data)
+	}
+	return r.r.Read(p)
 }
 
 // cloneServices snapshots the registry's bindings. Every run's Context is seeded from the
@@ -778,6 +826,20 @@ func (rtx *Context) WithVersion(version string) *Context {
 	return rtx
 }
 
+// WithHelp sets where [Context.Help] finds pages. See [Program.WithHelp].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
+func (rtx *Context) WithHelp(help HelpFunc) *Context {
+	if rtx != nil && help != nil {
+		rtx.mu.Lock()
+		rtx.help = help
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
 // WithParser sets the parser [Context.Parser] returns. See [Program.WithParser].
 //
 // For a Context you built yourself. One handed to a hook is already seeded from the Program,
@@ -793,6 +855,31 @@ func (rtx *Context) WithParser(parser *Parser) *Context {
 }
 
 // ── rotini's own seams, as the handler sees them ────────────────────────────.
+
+// Help is the help page of the command being run, from [Program.WithHelp]: what a generated
+// `--help` prints. It is "" when the program has no pages or none for this command.
+//
+// The page is the RUNNING program's, not the one the handler was generated with. A command
+// composed from another spec therefore shows its full path under the parent and the flags the
+// parent passes down, the same page `help <command>` shows.
+func (rtx *Context) Help() string {
+	rtx.mu.RLock()
+	help := rtx.help
+	rtx.mu.RUnlock()
+	if help == nil {
+		return ""
+	}
+	chain := rtx.Chain()
+	path := make([]string, 0, len(chain))
+	for i := 1; i < len(chain); i++ {
+		path = append(path, chain[i].Name)
+	}
+	page, err := help(path...)
+	if err != nil {
+		return ""
+	}
+	return page
+}
 
 // Version is what the program reports as its version, from [Program.WithVersion]. It is "" if
 // the entrypoint set none, which is the honest answer rather than a guess.

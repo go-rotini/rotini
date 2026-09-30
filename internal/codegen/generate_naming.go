@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -84,32 +85,72 @@ func renderImports(set map[string]bool) []string {
 }
 
 // toPascalCase converts a name to PascalCase, treating '-', '_' and ' ' as word
-// boundaries (e.g. "foo_bar" -> "FooBar", "generate" -> "Generate").
+// boundaries (e.g. "foo_bar" -> "FooBar", "generate" -> "Generate"). A word that is one of Go's
+// initialisms is written in capitals, as Go's own naming convention and its linters expect:
+// "api-resources" -> "APIResources", "base-url" -> "BaseURL", "apiKey" -> "APIKey".
 func toPascalCase(s string) string {
 	var b strings.Builder
-	capitalize := true
-	for _, r := range s {
-		if r == '-' || r == '_' || r == ' ' {
-			capitalize = true
-			continue
-		}
-		if capitalize {
-			b.WriteRune(unicode.ToUpper(r))
-			capitalize = false
-		} else {
-			b.WriteRune(r)
-		}
+	for _, word := range strings.FieldsFunc(s, func(r rune) bool { return r == '-' || r == '_' || r == ' ' }) {
+		r := []rune(word)
+		r[0] = unicode.ToUpper(r[0])
+		b.WriteString(initialismCase(string(r)))
 	}
 	return b.String()
 }
 
-// lowerFirst returns s with its first rune lower-cased.
+// initialismCase rewrites an already-PascalCase identifier so its initialism words are in
+// capitals: "ApiVersion" -> "APIVersion", "HttpGetUrl" -> "HTTPGetURL". Words are split where a
+// lower-case letter or digit meets an upper-case one, so a run already in capitals is one word.
+func initialismCase(name string) string {
+	r := []rune(name)
+	var b strings.Builder
+	start := 0
+	for i := 1; i <= len(r); i++ {
+		if i < len(r) && (!unicode.IsUpper(r[i]) || unicode.IsUpper(r[i-1])) {
+			continue
+		}
+		word := string(r[start:i])
+		if upper := strings.ToUpper(word); goInitialisms[upper] {
+			word = upper
+		}
+		b.WriteString(word)
+		start = i
+	}
+	return b.String()
+}
+
+// goInitialisms are the words Go writes in capitals inside an identifier — the list Go's
+// linters check (golint's commonInitialisms).
+var goInitialisms = map[string]bool{
+	"ACL": true, "API": true, "ASCII": true, "CPU": true, "CSS": true, "DNS": true, "EOF": true,
+	"GUID": true, "HTML": true, "HTTP": true, "HTTPS": true, "ID": true, "IP": true, "JSON": true,
+	"LHS": true, "QPS": true, "RAM": true, "RHS": true, "RPC": true, "SLA": true, "SMTP": true,
+	"SQL": true, "SSH": true, "TCP": true, "TLS": true, "TTL": true, "UDP": true, "UI": true,
+	"UID": true, "UUID": true, "URI": true, "URL": true, "UTF8": true, "VM": true, "XML": true,
+	"XMPP": true, "XSRF": true, "XSS": true,
+}
+
+// lowerFirst returns s as an unexported identifier: its first rune lower-cased, or the whole
+// leading initialism when s starts with one — "APIResources" -> "apiResources", "URL" -> "url",
+// never "aPIResources".
 func lowerFirst(s string) string {
 	if s == "" {
 		return ""
 	}
 	r := []rune(s)
-	r[0] = unicode.ToLower(r[0])
+	n := 0
+	for n < len(r) && unicode.IsUpper(r[n]) {
+		n++
+	}
+	switch {
+	case n <= 1:
+		n = 1
+	case n < len(r) && unicode.IsLower(r[n]):
+		n-- // the last capital starts the next word: "APIResources" keeps the R
+	}
+	for i := range n {
+		r[i] = unicode.ToLower(r[i])
+	}
 	return string(r)
 }
 
@@ -155,8 +196,10 @@ func stubFilename(base string) string {
 }
 
 // commandStubFilename returns a command's stub file name: its explicit `filename` override, or
-// the derived "<root>[_<path>].go". Codegen and lintHandlerFilenames share this derivation, so
-// naming and uniqueness validation agree.
+// the derived "<root>[_<path>].go", with every '-' in a command name written '_' as Go file
+// names are ("config_get_contexts.go", not "config_get-contexts.go"). Codegen and
+// lintHandlerFilenames share this derivation, so naming and uniqueness validation agree — two
+// commands that differ only by '-' versus '_' are reported there as a clash.
 func commandStubFilename(rootName, path, override string) string {
 	if override != "" {
 		return override
@@ -165,5 +208,39 @@ func commandStubFilename(rootName, path, override string) string {
 	if path != "" {
 		base += "_" + path
 	}
-	return stubFilename(base)
+	return stubFilename(strings.ReplaceAll(base, "-", "_"))
+}
+
+// dashedStubFilename is the name commandStubFilename gave a stub before it wrote '-' as '_' —
+// "config_get-contexts.go" — or "" when the two names are the same. A stub is create-once and
+// then the user's, so one seeded under the old name is still THIS command's handler: codegen
+// must neither seed a second copy beside it (the package would declare every type twice) nor
+// prune it as an orphan (which would delete the user's code). See stubFileFor.
+func dashedStubFilename(rootName, path, override string) string {
+	if override != "" {
+		return ""
+	}
+	base := rootName
+	if path != "" {
+		base += "_" + path
+	}
+	if old := stubFilename(base); old != commandStubFilename(rootName, path, override) {
+		return old
+	}
+	return ""
+}
+
+// stubFileFor returns the file name of c's stub in dir: the one under its old dashed name when
+// that exists and the current one does not, else the current name.
+func stubFileFor(dir string, c genCommand) string {
+	if c.dashedFilename == "" {
+		return c.filename
+	}
+	if _, err := os.Stat(filepath.Join(dir, c.filename)); err == nil {
+		return c.filename
+	}
+	if _, err := os.Stat(filepath.Join(dir, c.dashedFilename)); err == nil {
+		return c.dashedFilename
+	}
+	return c.filename
 }

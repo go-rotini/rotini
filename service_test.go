@@ -225,6 +225,36 @@ func TestService_shutdownHookOverrunIsATimeout(t *testing.T) {
 		}
 	})
 
+	// A hook that does NOT watch its ctx — the ordinary `conns.Wait()` — used to hold Run for as
+	// long as it blocked: the budget was checked only after the hook returned, so the promise
+	// that "the service returns rather than hanging" held for workers and not for hooks.
+	t.Run("a hook that ignores its ctx cannot hold Run past the budget", func(t *testing.T) {
+		t.Parallel()
+		release := make(chan struct{})
+		defer close(release)
+		var flushed atomic.Bool
+		start := time.Now()
+		err := NewService().
+			WithShutdownTimeout(30*time.Millisecond).
+			Go("w", func(ctx context.Context) error { return nil }).
+			WithShutdown(func(context.Context) error { flushed.Store(true); return nil }).
+			WithShutdown(func(context.Context) error { <-release; return nil }). // ignores ctx
+			Run(context.Background())
+
+		if took := time.Since(start); took > time.Second {
+			t.Fatalf("Run took %v with a 30ms budget — the stuck hook held it", took)
+		}
+		if !errors.Is(err, ErrShutdownTimeout) {
+			t.Errorf("err = %v, want ErrShutdownTimeout", err)
+		}
+		if err == nil || !strings.Contains(err.Error(), "shutdown hook 2 (of 2, in registration order) did not finish") {
+			t.Errorf("err = %v, want it to name the hook that overran", err)
+		}
+		if !flushed.Load() {
+			t.Error("the hook after the stuck one never ran — an overrun must not skip the rest of teardown")
+		}
+	})
+
 	t.Run("hooks that finish in time report nothing", func(t *testing.T) {
 		t.Parallel()
 		err := NewService().
@@ -368,7 +398,7 @@ func TestService_aDeadlineIsAsGracefulAsACancel(t *testing.T) {
 }
 
 // TestService_shutdownTimeoutNamesTheWorker: ErrShutdownTimeout exists to drive a decision, and
-// "rotini: shutdown timed out" on its own sends an operator to read the whole binary.
+// "shutdown timed out" on its own sends an operator to read the whole binary.
 func TestService_shutdownTimeoutNamesTheWorker(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
