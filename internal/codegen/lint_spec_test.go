@@ -179,9 +179,8 @@ func TestDocumentedLintCountsMatchTheRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Normalized before matching — emphasis stripped, whitespace collapsed — so the pattern
-	// does not depend on where someone put the asterisks. See the same note in
-	// TestDocumentedSeedSizeMatchesReality, where anticipating one phrasing let a stale
-	// claim through.
+	// does not depend on where someone put the asterisks or the line break: a guard that only
+	// catches the phrasing you thought of lets a stale claim through.
 	countRe := regexp.MustCompile(`(\d+) (?:rotini )?(?:spec )?lint rules`)
 	normalize := func(body []byte) string {
 		return strings.Join(strings.Fields(strings.ReplaceAll(string(body), "*", "")), " ")
