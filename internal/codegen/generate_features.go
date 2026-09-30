@@ -481,6 +481,9 @@ func flagDisplayType(schema *InputSchema) string {
 	if schema != nil && schema.Placeholder != "" {
 		return schema.Placeholder
 	}
+	if schema != nil && schema.Items != nil && schema.Items.Ref != "" {
+		return t // a list of named shapes: []Mount
+	}
 	if schema != nil && schema.Ref == "" && schema.Type != "" {
 		if jsonSchemaTypeToGo(schema.Type) == "[]string" && schema.Items != nil && schema.Items.Ref == "" && schema.Items.Type != "" {
 			return "[]" + helpTypeName(schema.Items.Type)

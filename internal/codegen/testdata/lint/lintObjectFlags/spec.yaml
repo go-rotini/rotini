@@ -1,0 +1,50 @@
+# An object flag takes a structured value validated against its named schema. Scalar-shaping
+# keys have nothing to act on, a positional has no name to hang fields on, and a default must
+# match the schema it will be validated against on every run that leaves the flag unset.
+version: 0.0.0
+command:
+  name: demo
+  schemas:
+    DB:
+      type: object
+      required: [host]
+      properties:
+        host: {type: string}
+        port: {type: integer, minimum: 1}
+    Mount:
+      type: object
+      properties:
+        src: {type: string}
+  flags:
+    - name: db
+      identifiers: [--db]
+      schema:
+        $ref: '#/schemas/DB'
+        separator: ','
+        enum: [a]
+    - name: primary
+      identifiers: [--primary]
+      schema:
+        $ref: '#/schemas/DB'
+        default: {port: 0}
+    - name: mounts
+      identifiers: [--mount]
+      schema:
+        type: array
+        items: {$ref: '#/schemas/Mount'}
+        default: [{src: a}, oops]
+    # Fine: a default that matches, and a list of objects.
+    - name: replica
+      identifiers: [--replica]
+      schema:
+        $ref: '#/schemas/DB'
+        default: {host: replica.internal, port: 5432}
+    - name: volumes
+      identifiers: [--volume]
+      schema:
+        type: array
+        items: {$ref: '#/schemas/Mount'}
+  arguments:
+    - name: target
+      schema:
+        $ref: '#/schemas/DB'

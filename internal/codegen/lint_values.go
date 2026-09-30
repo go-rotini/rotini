@@ -1,15 +1,18 @@
 package codegen
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/mail"
 	"net/netip"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
+	"github.com/go-rotini/recon"
 	"github.com/go-rotini/rotini"
 )
 
@@ -135,4 +138,117 @@ func reflectTypeOf(t string) (reflect.Type, bool) {
 		return reflect.PointerTo(et), true
 	}
 	return nil, false
+}
+
+// lintObjectFlags enforces the contract of an object-valued input — one whose schema is a named
+// object (`$ref: '#/schemas/DB'`) or a list of them.
+//
+// Flags only: a flag's value has a spelling (JSON, key=value, a file, --db.host=…), where a
+// positional has one word and no name to hang fields on. The keys that shape a single scalar
+// value — enum, separator, ignore_case, implicit_value, negatable, dotted_keys and the scalar
+// constraints — have nothing to act on; an object's rules live in its named schema, which is
+// what the value is validated against. And a default is checked against that schema here, so
+// a default that could never validate fails now, not on every run that leaves the flag unset.
+func lintObjectFlags(spec *Spec) []error {
+	var problems []error
+	schemas := spec.Command.Schemas
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			ref := objectRef(schema, schemas)
+			if ref == "" {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q %s", channel, name, msg)})
+			}
+			if channel == "argument" {
+				add(fmt.Sprintf("refers to the object schema %q — an object value is taken by a flag, whose name gives its fields somewhere to go (--%s host=…, --%s.host=…); declare it as a flag", refTypeName(ref), name, name))
+				return
+			}
+			if channel != "flag" {
+				return // env and config inputs decode objects through recon
+			}
+			if bad := scalarOnlyKeys(schema); len(bad) > 0 {
+				add(fmt.Sprintf("is an object flag, so %s cannot apply — an object's rules belong in its schema %q", strings.Join(bad, ", "), refTypeName(ref)))
+			}
+			if schema.Default != nil {
+				if msg := objectDefaultProblem(schema, schemas); msg != "" {
+					add("has a default that " + msg + " — every run that leaves it unset would fail")
+				}
+			}
+		})
+	})
+	return problems
+}
+
+// scalarOnlyKeys lists the keys set on an object flag that act on a scalar value.
+func scalarOnlyKeys(s *InputSchema) []string {
+	var bad []string
+	for key, set := range map[string]bool{
+		"enum":           len(s.Enum) > 0,
+		"separator":      s.Separator != "",
+		"ignore_case":    s.IgnoreCase,
+		"implicit_value": s.ImplicitValue != nil,
+		"negatable":      s.Negatable,
+		"dotted_keys":    s.DottedKeys,
+		"minimum/maximum/exclusiveMinimum/exclusiveMaximum/multipleOf": s.Minimum != nil || s.Maximum != nil ||
+			s.ExclusiveMinimum != nil || s.ExclusiveMaximum != nil || s.MultipleOf != nil,
+		"minLength/maxLength/pattern": s.MinLength != 0 || s.MaxLength != 0 || s.Pattern != "",
+	} {
+		if set {
+			bad = append(bad, key)
+		}
+	}
+	slices.Sort(bad)
+	return bad
+}
+
+// objectDefaultProblem validates an object flag's default against its named schema with the
+// validator the runtime uses, returning what is wrong or "".
+func objectDefaultProblem(schema *InputSchema, schemas map[string]Schema) string {
+	v, err := recon.NewJSONSchemaValidator([]byte(objectSchemaFor(schema, schemas)))
+	if err != nil {
+		return ""
+	}
+	docs := []any{schema.Default}
+	if list, ok := schema.Default.([]any); ok && strings.HasPrefix(getSchemaType(schema), "[]") {
+		docs = list
+	}
+	for _, d := range docs {
+		m, ok := d.(map[string]any)
+		if !ok {
+			return fmt.Sprintf("is not an object (write it as a mapping of %s's keys)", refTypeName(objectRef(schema, schemas)))
+		}
+		if err := v.Validate(m); err != nil {
+			return "does not match its schema: " + validationSummary(err)
+		}
+	}
+	return ""
+}
+
+// validationSummary renders recon's (possibly joined) validation errors as "key: problem; …".
+func validationSummary(err error) string {
+	var msgs []string
+	var walk func(error)
+	walk = func(e error) {
+		if joined, ok := e.(interface{ Unwrap() []error }); ok {
+			for _, inner := range joined.Unwrap() {
+				walk(inner)
+			}
+			return
+		}
+		if ve, ok := errors.AsType[*recon.ValidationError](e); ok {
+			if p := ve.Path.String(); p != "" {
+				msgs = append(msgs, p+": "+ve.Msg)
+				return
+			}
+			msgs = append(msgs, ve.Msg)
+		}
+	}
+	walk(err)
+	if len(msgs) == 0 {
+		return err.Error()
+	}
+	return strings.Join(msgs, "; ")
 }

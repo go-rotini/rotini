@@ -79,6 +79,7 @@ var specLints = []func(*Spec) []error{
 	lintSeparator,
 	lintImplicitValue,
 	lintValuesParse,
+	lintObjectFlags,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -368,8 +369,8 @@ func lintIgnoreCase(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
-			if schema == nil || !schema.IgnoreCase {
-				return
+			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || !schema.IgnoreCase {
+				return // an object input: lintObjectFlags
 			}
 			add := func(msg string) {
 				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
@@ -402,8 +403,8 @@ func lintSeparator(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
-			if schema == nil || schema.Separator == "" {
-				return
+			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.Separator == "" {
+				return // an object input: lintObjectFlags
 			}
 			add := func(msg string) {
 				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
@@ -447,8 +448,8 @@ func lintImplicitValue(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
-			if schema == nil || schema.ImplicitValue == nil {
-				return
+			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.ImplicitValue == nil {
+				return // an object input: lintObjectFlags
 			}
 			add := func(msg string) {
 				problems = append(problems, &problem{kind: "spec", ptr: ptr, loc: "command " + path,
@@ -1072,8 +1073,8 @@ func lintDefaultScalar(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
-			if schema == nil || schema.Default == nil {
-				return
+			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.Default == nil {
+				return // an object input: lintObjectFlags
 			}
 			switch v := schema.Default.(type) {
 			case string, bool, float64, int, int64, nil:
@@ -1716,8 +1717,8 @@ func lintDefaultConstraints(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
 		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
-			if schema == nil || schema.Default == nil {
-				return
+			if schema == nil || objectRef(schema, spec.Command.Schemas) != "" || schema.Default == nil {
+				return // an object input: lintObjectFlags
 			}
 			add := func(msg string) {
 				problems = append(problems, &problem{

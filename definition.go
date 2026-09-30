@@ -201,7 +201,12 @@ type FlagDef struct {
 	// ImplicitValue is the value a flag takes when given without one (`--color` means
 	// "always"), making its value optional: a value must then be attached (`--color=never`),
 	// since the next argument is never consumed. Empty means the flag requires a value.
-	ImplicitValue         string
+	ImplicitValue string
+	// ObjectSchema is the JSON Schema of an object-valued flag's value — set when the spec's
+	// schema is a named object (`$ref: '#/schemas/DB'`), or a list of them. The flag then
+	// takes JSON, key=value pairs, a YAML @file, or one field per flag (--db.host=…); see
+	// "Input values" in the package documentation.
+	ObjectSchema          string
 	Secret                bool     // when true, the value is redacted in usage/validation error output
 	Hidden                bool     // omitted from completion candidates (it still parses); help omission happens at codegen
 	DeprecatedIdentifiers []string // identifiers (subset of Identifiers) that [Deprecations] reports when used

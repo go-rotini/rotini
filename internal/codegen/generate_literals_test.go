@@ -85,10 +85,44 @@ func TestDefinitionTypeReachesEmittedLiterals(t *testing.T) {
 			{Name: "dir", Schema: &InputSchema{Type: "existingdir"}},
 		},
 	}
-	got := flagDefsLiteral(in) + argDefsLiteral(in)
+	got := flagDefsLiteral(in, nil) + argDefsLiteral(in)
 	for _, want := range []string{`Type: "existingfile"`, `Type: "count"`, `Type: "existingdir"`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("emitted literals missing %s\ngot: %s", want, got)
 		}
+	}
+}
+
+// An object flag's definition carries the named schema it is validated against, and its default
+// as the JSON document the flag decodes — one per element for a list. The generic rendering would
+// turn a mapping into key=value occurrences, which loses nesting and splits a value on its commas.
+func TestFlagDefsLiteral_objectFlags(t *testing.T) {
+	schemas := map[string]Schema{
+		"DB": {BaseSchema: BaseSchema{Type: "object", Properties: map[string]Schema{
+			"host": {BaseSchema: BaseSchema{Type: "string"}},
+			"pool": {BaseSchema: BaseSchema{Type: "object", Properties: map[string]Schema{"max": {BaseSchema: BaseSchema{Type: "integer"}}}}},
+		}}},
+		"Label": {BaseSchema: BaseSchema{Type: "string"}}, // a named scalar: not an object flag
+	}
+	in := &Inputs{Flags: []FlagInput{
+		{Name: "db", Identifiers: []string{"--db"}, Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"},
+			Default: map[string]any{"host": "a, b", "pool": map[string]any{"max": 3}}}},
+		{Name: "dbs", Identifiers: []string{"--dbs"}, Schema: &InputSchema{BaseSchema: BaseSchema{Type: "array", Items: &Schema{BaseSchema: BaseSchema{Ref: "#/schemas/DB"}}},
+			Default: []any{map[string]any{"host": "x"}, map[string]any{"host": "y"}}}},
+		{Name: "label", Identifiers: []string{"--label"}, Schema: &InputSchema{BaseSchema: BaseSchema{Ref: "#/schemas/Label"}}},
+	}}
+	got := flagDefsLiteral(in, schemas)
+	for _, want := range []string{
+		`Default: "{\"host\":\"a, b\",\"pool\":{\"max\":3}}"`,
+		`Defaults: []string{"{\"host\":\"x\"}", "{\"host\":\"y\"}"}`,
+		`ObjectSchema: `,
+		`#/definitions/DB`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("literal missing %s:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "ObjectSchema:"); n != 2 {
+		t.Errorf("%d flags carry ObjectSchema, want 2 (the named scalar is not an object):\n%s", n, got)
 	}
 }

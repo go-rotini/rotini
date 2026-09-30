@@ -1,0 +1,4 @@
+spec: .rotini.spec.yaml:6:3: command demo: flag "db" is an object flag, so enum, separator cannot apply — an object's rules belong in its schema "DB"
+spec: .rotini.spec.yaml:6:3: command demo: flag "primary" has a default that does not match its schema: port: value must be >= 1; missing required property "host" — every run that leaves it unset would fail
+spec: .rotini.spec.yaml:6:3: command demo: flag "mounts" has a default that is not an object (write it as a mapping of Mount's keys) — every run that leaves it unset would fail
+spec: .rotini.spec.yaml:6:3: command demo: argument "target" refers to the object schema "DB" — an object value is taken by a flag, whose name gives its fields somewhere to go (--target host=…, --target.host=…); declare it as a flag

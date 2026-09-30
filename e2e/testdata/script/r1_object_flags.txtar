@@ -1,0 +1,149 @@
+# R1 — object-valued flags, proven from outside a binary codegen produced.
+#
+# A flag whose schema is a named object takes JSON, key=value pairs, a file, or one field per
+# flag; occurrences merge; a list of objects takes one per occurrence; the env and config
+# fallbacks feed the same decoding; the named schema validates every spelling; and a default
+# written as a mapping in the spec arrives intact.
+
+gomodinit example.com/obj
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+# The declared default, from a mapping in the spec.
+exec ./app$exe
+stdout 'db=replica.internal:5432 tls=false mounts=0'
+
+# JSON, key=value, and per-field flags, merging in argv order.
+exec ./app$exe --db '{"host":"a","port":1}'
+stdout 'db=a:1 '
+exec ./app$exe --db host=b,port=2,tls=yes
+stdout 'db=b:2 tls=true'
+exec ./app$exe --db host=c --db.port=3 --db.tls=on
+stdout 'db=c:3 tls=true'
+
+# A file, with from: [file].
+exec ./app$exe --db @db.yaml
+stdout 'db=fromfile:7 '
+
+# A list of objects: one element per occurrence.
+exec ./app$exe --mount src=/a,dst=/b --mount '{"src":"/c","readonly":true}'
+stdout 'mounts=2 first=/a->/b last=/c ro=true'
+
+# The env and config fallbacks.
+env DB='{"host":"env","port":9}'
+exec ./app$exe
+stdout 'db=env:9 '
+env DB=
+exec ./app$exe --conf app.yaml
+stdout 'db=cfg:8 '
+stdout 'mounts=1 first=/x->'
+
+# The named schema validates every spelling, naming the flag and the key.
+! exec ./app$exe --db port=5
+stderr '--db: missing required property "host"'
+! exec ./app$exe --db host=h,port=0
+stderr '--db: port: value must be >= 1'
+! exec ./app$exe --db host=h,bogus=1
+stderr 'unknown key "bogus"'
+! exec ./app$exe --db.port=x
+stderr 'port: "x" is not an integer'
+
+-- db.yaml --
+host: fromfile
+port: 7
+-- app.yaml --
+db:
+  host: cfg
+  port: 8
+mount:
+  - src: /x
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: object flags demo
+  config_files:
+    - name: appconf
+      path: ./absent.yaml
+  schemas:
+    DB:
+      type: object
+      required: [host]
+      properties:
+        host: {type: string}
+        port: {type: integer, minimum: 1}
+        tls: {type: boolean}
+    Mount:
+      type: object
+      required: [src]
+      properties:
+        src: {type: string}
+        dst: {type: string}
+        readonly: {type: boolean}
+  flags:
+    - name: conf
+      summary: path to the config file
+      identifiers: [--conf]
+      schema:
+        type: string
+        config_source: appconf
+    - name: db
+      summary: the database to use
+      identifiers: [--db]
+      schema:
+        $ref: '#/schemas/DB'
+        from: [file]
+        key: db
+        variable: DB
+        default: {host: replica.internal, port: 5432}
+    - name: mount
+      summary: a volume to mount
+      identifiers: [--mount]
+      schema:
+        type: array
+        items: {$ref: '#/schemas/Mount'}
+        key: mount
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*appHandlers)(nil)
+
+type appHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[AppInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.HaltWithCode(1)
+		return
+	}
+	f := in.App.Flags
+	fmt.Fprintf(rtx.Stdout, "db=%s:%d tls=%v mounts=%d", f.Db.Host, f.Db.Port, f.Db.Tls, len(f.Mount))
+	if n := len(f.Mount); n > 0 {
+		fmt.Fprintf(rtx.Stdout, " first=%s->%s last=%s ro=%v", f.Mount[0].Src, f.Mount[0].Dst, f.Mount[n-1].Src, f.Mount[n-1].Readonly)
+	}
+	fmt.Fprintln(rtx.Stdout)
+}

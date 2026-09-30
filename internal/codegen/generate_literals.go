@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -15,8 +16,8 @@ import (
 // literal fields an Inputs contributes to a Definition or CommandDef literal,
 // omitting any that render empty. Shared by renderDefinition (the root) and
 // rnodesLiteral (each command node) so the field set is enumerated once.
-func writeInputDefsLiteral(b *strings.Builder, in *Inputs) {
-	if fl := flagDefsLiteral(in); fl != "" {
+func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Schema) {
+	if fl := flagDefsLiteral(in, schemas); fl != "" {
 		b.WriteString("Flags: " + fl + ",\n")
 	}
 	if al := argDefsLiteral(in); al != "" {
@@ -41,8 +42,8 @@ func renderDefinition(gp *program) string {
 	if gp.rootPassthrough {
 		b.WriteString("Passthrough: true,\n")
 	}
-	writeInputDefsLiteral(&b, gp.rootInputs)
-	if cl := rnodesLiteral(gp.rootName, gp.tree); cl != "" {
+	writeInputDefsLiteral(&b, gp.rootInputs, gp.schemas)
+	if cl := rnodesLiteral(gp.rootName, gp.tree, gp.schemas); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
 	}
 	if rl := remoteDefsLiteral(gp.rootName, gp.rootRemotes); rl != "" {
@@ -227,7 +228,7 @@ func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
 	})
 }
 
-func flagDefsLiteral(in *Inputs) string {
+func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 	if in == nil {
 		return ""
 	}
@@ -237,7 +238,13 @@ func flagDefsLiteral(in *Inputs) string {
 			b.WriteString(", Summary: " + strconv.Quote(f.Summary))
 		}
 		b.WriteString(", Type: " + strconv.Quote(definitionType(f.Schema)))
-		writeSchemaCommon(b, f.Schema)
+		objectSchema := objectSchemaFor(f.Schema, schemas)
+		if objectSchema != "" {
+			writeSchemaCommon(b, withObjectDefault(f.Schema))
+			b.WriteString(", ObjectSchema: " + goRawString(objectSchema))
+		} else {
+			writeSchemaCommon(b, f.Schema)
+		}
 		if f.Hidden {
 			b.WriteString(", Hidden: true")
 		}
@@ -261,6 +268,60 @@ func flagDefsLiteral(in *Inputs) string {
 		}
 		b.WriteString(completionLiteral(f.Schema))
 	})
+}
+
+// objectRef is the named schema an object-valued input refers to — its own $ref, or its
+// items' for a list of objects — when that schema is an object; "" otherwise.
+func objectRef(schema *InputSchema, schemas map[string]Schema) string {
+	if schema == nil {
+		return ""
+	}
+	ref := schema.Ref
+	if ref == "" && schema.Items != nil && strings.HasPrefix(getSchemaType(schema), "[]") {
+		ref = schema.Items.Ref
+	}
+	named, ok := schemas[refTypeName(ref)]
+	if !ok || (named.Type != "object" && len(named.Properties) == 0) {
+		return ""
+	}
+	return ref
+}
+
+// objectSchemaFor renders the JSON Schema an object flag's value is validated against — the
+// same self-contained form a stdin payload of that shape meets — or "" for any other flag.
+func objectSchemaFor(schema *InputSchema, schemas map[string]Schema) string {
+	ref := objectRef(schema, schemas)
+	if ref == "" {
+		return ""
+	}
+	return validationSchema(Schema{Ref: ref}, schemas)
+}
+
+// withObjectDefault returns schema with an object flag's default re-encoded as JSON — one
+// document for a single object, one per element for a list — the form the flag decodes. The
+// generic rendering would turn a mapping into key=value occurrences and flatten nesting.
+func withObjectDefault(schema *InputSchema) *InputSchema {
+	if schema == nil || schema.Default == nil {
+		return schema
+	}
+	out := *schema
+	switch d := schema.Default.(type) {
+	case map[string]any:
+		if raw, err := json.Marshal(d); err == nil {
+			out.Default = string(raw)
+		}
+	case []any:
+		docs := make([]any, 0, len(d))
+		for _, e := range d {
+			raw, err := json.Marshal(e)
+			if err != nil {
+				return schema
+			}
+			docs = append(docs, string(raw))
+		}
+		out.Default = docs
+	}
+	return &out
 }
 
 // completionLiteral renders an input's `complete:` hint as the Completion field of its
@@ -347,7 +408,7 @@ func flagDependenciesLiteral(in *Inputs) string {
 // rnodesLiteral renders the []rotini.CommandDef literal for a resolved command
 // tree (recursing into children), or "" when nodes is empty. host prefixes the
 // remote binary names for any discovery nodes.
-func rnodesLiteral(host string, nodes []rnode) string {
+func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		b.WriteString("Name: " + strconv.Quote(n.name) + ",\n")
 		b.WriteString("Handler: " + strconv.Quote(n.prefix) + ",\n")
@@ -366,8 +427,8 @@ func rnodesLiteral(host string, nodes []rnode) string {
 		if len(n.deprecatedIdentifiers) > 0 {
 			b.WriteString("DeprecatedIdentifiers: " + goStringSlice(n.deprecatedIdentifiers) + ",\n")
 		}
-		writeInputDefsLiteral(b, n.inputs)
-		if cl := rnodesLiteral(host, n.children); cl != "" {
+		writeInputDefsLiteral(b, n.inputs, schemas)
+		if cl := rnodesLiteral(host, n.children, schemas); cl != "" {
 			b.WriteString("Commands: " + cl + ",\n")
 		}
 		if rl := remoteDefsLiteral(host, n.remotes); rl != "" {

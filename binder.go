@@ -427,10 +427,18 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 		if vals, err = fallbackValues(val, def.Separator); err != nil {
 			return nil, fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
 		}
-	case field.Kind() == reflect.Map:
-		// recon keeps a config map as its leaves (labels.k, labels.x), not at the map's key.
+	case field.Kind() == reflect.Map || (isObjectFlag(def) && field.Kind() != reflect.Slice):
+		// recon keeps a config map — or an object flag's config block — as its leaves
+		// (labels.k, labels.x), not at the map's key. For an object each leaf is one
+		// key=value occurrence, and the occurrences merge.
 		if vals, source, err = mapLeaves(reg, key); err != nil {
 			return nil, reconBind(channelFlag, err)
+		}
+		if isObjectFlag(def) {
+			for i, leaf := range vals {
+				k, v, _ := strings.Cut(leaf, "=")
+				vals[i] = quotePair(k, v) // an object occurrence is CSV-split; keep a comma in a value
+			}
 		}
 		if len(vals) == 0 {
 			return nil, nil
@@ -483,6 +491,13 @@ func fallbackValues(val recon.Value, sep string) ([]string, error) {
 		out := make([]string, len(items))
 		for i, it := range items {
 			out[i] = it.String()
+			// A list of objects (a config file's list of mounts) goes through as JSON, one
+			// occurrence per element — the form an object flag decodes.
+			if _, err := it.AsMap(); err == nil {
+				if raw, err := json.Marshal(plainValue(it)); err == nil {
+					out[i] = string(raw)
+				}
+			}
 		}
 		return out, nil
 	}
@@ -495,6 +510,26 @@ func fallbackValues(val recon.Value, sep string) ([]string, error) {
 	// Value.String stringifies any kind; the strict AsString returns "" for non-strings,
 	// silently dropping a numeric or bool flag's fallback.
 	return splitValue(val.String(), sep)
+}
+
+// plainValue converts a recon value to plain JSON-shaped Go data — maps and slices of plain
+// values all the way down — since a recon map holds recon values, which encode as nothing.
+func plainValue(v recon.Value) any {
+	if m, err := v.AsMap(); err == nil {
+		out := make(map[string]any, len(m))
+		for k, e := range m {
+			out[k] = plainValue(e)
+		}
+		return out
+	}
+	if items, err := v.AsSlice(); err == nil {
+		out := make([]any, len(items))
+		for i, e := range items {
+			out[i] = plainValue(e)
+		}
+		return out
+	}
+	return v.Any()
 }
 
 // flattenMap appends a reconciled map's leaves as dotted key=value pairs.
@@ -515,6 +550,9 @@ func flattenMap(prefix string, m map[string]recon.Value, out *[]string) {
 // coerceFlagValues binds fallback values into a flag's field the way [bindFlags] binds argv
 // values, dotted-key maps included.
 func coerceFlagValues(f reflect.Value, def FlagDef, vals []string) error {
+	if isObjectFlag(def) {
+		return bindObjectFlag(f, vals, def)
+	}
 	if def.DottedKeys {
 		return coerceMapDotted(f, vals)
 	}

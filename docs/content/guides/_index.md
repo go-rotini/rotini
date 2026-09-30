@@ -35,7 +35,7 @@ Note: pruned todo_version.go — its command is no longer in the spec
 {{< /code >}}
 
 {{< alert type="info" title="TRY IT WITHOUT GENERATING:" >}}
-`rotini validate` runs the schema and all 41 lint rules and writes nothing. It is the right thing to put in CI, and fast enough to bind to a keystroke.
+`rotini validate` runs the schema and all 42 lint rules and writes nothing. It is the right thing to put in CI, and fast enough to bind to a keystroke.
 {{< /alert >}}
 
 ## Declare inputs

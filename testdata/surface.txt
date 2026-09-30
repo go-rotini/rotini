@@ -115,6 +115,7 @@ field FlagDef.ImplicitValue
 field FlagDef.KeyPaths
 field FlagDef.Name
 field FlagDef.Negatable
+field FlagDef.ObjectSchema
 field FlagDef.Required
 field FlagDef.Secret
 field FlagDef.Separator

@@ -74,6 +74,30 @@
 // hidden __complete entry the generated shell scripts call, and os.Exit as the default exit
 // action (capture it with [Program.WithExit]).
 //
+// # Input values
+//
+// What a user can type is declared in the spec and parsed the same way on every channel an
+// input reads — argv, a flag's environment and configuration fallbacks, and env and config
+// inputs:
+//
+//   - Scalars parse into the generated field's type: the int, uint and float families; bool
+//     as true/false, yes/no, on/off, y/n, t/f or 1/0 in any case; durations with Go's units plus
+//     d and w (7d, 2w3d); and the value types url, email, timezone, mac, ip, cidr, hostport,
+//     bytesize ([ByteSize]: 512Mi, 10MB), hexbytes ([HexBytes]) and base64bytes ([Base64Bytes]).
+//     Any other type parses through its own encoding.TextUnmarshaler.
+//   - A list or map flag repeats (--tag a --tag b, --label k=v); with `separator:` one value
+//     also splits (--tag a,b), CSV-style, before validation sees the items.
+//   - `implicit_value:` makes a flag's value optional: bare --color takes it, --color=never
+//     sets one, and the next word is never consumed.
+//   - An `enum` matches exactly, or regardless of case with `ignore_case:`, binding the
+//     declared spelling.
+//   - A flag whose schema is a named object ($ref: '#/schemas/DB') takes a structured value:
+//     JSON (--db '{"host":"h","port":5}'), key=value pairs (--db host=h,port=5, dotted keys
+//     nesting, quotes keeping a comma), a JSON or YAML file with `from: [file]` (--db @db.yaml),
+//     or one field per flag (--db.host=h). Occurrences merge in order, a later key winning; a
+//     list of objects takes one element per occurrence. Every spelling is validated against
+//     the named schema, the one a stdin payload of that shape meets.
+//
 // # Slices at the boundary
 //
 // One rule, because the two directions differ and the difference has bitten:

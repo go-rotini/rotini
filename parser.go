@@ -327,6 +327,14 @@ func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int,
 
 	fdef, idx, negated, ok := findFlagMatch(chain, name)
 	if !ok {
+		// --db.host=h sets one field of the object flag --db: it is the occurrence host=h.
+		if ofd, oidx, field, isField := objectFieldFlag(chain, name); isField {
+			value, next, err := flagTokenValue(FlagDef{Type: "string"}, name, inline, hasInline, argv, i)
+			if err != nil {
+				return 0, err
+			}
+			return next - i, addFlag(oidx, ofd, quotePair(field, value))
+		}
 		if isShortCluster(name) {
 			return parseCluster(chain, name[1:], inline, hasInline, argv, i, addFlag)
 		}
@@ -1309,6 +1317,11 @@ func bindFlags(v reflect.Value, flags map[string][]string, defs []FlagDef) error
 			case def.DottedKeys:
 				if err := coerceMapDotted(v.Field(i), raw); err != nil {
 					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %s", labelForFlag(defs, name), coerceMessage(err, def.Secret)), Flag: labelForFlag(defs, name)}
+				}
+				continue
+			case isObjectFlag(def):
+				if err := bindObjectFlag(v.Field(i), raw, def); err != nil {
+					return &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("%s: %v", labelForFlag(defs, name), err), Flag: labelForFlag(defs, name)}
 				}
 				continue
 			case def.Type == "count":
