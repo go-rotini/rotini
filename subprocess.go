@@ -199,7 +199,9 @@ func (s *Subprocess) Output(ctx context.Context) (string, error) {
 // to a pipe nobody reads — which would hang cmd.Wait. Used only once the stream is
 // already known to be unusable, so the discarded bytes are of no value.
 func drain(r io.Reader) {
-	_, _ = io.Copy(io.Discard, r) // the stream already failed; a second error adds nothing
+	if _, err := io.Copy(io.Discard, r); err != nil {
+		return // the stream already failed; a second error adds nothing
+	}
 }
 
 // exitCodeOf is the exit code a failed run reports: the child's own status when it ran and
@@ -219,7 +221,9 @@ func (s *Subprocess) startFailure(err error) *SubprocessError {
 // reap waits for a child we deliberately killed, releasing its process entry. The status is
 // meaningless — the kill was ours — so it is dropped rather than surfaced.
 func reap(cmd *exec.Cmd) {
-	_ = cmd.Wait() // the kill was ours, so the status it reports is expected
+	if err := cmd.Wait(); err != nil {
+		return // the kill was ours, so the status it reports is expected
+	}
 }
 
 // Lines runs the command and yields its output one line at a time, tagged with the stream it
