@@ -35,7 +35,7 @@ func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
+	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", args.SpecFilePath, flags.ConfFilePath)
 
 	version := rtx.Version()
 	rtx.BindIfAbsent("validate", codegen.NewProcessor(version).Validate)
