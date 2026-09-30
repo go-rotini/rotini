@@ -36,7 +36,7 @@ and an editable handler stub. You fill in the body.
 ## Three things that are actually different
 
 **1. Your CLI is checked before your code exists.** The spec is validated by a JSON
-Schema plus 34 rotini lint rules — a misspelled key, a duplicate flag identifier, a
+Schema plus 35 rotini lint rules — a misspelled key, a duplicate flag identifier, a
 config file nothing reads, a `$ref` cycle, an input whose type is not a Go type. Each
 is reported with a `file:line:col`, by `rotini validate`, before a line of Go is
 generated. Frameworks that declare the CLI *in Go* can only catch what the compiler

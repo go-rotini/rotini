@@ -1,16 +1,17 @@
 package codegen
 
 import (
-	"strconv"
-
 	"fmt"
 	"go/ast"
 	"go/parser"
+	"math"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // This file holds the spec lint STAGE: the lintSpec method plus the rotini-specific
@@ -70,6 +71,7 @@ var specLints = []func(*Spec) []error{
 	lintStdinFormat,
 	lintComplete,
 	lintDefaultScalar,
+	lintDefaultConstraints,
 }
 
 // lintRootCommand enforces what the shared Command shape can't: the top-level
@@ -1465,4 +1467,145 @@ func nonScalarElement(v any) string {
 		return defaultKindName(it)
 	}
 	return ""
+}
+
+// lintDefaultConstraints rejects a `default` that its own sibling constraints forbid.
+//
+// This is the hole that let a spec validate, generate, compile — and then fail on EVERY
+// invocation that took the default:
+//
+//	schema: { type: string, enum: [fast, slow], default: turbo }
+//
+//	$ mycli
+//	Error: invalid value "turbo" for --mode (one of: fast, slow)
+//
+// The error names a flag the user never typed, and both halves of the contradiction sit three
+// lines apart in the spec. Every constraint was uncaught: enum, minimum, maximum, minLength,
+// pattern and minItems, six for six.
+//
+// It checks the SAME STRINGS the runtime will see — defaultString/defaultList are what codegen
+// writes into FlagDef.Default and .Defaults — so there is no formatting drift between what this
+// rule judges and what the parser later rejects. The per-value checks mirror parser.go's
+// checkNumericBounds, checkStringBounds and checkItemCount; TestDefaultConstraintsAgreeWithRuntime
+// holds them to that, since codegen cannot call the runtime's unexported checkers.
+//
+// Per-value constraints apply element-wise to a multi-value default, matching how the runtime
+// treats a repeatable input; item counts apply to the collection.
+func lintDefaultConstraints(spec *Spec) []error {
+	var problems []error
+	walkCommandsAt(spec, func(c *Command, path, ptr string) {
+		eachInputSchema(c.inputs(), func(channel, name string, schema *InputSchema) {
+			if schema == nil || schema.Default == nil {
+				return
+			}
+			add := func(msg string) {
+				problems = append(problems, &problem{
+					kind: "spec", ptr: ptr, loc: "command " + path,
+					msg: fmt.Sprintf("%s %q: %s", channel, name, msg),
+				})
+			}
+
+			values := defaultList(schema.Default)
+			multi := len(values) > 0
+			if !multi {
+				if d := defaultString(schema.Default); d != "" {
+					values = []string{d}
+				}
+			}
+			if len(values) == 0 {
+				return
+			}
+
+			// Item counts judge the collection, and only for a default that is one.
+			if multi {
+				if n := len(values); schema.MinItems > 0 && n < schema.MinItems {
+					add(fmt.Sprintf("default has %d %s but minItems is %d — the declared default could never satisfy the declared bound, so every run that took it would fail",
+						n, pluralWord("value", n), schema.MinItems))
+				} else if schema.MaxItems > 0 && n > schema.MaxItems {
+					add(fmt.Sprintf("default has %d %s but maxItems is %d — the declared default could never satisfy the declared bound, so every run that took it would fail",
+						n, pluralWord("value", n), schema.MaxItems))
+				}
+			}
+
+			label := "default"
+			if multi {
+				label = "default element"
+			}
+			for _, v := range values {
+				if msg := defaultViolation(schema, label, v); msg != "" {
+					add(msg + " — every run that took the default would fail")
+				}
+			}
+		})
+	})
+	return problems
+}
+
+// defaultViolation reports why v cannot satisfy schema's own constraints, or "". label is
+// "default" or "default element", so a multi-value default names the element without repeating
+// the value twice in one sentence.
+//
+// The order and the comparisons mirror parser.go: enum membership, then numeric bounds on a
+// value that parses as a number, then length and pattern on a string. A value the runtime could
+// not coerce is left alone — coercion reports that itself, and lintSchemaTypes already guards
+// the type.
+func defaultViolation(schema *InputSchema, label, v string) string {
+	if len(schema.Enum) > 0 && !slices.Contains(schema.Enum, v) {
+		return fmt.Sprintf("%s %q is not one of the declared enum values (%s)",
+			label, v, strings.Join(schema.Enum, ", "))
+	}
+
+	if n, err := strconv.ParseFloat(v, 64); err == nil {
+		switch {
+		case schema.Minimum != nil && n < *schema.Minimum:
+			return fmt.Sprintf("%s %s is below the declared minimum %s", label, v, formatBound(*schema.Minimum))
+		case schema.Maximum != nil && n > *schema.Maximum:
+			return fmt.Sprintf("%s %s is above the declared maximum %s", label, v, formatBound(*schema.Maximum))
+		case schema.ExclusiveMinimum != nil && n <= *schema.ExclusiveMinimum:
+			return fmt.Sprintf("%s %s is not above the declared exclusiveMinimum %s", label, v, formatBound(*schema.ExclusiveMinimum))
+		case schema.ExclusiveMaximum != nil && n >= *schema.ExclusiveMaximum:
+			return fmt.Sprintf("%s %s is not below the declared exclusiveMaximum %s", label, v, formatBound(*schema.ExclusiveMaximum))
+		case schema.MultipleOf != nil && !isDefaultMultipleOf(n, *schema.MultipleOf):
+			return fmt.Sprintf("%s %s is not a multiple of the declared multipleOf %s", label, v, formatBound(*schema.MultipleOf))
+		}
+	}
+
+	if ln := utf8.RuneCountInString(v); schema.MinLength > 0 && ln < schema.MinLength {
+		return fmt.Sprintf("%s %q is %d %s, below the declared minLength %d",
+			label, v, ln, pluralWord("character", ln), schema.MinLength)
+	} else if schema.MaxLength > 0 && ln > schema.MaxLength {
+		return fmt.Sprintf("%s %q is %d %s, above the declared maxLength %d",
+			label, v, ln, pluralWord("character", ln), schema.MaxLength)
+	}
+
+	if schema.Pattern != "" {
+		// An uncompilable pattern is lintPatternCompiles's problem, not this rule's.
+		if ok, err := regexp.MatchString(schema.Pattern, v); err == nil && !ok {
+			return fmt.Sprintf("%s %q does not match the declared pattern %s", label, v, schema.Pattern)
+		}
+	}
+	return ""
+}
+
+// pluralWord is "thing" or "things" — a local copy of what the runtime's plural does, since
+// codegen cannot reach it.
+func pluralWord(word string, n int) string {
+	if n == 1 {
+		return word
+	}
+	return word + "s"
+}
+
+// formatBound renders a bound the way the runtime's formatNum does — a whole number without a
+// trailing ".0", so a message reads "minimum 10" rather than "minimum 10.000000".
+func formatBound(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
+
+// isDefaultMultipleOf mirrors parser.go's isMultipleOf, including its tolerance for float
+// representation so a 1.2 default against multipleOf 0.1 is not a false positive.
+func isDefaultMultipleOf(n, m float64) bool {
+	if m <= 0 {
+		return false
+	}
+	q := n / m
+	return math.Abs(q-math.Round(q)) < 1e-9*math.Max(1, math.Abs(q))
 }

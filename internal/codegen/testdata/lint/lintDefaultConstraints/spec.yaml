@@ -1,0 +1,80 @@
+# A `default` must satisfy the constraints declared beside it. Before this rule, none of the
+# specs below was rejected: each one validated, generated, compiled — and then failed on EVERY
+# invocation that took the default, with an error naming a flag the user never typed:
+#
+#   $ demo
+#   Error: invalid value "turbo" for --mode (one of: fast, slow)
+#
+# Both halves of the contradiction sit three lines apart, and validate is the gate. Six
+# constraint families were uncaught; all six are below.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # enum: the default is not a member.
+    - name: mode
+      identifiers:
+        - --mode
+      schema:
+        type: string
+        enum:
+          - fast
+          - slow
+        default: turbo
+    # numeric bounds, inclusive and exclusive.
+    - name: retries
+      identifiers:
+        - --retries
+      schema:
+        type: int
+        minimum: 10
+        default: 3
+    - name: workers
+      identifiers:
+        - --workers
+      schema:
+        type: int
+        exclusiveMinimum: 0
+        default: 0
+    - name: step
+      identifiers:
+        - --step
+      schema:
+        type: int
+        multipleOf: 5
+        default: 7
+    # string length and pattern.
+    - name: name
+      identifiers:
+        - --name
+      schema:
+        type: string
+        minLength: 5
+        default: ab
+    - name: tag
+      identifiers:
+        - --tag
+      schema:
+        type: string
+        pattern: ^v[0-9]+$
+        default: nope
+    # Item counts judge the collection; per-value constraints judge each element.
+    - name: hosts
+      identifiers:
+        - --hosts
+      schema:
+        type: '[]string'
+        minItems: 2
+        default:
+          - only-one
+    - name: levels
+      identifiers:
+        - --levels
+      schema:
+        type: '[]string'
+        enum:
+          - low
+          - high
+        default:
+          - low
+          - BOGUS
