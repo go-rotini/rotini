@@ -8,13 +8,7 @@ title: "rotini"
 
 <p class="hero_beats">Validate. Generate. Ship.</p>
 
-<p class="hero_sub">A spec-driven CLI framework for Go. Declare your commands, flags and arguments in a spec file; rotini validates it and generates the typed Go, the command tree and a handler stub for each command. You write what each command does.</p>
-
-<div class="hero_actions">
-  <a class="primary" href="/docs">Get started</a>
-  <a href="/specification">Spec</a>
-  <a href="/api">API</a>
-</div>
+<p class="hero_sub">Describe your CLI in one spec file and rotini turns it into typed, validated Go — so the only code you write is what each command does.</p>
 
 ---
 
