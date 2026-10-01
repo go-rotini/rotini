@@ -1,0 +1,11 @@
+# An unresolvable type would otherwise surface as a gofmt error over the whole
+# generated file, naming neither the input nor its line.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: weird
+      identifiers:
+        - --weird
+      schema:
+        type: 'not a go type!'

@@ -1,0 +1,47 @@
+# A multi-value default is seeded as argv OCCURRENCES — one per list element, or one
+# `key=value` per map entry — so it only means something for an input that can hold several.
+# What is left to reject is a multi-value default on an input with nowhere to put it, and an
+# element that is not a scalar and so cannot be coerced through the element type.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # A list default on a SINGLE-VALUED input: nowhere to put the second element.
+    - name: mode
+      identifiers:
+        - --mode
+      schema:
+        type: string
+        default:
+          - fast
+          - slow
+    # A map default on a single-valued input: same problem, different spelling.
+    - name: retries
+      identifiers:
+        - --retries
+      schema:
+        type: int
+        default:
+          first: 1
+    # Repeatable, but an element is itself a list — there is no element type to coerce it to.
+    - name: tags
+      identifiers:
+        - --tags
+      schema:
+        type: '[]string'
+        default:
+          - ok
+          - [nested, list]
+    # Scalars of every kind are fine, and must stay fine.
+    - name: force
+      identifiers:
+        - --force
+      schema:
+        type: bool
+        default: false
+    - name: name
+      identifiers:
+        - --name
+      schema:
+        type: string
+        default: anonymous

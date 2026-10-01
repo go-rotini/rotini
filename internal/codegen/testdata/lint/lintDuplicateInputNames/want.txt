@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:11:7: command demo: flag "out": declared twice; each flag needs a unique name

@@ -1,0 +1,398 @@
+# R6c — parent and child CLIs in ONE codebase, each separately shippable.
+#
+# r6_compose_transitive proves a $ref tree dispatches. This proves the shape a monorepo
+# actually wants on top of it: several children that each BUILD THEIR OWN BINARY and are also
+# composed by a parent, with one shared handler package serving all of them.
+#
+# The assertion throughout is EQUALITY — the composed output must equal the standalone output
+# for the same command — because that is the whole claim. `parent alpha work` runs the
+# identical code `alpha work` runs, since it is that code. If the two ever diverge,
+# composition has quietly become duplication.
+#
+# Three things are easy to get wrong and are pinned here:
+#
+#   1. a child is named after the BINARY it ships as, and the parent's $ref renames it on the
+#      way in — otherwise you choose between a truthful standalone help page and `parent
+#      my-alpha` as a sub-command name;
+#   2. a shared handler names NONE of the generated inputs types (there is one per CLI and
+#      they differ), and declares the shape it needs instead;
+#   3. identity that must survive composition is BOUND by the child, not read from a command
+#      name the parent is free to change.
+#
+# One practical consequence of (1) worth knowing: a stub's FILENAME derives from the command
+# name, so a command called my-alpha seeds my-alpha.go. A hand-written handler has to use that
+# name, or rotini seeds a stub beside it and the package has two of everything.
+
+gomodinit example.com/multi
+
+# Order is irrelevant: the parent reads each child's SPEC, not its generated Go.
+exec rotini generate cmd/parent/.rotini.spec.yaml --config cmd/parent/.rotini.conf.yaml
+exec rotini generate cmd/alpha/.rotini.spec.yaml --config cmd/alpha/.rotini.conf.yaml
+exec rotini generate cmd/beta/.rotini.spec.yaml --config cmd/beta/.rotini.conf.yaml
+exec go mod tidy
+
+# Three binaries from one module.
+exec go build -o parent$exe ./cmd/parent
+exec go build -o my-alpha$exe ./cmd/alpha
+exec go build -o my-beta$exe ./cmd/beta
+
+# ── the children stand alone ─────────────────────────────────────────────────
+exec ./my-alpha$exe work --count 2
+stdout 'alpha did 2'
+exec ./my-beta$exe work --count 5
+stdout 'beta did 5'
+
+# ── and the parent runs the same code ────────────────────────────────────────
+exec ./parent$exe alpha work --count 2
+stdout 'alpha did 2'
+exec ./parent$exe beta work --count 5
+stdout 'beta did 5'
+
+# A child's own cascading flag crosses the graft untouched.
+exec ./my-alpha$exe --tag prod work --count 1
+stdout 'alpha did 1 \(prod\)'
+exec ./parent$exe alpha --tag prod work --count 1
+stdout 'alpha did 1 \(prod\)'
+
+# ── the overlay rename ───────────────────────────────────────────────────────
+# The child names itself after its binary, so ITS help is truthful...
+exec ./my-alpha$exe --help
+stdout 'my-alpha <command>'
+# ...and the parent lists it short.
+exec ./parent$exe --help
+stdout '  alpha '
+! stdout 'my-alpha'
+
+# ── the shared handler, one implementation, both depths ──────────────────────
+# It reports the COMPONENT each child bound, not the name the parent gave it — which is the
+# only way the two agree once a rename is in play.
+exec ./my-alpha$exe status
+stdout '^status: alpha$'
+exec ./parent$exe alpha status
+stdout '^status: alpha$'
+exec ./my-beta$exe status
+stdout '^status: beta$'
+exec ./parent$exe beta status
+stdout '^status: beta$'
+
+# ── a child's declared validation is enforced through the parent ─────────────
+! exec ./my-alpha$exe work
+stderr 'missing required input'
+! exec ./parent$exe alpha work
+stderr 'missing required input'
+
+-- cmd/alpha/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  # Named after the binary it ships as, so `my-alpha --help` is truthful. The parent
+  # renames it to `alpha` on the way in.
+  name: my-alpha
+  summary: the alpha component
+  flags:
+    - name: tag
+      summary: a cascading flag of the child's own
+      identifiers: ["--tag"]
+      cascading: true
+      schema:
+        type: string
+    - name: help
+      summary: print help
+      identifiers: ["-h", "--help"]
+      schema:
+        type: bool
+  commands:
+    - name: work
+      summary: do the work
+      flags:
+        - name: count
+          summary: how much
+          identifiers: ["--count"]
+          schema:
+            type: int
+            required: true
+    - name: status
+      summary: report component status
+      handler:
+        import: shared example.com/multi/handlers/status
+        convention: Status
+-- cmd/alpha/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/alpha/main.go
+    - type: cmd
+      file: internal/cmd/alpha/zz_alpha.go
+      package: alpha
+  features:
+    - type: help
+      enabled: true
+-- cmd/beta/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: my-beta
+  summary: the beta component
+  flags:
+    - name: help
+      summary: print help
+      identifiers: ["-h", "--help"]
+      schema:
+        type: bool
+  commands:
+    - name: work
+      summary: do the work
+      flags:
+        - name: count
+          summary: how much
+          identifiers: ["--count"]
+          schema:
+            type: int
+            required: true
+    - name: status
+      summary: report component status
+      handler:
+        import: shared example.com/multi/handlers/status
+        convention: Status
+-- cmd/beta/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/beta/main.go
+    - type: cmd
+      file: internal/cmd/beta/zz_beta.go
+      package: beta
+  features:
+    - type: help
+      enabled: true
+-- cmd/parent/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: parent
+  summary: composes the two
+  flags:
+    - name: help
+      summary: print help
+      identifiers: ["-h", "--help"]
+      schema:
+        type: bool
+  commands:
+    - $ref: ../alpha/.rotini.spec.yaml
+      name: alpha
+    - $ref: ../beta/.rotini.spec.yaml
+      name: beta
+-- cmd/parent/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/parent/main.go
+    - type: cmd
+      file: internal/cmd/parent/zz_parent.go
+      package: parent
+  features:
+    - type: help
+      enabled: true
+-- handlers/status/status.go --
+// Package status is ONE implementation of `status`, shared by both component CLIs and reached
+// through the parent as well.
+//
+// It names none of the generated inputs types — there is one per CLI and they differ — and
+// declares the shape it needs instead. The binder matches structurally, counting frames back
+// from the leaf, so the same struct describes the command at every depth.
+package status
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+// ComponentKey carries the identity each child binds for itself. A command NAME is not stable
+// under composition — the parent renames both children — so a handler keying on the name would
+// give two answers for one component.
+var ComponentKey = rotini.NewKey[string]("multi.component")
+
+type Inputs struct {
+	Host   struct{ Flags, Arguments struct{} }
+	Status struct{ Flags, Arguments struct{} }
+}
+
+func Status() rotini.Handlers { return &handlers{} }
+
+type handlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {
+	if _, err := rotini.Collect[Inputs](rtx); err != nil {
+		rtx.RecordError(err)
+		rtx.Halt()
+		return
+	}
+	name, _ := ComponentKey.Get(rtx)
+	if name == "" {
+		name = rtx.Chain()[0].Name
+	}
+	fmt.Fprintf(rtx.Stdout, "status: %s\n", name)
+}
+-- internal/cmd/alpha/my-alpha.go --
+package alpha
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+
+	"example.com/multi/handlers/status"
+)
+
+type base struct {
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type myAlphaHandlers struct{ base }
+
+// CascadingPreRun binds this CLI's identity for everything beneath it, including the shared
+// handler. It runs whether this is the root of its own binary or a frame inside the parent.
+func (*myAlphaHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	status.ComponentKey.BindTo(rtx, "alpha")
+}
+
+func (*myAlphaHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, HelpMyAlpha)
+}
+-- internal/cmd/alpha/my-alpha_work.go --
+package alpha
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type myAlphaWorkHandlers struct{ base }
+
+func (*myAlphaWorkHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {}
+
+func (*myAlphaWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[MyAlphaWorkInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.Halt()
+		return
+	}
+	if tag := in.MyAlpha.Flags.Tag; tag != "" {
+		fmt.Fprintf(rtx.Stdout, "alpha did %d (%s)\n", in.MyAlphaWork.Flags.Count, tag)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "alpha did %d\n", in.MyAlphaWork.Flags.Count)
+}
+-- internal/cmd/beta/my-beta.go --
+package beta
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+
+	"example.com/multi/handlers/status"
+)
+
+type base struct {
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type myBetaHandlers struct{ base }
+
+func (*myBetaHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	status.ComponentKey.BindTo(rtx, "beta")
+}
+
+func (*myBetaHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, HelpMyBeta)
+}
+-- internal/cmd/beta/my-beta_work.go --
+package beta
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type myBetaWorkHandlers struct{ base }
+
+func (*myBetaWorkHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {}
+
+func (*myBetaWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[MyBetaWorkInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.Halt()
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "beta did %d\n", in.MyBetaWork.Flags.Count)
+}
+-- internal/cmd/parent/parent.go --
+package parent
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type parentHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*parentHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, HelpParent)
+}
+-- cmd/parent/main.go --
+package main
+
+import (
+	parent "example.com/multi/internal/cmd/parent"
+)
+
+func main() {
+	parent.Program.Execute()
+}
+-- cmd/alpha/main.go --
+package main
+
+import (
+	alpha "example.com/multi/internal/cmd/alpha"
+)
+
+func main() {
+	alpha.Program.Execute()
+}
+-- cmd/beta/main.go --
+package main
+
+import (
+	beta "example.com/multi/internal/cmd/beta"
+)
+
+func main() {
+	beta.Program.Execute()
+}

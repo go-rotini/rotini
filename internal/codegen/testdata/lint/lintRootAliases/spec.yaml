@@ -1,0 +1,6 @@
+# argv[0] is not a routing token, so a root alias could never dispatch.
+version: 0.0.0
+command:
+  name: demo
+  aliases:
+    - dm

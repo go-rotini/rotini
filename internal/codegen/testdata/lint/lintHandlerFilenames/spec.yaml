@@ -1,0 +1,12 @@
+# Two commands resolving to one stub file would have codegen write over itself, and a
+# name the go tool reads specially would silently break the build.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: build
+      filename: shared.go
+    - name: ship
+      filename: shared.go
+    - name: probe
+      filename: probe_test.go

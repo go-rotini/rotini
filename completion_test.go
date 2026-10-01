@@ -3,26 +3,34 @@ package rotini
 import (
 	"bytes"
 	"context"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+// progFile is the file a program named name lives in: Windows finds a program only by an
+// executable extension, so a plugin there is name.exe.
+func progFile(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
 func TestComplete_discoversPlugins(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar", "unrelated"} {
-		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, progFile(n)), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	def := Definition{
 		Name: "acme", Handler: "App",
 		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}}, // collides with acme-bar
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
 	got := complete(def, []string{""}, nil, nil)
@@ -52,7 +60,7 @@ func TestComplete_discoversPlugins(t *testing.T) {
 func TestDiscoveredPlugins(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar", "acme-zip", "unrelated"} {
-		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, progFile(n)), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -62,12 +70,30 @@ func TestDiscoveredPlugins(t *testing.T) {
 		// "ext"/"x" remote shadows nothing discovered here.
 		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}},
 		Remotes:   []RemoteDef{{Name: "ext", Aliases: []string{"x"}, Binary: "acme-ext"}},
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
 	got := DiscoveredPlugins(cmd)
-	if !reflect.DeepEqual(got, []string{"foo", "zip"}) {
-		t.Errorf("DiscoveredPlugins = %v, want [foo zip] (bar shadowed by declared command; unrelated unprefixed)", got)
+	want := []DiscoveredPlugin{
+		{Name: "foo", Path: filepath.Join(dir, progFile("acme-foo"))},
+		{Name: "zip", Path: filepath.Join(dir, progFile("acme-zip"))},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("DiscoveredPlugins = %v, want %v (bar shadowed by declared command; unrelated unprefixed)", got, want)
+	}
+
+	// The path is the one dispatch would run: a copy earlier in the search order shadows a
+	// later one, so listing the later one would name a binary that never runs.
+	earlier := t.TempDir()
+	if err := os.WriteFile(filepath.Join(earlier, progFile("acme-foo")), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", earlier)
+	if got := DiscoveredPlugins(cmd); len(got) == 0 || got[0].Path != filepath.Join(dir, progFile("acme-foo")) {
+		t.Errorf("foo = %v, want the plugin-path copy (searched before PATH)", got)
+	}
+	if path, ok := RemoteBinaryPath(cmd, "foo"); !ok || path != filepath.Join(dir, progFile("acme-foo")) {
+		t.Errorf("RemoteBinaryPath(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
 	}
 
 	// Hidden discovery → nil (the section is suppressed).
@@ -85,31 +111,40 @@ func TestDiscoveredPlugins(t *testing.T) {
 	}
 }
 
-// TestDiscoveryDiagnostics surfaces a misconfigured discovery path as data: a missing or
-// unreadable author-configured `path` is reported (with the offending path + cause), a
-// clean path reports nothing, and listing still works (DiscoveredPlugins never errors).
+// TestDiscoveryDiagnostics surfaces a misconfigured discovery path as data: an unusable
+// author-configured path is reported (with the offending path + cause), a clean path reports
+// nothing, and listing still works (DiscoveredPlugins never errors).
 func TestDiscoveryDiagnostics(t *testing.T) {
-	// A bad CONFIGURED path is a real diagnostic.
+	// A path that is not a directory is a real diagnostic.
+	file := filepath.Join(t.TempDir(), "plugins")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	bad := ResolvedCommand{
 		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: filepath.Join(t.TempDir(), "no-such-subdir")},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: file,
 	}
 	problems := DiscoveryDiagnostics(bad)
-	if len(problems) != 1 {
-		t.Fatalf("DiscoveryDiagnostics = %v, want exactly one problem for the missing path", problems)
-	}
-	if !errors.Is(problems[0], fs.ErrNotExist) {
-		t.Errorf("problem = %v, want a not-exist error a caller can classify", problems[0])
+	if len(problems) != 1 || !strings.Contains(problems[0].Error(), file) {
+		t.Fatalf("DiscoveryDiagnostics = %v, want exactly one problem naming %s", problems, file)
 	}
 	// Listing degrades gracefully: the bad path contributes nothing but never errors.
 	if got := DiscoveredPlugins(bad); got != nil {
 		t.Errorf("DiscoveredPlugins with only a bad path = %v, want nil", got)
 	}
 
+	// A path that does not exist YET is not a problem: it is where plugins go once one is
+	// installed. Reporting it made every fresh install look misconfigured.
+	absent := bad
+	absent.PluginPath = filepath.Join(t.TempDir(), "no-such-subdir")
+	if probs := DiscoveryDiagnostics(absent); len(probs) != 0 {
+		t.Errorf("a missing plugin directory produced diagnostics: %v", probs)
+	}
+
 	// A clean configured path reports no problems.
 	clean := ResolvedCommand{
 		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: t.TempDir()},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: t.TempDir(),
 	}
 	if probs := DiscoveryDiagnostics(clean); probs != nil {
 		t.Errorf("clean path produced diagnostics: %v", probs)
@@ -127,7 +162,7 @@ func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(t.TempDir(), "missing-path-entry"))
 	cmd := ResolvedCommand{
 		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, // no configured Path
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, // no configured PluginPath
 	}
 	if probs := DiscoveryDiagnostics(cmd); probs != nil {
 		t.Errorf("a bad $PATH entry was reported as a diagnostic: %v", probs)
@@ -140,19 +175,19 @@ func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
 func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar"} {
-		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, progFile(n)), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
 	def := Definition{
 		Name: "acme", Handler: "App",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-", Path: dir},
+		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 	rtx := NewContextFor(def, nil) // what the runtime hands a handler
 	chain := rtx.Chain()
 	got := DiscoveredPlugins(chain[len(chain)-1])
-	if !reflect.DeepEqual(got, []string{"bar", "foo"}) {
-		t.Errorf("DiscoveredPlugins via rtx.Chain() = %v, want [bar foo]", got)
+	if len(got) != 2 || got[0].Name != "bar" || got[1].Name != "foo" {
+		t.Errorf("DiscoveredPlugins via rtx.Chain() = %v, want bar and foo", got)
 	}
 }
 
@@ -449,7 +484,7 @@ func TestComplete_runIntercept(t *testing.T) {
 	out := &bytes.Buffer{}
 	p := NewProgram(completionDef(), &testHandlers{log: new([]string)}).WithArgs([]string{"__complete", "te"})
 	p.stdout, p.stderr = out, &bytes.Buffer{}
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("__complete run = %d, want 0", code)
 	}
 	if got := strings.TrimSpace(out.String()); got != "test" {
@@ -464,7 +499,7 @@ func TestComplete_dynamicViaProgram(t *testing.T) {
 	out := &bytes.Buffer{}
 	p := NewProgram(dynCompletionDef(), dynCompletionHandlers{}).WithArgs([]string{"__complete", "build", "--mode", "s"})
 	p.stdout, p.stderr = out, &bytes.Buffer{}
-	if code, _ := p.run(p.args); code != 0 {
+	if code, _ := p.Run(p.args); code != 0 {
 		t.Fatalf("__complete run = %d, want 0", code)
 	}
 	if got := strings.TrimSpace(out.String()); got != "slow" {
@@ -575,11 +610,10 @@ func (argCompleterHandlers) AppDeploy() Handlers { return deployArgCompleter{} }
 // return defers to the static enum.
 func TestComplete_dynamicArgValue(t *testing.T) {
 	def := completionFixtureDef()
-	got := complete(def, []string{"deploy", "x"}, argCompleterHandlers{}, nil)
 	want := []string{"dyn-one", "dyn-two"}
-	// "x" filters out the subcommand/enum names; the dynamic candidates remain
-	// unfiltered-by-enum but still prefix-filtered — none start with x, so refine:
-	got = complete(def, []string{"deploy", "dyn"}, argCompleterHandlers{}, nil)
+	// Candidates are prefix-filtered, so query with a prefix the dynamic ones share:
+	// "x" would filter every one of them out and prove nothing.
+	got := complete(def, []string{"deploy", "dyn"}, argCompleterHandlers{}, nil)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("dynamic arg candidates = %v, want %v", got, want)
 	}
@@ -687,5 +721,170 @@ func TestComplete_nestedRemote(t *testing.T) {
 	}
 	if got := complete(def, []string{"cluster", "scan", ""}, nil, nil); got != nil {
 		t.Errorf("complete past nested remote = %v, want nil", got)
+	}
+}
+
+// completionHintDef declares one input per hint kind, plus the two shapes that must produce
+// none: a bool (no value to complete) and a flag NAME being typed.
+func completionHintDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "config", Identifiers: []string{"--config"}, Type: "string",
+				Complete: Completion{Kind: "file", Extensions: []string{"yaml", "yml"}}},
+			{Name: "out", Identifiers: []string{"--out"}, Type: "string",
+				Complete: Completion{Kind: "directory"}},
+			{Name: "id", Identifiers: []string{"--id"}, Type: "string",
+				Complete: Completion{Kind: "none"}},
+			{Name: "plain", Identifiers: []string{"--plain"}, Type: "string"},
+			{Name: "force", Identifiers: []string{"--force"}, Type: "bool"},
+		},
+		Commands: []CommandDef{{
+			Name: "open", Handler: "AppOpen",
+			Arguments: []ArgDef{{Name: "path", Type: "string", Complete: Completion{Kind: "file"}}},
+		}},
+	}
+}
+
+// TestCompletionHint covers the declarative hint — the case between a static enum and writing
+// a Go completer, which is "this is a file". It is the commonest value shape there is, and
+// before this key the only way to say it was code.
+func TestCompletionHint(t *testing.T) {
+	cases := []struct {
+		name  string
+		words []string
+		want  string
+	}{
+		{"a file flag, separate word", []string{"--config", ""}, ":rotini:file yaml yml"},
+		{"a file flag, inline form", []string{"--config="}, ":rotini:file yaml yml"},
+		{"a directory flag", []string{"--out", ""}, ":rotini:directory"},
+		{"an opaque value suppresses the shell's default", []string{"--id", ""}, ":rotini:none"},
+		{"a flag with no hint leaves the shell alone", []string{"--plain", ""}, ""},
+		{"a bool takes no value", []string{"--force", ""}, ""},
+		{"a flag NAME being typed is not a path", []string{"--con"}, ""},
+		{"a positional with a hint", []string{"open", ""}, ":rotini:file"},
+		{"a bare word that could still be a sub-command", []string{""}, ""},
+		{"nothing after the terminator", []string{"--", ""}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := completionHint(completionHintDef(), tc.words); got != tc.want {
+				t.Errorf("completionHint(%q) = %q, want %q", tc.words, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCompletionHint_isSeparableFromCandidates: the directive rides the same stream as the
+// candidates, so it has to be unmistakable — a shell script that treated it as a candidate
+// would offer the user a line of punctuation.
+func TestCompletionHint_isSeparableFromCandidates(t *testing.T) {
+	def := completionHintDef()
+	for _, words := range [][]string{{""}, {"--"}, {"--config", ""}, {"open", ""}} {
+		for _, c := range complete(def, words, nil, nil) {
+			if strings.HasPrefix(c, completionDirectivePrefix) {
+				t.Errorf("candidate %q collides with the directive prefix", c)
+			}
+		}
+	}
+	if d := completionHint(def, []string{"--config", ""}); !strings.HasPrefix(d, completionDirectivePrefix) {
+		t.Errorf("directive %q does not carry the prefix a script matches on", d)
+	}
+}
+
+// TestCompletionHint_noneIsNotTheSameAsEmpty pins the distinction the key exists for: with no
+// hint the shell applies its own default (file completion, in bash and zsh), and "none"
+// suppresses it. Collapsing the two would make an opaque identifier offer the user the
+// contents of the current directory as if they were plausible answers.
+func TestCompletionHint_noneIsNotTheSameAsEmpty(t *testing.T) {
+	def := completionHintDef()
+	none := completionHint(def, []string{"--id", ""})
+	unset := completionHint(def, []string{"--plain", ""})
+
+	if none == unset {
+		t.Fatalf("kind none and no hint both produced %q — the shell cannot tell them apart", none)
+	}
+	if none != ":rotini:none" {
+		t.Errorf("none = %q, want the explicit suppression directive", none)
+	}
+	if unset != "" {
+		t.Errorf("no hint = %q, want empty so the shell applies its own default", unset)
+	}
+}
+
+// lenientRootInputs is a root's generated inputs shape: one global flag with an env fallback,
+// and a required one that a half-typed line has not supplied yet.
+type lenientRootInputs struct {
+	App struct {
+		Flags struct {
+			Store string `rotini:"store" recon:"store" env:"LENIENT_STORE"`
+			Token string `rotini:"token"`
+		}
+		Arguments struct{}
+	}
+}
+
+type lenientHandlers struct{}
+
+type lenientShow struct{ deployArgCompleter }
+
+// CompleteArgValue is the recipe FlagValueCompleter's doc gives, verbatim in shape: the root's
+// flags, read at the root's frame, from the line and the environment, with nothing validated.
+func (lenientShow) CompleteArgValue(rtx *Context, arg, partial string) []string {
+	var in lenientRootInputs
+	AtFrame(0, func(_ context.Context, rtx *Context) {
+		env, _ := ParseEnv[lenientRootInputs](rtx)
+		argv, _ := ParseArgv[lenientRootInputs](rtx)
+		in = OverlayInputs(env, argv)
+	})(context.Background(), rtx)
+	return []string{"from-" + in.App.Flags.Store}
+}
+
+func (lenientHandlers) AppShow() Handlers { return lenientShow{} }
+
+// TestComplete_lenientParseOfAnAncestorsFlags proves the documented way a completer reads what
+// the user has said so far: a root flag on the line, else its environment fallback, though the
+// line is half-typed and a required flag is missing. rubectl hand-copied the env lookup instead,
+// and its first attempt missed it and completed nothing.
+func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "store", Identifiers: []string{"--store"}, Type: "string"},
+			{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true},
+		},
+		Commands: []CommandDef{{Name: "show", Handler: "AppShow", Arguments: []ArgDef{{Name: "name", Type: "string"}}}},
+	}
+	t.Setenv("LENIENT_STORE", "env")
+	if got := complete(def, []string{"show", ""}, lenientHandlers{}, newContext()); !reflect.DeepEqual(got, []string{"from-env"}) {
+		t.Errorf("env fallback: candidates = %v, want [from-env]", got)
+	}
+	if got := complete(def, []string{"--store", "line", "show", ""}, lenientHandlers{}, newContext()); !reflect.DeepEqual(got, []string{"from-line"}) {
+		t.Errorf("flag on the line: candidates = %v, want [from-line] — argv outranks env", got)
+	}
+}
+
+// TestComplete_followsTheParsersFlagValueRule: completion walks the line with the parser's rule
+// for which word is a flag's value, so it descends where dispatch will (`--color sub <TAB>`,
+// `-vn 5 sub <TAB>`), and a bare optional-value flag is not waiting for a value — its value must
+// be attached — so the next word completes as a command.
+func TestComplete_followsTheParsersFlagValueRule(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"--color"}, Type: "string", ImplicitValue: "always", Enum: []string{"always", "never"}},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+			{Name: "num", Identifiers: []string{"-n"}, Type: "int"},
+		},
+		Commands: []CommandDef{{Name: "sub", Handler: "AppSub", Commands: []CommandDef{{Name: "leaf", Handler: "AppSubLeaf"}}}}}
+	for _, words := range [][]string{{"--color", "sub", "l"}, {"-vn", "5", "sub", "l"}} {
+		if got := complete(def, words, nil, nil); !reflect.DeepEqual(got, []string{"leaf"}) {
+			t.Errorf("complete %q = %v, want [leaf]", words, got)
+		}
+	}
+	if got := complete(def, []string{"--color", "s"}, nil, nil); !reflect.DeepEqual(got, []string{"sub"}) {
+		t.Errorf("complete --color s = %v, want [sub] — the optional value must be attached", got)
+	}
+	if got := complete(def, []string{"--color=n"}, nil, nil); !reflect.DeepEqual(got, []string{"--color=never"}) {
+		t.Errorf("complete --color=n = %v, want [--color=never]", got)
 	}
 }

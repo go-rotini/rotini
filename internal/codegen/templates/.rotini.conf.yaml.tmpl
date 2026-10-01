@@ -1,0 +1,26 @@
+$schema: ./.rotini-schema.conf.json
+version: {{.Version}}
+generate:
+  schemas:
+    conf:
+      file: cmd/{{.Package}}/.rotini-schema.conf.json
+    spec:
+      file: cmd/{{.Package}}/.rotini-schema.spec.json
+  packages:
+    - type: main
+      file: cmd/{{.Package}}/main.go
+    - type: cmd
+      file: internal/cmd/{{.Package}}/zz_rotini.go
+  features:
+    # help is on so `{{.Package}} --help` works from the first build. The other three
+    # are opt-in; flip `enabled` to turn one on.
+    - type: help
+      enabled: true
+    - type: completion
+      enabled: false
+    - type: man
+      enabled: false
+    - type: markdown
+      enabled: false
+validate:
+  fail: collect

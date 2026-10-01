@@ -1,0 +1,2 @@
+warning: conf: .rotini.conf.yaml:10:7: generate.features.help.embed_dir: is set but `embed` is false; `embed_dir` is used only in embed mode (//go:embed); inline content writes no file, so it is ignored
+warning: conf: .rotini.conf.yaml:14:7: generate.features.completion.template_dir: completion has no editable template; `template_dir` has no effect here

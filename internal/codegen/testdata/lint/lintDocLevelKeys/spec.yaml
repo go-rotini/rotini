@@ -1,0 +1,7 @@
+# env_prefix and schemas are read only on the root; deeper they are a silent no-op.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: build
+      env_prefix: DEMO

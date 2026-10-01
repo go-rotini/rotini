@@ -1,0 +1,7 @@
+# handler: is a per-sub-command delegation seam; the root has none.
+version: 0.0.0
+command:
+  name: demo
+  handler:
+    import: example.com/handlers
+    convention: Demo

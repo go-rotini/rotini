@@ -1,0 +1,173 @@
+# R6 — a composed child's cascading hook reads its OWN flags.
+#
+# This is the case that had no correct call at all. A composed child's generated inputs type
+# spans only its own lineage, because the child does not know which tree it will be mounted
+# into. When the anchor was inferred from the struct's field count against the chain:
+#
+#   umbrella kid work        chain: umbrella → kid → work
+#
+#   kid's CascadingPreRun collecting KidInputs (one field)
+#     leaf-anchored → the field lands on `work`     → wrong frame
+#     root-anchored → the field lands on `umbrella` → wrong frame
+#
+# Both returned zeros and a nil error, and the alignment guard could not fire because every
+# frame declares --help. So the hook whose job was to act on --loud silently saw false.
+#
+# Collect now anchors on rtx.Frame() — the command whose hook is running — so the same call the
+# child uses standalone is correct once composed, at any depth.
+
+gomodinit example.com/frames
+
+exec rotini generate cmd/kid/.rotini.spec.yaml --config cmd/kid/.rotini.conf.yaml
+exec rotini generate cmd/umbrella/.rotini.spec.yaml --config cmd/umbrella/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o kid$exe ./cmd/kid
+exec go build -o umbrella$exe ./cmd/umbrella
+
+# ── standalone: the child is its own root, and its cascading hook reads --loud ──
+exec ./kid$exe --loud work
+stdout 'kid cascading: loud=true'
+stdout 'work ran'
+
+# ── composed, child is a MIDDLE frame: the same hook, the same call, same answer ──
+# This is the cell that used to be unreachable.
+exec ./umbrella$exe kid --loud work
+stdout 'kid cascading: loud=true'
+stdout 'work ran'
+
+# ── composed, child is the LEAF ────────────────────────────────────────────────
+exec ./umbrella$exe kid --loud
+stdout 'kid cascading: loud=true'
+
+# ── frame isolation: the child's frame does not absorb the umbrella's own flags ──
+# --quiet belongs to the umbrella alone, so the child's frame must not see anything for it, and
+# the child's own --loud must stay false when only the umbrella's flag was passed.
+exec ./umbrella$exe --quiet kid work
+stdout 'kid cascading: loud=false'
+
+# ── a shared flag NAME is a separate rule, and worth pinning next to this one ──
+# A flag binds by POSITION: only the commands reached so far are eligible, so a flag written
+# before a sub-command's name belongs to an ancestor. Both frames declare --shared: before `kid`
+# it is the umbrella's, after `kid` it is the child's. (It once bound to the DEEPEST declaration
+# wherever it sat, which made `umbrella --shared kid` set the child's flag and misattributed
+# deprecations.)
+exec ./umbrella$exe --shared kid work
+stdout 'shared=false'
+exec ./umbrella$exe kid --shared work
+stdout 'shared=true'
+
+-- cmd/umbrella/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: umbrella
+  summary: mounts a child CLI
+  flags:
+    - name: quiet
+      summary: the umbrella's own flag, which the child's frame must never see
+      identifiers: [--quiet]
+      schema: { type: bool }
+    - name: shared
+      summary: a name the child also declares, to pin the shadowing rule
+      identifiers: [--shared]
+      schema: { type: bool }
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      schema: { type: bool }
+  commands:
+    - $ref: ../kid/.rotini.spec.yaml
+-- cmd/umbrella/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/umbrella/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/umbrella/zz_umbrella.go
+      package: umbrella
+-- cmd/kid/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: kid
+  summary: a child CLI with a sub-command and a cascading hook
+  flags:
+    - name: loud
+      summary: read by the child's own cascading hook
+      identifiers: [--loud]
+      schema: { type: bool }
+    - name: shared
+      summary: a name the umbrella also declares
+      identifiers: [--shared]
+      schema: { type: bool }
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      schema: { type: bool }
+  commands:
+    - name: work
+      summary: makes the child a middle frame
+-- cmd/kid/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/kid/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/kid/zz_kid.go
+      package: kid
+-- internal/cmd/kid/kid.go --
+package kid
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*kidHandlers)(nil)
+
+type kidHandlers struct {
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+// CascadingPreRun runs for every invocation under this child, at whatever depth the child was
+// mounted. KidInputs has one field — the child's own command — because a composed child cannot
+// know its parent. Collect anchors it on rtx.Frame(), which is this command in this hook.
+func (*kidHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[KidInputs](rtx)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "kid cascading: loud=%v shared=%v (frame=%s, leaf=%s)\n",
+		in.Kid.Flags.Loud, in.Kid.Flags.Shared, rtx.Frame().Name, rtx.Command().Name)
+}
+
+func (*kidHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/kid/kid_work.go --
+package kid
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*kidWorkHandlers)(nil)
+
+type kidWorkHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*kidWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "work ran")
+}

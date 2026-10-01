@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:6:7: command demo: config_files "both": sets both `path` and `discover`; exactly one locates the file
+spec: .rotini.spec.yaml:11:7: command demo: config_files "xdgnoapp": `discover` strategy "xdg" needs `app` (the directory under the XDG config root)

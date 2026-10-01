@@ -1,0 +1,174 @@
+# R4 — where Halt bites, and why failing is one call.
+#
+# Halt stops FORWARD progress. That makes it load-bearing in two of the five hooks and a no-op
+# in the other three: Run is the last forward step of the default plan, and the unwind never
+# consults the halt flag — only a hard Exit cuts teardown short. A unit test pins that matrix;
+# this pins the consequence a real binary shows, because a real binary is where it was missed.
+#
+# The hazard is not a wrong verdict. A setup hook that records an error WITHOUT halting exits
+# with the same code and the same stderr as one that halts, byte for byte. The only difference
+# is that the command went on to do the work its setup had just established it must not do.
+# Nothing in the output says so — which is why no output-asserting test caught it, and why
+# HaltWith exists: record-and-stop as one call cannot be half-written.
+
+gomodinit example.com/halt
+
+exec rotini generate cmd/halt/.rotini.spec.yaml --config cmd/halt/.rotini.conf.yaml
+
+# Replace the seeded stubs with a tree that reports every hook it runs.
+cp root.go.txt internal/cmd/halt/halt.go
+cp work.go.txt internal/cmd/halt/halt_work.go
+exec go mod tidy
+exec go build -o halt$exe ./cmd/halt
+
+# ── the hazard: record without halting, and the work runs anyway ─────────────
+! exec ./halt$exe --mode record work
+stdout 'setup: refusing'
+stdout 'WORK RAN'
+stdout 'teardown'
+cp stderr recorded-stderr.txt
+
+# ── HaltWith: identical verdict, and the work does not run ───────────────────
+! exec ./halt$exe --mode haltwith work
+stdout 'setup: refusing'
+! stdout 'WORK RAN'
+
+# Halting is not aborting: teardown still unwinds for the step that began.
+stdout 'teardown'
+
+# The stderr is byte-identical to the unhalted run. That is the finding: the output
+# cannot tell you whether the work ran, so only skipping it proves anything.
+cmp stderr recorded-stderr.txt
+
+# ── Halt in Run is inert: the run is identical with and without it ───────────
+exec ./halt$exe --mode halt-in-run work
+cmp stdout run-transcript.txt
+exec ./halt$exe --mode plain work
+cmp stdout run-transcript.txt
+
+# ── Exit is the one that does cut teardown short ─────────────────────────────
+! exec ./halt$exe --mode exit work
+stdout 'setup: exiting'
+! stdout 'WORK RAN'
+! stdout 'teardown'
+
+-- run-transcript.txt --
+setup: ok
+WORK RAN
+teardown
+-- cmd/halt/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: halt
+  summary: demonstrates where Halt takes effect
+  flags:
+    - name: mode
+      summary: which stopping style the setup hook uses
+      identifiers: [--mode]
+      cascading: true
+      schema: { type: string }
+  commands:
+    - name: work
+      summary: does the work a failed setup must prevent
+-- cmd/halt/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/halt/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/halt/zz_halt.go
+      package: halt
+-- root.go.txt --
+package halt
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*haltHandlers)(nil)
+
+// modeKey carries the root's decision to the leaf, so the leaf does not re-read argv.
+var modeKey = rotini.NewKey[string]("mode")
+
+type haltHandlers struct {
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+}
+
+// CascadingPreRun is the hook where Halt decides something: it runs before the leaf's PreRun
+// and Run, so refusing here is what prevents the work.
+//
+// Collect works here as it does anywhere: it anchors HaltInputs on rtx.Frame(), the command
+// whose hook is running, which in a cascading hook is this command rather than the leaf.
+func (*haltHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rotini.Collect[HaltInputs](rtx)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	mode := inputs.Halt.Flags.Mode
+	modeKey.BindTo(rtx, mode)
+
+	refused := errors.New("setup refused to continue")
+
+	switch mode {
+	case "record":
+		// The mistake. The error is reported and the run carries on into the work.
+		fmt.Fprintln(rtx.Stdout, "setup: refusing")
+		rtx.RecordError(refused)
+	case "haltwith":
+		// The cure. One call, and the work is prevented.
+		fmt.Fprintln(rtx.Stdout, "setup: refusing")
+		rtx.HaltWith(refused)
+	case "exit":
+		// Not a halt: Exit skips every pending teardown too.
+		fmt.Fprintln(rtx.Stdout, "setup: exiting")
+		rtx.Exit(1)
+	default:
+		fmt.Fprintln(rtx.Stdout, "setup: ok")
+	}
+}
+
+func (*haltHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "teardown")
+}
+
+func (*haltHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "root ran")
+}
+-- work.go.txt --
+package halt
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*haltWorkHandlers)(nil)
+
+type haltWorkHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+// Run is the work a failed setup hook must prevent. Reaching this line at all is the
+// observable difference between recording and halting.
+func (*haltWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "WORK RAN")
+
+	if mode, _ := modeKey.Get(rtx); mode == "halt-in-run" {
+		// Inert. Run is the last forward step, so there is nothing left to stop — the
+		// teardown that follows is not forward progress and Halt does not touch it.
+		rtx.Halt()
+	}
+}

@@ -1,0 +1,11 @@
+# A $ref node delegates to the child's handler, built against the child's own inputs,
+# so a handler-coupled key overlaid here would not match it.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - $ref: ./child.spec.yaml
+      flags:
+        - name: force
+          schema:
+            type: bool

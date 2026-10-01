@@ -1,0 +1,14 @@
+# Exactly one of path/discover, and the xdg strategy needs an app directory.
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: both
+      path: ./a.yaml
+      discover:
+        strategy: walk-up
+        file: .demo.yaml
+    - name: xdgnoapp
+      discover:
+        strategy: xdg
+        file: config.yaml

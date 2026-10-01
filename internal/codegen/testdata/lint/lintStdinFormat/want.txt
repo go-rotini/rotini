@@ -1,0 +1,2 @@
+spec: .rotini.spec.yaml:10:9: command demo/upper: stdin: `format` "text" binds the payload as string, but the schema declares []string; declare string, or use a document format (json/yaml/jsonc/toml) to decode into a typed payload instead
+spec: .rotini.spec.yaml:15:9: command demo/sort: stdin: `format` "lines" binds the payload as []string, but the schema declares string; declare []string, or use a document format (json/yaml/jsonc/toml) to decode into a typed payload instead

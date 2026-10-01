@@ -20,7 +20,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
 
       - name: Test
         run: make test
@@ -39,7 +39,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
 
       - name: Acceptance
         run: make test-acceptance
@@ -51,10 +51,26 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
 
       - name: Lint
         run: make lint
+
+  # rotini commits files it generates from its own sources: the Go types for the spec and conf
+  # schemas, the published schema copies, and its own CLI's wiring. A change to a source that
+  # forgot to regenerate would ship stale code with every test still passing, so this fails
+  # when regenerating from a clean checkout changes anything.
+  generated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generated files and go.mod are up to date
+        run: make check-generated
 
   fuzz:
     runs-on: ubuntu-latest
@@ -63,7 +79,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
 
       - name: Fuzz smoke test
         run: make test-fuzz
@@ -78,10 +94,39 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
 
       - name: Cross-platform conformance
         run: make test-conformance
+
+  e2e:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+
+      # The completion rigs source each generated script in the shell it targets, but skip
+      # when that shell is absent — so without this the coverage would be silently
+      # conditional, which is the same as not having it. bash and zsh ship with the runner.
+      - name: Install the shells the completion rigs drive
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fish powershell || sudo apt-get install -y fish
+
+      - name: Install the shells the completion rigs drive
+        if: matrix.os == 'macos-latest'
+        run: brew install fish powershell/tap/powershell || brew install fish
+
+      # The outside-in tier: spec -> generate -> build -> RUN the binary, as a user does.
+      - name: End-to-end
+        run: make test-e2e
 
   benchmark:
     runs-on: ubuntu-latest
@@ -90,7 +135,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
 
       - name: Benchmarks
         run: make test-bench
@@ -111,7 +156,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
-          go-version: "1.26.x"
+          go-version-file: go.mod
 
       - name: Race detector
         run: make test-race

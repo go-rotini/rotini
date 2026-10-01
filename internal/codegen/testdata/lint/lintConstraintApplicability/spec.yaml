@@ -1,0 +1,44 @@
+# A constraint declared on a type that can never check it would be silently ignored.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: force
+      identifiers:
+        - --force
+      schema:
+        type: bool
+        minimum: 1
+    - name: retries
+      identifiers:
+        - --retries
+      schema:
+        type: int
+        minLength: 3
+    # Durations and sizes take bounds in their own spelling. A bare number on a duration has
+    # no unit; text that is not the type's spelling, or text on a plain number, is rejected.
+    - name: wait
+      identifiers: [--wait]
+      schema: {type: duration, minimum: 5}
+    - name: cache
+      identifiers: [--cache]
+      schema: {type: bytesize, maximum: 12XB}
+    - name: workers
+      identifiers: [--workers]
+      schema: {type: int, maximum: 1s}
+    # Fine: bounds in the type's spelling, and bytes as a number.
+    - name: timeout
+      identifiers: [--timeout]
+      schema: {type: duration, minimum: 1s, maximum: 1h30m}
+    - name: limit
+      identifiers: [--limit]
+      schema: {type: bytesize, minimum: 1024, maximum: 1Gi}
+  # Keys that apply to some kinds of input only: accepted elsewhere, they would do nothing.
+  env:
+    - name: loud
+      schema: {type: bool, negatable: true}
+    - name: region
+      schema: {type: string, key: deploy.region}
+  arguments:
+    - name: labels
+      schema: {type: map, properties: {team: {type: string}}}

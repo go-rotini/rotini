@@ -2,10 +2,9 @@ package rotini
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/internal/codegen"
 )
 
 var _ rotini.Handlers = (*rotiniValidateHandlers)(nil)
@@ -18,56 +17,32 @@ type rotiniValidateHandlers struct {
 }
 
 func (*rotiniValidateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-
-	var inputs RotiniValidateInputs
-	if err := parser.Parse(rtx, &inputs); err != nil {
-		rtx.RecordError(err)
-		rtx.SignalExit(1)
+	if answerHelp(rtx, func(in RotiniValidateInputs) bool { return in.RotiniValidate.Flags.Help }) {
 		return
 	}
 
+	inputs, err := rotini.Collect[RotiniValidateInputs](rtx)
+	if err != nil {
+		haltWithInputError(rtx, err)
+		return
+	}
 	args := inputs.RotiniValidate.Arguments
 	flags := inputs.RotiniValidate.Flags
 
-	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, HelpRotiniValidate)
-		rtx.SignalExit(0)
+	spec, conf, ok := resolveInputs(rtx, args.SpecFilePath, flags.ConfFilePath)
+	if !ok {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n\n", args.SpecFilePath, flags.ConfFilePath)
+	version := rtx.Version()
+	rtx.BindIfAbsent("validate", codegen.NewProcessor(version).Validate)
+	validate := rtx.MustGet[codegen.ValidateFn]("validate")
 
-	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	rtx.BindIfAbsent("validate", internal.NewProcessor(v.VersionSemantic).Validate)
-	validate := rotini.MustGet[internal.ValidateFn](rtx, "validate")
-
-	err := validate(
-		args.SpecFilePath,
-		flags.ConfFilePath,
-		flags.Watch,
-		flags.Fail,
-		func(result string, err error) {
-			if err != nil {
-				fmt.Fprintln(rtx.Stderr, "Error:", err)
-				return
-			}
-			fmt.Fprintln(rtx.Stdout, result)
-		},
-		// Validator warnings are non-fatal: record them so the funnel
-		// reports them (the default prints "Warning: …"); they never fail the run.
-		func(warnings []error) {
-			for _, w := range warnings {
-				rtx.RecordWarning(w)
-			}
-		},
-	)
-
-	if err != nil {
-		rtx.RecordError(err)
-		rtx.SignalExit(1)
+	// Warnings never fail the run; they print as each pass reports them.
+	if err := validate(spec, conf, flags.Watch, flags.Fail, printResult(rtx), printWarnings(rtx)); err != nil {
+		haltWithProblems(rtx, err)
 		return
 	}
 
-	rtx.SignalExit(0)
+	rtx.HaltWithCode(0)
 }

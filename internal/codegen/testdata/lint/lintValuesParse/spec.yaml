@@ -1,0 +1,76 @@
+# A default or implicit_value the input's own type cannot hold validated clean before, then made
+# every run that took it fail with a usage error about a value the user never typed.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: port
+      identifiers: [--port]
+      schema:
+        type: int
+        default: abc
+    - name: wait
+      identifiers: [--wait]
+      schema:
+        type: duration
+        default: 5
+    - name: limits
+      identifiers: [--limit]
+      schema:
+        type: '[]bytesize'
+        default: [1Gi, lots]
+    - name: level
+      identifiers: [--level]
+      schema:
+        type: int
+        implicit_value: max
+    # Fine: values the runtime accepts, including its newer spellings.
+    - name: cache
+      identifiers: [--cache]
+      schema:
+        type: bool
+        default: 'off'
+    - name: ttl
+      identifiers: [--ttl]
+      schema:
+        type: duration
+        default: 7d
+    - name: labels
+      identifiers: [--label]
+      schema:
+        type: 'map[string]int'
+        default: {a: 1, b: 2}
+    - name: token
+      identifiers: [--token]
+      schema:
+        type: uuid.UUID
+        import: github.com/google/uuid
+        default: not-checked-here
+    # Time defaults parse under the input's layout: a date is a calendar date; datetime is RFC 3339.
+    - name: due
+      identifiers: [--due]
+      schema:
+        type: date
+        default: '2026-13-01'
+    - name: at
+      identifiers: [--at]
+      schema:
+        type: datetime
+        default: '2026-09-29'
+    - name: day
+      identifiers: [--day]
+      schema:
+        type: date
+        default: '2026-09-29'
+    # A duration default outside the duration's own bounds, read in its unit.
+    - name: grace
+      identifiers: [--grace]
+      schema:
+        type: duration
+        minimum: 1m
+        default: 30s
+  arguments:
+    - name: count
+      schema:
+        type: uint
+        default: -1

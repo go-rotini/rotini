@@ -1,0 +1,3 @@
+spec: .rotini.spec.yaml:7:7: command demo: flag "level": sets `ignore_case` but declares no `enum`; `ignore_case` changes how a value is matched against enum members, so without one it does nothing
+spec: .rotini.spec.yaml:12:7: command demo: flag "mode": sets `ignore_case` but enum members "Fast" and "fast" differ only in case; a value matching both could bind either
+spec: .rotini.spec.yaml:26:7: command demo: env "region": sets `ignore_case` but declares no `enum`; `ignore_case` changes how a value is matched against enum members, so without one it does nothing

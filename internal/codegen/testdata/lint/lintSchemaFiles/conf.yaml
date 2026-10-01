@@ -1,0 +1,7 @@
+# generate.schemas paths are module-root-relative: one that climbs out of the module has
+# nowhere to be written, so validate refuses it before generate would.
+version: 0.0.0
+generate:
+  schemas:
+    spec:
+      file: ../../outside.spec.json

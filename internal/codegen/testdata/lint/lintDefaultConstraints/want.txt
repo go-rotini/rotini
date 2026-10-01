@@ -1,0 +1,8 @@
+spec: .rotini.spec.yaml:15:7: command demo: flag "mode": `default` "turbo" is not one of the declared `enum` values (fast, slow); every run that leaves it unset would fail
+spec: .rotini.spec.yaml:25:7: command demo: flag "retries": `default` 3 is below the declared `minimum` 10; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:32:7: command demo: flag "workers": `default` 0 is not above the declared `exclusiveMinimum` 0; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:39:7: command demo: flag "step": `default` 7 is not a multiple of the declared `multipleOf` 5; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:47:7: command demo: flag "name": `default` "ab" is 2 characters, below the declared `minLength` 5; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:54:7: command demo: flag "tag": `default` "nope" does not match the declared `pattern` ^v[0-9]+$; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:62:7: command demo: flag "hosts": `default` has 1 value but `minItems` is 2; every run that leaves it unset would fail
+spec: .rotini.spec.yaml:70:7: command demo: flag "levels": `default` element "BOGUS" is not one of the declared `enum` values (low, high); every run that leaves it unset would fail

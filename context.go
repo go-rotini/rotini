@@ -1,132 +1,246 @@
 package rotini
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"reflect"
+	"slices"
+	"strings"
 	"sync"
 )
 
-// ErrServiceNotFound is the sentinel reported when a registry key is unbound — the
-// [MustGet] panics a [*ServiceError] wrapping it, which the runtime
-// recovers and routes to the funnel (a missing service is rotini's
-// "should never happen", not the end-user's error). A funnel classifies it with errors.Is:
-//
-//	case errors.Is(err, rotini.ErrServiceNotFound):
+// ErrServiceNotFound is the sentinel reported when a registry key is unbound, or bound to a
+// value of the wrong type, which [Context.MustGet] cannot hand back either. MustGet panics a
+// [*ServiceError] wrapping it, which the runtime recovers and routes to the funnel.
 var ErrServiceNotFound = errors.New("rotini: service not found")
 
-// ServiceError reports a registry key that was requested but unbound (or bound to
-// the wrong type) — the [MustGet] panics it. It unwraps to
-// [ErrServiceNotFound]; recover the key with errors.As.
+// ServiceError reports a registry key that was requested but unbound, or bound to the wrong
+// type. It unwraps to [ErrServiceNotFound]; recover the key with errors.As.
 type ServiceError struct {
 	Key string // the registry key that was requested
+
+	// got and want are the bound value's type and the requested one, when the key IS bound —
+	// to the wrong type. Both empty: nothing is bound.
+	got, want string
 }
 
+// Error renders the fault as a single line, saying which of the two it is: an unbound key
+// sends the reader to the binding code, a wrong type to the declaration.
 func (e *ServiceError) Error() string {
+	if e.got != "" {
+		return fmt.Sprintf("rotini: the service under key %q is a %s, not the %s requested", e.Key, e.got, e.want)
+	}
 	return fmt.Sprintf("rotini: no service bound under key %q", e.Key)
 }
 
-// Unwrap exposes both the [ErrServiceNotFound] sentinel and [ErrInternal], so a missing
-// service matches errors.Is for either — and [CategoryOf] classifies it as
-// [CategoryInternal] (a wiring bug, not the end-user's fault).
+// Unwrap exposes both [ErrServiceNotFound] and [ErrInternal], so [CategoryOf] classifies a
+// missing service as [CategoryInternal] — a wiring bug, not the user's fault.
 func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, ErrInternal} }
 
-// Context is rotini's per-invocation context: the service registry plus the bits
-// the runtime resolves before dispatch — the raw argument vector (read via
-// [Context.Args]) and the resolved command chain (read via [Context.Chain]). One
-// is built per invocation and passed (as *Context) into every handler hook, so all
-// hooks share the same bindings and exit state.
+// Context is rotini's per-invocation context: the service registry, the program's streams, and
+// what the runtime resolved before dispatch — the raw argument vector ([Context.Argv]) and the
+// resolved command chain ([Context.Chain]). One is built per [Program.Run] and passed to every
+// hook, so all hooks share the same bindings and exit state and no records leak between
+// invocations.
 //
-// The registry is the dependency-injection seam: bind any service with
-// [Context.Bind] (a real implementation in production, a double in tests) and
-// retrieve it with [Context.Value] (or the typed [Get]/[MustGet]).
-// Bindings persist for the lifetime of the Context. Opt-in input parsing (the
-// [Parser]) reads [Context.Args]/[Context.Chain]; the runtime itself never
-// parses flags.
+// The surface groups into six jobs, and nothing outside them is worth hunting for:
 //
-// A Context is safe for concurrent registry access; reads and writes are guarded
-// by an internal sync.RWMutex. Always pass it as a pointer — it must not be copied.
+//   - what was typed — the [Context.Argv], [Context.Stdin], [Context.Stdout] and
+//     [Context.Stderr] fields above
+//   - which command — [Context.Frame] is whose hook is running, [Context.Command] is the one
+//     the user invoked, [Context.IsLeaf] says whether they are the same, [Context.CommandPath]
+//     names it, [Context.Chain] is the whole path
+//   - YOUR dependencies — [Context.Bind] and [Context.BindIfAbsent] for a key you name,
+//     [Context.Get] and [Context.MustGet] to read one back, [Context.Value] for the raw entry
+//   - report what happened — [Context.RecordInfo], [Context.RecordSuccess],
+//     [Context.RecordWarning], [Context.RecordError], and [Context.Failed] to ask
+//   - stop — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] when
+//     the code is the point, [Context.Exit] to skip pending teardown
+//   - rotini's own seams — [Context.Version], [Context.Help] and [Context.Parser] to read, and
+//     for a Context you built yourself rather than one the runtime handed you,
+//     [Context.WithVersion], [Context.WithHelp], [Context.WithParser], [Context.WithBindMeta]
+//     and [Context.WithBinder] to set
+//
+// Inputs are NOT on this list. A handler reads them with [Collect], which takes the Context
+// rather than hanging off it, because parsing is opt-in: a CLI that wants raw argv never calls
+// it and reads [Context.Argv].
+//
+// The registry is the dependency-injection seam: bind a service with [Context.Bind] and
+// retrieve it with [Context.Get], [Context.MustGet] or the raw [Context.Value]. Bindings last
+// the lifetime of the Context.
+//
+// A Context is safe for concurrent registry access — a handler may read it, record outcomes
+// and reach its seams from goroutines it spawned. Always pass it as a pointer; it must not be
+// copied.
+//
+// Safe is not the same as unchanging. [Context.Frame] tracks the lifecycle's progress, so a
+// goroutine that outlives the hook that spawned it reads the step running when it looks rather
+// than the step that started it — see Frame. Everything else a handler reads here is fixed for
+// the run.
+//
+// A nil *Context is a caller bug, not a state to handle: the runtime always hands a real one
+// to every hook, and [NewContextFor] never returns nil, so the methods a handler reads and
+// records through dereference rather than check. That is the same rule [Program] follows, and
+// for the same reason: a nil that reports "nothing recorded" or "no chain" hides the mistake
+// and surfaces it somewhere later, at a call that was not wrong. The standalone setters
+// ([Context.WithVersion] and its siblings) are the exception — on a nil Context they do nothing
+// and return nil.
+//
+// rotini's own entry points that ACCEPT a Context from a caller — [Deprecations], [Collect]
+// and the per-channel functions — still check it: [Collect] and the per-channel functions
+// report a nil one as an error, and Deprecations reports none. The guard belongs at the
+// boundary, not on every method behind it.
 type Context struct {
 	mu sync.RWMutex
 
-	// Stdin, Stdout, and Stderr are the program's streams, mirroring those set via
-	// [Program.WithStdin] / [Program.WithStdout] / [Program.WithStderr] (default os.Stdin /
-	// os.Stdout / os.Stderr). A handler reads input and writes its output/diagnostics
-	// through these rather than os.Std* directly, so the same handler code is exercised in
-	// a test by configuring the Program's streams (the Binder reads its stdin channel from
-	// [Context.Stdin] too). They are set before dispatch and not mutated thereafter; never
-	// nil (a standalone [NewContextFor] defaults them to os.Std*).
+	// Stdin, Stdout and Stderr are the program's streams, mirroring [Program.WithStdin] and
+	// friends. A handler reads and writes through these rather than os.Std* directly, so the
+	// same handler code can be driven by a test that configures the Program's streams. They
+	// are set before dispatch, never mutated by rotini thereafter, and never nil.
+	//
+	// They are for READING. Assigning one is not supported and does not do what it looks like:
+	// the default funnel reports through the PROGRAM's streams, so a hook that swaps
+	// rtx.Stdout redirects its own writes and nothing else — the run's errors still go where
+	// they were always going. To redirect a whole invocation, configure the Program
+	// ([Program.WithStdout]) or give the run its own ([Program.RunContext] on a Program built
+	// for it).
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
 
-	// Args is the raw argument vector for this invocation — os.Args[1:], or the
-	// override from [Program.WithArgs] — with everything after the resolved
+	// Argv is the raw argument vector for this invocation, with everything after the resolved
 	// command path still present, so a handler can run its own parser instead of
-	// [Parser.Parse]. It is the live slice, not a copy: set before dispatch and
-	// not mutated by the runtime thereafter; a handler that mutates it changes
-	// what every later read (including the opt-in Parser/Binder) sees, and owns
-	// the consequences.
-	Args []string
+	// [Parser.Parse]. It is the live slice, not a copy: a handler that mutates it changes what
+	// every later read sees, including the Parser and Binder.
+	//
+	// Argv, not Args: these are the invocation's raw tokens, command names and flags included.
+	// A command's DECLARED positionals are the generated inputs' Arguments field, already
+	// parsed, typed and validated — a different thing that a handler reaches for far more often.
+	Argv []string
 
 	services    map[string]any
 	chain       []ResolvedCommand // resolved command path, root → leaf
-	exitCode    int               // process exit code requested via [Context.SignalExit]/[Context.Exit] (first non-zero wins; the funnel overrides)
-	stopped     bool              // an exit was requested; forward progress (setup/PreRun/Run) halts
-	exitNow     bool              // [Context.Exit] (hard) was called: skip remaining teardown too
-	funnelStage bool              // the run has settled and the funnel is executing: [Context.Exit] now OVERRIDES the exit code (the funnel is the final authority); [Context.SignalExit] is a no-op
-	infos       []string          // informational messages recorded this run via [Context.RecordInfo]; handed to the funnel
-	recorded    []error           // errors recorded this run via [Context.RecordError]; handed to the funnel
-	warnings    []error           // warnings recorded this run via [Context.RecordWarning]; handed to the funnel
-	successes   []string          // successes recorded this run via [Context.RecordSuccess]; handed to the funnel
-	faults      []*PanicError     // recovered panics + rotini-detected faults; set by the lifecycle (NOT publicly recordable); handed to the funnel
+	exitCode    int               // first non-zero wins; the funnel overrides
+	stopped     bool              // an exit was requested: forward progress halts
+	exitNow     bool              // hard Exit: skip remaining teardown too
+	funnelStage bool              // the funnel is executing: Exit overrides, HaltWithCode is a no-op
+	infos       []string          // the five outcome channels, all private: they surface
+	errs        []error           // only as the slices handed to the funnel. faults are
+	warnings    []error           // the lifecycle's to capture, never a handler's to record.
+	successes   []string
+	faults      []*PanicError
+
+	// frame is the chain index of the command whose hook is currently running, or -1 for
+	// "not inside a hook", which resolves to the leaf. The lifecycle sets it around every
+	// step (see [AtFrame]); it is what lets an inputs struct be anchored on the caller's own
+	// command rather than guessed from its field count. See [Context.Frame].
+	frame int
+
+	// rotini's own seams, seeded from the Program each run — see [Program.WithBindMeta].
+	// They are deliberately NOT in services: the registry is the user's namespace, and a
+	// value the runtime depends on must not share a flat keyspace with it.
+	meta     *BindMeta
+	binderFn func(BindMeta) *Binder
+	version  string
+	help     HelpFunc
+	parser   *Parser
+
+	// flagStdinMemo is stdin as the flag channel saw it: read once, the first time a `from: [stdin]`
+	// flag's "-" asks for it, and replayed to every later parse of the same run. Parsing argv
+	// resolves that sentinel, and argv is parsed more than once in a run — the generated --help
+	// check, a parent collecting its own inputs, Collect itself — while stdin can be read once.
+	flagStdinMemo *stdinMemo
 }
 
-// newContext returns an empty [Context] with an initialized registry and no
-// resolved command. The runtime builds one per invocation and fills in the
-// resolved chain before dispatch; [NewContextFor] is the public entry for
-// tests and standalone tooling (pass an empty Definition for a bare registry).
+// stdinMemo reads a stream to EOF once and replays it.
+type stdinMemo struct {
+	once sync.Once
+	src  io.Reader
+	data []byte
+	err  error
+}
+
+// flagStdin is the reader a parse resolves `from: [stdin]` against: each call returns a fresh
+// replay of one shared, lazily performed read of rtx.Stdin, so a second parse sees what the first
+// consumed. Nothing is read unless a "-" value actually asks.
+func (rtx *Context) flagStdin() io.Reader {
+	if rtx.Stdin == nil {
+		return nil
+	}
+	if rtx.flagStdinMemo == nil || rtx.flagStdinMemo.src != rtx.Stdin {
+		rtx.flagStdinMemo = &stdinMemo{src: rtx.Stdin}
+	}
+	return &memoReader{m: rtx.flagStdinMemo}
+}
+
+type memoReader struct {
+	m *stdinMemo
+	r io.Reader // this replay's position in m.data, once the read has happened
+}
+
+func (r *memoReader) Read(p []byte) (int, error) {
+	if r.r == nil {
+		// readStdin, not io.ReadAll: an interactive terminal is "nothing piped", not a read that
+		// blocks on the keyboard.
+		r.m.once.Do(func() { r.m.data, r.m.err = readStdin(r.m.src) })
+		if r.m.err != nil {
+			return 0, r.m.err
+		}
+		r.r = bytes.NewReader(r.m.data)
+	}
+	return r.r.Read(p)
+}
+
+// cloneServices snapshots the registry's bindings. Every run's Context is seeded from the
+// Program's registry through it, so a service bound before the run is visible to every run
+// while one bound during a run stays local to it.
+func (rtx *Context) cloneServices() map[string]any {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return maps.Clone(rtx.services)
+}
+
+// newContext returns an empty [Context] with an initialized registry and no resolved command.
+// [NewContextFor] is the public entry.
 func newContext() *Context {
 	return &Context{
 		services: make(map[string]any),
+		frame:    frameUnset,
 		Stdin:    os.Stdin,
 		Stdout:   os.Stdout,
 		Stderr:   os.Stderr,
 	}
 }
 
-// NewContextFor builds a [Context] with argv resolved against an explicit def — the
-// same context the runtime hands a handler at dispatch (raw [Context.Args] + the
-// resolved [Context.Chain]). It is for exercising the [Parser]/[Usage] helpers, or a
-// single hook, against a Definition you construct:
+// NewContextFor builds a [Context] with argv resolved against an explicit def — the same
+// context the runtime hands a handler at dispatch. Use it to exercise the [Parser] or the
+// [Collect] family, or a single hook, against a Definition you construct:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
-//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"}).Bind(rotini.KeyParser, rotini.NewParser())
+//	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"})
 //	var in appInputs
-//	err := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser).Parse(rtx, &in)
+//	err := rtx.Parser().Parse(rtx, &in)
 //
-// To drive a whole *generated* program end-to-end (the usual handler test), construct it
-// with the generated NewProgram and run it under a recording exit + capture streams —
-// see [Program.WithExit]/[Program.WithStdout]/[Program.WithStderr] — rather than building
-// a context by hand; the generated command tree is unexported.
+// To drive a whole generated program end to end — the usual handler test — construct it with
+// the generated NewProgram and run it under a recording exit and captured streams instead; the
+// generated command tree is unexported.
 //
-// A remote/co-located token resolves to as much of the chain as precedes it; the
-// runtime would exec the sibling binary, which NewContextFor does not.
+// A remote token resolves to as much of the chain as precedes it. NewContextFor does not exec
+// the sibling binary the runtime would.
 func NewContextFor(def Definition, argv []string) *Context {
 	rtx := newContext()
 	chain, _ := resolveChain(def, argv)
-	rtx.Args = argv
+	rtx.Argv = argv
 	rtx.chain = chain
 	return rtx
 }
 
-// Bind associates value with key, overwriting any prior binding. It returns the
-// receiver so calls can be chained:
-//
-//	cmd.Program.Bind(rotini.KeyParser, customParser).Bind(rotini.KeyBinder, customBinder).Execute()
-//
-// Bind is safe for concurrent use.
+// Bind associates value with key, overwriting any prior binding, and returns the receiver so
+// calls chain. It is safe for concurrent use.
 func (rtx *Context) Bind(key string, value any) *Context {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
@@ -137,16 +251,16 @@ func (rtx *Context) Bind(key string, value any) *Context {
 	return rtx
 }
 
-// BindIfAbsent binds value under key only if key is not already bound, and returns the
-// receiver to chain. It is the registered-default form of [Bind]: a handler binds its work
-// dependency's real implementation with BindIfAbsent so production materializes the real one
-// in the registry, while a caller (e.g. a test) that bound a double under the same key
-// earlier keeps it — and either way the dependency is resolvable from the registry (with the
-// standard [MustGet]), not a value hidden inline. The check-and-set is atomic. Use [Bind] to
-// overwrite unconditionally.
+// BindIfAbsent binds value under key only if key is not already bound, atomically. It is the
+// registered-default form of [Context.Bind]: a handler registers the real implementation of a
+// dependency, but a test that bound a double under the same key earlier keeps it. Either way
+// the dependency is resolvable from the registry rather than hidden inline.
 //
-//	rtx.BindIfAbsent("generate", internal.Generate)
-//	gen := rotini.MustGet[internal.GenerateFn](rtx, "generate")
+//	rtx.BindIfAbsent("clock", time.Now)
+//	now := rtx.MustGet[func() time.Time]("clock")
+//
+// MustGet matches the bound value's exact type, so a value bound as a plain func is only
+// found under a func type, or an alias of one — not under a named func type.
 func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
@@ -159,54 +273,282 @@ func (rtx *Context) BindIfAbsent(key string, value any) *Context {
 	return rtx
 }
 
-// Chain returns the resolved command path for this invocation, root → leaf — the
-// command tree the runtime descended to choose this handler. Opt-in tooling (the
-// [Parser] and [Usage]) reads it to bind inputs and render help against
-// the exact command whose handler ran. The slice is the runtime's; treat it as
-// read-only.
+// Chain returns the resolved command path for this invocation, root → leaf. The [Parser] and
+// [Binder] read it to bind inputs against the command whose handler ran.
+//
+// The slice is a COPY, so reordering, reslicing or replacing a frame is a caller's own
+// business and cannot reach the run — [Context.CommandPath], [Context.Command], the binder's
+// frame alignment and configuration-file scoping all read the run's own chain. The outcome
+// channels are copied for the same reason.
+//
+// The copy is one level deep, which is the boundary that exists to defend. A frame's Flags,
+// Arguments and Commands are the [Definition]'s own slices, shared program-wide and read-only
+// across every run by the same convention that lets one Program serve a REPL; Chain neither
+// widens nor narrows that.
 func (rtx *Context) Chain() []ResolvedCommand {
-	if rtx == nil {
-		return nil
-	}
-	return rtx.chain
+	return slices.Clone(rtx.chain)
 }
 
-// Value returns the service bound under key, or nil if none is bound — the raw
-// accessor, mirroring [context.Context.Value]. Callers type-assert to the expected
-// type, using the comma-ok form to handle an unbound (or wrong-type) service:
+// Command returns the command this invocation resolved to — the leaf of the chain, whose Run
+// is executing, or the root for a bare root invocation:
 //
-//	parser, ok := rtx.Value(rotini.KeyParser).(*rotini.Parser)
-//	if !ok {
-//		// not bound — fail the command, or fall back
+//	rtx.RecordError(fmt.Errorf("%s: %w", rtx.Command().Name, err))
+//
+// [Context.Chain] has the ancestors and the argv token that matched each one.
+func (rtx *Context) Command() ResolvedCommand {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.chain) == 0 {
+		return ResolvedCommand{}
+	}
+	return rtx.chain[len(rtx.chain)-1]
+}
+
+// frameUnset marks a Context that is not inside a lifecycle step. It resolves to the leaf,
+// which is what every non-cascading hook wants and what the API did before frames existed.
+const frameUnset = -1
+
+// Frame returns the command whose hook is currently running.
+//
+// This is not always [Context.Command], and the difference is the whole point. Command is the
+// command the user INVOKED — the leaf of the chain — and it is the same value in every hook of
+// the run. Frame is the command this particular hook belongs to:
+//
+//	$ mig db status        — Command() is the leaf, "status", in every hook below
+//
+//	hook                                 Frame()
+//	────                                 ───────
+//	mig's CascadingPreRun                mig
+//	db's CascadingPreRun                 db
+//	the leaf's PreRun / Run / PostRun    status
+//	db's CascadingPostRun                db
+//	mig's CascadingPostRun               mig
+//
+// [Collect] anchors an inputs struct on this frame, which is what makes it correct in every
+// hook — including a composed child's cascading hook reading its own flags.
+//
+// Outside a lifecycle step — a Context from [NewContextFor], or one reaching a funnel after the
+// run has settled — there is no hook, and Frame reports the leaf.
+//
+// # It describes the step running NOW, not the one that spawned you
+//
+// The frame moves as the lifecycle advances, so Frame answers for whichever step is running when
+// it is called — not for the hook that happens to be on the stack. A goroutine a hook spawns and
+// does not wait for therefore reads whatever step the run has reached by the time it looks:
+//
+//	func (*h) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+//	    go func() {
+//	        // The run has moved on. This may report the leaf, not this command.
+//	        log.Println(rtx.Frame().Name)
+//	    }()
 //	}
 //
-// Value reports a miss as nil and never panics; prefer the typed [Get] (comma-ok)
-// or [MustGet] (panics → the funnel) for type-safe retrieval.
-func (rtx *Context) Value(key string) any {
-	if rtx == nil {
-		return nil
+// It is not a data race — the frame is mutex-guarded and every read is consistent — but the
+// ANSWER is timing-dependent, and [Collect] anchors on it, so a goroutine collecting inputs may
+// anchor somewhere its spawning hook did not intend. Capture what you need before spawning:
+//
+//	frame := rtx.Frame()                       // or collect the inputs here
+//	go func() { log.Println(frame.Name) }()
+//
+// A goroutine the hook WAITS for, before returning, sees its spawner's frame.
+func (rtx *Context) Frame() ResolvedCommand {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.chain) == 0 {
+		return ResolvedCommand{}
 	}
+	return rtx.chain[rtx.frameIndexLocked()]
+}
+
+// frameIndex is the chain index Frame reports. Callers must not hold the lock.
+func (rtx *Context) frameIndex() int {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.frameIndexLocked()
+}
+
+// frameIndexLocked resolves the unset sentinel to the leaf. The caller holds the lock.
+func (rtx *Context) frameIndexLocked() int {
+	if rtx.frame < 0 || rtx.frame >= len(rtx.chain) {
+		return max(len(rtx.chain)-1, 0)
+	}
+	return rtx.frame
+}
+
+// setFrame records which frame's hook is running, returning the previous value so [AtFrame] can
+// restore it. Unexported: a handler never sets its own identity.
+func (rtx *Context) setFrame(i int) int {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	prev := rtx.frame
+	rtx.frame = i
+	return prev
+}
+
+// IsLeaf reports whether [Context.Frame] is the command the user invoked — whether this hook
+// belongs to the leaf of the chain, or to one of its ancestors.
+//
+// In PreRun, Run and PostRun it is always true: those hooks only ever run for the leaf. It is a
+// real question in a cascading hook, which runs at every depth:
+//
+//	func (*songsHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+//	    if rtx.IsLeaf() {
+//	        // `musak songs` — this command IS the invocation; print help rather than defer.
+//	        return
+//	    }
+//	    // `musak songs list` — a sub-command is running; set up for it.
+//	}
+//
+// It exists because the obvious spelling does not compile: [ResolvedCommand] holds slices, so
+// rtx.Frame() == rtx.Command() is not a legal comparison, and comparing their Names is unsound
+// when a chain repeats one.
+//
+// Outside a lifecycle step the frame is the leaf, so it reports true.
+func (rtx *Context) IsLeaf() bool {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.frameIndexLocked() == max(len(rtx.chain)-1, 0)
+}
+
+// CommandPath returns the invoked command path, space-joined — "tasks add" for a sub-command,
+// "tasks" for a bare root invocation.
+//
+// The names are canonical, not the tokens the user typed, so an invocation through an alias
+// reports the real command name and a path is stable to log and aggregate on. Each frame's
+// Matched token in [Context.Chain] is what the user actually typed.
+//
+// CommandPath, not Path: in this API "path" already means a filesystem location
+// ([RemoteBinaryPath], a command's PluginPath) and a route through an inputs struct
+// ([FieldPath]). This one is neither.
+func (rtx *Context) CommandPath() string {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	names := make([]string, 0, len(rtx.chain))
+	for _, c := range rtx.chain {
+		names = append(names, c.Name)
+	}
+	return strings.Join(names, " ")
+}
+
+// Value returns the service bound under key, or nil if none is bound — the raw accessor,
+// mirroring [context.Context.Value]. It never panics.
+//
+// It is the fallback, not a peer of the typed readers. Reach for a [Key] and its Get/MustGet
+// when the key is known at compile time, which is nearly always; [Context.Get] and
+// [Context.MustGet] when you have the name but want the type checked; and Value only when the
+// key itself is computed and there is no type to assert.
+func (rtx *Context) Value(key string) any {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	return rtx.services[key]
 }
 
-// SignalExit records the program's exit code and stops the lifecycle's forward
-// progress — no further setup hook (CascadingPreRun), PreRun, or Run runs.
-// Teardown is unaffected: every PostRun/CascadingPostRun whose paired setup hook
-// began still runs, in reverse, so cleanup is never skipped. The first non-zero
-// code wins, so a later SignalExit (e.g. from a teardown hook) cannot change the
-// verdict. SignalExit records no error — it is a clean, deliberate stop,
-// not an error. The process exits with the recorded code once the lifecycle,
-// teardown included, completes. For an abort that skips pending teardown, use
-// [Context.Exit].
+// Halt stops the lifecycle's FORWARD progress without claiming an exit code, leaving the
+// verdict to whatever else the run records and to the funnel. Teardown is unaffected: every
+// PostRun and CascadingPostRun whose paired setup hook began still runs, in reverse.
 //
-// SignalExit is a NO-OP inside the funnel ([Program.WithFunnel]): the lifecycle and
-// its teardown have already run, so there is no forward progress to stop. To set the
-// exit code from the funnel, use [Context.Exit] (which the funnel is allowed to use to
-// override any code the lifecycle set).
-func (rtx *Context) SignalExit(code int) {
-	if rtx == nil || rtx.funnelStage {
+// Forward progress is the operative word, and it makes Halt load-bearing in two of the five
+// hooks and a no-op in the other three:
+//
+//	Hook                What Halt does there
+//	────                ────────────────────
+//	CascadingPreRun     stops the run: no further frame's setup, no PreRun, no work
+//	PreRun              stops the run: the leaf's Run never happens
+//	Run                 NOTHING — this is the last forward step of the default plan
+//	PostRun             NOTHING — the unwind runs to completion; only Exit cuts it short
+//	CascadingPostRun    NOTHING — likewise
+//
+// So Halt is how a SETUP hook refuses to let the command proceed. It is safe to call anywhere
+// and its own failure mode is omission, not misuse — which is why [Context.HaltWith] exists:
+// it records an error and halts as one act, is correct in all five hooks, and cannot be
+// half-forgotten the way `RecordError` followed by a `Halt` that is never written can be.
+//
+// Prefer Halt on its own when there is nothing to record — a deliberate, unremarkable stop:
+//
+//	if !inputs.Force && !confirmed {
+//	    rtx.Halt()          // nothing failed; there is simply nothing more to do
+//	    return
+//	}
+//
+// [Context.HaltWithCode] does two jobs at once — claim the code AND stop — so a program that
+// centralizes its exit policy in a funnel would have to write a number it did not mean purely
+// to stop, and explain in a comment that the number was a lie. Worse, the number then reads as
+// redundant: deleting it looks like tidying and silently removes the halt, so the next hook
+// collects the same inputs, hits the same validation and records the same error again. That
+// is not hypothetical — it is how one bad flag came to be reported three times, with a
+// fourth misleading error on top, while this example was being written.
+//
+// Halt claims nothing, so it cannot be mistaken for policy and cannot be deleted as
+// redundant. Reach for [Context.HaltWith] to fail, [Context.HaltWithCode] when the code IS the
+// point, and [Context.Exit] when pending teardown must not run.
+//
+// Like HaltWithCode it is a no-op inside the funnel, where the lifecycle has already run.
+func (rtx *Context) Halt() {
+	if rtx.funnelStage {
+		return
+	}
+	rtx.stopped = true
+}
+
+// HaltWith records err and stops the lifecycle's forward progress — [Context.RecordError] and
+// [Context.Halt] as one act. It claims no exit code: the funnel decides what the failure costs.
+//
+//	if err := store.Save(task); err != nil {
+//	    rtx.HaltWith(err)
+//	    return
+//	}
+//
+// This is the spelling to reach for when a hook has failed, and the reason it exists is that
+// the two-part version can be half-written. Failing used to be "record, then stop", and the
+// stop is the half that decides anything — in a setup hook, omitting it lets the command do
+// the work it just established it must not do. The exit code and stderr are IDENTICAL either
+// way, so nothing in the output says the work ran, and no test that asserts on output catches
+// it. A single call cannot be half-forgotten.
+//
+// HaltWith is correct in all five hooks. Where Halt is a no-op (see its table) HaltWith
+// degrades to recording alone, which is what a failure in Run or a teardown hook wants anyway
+// — so a handler never has to know which hook it is in to fail correctly.
+//
+// A nil err records nothing and still halts, so a caller need not guard.
+//
+// To record a problem and CONTINUE — collecting several before anything stops, or leaving the
+// decision to a later hook that gates on [Context.Failed] — use RecordError on its own. That
+// remains a supported choice; HaltWith exists so it is a deliberate one rather than what
+// omission gives you.
+//
+// Inside the funnel it does nothing at all, and does not report that it did nothing. The halt
+// is a no-op there, as [Context.Halt]'s is, and the recorded error is dropped: the [Outcome] was
+// snapshotted before the funnel was called, so nothing re-reads the channels afterwards. A
+// funnel that fails while reporting should write to rtx.Stderr and set a code with
+// [Context.Exit] — it is the final authority by then, and recording has no one left to tell.
+func (rtx *Context) HaltWith(err error) {
+	rtx.RecordError(err)
+	rtx.Halt()
+}
+
+// HaltWithCode claims the program's exit code and stops the lifecycle's forward progress — for
+// when the NUMBER is the point: a filter reporting "no match" as 1, a wrapper passing a child's
+// status through. It records no error; it is a deliberate verdict, not a failure.
+//
+// Teardown is unaffected: every PostRun and CascadingPostRun whose paired setup hook began still
+// runs, in reverse. The first non-zero code wins, so a later HaltWithCode cannot overrule an
+// earlier one.
+//
+// It is one of the Halt family, and the family is the thing to learn:
+//
+//	Halt()              stop
+//	HaltWith(err)       stop, and record err          — the way a hook fails
+//	HaltWithCode(n)     stop, and claim exit code n    — the way a hook renders a verdict
+//	Exit(n)             stop, claim n, and SKIP pending teardown
+//
+// Everything named Halt* leaves teardown intact. [Context.Exit] is the one that does not, which
+// is the whole distinction and the reason it is spelled like [os.Exit], whose deferred functions
+// do not run either.
+//
+// It is a no-op inside the funnel, where the lifecycle has already run; [Context.Exit] is how
+// the funnel sets the code.
+func (rtx *Context) HaltWithCode(code int) {
+	if rtx.funnelStage {
 		return
 	}
 	rtx.stopped = true
@@ -215,25 +557,18 @@ func (rtx *Context) SignalExit(code int) {
 	}
 }
 
-// Exit records the program's exit code and stops the lifecycle immediately — no
-// further hook runs, teardown included: any PostRun/CascadingPostRun still
-// pending is skipped. Use it for an abort-now path where remaining cleanup must
-// not run; prefer [Context.SignalExit] for an orderly stop that still unwinds
-// every begun teardown hook. The first non-zero code wins, and Exit does not
-// itself trigger the panic funnel — it is a deliberate stop, not an error.
+// Exit records the program's exit code and stops the lifecycle immediately — every pending
+// teardown hook is skipped. Use it where remaining cleanup must not run; prefer
+// [Context.HaltWithCode] for an orderly stop. The first non-zero code wins, and Exit is a
+// deliberate stop, not an error.
 //
-// Exit skips teardown, not fault reporting: a panic already recovered before Exit
-// is still captured and handed to the funnel ([Program.WithFunnel]), so a handler's
-// Exit cannot silently swallow an in-flight panic — though the FUNNEL itself, as the
-// final authority, may.
+// It skips teardown, not fault reporting: a panic recovered before Exit still reaches the
+// funnel, so a handler cannot silently swallow one — though the funnel, as the final
+// authority, may.
 //
-// Inside the funnel, Exit is the way to set the final exit code and OVERRIDES any code
-// the lifecycle set (the funnel is the last word — first-non-zero-wins no longer
-// applies). During the lifecycle it keeps first-non-zero-wins.
+// Inside the funnel, Exit overrides any code the lifecycle set; during the lifecycle it keeps
+// first-non-zero-wins.
 func (rtx *Context) Exit(code int) {
-	if rtx == nil {
-		return
-	}
 	rtx.stopped = true
 	rtx.exitNow = true
 	if rtx.funnelStage {
@@ -245,14 +580,12 @@ func (rtx *Context) Exit(code int) {
 	}
 }
 
-// RecordInfo records msg as an informational message of this run — neutral
-// output the end-user wants surfaced (progress, context, a note), distinct from a
-// success message only by intent. Like the other record calls it neither prints
-// nor stops the lifecycle: it appends, and the program's funnel
-// ([Program.WithFunnel]) receives the recorded infos as a slice once the run
-// settles. Recording an info never sets the exit code. An empty msg is ignored.
+// RecordInfo records msg as an informational message of this run — neutral output such as
+// progress or context, distinct from a success message only by intent. Like every record call
+// it neither prints nor stops the lifecycle: the funnel receives the infos once the run
+// settles. An empty msg is ignored.
 func (rtx *Context) RecordInfo(msg string) {
-	if rtx == nil || msg == "" {
+	if msg == "" {
 		return
 	}
 	rtx.mu.Lock()
@@ -260,82 +593,56 @@ func (rtx *Context) RecordInfo(msg string) {
 	rtx.infos = append(rtx.infos, msg)
 }
 
-// copyInfos snapshots the informational messages recorded this run (via
-// [Context.RecordInfo]), in recording order, as a copy. Unexported: infos are
-// PRIVATE and surface only as the slice handed to the funnel.
+// copyInfos snapshots the recorded infos, in recording order.
 func (rtx *Context) copyInfos() []string {
-	if rtx == nil {
-		return nil
-	}
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.infos) == 0 {
-		return nil
-	}
-	out := make([]string, len(rtx.infos))
-	copy(out, rtx.infos)
-	return out
+	return snapshot(rtx, func(c *Context) []string { return c.infos })
 }
 
-// RecordError records err as one of THIS run's errors — the end-user's own
-// failures, to be reported once the lifecycle settles. It does NOT print and
-// does NOT stop the lifecycle — a handler accumulates one or more errors with
-// RecordError (it may call it any number of times, across any hook), then
-// chooses HOW to stop independently: [Context.SignalExit] for a graceful stop
-// that still unwinds teardown, or [Context.Exit] to skip teardown. Either way —
-// and even if neither is called — the program's funnel ([Program.WithFunnel])
-// receives the recorded errors as a slice once the run settles. A nil err is
-// ignored.
+// RecordError records err as one of this run's errors — the end-user's own failures. It
+// neither prints nor stops the lifecycle: a handler accumulates errors across any number of
+// calls and hooks, then chooses how to stop, and the funnel receives them once the run
+// settles either way. A nil err is ignored.
 //
-// This is the error channel of five outcome channels handed to the one funnel.
-// Recovered panics and rotini-detected faults (a wiring mismatch, a resolver
-// fault, a [MustGet] on a missing service) are NOT recorded here — the lifecycle
-// captures them as the funnel's panics slice; infos/successes/warnings have their
-// own channels ([Context.RecordInfo] / [Context.RecordSuccess] /
-// [Context.RecordWarning]).
+// Recovered panics and rotini-detected faults are not recorded here; the lifecycle captures
+// them as the funnel's panics slice.
 //
-//	inputs, err := rotini.Collect[cmdgen.MycliInputs](rtx)
-//	if err != nil {
-//	    rtx.RecordError(err)
-//	    rtx.SignalExit(1) // graceful; or rtx.Exit(…) to skip teardown
-//	    return
+// Use it on its own when the run should CONTINUE — to collect several problems before anything
+// stops, or to leave the decision to a later hook that gates on [Context.Failed]:
+//
+//	for _, path := range inputs.Check.Arguments.Paths {
+//	    if err := validate(path); err != nil {
+//	        rtx.RecordError(err) // report them all, not just the first
+//	    }
 //	}
+//
+// To fail and stop in one act, use [Context.HaltWith]. Pairing RecordError with a separate
+// [Context.Halt] does the same thing, and is the form whose second half can go missing.
 func (rtx *Context) RecordError(err error) {
-	if rtx == nil || err == nil {
+	if err == nil {
 		return
 	}
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
-	rtx.recorded = append(rtx.recorded, err)
+	rtx.errs = append(rtx.errs, err)
 }
 
-// copyErrors snapshots the errors recorded this run (via [Context.RecordError]),
-// in recording order, as a copy. It is unexported: the recorded errors are
-// PRIVATE — they surface only as the slice the runtime hands to the funnel
-// ([Program.WithFunnel]), never through a drainable accessor.
+// copyErrors snapshots the recorded errors, in recording order.
 func (rtx *Context) copyErrors() []error {
-	if rtx == nil {
-		return nil
-	}
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.recorded) == 0 {
-		return nil
-	}
-	out := make([]error, len(rtx.recorded))
-	copy(out, rtx.recorded)
-	return out
+	return snapshot(rtx, func(c *Context) []error { return c.errs })
 }
 
-// RecordWarning records warn as a non-fatal warning of this run — something the
-// end-user should know about that did NOT fail the command (a deprecation, a
-// fallback, a skipped item). Like [Context.RecordError] it neither prints nor
-// stops the lifecycle: it appends, and the program's funnel ([Program.WithFunnel])
-// receives the recorded warnings as a slice once the run settles. A warning is an
-// error value (so it can be typed and branched with errors.As, and secrets stay
-// redacted), but it never raises the exit code. A nil warn is ignored.
+// RecordWarning records warn as a non-fatal warning of this run — a deprecation, a fallback,
+// a skipped item. It is an error value so it can be typed and branched on with errors.As and
+// so secrets stay redacted, but it never raises the exit code. A nil warn is ignored.
+//
+// Why the Record family splits its parameter type, since the names do not say: the two
+// SEVERITY-bearing channels take an error, because a warning or a failure is something a funnel
+// may want to branch on — categorize it with [CategoryOf], match it with errors.As, redact it.
+// [Context.RecordInfo] and [Context.RecordSuccess] take a string, because neither carries
+// severity and there is nothing to inspect. The asymmetry is deliberate, and the compiler tells
+// you which one you are in.
 func (rtx *Context) RecordWarning(warn error) {
-	if rtx == nil || warn == nil {
+	if warn == nil {
 		return
 	}
 	rtx.mu.Lock()
@@ -343,14 +650,13 @@ func (rtx *Context) RecordWarning(warn error) {
 	rtx.warnings = append(rtx.warnings, warn)
 }
 
-// RecordSuccess records msg as a success message of this run — what went right,
-// for the program's funnel ([Program.WithFunnel]) to present. Like the other
-// record calls it neither prints nor stops the lifecycle: it appends, and the
-// funnel receives the recorded messages as a slice once the run settles.
-// Recording a success does not by itself set the exit code (a clean run is
-// already 0). An empty msg is ignored.
+// RecordSuccess records msg as a success message of this run, for the funnel to present. An
+// empty msg is ignored.
+//
+// The funnel reports after the lifecycle settles, so recorded outcomes appear after anything a
+// handler wrote directly to [Context.Stdout] during Run.
 func (rtx *Context) RecordSuccess(msg string) {
-	if rtx == nil || msg == "" {
+	if msg == "" {
 		return
 	}
 	rtx.mu.Lock()
@@ -358,61 +664,68 @@ func (rtx *Context) RecordSuccess(msg string) {
 	rtx.successes = append(rtx.successes, msg)
 }
 
-// copyWarnings snapshots the warnings recorded this run (via
-// [Context.RecordWarning]), in recording order, as a copy. Unexported: warnings
-// are PRIVATE and surface only as the slice handed to the funnel.
+// copyWarnings snapshots the recorded warnings, in recording order.
 func (rtx *Context) copyWarnings() []error {
-	if rtx == nil {
-		return nil
-	}
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.warnings) == 0 {
-		return nil
-	}
-	out := make([]error, len(rtx.warnings))
-	copy(out, rtx.warnings)
-	return out
+	return snapshot(rtx, func(c *Context) []error { return c.warnings })
 }
 
-// copySuccesses snapshots the success messages recorded this run (via
-// [Context.RecordSuccess]), in recording order, as a copy. Unexported:
-// successes are PRIVATE and surface only as the slice handed to the funnel.
+// copySuccesses snapshots the recorded successes, in recording order.
 func (rtx *Context) copySuccesses() []string {
-	if rtx == nil {
-		return nil
-	}
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.successes) == 0 {
-		return nil
-	}
-	out := make([]string, len(rtx.successes))
-	copy(out, rtx.successes)
-	return out
+	return snapshot(rtx, func(c *Context) []string { return c.successes })
 }
 
-// copyFaults snapshots the recovered panics + rotini-detected faults captured
-// this run, in capture order, as a copy. Unexported: faults are PRIVATE (there
-// is no public record call either — the lifecycle captures them) and surface
-// only as the panics slice handed to the funnel ([Program.WithFunnel]).
+// copyFaults snapshots the captured faults, in capture order.
 func (rtx *Context) copyFaults() []*PanicError {
+	return snapshot(rtx, func(c *Context) []*PanicError { return c.faults })
+}
+
+// snapshot copies one outcome channel under the read lock, returning nil for an empty channel
+// or a nil Context.
+func snapshot[T any](rtx *Context, channel func(*Context) []T) []T {
 	if rtx == nil {
 		return nil
 	}
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
-	if len(rtx.faults) == 0 {
-		return nil
+	if s := channel(rtx); len(s) > 0 {
+		return slices.Clone(s)
 	}
-	out := make([]*PanicError, len(rtx.faults))
-	copy(out, rtx.faults)
-	return out
+	return nil
 }
 
-// recordFault appends a recovered panic / rotini-detected fault to the private
-// fault channel (handed to the funnel as its panics slice). It is unexported on
-// purpose: faults are the lifecycle's to capture, never the handler's to record.
+// Failed reports whether this invocation has recorded an error or suffered a fault SO FAR.
+//
+// It exists for teardown. A PostRun or CascadingPostRun that owns a resource has exactly one
+// decision to make — commit or roll back, keep or discard, publish or delete — and it cannot
+// make it without knowing whether the work it was bracketing succeeded:
+//
+//	func (*migrateHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+//	    if rtx.Failed() {
+//	        tx.Rollback()
+//	        return
+//	    }
+//	    tx.Commit()
+//	}
+//
+// The [Outcome] a funnel receives answers the same question, but a funnel runs AFTER every
+// teardown has finished — the right place to report a failure and much too late to undo one.
+//
+// It is deliberately one bit and not the errors themselves. A teardown that could read them
+// would be tempted to print them, and the whole point of the funnel is that a run reports its
+// outcome exactly once, in one place, after everything has settled. Faults count: a panic in
+// the bracketed work is a failure, and a rollback is even more clearly right there.
+//
+// Read from a forward hook it is also meaningful — an earlier hook in the chain may already
+// have recorded an error — but the answer only grows over a run, so a false is never a promise
+// about what comes next.
+func (rtx *Context) Failed() bool {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return len(rtx.errs) > 0 || len(rtx.faults) > 0
+}
+
+// recordFault appends a recovered panic or detected fault. Unexported on purpose: faults are
+// the lifecycle's to capture, never a handler's to record.
 func (rtx *Context) recordFault(pe *PanicError) {
 	if rtx == nil || pe == nil {
 		return
@@ -422,36 +735,175 @@ func (rtx *Context) recordFault(pe *PanicError) {
 	rtx.faults = append(rtx.faults, pe)
 }
 
-// Get returns the service bound under key as T — the typed, comma-ok form of the
-// raw [Context.Value] (which returns any). ok is false when no service is bound
-// under key or the bound value is not a T:
+// Get returns the service bound under key as T, reporting ok=false when nothing is bound there
+// or the bound value is not a T. It never panics; use [Context.MustGet] to route a miss
+// through the funnel instead of handling it inline, or a typed [Key], which supplies T for you.
 //
-//	parser, ok := rotini.Get[*rotini.Parser](rtx, rotini.KeyParser)
-//	if !ok {
-//		// not bound — fail the command, or fall back
-//	}
-//
-// It never panics; use [MustGet] to route a missing/wrong-type service through the
-// funnel (as a fault) instead of handling it inline.
-func Get[T any](rtx *Context, key string) (T, bool) {
+//	store, ok := rtx.Get[Store]("store")
+func (rtx *Context) Get[T any](key string) (T, bool) {
 	v, ok := rtx.Value(key).(T)
 	return v, ok
 }
 
-// MustGet returns the service bound under key as T, or panics with a
-// [*ServiceError] (unwrapping to [ErrServiceNotFound]) when it is absent or not a
-// T. The panic is intentional and recoverable: the runtime recovers it inside
-// dispatch and routes it through the program's funnel — so a handler that
-// cannot run without a service reaches for MustGet instead of handling a miss
-// inline:
+// ── rotini's own seams, as a standalone Context configures them ─────────────.
 //
-//	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-//	var in rtg.MycliInputs
-//	err := parser.Parse(rtx, &in)
-func MustGet[T any](rtx *Context, key string) T {
-	v, ok := Get[T](rtx, key)
+// A dispatched Context is seeded from the Program, so these are for a Context built by
+// [NewContextFor] — exercising a [Parser], or driving one hook — where there is no Program to
+// carry them. They mirror the [Program] options exactly, so there is one vocabulary to learn.
+//
+// A handler should not need any of them, and each says so, because a grouping comment in the
+// source is not what a reader sees: `go doc Context.WithParser` prints that method's own lines
+// and nothing else. The five sit in the same autocomplete list as [Context.Stdout], which is the
+// cost of sharing one vocabulary with the Program, so each one carries the scope itself.
+
+// WithBindMeta supplies the generated descriptor [Collect] reconciles from. See
+// [Program.WithBindMeta].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
+func (rtx *Context) WithBindMeta(meta BindMeta) *Context {
+	if rtx != nil {
+		rtx.mu.Lock()
+		rtx.meta = &meta
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithBinder replaces the binder [Collect] uses, built from the meta. See [Program.WithBinder].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
+func (rtx *Context) WithBinder(fn func(BindMeta) *Binder) *Context {
+	if rtx != nil && fn != nil {
+		rtx.mu.Lock()
+		rtx.binderFn = fn
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithVersion sets what [Context.Version] reports. See [Program.WithVersion].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
+func (rtx *Context) WithVersion(version string) *Context {
+	if rtx != nil {
+		rtx.mu.Lock()
+		rtx.version = version
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithHelp sets where [Context.Help] finds pages. See [Program.WithHelp].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
+func (rtx *Context) WithHelp(help HelpFunc) *Context {
+	if rtx != nil && help != nil {
+		rtx.mu.Lock()
+		rtx.help = help
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// WithParser sets the parser [Context.Parser] returns. See [Program.WithParser].
+//
+// For a Context you built yourself. One handed to a hook is already seeded from the Program,
+// and this is not scoped to the current hook: every later hook of THIS run sees the change. It
+// does not outlive the run — the next invocation is seeded from the Program again.
+func (rtx *Context) WithParser(parser *Parser) *Context {
+	if rtx != nil && parser != nil {
+		rtx.mu.Lock()
+		rtx.parser = parser
+		rtx.mu.Unlock()
+	}
+	return rtx
+}
+
+// ── rotini's own seams, as the handler sees them ────────────────────────────.
+
+// Help is the help page of the command being run, from [Program.WithHelp]: what a generated
+// `--help` prints. It is "" when the program has no pages or none for this command.
+//
+// The page is the RUNNING program's, not the one the handler was generated with. A command
+// composed from another spec therefore shows its full path under the parent and the flags the
+// parent passes down, the same page `help <command>` shows.
+func (rtx *Context) Help() string {
+	rtx.mu.RLock()
+	help := rtx.help
+	rtx.mu.RUnlock()
+	if help == nil {
+		return ""
+	}
+	chain := rtx.Chain()
+	path := make([]string, 0, len(chain))
+	for i := 1; i < len(chain); i++ {
+		path = append(path, chain[i].Name)
+	}
+	page, err := help(path...)
+	if err != nil {
+		return ""
+	}
+	return page
+}
+
+// Version is what the program reports as its version, from [Program.WithVersion]. It is "" if
+// the entrypoint set none, which is the honest answer rather than a guess.
+func (rtx *Context) Version() string {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.version
+}
+
+// Parser is the [Parser] for this run: the one [Program.WithParser] supplied, or the default.
+//
+// It never returns nil. Parsing is not optional — [Collect] uses a parser whether or not the
+// entrypoint supplied one — so a handler that wants to parse argv itself should not have to
+// ask whether one exists, nor bind one to make the answer yes.
+func (rtx *Context) Parser() *Parser {
+	rtx.mu.RLock()
+	p := rtx.parser
+	rtx.mu.RUnlock()
+	if p == nil {
+		return NewParser()
+	}
+	return p
+}
+
+// bindMeta is the generated descriptor for this run, and whether the program supplied one.
+func (rtx *Context) bindMeta() (BindMeta, bool) {
+	if rtx == nil {
+		return BindMeta{}, false
+	}
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if rtx.meta == nil {
+		return BindMeta{}, false
+	}
+	return *rtx.meta, true
+}
+
+// MustGet returns the service bound under key as T, or panics with a [*ServiceError] when it
+// is absent or not a T. The panic is intentional: the runtime recovers it inside dispatch and
+// routes it through the funnel, so a handler that cannot run without a service reaches for
+// MustGet rather than handling a miss inline.
+//
+//	store := rtx.MustGet[Store]("store")
+func (rtx *Context) MustGet[T any](key string) T {
+	v, ok := rtx.Get[T](key)
 	if !ok {
-		panic(&ServiceError{Key: key})
+		se := &ServiceError{Key: key}
+		if bound := rtx.Value(key); bound != nil {
+			se.got, se.want = fmt.Sprintf("%T", bound), reflect.TypeFor[T]().String()
+		}
+		panic(se)
 	}
 	return v
 }

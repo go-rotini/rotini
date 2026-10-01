@@ -1,39 +1,42 @@
-$schema: https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/0.0.0/schema-conf.json
+# yaml-language-server: $schema=../../schema-conf.json
+version: 0.0.0
 generate:
+  # rotini publishes its own schemas at the MODULE ROOT, so a release tag serves them
+  # at raw.githubusercontent.com/.../refs/tags/<tag>/schema-spec.json — the URL a user's
+  # `$schema` key points at. TestPublishedSchemasInSync guards the copies.
+  schemas:
+    spec:
+      file: schema-spec.json
+    conf:
+      file: schema-conf.json
   packages:
-    entrypoint:
-      package: cmd/rotini
-      file: main.go
-    cmd:
-      package: internal/cmd/rotini
-      file: zz_rotini.go
-    cmdgen:
-      package: internal/cmd/rotini
-      file: zz_rotini.go
+    - type: main
+      file: cmd/rotini/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/rotini/zz_rotini.go
+      package: rotini
   features:
-    help:
+    - type: help
       enabled: true
       embed: false
-      embed_dir: internal/cmd/rotini/renders
       template: false
-      template_dir: internal/cmd/rotini/templates
-    completion:
-      enabled: true
-      embed: false
-      embed_dir: internal/cmd/rotini/renders
-      template: false
-      template_dir: internal/cmd/rotini/templates
-    man:
+    - type: completion
       enabled: false
       embed: false
       embed_dir: internal/cmd/rotini/renders
       template: false
       template_dir: internal/cmd/rotini/templates
-    markdown:
+    - type: man
       enabled: false
       embed: false
       embed_dir: internal/cmd/rotini/renders
       template: false
       template_dir: internal/cmd/rotini/templates
+    - type: markdown
+      enabled: false
+      embed: false
+      embed_dir: internal/cmd/rotini/renders
+      template: false
 validate:
   fail: collect

@@ -1,0 +1,124 @@
+# R7 — reading a secret, and not eating the rest of the stream.
+#
+# A terminal is the one environment this is NOT tested in, and that is deliberate: a tty hides
+# the defect this script exists for.
+#
+# rotini no longer ships prompts, selects or confirms — drawing questions belongs to a library
+# built for it. What it still ships is ReadSecret, because turning terminal echo off is a
+# termios ioctl the standard library will not do and a program cannot safely fake: the failure
+# is not a wrong value, it is a shell left with echo off after the process is gone.
+#
+# The shape that used to break is still the shape to guard. A reader that buffers ahead fills
+# its private buffer with everything available — the secret AND whatever came after it — returns
+# one line, and drops the rest when it goes out of scope. The next consumer sees EOF with its
+# input still sitting in the pipe. At a terminal it works perfectly, because a tty hands over
+# one line at a time and there is never a surplus to lose.
+#
+# Hence: one binary, one pipe, a secret followed by more input that must survive.
+
+gomodinit example.com/vault
+
+exec rotini generate cmd/vault/.rotini.spec.yaml --config cmd/vault/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o vault$exe ./cmd/vault
+
+# The secret is read, and the two lines after it are still there to read.
+stdin session.txt
+exec ./vault$exe login
+stdout 'secret=hunter2'
+stdout 'rest=\[keep me\] \[and me\]'
+
+# The secret is never written to the output. Nothing echoes it, because nothing printed it.
+! stdout 'hunter2 '
+! stderr 'hunter2'
+
+# No input at all is a named error, not a hang and not an empty password accepted as one.
+stdin empty.txt
+! exec ./vault$exe login
+stderr 'not interactive'
+
+-- empty.txt --
+-- session.txt --
+hunter2
+keep me
+and me
+-- cmd/vault/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: vault
+  summary: reads a secret from stdin
+  commands:
+    - name: login
+      summary: read a secret, then read what follows it
+-- cmd/vault/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/vault/main.go
+    - type: cmd
+      file: internal/cmd/vault/zz_vault.go
+      package: vault
+-- internal/cmd/vault/vault.go --
+package vault
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type vaultHandlers struct{ base }
+
+func (*vaultHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/vault/vault_login.go --
+package vault
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+type vaultLoginHandlers struct{ base }
+
+// Run reads a secret and then keeps reading the SAME stream, which is the shape that catches a
+// reader buffering past its line.
+func (*vaultLoginHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	secret, err := rotini.ReadSecret(os.Stdin)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+
+	var rest []string
+	scan := bufio.NewScanner(os.Stdin)
+	for scan.Scan() {
+		rest = append(rest, "["+scan.Text()+"]")
+	}
+
+	fmt.Fprintf(rtx.Stdout, "secret=%s\n", secret)
+	fmt.Fprintf(rtx.Stdout, "rest=%s\n", strings.Join(rest, " "))
+}
+-- cmd/vault/main.go --
+package main
+
+import (
+	vault "example.com/vault/internal/cmd/vault"
+)
+
+func main() {
+	vault.Program.
+		Execute()
+}

@@ -1,0 +1,14 @@
+# A dependency on a flag that does not exist could never fire, masking a typo.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: tls
+      identifiers:
+        - --tls
+      schema:
+        type: bool
+  flag_dependencies:
+    - when: tls
+      requires:
+        - cert

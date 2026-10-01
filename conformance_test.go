@@ -10,13 +10,15 @@ import (
 	"testing"
 )
 
-// This file is the in-process tier of the input conformance suite (the
-// business-like input matrix of .docs/ROTINI_INPUT_BEHAVIOR.md, encoded as
-// code). `make test-conformance` runs it. Each matrix ID appears exactly once
-// across the whole suite — most here, and the handful that only a real
-// process can witness (exit codes, auto-detected pipes, the no-pipe sentinel)
-// in the acceptance tier (acceptance_test.go); TestConformance_matrixComplete
-// enforces the exactly-once split.
+// This file is the in-process tier of the input conformance suite: the input
+// matrix, encoded as code. `make test-conformance` runs it.
+//
+// TestConformance_matrixComplete below holds the canonical ID list; that list,
+// plus each case's own comment, IS the matrix definition — there is no separate
+// prose document to keep in sync. Every ID appears exactly once across the whole
+// suite: most here, and the handful only a real process can witness (exit codes,
+// auto-detected pipes, the no-pipe sentinel) in the acceptance tier
+// (acceptance_test.go). TestConformance_matrixComplete enforces that split.
 
 // ── the acme fixture ─────────────────────────────────────────────────────────
 //
@@ -530,7 +532,7 @@ func conformanceCases() []inputCase {
 					t.Error("empty $ACME_REGION not recorded as present — empty must differ from unset")
 				}
 				os.Unsetenv("ACME_REGION")
-				layer2, err := ParseEnv[acDeployInputs](NewContextFor(acmeDef(), rtx.Args))
+				layer2, err := ParseEnv[acDeployInputs](NewContextFor(acmeDef(), rtx.Argv))
 				if err != nil {
 					t.Fatalf("ParseEnv(unset): %v", err)
 				}
@@ -699,7 +701,7 @@ func conformanceCases() []inputCase {
 				if err := os.WriteFile(filepath.Join("..", "acme.yaml"), []byte("acme:\n  env: prod\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
-				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), rtx.Args), meta); in.Deploy.Flags.Env != "prod" {
+				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), rtx.Argv), meta); in.Deploy.Flags.Env != "prod" {
 					t.Errorf("env = %q, want prod from the now-conforming file", in.Deploy.Flags.Env)
 				}
 			}},
@@ -830,7 +832,7 @@ func conformanceCases() []inputCase {
 			check: func(t *testing.T, rtx *Context, _ BindMeta) {
 				// Provenance: the Report knows WHICH layer won, and the full
 				// history beneath it.
-				rtx.Bind(KeyBindMeta, acmeMeta(filepath.Dir(mustGetwd(t))))
+				rtx.WithBindMeta(acmeMeta(filepath.Dir(mustGetwd(t))))
 				defaults, _ := Defaults[acDeployInputs](rtx)
 				files, _ := ParseFiles[acDeployInputs](rtx)
 				env, _ := ParseEnv[acDeployInputs](rtx)

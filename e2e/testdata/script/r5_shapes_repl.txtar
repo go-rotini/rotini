@@ -1,0 +1,182 @@
+# R5b — Program.Run re-entrancy, from a real binary.
+#
+# A REPL dispatches each line back through the SAME Program the binary uses, which only works
+# if Run is re-entrant: each line needs a fresh Context, so one command's recorded outcomes and
+# exit code cannot leak into the next, while services bound on the Program are seeded into
+# every line. State persists; failures do not.
+#
+# It also pins the pairing of two DEFAULTS that used not to compose. rotini's default funnel
+# prints every recorded error, and the REPL's error echo defaulted to on, so an out-of-the-box
+# program in an out-of-the-box REPL printed each failure twice — once on stderr from the
+# funnel, once on stdout from the echo, which at a terminal is one destination.
+
+gomodinit example.com/loop
+
+exec rotini generate cmd/loop/.rotini.spec.yaml --config cmd/loop/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o loop$exe ./cmd/loop
+
+# State persists across lines, a failing line does not end the session, and the session itself
+# exits 0 — a typo at a prompt is not a reason to lose your place.
+stdin session.txt
+exec ./loop$exe shell
+stdout 'count=1'
+stdout 'count=2'
+stdout 'count=3'
+
+# The failure was reported EXACTLY once, by the funnel, on stderr.
+stderr 'boom'
+! stdout 'boom'
+
+# ...and it did not leak into the line after it: the next command ran and exited clean.
+stdout 'count=3'
+
+# The same command from the shell behaves identically — one command tree, one set of handlers.
+exec ./loop$exe bump
+stdout 'count=1'
+
+-- session.txt --
+bump
+bump
+explode
+bump
+exit
+-- cmd/loop/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: loop
+  summary: a program that can run itself
+  commands:
+    - name: shell
+      summary: dispatch lines back into this program
+    - name: bump
+      summary: increment the shared counter
+    - name: explode
+      summary: fail on purpose
+-- cmd/loop/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/loop/main.go
+    - type: cmd
+      file: internal/cmd/loop/zz_loop.go
+      package: loop
+-- internal/cmd/loop/loop.go --
+package loop
+
+import (
+	"context"
+	"sync/atomic"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+// Counter is the shared service. It is bound on the PROGRAM, so every invocation — including
+// every REPL line — sees the same one.
+type Counter struct{ n atomic.Int64 }
+
+func (c *Counter) Bump() int64 { return c.n.Add(1) }
+
+var CounterKey = rotini.NewKey[*Counter]("loop.counter")
+
+// BuilderKey holds the assembler a REPL session uses, so main stays the only place that knows
+// how this process is wired.
+var BuilderKey = rotini.NewKey[func(*rotini.Context) *rotini.Program]("loop.builder")
+
+type loopHandlers struct{ base }
+
+func (*loopHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/loop/loop_shell.go --
+package loop
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type loopShellHandlers struct{ base }
+
+func (*loopShellHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	build, ok := BuilderKey.Get(rtx)
+	if !ok {
+		rtx.RecordError(rotini.InternalError(errors.New("shell: nothing to dispatch into")))
+		rtx.HaltWithCode(1)
+		return
+	}
+	// The error echo is left at its default (off): the program's funnel already reports.
+	err := rotini.NewREPL(build(rtx)).
+		WithPrompt("").
+		WithInput(rtx.Stdin).
+		WithOutput(rtx.Stdout).
+		Run(ctx)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		rtx.RecordError(err)
+	}
+}
+-- internal/cmd/loop/loop_bump.go --
+package loop
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type loopBumpHandlers struct{ base }
+
+func (*loopBumpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintf(rtx.Stdout, "count=%d\n", CounterKey.MustGet(rtx).Bump())
+}
+-- internal/cmd/loop/loop_explode.go --
+package loop
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type loopExplodeHandlers struct{ base }
+
+func (*loopExplodeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.RecordError(errors.New("boom"))
+	rtx.HaltWithCode(1)
+}
+-- cmd/loop/main.go --
+package main
+
+import (
+	"github.com/go-rotini/rotini"
+
+	loop "example.com/loop/internal/cmd/loop"
+)
+
+var counter = &loop.Counter{}
+
+func main() { build(nil).Execute() }
+
+// build is the single assembler: the process's own Program and every REPL session's come from
+// here, so a command cannot behave differently at the prompt than it does from the shell.
+func build(rtx *rotini.Context) *rotini.Program {
+	p := loop.NewProgram(loop.Handlers()).
+		With(
+			rotini.Provide(loop.CounterKey, counter),
+			rotini.Provide(loop.BuilderKey, build),
+		)
+	if rtx != nil {
+		p = p.WithStdin(rtx.Stdin).WithStdout(rtx.Stdout).WithStderr(rtx.Stderr)
+	}
+	return p
+}

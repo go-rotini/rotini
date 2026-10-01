@@ -19,6 +19,7 @@ linters:
     - arangolint
     - gosmopolitan
     - exhaustruct
+    - exhaustruct_v5 # the v2.13 rename; disabled for the same reason as exhaustruct
     - varnamelen
     - wsl_v5
     - nlreturn
@@ -90,8 +91,15 @@ linters:
     errcheck:
       check-type-assertions: false
       check-blank: true
+      exclude-functions:
+        # AsType returns (E, bool) with E constrained to error, so discarding the
+        # value reads to errcheck as dropping an error. The bool IS the check.
+        - errors.AsType
     gosec:
       excludes:
+        # Scheduling jitter (Scheduler.next) uses math/rand deliberately: it
+        # spreads ticks, it is never a security decision.
+        - G404
         - G304
         - G115
         - G301
@@ -111,6 +119,10 @@ linters:
         - "io\\.Closer"
       ignore-sig-regexps:
         - "io\\.Writer\\)\\.Write"
+        # The counterpart of the Write entry above: an io.Reader's own Read error is
+        # already the most specific thing there is to return, and wrapping it would hide
+        # io.EOF behind prose that every caller then has to unwrap again.
+        - "io\\.Reader\\)\\.Read"
         - "\\(\\*os\\.PathError\\)"
       ignore-package-globs:
         - "strconv"
@@ -173,22 +185,6 @@ linters:
           - wastedassign # ditto — reassigned scratch vars in test scaffolding
           - dupword # repeated words in fixture data ("scan\tscan things") are intentional
           - govet # "cannot inline" noise on generic test helpers
-      - path: (parser|binder|overlay|completion)\.go
-        linters:
-          - cyclop
-          - gocognit
-          - gocyclo
-          - funlen
-          - maintidx
-          - nestif
-      - path: internal/(generator|position)\.go
-        linters:
-          - cyclop
-          - gocognit
-          - gocyclo
-          - funlen
-          - maintidx
-          - nestif
       - path: parser\.go
         linters:
           - errname
@@ -204,10 +200,16 @@ linters:
       - path: overlay\.go
         linters:
           - errcheck
-      - path: types\.go
+      - path: definition\.go
         linters:
           - embeddedstructfieldcheck
           - gocheckcompilerdirectives
+      # generate_completion.go is almost entirely SHELL source held in Go string
+      # literals, so Go prose linters read it as prose it is not: fish's block
+      # terminators are a row of "end" lines, not a duplicated word.
+      - path: internal/codegen/generate_completion\.go
+        linters:
+          - dupword
       - path: cmd/
         linters:
           - wrapcheck

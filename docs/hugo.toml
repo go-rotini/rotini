@@ -16,3 +16,15 @@ disableKinds = ["taxonomy"]
 
 [markup.highlight]
   noClasses = false
+
+# The spec and conf pages show rotini's JSON Schemas verbatim, straight from the published files
+# at the repository root, so the site can never show a stale copy. Declaring a mount for
+# `assets` replaces Hugo's default one, so the site's own assets directory is mounted again too.
+[[module.mounts]]
+  source = "assets"
+  target = "assets"
+
+[[module.mounts]]
+  source = ".."
+  target = "assets/schemas"
+  files = ["schema-spec.json", "schema-conf.json"]

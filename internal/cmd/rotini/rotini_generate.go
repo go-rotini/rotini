@@ -2,10 +2,9 @@ package rotini
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/go-rotini/rotini"
-	"github.com/go-rotini/rotini/internal"
+	"github.com/go-rotini/rotini/internal/codegen"
 )
 
 var _ rotini.Handlers = (*rotiniGenerateHandlers)(nil)
@@ -18,47 +17,34 @@ type rotiniGenerateHandlers struct {
 }
 
 func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	parser := rotini.MustGet[*rotini.Parser](rtx, rotini.KeyParser)
-
-	var inputs RotiniGenerateInputs
-	if err := parser.Parse(rtx, &inputs); err != nil {
-		rtx.RecordError(err)
-		rtx.SignalExit(1)
+	if answerHelp(rtx, func(in RotiniGenerateInputs) bool { return in.RotiniGenerate.Flags.Help }) {
 		return
 	}
 
+	inputs, err := rotini.Collect[RotiniGenerateInputs](rtx)
+	if err != nil {
+		haltWithInputError(rtx, err)
+		return
+	}
 	args := inputs.RotiniGenerate.Arguments
 	flags := inputs.RotiniGenerate.Flags
 
-	if flags.Help {
-		fmt.Fprintln(rtx.Stdout, HelpRotiniGenerate)
+	spec, conf, ok := resolveInputs(rtx, args.SpecFilePath, flags.ConfFilePath)
+	if !ok {
 		return
 	}
 
-	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n", args.SpecFilePath, flags.ConfFilePath)
+	version := rtx.Version()
+	rtx.BindIfAbsent("generate", codegen.NewProcessor(version).Generate)
+	generate := rtx.MustGet[codegen.GenerateFn]("generate")
 
-	v := rotini.MustGet[*rotini.Versioner](rtx, rotini.KeyVersioner)
-	rtx.BindIfAbsent("generate", internal.NewProcessor(v.VersionSemantic).Generate)
-	generate := rotini.MustGet[internal.GenerateFn](rtx, "generate")
-
-	err := generate(
-		args.SpecFilePath,
-		flags.ConfFilePath,
-		flags.Watch,
-		func(result string, err error) {
-			if err != nil {
-				fmt.Fprintln(rtx.Stderr, "Error:", err)
-				return
-			}
-			fmt.Fprintln(rtx.Stdout, result)
-		},
-	)
-
-	if err != nil {
-		rtx.RecordError(err)
-		rtx.SignalExit(1)
+	// The warnings are validate's, plus what the pass removed — generating is not supposed to
+	// be destructive, so on the rare occasion it is, it says so — and what the handler-hook
+	// audit found in files rotini did not write.
+	if err := generate(spec, conf, flags.Watch, printResult(rtx), printWarnings(rtx)); err != nil {
+		haltWithProblems(rtx, err)
 		return
 	}
 
-	rtx.SignalExit(0)
+	rtx.HaltWithCode(0)
 }

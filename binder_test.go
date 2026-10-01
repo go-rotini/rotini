@@ -1,10 +1,14 @@
 package rotini
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-rotini/recon"
 )
@@ -121,7 +125,7 @@ func TestBinder_customSources(t *testing.T) {
 
 	t.Run("per-channel surface sees sources via KeyBindMeta", func(t *testing.T) {
 		rtx := NewContextFor(tbDef(), nil)
-		rtx.Bind(KeyBindMeta, BindMeta{Sources: []recon.Source{vault()}})
+		rtx.WithBindMeta(BindMeta{Sources: []recon.Source{vault()}})
 		files, err := ParseFiles[tbInputs](rtx)
 		if err != nil {
 			t.Fatalf("ParseFiles: %v", err)
@@ -764,7 +768,7 @@ func tbPortDef() Definition {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0)},
+			Minimum: Ptr(1.0), Maximum: Ptr(65535.0),
 		}},
 	}
 }
@@ -1016,5 +1020,955 @@ func TestBinder_chainConfigFiles(t *testing.T) {
 	}
 	if got, want := strings.Join(names, ","), "aws,deploy,rootA,rootB,global"; got != want {
 		t.Errorf("chainConfigFiles = %q, want %q", got, want)
+	}
+}
+
+// ── BindError ───────────────────────────────────────────────.
+
+// beEnv is a minimal env channel: a bool that "junk" cannot coerce into, and a
+// secret int whose bad value must never reach a BindError message.
+type beEnv struct {
+	Loud  bool `rotini:"loud" recon:"loud"`
+	Token int  `rotini:"token" recon:"token,secret"`
+}
+type beCmdInputs struct {
+	Flags     struct{}
+	Arguments struct{}
+	Env       beEnv
+}
+type beInputs struct {
+	App beCmdInputs
+}
+
+func beBind(t *testing.T) error {
+	t.Helper()
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	var in beInputs
+	return NewBinder(BindMeta{}).Bind(rtx, &in)
+}
+
+// TestBindError_envCoercion_isCleanUsage is EH4's headline: the famous
+// "recon: coerce …: string → bool" leak becomes a typed, categorized,
+// non-leaky *BindError — while the recon cause stays reachable via errors.As.
+func TestBindError_envCoercion_isCleanUsage(t *testing.T) {
+	t.Setenv("LOUD", "junk") // not a bool
+	err := beBind(t)
+	if err == nil {
+		t.Fatal("Bind = nil, want a coercion error for LOUD=junk")
+	}
+
+	// Typed + structured.
+	var be *BindError
+	if !errors.As(err, &be) {
+		t.Fatalf("err is not a *BindError: %T (%v)", err, err)
+	}
+	if be.Channel != channelEnv || be.Input != "loud" {
+		t.Errorf("BindError = {Channel:%q Input:%q}, want {env loud}", be.Channel, be.Input)
+	}
+
+	// Categorized as usage (errors.Is AND CategoryOf), not internal.
+	if !errors.Is(err, ErrUsage) || errors.Is(err, ErrInternal) {
+		t.Errorf("Is(ErrUsage)=%v Is(ErrInternal)=%v, want true/false", errors.Is(err, ErrUsage), errors.Is(err, ErrInternal))
+	}
+	if CategoryOf(err) != CategoryUsage {
+		t.Errorf("CategoryOf = %v, want usage", CategoryOf(err))
+	}
+
+	// Non-leaky message: names the input in plain language, never echoes recon
+	// internals or the bad value.
+	msg := err.Error()
+	if !strings.Contains(msg, "environment variable") || !strings.Contains(msg, `"loud"`) || !strings.Contains(msg, "expected") {
+		t.Errorf("message = %q, want a clean environment-variable phrasing", msg)
+	}
+	if strings.Contains(msg, "recon") || strings.Contains(msg, "junk") {
+		t.Errorf("message = %q, leaks recon text or the bad value", msg)
+	}
+
+	// The recon cause is still reachable for a handler that wants the detail.
+	if ce, ok := errors.AsType[*recon.CoercionError](err); !ok {
+		t.Error("errors.As could not reach the recon *CoercionError cause")
+	} else if ce.Path.String() != "loud" {
+		t.Errorf("CoercionError.Path = %q, want loud", ce.Path.String())
+	}
+}
+
+// TestBindError_secretNeverLeaks: a coercion failure on a secret-tagged input
+// must not put the offending value in the message.
+func TestBindError_secretNeverLeaks(t *testing.T) {
+	const secret = "sk_live_not_a_number"
+	t.Setenv("TOKEN", secret) // not an int, and tagged secret
+	err := beBind(t)
+	if err == nil {
+		t.Fatal("Bind = nil, want a coercion error for the secret TOKEN")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("message = %q, leaks the secret value", err.Error())
+	}
+	if CategoryOf(err) != CategoryUsage {
+		t.Errorf("CategoryOf = %v, want usage", CategoryOf(err))
+	}
+}
+
+// TestBindError_typeContract pins the type's category + unwrap behavior directly,
+// independent of any channel: Error is the clean message, the category sentinel
+// and the cause are both reachable.
+func TestBindError_typeContract(t *testing.T) {
+	boom := errors.New("low-level cause")
+
+	usage := usageBind(channelConfig, "api.token", "config key \"api.token\" is required", boom)
+	if usage.Error() != `config key "api.token" is required` {
+		t.Errorf("Error() = %q, want the clean message", usage.Error())
+	}
+	if CategoryOf(usage) != CategoryUsage || !errors.Is(usage, boom) {
+		t.Errorf("usageBind: CategoryOf=%v Is(boom)=%v, want usage/true", CategoryOf(usage), errors.Is(usage, boom))
+	}
+
+	internal := internalBind(channelConfig, "", "could not build the configuration registry", boom)
+	if CategoryOf(internal) != CategoryInternal || !errors.Is(internal, boom) {
+		t.Errorf("internalBind: CategoryOf=%v Is(boom)=%v, want internal/true", CategoryOf(internal), errors.Is(internal, boom))
+	}
+
+	// A nil cause is fine — the sentinel is still reachable.
+	noCause := usageBind(channelStdin, "", "required stdin payload is empty", nil)
+	if !errors.Is(noCause, ErrUsage) {
+		t.Error("a nil-cause usage BindError must still match ErrUsage")
+	}
+}
+
+// ── WithBinder as an override ────────────────────────────────────────────────.
+
+// A WithBinder function replaces the binder Collect would build — and RECEIVES the meta, so
+// an override starts from the generated descriptor instead of having to reproduce it.
+//
+// The shape matters. This used to be a registry key holding a *Binder, which meant the caller
+// had to find BindMeta and pass it themselves; the obvious call, NewBinder(BindMeta{}), turned
+// the configuration-file channel off in silence. Handing the meta to the function makes that
+// mistake unwritable.
+func TestWithBinder_overridesTheDefault(t *testing.T) {
+	custom := NewBinder(BindMeta{EnvPrefix: "SENTINEL"})
+
+	var got *Binder
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+	p.WithBinder(func(BindMeta) *Binder { return custom })
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got != custom {
+		t.Errorf("binderFor returned %p, want the supplied %p", got, custom)
+	}
+}
+
+// The override receives the program's meta, which is the whole reason for the signature.
+func TestWithBinder_receivesTheProgramsMeta(t *testing.T) {
+	meta := BindMeta{EnvPrefix: "ACME", ConfigFiles: []ConfigFile{{Name: "project", Scope: "app"}}}
+
+	var seen BindMeta
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { _ = binderFor(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+	p.WithBindMeta(meta).WithBinder(func(m BindMeta) *Binder {
+		seen = m
+		return NewBinder(m)
+	})
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if seen.EnvPrefix != "ACME" || len(seen.ConfigFiles) != 1 {
+		t.Errorf("the override saw %+v, want the program's BindMeta — an override that cannot see the descriptor silently drops channels", seen)
+	}
+}
+
+// With nothing supplied, Collect still works: the default is built from the descriptor, so
+// WithBinder is an override rather than a prerequisite.
+func TestWithBinder_defaultsWhenUnset(t *testing.T) {
+	var got *Binder
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("binderFor returned nil with no binder supplied")
+	}
+}
+
+// A function that returns nil falls back rather than handing a nil binder to Collect.
+func TestWithBinder_ignoresANilResult(t *testing.T) {
+	var got *Binder
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+	p, _, _ := newTestProgram(h, nil)
+	p.WithBinder(func(BindMeta) *Binder { return nil })
+
+	if _, err := p.Run([]string{"run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Error("a nil result produced a nil binder instead of the default")
+	}
+}
+
+// ── raw stdin formats (text / lines) ─────────────────────────────────────────
+//
+// The grep/jq/fmt family, whose stdin is not a document. Before these formats a command
+// consuming plain text could not declare its stdin channel at all: it read rtx.Stdin
+// directly, which appears in no help page, no completion and no validation.
+
+type tbTextCmd struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *string `stdin:"text"`
+}
+type tbTextInputs struct{ App tbTextCmd }
+
+type tbLinesCmd struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *[]string `stdin:"lines"`
+}
+type tbLinesInputs struct{ App tbLinesCmd }
+
+type tbTextReqCmd struct {
+	Flags     struct{}
+	Arguments struct{}
+	Stdin     *string `stdin:"text,required"`
+}
+type tbTextReqInputs struct{ App tbTextReqCmd }
+
+func TestBinder_stdinText(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{"a single line loses its trailing newline", "hello world\n", "hello world"},
+		{"no trailing newline is fine", "hello world", "hello world"},
+		{"interior newlines are content", "a\nb\nc\n", "a\nb\nc"},
+		{"interior whitespace is content", "  two  spaces  \n", "  two  spaces  "},
+		{"a CRLF line ending is handled", "hello\r\n", "hello"},
+		{"only the LAST newline goes", "a\n\n", "a\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+			rtx.Stdin = strings.NewReader(tc.body)
+
+			var in tbTextInputs
+			if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+				t.Fatalf("Bind: %v", err)
+			}
+			if in.App.Stdin == nil {
+				t.Fatal("the payload is nil, but something was piped")
+			}
+			if *in.App.Stdin != tc.want {
+				t.Errorf("payload = %q, want %q", *in.App.Stdin, tc.want)
+			}
+		})
+	}
+}
+
+func TestBinder_stdinLines(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"three lines", "alpha\nbeta\ngamma\n", []string{"alpha", "beta", "gamma"}},
+		// A trailing newline is a terminator, not a separator: "a\nb\n" is two lines.
+		{"a trailing newline adds no empty element", "a\nb\n", []string{"a", "b"}},
+		{"no trailing newline", "a\nb", []string{"a", "b"}},
+		{"a blank interior line is a line", "a\n\nb\n", []string{"a", "", "b"}},
+		{"one line", "only\n", []string{"only"}},
+		{"CRLF input stays usable", "a\r\nb\r\n", []string{"a", "b"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+			rtx.Stdin = strings.NewReader(tc.body)
+
+			var in tbLinesInputs
+			if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+				t.Fatalf("Bind: %v", err)
+			}
+			if in.App.Stdin == nil {
+				t.Fatal("the payload is nil, but something was piped")
+			}
+			if !slices.Equal(*in.App.Stdin, tc.want) {
+				t.Errorf("payload = %q, want %q", *in.App.Stdin, tc.want)
+			}
+		})
+	}
+}
+
+// TestBinder_rawStdinNilVsEmpty: the payload is a POINTER so a filter can tell "nothing was
+// piped" from "an empty payload was piped" — for a filter that is a real difference, and it is
+// why the field is not a plain string.
+func TestBinder_rawStdinNilVsEmpty(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	rtx.Stdin = strings.NewReader("")
+
+	var in tbTextInputs
+	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if in.App.Stdin != nil {
+		t.Errorf("nothing piped left a non-nil payload %q", *in.App.Stdin)
+	}
+}
+
+// TestBinder_rawStdinRequired: `required: true` on a raw payload rejects an empty stdin, with
+// a usage-class message naming the format rather than a nil the handler dereferences.
+func TestBinder_rawStdinRequired(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	rtx.Stdin = strings.NewReader("")
+
+	var in tbTextReqInputs
+	err := NewBinder(BindMeta{}).Bind(rtx, &in)
+	if err == nil {
+		t.Fatal("an empty required stdin payload was accepted")
+	}
+	if !errors.Is(err, ErrUsage) {
+		t.Errorf("category = %v, want usage — an empty pipe is the caller's doing", CategoryOf(err))
+	}
+	for _, want := range []string{"required", "text"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message %q does not mention %q", err, want)
+		}
+	}
+}
+
+// ── the descriptor's absence is now distinguishable (C1 Tier 1) ──────────────.
+
+// NewBinderWithoutDescriptor builds a binder the way a hand-assembled program produces one:
+// no BindMeta was ever supplied, as distinct from an empty one.
+func NewBinderWithoutDescriptor() *Binder {
+	b := NewBinder(BindMeta{})
+	b.described = false
+	return b
+}
+
+// TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor is the one silent failure that
+// survived moving BindMeta off the registry — and the first time it has been detectable.
+//
+// A command with `config:` inputs resolves them out of the sources in BindMeta. A program
+// assembled without one (hand-built, rather than through the generated NewProgram) used to
+// fill every configuration value with its zero and say nothing. Now it is a wiring fault,
+// because that is whose mistake it is.
+func TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Config    struct {
+				Region string `rotini:"region" recon:"api.region"`
+			}
+		}
+	}
+
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	var in inputs
+	err := NewBinderWithoutDescriptor().Bind(rtx, &in)
+
+	if err == nil {
+		t.Fatal("Bind succeeded with config: inputs and no BindMeta — the values would be silently zero")
+	}
+	var we *WiringError
+	if !errors.As(err, &we) {
+		t.Errorf("error is %T (%v), want a *WiringError — this is the program author's mistake, not the user's", err, err)
+	}
+	if !strings.Contains(err.Error(), "WithBindMeta") {
+		t.Errorf("error %q does not name the call that fixes it", err)
+	}
+}
+
+// An EMPTY descriptor is a different statement from an absent one — "this program has no
+// configuration sources" is a choice, and it stays legal. Telling the two apart is only
+// possible because the descriptor is a typed option; a registry entry read absent and zero
+// identically, which is exactly how the silent case survived.
+func TestCheckDescribed_anEmptyDescriptorIsLegal(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Config    struct {
+				Region string `rotini:"region" recon:"api.region"`
+			}
+		}
+	}
+
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithBindMeta(BindMeta{})
+	var in inputs
+	if err := binderFor(rtx).Bind(rtx, &in); err != nil {
+		t.Errorf("Bind failed with an explicitly empty BindMeta: %v", err)
+	}
+}
+
+// A command with NO config: inputs needs no descriptor, so a bare program still works. This is
+// the common case for a CLI that reads only argv, and it must not have been made noisier.
+func TestCheckDescribed_noConfigInputsNeedsNoDescriptor(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Verbose bool `rotini:"verbose"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	rtx := NewContextFor(Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"}},
+	}, []string{"-v"})
+	var in inputs
+	if err := NewBinderWithoutDescriptor().Bind(rtx, &in); err != nil {
+		t.Errorf("Bind failed for an argv-only command with no descriptor: %v", err)
+	}
+	if !in.App.Flags.Verbose {
+		t.Error("argv did not bind")
+	}
+}
+
+// ── fallback values the flag's type cannot hold ─────────────────────────.
+
+type tbFallbackInputs struct {
+	App struct {
+		Flags struct {
+			Port int `rotini:"port" recon:"port" env:"PORT"`
+		}
+		Arguments struct{}
+	}
+}
+
+func tbFallbackDef(secret bool) Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "port", Identifiers: []string{"--port"}, Type: "int", Secret: secret}},
+	}
+}
+
+// A bad env or config value for a flag is the user's error exactly as `--port abc` is. It used
+// to be dropped: `PORT=abc` bound port 0 and the command ran.
+func TestBinder_badFallbackValueIsAUsageError(t *testing.T) {
+	t.Run("env", func(t *testing.T) {
+		t.Setenv("PORT", "abc")
+		var in tbFallbackInputs
+		err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(false), nil), &in)
+		var be *BindError
+		if !errors.As(err, &be) || CategoryOf(err) != CategoryUsage {
+			t.Fatalf("err = %v (%T), want a usage *BindError", err, err)
+		}
+		for _, want := range []string{"--port", `"abc" is not a valid integer`, "environment variable PORT"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("message %q missing %q", err, want)
+			}
+		}
+	})
+	t.Run("config", func(t *testing.T) {
+		cfg := writeConfig(t, "port: abc\n")
+		var in tbFallbackInputs
+		err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+			Bind(NewContextFor(tbFallbackDef(false), nil), &in)
+		if err == nil || !strings.Contains(err.Error(), `configuration file "app"`) {
+			t.Fatalf("err = %v, want it to name the configuration file", err)
+		}
+	})
+	t.Run("secret", func(t *testing.T) {
+		t.Setenv("PORT", "hunter2")
+		var in tbFallbackInputs
+		err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(true), nil), &in)
+		if err == nil || strings.Contains(err.Error(), "hunter2") {
+			t.Fatalf("err = %v, want an error that does not show the secret", err)
+		}
+	})
+	t.Run("good value still binds", func(t *testing.T) {
+		t.Setenv("PORT", "8080")
+		var in tbFallbackInputs
+		if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(false), nil), &in); err != nil || in.App.Flags.Port != 8080 {
+			t.Fatalf("Port = %d, err = %v; want 8080", in.App.Flags.Port, err)
+		}
+	})
+}
+
+// ── enums on env and config inputs ──────────────────────────────────────.
+
+type tbChannelEnumInputs struct {
+	App struct {
+		Flags     struct{}
+		Arguments struct{}
+		Env       struct {
+			Mode  string   `rotini:"mode" recon:"mode" env:"MODE" enum:"[\"fast\",\"slow\"]"`
+			Level string   `rotini:"level" recon:"level" env:"LEVEL" enum:"[\"debug\",\"info\"]" ignorecase:"true"`
+			Tags  []string `rotini:"tags" recon:"tags" env:"TAGS" enum:"[\"a\",\"b\"]" ignorecase:"true"`
+		}
+		Config struct {
+			Tier string `rotini:"tier" recon:"tier" enum:"[\"gold\",\"silver\"]"`
+		}
+	}
+}
+
+// An enum on an env or config input was advertised in help and never checked: MODE=bogus bound
+// "bogus". It is now enforced there exactly as on argv.
+func TestBinder_channelEnumEnforced(t *testing.T) {
+	bind := func(t *testing.T, meta BindMeta) (tbChannelEnumInputs, error) {
+		t.Helper()
+		var in tbChannelEnumInputs
+		err := NewBinder(meta).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+		return in, err
+	}
+	t.Run("env rejects a non-member, naming the variable", func(t *testing.T) {
+		t.Setenv("MODE", "bogus")
+		_, err := bind(t, BindMeta{})
+		if err == nil || CategoryOf(err) != CategoryUsage || !strings.Contains(err.Error(), `invalid value "bogus" for MODE (one of: fast, slow)`) {
+			t.Fatalf("err = %v, want a usage error naming MODE and its members", err)
+		}
+	})
+	t.Run("env is case-sensitive by default", func(t *testing.T) {
+		t.Setenv("MODE", "FAST")
+		if _, err := bind(t, BindMeta{}); err == nil {
+			t.Fatal("MODE=FAST accepted without ignorecase")
+		}
+	})
+	t.Run("ignorecase binds the declared spelling", func(t *testing.T) {
+		t.Setenv("LEVEL", "INFO")
+		t.Setenv("TAGS", "A,b")
+		in, err := bind(t, BindMeta{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if in.App.Env.Level != "info" || !slices.Equal(in.App.Env.Tags, []string{"a", "b"}) {
+			t.Errorf("Level = %q, Tags = %v; want info, [a b]", in.App.Env.Level, in.App.Env.Tags)
+		}
+	})
+	t.Run("config rejects a non-member", func(t *testing.T) {
+		cfg := writeConfig(t, "tier: bronze\n")
+		_, err := bind(t, BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		if err == nil || !strings.Contains(err.Error(), `invalid value "bronze" for tier`) {
+			t.Fatalf("err = %v, want an enum violation for tier", err)
+		}
+	})
+}
+
+// ── list and map flags with a fallback ──────────────────────────────────.
+
+type tbListInputs struct {
+	App struct {
+		Flags struct {
+			Tags   []string          `rotini:"tags" recon:"tags" env:"TAGS"`
+			Labels map[string]string `rotini:"labels" recon:"labels" env:"LABELS"`
+			Ports  []int             `rotini:"ports" recon:"ports" env:"PORTS"`
+		}
+		Arguments struct{}
+	}
+}
+
+func tbListDef() Definition {
+	return Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string"},
+		{Name: "labels", Identifiers: []string{"--labels"}, Type: "map[string]string"},
+		{Name: "ports", Identifiers: []string{"--ports"}, Type: "[]int", Separator: ","},
+	}}
+}
+
+// A list or map flag that also declares a fallback (key: or variable:) was broken on every
+// channel: its argv values were re-read through the fallback registry and came back as the
+// single string "[a b]" (or "map[k:v]", which then failed as not key=value), and a config
+// file's YAML list bound the same way.
+func TestBinder_listAndMapFlagsWithAFallback(t *testing.T) {
+	bind := func(t *testing.T, argv []string, meta BindMeta) tbListInputs {
+		t.Helper()
+		var in tbListInputs
+		if err := NewBinder(meta).Bind(NewContextFor(tbListDef(), argv), &in); err != nil {
+			t.Fatalf("Bind: %v", err)
+		}
+		return in
+	}
+	t.Run("argv", func(t *testing.T) {
+		t.Setenv("TAGS", "from-env") // argv outranks it
+		in := bind(t, []string{"--tags", "a", "--tags", "b", "--labels", "k=v", "--ports", "1,2"}, BindMeta{})
+		if !slices.Equal(in.App.Flags.Tags, []string{"a", "b"}) || in.App.Flags.Labels["k"] != "v" || !slices.Equal(in.App.Flags.Ports, []int{1, 2}) {
+			t.Errorf("tags=%q labels=%v ports=%v", in.App.Flags.Tags, in.App.Flags.Labels, in.App.Flags.Ports)
+		}
+	})
+	t.Run("config list and map", func(t *testing.T) {
+		cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v, x: y}\nports: [8080, 9090]\n")
+		in := bind(t, nil, BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		if !slices.Equal(in.App.Flags.Tags, []string{"a", "b"}) || len(in.App.Flags.Labels) != 2 || in.App.Flags.Labels["x"] != "y" ||
+			!slices.Equal(in.App.Flags.Ports, []int{8080, 9090}) {
+			t.Errorf("tags=%q labels=%v ports=%v", in.App.Flags.Tags, in.App.Flags.Labels, in.App.Flags.Ports)
+		}
+	})
+	t.Run("env splits on the separator only when declared", func(t *testing.T) {
+		t.Setenv("PORTS", "1, 2,3")
+		t.Setenv("TAGS", "a,b") // no separator: one item, as written
+		in := bind(t, nil, BindMeta{})
+		if !slices.Equal(in.App.Flags.Ports, []int{1, 2, 3}) || !slices.Equal(in.App.Flags.Tags, []string{"a,b"}) {
+			t.Errorf("ports=%v tags=%q", in.App.Flags.Ports, in.App.Flags.Tags)
+		}
+	})
+}
+
+// ── several variable names ──────────────────────────────────────────────.
+
+type tbMultiEnvInputs struct {
+	App struct {
+		Flags struct {
+			Token string `rotini:"token" recon:"token" env:"GH_TOKEN,GITHUB_TOKEN"`
+		}
+		Arguments struct{}
+		Env       struct {
+			Region string `rotini:"region" recon:"region" env:"APP_REGION,AWS_REGION" enum:"[\"us\",\"eu\"]"`
+		}
+	}
+}
+
+// `variable: [GH_TOKEN, GITHUB_TOKEN]` generates env:"GH_TOKEN,GITHUB_TOKEN": the first name
+// that is set supplies the value, on a flag's fallback and on an env input alike.
+func TestBinder_severalVariableNames(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string"}}}
+	bind := func(t *testing.T) (tbMultiEnvInputs, error) {
+		t.Helper()
+		var in tbMultiEnvInputs
+		err := NewBinder(BindMeta{}).Bind(NewContextFor(def, nil), &in)
+		return in, err
+	}
+	t.Run("a later name when the first is unset", func(t *testing.T) {
+		t.Setenv("GITHUB_TOKEN", "from-github")
+		t.Setenv("AWS_REGION", "eu")
+		in, err := bind(t)
+		if err != nil || in.App.Flags.Token != "from-github" || in.App.Env.Region != "eu" {
+			t.Fatalf("token=%q region=%q err=%v", in.App.Flags.Token, in.App.Env.Region, err)
+		}
+	})
+	t.Run("the first name wins when both are set", func(t *testing.T) {
+		t.Setenv("GH_TOKEN", "from-gh")
+		t.Setenv("GITHUB_TOKEN", "from-github")
+		t.Setenv("APP_REGION", "us")
+		t.Setenv("AWS_REGION", "eu")
+		in, err := bind(t)
+		if err != nil || in.App.Flags.Token != "from-gh" || in.App.Env.Region != "us" {
+			t.Fatalf("token=%q region=%q err=%v", in.App.Flags.Token, in.App.Env.Region, err)
+		}
+	})
+	t.Run("an error names the variable that was set", func(t *testing.T) {
+		t.Setenv("AWS_REGION", "mars")
+		if _, err := bind(t); err == nil || !strings.Contains(err.Error(), "for AWS_REGION") {
+			t.Fatalf("err = %v, want it to name AWS_REGION", err)
+		}
+	})
+}
+
+// An environment variable that is set but empty is unset, for a flag's fallback: the config file
+// and then the default supply the value, rather than "" outranking them and failing to parse.
+func TestBinder_emptyEnvFallsThrough(t *testing.T) {
+	cfg := writeConfig(t, "port: 9090\n")
+	t.Setenv("PORT", "")
+	var in tbFallbackInputs
+	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Bind(NewContextFor(tbFallbackDef(false), nil), &in)
+	if err != nil || in.App.Flags.Port != 9090 {
+		t.Fatalf("Port = %d, err = %v; want the config file's 9090", in.App.Flags.Port, err)
+	}
+}
+
+// An env or config input's bool takes the spellings a flag's does. recon alone accepts only
+// true/false/1/0, so CACHE=yes failed on an env input while working as a flag's fallback.
+// A string input whose value is "yes" is untouched.
+func TestBinder_boolSpellingsOnEnvAndConfig(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Env       struct {
+				Cache  bool   `rotini:"cache" recon:"cache" env:"CACHE"`
+				Answer string `rotini:"answer" recon:"answer" env:"ANSWER"`
+			}
+			Config struct {
+				Debug *bool `rotini:"debug" recon:"debug"`
+			}
+		}
+	}
+	cfg := writeConfig(t, "debug: 'on'\n")
+	t.Setenv("CACHE", "Yes")
+	t.Setenv("ANSWER", "yes")
+	var in inputs
+	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !in.App.Env.Cache || in.App.Env.Answer != "yes" || in.App.Config.Debug == nil || !*in.App.Config.Debug {
+		t.Errorf("cache=%v answer=%q debug=%v", in.App.Env.Cache, in.App.Env.Answer, in.App.Config.Debug)
+	}
+	t.Setenv("CACHE", "maybe")
+	var bad inputs
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
+		t.Error("CACHE=maybe accepted")
+	}
+}
+
+// A date on an env or config input reads the same way a date flag does: the generated layout
+// tag reaches recon through the source, which alone would demand RFC 3339.
+func TestBinder_channelTimeLayouts(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Env       struct {
+				Since time.Time `rotini:"since" recon:"since" env:"SINCE" layout:"2006-01-02"`
+				Epoch time.Time `rotini:"epoch" recon:"epoch" env:"EPOCH" layout:"unix"`
+			}
+			Config struct {
+				Until *time.Time `rotini:"until" recon:"until" layout:"02/01/2006"`
+			}
+		}
+	}
+	cfg := writeConfig(t, "until: '25/12/2026'\n")
+	t.Setenv("SINCE", "2026-09-29")
+	t.Setenv("EPOCH", "1759104000")
+	var in inputs
+	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, c := in.App.Env, in.App.Config
+	if !e.Since.Equal(time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)) || e.Epoch.Unix() != 1759104000 || c.Until == nil || c.Until.Month() != 12 {
+		t.Errorf("since=%v epoch=%v until=%v", e.Since, e.Epoch, c.Until)
+	}
+	t.Setenv("SINCE", "yesterday")
+	var bad inputs
+	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
+		t.Error("SINCE=yesterday accepted")
+	}
+}
+
+// An env or config duration reads days and weeks like a flag does, and a duration or size bound
+// applies on those channels too — recon's own parser stops at hours, and a duration read as a
+// plain integer never met its bound.
+func TestBinder_channelDurationsAndBounds(t *testing.T) {
+	type inputs struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+			Env       struct {
+				TTL time.Duration `rotini:"ttl" recon:"ttl" env:"TTL" max:"604800000000000"`
+			}
+			Config struct {
+				Cache ByteSize `rotini:"cache" recon:"cache" max:"1073741824"`
+			}
+		}
+	}
+	bind := func(t *testing.T, cfg string) (inputs, error) {
+		t.Helper()
+		var in inputs
+		meta := BindMeta{}
+		if cfg != "" {
+			meta.ConfigFiles = []ConfigFile{{Name: "app", Path: writeConfig(t, cfg), Format: "yaml"}}
+		}
+		err := NewBinder(meta).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+		return in, err
+	}
+	t.Setenv("TTL", "3d")
+	in, err := bind(t, "cache: 512Mi\n")
+	if err != nil || in.App.Env.TTL != 72*time.Hour || in.App.Config.Cache != 512<<20 {
+		t.Fatalf("ttl=%v cache=%v err=%v", in.App.Env.TTL, in.App.Config.Cache, err)
+	}
+	t.Setenv("TTL", "8d")
+	if _, err := bind(t, ""); err == nil || !strings.Contains(err.Error(), "TTL must be <= 7d (got 8d)") {
+		t.Errorf("TTL=8d: err = %v, want the 7d bound", err)
+	}
+	t.Setenv("TTL", "1h")
+	if _, err := bind(t, "cache: 2Gi\n"); err == nil || !strings.Contains(err.Error(), "cache must be <= 1Gi") {
+		t.Errorf("cache 2Gi: err = %v, want the 1Gi bound", err)
+	}
+}
+
+// A parent collecting its own inputs (in CascadingPreRun, say) judges only its own frames: the
+// leaf's required flag is the leaf's handler's business. Judging it here failed `app sub --help`
+// before sub's handler could answer the --help.
+func TestBinder_validatesOnlyTheFramesTheTypeDescribes(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "config", Identifiers: []string{"--config"}, Type: "string"}},
+		Commands: []CommandDef{{
+			Name: "sub", Handler: "AppSub",
+			Flags: []FlagDef{
+				{Name: "file", Identifiers: []string{"-f"}, Type: "string", Required: true},
+				{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
+			},
+		}},
+	}
+	var root struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config"`
+			}
+			Arguments struct{}
+		}
+	}
+	rtx := NewContextFor(def, []string{"--config", "c.yaml", "sub", "-h"})
+	rtx.frame = 0 // collecting from the root's own hook
+	if err := NewBinder(BindMeta{}).Bind(rtx, &root); err != nil || root.App.Flags.Config != "c.yaml" {
+		t.Fatalf("root collect: config=%q err=%v", root.App.Flags.Config, err)
+	}
+	// The leaf's own collect still enforces its required flag.
+	var leaf struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config"`
+			}
+			Arguments struct{}
+		}
+		AppSub struct {
+			Flags struct {
+				File string `rotini:"file"`
+				Help bool   `rotini:"help"`
+			}
+			Arguments struct{}
+		}
+	}
+	rtx.frame = 1
+	if err := NewBinder(BindMeta{}).Bind(rtx, &leaf); err == nil || !strings.Contains(err.Error(), "-f") {
+		t.Errorf("leaf collect: err = %v, want the missing -f", err)
+	}
+}
+
+// TestReconBind_unrecognizedCause covers the fallback arm of reconBind: a recon failure that
+// is none of the four typed ones still has to produce a categorized, non-leaky *BindError
+// naming the channel in plain words ("environment", not "env").
+func TestReconBind_unrecognizedCause(t *testing.T) {
+	cause := errors.New("some unrecognized recon failure")
+	cases := []struct {
+		channel string
+		want    string
+	}{
+		{channelEnv, "environment"},
+		{channelConfig, "configuration"},
+		{channelStdin, "stdin"},
+		{channelFlag, "flag"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.channel, func(t *testing.T) {
+			err := reconBind(tc.channel, cause)
+
+			var be *BindError
+			if !errors.As(err, &be) {
+				t.Fatalf("reconBind returned %T, want a *BindError", err)
+			}
+			if !strings.Contains(be.Msg, tc.want) {
+				t.Errorf("message %q does not name the channel as %q", be.Msg, tc.want)
+			}
+			if !errors.Is(err, cause) {
+				t.Error("the original cause is not reachable with errors.Is")
+			}
+			if !errors.Is(err, ErrUsage) {
+				t.Error("an unrecognized channel failure should still be usage-class")
+			}
+			// Non-leaky: the raw recon text must not reach the user's message.
+			if strings.Contains(be.Msg, cause.Error()) {
+				t.Errorf("message %q leaks the raw cause", be.Msg)
+			}
+		})
+	}
+
+	if err := reconBind(channelEnv, nil); err != nil {
+		t.Errorf("reconBind(nil) = %v, want nil", err)
+	}
+}
+
+// TestReconBind_rootPathIsNamedByChannel pins how a failure about the payload AS A WHOLE is
+// phrased. recon reports an empty Path for a document-level problem — a JSON stdin payload
+// missing its own required property, say — and the message used to interpolate that empty
+// string into the per-input noun:
+//
+//	Error: stdin field "": missing required property "name"
+//
+// A reader then hunts for a field called "", while the real subject sits in the detail behind
+// an empty pair of quotes. An empty path now falls back to the channel's own name, and a
+// NON-empty one is untouched, which is the half a naive fix would break.
+func TestReconBind_rootPathIsNamedByChannel(t *testing.T) {
+	root, field := recon.Path{}, recon.Path{"tags"}
+	cases := []struct {
+		name  string
+		cause error
+		want  string
+	}{
+		{"validation at the root", &recon.ValidationError{Path: root, Msg: `missing required property "name"`}, `stdin: missing required property "name"`},
+		{"validation on a field", &recon.ValidationError{Path: field, Msg: "value is not of type array"}, `stdin field "tags": value is not of type array`},
+		{"missing required at the root", &recon.MissingRequiredError{Path: root}, "stdin is required"},
+		{"missing required on a field", &recon.MissingRequiredError{Path: field}, `stdin field "tags" is required`},
+		{"coercion at the root", &recon.CoercionError{Path: root, Target: "int"}, "stdin: expected int"},
+		{"empty value at the root", &recon.EmptyValueError{Path: root}, "stdin must not be empty"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var be *BindError
+			if !errors.As(reconBind(channelStdin, tc.cause), &be) {
+				t.Fatalf("reconBind did not return a *BindError for %T", tc.cause)
+			}
+			if be.Msg != tc.want {
+				t.Errorf("message = %q, want %q", be.Msg, tc.want)
+			}
+			if strings.Contains(be.Msg, `""`) {
+				t.Errorf("message %q names an empty input", be.Msg)
+			}
+		})
+	}
+}
+
+func TestTrimAcquiredPayload_oneRuleForBothPaths(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ name, in, want string }{
+		{"one trailing newline goes", "hello\n", "hello"},
+		{"a CRLF ending goes whole", "hello\r\n", "hello"},
+		{"only ONE ending goes", "hello\n\n", "hello\n"},
+		{"leading whitespace is content", "  hello", "  hello"},
+		{"interior whitespace is content", "a  b", "a  b"},
+		{"trailing spaces are content", "hello  ", "hello  "},
+		{"spaces before the ending survive", "  hello  \n", "  hello  "},
+		{"no ending, nothing to do", "hello", "hello"},
+		{"empty stays empty", "", ""},
+		{"a lone newline empties", "\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := trimAcquiredPayload(tc.in); got != tc.want {
+				t.Errorf("trimAcquiredPayload(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+
+	// The property that actually matters: both entry points agree. resolveFlagValue reads
+	// the sentinel side; bindRawStdin reads the channel side.
+	const payload = "  hello  \n"
+	dir := t.TempDir()
+	file := filepath.Join(dir, "value.txt")
+	if err := os.WriteFile(file, []byte(payload), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fd := FlagDef{Name: "input", Identifiers: []string{"-i"}, From: []string{"file", "stdin"}}
+
+	fromFile, err := resolveFlagValue(fd, "-i", "@"+file, nil)
+	if err != nil {
+		t.Fatalf("resolveFlagValue(@file): %v", err)
+	}
+	fromStdin, err := resolveFlagValue(fd, "-i", "-", strings.NewReader(payload))
+	if err != nil {
+		t.Fatalf("resolveFlagValue(-): %v", err)
+	}
+	var channel *string
+	sf := reflect.ValueOf(&channel).Elem()
+	if err := bindRawStdin(sf, "text", []byte(payload)); err != nil {
+		t.Fatalf("bindRawStdin: %v", err)
+	}
+
+	if fromFile != fromStdin || fromFile != *channel {
+		t.Errorf("the three acquisition paths disagree: @file=%q -=%q channel=%q", fromFile, fromStdin, *channel)
+	}
+	if *channel != "  hello  " {
+		t.Errorf("payload = %q, want %q — leading and trailing spaces are content", *channel, "  hello  ")
 	}
 }

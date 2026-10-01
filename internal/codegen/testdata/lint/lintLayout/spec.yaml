@@ -1,0 +1,37 @@
+# layout says how a TIME is written, in Go's reference-time notation. It means nothing on a
+# non-time input, and a layout with no part of the reference time can never match a value —
+# the classic case is YYYY-MM-DD, which Go reads as literal text.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: name
+      identifiers: [--name]
+      schema:
+        type: string
+        layout: '2006-01-02'
+    - name: due
+      identifiers: [--due]
+      schema:
+        type: date
+        layout: YYYY-MM-DD
+    # Fine: a date, a custom layout, Unix seconds, and a list of dates.
+    - name: day
+      identifiers: [--day]
+      schema:
+        type: date
+        default: '2026-09-29'
+    - name: at
+      identifiers: [--at]
+      schema:
+        type: datetime
+        layout: 'Jan 2 2006 15:04'
+    - name: since
+      identifiers: [--since]
+      schema:
+        type: time
+        layout: unix
+    - name: holidays
+      identifiers: [--holiday]
+      schema:
+        type: '[]date'

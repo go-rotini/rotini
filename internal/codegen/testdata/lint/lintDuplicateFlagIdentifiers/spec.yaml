@@ -1,0 +1,16 @@
+# The parser would resolve a duplicate identifier silently, binding one and ignoring
+# the other.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: out
+      identifiers:
+        - -o
+      schema:
+        type: string
+    - name: owner
+      identifiers:
+        - -o
+      schema:
+        type: string

@@ -1,0 +1,79 @@
+# R2 — verbatim pages. `help:`, `man:` and `markdown:` on a command are the exact page, bypassing
+# the renderer — the escape hatch for when a generated page is not enough, which makes it the
+# path that has to be right when it is used.
+#
+# The pages below carry everything a renderer would touch: a tab, trailing spaces, a run of blank
+# lines, quotes, backticks, template braces, and ANSI styling. Help keeps all of it byte for byte;
+# man drops the ANSI (a man page carries no terminal styling — the one documented difference);
+# markdown keeps all of it. A command WITHOUT a verbatim page still gets a generated one: a
+# page is not inherited down the tree.
+
+gomodinit example.com/vb
+
+exec rotini generate cmd/vb/.rotini.spec.yaml --config cmd/vb/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o vb$exe ./cmd/vb
+
+exec ./vb$exe
+cmp stdout want.txt
+
+-- want.txt --
+help="VB\tHELP  \n\n\n  indented \"quoted\" `code` {{not a template}}\n\x1b[1mbold\x1b[0m\nlast line"
+man="VB(1) MAN PAGE\n\n\nNAME  \nvb\n"
+markdown="# vb\n\n\n| a |  b |\n"
+sub generated=true
+-- cmd/vb/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: vb
+  summary: verbatim demo
+  help: "VB\tHELP  \n\n\n  indented \"quoted\" `code` {{not a template}}\n\u001b[1mbold\u001b[0m\nlast line"
+  man: "VB(1) MAN PAGE\n\n\nNAME  \n\u001b[1mvb\u001b[0m\n"
+  markdown: "# vb\n\n\n| a |  b |\n"
+  commands:
+    - name: sub
+      summary: a sub-command
+-- cmd/vb/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/vb/main.go
+    - type: cmd
+      file: internal/cmd/vb/zz_vb.go
+      package: vb
+  features:
+    - type: help
+      enabled: true
+    - type: man
+      enabled: true
+    - type: markdown
+      enabled: true
+-- internal/cmd/vb/vb.go --
+package vb
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*vbHandlers)(nil)
+
+type vbHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*vbHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	help, _ := Help()
+	man, _ := Man()
+	markdown, _ := Markdown()
+	sub, _ := Help("sub")
+	fmt.Fprintf(rtx.Stdout, "help=%q\nman=%q\nmarkdown=%q\n", help, man, markdown)
+	fmt.Fprintf(rtx.Stdout, "sub generated=%v\n", strings.Contains(sub, "Usage:") && !strings.Contains(sub, "VB"))
+}

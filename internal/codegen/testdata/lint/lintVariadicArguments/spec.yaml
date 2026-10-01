@@ -1,0 +1,11 @@
+# A trailing variadic absorbs the rest, so anything after it could never bind.
+version: 0.0.0
+command:
+  name: demo
+  arguments:
+    - name: paths
+      schema:
+        type: '[]string'
+    - name: target
+      schema:
+        type: string

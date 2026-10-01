@@ -72,7 +72,7 @@ func TestDefaultSignals_gracefulShutdownRunsTeardown(t *testing.T) {
 		}
 	}}
 
-	code, _ := newSigProgram(h).run(nil)
+	code, _ := newSigProgram(h).Run(nil)
 
 	if want := 128 + int(syscall.SIGUSR1); code != want {
 		t.Errorf("exit code = %d, want %d (128+signum graceful signal shutdown)", code, want)
@@ -115,7 +115,7 @@ func TestDefaultSignals_secondSignalForcesExit(t *testing.T) {
 
 	p := newSigProgram(h)
 	p.exit = func(code int) { forced.Store(int32(code)) }
-	p.run(nil)
+	p.Run(nil)
 
 	if got := forced.Load(); got != forceExitCode {
 		t.Errorf("force exit code = %d, want %d", got, forceExitCode)
@@ -143,7 +143,7 @@ func TestDefaultSignals_withContextOptsOut(t *testing.T) {
 		close(delivered)
 	}}
 
-	newSigProgram(h).WithContext(context.Background()).run(nil)
+	newSigProgram(h).WithContext(context.Background()).Run(nil)
 	<-delivered
 }
 
@@ -169,7 +169,7 @@ func TestWithoutSignalHandling_suppressesTrap(t *testing.T) {
 		close(delivered)
 	}}
 
-	newSigProgram(h).WithoutSignalHandling().run(nil)
+	newSigProgram(h).WithoutSignalHandling().Run(nil)
 	<-delivered
 }
 
@@ -186,7 +186,7 @@ func TestWithSignals_trapsCustomSet(t *testing.T) {
 		}
 	}}
 
-	code, _ := newSigProgram(h).WithSignals(syscall.SIGUSR1).run(nil)
+	code, _ := newSigProgram(h).WithSignals(syscall.SIGUSR1).Run(nil)
 
 	if want := 128 + int(syscall.SIGUSR1); code != want {
 		t.Errorf("exit code = %d, want %d (128+signum)", code, want)
@@ -213,7 +213,7 @@ func TestWithSignals_withContext_derivesChildAndTraps(t *testing.T) {
 		}
 	}}
 
-	code, _ := newSigProgram(h).WithContext(context.Background()).WithSignals(syscall.SIGUSR1).run(nil)
+	code, _ := newSigProgram(h).WithContext(context.Background()).WithSignals(syscall.SIGUSR1).Run(nil)
 
 	if want := 128 + int(syscall.SIGUSR1); code != want {
 		t.Errorf("exit code = %d, want %d", code, want)
@@ -238,7 +238,7 @@ func TestWithSignals_withContext_parentCancelStillHalts(t *testing.T) {
 		}
 	}}
 
-	newSigProgram(h).WithContext(parent).WithSignals(syscall.SIGUSR1).run(nil)
+	newSigProgram(h).WithContext(parent).WithSignals(syscall.SIGUSR1).Run(nil)
 
 	if !contains(log, "CascadingPostRun") {
 		t.Errorf("teardown did not run after parent cancel; log=%v", log)

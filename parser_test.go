@@ -24,7 +24,14 @@ func parserTestDef() Definition {
 				Name:    "run",
 				Handler: "AppRun",
 				Aliases: []string{"r"},
-				Flags:   []FlagDef{{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"}},
+				Flags: []FlagDef{
+					{Name: "count", Identifiers: []string{"-c", "--count"}, Type: "int"},
+					{Name: "rate", Identifiers: []string{"--rate"}, Type: "float64"},
+					{Name: "wait", Identifiers: []string{"--wait"}, Type: "time.Duration"},
+					{Name: "when", Identifiers: []string{"--when"}, Type: "time.Time"},
+					{Name: "level", Identifiers: []string{"--level"}, Type: "int"},
+					{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string"},
+				},
 				Arguments: []ArgDef{
 					{Name: "name", Type: "string"},
 					{Name: "rest", Type: "[]string", Variadic: true},
@@ -50,13 +57,17 @@ func TestParse_bindsInputs(t *testing.T) {
 
 // TestParse_viaRegistryGet exercises the full handler flow: the parser is bound to
 // the registry, retrieved via rtx.Get (ctx.Value style), then used to parse.
-func TestParse_viaRegistryGet(t *testing.T) {
+// The parser a handler reaches is the one the program supplied — and Context.Parser never
+// returns nil, so a handler that wants to parse argv itself does not have to ask whether one
+// exists, nor supply one to make the answer yes.
+func TestParse_viaContextParser(t *testing.T) {
 	rtx := NewContextFor(parserTestDef(), []string{"run", "alice"})
-	rtx.Bind(KeyParser, NewParser())
+	supplied := NewParser()
+	rtx.WithParser(supplied)
 
-	parser, ok := rtx.Value(KeyParser).(*Parser)
-	if !ok {
-		t.Fatal("parser not retrievable from registry")
+	parser := rtx.Parser()
+	if parser != supplied {
+		t.Fatalf("Parser() = %p, want the supplied %p", parser, supplied)
 	}
 	var in runInputs
 	if err := parser.Parse(rtx, &in); err != nil {
@@ -113,7 +124,7 @@ func TestParse_unknownCommand(t *testing.T) {
 	// "ru" is a stray positional on a branch-only root: a mistyped sub-command.
 	// The error is data, not presentation: no baked-in suggestion text — the
 	// structured fields carry the token and the sibling vocabulary so a handler
-	// composes its own response (typically with a bound [Suggestor]).
+	// composes its own response (typically with a [Suggestor]).
 	rtx := NewContextFor(parserTestDef(), []string{"ru"})
 	var in runInputs
 	err := NewParser().Parse(rtx, &in)
@@ -235,7 +246,7 @@ func TestParse_numericConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "port", Identifiers: []string{"--port"}, Type: "int",
-			Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0)},
+			Minimum: Ptr(1.0), Maximum: Ptr(65535.0),
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -259,13 +270,13 @@ func TestParse_constraintsExclusiveAndZero(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "delta", Identifiers: []string{"--delta"}, Type: "int",
-				Constraints: Constraints{Minimum: Ptr(0.0)}}, // the once-rejected zero bound
+				Minimum: Ptr(0.0)}, // the once-rejected zero bound
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float64",
-				Constraints: Constraints{ExclusiveMinimum: Ptr(0.0), ExclusiveMaximum: Ptr(1.0)}},
+				ExclusiveMinimum: Ptr(0.0), ExclusiveMaximum: Ptr(1.0)},
 			{Name: "step", Identifiers: []string{"--step"}, Type: "int",
-				Constraints: Constraints{MultipleOf: Ptr(5.0)}},
+				MultipleOf: Ptr(5.0)},
 			{Name: "ports", Identifiers: []string{"--ports"}, Type: "[]int",
-				Constraints: Constraints{MultipleOf: Ptr(2.0)}},
+				MultipleOf: Ptr(2.0)},
 		},
 	}
 	cases := []struct {
@@ -315,15 +326,15 @@ func TestParse_constraintsWidenedTypes(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "workers", Identifiers: []string{"--workers"}, Type: "uint",
-				Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(64.0)}},
+				Minimum: Ptr(1.0), Maximum: Ptr(64.0)},
 			{Name: "offset", Identifiers: []string{"--offset"}, Type: "int64",
-				Constraints: Constraints{Minimum: Ptr(-100.0), Maximum: Ptr(100.0)}},
+				Minimum: Ptr(-100.0), Maximum: Ptr(100.0)},
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float32",
-				Constraints: Constraints{Maximum: Ptr(1.0)}},
+				Maximum: Ptr(1.0)},
 			{Name: "port", Identifiers: []string{"--port"}, Type: "[]int",
-				Constraints: Constraints{Minimum: Ptr(1.0), Maximum: Ptr(65535.0), MaxItems: 3}},
+				Minimum: Ptr(1.0), Maximum: Ptr(65535.0), MaxItems: 3},
 			{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
-				Constraints: Constraints{MinLength: 2}},
+				MinLength: 2},
 		},
 	}
 	cases := []struct {
@@ -352,7 +363,7 @@ func TestParse_stringLengthConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "name", Identifiers: []string{"--name"}, Type: "string",
-			Constraints: Constraints{MinLength: 2, MaxLength: 5},
+			MinLength: 2, MaxLength: 5,
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -371,7 +382,7 @@ func TestParse_patternConstraint(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "id", Identifiers: []string{"--id"}, Type: "string",
-			Constraints: Constraints{Pattern: "^[a-z]+$"},
+			Pattern: "^[a-z]+$",
 		}},
 	}
 	for _, c := range []struct{ val, wantErr string }{
@@ -389,7 +400,7 @@ func TestParse_itemCountConstraints(t *testing.T) {
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{
 			Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string",
-			Constraints: Constraints{MinItems: 1, MaxItems: 2},
+			MinItems: 1, MaxItems: 2,
 		}},
 	}
 	for _, c := range []struct {
@@ -414,7 +425,7 @@ func TestParse_variadicArgItemCount(t *testing.T) {
 		Name: "app", Handler: "App",
 		Arguments: []ArgDef{{
 			Name: "files", Type: "[]string", Variadic: true,
-			Constraints: Constraints{MinItems: 2},
+			MinItems: 2,
 		}},
 	}
 	var in struct{}
@@ -541,12 +552,37 @@ func TestParse_secretValueRedactedInErrors(t *testing.T) {
 	}
 }
 
+// A value type's parser quotes what it rejected, so its message must not ride along on a secret.
+func TestParse_secretValueRedactedFromParserCause(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "key", Identifiers: []string{"--key"}, Type: "rotini.HexBytes", Secret: true}},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Key HexBytes `rotini:"key"`
+			}
+		}
+	}
+	err := NewParser().Parse(NewContextFor(def, []string{"--key", "topsecretzz"}), &in)
+	if err == nil {
+		t.Fatal("expected a coercion error")
+	}
+	if strings.Contains(err.Error(), "topsecret") {
+		t.Errorf("secret value leaked through the parser's own message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "is not a valid hex value") {
+		t.Errorf("error should still name the type: %v", err)
+	}
+}
+
 func TestParse_secretConstraintValueRedacted(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "pin", Identifiers: []string{"--pin"}, Type: "string", Secret: true,
-				Constraints: Constraints{Pattern: "^[0-9]{4}$"}},
+				Pattern: "^[0-9]{4}$"},
 		},
 	}
 	var in struct{}
@@ -642,7 +678,7 @@ func TestParser_deprecations(t *testing.T) {
 		if err := p.Parse(rtx, &in); err != nil {
 			t.Fatalf("parse %v: %v", argv, err)
 		}
-		return p.Deprecations(rtx)
+		return Deprecations(rtx)
 	}
 
 	// Deprecation implements error, so a handler can return/print it.
@@ -672,6 +708,46 @@ func TestParser_deprecations(t *testing.T) {
 	// The current name + current flag spelling → nothing deprecated.
 	if got := depsFor("compile", "--config", "x"); len(got) != 0 {
 		t.Errorf("Deprecations(compile --config) = %v, want none", got)
+	}
+}
+
+// TestDeprecations_needsNoParserBound is the point of making Deprecations a function.
+//
+// It used to be a method, so a handler had to pull a *Parser out of the registry to get a
+// receiver it never used. That made `Bind(KeyParser, NewParser())` look mandatory in every
+// entrypoint — and a user who removed the line, reasonably, since nothing else read it,
+// SILENTLY lost deprecation reporting: the conventional `Get`+ok guard simply skipped the
+// loop. Nothing failed and nothing said so.
+//
+// The chain here is resolved with no services bound at all.
+func TestDeprecations_needsNoParserBound(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{{
+			Name: "compile", Handler: "AppCompile",
+			Aliases:               []string{"build"},
+			DeprecatedIdentifiers: []string{"build"},
+		}},
+	}
+
+	rtx := NewContextFor(def, []string{"build"})
+	if len(rtx.services) != 0 {
+		t.Fatal("something is bound; this test is meaningless unless the registry is empty")
+	}
+
+	deps := Deprecations(rtx)
+	if len(deps) != 1 {
+		t.Fatalf("Deprecations = %v, want the one deprecated alias", deps)
+	}
+	if deps[0].Kind != "command" || deps[0].Identifier != "build" || deps[0].Name != "compile" {
+		t.Errorf("Deprecations = %+v, want command compile via \"build\"", deps[0])
+	}
+}
+
+// TestDeprecations_nilContext keeps the defensive path covered now that the receiver is gone.
+func TestDeprecations_nilContext(t *testing.T) {
+	if got := Deprecations(nil); got != nil {
+		t.Errorf("Deprecations(nil) = %v, want nil", got)
 	}
 }
 
@@ -956,6 +1032,7 @@ func TestParse_multiCharShortVsCluster(t *testing.T) {
 func TestParse_repeatedNameOnPath(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool"}},
 		Commands: []CommandDef{{
 			Name: "cmd1", Handler: "AppCmd1",
 			Flags: []FlagDef{{Name: "mid", Identifiers: []string{"--mid"}, Type: "string"}},
@@ -1005,6 +1082,7 @@ func TestParse_repeatedNameOnPath(t *testing.T) {
 func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"-v", "--verbose"}, Type: "bool"}},
 		Commands: []CommandDef{
 			{
 				Name: "cmd1", Handler: "AppCmd1",
@@ -1081,7 +1159,7 @@ func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 	}
 }
 
-// The structs below mirror the shape the framework package (rtg) generates for a
+// The structs below mirror the shape the generated cmd package emits for a
 // root command "app" with a sub-command "run".
 
 type appFlags struct {
@@ -1164,7 +1242,8 @@ type runInputs struct {
 func bindStore[T any](store *parsedInputs) T {
 	var out T
 	chain := make([]ResolvedCommand, len(store.scopes))
-	_ = bindInputs(reflect.ValueOf(&out).Elem(), store, chain)
+	v := reflect.ValueOf(&out).Elem()
+	_ = bindInputs(v, store, chain, frameAnchor(v, chain, frameUnset))
 	return out
 }
 
@@ -1485,12 +1564,24 @@ func TestParse_fromFile(t *testing.T) {
 		t.Errorf("inline Token = %q, want the file's contents", in2.App.Flags.Token)
 	}
 
-	// An unreadable file is a usage error naming the flag and the @path — never
-	// a silent literal.
+	// An unreadable file is a usage error naming the flag and the path, in rotini's words —
+	// never a silent literal, and never the OS's own error text ("open …: permission denied").
 	var in3 fromInputs
 	err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token", "@/nonexistent/nope"}), &in3)
-	if err == nil || !strings.Contains(err.Error(), "--token") || !strings.Contains(err.Error(), "@/nonexistent/nope") {
-		t.Errorf("Parse(missing file) = %v, want a cannot-read usage error", err)
+	if err == nil || err.Error() != `--token: no such file: "/nonexistent/nope"` {
+		t.Errorf("Parse(missing file) = %v, want the flag and the path named", err)
+	}
+	locked := filepath.Join(t.TempDir(), "locked")
+	if err := os.WriteFile(locked, []byte("x"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if f, openErr := os.Open(locked); openErr == nil { // running as root: nothing is unreadable
+		_ = f.Close()
+	} else {
+		err = NewParser().Parse(NewContextFor(fromDef(), []string{"--token", "@" + locked}), &in3)
+		if err == nil || !strings.Contains(err.Error(), "permission denied reading") || strings.Contains(err.Error(), "open ") {
+			t.Errorf("Parse(unreadable file) = %v, want a permission error in rotini's words", err)
+		}
 	}
 
 	// STDIN-04 conformance: a plain path (no '@') stays literal even on a
@@ -1587,8 +1678,10 @@ func TestParse_dottedKeys(t *testing.T) {
 	if !ok || image["tag"] != "v2" || image["pull"] != "Always" {
 		t.Errorf("Set[image] = %#v, want nested {tag: v2, pull: Always}", in.App.Flags.Set["image"])
 	}
-	if in.App.Flags.Set["replicas"] != "3" {
-		t.Errorf("Set[replicas] = %#v, want %q", in.App.Flags.Set["replicas"], "3")
+	// A dotted_keys map says nothing about its values, so each is read as the JSON spelling of
+	// it would be: 3 is the number JSON gives, not the text "3".
+	if in.App.Flags.Set["replicas"] != float64(3) {
+		t.Errorf("Set[replicas] = %#v, want float64(3)", in.App.Flags.Set["replicas"])
 	}
 	if in.App.Flags.Labels["team.name"] != "core" {
 		t.Errorf("plain map = %v, want the literal key team.name (dotted_keys is opt-in)", in.App.Flags.Labels)
@@ -1598,13 +1691,13 @@ func TestParse_dottedKeys(t *testing.T) {
 	// replaced by a subtree and a subtree replaced by a scalar.
 	if in, err := parse(t, "--set", "a=1", "--set", "a.b=2"); err != nil {
 		t.Errorf("Parse: %v", err)
-	} else if sub, ok := in.App.Flags.Set["a"].(map[string]any); !ok || sub["b"] != "2" {
+	} else if sub, ok := in.App.Flags.Set["a"].(map[string]any); !ok || sub["b"] != float64(2) {
 		t.Errorf("scalar→subtree: Set[a] = %#v, want map[b:2]", in.App.Flags.Set["a"])
 	}
 	if in, err := parse(t, "--set", "a.b=2", "--set", "a=1"); err != nil {
 		t.Errorf("Parse: %v", err)
-	} else if in.App.Flags.Set["a"] != "1" {
-		t.Errorf("subtree→scalar: Set[a] = %#v, want %q", in.App.Flags.Set["a"], "1")
+	} else if in.App.Flags.Set["a"] != float64(1) {
+		t.Errorf("subtree→scalar: Set[a] = %#v, want 1", in.App.Flags.Set["a"])
 	}
 
 	// An empty path segment is a usage error naming the flag.
@@ -1656,5 +1749,1122 @@ func TestInputs_missingFlagKeepsZero(t *testing.T) {
 	}})
 	if in.Run.Flags.Count != 5 || in.Run.Flags.Rate != 0 || in.Run.Flags.Wait != 0 || in.Run.Flags.Level != nil {
 		t.Errorf("absent flags should stay zero: %+v", in.Run.Flags)
+	}
+}
+
+// ── ParseKind ───────────────────────────────────────────────────.
+
+// TestParseError_kindPerPath drives each parse/validate failure path and asserts
+// the *ParseError carries the right ParseKind — so a funnel can branch on Kind
+// instead of matching the message. Every kind still classifies as CategoryUsage
+// (even the API-misuse Internal kind is a usage-shaped *ParseError).
+func TestParseError_kindPerPath(t *testing.T) {
+	min1 := Ptr(1.0)
+	cases := []struct {
+		name string
+		def  Definition
+		argv []string
+		out  any
+		want ParseKind
+	}{
+		{
+			name: "unknown flag",
+			def:  Definition{Name: "app", Handler: "App"},
+			argv: []string{"--nope"},
+			want: ParseKindUnknownFlag,
+		},
+		{
+			name: "unknown command (stray positional on a branch)",
+			def:  Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "run", Handler: "Run"}}},
+			argv: []string{"ru"},
+			want: ParseKindUnknownCommand,
+		},
+		{
+			name: "flag needs a value",
+			def:  Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "count", Identifiers: []string{"--count"}, Type: "int"}}},
+			argv: []string{"--count"},
+			want: ParseKindNeedsValue,
+		},
+		{
+			name: "value on a count flag (invalid value)",
+			def:  Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "c", Identifiers: []string{"--c"}, Type: "count"}}},
+			argv: []string{"--c=5"},
+			want: ParseKindInvalidValue,
+		},
+		{
+			name: "enum violation",
+			def:  Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "level", Identifiers: []string{"--level"}, Type: "string", Enum: []string{"low", "high"}}}},
+			argv: []string{"--level", "medium"},
+			want: ParseKindEnumViolation,
+		},
+		{
+			name: "constraint violation (minimum)",
+			def:  Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "n", Identifiers: []string{"--n"}, Type: "int", Minimum: min1}}},
+			argv: []string{"--n", "0"},
+			want: ParseKindConstraintViolation,
+		},
+		{
+			name: "missing required",
+			def:  Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string", Required: true}}},
+			argv: []string{},
+			want: ParseKindMissingRequired,
+		},
+		{
+			name: "command takes no arguments",
+			def:  Definition{Name: "app", Handler: "App"},
+			argv: []string{"stray"},
+			want: ParseKindNoArguments,
+		},
+		{
+			name: "too many arguments",
+			def:  Definition{Name: "app", Handler: "App", Arguments: []ArgDef{{Name: "name", Type: "string"}}},
+			argv: []string{"a", "b"},
+			want: ParseKindTooManyArguments,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rtx := NewContextFor(tc.def, tc.argv)
+			out := tc.out
+			if out == nil {
+				out = &struct{}{}
+			}
+			err := NewParser().Parse(rtx, out)
+			if err == nil {
+				t.Fatalf("Parse(%v) = nil, want a %s error", tc.argv, tc.want)
+			}
+			var pe *ParseError
+			if !errors.As(err, &pe) {
+				t.Fatalf("err is not a *ParseError: %T (%v)", err, err)
+			}
+			if pe.Kind != tc.want {
+				t.Errorf("Kind = %s, want %s (msg: %q)", pe.Kind, tc.want, pe.Msg)
+			}
+			// Every parse failure is usage-categorized regardless of kind.
+			if CategoryOf(err) != CategoryUsage {
+				t.Errorf("CategoryOf = %v, want usage", CategoryOf(err))
+			}
+		})
+	}
+}
+
+// TestParseError_internalKind: a parser API misuse (a non-pointer out) is the
+// Internal kind — still a usage-shaped *ParseError.
+func TestParseError_internalKind(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	err := NewParser().Parse(rtx, 42) // not a pointer
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("err is not a *ParseError: %T (%v)", err, err)
+	}
+	if pe.Kind != ParseKindInternal {
+		t.Errorf("Kind = %s, want internal", pe.Kind)
+	}
+}
+
+// TestParseKind_String pins the stable labels (and the zero-value default).
+func TestParseKind_String(t *testing.T) {
+	if got := ParseKindUnspecified.String(); got != "unspecified" {
+		t.Errorf("ParseKindUnspecified = %q, want unspecified", got)
+	}
+	if got := ParseKindEnumViolation.String(); got != "enum-violation" {
+		t.Errorf("ParseKindEnumViolation = %q, want enum-violation", got)
+	}
+}
+
+// ── usage rendering ─────────────────────────────────────────────.
+
+// A parse failure the end user caused carries the usage category, so a single CategoryOf call
+// in a funnel classifies it as theirs; a misuse of the parser API is the author's bug and
+// carries the internal one, as ParseKindInternal's own doc has always said.
+func TestParseError_category(t *testing.T) {
+	var in struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+		}
+	}
+	err := NewParser().Parse(NewContextFor(Definition{Name: "app", Handler: "App"}, []string{"--nope"}), &in)
+	if CategoryOf(err) != CategoryUsage || !errors.Is(err, ErrUsage) || errors.Is(err, ErrInternal) {
+		t.Errorf("unknown flag: %v is %v, want usage", err, CategoryOf(err))
+	}
+
+	err = NewParser().Parse(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), 42) // a non-pointer out
+	if CategoryOf(err) != CategoryInternal || !errors.Is(err, ErrInternal) || errors.Is(err, ErrUsage) {
+		t.Errorf("non-pointer out: %v is %v, want internal", err, CategoryOf(err))
+	}
+}
+
+// negatableDef is a command with one negatable bool flag defaulting to on, plus a genuinely
+// declared --no-cache on a DIFFERENT flag, so the precedence between a declared identifier
+// and a derived negated one is exercised rather than assumed.
+func negatableDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"--color", "-c"}, Type: "bool", Negatable: true, Default: "true"},
+			{Name: "verify", Identifiers: []string{"--verify"}, Type: "bool", Negatable: true},
+		},
+	}
+}
+
+type negatableInputs struct {
+	App struct {
+		Flags struct {
+			Color  bool `rotini:"color"`
+			Verify bool `rotini:"verify"`
+		}
+		Arguments struct{}
+	}
+}
+
+// TestParse_negatableBool covers the direction a plain bool cannot express: turning something
+// off for one run when a default, a config file or an environment variable already turned it
+// on. Without it, an author can only ever say "on".
+func TestParse_negatableBool(t *testing.T) {
+	cases := []struct {
+		name         string
+		argv         []string
+		color        bool
+		verify       bool
+		wantErr      string
+		wantErrToken string
+	}{
+		{name: "the default stands", argv: nil, color: true},
+		{name: "the positive form", argv: []string{"--color"}, color: true},
+		{name: "the negated form sets false", argv: []string{"--no-color"}, color: false},
+		{name: "negating a flag that was off leaves it off", argv: []string{"--no-verify"}, color: true},
+		{name: "positive then negated: last wins", argv: []string{"--color", "--no-color"}, color: false},
+		{name: "negated then positive: last wins", argv: []string{"--no-color", "--color"}, color: true},
+		{name: "the short form has no negated spelling", argv: []string{"-c"}, color: true},
+		{
+			// Short flags have no negated spelling, so "-no-c" is read as a POSIX
+			// cluster (-n -o -c) and fails on the first unknown letter. The point is
+			// that rotini does not invent one, not which token the cluster blames.
+			name:    "a negated short form is not invented",
+			argv:    []string{"-no-c"},
+			wantErr: "unknown flag",
+		},
+		{
+			name:    "the negated form takes no value",
+			argv:    []string{"--no-color=true"},
+			wantErr: "negated form and takes no value",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var in negatableInputs
+			rtx := NewContextFor(negatableDef(), tc.argv)
+			err := NewParser().Parse(rtx, &in)
+
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
+				}
+				if tc.wantErrToken != "" {
+					var pe *ParseError
+					if !errors.As(err, &pe) || pe.Token != tc.wantErrToken {
+						t.Errorf("ParseError token = %v, want %q", err, tc.wantErrToken)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			if in.App.Flags.Color != tc.color {
+				t.Errorf("color = %v, want %v", in.App.Flags.Color, tc.color)
+			}
+			if in.App.Flags.Verify != tc.verify {
+				t.Errorf("verify = %v, want %v", in.App.Flags.Verify, tc.verify)
+			}
+		})
+	}
+}
+
+// TestParse_declaredIdentifierBeatsNegatedForm: an author who genuinely declares --no-cache
+// keeps it, even when another flag's negatable would derive the same token. Silently shadowing
+// a declared identifier is the one outcome that must not happen.
+func TestParse_declaredIdentifierBeatsNegatedForm(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "cache", Identifiers: []string{"--cache"}, Type: "bool", Negatable: true},
+			{Name: "nocache", Identifiers: []string{"--no-cache"}, Type: "string"},
+		},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Cache   bool   `rotini:"cache"`
+				Nocache string `rotini:"nocache"`
+			}
+			Arguments struct{}
+		}
+	}
+	rtx := NewContextFor(def, []string{"--no-cache", "hello"})
+	if err := NewParser().Parse(rtx, &in); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if in.App.Flags.Nocache != "hello" {
+		t.Errorf("the declared --no-cache did not win: nocache=%q cache=%v", in.App.Flags.Nocache, in.App.Flags.Cache)
+	}
+}
+
+// TestParse_negatedFormIsSuggestable: the negated spelling joins the flag vocabulary a
+// ParseError carries, so a Suggestor can offer it for a near miss.
+func TestParse_negatedFormIsSuggestable(t *testing.T) {
+	var in negatableInputs
+	rtx := NewContextFor(negatableDef(), []string{"--no-colour"})
+	err := NewParser().Parse(rtx, &in)
+
+	var pe *ParseError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error = %v, want a *ParseError", err)
+	}
+	if !slices.Contains(pe.Candidates, "--no-color") {
+		t.Errorf("candidates %v do not include the negated form", pe.Candidates)
+	}
+	if got := NewSuggestor().Suggest(pe.Token, pe.Candidates); !slices.Contains(got, "--no-color") {
+		t.Errorf("suggestions %v do not offer --no-color for %q", got, pe.Token)
+	}
+}
+
+// TestParse_pathTypes covers existingfile / existingdir: a value that is not there, or is the
+// wrong kind of thing, is a usage error at PARSE time naming the flag the user typed —
+// instead of an *os.PathError surfacing three layers into a handler, naming only a path.
+func TestParse_pathTypes(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "real.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "absent.txt")
+
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "config", Identifiers: []string{"--config"}, Type: "existingfile"},
+			{Name: "out", Identifiers: []string{"--out"}, Type: "existingdir"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config"`
+				Out    string `rotini:"out"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	cases := []struct {
+		name    string
+		argv    []string
+		wantErr string
+	}{
+		{name: "an existing file passes", argv: []string{"--config", file}},
+		{name: "an existing directory passes", argv: []string{"--out", dir}},
+		{name: "a missing file is named", argv: []string{"--config", missing}, wantErr: "no such file"},
+		{name: "a missing directory says directory", argv: []string{"--out", missing}, wantErr: "no such directory"},
+		{name: "a directory is not a file", argv: []string{"--config", dir}, wantErr: "is a directory, not a file"},
+		{name: "a file is not a directory", argv: []string{"--out", file}, wantErr: "is not a directory"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var in inputs
+			err := NewParser().Parse(NewContextFor(def, tc.argv), &in)
+
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("parse: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
+			}
+			// It is the user's mistake, so it classifies as usage — not internal.
+			if CategoryOf(err) != CategoryUsage {
+				t.Errorf("category = %v, want CategoryUsage", CategoryOf(err))
+			}
+			// The message names the flag, so the user knows which one to fix.
+			var pe *ParseError
+			if !errors.As(err, &pe) || !strings.Contains(pe.Msg, "--") {
+				t.Errorf("message %q does not name the flag", err)
+			}
+		})
+	}
+}
+
+// TestParse_pathTypeKeepsStringBounds: a path is still a string, so its declared pattern and
+// length bounds apply. Skipping them would silently ignore a declared constraint, which is
+// the single failure mode rotini's validation exists to prevent.
+func TestParse_pathTypeKeepsStringBounds(t *testing.T) {
+	dir := t.TempDir()
+	yaml := filepath.Join(dir, "conf.yaml")
+	text := filepath.Join(dir, "conf.txt")
+	for _, p := range []string{yaml, text} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{
+			Name: "config", Identifiers: []string{"--config"}, Type: "existingfile",
+			Constraints: Constraints{Pattern: `\.ya?ml$`},
+		}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Config string `rotini:"config"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	var ok inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--config", yaml}), &ok); err != nil {
+		t.Fatalf("a .yaml path matching the pattern: %v", err)
+	}
+
+	var bad inputs
+	err := NewParser().Parse(NewContextFor(def, []string{"--config", text}), &bad)
+	if err == nil {
+		t.Fatal("a path that exists but violates the pattern was accepted — the constraint was ignored")
+	}
+	if !strings.Contains(err.Error(), `must match \.ya?ml$`) {
+		t.Errorf("error = %v, want it to quote the pattern it violated", err)
+	}
+}
+
+// TestParse_multiValueDefaults covers the capability a repeatable input did not have: a
+// default with more than one value in it.
+//
+// A default is carried as argv occurrences, and FlagDef.Default is ONE string — so before
+// Defaults, `default: [a, b]` had no representation. It stringified into a single mangled
+// element (`"[a b c]"`, Go's %v), which is why lintDefaultScalar rejected it outright and told
+// the author to seed the value in the handler instead. That advice worked and pushed a
+// declared default back into hand-written Go, which is the thing declaring inputs exists to
+// avoid.
+func TestParse_multiValueDefaults(t *testing.T) {
+	t.Parallel()
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "tag", Identifiers: []string{"--tag"}, Type: "[]string", Defaults: []string{"latest", "stable"}},
+			{Name: "label", Identifiers: []string{"--label"}, Type: "map[string]string", Defaults: []string{"team=core", "tier=1"}},
+			{Name: "port", Identifiers: []string{"--port"}, Type: "[]int", Defaults: []string{"80", "443"}},
+			{Name: "plain", Identifiers: []string{"--plain"}, Type: "string", Default: "one"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Tag   []string          `rotini:"tag"`
+				Label map[string]string `rotini:"label"`
+				Port  []int             `rotini:"port"`
+				Plain string            `rotini:"plain"`
+			}
+			Arguments struct{}
+		}
+	}
+
+	t.Run("every element is seeded when the flag is unset", func(t *testing.T) {
+		t.Parallel()
+		var in inputs
+		if err := NewParser().Parse(NewContextFor(def, nil), &in); err != nil {
+			t.Fatal(err)
+		}
+		f := in.App.Flags
+		if !slices.Equal(f.Tag, []string{"latest", "stable"}) {
+			t.Errorf("Tag = %q, want [latest stable]", f.Tag)
+		}
+		if !slices.Equal(f.Port, []int{80, 443}) {
+			t.Errorf("Port = %v, want [80 443] — elements coerce through the element type", f.Port)
+		}
+		if f.Label["team"] != "core" || f.Label["tier"] != "1" {
+			t.Errorf("Label = %v, want team=core tier=1", f.Label)
+		}
+		if f.Plain != "one" {
+			t.Errorf("Plain = %q — a scalar default still works", f.Plain)
+		}
+	})
+
+	t.Run("a supplied value REPLACES the default rather than adding to it", func(t *testing.T) {
+		t.Parallel()
+		var in inputs
+		rtx := NewContextFor(def, []string{"--tag", "mine"})
+		if err := NewParser().Parse(rtx, &in); err != nil {
+			t.Fatal(err)
+		}
+		// Merging would make the default impossible to opt out of, which is the whole
+		// reason a default is a fallback rather than a seed.
+		if !slices.Equal(in.App.Flags.Tag, []string{"mine"}) {
+			t.Errorf("Tag = %q, want [mine] — a default must not merge with a supplied value", in.App.Flags.Tag)
+		}
+		// ...and the flags the user did not touch still take theirs.
+		if !slices.Equal(in.App.Flags.Port, []int{80, 443}) {
+			t.Errorf("Port = %v, want its default", in.App.Flags.Port)
+		}
+	})
+
+	t.Run("repeating the flag still accumulates", func(t *testing.T) {
+		t.Parallel()
+		var in inputs
+		rtx := NewContextFor(def, []string{"--tag", "a", "--tag", "b"})
+		if err := NewParser().Parse(rtx, &in); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(in.App.Flags.Tag, []string{"a", "b"}) {
+			t.Errorf("Tag = %q, want [a b]", in.App.Flags.Tag)
+		}
+	})
+
+	t.Run("a scalar Default wins over Defaults", func(t *testing.T) {
+		t.Parallel()
+		// The spec cannot produce both — a default is a scalar or a list, never both —
+		// but a hand-built Definition can, so the precedence is pinned rather than left
+		// to map order.
+		both := FlagDef{Name: "x", Default: "scalar", Defaults: []string{"a", "b"}}
+		if got := flagDefaults(both); !slices.Equal(got, []string{"scalar"}) {
+			t.Errorf("flagDefaults = %q, want [scalar]", got)
+		}
+		if got := flagDefaults(FlagDef{Name: "x"}); got != nil {
+			t.Errorf("flagDefaults with no default = %q, want nil — absent stays absent", got)
+		}
+	})
+}
+
+// ignore_case: a value matches an enum member regardless of case and binds the declared
+// spelling, on flags and arguments alike; without it matching stays exact.
+func TestParse_enumIgnoreCase(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "mode", Identifiers: []string{"--mode"}, Type: "string", Enum: []string{"fast", "slow"}, IgnoreCase: true},
+			{Name: "strict", Identifiers: []string{"--strict"}, Type: "string", Enum: []string{"on", "off"}},
+		},
+		Arguments: []ArgDef{{Name: "env", Type: "string", Enum: []string{"prod", "dev"}, IgnoreCase: true}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Mode   string `rotini:"mode"`
+				Strict string `rotini:"strict"`
+			}
+			Arguments struct {
+				Env string `rotini:"env"`
+			}
+		}
+	}
+	var in inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--mode", "FAST", "PROD"}), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.App.Flags.Mode != "fast" || in.App.Arguments.Env != "prod" {
+		t.Errorf("mode = %q, env = %q; want the declared spellings fast, prod", in.App.Flags.Mode, in.App.Arguments.Env)
+	}
+	var in2 inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--strict", "ON"}), &in2); err == nil {
+		t.Error("--strict ON accepted without ignore_case")
+	}
+	var in3 inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--mode", "medium"}), &in3); err == nil {
+		t.Error("a non-member accepted under ignore_case")
+	}
+}
+
+func TestSplitValue(t *testing.T) {
+	for _, tc := range []struct {
+		in, sep string
+		want    []string
+	}{
+		{"a,b,c", ",", []string{"a", "b", "c"}},
+		{"a, b,  c", ",", []string{"a", "b", "c"}}, // leading spaces trimmed
+		{`"a,b",c`, ",", []string{"a,b", "c"}},     // a quoted item keeps the separator
+		{`it's,5"`, ",", []string{"it's", `5"`}},   // a stray quote is literal
+		{"a;b", ";", []string{"a", "b"}},
+		{"a|b", "|", []string{"a", "b"}},
+		{"", ",", nil},               // an empty value is an empty list
+		{"a,b", "", []string{"a,b"}}, // no separator: untouched
+		{"k=1,j=2", ",", []string{"k=1", "j=2"}},
+	} {
+		got, err := splitValue(tc.in, tc.sep)
+		if err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("splitValue(%q, %q) = %q, %v; want %q", tc.in, tc.sep, got, err, tc.want)
+		}
+	}
+}
+
+// Items are split before validation, so enum and item counts see each one; repeating the flag
+// still appends; and the variadic argument splits the same way.
+func TestParse_separator(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "tags", Identifiers: []string{"--tags"}, Type: "[]string", Separator: ",", Enum: []string{"a", "b", "c"},
+				Constraints: Constraints{MaxItems: 3}},
+			{Name: "raw", Identifiers: []string{"--raw"}, Type: "[]string"},
+		},
+		Arguments: []ArgDef{{Name: "first", Type: "string"}, {Name: "rest", Type: "[]string", Variadic: true, Separator: ","}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Tags []string `rotini:"tags"`
+				Raw  []string `rotini:"raw"`
+			}
+			Arguments struct {
+				First string   `rotini:"first"`
+				Rest  []string `rotini:"rest"`
+			}
+		}
+	}
+	var in inputs
+	if err := NewParser().Parse(NewContextFor(def, []string{"--tags", "a,b", "--tags", "c", "--raw", "x,y", "one,two", "p,q", "r"}), &in); err != nil {
+		t.Fatal(err)
+	}
+	f, a := in.App.Flags, in.App.Arguments
+	if !slices.Equal(f.Tags, []string{"a", "b", "c"}) || !slices.Equal(f.Raw, []string{"x,y"}) ||
+		a.First != "one,two" || !slices.Equal(a.Rest, []string{"p", "q", "r"}) {
+		t.Errorf("tags=%q raw=%q first=%q rest=%q", f.Tags, f.Raw, a.First, a.Rest)
+	}
+	for _, argv := range [][]string{{"--tags", "a,z"}, {"--tags", "a,b,c,a"}} {
+		var bad inputs
+		if err := NewParser().Parse(NewContextFor(def, argv), &bad); err == nil {
+			t.Errorf("%q accepted — split items must be validated one by one", argv)
+		}
+	}
+}
+
+// implicit_value: a bare flag takes the implicit value, an attached one wins, and the next word
+// is never consumed — on long flags and at the end of a short cluster alike.
+func TestParse_implicitValue(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"-c", "--color"}, Type: "string", Default: "auto", ImplicitValue: "always"},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+		},
+		Arguments: []ArgDef{{Name: "rest", Type: "[]string", Variadic: true}},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				Color   string `rotini:"color"`
+				Verbose bool   `rotini:"verbose"`
+			}
+			Arguments struct {
+				Rest []string `rotini:"rest"`
+			}
+		}
+	}
+	for _, tc := range []struct {
+		argv       []string
+		color      string
+		rest       []string
+		verboseSet bool
+	}{
+		{nil, "auto", nil, false},
+		{[]string{"--color"}, "always", nil, false},
+		{[]string{"--color=never"}, "never", nil, false},
+		{[]string{"--color", "never"}, "always", []string{"never"}, false},
+		{[]string{"-c"}, "always", nil, false},
+		{[]string{"-cnever"}, "never", nil, false},
+		{[]string{"-vc", "x"}, "always", []string{"x"}, true},
+	} {
+		var in inputs
+		if err := NewParser().Parse(NewContextFor(def, tc.argv), &in); err != nil {
+			t.Fatalf("%q: %v", tc.argv, err)
+		}
+		f, a := in.App.Flags, in.App.Arguments
+		if f.Color != tc.color || !slices.Equal(a.Rest, tc.rest) || f.Verbose != tc.verboseSet {
+			t.Errorf("%q → color=%q rest=%q verbose=%v; want %q %q %v", tc.argv, f.Color, a.Rest, f.Verbose, tc.color, tc.rest, tc.verboseSet)
+		}
+	}
+}
+
+// `type: date` generates Layout "2006-01-02": a calendar date parses on a flag, a list flag and
+// an argument, where before only a full RFC 3339 timestamp did.
+func TestParse_dateLayout(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "due", Identifiers: []string{"--due"}, Type: "time.Time", Layout: "2006-01-02"},
+			{Name: "skip", Identifiers: []string{"--skip"}, Type: "[]time.Time", Layout: "2006-01-02"},
+		},
+		Arguments: []ArgDef{{Name: "since", Type: "time.Time", Layout: "unix"}},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Due  time.Time   `rotini:"due"`
+				Skip []time.Time `rotini:"skip"`
+			}
+			Arguments struct {
+				Since time.Time `rotini:"since"`
+			}
+		}
+	}
+	if err := NewParser().Parse(NewContextFor(def, []string{"--due", "2026-10-01", "--skip", "2026-12-25", "--skip", "2026-12-26", "1759104000"}), &in); err != nil {
+		t.Fatal(err)
+	}
+	f, a := in.App.Flags, in.App.Arguments
+	if f.Due.Format("2006-01-02") != "2026-10-01" || len(f.Skip) != 2 || a.Since.Unix() != 1759104000 {
+		t.Errorf("due=%v skip=%v since=%v", f.Due, f.Skip, a.Since)
+	}
+}
+
+// An error about a value names the flag as the user typed it — long, short, or inside a short
+// cluster — on every path a value is checked; with nothing typed (a missing required flag) the
+// long identifier names it, since --due says more than -d.
+func TestParse_errorsNameTheTypedIdentifier(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "due", Identifiers: []string{"-d", "--due"}, Type: "time.Time", Layout: "2006-01-02"},
+			{Name: "mode", Identifiers: []string{"-m", "--mode"}, Type: "string", Enum: []string{"fast", "slow"}},
+			{Name: "port", Identifiers: []string{"-p", "--port"}, Type: "int", Constraints: Constraints{Maximum: Ptr(10.0)}},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+			{Name: "name", Identifiers: []string{"-n", "--name"}, Type: "string", Required: true},
+		},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Due     time.Time `rotini:"due"`
+				Mode    string    `rotini:"mode"`
+				Port    int       `rotini:"port"`
+				Verbose bool      `rotini:"verbose"`
+				Name    string    `rotini:"name"`
+			}
+		}
+	}
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"-n", "x", "--due", "10/01/2026"}, "--due: "},
+		{[]string{"-n", "x", "-d", "10/01/2026"}, "-d: "},
+		{[]string{"-n", "x", "--due=10/01/2026"}, "--due: "},
+		{[]string{"-n", "x", "-vd", "10/01/2026"}, "-d: "},
+		{[]string{"-n", "x", "--mode", "turbo"}, "for --mode "},
+		{[]string{"-n", "x", "-m", "turbo"}, "for -m "},
+		{[]string{"-n", "x", "-p", "99"}, "-p must be <= 10"},
+		{[]string{"-n", "x", "--port", "abc"}, "--port: "},
+		{nil, "--name"},
+	} {
+		err := NewParser().Parse(NewContextFor(def, tc.argv), &in)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q: err = %v, want it to contain %q", tc.argv, err, tc.want)
+		}
+	}
+}
+
+// A `deprecated:` message reaches the runtime: using a deprecated command (by any name), flag
+// (by any identifier) or argument reports a Deprecation carrying it — where before the message
+// reached the help page only, and a handler could not tell the input was deprecated at all.
+// Deprecated identifiers alone still report, without a message.
+func TestDeprecations_carryTheMessage(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{{
+			Name: "build", Aliases: []string{"b", "mk"}, Handler: "AppBuild", Deprecated: "use app make",
+			DeprecatedIdentifiers: []string{"mk"},
+			Flags: []FlagDef{
+				{Name: "conf", Identifiers: []string{"-c", "--conf"}, Type: "string", Deprecated: "use --config"},
+				{Name: "out", Identifiers: []string{"-o", "--out", "--output"}, Type: "string", DeprecatedIdentifiers: []string{"--out"}},
+			},
+			Arguments: []ArgDef{{Name: "target", Type: "string"}, {Name: "legacy", Type: "string", Deprecated: "no longer read"}},
+		}},
+	}
+	got := Deprecations(NewContextFor(def, []string{"mk", "-c", "x", "--out", "y", "t1", "t2"}))
+	want := []Deprecation{
+		{Kind: "command", Name: "build", Identifier: "mk", Message: "use app make"},
+		{Kind: "flag", Name: "conf", Identifier: "-c", Message: "use --config"},
+		{Kind: "flag", Name: "out", Identifier: "--out"},
+		{Kind: "argument", Name: "legacy", Identifier: "<legacy>", Message: "no longer read"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Deprecations =\n %+v\nwant\n %+v", got, want)
+	}
+	if got := got[1].Error(); got != `flag "-c" is deprecated: use --config` {
+		t.Errorf("Error() = %q", got)
+	}
+	// When some spellings are listed as deprecated, only those are: the command reached by its
+	// name or a live alias, and --output (the flag's live spelling), report nothing — they are
+	// what the message tells the user to move to. The unused argument is not reported either.
+	if got := Deprecations(NewContextFor(def, []string{"b", "--output", "y", "t1"})); len(got) != 0 {
+		t.Errorf("got %+v, want nothing: only the listed spellings are deprecated", got)
+	}
+}
+
+// Bounds on a duration or size apply in the type's own unit, element-wise for a list, and the
+// message prints the bound the way the type is written.
+func TestParse_measuredBounds(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "wait", Identifiers: []string{"--wait"}, Type: "time.Duration",
+				Constraints: Constraints{Minimum: Ptr(float64(time.Second)), Maximum: Ptr(float64(90 * time.Minute))}},
+			{Name: "size", Identifiers: []string{"--size"}, Type: "rotini.ByteSize",
+				Constraints: Constraints{Maximum: Ptr(float64(1 << 30))}},
+			{Name: "sizes", Identifiers: []string{"--sizes"}, Type: "[]rotini.ByteSize",
+				Constraints: Constraints{Maximum: Ptr(float64(1 << 20))}},
+		},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Wait  time.Duration `rotini:"wait"`
+				Size  ByteSize      `rotini:"size"`
+				Sizes []ByteSize    `rotini:"sizes"`
+			}
+		}
+	}
+	if err := NewParser().Parse(NewContextFor(def, []string{"--wait", "1h", "--size", "512Mi", "--sizes", "1Ki", "--sizes", "1Mi"}), &in); err != nil {
+		t.Fatalf("in-range values rejected: %v", err)
+	}
+	for argv, want := range map[string]string{
+		"--wait=2h":    "--wait must be <= 1h30m (got 2h)",
+		"--wait=500ms": "--wait must be >= 1s (got 500ms)",
+		"--size=2Gi":   "--size must be <= 1Gi (got 2Gi)",
+		"--sizes=2Mi":  "--sizes must be <= 1Mi (got 2Mi)",
+		"--wait=1d":    "--wait must be <= 1h30m (got 1d)",
+	} {
+		err := NewParser().Parse(NewContextFor(def, []string{argv}), &in)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", argv, err, want)
+		}
+	}
+}
+
+// A `from: [stdin]` flag's "-" survives argv being parsed more than once in a run — the generated
+// --help check (ParseArgv) and a parent collecting its own inputs both parse argv before the leaf's
+// Collect. Each parse used to read stdin afresh, so the first drained it and the leaf failed with
+// "stdin is empty".
+func TestParse_stdinSentinelSurvivesReparsing(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "file", Identifiers: []string{"-f"}, Type: "string", From: []string{"stdin"}},
+			{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				File string `rotini:"file"`
+				Help bool   `rotini:"help"`
+			}
+		}
+	}
+	rtx := NewContextFor(def, []string{"-f", "-"})
+	rtx.Stdin = strings.NewReader("piped payload\n")
+	for i := range 3 {
+		var in inputs
+		if err := NewParser().Parse(rtx, &in); err != nil {
+			t.Fatalf("parse %d: %v", i+1, err)
+		}
+		if in.App.Flags.File != "piped payload" {
+			t.Errorf("parse %d: file = %q", i+1, in.App.Flags.File)
+		}
+	}
+}
+
+// Collecting an ancestor's inputs type from a descendant's handler is an error, even when the
+// two happen to share a flag. Every command shares `help`, so the old check ("they share some
+// flag") passed, and the root's type bound onto the leaf: fallbacks filled its fields by key while
+// argv values were lost — a silently wrong answer instead of a loud one.
+func TestParse_ancestorTypeFromDescendantIsAnError(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "help", Identifiers: []string{"-h"}, Type: "bool"},
+			{Name: "config", Identifiers: []string{"--config"}, Type: "string"},
+		},
+		Commands: []CommandDef{{
+			Name: "view", Handler: "AppView",
+			Flags: []FlagDef{{Name: "help", Identifiers: []string{"-h"}, Type: "bool"}},
+		}},
+	}
+	var root struct {
+		App struct {
+			Flags struct {
+				Help   bool   `rotini:"help"`
+				Config string `rotini:"config"`
+			}
+		}
+	}
+	err := NewParser().Parse(NewContextFor(def, []string{"--config", "x", "view"}), &root)
+	if err == nil || !strings.Contains(err.Error(), `declares no flag "config"`) {
+		t.Fatalf("err = %v, want the mismatch named", err)
+	}
+}
+
+// A token counts against the flag the parser bound it to. The root deprecates --store; a
+// sub-command declares its own --store. `app set --store x` used the sub-command's, and was
+// reported as the root's deprecated one because the report matched raw argv tokens against every
+// command's flags.
+func TestDeprecations_attributeTokensToTheBoundFlag(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "store", Identifiers: []string{"--store"}, Type: "string", Deprecated: "use a context"}},
+		Commands: []CommandDef{{
+			Name: "set", Handler: "AppSet",
+			Flags: []FlagDef{{Name: "store", Identifiers: []string{"--store"}, Type: "string"}},
+		}},
+	}
+	if got := Deprecations(NewContextFor(def, []string{"set", "--store", "x"})); len(got) != 0 {
+		t.Errorf("the sub-command's own --store was reported: %+v", got)
+	}
+	got := Deprecations(NewContextFor(def, []string{"--store", "x", "set"}))
+	if len(got) != 1 || got[0].Name != "store" || got[0].Message != "use a context" {
+		t.Errorf("the root's --store: %+v", got)
+	}
+}
+
+// A flag typed before a sub-command's name belongs to an ancestor: only the commands reached so
+// far are eligible, as in every CLI with sub-commands.
+func TestParse_flagsBindByPosition(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "out", Identifiers: []string{"-o"}, Type: "string"}},
+		Commands: []CommandDef{{
+			Name: "get", Handler: "AppGet",
+			Flags: []FlagDef{
+				{Name: "out", Identifiers: []string{"-o"}, Type: "string"},
+				{Name: "wide", Identifiers: []string{"--wide"}, Type: "bool"},
+			},
+		}},
+	}
+	var in struct {
+		App struct {
+			Flags struct {
+				Out string `rotini:"out"`
+			}
+		}
+		AppGet struct {
+			Flags struct {
+				Out  string `rotini:"out"`
+				Wide bool   `rotini:"wide"`
+			}
+		}
+	}
+	if err := NewParser().Parse(NewContextFor(def, []string{"-o", "root", "get", "-o", "leaf"}), &in); err != nil {
+		t.Fatal(err)
+	}
+	if in.App.Flags.Out != "root" || in.AppGet.Flags.Out != "leaf" {
+		t.Errorf("root -o = %q, get -o = %q", in.App.Flags.Out, in.AppGet.Flags.Out)
+	}
+	if err := NewParser().Parse(NewContextFor(def, []string{"--wide", "get"}), &in); err == nil {
+		t.Error("a sub-command's flag was accepted before the sub-command's name")
+	}
+}
+
+// TestParse_detachedOptionalValueHint pins the hint for the likeliest mistake with an
+// optional-value flag: writing its value detached. `--dry-run server` leaves server as a
+// positional by the documented rule (the value must be attached), and the error used to be only
+// `"apply" takes no arguments (got 1)` — true, and no help at all.
+func TestParse_detachedOptionalValueHint(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{
+		{Name: "apply", Handler: "AppApply", Flags: []FlagDef{
+			{Name: "dry-run", Identifiers: []string{"--dry-run"}, Type: "string", ImplicitValue: "client", Enum: []string{"none", "client", "server"}},
+			{Name: "color", Identifiers: []string{"--color"}, Type: "string", ImplicitValue: "always"},
+		}},
+		{Name: "cat", Handler: "AppCat", Arguments: []ArgDef{{Name: "file", Type: "string"}}, Flags: []FlagDef{
+			{Name: "color", Identifiers: []string{"--color"}, Type: "string", ImplicitValue: "always"},
+		}},
+	}}
+	for _, tt := range []struct {
+		argv []string
+		hint string // "" = no hint
+	}{
+		{[]string{"apply", "--dry-run", "server"}, "--dry-run takes its value attached: --dry-run=server"},
+		{[]string{"apply", "--dry-run", "bogus"}, ""},      // not a valid value: no guess
+		{[]string{"apply", "--dry-run=server", "x"}, ""},   // attached already
+		{[]string{"cat", "--color", "a.txt", "b.txt"}, ""}, // the detached word is a real argument
+		{[]string{"cat", "a.txt", "--color", "never"}, "--color takes its value attached: --color=never"},
+	} {
+		err := NewParser().Parse(NewContextFor(def, tt.argv), &struct{}{})
+		if err == nil {
+			t.Errorf("%v: parsed, want a usage error", tt.argv)
+			continue
+		}
+		if has := strings.Contains(err.Error(), "takes its value attached"); has != (tt.hint != "") || (tt.hint != "" && !strings.Contains(err.Error(), tt.hint)) {
+			t.Errorf("%v: err = %q, want hint %q", tt.argv, err, tt.hint)
+		}
+	}
+}
+
+// TestSecret_coercionFailureIsRedacted is the leak that was there: a secret typed wrong.
+func TestSecret_coercionFailureIsRedacted(t *testing.T) {
+	_, err := Collect[secIntInputs](NewContextFor(secretFlagDef("int"), []string{"--token", secretValue}))
+	mustNotLeak(t, "a secret flag coerced to int", err)
+}
+
+// TestSecret_argumentCoercionIsRedacted: positionals take the same path, and bindArgs had no
+// access to the ArgDefs at all until this was fixed.
+func TestSecret_argumentCoercionIsRedacted(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App",
+		Arguments: []ArgDef{{Name: "tok", Type: "int", Secret: true}}}
+	type args struct {
+		Tok int `rotini:"tok"`
+	}
+	type cmd struct {
+		Flags     struct{}
+		Arguments args
+	}
+	type in struct{ App cmd }
+
+	_, err := Collect[in](NewContextFor(def, []string{secretValue}))
+	mustNotLeak(t, "a secret argument coerced to int", err)
+}
+
+// TestSecret_enumViolationIsRedacted covers the path that was already correct, so a later change
+// cannot quietly regress it while fixing something else.
+func TestSecret_enumViolationIsRedacted(t *testing.T) {
+	_, err := Collect[secInputs](NewContextFor(secretFlagDef("string", "alpha", "beta"), []string{"--token", secretValue}))
+	mustNotLeak(t, "a secret flag failing its enum", err)
+}
+
+// TestSecret_nonSecretValuesStillAppear is the other half: redaction must not swallow the
+// information an ordinary user needs to fix their command line.
+func TestSecret_nonSecretValuesStillAppear(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "count", Identifiers: []string{"--count"}, Type: "int"}}}
+	type f struct {
+		Count int `rotini:"count"`
+	}
+	type c struct {
+		Flags     f
+		Arguments struct{}
+	}
+	type in struct{ App c }
+
+	_, err := Collect[in](NewContextFor(def, []string{"--count", "twelve"}))
+	if err == nil {
+		t.Fatal("expected a rejection")
+	}
+	if !strings.Contains(err.Error(), "twelve") {
+		t.Errorf("a NON-secret value was hidden, which costs the user the diagnosis:\n  %v", err)
+	}
+}
+
+// TestSecret_coerceErrorUnwrapsToItsCause keeps the typed error honest: wrapping the decoder's
+// error was how the TextUnmarshaler path reported detail, and that must survive.
+func TestSecret_coerceErrorUnwrapsToItsCause(t *testing.T) {
+	cause := errors.New("underlying decoder said no")
+	ce := &coerceError{Value: "x", TypeName: "widget", Cause: cause}
+
+	if !errors.Is(ce, cause) {
+		t.Error("coerceError does not unwrap to its cause")
+	}
+	if !strings.Contains(ce.Error(), "underlying decoder said no") {
+		t.Errorf("the cause is not rendered: %q", ce.Error())
+	}
+	if !strings.Contains(ce.render(true), "[redacted]") || strings.Contains(ce.render(true), `"x"`) {
+		t.Errorf("redacted rendering still shows the value: %q", ce.render(true))
+	}
+}
+
+// redactValue's own doc promises that "a secret flag/argument's value never appears in usage or
+// validation errors". It was true for the paths that already had the input's definition in
+// scope — enum violations, constraint violations, map-pair errors — and false for COERCION,
+// which fails several frames below where the definition lives.
+//
+// A secret given a value of the wrong type therefore printed the value, through the default
+// funnel, to stderr. These walk every way a declared input can reject a value.
+
+const secretValue = "hunter2-DO-NOT-PRINT"
+
+func secretFlagDef(typ string, enum ...string) Definition {
+	return Definition{Name: "app", Handler: "App",
+		Flags: []FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: typ, Secret: true, Enum: enum}}}
+}
+
+type secFlags struct {
+	Token string `rotini:"token"`
+}
+type secIntFlags struct {
+	Token int `rotini:"token"`
+}
+type secCmd struct {
+	Flags     secFlags
+	Arguments struct{}
+}
+type secIntCmd struct {
+	Flags     secIntFlags
+	Arguments struct{}
+}
+type secInputs struct{ App secCmd }
+type secIntInputs struct{ App secIntCmd }
+
+func mustNotLeak(t *testing.T, what string, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("%s: expected a rejection, got none", what)
+	}
+	if strings.Contains(err.Error(), secretValue) {
+		t.Errorf("%s LEAKS the secret:\n  %v", what, err)
+	}
+	if !strings.Contains(err.Error(), "[redacted]") {
+		t.Errorf("%s does not mark the value redacted, so the message is unhelpful:\n  %v", what, err)
+	}
+}
+
+// TestParse_authorMistakesAreInternal: a field whose TYPE cannot hold what the Definition
+// declares fails for every value, so it is the program author's bug, reported as rotini's and
+// categorized internal. It used to read as the end user's invalid value, and a map with
+// non-string keys was silently left empty.
+func TestParse_authorMistakesAreInternal(t *testing.T) {
+	type opaque struct{}
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "thing", Identifiers: []string{"--thing"}, Type: "opaque"},
+		{Name: "ids", Identifiers: []string{"--ids"}, Type: "map[int]string"},
+	}}
+	var in struct {
+		App struct {
+			Flags struct {
+				Thing opaque         `rotini:"thing"`
+				IDs   map[int]string `rotini:"ids"`
+			}
+			Arguments struct{}
+		}
+	}
+	for _, argv := range [][]string{{"--thing", "x"}, {"--ids", "1=a"}} {
+		err := NewParser().Parse(NewContextFor(def, argv), &in)
+		pe, ok := errors.AsType[*ParseError](err)
+		if !ok || pe.Kind != ParseKindInternal || !strings.HasPrefix(pe.Msg, "rotini: ") || CategoryOf(err) != CategoryInternal {
+			t.Errorf("%v: err = %v, want an internal error named as rotini's", argv, err)
+		}
+	}
+}
+
+// TestParse_unknownFlagInAClusterCarriesTheVocabulary: an unknown flag carries the declared
+// identifiers for a Suggestor wherever it is found — including inside a short cluster (-vx),
+// which used to report it with none.
+func TestParse_unknownFlagInAClusterCarriesTheVocabulary(t *testing.T) {
+	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
+		{Name: "quiet", Identifiers: []string{"-q"}, Type: "bool"},
+	}}
+	var in struct {
+		App struct {
+			Flags     struct{}
+			Arguments struct{}
+		}
+	}
+	for _, argv := range [][]string{{"-x"}, {"-vx"}} {
+		err := NewParser().Parse(NewContextFor(def, argv), &in)
+		pe, ok := errors.AsType[*ParseError](err)
+		if !ok || pe.Kind != ParseKindUnknownFlag || !slices.Contains(pe.Candidates, "-q") {
+			t.Errorf("%v: err = %+v, want an unknown flag carrying the declared identifiers", argv, pe)
+		}
 	}
 }

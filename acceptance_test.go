@@ -41,6 +41,9 @@ func acmeBin(t *testing.T) string {
 		}
 		acmeBinDir = dir
 		acmeBinPath = filepath.Join(dir, "acme")
+		if runtime.GOOS == "windows" {
+			acmeBinPath += ".exe" // Windows runs a program only by an executable extension
+		}
 		cmd := exec.Command("go", "build", "-o", acmeBinPath, "./testdata/acmecli")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			acmeBinErr = fmt.Errorf("build fixture: %v\n%s", err, out)
@@ -82,9 +85,12 @@ func acmeRun(t *testing.T, stdin string, args ...string) (stdout, stderr string,
 	return out.String(), errb.String(), code
 }
 
-// ARG-04: a missing required positional is a usage error — exit code 2 (the
-// recommended ErrUsage → 1 convention, applied by the fixture's
-// handler), with the error on stderr and NOTHING executed.
+// ARG-04: a missing required positional is a usage error, with the message on stderr and
+// NOTHING executed.
+//
+// Exit 1 is the DEFAULT FUNNEL's flat floor, not a category mapping: rotini labels the error
+// CategoryUsage and leaves the code to the funnel (see Category). A program wanting the common
+// "2 means the command line was wrong" convention maps it itself.
 func TestAcceptance_ARG_04_missingRequired(t *testing.T) {
 	stdout, stderr, code := acmeRun(t, "", "widget", "get")
 	if code != 1 {
@@ -137,7 +143,7 @@ func TestAcceptance_completionProtocol(t *testing.T) {
 	// One candidate per line; a described candidate is "name\tdescription",
 	// an undescribed one is bare — both shapes ride the same wire.
 	byName := map[string]string{}
-	for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.TrimRight(stdout, "\n"), "\n") {
 		name, desc, _ := strings.Cut(line, "\t")
 		byName[name] = desc
 	}

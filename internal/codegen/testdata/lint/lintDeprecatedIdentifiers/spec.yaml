@@ -1,0 +1,13 @@
+# A deprecated identifier must be one the input actually declares, or the annotation
+# silently never fires.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: out
+      identifiers:
+        - --out
+      deprecated_identifiers:
+        - --never-declared
+      schema:
+        type: string

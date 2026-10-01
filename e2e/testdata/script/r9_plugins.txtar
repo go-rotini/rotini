@@ -1,0 +1,289 @@
+# R9 — plugin dispatch, against real sibling binaries.
+#
+# Remote dispatch is "hand argv to another process, pass stdio through, return its exit code",
+# and a fake process tests none of that. So this builds actual plugins and runs them.
+#
+# The interesting part is not that dispatch works — it is that the SAME symptom, "no binary",
+# is a different party's fault depending on who promised the command existed:
+#
+#   a DECLARED remote appears in help and completion whether or not it is installed, so its
+#   absence is a broken install — CategoryInternal, the author's or packager's problem;
+#
+#   a DISCOVERED token appears only when its binary does, so a missing one is a typo —
+#   CategoryUsage, the user's problem.
+#
+# A framework that returned "not found" for both would make a plugin host unable to tell its
+# users apart from its packagers.
+
+gomodinit example.com/host
+
+exec rotini generate cmd/host/.rotini.spec.yaml --config cmd/host/.rotini.conf.yaml
+exec go mod tidy
+
+# The host and its plugins go in one directory: rotini looks NEXT TO THE HOST BINARY first,
+# which is the git/kubectl convention.
+mkdir bin
+mkdir extra-plugins
+exec go build -o bin/host$exe ./cmd/host
+exec go build -o bin/host-sync$exe ./plugins/sync
+exec go build -o bin/host-slow$exe ./plugins/slow
+exec go build -o bin/host-extra$exe ./plugins/extra
+exec go build -o bin/host-status$exe ./plugins/shadow
+
+# ── a declared remote ────────────────────────────────────────────────────────
+exec bin/host$exe sync alpha beta
+stdout 'host-sync got: alpha beta'
+
+# argv passes through verbatim — a flag the host never declared is the plugin's business.
+exec bin/host$exe sync --not-a-host-flag
+stdout 'host-sync got: --not-a-host-flag'
+
+# stdin reaches the plugin, and so do its two output streams.
+stdin payload.txt
+exec bin/host$exe sync --count
+stdout 'host-sync counted 3'
+
+# The plugin's OWN non-zero exit passes through unchanged, and rotini says nothing about it:
+# it has no opinion on what 3 means to host-sync.
+wantexit 3 bin/host$exe sync --fail
+stderr 'host-sync: refused'
+! stderr 'host:'
+
+# ── a discovered plugin ──────────────────────────────────────────────────────
+# Nothing in the spec mentions `extra`. It is a sub-command because a binary is.
+exec bin/host$exe extra one
+stdout 'host-extra got: one'
+
+# ── the plugin path serves BOTH kinds ────────────────────────────────────────
+# host-vendored is a DECLARED remote whose binary lives only in plugin_path — nowhere near
+# the host binary and not on PATH. Before the path was promoted off remote_discovery, this
+# was simply not expressible.
+exec go build -o extra-plugins/host-vendored$exe ./plugins/vendored
+exec bin/host$exe vendored one two
+stdout 'host-vendored got: one two'
+
+# ...and a DISCOVERED plugin in the same directory works the same way.
+exec go build -o extra-plugins/host-found$exe ./plugins/extra
+exec bin/host$exe found alpha
+stdout 'host-extra got: alpha'
+
+# ── the shadowing rule ───────────────────────────────────────────────────────
+# host-status exists, and `status` is one of the host's own commands. Dropping a binary on
+# PATH must not take over a CLI's published interface.
+exec bin/host$exe status
+stdout 'the host.s own status'
+! stdout 'SHADOWED'
+
+# ── the two missing-binary categories ────────────────────────────────────────
+# Declared but absent: an install problem. The funnel maps CategoryInternal to 70.
+wantexit 70 bin/host$exe absent
+stderr 'not found'
+
+# Discovered and absent: a typo. CategoryUsage, mapped to 2.
+wantexit 2 bin/host$exe nosuchthing
+stderr 'not found'
+
+# The failure message names the places actually searched, and now BOTH kinds search the same
+# three: next to the binary, the plugin path, then PATH. The message used to claim it had
+# looked in a discovery path it never consulted for a declared remote.
+! exec bin/host$exe absent
+stderr 'next to the binary'
+stderr 'the plugin path'
+! exec bin/host$exe nosuchthing
+stderr 'next to the binary'
+stderr 'the plugin path'
+
+# ── the timeout ──────────────────────────────────────────────────────────────
+# Found, started, ran long: neither party's fault. CategoryNone, which the host's funnel
+# maps to 75 (EX_TEMPFAIL) because it might work next time.
+wantexit 75 bin/host$exe slow
+stderr 'timed out after 200ms'
+
+# ── completion ───────────────────────────────────────────────────────────────
+exec bin/host$exe __complete ''
+stdout 'sync'
+stdout 'extra'
+# The shadowing plugin contributes nothing: `status` is offered once, as the host's own.
+stdout 'status\tthe host''s own status command'
+
+-- payload.txt --
+one
+two
+three
+-- cmd/host/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: host
+  summary: a plugin host
+  # ONE directory for this command's plugin binaries, searched for BOTH the declared
+  # remote_commands below and anything remote_discovery finds. It used to live under
+  # remote_discovery, where only discovered plugins could reach it — so an author had no way
+  # to say where a DECLARED remote lived, and the not-found message named a directory that
+  # had never been searched for it.
+  plugin_path: ./extra-plugins
+  remote_discovery:
+    prefix: host-
+  remote_commands:
+    - name: sync
+      summary: sync via a plugin
+    - name: slow
+      summary: a slow plugin
+      timeout: 200ms
+    - name: absent
+      summary: declared, never installed
+    - name: vendored
+      summary: declared, installed only in plugin_path
+  commands:
+    - name: status
+      summary: the host's own status command
+-- cmd/host/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/host/main.go
+    - type: cmd
+      file: internal/cmd/host/zz_host.go
+      package: host
+  features:
+    - type: completion
+      enabled: true
+-- internal/cmd/host/host.go --
+package host
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type hostHandlers struct{ base }
+
+func (*hostHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+
+// Funnel maps rotini's categories onto this host's exit codes. A timeout is CategoryNone, so
+// it is matched on the typed Kind rather than the category.
+func Funnel(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
+	worst := 0
+	for _, e := range out.Errors {
+		if _, err := rtx.Stderr.Write([]byte("host: " + e.Error() + "\n")); err != nil {
+			continue
+		}
+		if c := codeFor(e); c > worst {
+			worst = c
+		}
+	}
+	if worst > 0 {
+		rtx.Exit(worst)
+	}
+}
+
+func codeFor(err error) int {
+	var re *rotini.RemoteError
+	if errors.As(err, &re) && re.Kind == rotini.RemoteTimeout {
+		return 75
+	}
+	switch rotini.CategoryOf(err) {
+	case rotini.CategoryUsage:
+		return 2
+	case rotini.CategoryInternal:
+		return 70
+	default:
+		return 1
+	}
+}
+-- internal/cmd/host/host_status.go --
+package host
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type hostStatusHandlers struct{ base }
+
+func (*hostStatusHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "the host's own status")
+}
+-- cmd/host/main.go --
+package main
+
+import (
+	host "example.com/host/internal/cmd/host"
+)
+
+func main() {
+	host.Program.
+		WithFunnel(host.Funnel).
+		Execute()
+}
+-- plugins/sync/main.go --
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"slices"
+	"strings"
+)
+
+func main() {
+	args := os.Args[1:]
+	if slices.Contains(args, "--fail") {
+		fmt.Fprintln(os.Stderr, "host-sync: refused")
+		os.Exit(3)
+	}
+	if slices.Contains(args, "--count") {
+		n := 0
+		sc := bufio.NewScanner(os.Stdin)
+		for sc.Scan() {
+			n++
+		}
+		fmt.Printf("host-sync counted %d\n", n)
+		return
+	}
+	fmt.Printf("host-sync got: %s\n", strings.Join(args, " "))
+}
+-- plugins/slow/main.go --
+package main
+
+import "time"
+
+func main() { time.Sleep(5 * time.Second) }
+-- plugins/extra/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() { fmt.Printf("host-extra got: %s\n", strings.Join(os.Args[1:], " ")) }
+-- plugins/vendored/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+func main() { fmt.Printf("host-vendored got: %s\n", strings.Join(os.Args[1:], " ")) }
+-- plugins/shadow/main.go --
+package main
+
+import "fmt"
+
+func main() { fmt.Println("SHADOWED — a plugin took over a declared command") }

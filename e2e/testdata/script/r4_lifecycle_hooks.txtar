@@ -1,0 +1,265 @@
+# R4 — the lifecycle, observed from a real three-deep tree.
+#
+# Hook ORDER is the thing a framework is trusted for and the thing no unit test really checks:
+# a test that calls the hooks itself proves nothing about the order the runtime picks. So this
+# builds a tree that records every event it takes part in and asserts the whole transcript.
+#
+# It also pins the two seams that a real CLI (example-lifecycle) found missing:
+#
+#   1. A cascading hook reading its OWN flags. The anchor for an inputs struct used to be
+#      inferred from its field count against the chain, so a root CASCADING hook — which runs
+#      for every invocation and cannot name the leaf's type — got zeros: --verbose came back
+#      false in the one hook whose job is to act on it. Collect now anchors on rtx.Frame(), the
+#      command whose hook is running, so the ordinary call is correct here too.
+#
+#   2. Context.Failed. A teardown that owns a transaction has one decision to make and could
+#      not make it: Context had five Record* methods and no reader, while the Outcome that
+#      answers the question reaches the funnel after every teardown has already finished.
+
+gomodinit example.com/life
+
+exec rotini generate cmd/life/.rotini.spec.yaml --config cmd/life/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o life$exe ./cmd/life
+
+# ── order ────────────────────────────────────────────────────────────────────
+# Cascading hooks bracket every ancestor; the non-cascading ones belong to the LEAF alone.
+# `work` is an ancestor of `run`, so its PreRun must NOT appear.
+exec ./life$exe --verbose job work run
+cmp stdout order.txt
+
+# ── PreRun is the leaf's, and only the leaf's ────────────────────────────────
+! stdout 'work PreRun'
+
+# ── the root's cascading hook read its OWN flag ──────────────────────────────
+# This is the frame-anchoring assertion. Without it the first line reads "root CascadingPreRun
+# verbose=false" while --verbose sits in argv.
+stdout 'root CascadingPreRun verbose=true'
+
+# ── teardown runs after a failure, and Failed() drives the decision ──────────
+! exec ./life$exe job work run --fail
+stdout 'work CascadingPostRun ROLLBACK'
+stdout 'root CascadingPostRun'
+! stdout 'work CascadingPostRun commit'
+stderr 'the work failed'
+
+# A clean run commits instead.
+exec ./life$exe job work run
+stdout 'work CascadingPostRun commit'
+
+# ── a panic unwinds too, and Failed() sees it ────────────────────────────────
+# The case a program's own hand-kept "did we fail" flag would miss: the handler never runs to
+# the line that would set it.
+! exec ./life$exe job work run --panic
+stdout 'work CascadingPostRun ROLLBACK'
+stdout 'root CascadingPostRun'
+stderr 'panic'
+
+# ── collecting an ancestor's type from a deeper command is now an ERROR ──────
+# It used to bind zeros. `--misaligned` makes the leaf do it deliberately.
+! exec ./life$exe job work run --misaligned
+stderr 'does not describe the running command "life job work run"'
+stderr 'its Life field maps to "run"'
+stderr 'cannot be collected from a deeper command'
+
+-- order.txt --
+root CascadingPreRun verbose=true
+job CascadingPreRun
+work CascadingPreRun begin
+run PreRun
+run Run
+run PostRun
+work CascadingPostRun commit
+job CascadingPostRun
+root CascadingPostRun
+-- cmd/life/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: life
+  summary: a tree that narrates its own lifecycle
+  flags:
+    - name: verbose
+      summary: narrate
+      identifiers: ["--verbose"]
+      cascading: true
+      schema: { type: bool }
+  commands:
+    - name: job
+      summary: a middle command
+      commands:
+        - name: work
+          summary: another middle command
+          commands:
+            - name: run
+              summary: the leaf
+              flags:
+                - name: fail
+                  summary: record an error
+                  identifiers: ["--fail"]
+                  schema: { type: bool }
+                - name: panic
+                  summary: panic
+                  identifiers: ["--panic"]
+                  schema: { type: bool }
+                - name: misaligned
+                  summary: collect an ancestor's inputs type on purpose
+                  identifiers: ["--misaligned"]
+                  schema: { type: bool }
+-- cmd/life/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/life/main.go
+    - type: cmd
+      file: internal/cmd/life/zz_life.go
+      package: life
+-- internal/cmd/life/life.go --
+package life
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+func say(rtx *rotini.Context, format string, args ...any) {
+	fmt.Fprintf(rtx.Stdout, format+"\n", args...)
+}
+
+type lifeHandlers struct {
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+}
+
+func (*lifeHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	// Collect anchors the struct on rtx.Frame() — the command whose hook is running, which
+	// here is the root rather than the leaf. So a cascading hook reads its OWN flags with the
+	// same call a leaf's Run uses, without naming the leaf's type (which it cannot know).
+	in, err := rotini.Collect[LifeInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.HaltWithCode(1)
+		return
+	}
+	say(rtx, "root CascadingPreRun verbose=%t", in.Life.Flags.Verbose)
+}
+
+func (*lifeHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	say(rtx, "root CascadingPostRun")
+}
+
+func (*lifeHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/life/life_job.go --
+package life
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type lifeJobHandlers struct {
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+}
+
+func (*lifeJobHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	say(rtx, "job CascadingPreRun")
+}
+
+func (*lifeJobHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	say(rtx, "job CascadingPostRun")
+}
+
+func (*lifeJobHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/life/life_job_work.go --
+package life
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+// lifeJobWorkHandlers brackets its subtree the way a transaction does. A PreRun here would
+// run for `work` alone — never when `run` is the leaf — so the bracket has to be cascading.
+type lifeJobWorkHandlers struct {
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+}
+
+func (*lifeJobWorkHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	say(rtx, "work CascadingPreRun begin")
+}
+
+func (*lifeJobWorkHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	// The decision a teardown exists to make, and the only way to make it.
+	if rtx.Failed() {
+		say(rtx, "work CascadingPostRun ROLLBACK")
+		return
+	}
+	say(rtx, "work CascadingPostRun commit")
+}
+
+func (*lifeJobWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/life/life_job_work_run.go --
+package life
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type lifeJobWorkRunHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*lifeJobWorkRunHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
+	say(rtx, "run PreRun")
+}
+
+func (*lifeJobWorkRunHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+	say(rtx, "run PostRun")
+}
+
+func (*lifeJobWorkRunHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[LifeJobWorkRunInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.HaltWithCode(1)
+		return
+	}
+	say(rtx, "run Run")
+
+	f := in.LifeJobWorkRun.Flags
+	switch {
+	case f.Misaligned:
+		// Deliberately wrong: LifeInputs describes `life`, and the running command is
+		// `life job work run`. This used to bind zeros in silence.
+		if _, err := rotini.Collect[LifeInputs](rtx); err != nil {
+			rtx.RecordError(err)
+			rtx.HaltWithCode(1)
+		}
+	case f.Panic:
+		panic("run panicked")
+	case f.Fail:
+		rtx.RecordError(errors.New("the work failed"))
+		rtx.HaltWithCode(1)
+	}
+}
+-- cmd/life/main.go --
+package main
+
+import (
+	life "example.com/life/internal/cmd/life"
+)
+
+func main() {
+	life.Program.
+		Execute()
+}

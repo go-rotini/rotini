@@ -1,0 +1,16 @@
+# A directory knob the feature's mode ignores is inert rather than broken, so this
+# one WARNS instead of failing.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    - type: help
+      enabled: true
+      embed: false
+      embed_dir: internal/cmd/demo/renders
+    - type: completion
+      enabled: true
+      template_dir: internal/cmd/demo/templates

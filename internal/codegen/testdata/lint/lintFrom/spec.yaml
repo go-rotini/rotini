@@ -1,0 +1,13 @@
+# Acquisition sentinels are argv flag grammar: not on an argument, and never on a
+# bool flag, whose value is inline-only.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: force
+      identifiers:
+        - --force
+      schema:
+        type: bool
+        from:
+          - file

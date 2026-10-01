@@ -1,0 +1,132 @@
+# pattern_message — the sentence a user sees when a value fails a `pattern`, in place of the
+# regex. The regex is written for the program; `-o must match ^(json|yaml|wide|...)$` asks the
+# person at the keyboard to read it. Driven through generated code on every path
+# a pattern is checked: a flag, each element of a list, a named schema the flag refers to, an
+# env input, and a property inside an object-valued flag.
+
+gomodinit example.com/pm
+
+exec rotini generate cmd/app/.rotini.spec.yaml --config cmd/app/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o app$exe ./cmd/app
+
+exec ./app$exe -o json --tag ok --kind pod
+stdout 'output=json'
+
+# A flag: the sentence follows the name the user typed.
+! exec ./app$exe -o bogus
+stderr '^Error: -o must be json, yaml or custom-columns=<spec> \(got "bogus"\)$'
+! stderr 'must match'
+
+# Each element of a list, from `items`.
+! exec ./app$exe --tag ok --tag BAD
+stderr '--tag must be lowercase letters \(got "BAD"\)'
+
+# A named schema the flag refers to brings its message with its pattern.
+! exec ./app$exe --kind Pod
+stderr '--kind must be a lowercase resource kind \(got "Pod"\)'
+
+# An env input: the same message on the environment channel.
+env APP_REGION=EU
+! exec ./app$exe
+stderr 'must be a lowercase region such as eu-west'
+env APP_REGION=
+
+# A property of an object-valued flag, checked by its JSON schema.
+! exec ./app$exe --db host=db_1
+stderr 'host: must be a hostname: letters, digits, dots and hyphens'
+! stderr 'does not match pattern'
+
+# No message declared: the regex is still the answer, as before.
+! exec ./app$exe --plain x
+stderr '--plain must match \^y\$'
+
+-- cmd/app/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: app
+  summary: pattern messages
+  schemas:
+    Kind:
+      type: string
+      pattern: '^[a-z]+$'
+      pattern_message: must be a lowercase resource kind
+    DB:
+      type: object
+      properties:
+        host:
+          type: string
+          pattern: '^[A-Za-z0-9.-]+$'
+          pattern_message: 'must be a hostname: letters, digits, dots and hyphens'
+  flags:
+    - name: output
+      summary: output format
+      identifiers: [-o, --output]
+      schema:
+        type: string
+        default: json
+        pattern: '^(json|yaml|custom-columns=.+)$'
+        pattern_message: must be json, yaml or custom-columns=<spec>
+    - name: tag
+      summary: a tag
+      identifiers: [--tag]
+      schema:
+        type: array
+        items:
+          type: string
+          pattern: '^[a-z]+$'
+          pattern_message: must be lowercase letters
+    - name: kind
+      summary: a resource kind
+      identifiers: [--kind]
+      schema: { $ref: Kind }
+    - name: db
+      summary: the database
+      identifiers: [--db]
+      schema: { $ref: DB }
+    - name: plain
+      summary: no message
+      identifiers: [--plain]
+      schema: { type: string, pattern: '^y$' }
+  env:
+    - name: region
+      summary: the region
+      schema:
+        type: string
+        variable: APP_REGION
+        pattern: '^[a-z]+(-[a-z]+)*$'
+        pattern_message: must be a lowercase region such as eu-west
+-- cmd/app/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/app/main.go
+    - type: cmd
+      file: internal/cmd/app/zz_app.go
+      package: app
+-- internal/cmd/app/app.go --
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type appHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[AppInputs](rtx)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprintf(rtx.Stdout, "output=%s\n", in.App.Flags.Output)
+}

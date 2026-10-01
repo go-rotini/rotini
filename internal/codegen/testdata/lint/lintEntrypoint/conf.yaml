@@ -1,0 +1,10 @@
+# keep only takes effect once the entrypoint is actually written, which needs file.
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      keep:
+        - notes.go
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo

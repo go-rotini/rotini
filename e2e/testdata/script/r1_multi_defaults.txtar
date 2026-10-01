@@ -1,0 +1,138 @@
+# R1c — a repeatable input's multi-value default, end to end.
+#
+# A default reaches the runtime as argv OCCURRENCES, and FlagDef.Default is one string — so a
+# repeatable flag could not express a multi-value default at all. Written the natural way it
+# stringified into a single mangled element:
+#
+#   default: [defaults, files, env, argv]   ->   Default: "[defaults files env argv]"
+#
+# which the program then received as ONE value and rejected: `unknown layer "[defaults files
+# env argv]"`. A lint rule later caught the shape, but its advice was to seed the default in
+# the HANDLER — pushing a declared value back into hand-written Go, which is the thing
+# declaring inputs in a spec exists to avoid.
+#
+# Now a list seeds one occurrence per element, and a map — which is repeatable too, taking
+# `key=value` pairs — seeds one pair per entry.
+
+gomodinit example.com/dfl
+
+exec rotini generate cmd/dfl/.rotini.spec.yaml --config cmd/dfl/.rotini.conf.yaml
+
+# The Definition carries the elements, not a stringified list.
+grep 'Defaults: \[\]string\{"defaults", "files", "env", "argv"\}' internal/cmd/dfl/zz_dfl.go
+grep 'Defaults: \[\]string\{"team=core", "tier=1"\}' internal/cmd/dfl/zz_dfl.go
+! grep 'Default: "\[' internal/cmd/dfl/zz_dfl.go
+
+exec go mod tidy
+exec go build -o dfl$exe ./cmd/dfl
+
+# Unset: every element is seeded and coerced through the ELEMENT type (ports are ints).
+exec ./dfl$exe
+stdout 'order=\[defaults files env argv\]'
+stdout 'label=map\[team:core tier:1\]'
+stdout 'port=\[80 443\]'
+
+# Supplied: the default is REPLACED, not merged. Merging would make a default impossible to
+# opt out of, which is the whole reason it is a fallback rather than a seed.
+exec ./dfl$exe --order argv
+stdout 'order=\[argv\]'
+# ...and the untouched flags still take theirs.
+stdout 'port=\[80 443\]'
+
+# Repeating still accumulates, so the default does not change how the flag itself behaves.
+exec ./dfl$exe --order env --order argv
+stdout 'order=\[env argv\]'
+
+# A multi-value default on a SINGLE-valued input has nowhere to put the second element, and is
+# still rejected — with a message that names the type and says what to declare instead.
+! exec rotini validate cmd/bad/.rotini.spec.yaml --config cmd/dfl/.rotini.conf.yaml
+stderr 'a multi-value `default` needs a repeatable type, and this one is string'
+stderr 'Declare the type as a list'
+
+-- cmd/dfl/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: dfl
+  summary: multi-value defaults
+  flags:
+    - name: order
+      summary: precedence order
+      identifiers: ["--order"]
+      schema:
+        type: '[]string'
+        default: [defaults, files, env, argv]
+    - name: label
+      summary: labels
+      identifiers: ["--label"]
+      schema:
+        type: 'map[string]string'
+        default:
+          team: core
+          tier: "1"
+    - name: port
+      summary: ports
+      identifiers: ["--port"]
+      schema:
+        type: array
+        items:
+          type: int
+        default: [80, 443]
+-- cmd/bad/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  summary: a list default with nowhere to go
+  flags:
+    - name: mode
+      summary: mode
+      identifiers: ["--mode"]
+      schema:
+        type: string
+        default: [fast, slow]
+-- cmd/dfl/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/dfl/main.go
+    - type: cmd
+      file: internal/cmd/dfl/zz_dfl.go
+      package: dfl
+-- internal/cmd/dfl/dfl.go --
+package dfl
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type dflHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*dflHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[DflInputs](rtx)
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.Halt()
+		return
+	}
+	f := in.Dfl.Flags
+	fmt.Fprintf(rtx.Stdout, "order=%v\nlabel=%v\nport=%v\n", f.Order, f.Label, f.Port)
+}
+-- cmd/dfl/main.go --
+package main
+
+import (
+	dfl "example.com/dfl/internal/cmd/dfl"
+)
+
+func main() {
+	dfl.Program.
+		Execute()
+}

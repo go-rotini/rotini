@@ -1,0 +1,107 @@
+# R4 — a misspelled lifecycle hook is reported at generate time.
+#
+# A handler embeds the Default* no-ops and overrides the hooks it wants. The stub's own comment
+# says to implement one by "declaring a method with the same name" — and says nothing about
+# removing the embed it replaces, because there is no reason to: a method at depth 0 wins over a
+# promoted one. That is what makes a misspelled name SILENT. The embed keeps satisfying
+# Handlers, so the `var _ rotini.Handlers` assertion holds, the package compiles, vet is clean,
+# and the author's hook is dead code that never runs.
+#
+# The assertion catches the other two ways a hook goes wrong — a missing one (no method at all)
+# and a drifted signature (the embed is shadowed by something that does not implement the
+# interface). It structurally cannot catch this one. So generate reports it, the way rotini
+# reports every other "you wrote something that will not do what you meant" problem: with a
+# file:line, as a warning, because an unused method is legal Go.
+
+gomodinit example.com/demo
+
+exec rotini init demo
+exec go mod tidy
+
+# The author adds a cascading setup hook — and mistypes it.
+cp typo-handler.go.txt internal/cmd/demo/demo.go
+
+# ── the problem: the toolchain is happy ──────────────────────────────────────
+exec go build ./...
+exec go vet ./...
+
+# ── generate says so, with everything needed to act on it ────────────────────
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+stderr '^Warning: internal/cmd/demo/demo\.go:\d+'
+stderr 'method "CascadingPrerun" on demoHandlers is not a lifecycle hook'
+stderr 'will never run'
+stderr 'rotini\.DefaultCascadingPreRun is what supplies CascadingPreRun'
+stderr 'did you mean "CascadingPreRun"\?'
+
+# ── and the warning is true: the hook really does not run ────────────────────
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe
+stdout 'ran'
+! stdout 'setup'
+
+# ── fix the spelling: generate goes quiet and the hook fires ─────────────────
+cp fixed-handler.go.txt internal/cmd/demo/demo.go
+exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
+! stderr 'Warning:'
+
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe
+stdout 'setup'
+stdout 'ran'
+
+-- typo-handler.go.txt --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*demoHandlers)(nil)
+
+// The embeds are all present, as the seeded stub wrote them. CascadingPreRun below is
+// misspelled, so DefaultCascadingPreRun is what the runtime will call.
+type demoHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*demoHandlers) CascadingPrerun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "setup")
+}
+
+func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "ran")
+}
+-- fixed-handler.go.txt --
+package demo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*demoHandlers)(nil)
+
+// The same file with the one letter corrected. The embed stays: it is now shadowed, which is
+// the normal way to implement a hook.
+type demoHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*demoHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "setup")
+}
+
+func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "ran")
+}

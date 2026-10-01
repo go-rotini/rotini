@@ -1,0 +1,12 @@
+# config_files cascade, so a logical name repeated down a chain leaves a pin ambiguous.
+version: 0.0.0
+command:
+  name: demo
+  config_files:
+    - name: app
+      path: ./root.yaml
+  commands:
+    - name: build
+      config_files:
+        - name: app
+          path: ./build.yaml

@@ -1,0 +1,10 @@
+# file: pins a config input to one config_files entry, which has to be in scope.
+version: 0.0.0
+command:
+  name: demo
+  config:
+    - name: timeout
+      schema:
+        type: duration
+        key: timeout
+        file: nosuchfile

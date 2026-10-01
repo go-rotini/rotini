@@ -1,0 +1,154 @@
+# R2b — `template: true`: the author takes ownership of rotini's output.
+#
+# This is the extensibility knob. `embed` decides where rendered content LANDS; `template`
+# decides who OWNS the rendering — rotini's built-in, or an editable *.tmpl seeded into the
+# project. It was the last unexercised quadrant of the feature matrix, and the campaign's own
+# history says an untried combination is where the defect is: F-31 was a program with only the
+# completion feature enabled that generated a file which did not compile, because no test had
+# ever enabled it alone.
+#
+# Four things have to hold for the knob to be worth having:
+#
+#   1. the template is seeded when missing;
+#   2. pages render FROM it, so an edit actually reaches the binary;
+#   3. an edited template is never clobbered by a later generate — it is the author's file now;
+#   4. a broken template fails at GENERATE time, with a position and in rotini's voice.
+#
+# (4) is the one that matters most: this is the only template a rotini USER ever writes, so it
+# is the only one whose errors they read. text/template's stock wording names the file three
+# times and ends at `codegen.templateHelpData`, an internal Go type nobody can look up.
+
+gomodinit example.com/own
+
+exec rotini generate cmd/own/.rotini.spec.yaml --config cmd/own/.rotini.conf.yaml
+
+# 1. seeded, and NOT //go:embed-ed: a template is an input to codegen, not an output of it.
+exists templates/help.txt.tmpl
+! grep 'go:embed templates' internal/cmd/own/zz_own.go
+
+# The seeded template documents its own data — which is what the error in (4) points at.
+grep '.Headings' templates/help.txt.tmpl
+
+exec go mod tidy
+exec go build -o own$exe ./cmd/own
+
+# The stock page, before the author touches anything.
+exec ./own$exe
+stdout 'Usage:'
+! stdout 'ACME'
+
+# 2. Customise the template and regenerate: the edit reaches the rendered page.
+cp custom.tmpl templates/help.txt.tmpl
+exec rotini generate cmd/own/.rotini.spec.yaml --config cmd/own/.rotini.conf.yaml
+exec go build -o own$exe ./cmd/own
+exec ./own$exe
+stdout 'ACME CORP — own'
+stdout 'HOW TO RUN IT:'
+# A heading the author replaced is GONE, not printed alongside.
+! stdout 'Usage:'
+# ...and the command tree still renders, so this is customisation rather than replacement.
+stdout 'build'
+
+# 3. A second generate does not clobber the author's file: seed-when-MISSING.
+exec rotini generate cmd/own/.rotini.spec.yaml --config cmd/own/.rotini.conf.yaml
+grep 'ACME CORP' templates/help.txt.tmpl
+
+# 4. A broken template is a generate-time failure that names the line and the fix, and says
+#    nothing about rotini's internals.
+cp broken.tmpl templates/help.txt.tmpl
+! exec rotini generate cmd/own/.rotini.spec.yaml --config cmd/own/.rotini.conf.yaml
+stderr 'help\.txt\.tmpl:\d+:\d+'
+stderr 'NoSuchField'
+stderr 'fields available to this template are listed in the comment at the top'
+! stderr 'codegen\.'
+! stderr 'in type '
+
+-- custom.tmpl --
+ACME CORP — {{.Invocation}}
+
+{{with .Description}}{{.}}
+
+{{end -}}
+{{- $usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}
+{{- with $usage}}HOW TO RUN IT:
+{{indent 2 .}}
+
+{{end -}}
+{{- range .CommandGroups}}{{if .Title}}{{.Title}}:{{else}}Commands:{{end}}
+{{range .Commands}}  {{.Name}}	{{.Summary}}
+{{end}}
+{{end -}}
+-- broken.tmpl --
+{{.Invocation}}
+{{.NoSuchField}}
+-- cmd/own/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: own
+  summary: a CLI whose help page its author owns
+  description: Exercising template mode.
+  commands:
+    - name: build
+      summary: build a thing
+-- cmd/own/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/own/main.go
+    - type: cmd
+      file: internal/cmd/own/zz_own.go
+      package: own
+  features:
+    - type: help
+      enabled: true
+      # The knob under test. embed stays false, so the rendered page is an inline string
+      # literal and the TEMPLATE is the only file on disk — which is the combination that
+      # isolates what `template` actually does.
+      template: true
+      template_dir: templates
+-- internal/cmd/own/own.go --
+package own
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+type ownHandlers struct{ base }
+
+func (*ownHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, HelpOwn)
+}
+-- internal/cmd/own/own_build.go --
+package own
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type ownBuildHandlers struct{ base }
+
+func (*ownBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- cmd/own/main.go --
+package main
+
+import (
+	own "example.com/own/internal/cmd/own"
+)
+
+func main() {
+	own.Program.
+		Execute()
+}

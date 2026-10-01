@@ -1,0 +1,1 @@
+conf: .rotini.conf.yaml:8:7: generate.packages: type "cmd" is declared more than once; each package type may appear at most once

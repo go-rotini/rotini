@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:7:7: command demo: dispatch token "build" is claimed by both "build" and "ship"

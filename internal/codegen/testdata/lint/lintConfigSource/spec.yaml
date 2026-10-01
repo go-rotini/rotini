@@ -1,0 +1,12 @@
+# config_source names a config_files entry and must be string-typed, on a flag or env
+# input. Here the type is wrong and the named entry does not exist.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: conf
+      identifiers:
+        - --conf
+      schema:
+        type: int
+        config_source: nosuchfile

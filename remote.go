@@ -2,38 +2,20 @@ package rotini
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
 
-// rotiniVersionCommand is the hidden entry every rotini program answers (mirroring
-// [completeCommand]): `<binary> __rotini` prints the rotini version the binary was built
-// against, so a host can negotiate same-major compatibility before dispatching to it (the
-// binary arm of D-W9.4). It is always answerable; the host PROBE is opt-in ([RemoteVerify.Version]).
-const rotiniVersionCommand = "__rotini"
-
-// rotiniVersionReport is the line `<binary> __rotini` prints: a self-identifying marker
-// plus the rotini version ([rotiniLibraryVersion]; blank when undeterminable).
-func rotiniVersionReport() string { return "rotini " + rotiniLibraryVersion() }
-
-// parseRotiniVersionReport extracts the version from a [rotiniVersionReport] line,
-// returning "" when the output is not a recognizable report (so the host skips the check).
-func parseRotiniVersionReport(out string) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
-	rest, ok := strings.CutPrefix(strings.TrimSpace(line), "rotini ")
-	if !ok {
-		return ""
-	}
-	return strings.TrimSpace(rest)
-}
+// Plugin dispatch: resolving a co-located `<program>-<name>` binary and exec'ing it with the
+// program's streams — canceling the run's context kills the plugin — the git-style
+// sub-command model, declared in the spec as remote_commands / remote_discovery.
 
 // RemoteErrorKind classifies a remote-dispatch failure: the plugin binary could
 // not be located, it exceeded its declared timeout, or it could not be spawned.
@@ -41,7 +23,7 @@ type RemoteErrorKind int
 
 const (
 	// RemoteBinaryNotFound: no binary was found next to the executable, in the
-	// discovery path, or on PATH.
+	// plugin path, or on PATH.
 	RemoteBinaryNotFound RemoteErrorKind = iota
 	// RemoteTimeout: the plugin ran past its declared timeout and was killed.
 	RemoteTimeout
@@ -49,11 +31,6 @@ const (
 	// exec or pipe failure — NOT the plugin's own non-zero exit, which passes
 	// through untouched).
 	RemoteSpawnFailed
-	// RemoteVerificationFailed: an opt-in pre-dispatch trust check rejected the
-	// binary (a [RemoteVerify.SHA256] content-hash mismatch, or a [RemoteVerify.Signature]
-	// keyless signature that is missing, unverifiable, or does not match the expected
-	// identity) — the binary was found but is not trusted, so it is NOT run.
-	RemoteVerificationFailed
 )
 
 // String renders the kind as a short, stable label.
@@ -65,31 +42,23 @@ func (k RemoteErrorKind) String() string {
 		return "timeout"
 	case RemoteSpawnFailed:
 		return "spawn-failed"
-	case RemoteVerificationFailed:
-		return "verification-failed"
 	default:
 		return "unknown"
 	}
 }
 
-// RemoteError reports a rotini-authored failure carrying out a remote/plugin
-// dispatch (NOT the plugin's own non-zero exit, which rotini passes through —
-// the plugin already spoke for itself). It is the remote channel's typed,
-// errors.As-able error, so a funnel can special-case a timeout or a missing
-// plugin without matching the message:
+// RemoteError reports a rotini-authored failure carrying out a remote dispatch — not the
+// plugin's own non-zero exit, which passes through untouched. It is typed so a funnel can
+// special-case a timeout or a missing plugin without matching the message:
 //
 //	var re *rotini.RemoteError
 //	if errors.As(err, &re) && re.Kind == rotini.RemoteTimeout {
 //	    fmt.Fprintf(os.Stderr, "%s timed out after %s\n", re.Name, re.Timeout)
 //	}
 //
-// Category follows D4: a missing binary is the user's typo when DISCOVERED
-// ([CategoryUsage]) and an install/wiring problem when DECLARED
-// ([CategoryInternal]); a spawn failure is [CategoryInternal]; a timeout is
-// deliberately [CategoryNone] — operational, neither party's fault — but still
-// As-able here so a funnel that wants to treat it specially can. The underlying
-// OS/exec Cause stays reachable via errors.As (nil for a synthesized
-// not-found).
+// A missing binary is [CategoryUsage] when discovered (the user's typo) and [CategoryInternal]
+// when declared (an install problem); a spawn failure is [CategoryInternal]; a timeout is
+// deliberately [CategoryNone], operational and neither party's fault, but still As-able here.
 type RemoteError struct {
 	Name    string          // the remote command name (or discovery token)
 	Binary  string          // the plugin binary that was sought or spawned
@@ -101,6 +70,7 @@ type RemoteError struct {
 	cat Category // how CategoryOf classifies it (CategoryNone for a timeout)
 }
 
+// Error renders the plugin-dispatch failure as a single, user-facing line.
 func (e *RemoteError) Error() string { return e.Msg }
 
 // Unwrap exposes the Cause (when present) and the category sentinel
@@ -120,32 +90,23 @@ func (e *RemoteError) Unwrap() []error {
 	return out
 }
 
-// RemoteDispatch is a resolved remote/co-located sub-command invocation: the
-// plugin binary Def.Binary run with Args (everything after the command name).
-// Dir is an extra directory to search first (from remote_discovery.path),
-// empty for a declared remote command. The default resolver produces one for
-// declared remote_commands and discovered plugins; a custom [Resolver] may
-// return its own in [Resolution.Remote].
+// RemoteDispatch is a resolved remote sub-command invocation: Def.Binary run with Args. Dir is
+// the command's plugin path, searched after the host binary's own directory and before PATH,
+// for declared remotes and discovered plugins alike; empty means no plugin path. The default
+// resolver produces one for declared remotes and discovered plugins.
 type RemoteDispatch struct {
 	Def  RemoteDef
 	Args []string
 	Dir  string
-	// Discovered marks a plugin-discovery dispatch (an unmatched token mapped
-	// to <prefix><token>) as opposed to a declared remote command. It decides
-	// the error CATEGORY when the binary cannot be resolved: a discovered
-	// token is the user's typo (CategoryUsage — pair it with a Suggestor in a
-	// custom funnel), while a declared remote's missing binary is an
-	// install/wiring problem (CategoryInternal).
+	// Discovered marks a plugin-discovery dispatch rather than a declared remote command,
+	// which decides the error category when the binary cannot be resolved.
 	Discovered bool
 }
 
-// execRemote locates and runs the co-located plugin binary, passing stdio
-// through, honoring the run context (so a signal/cancellation kills the subprocess)
-// and any timeout, and returning the plugin's exit code. rotini-authored
-// diagnostics (binary not found, timeout, spawn failure) are recorded as errors
-// and routed through the funnel (a plugin's environment is the
-// end-user's, not a rotini fault — see [Program.remoteFailure]); the plugin's
-// own non-zero exit passes through untouched (the plugin already spoke for itself).
+// execRemote locates and runs the co-located plugin binary, passing stdio through, honoring
+// the run context and any timeout, and returning the plugin's exit code. rotini-authored
+// diagnostics are recorded as errors and routed through the funnel; the plugin's own non-zero
+// exit passes through untouched.
 func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatch) (int, error) {
 	path, err := resolveRemoteBinary(r.Def.Binary, r.Dir)
 	if err != nil {
@@ -161,16 +122,6 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 		})
 	}
 
-	// Opt-in pre-dispatch trust (D-W9.3/D-W9.4): a content-hash pin and/or a same-major
-	// version handshake, both BEFORE the binary runs. A failure aborts the dispatch and is
-	// recorded through the funnel (the binary is the consumer's environment).
-	if r.Def.Verify != nil {
-		if err := verifyRemoteBinary(ctx, path, r.Def); err != nil {
-			rtx.RecordError(err)
-			return p.settle(ctx, rtx)
-		}
-	}
-
 	if r.Def.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, r.Def.Timeout)
@@ -178,7 +129,12 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 	}
 
 	cmd := exec.CommandContext(ctx, path, r.Args...)
-	cmd.Stdin = os.Stdin
+	// All three streams come from the Program, not from the process, so a host that redirects
+	// them — a test, a REPL feeding a plugin, an embedding program — redirects the plugin too.
+	//
+	// By default p.stdin IS os.Stdin, and exec.Cmd hands an *os.File to the child as a raw
+	// descriptor, so an interactive plugin still gets the real terminal.
+	cmd.Stdin = p.stdin
 	cmd.Stdout = p.stdout
 	cmd.Stderr = p.stderr
 
@@ -204,167 +160,140 @@ func (p *Program) execRemote(ctx context.Context, rtx *Context, r *RemoteDispatc
 	}
 }
 
-// remoteFailure records a rotini-authored remote dispatch error and reports it
-// through the funnel. A missing / timed-out / unspawnable plugin is
-// ENVIRONMENTAL — the engineer who built this binary cannot control whether the
-// consumer installed the plugin being dispatched to — so it is the end-user's
-// recorded error, not rotini's "should never happen" fault (a panic).
+// remoteFailure records a rotini-authored remote dispatch error and reports it through the
+// funnel. A missing, timed-out or unspawnable plugin is environmental — the author cannot
+// control whether the consumer installed it — so it is a recorded error, not a fault.
 func (p *Program) remoteFailure(ctx context.Context, rtx *Context, re *RemoteError) (int, error) {
 	rtx.RecordError(re)
 	return p.settle(ctx, rtx)
 }
 
-// remoteVersionProbeTimeout caps the `__rotini` handshake probe so a misbehaving binary
-// can't hang dispatch; it is independent of the command's own run timeout.
-const remoteVersionProbeTimeout = 5 * time.Second
-
-// verifyRemoteBinary runs the opt-in pre-dispatch checks for a resolved plugin at path
-// (def.Verify is non-nil): the content-hash pin first (cheap, local), then the keyless
-// signature (local, sidecar bundle), then the same-major version handshake (spawns). It
-// returns the typed failure to record (a [*RemoteError] for a hash/signature mismatch, a
-// binary-arm [*CompositionVersionError] for a cross-major), or nil to proceed.
-func verifyRemoteBinary(ctx context.Context, path string, def RemoteDef) error {
-	v := def.Verify
-	if v.SHA256 != "" {
-		sum, err := fileSHA256(path)
-		if err != nil {
-			return &RemoteError{
-				Name: def.Name, Binary: def.Binary, Kind: RemoteVerificationFailed, Cause: err,
-				Msg: fmt.Sprintf("%s: cannot hash %s for verification: %v", def.Name, def.Binary, err), cat: CategoryInternal,
-			}
-		}
-		if !sha256Matches(v.SHA256, sum) {
-			return &RemoteError{
-				Name: def.Name, Binary: def.Binary, Kind: RemoteVerificationFailed,
-				Msg: fmt.Sprintf("%s: binary %s failed sha256 verification — pinned %s, got sha256:%s", def.Name, def.Binary, normalizeSHA256(v.SHA256), sum), cat: CategoryInternal,
-			}
-		}
+// RemoteBinaryPath reports the executable the named remote sub-command of cmd would run, and
+// whether it resolves at all. It searches exactly where dispatch searches, in the same order,
+// which is the entire reason it exists.
+//
+// A plugin host's first extra command is always a doctor — "what is installed, what is
+// missing" — and without this it has to reimplement rotini's search order from the outside.
+// That order is three steps, the same for both kinds of remote: next to the host binary, then
+// the command's plugin_path, then PATH. Reaching for exec.LookPath, which is the obvious thing, reports every plugin
+// installed beside the host binary as missing — the git/kubectl convention and the first
+// location rotini tries.
+//
+// name may be a declared remote's name or one of its aliases, or a discovered plugin's token.
+// It returns "", false when cmd declares no such remote and has no discovery to fall back on.
+//
+// Like [DiscoveredPlugins], this touches the filesystem on every call and answers about right
+// now: a plugin installed after it returns false will still dispatch.
+func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool) {
+	// The plugin path applies to both kinds, so it is read once rather than per branch.
+	dir := cmd.PluginPath
+	var binary string
+	switch rd, ok := findRemote(cmd, name); {
+	case ok:
+		binary = rd.Binary
+	case cmd.Discovery != nil:
+		binary = cmd.Discovery.Prefix + name
+	default:
+		return "", false
 	}
-	if v.Signature != nil {
-		if err := verifyRemoteSignature(path, def); err != nil {
-			return err
-		}
-	}
-	if v.Version {
-		return verifyRemoteVersion(ctx, path, def)
-	}
-	return nil
-}
-
-// keylessBundleSuffix is the sidecar bundle convention for the keyless signature rung: a
-// remote binary <path> is signed alongside a <path>.sigstore.json bundle (the format
-// cosign / GitHub's actions/attest-build-provenance emit).
-const keylessBundleSuffix = ".sigstore.json"
-
-// keylessVerifier verifies a keyless (sigstore) signature bundle for a dispatched binary
-// against an expected signer identity, fully offline. It returns nil when the bundle is a
-// valid signature over binaryPath by an identity matching (issuer, subject), else an error
-// describing the failure.
-type keylessVerifier func(binaryPath, bundlePath, issuer, subject string) error
-
-// verifyKeyless is the keyless verifier the dispatch gate uses (D-W9.10): rotini VERIFIES,
-// it never signs. It defaults to the sigstore-backed implementation ([sigstoreVerifyKeyless]
-// in keyless.go); tests override it (and a nil value makes verifyRemoteSignature fail
-// closed, exercising the no-verifier path).
-var verifyKeyless keylessVerifier = sigstoreVerifyKeyless
-
-// verifyRemoteSignature checks a keyless signature on the resolved binary at path against
-// the expected identity (def.Verify.Signature is non-nil). It fails CLOSED: no wired
-// verifier, a missing sidecar bundle, or a verification error all abort dispatch with a
-// [*RemoteError] ([RemoteVerificationFailed]) — a declared trust check never silently passes.
-func verifyRemoteSignature(path string, def RemoteDef) error {
-	sig := def.Verify.Signature
-	fail := func(msg string, cause error) error {
-		return &RemoteError{Name: def.Name, Binary: def.Binary, Kind: RemoteVerificationFailed, Cause: cause, Msg: msg, cat: CategoryInternal}
-	}
-	if verifyKeyless == nil {
-		return fail(fmt.Sprintf("%s: binary %s declares a keyless signature check but no sigstore verifier is wired — import a rotini keyless verifier to enable it", def.Name, def.Binary), nil)
-	}
-	bundle := path + keylessBundleSuffix
-	if _, err := os.Stat(bundle); err != nil {
-		return fail(fmt.Sprintf("%s: binary %s is missing its signature bundle %s — keyless verification cannot proceed", def.Name, def.Binary, filepath.Base(bundle)), err)
-	}
-	if err := verifyKeyless(path, bundle, sig.Issuer, sig.Subject); err != nil {
-		return fail(fmt.Sprintf("%s: binary %s failed keyless signature verification (issuer %q, subject %q): %v", def.Name, def.Binary, sig.Issuer, sig.Subject, err), err)
-	}
-	return nil
-}
-
-// verifyRemoteVersion runs `<path> __rotini` and fails on a definite cross-major mismatch
-// with the host's rotini version. It is best-effort: an undeterminable host version, a
-// remote that doesn't answer the handshake, or an unparseable report all skip the check
-// (proceed) rather than block — only a clearly-different major aborts dispatch.
-func verifyRemoteVersion(ctx context.Context, path string, def RemoteDef) error {
-	host := hostRotiniVersion()
-	if host == "" {
-		return nil
-	}
-	probeCtx, cancel := context.WithTimeout(ctx, remoteVersionProbeTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(probeCtx, path, rotiniVersionCommand).Output()
+	path, err := resolveRemoteBinary(binary, dir)
 	if err != nil {
-		return nil // not a rotini binary, or one too old to answer __rotini
+		return "", false
 	}
-	remote := parseRotiniVersionReport(string(out))
-	if remote == "" || sameMajorVersion(host, remote) {
-		return nil
-	}
-	return &CompositionVersionError{
-		Arm: CompositionBinaryArm, Subject: def.Binary, Want: host, Got: remote,
-		Msg: fmt.Sprintf("remote %q binary %s was built with rotini %s but this program is rotini %s — a different major may speak an incompatible dispatch protocol; rebuild the plugin against a compatible rotini", def.Name, def.Binary, remote, host),
-	}
-}
-
-// fileSHA256 returns the hex-encoded SHA-256 of the file at path (no "sha256:" prefix).
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open binary: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("read binary: %w", err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// normalizeSHA256 lowercases a declared hash and strips an optional "sha256:" prefix, so a
-// pin written either way ("sha256:ABC…" or "abc…") compares equal.
-func normalizeSHA256(declared string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(declared), "sha256:"))
-}
-
-// sha256Matches reports whether a declared pin equals the computed hex digest.
-func sha256Matches(declared, hexDigest string) bool {
-	return normalizeSHA256(declared) == strings.ToLower(hexDigest)
+	return path, true
 }
 
 // resolveRemoteBinary finds the plugin binary: first adjacent to the running
-// executable (the git/kubectl convention), then in dir (the remote_discovery.path,
+// executable (the git/kubectl convention), then in dir (the command's plugin_path,
 // when set), then anywhere on PATH.
+//
+// dir is the command's PluginPath, and it is the same for both kinds of remote — a declared
+// one and a discovered one are the same binaries in the same place, so either can be
+// installed in the plugin path.
+//
+// The failure message names the locations actually searched, and only those: telling a user
+// rotini looked in a directory it never consulted would send them hunting in the wrong place.
 func resolveRemoteBinary(name, dir string) (string, error) {
+	searched := []string{}
 	if exe, err := os.Executable(); err == nil {
-		if p, ok := executableAt(filepath.Dir(exe), name); ok {
+		exeDir := filepath.Dir(exe)
+		if p, ok := executableAt(exeDir, name); ok {
 			return p, nil
 		}
+		searched = append(searched, "next to the binary "+exeDir)
 	}
 	if dir != "" {
 		if p, ok := executableAt(dir, name); ok {
 			return p, nil
 		}
+		searched = append(searched, "the plugin path "+dir)
 	}
 	if p, err := exec.LookPath(name); err == nil {
 		return p, nil
 	}
-	return "", fmt.Errorf("%q not found (looked next to the binary, in the discovery path, and on PATH)", name)
+	searched = append(searched, "PATH")
+	return "", fmt.Errorf("%q not found; searched %s", name, strings.Join(searched, ", then "))
 }
 
-// executableAt reports the path dir/name when it exists as a non-directory file.
+// executableAt reports the path of the executable named name in dir, when one exists as a
+// non-directory file. On Windows a program is a file with an executable extension, so
+// "host-sync" is found as host-sync.exe (or any other PATHEXT extension), the way the shell
+// finds it; elsewhere the file is taken as named.
 func executableAt(dir, name string) (string, bool) {
-	p := filepath.Join(dir, name)
-	if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-		return p, true
+	for _, candidate := range executableFileNames(name, executableExts(runtime.GOOS, os.Getenv("PATHEXT"))) {
+		p := filepath.Join(dir, candidate)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p, true
+		}
 	}
 	return "", false
+}
+
+// executableExts lists the lower-cased extensions that make a file runnable by name on goos:
+// on Windows the PATHEXT list (or its default when unset), elsewhere none, since any file is
+// run as named.
+func executableExts(goos, pathext string) []string {
+	if goos != "windows" {
+		return nil
+	}
+	if pathext == "" {
+		pathext = ".com;.exe;.bat;.cmd"
+	}
+	var out []string
+	for ext := range strings.SplitSeq(pathext, ";") {
+		if ext = strings.ToLower(strings.TrimSpace(ext)); ext != "" {
+			out = append(out, ext)
+		}
+	}
+	return out
+}
+
+// executableFileNames lists the file names that would run as name, in lookup order. With no
+// executable extensions (every OS but Windows) that is name itself. On Windows it is name
+// with each extension added, plus name as given when it already carries one.
+func executableFileNames(name string, exts []string) []string {
+	if len(exts) == 0 {
+		return []string{name}
+	}
+	var out []string
+	if _, ok := trimExecutableExt(name, exts); ok {
+		out = append(out, name)
+	}
+	for _, ext := range exts {
+		out = append(out, name+ext)
+	}
+	return out
+}
+
+// trimExecutableExt strips an executable extension from file, reporting whether it had one.
+// With no executable extensions (every OS but Windows) every file counts, unchanged.
+func trimExecutableExt(file string, exts []string) (string, bool) {
+	if len(exts) == 0 {
+		return file, true
+	}
+	ext := strings.ToLower(filepath.Ext(file))
+	if ext != "" && slices.Contains(exts, ext) {
+		return file[:len(file)-len(ext)], true
+	}
+	return file, false
 }

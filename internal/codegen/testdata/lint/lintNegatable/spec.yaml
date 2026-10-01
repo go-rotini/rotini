@@ -1,0 +1,32 @@
+# The negated form sets a bool FALSE, so negatable needs a bool with a long identifier to
+# derive "--no-<x>" from — and the derived form must not collide with a real one.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    # Not a bool: there is nothing for "--no-" to set false.
+    - name: level
+      identifiers:
+        - --level
+      schema:
+        type: int
+        negatable: true
+    # No long identifier: nothing to derive the negated form from.
+    - name: quiet
+      identifiers:
+        - -q
+      schema:
+        type: bool
+        negatable: true
+    # The derived "--no-cache" collides with a flag that really declares it.
+    - name: cache
+      identifiers:
+        - --cache
+      schema:
+        type: bool
+        negatable: true
+    - name: nocache
+      identifiers:
+        - --no-cache
+      schema:
+        type: bool

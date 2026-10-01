@@ -1,0 +1,783 @@
+package codegen
+
+// Template parsing and rendering: every generated artifact — seed spec/conf files, the
+// entrypoint, handler stubs, the handlers rollup, the framework file, and the doc pages —
+// renders through here.
+
+import (
+	"bytes"
+	_ "embed"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"go/format"
+	"reflect"
+	"strconv"
+	"strings"
+	"text/tabwriter"
+	"text/template"
+
+	"github.com/go-rotini/jsonc"
+	"github.com/go-rotini/toml"
+	"github.com/go-rotini/yaml"
+)
+
+var (
+	//go:embed templates/.rotini.spec.yaml.tmpl
+	templateSpec string
+	//go:embed templates/.rotini.conf.yaml.tmpl
+	templateConf string
+	//go:embed templates/main.go.tmpl
+	templateMain string
+	//go:embed templates/handler.go.tmpl
+	templateHandlerStub string
+	//go:embed templates/rotini.go.tmpl
+	templateRotini string
+
+	//go:embed templates/models.go.tmpl
+	templateModels string
+	//go:embed templates/help.txt.tmpl
+	templateHelp string
+	//go:embed templates/man.txt.tmpl
+	templateMan string
+	//go:embed templates/markdown.md.tmpl
+	templateMarkdown string
+)
+
+// convert transcodes a rendered YAML document to the target serialization: YAML is returned
+// verbatim, json and jsonc become pretty-printed JSON, and toml becomes TOML.
+//
+// Every field the template declares is carried in the TEMPLATE'S order — `version` first, a
+// command's `name` before its inputs, a feature's `type` before `enabled` — rather than
+// alphabetized, and the template's comments are carried into the formats that have them.
+// The encoders keep a struct's field order, so the decoded document is rebuilt as structs
+// (see orderedValue) before encoding.
+func convert(yamlBytes []byte, target fileFormat) ([]byte, error) {
+	if target == formatYAML {
+		return yamlBytes, nil
+	}
+
+	var doc any
+	if err := yaml.UnmarshalWithOptions(yamlBytes, &doc, yaml.WithOrderedMap()); err != nil {
+		return nil, fmt.Errorf("convert seed: %w", err)
+	}
+	comments, err := seedComments(yamlBytes)
+	if err != nil {
+		return nil, fmt.Errorf("convert seed: %w", err)
+	}
+	value := orderedValue(doc)
+
+	switch target {
+	case formatJSON:
+		out, err := json.MarshalIndent(value, "", "  ")
+		if err != nil {
+			return nil, fmt.Errorf("encode json: %w", err)
+		}
+		return append(out, '\n'), nil
+	case formatJSONC:
+		byPath := map[string][]jsonc.Comment{}
+		for path, lines := range comments {
+			for _, line := range lines {
+				byPath[path] = append(byPath[path], jsonc.Comment{Position: jsonc.HeadCommentPos, Text: line})
+			}
+		}
+		out, err := jsonc.MarshalWithOptions(value, jsonc.WithIndent("  "), jsonc.WithEscapeHTML(false), jsonc.WithComment(byPath))
+		if err != nil {
+			return nil, fmt.Errorf("encode jsonc: %w", err)
+		}
+		return append(out, '\n'), nil
+	case formatTOML:
+		out, err := toml.Marshal(value)
+		if err != nil {
+			return nil, fmt.Errorf("convert to toml: %w", err)
+		}
+		return tomlWithComments(out, comments), nil
+	default:
+		return nil, fmt.Errorf("%w: %s", errUnsupportedFormat, target)
+	}
+}
+
+// tomlWithComments writes each comment above the table header its path names (`[a.b]`, or
+// `[[a.b]]` for a list of tables). The toml encoder places comments only on key/value lines,
+// and a seed's comments sit above tables. A comment whose table is not in the output is
+// dropped rather than guessed at.
+func tomlWithComments(out []byte, comments map[string][]string) []byte {
+	text := string(out)
+	for path, lines := range comments {
+		for _, header := range []string{"[[" + path + "]]\n", "[" + path + "]\n"} {
+			i := strings.Index(text, header)
+			if i < 0 || (i > 0 && text[i-1] != '\n') {
+				continue
+			}
+			var block strings.Builder
+			for _, line := range lines {
+				block.WriteString("# " + line + "\n")
+			}
+			text = text[:i] + block.String() + text[i:]
+			break
+		}
+	}
+	return []byte(text)
+}
+
+// seedComments collects a YAML seed's head comments by the dotted path of the key they sit
+// above ("generate.features"). A comment written above a list item is reported against the
+// key holding the list: that is where JSONC and TOML can carry it, and where a reader of the
+// converted file expects it.
+func seedComments(yamlBytes []byte) (map[string][]string, error) {
+	file, err := yaml.Parse(yamlBytes)
+	if err != nil {
+		return nil, fmt.Errorf("read seed comments: %w", err)
+	}
+	out := map[string][]string{}
+	var walk func(n *yaml.Node, path string, listItem bool)
+	walk = func(n *yaml.Node, path string, listItem bool) {
+		switch n.Kind {
+		case yaml.DocumentNode:
+			for _, c := range n.Children {
+				walk(c, path, false)
+			}
+		case yaml.SequenceNode:
+			for _, c := range n.Children {
+				walk(c, path, true)
+			}
+		case yaml.MappingNode:
+			for i := 0; i+1 < len(n.Children); i += 2 {
+				key, val := n.Children[i], n.Children[i+1]
+				child := key.Value
+				if path != "" {
+					child = path + "." + key.Value
+				}
+				if key.HeadComment != "" {
+					// A comment above a list item parses onto the item's first key.
+					at := child
+					if i == 0 && listItem {
+						at = path
+					}
+					out[at] = append(out[at], commentLines(key.HeadComment)...)
+				}
+				walk(val, child, false)
+			}
+		}
+	}
+	for _, d := range file.Docs {
+		walk(d, "", false)
+	}
+	return out, nil
+}
+
+// commentLines splits a parsed comment block into its lines, without the '#' markers.
+func commentLines(text string) []string {
+	var lines []string
+	for line := range strings.SplitSeq(text, "\n") {
+		lines = append(lines, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#")))
+	}
+	return lines
+}
+
+// orderedValue rebuilds a decoded ordered YAML value with every mapping as a struct whose
+// fields are the mapping's keys in order (tagged for the json, jsonc and toml encoders), so
+// encoding keeps the order a map would lose.
+func orderedValue(v any) any {
+	switch t := v.(type) {
+	case yaml.MapSlice:
+		fields := make([]reflect.StructField, len(t))
+		values := make([]reflect.Value, len(t))
+		for i, item := range t {
+			val := reflect.ValueOf(orderedValue(item.Value))
+			typ := reflect.TypeFor[any]()
+			if val.IsValid() {
+				typ = val.Type()
+			}
+			fields[i] = reflect.StructField{
+				Name: "F" + strconv.Itoa(i),
+				Type: typ,
+				Tag:  reflect.StructTag(fmt.Sprintf(`json:%q`, fmt.Sprint(item.Key))),
+			}
+			values[i] = val
+		}
+		out := reflect.New(reflect.StructOf(fields)).Elem()
+		for i, val := range values {
+			if val.IsValid() {
+				out.Field(i).Set(val)
+			}
+		}
+		return out.Interface()
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = orderedValue(e)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
+func renderTemplate(name, text string, data any) ([]byte, error) {
+	tmpl, err := template.New(name).Funcs(templateFuncMap()).Parse(text)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s template: %w", name, err)
+	}
+
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, data); err != nil {
+		return nil, fmt.Errorf("render %s template: %w", name, err)
+	}
+
+	return buffer.Bytes(), nil
+}
+
+// renderGoFileWithHeader renders a Go source template, gofmt-formats the result, and groups its
+// imports, so templates need no whitespace gymnastics and malformed output fails at render
+// time; a formatting failure includes the unformatted source to make template bugs
+// diagnosable. header is the target's conf-declared `header:` — a license block a repository
+// mandates on every .go file, or a //go:build constraint — and may be "".
+//
+// The header goes in verbatim, ABOVE rotini's own "Code generated by rotini" line, and is
+// gofmt'd along with the rest, so a malformed header fails loudly at generate time rather
+// than producing a file the go tool will not read.
+func renderGoFileWithHeader(header, name, text string, data any) ([]byte, error) {
+	rendered, err := renderTemplate(name, text, data)
+	if err != nil {
+		return nil, err
+	}
+	if h := strings.TrimRight(header, "\n"); h != "" {
+		rendered = append([]byte(h+"\n\n"), rendered...)
+	}
+
+	formatted, err := format.Source(rendered)
+	if err != nil {
+		return nil, fmt.Errorf("gofmt %s: %w\n--- generated source ---\n%s", name, err, rendered)
+	}
+
+	return groupImports(formatted)
+}
+
+// templateSeedData is the context for the spec and conf seed templates. The seed is
+// small: a root with --help/--version plus `help` and `version` sub-commands, and a conf
+// declaring the entrypoint + packages with only the help feature on. `rotini init` runs
+// the standard generate over it, producing a ready-to-build CLI the author grows from there.
+type templateSeedData struct {
+	Version string
+	Package string
+}
+
+// renderSeedFile renders one YAML seed template and transcodes it to the
+// requested file format.
+func renderSeedFile(name, text, version, pkg string, target fileFormat) ([]byte, error) {
+	rendered, err := renderTemplate(name, text, templateSeedData{
+		Version: version,
+		Package: pkg,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return convert(rendered, target)
+}
+
+func renderSpecFile(version, pkg string, target fileFormat) ([]byte, error) {
+	return renderSeedFile("spec", templateSpec, version, pkg, target)
+}
+
+func renderConfFile(version, pkg string, target fileFormat) ([]byte, error) {
+	return renderSeedFile("conf", templateConf, version, pkg, target)
+}
+
+type templateMainData struct {
+	Package      string
+	PackageAlias string
+	Extension    string // spec/conf file extension for the //go:generate directive, e.g. "yaml"
+	Header       string // the target's conf-declared `header:`; "" for none
+}
+
+func renderMainFile(header, pkg, pkgAlias, extension string) ([]byte, error) {
+	return renderGoFileWithHeader(header, "main", templateMain, templateMainData{
+		Header:       header,
+		Package:      pkg,
+		PackageAlias: pkgAlias,
+		Extension:    extension,
+	})
+}
+
+// templateHandlerData is the per-command handler stub context. The stub is
+// create-once and then the user's, so it is written to be the shape worth copying:
+// the Default* hooks embedded rather than overridden, and Run showing the
+// Collect-then-HaltWith idiom against this command's own generated inputs type.
+type templateHandlerData struct {
+	Package       string
+	HandlersType  string
+	InputsType    string // the generated inputs type Collect decodes into
+	Invocation    string // how a user types the command, e.g. "rotini generate"
+	Prefix        string // this command's frame inside the inputs type, e.g. inputs.RotiniGenerate
+	RuntimeImport string
+
+	// The seeded body. Every field below is derived from what the spec and conf ALREADY
+	// declare — a --help flag with the help feature on, a --version flag, a command named
+	// `help` taking a variadic path — so the stub starts connected rather than starting with
+	// a TODO that reimplements what codegen just generated. Nothing here is injected at run
+	// time; it is starter code in a create-once file the author owns and may delete.
+	HelpFlag            string // Go field of this command's bool `help` flag; "" when there is none, or the help feature is off
+	HelpFrame           string // inputs frame holding HelpFlag: this command's prefix, or an ancestor's when the flag is inherited
+	HelpFlagName        string // that flag's logical name, for the comment explaining the ordering
+	AnswerBeforeCollect bool   // this command answers help/version from argv, ahead of Collect's validation
+	UsesInputs          bool   // the seeded body reads `inputs`; when false Collect still runs, for its validation
+	VersionFlag         string // Go field of this command's bool `version` flag; "" when there is none
+	Header              string // the target's conf-declared `header:`; "" for none
+	HelpPathArg         string // Go field of the variadic path argument on a command named `help`; "" otherwise
+	VersionOnly         bool   // a command named `version` whose whole job is to print it
+	PrintHelpWhenBare   bool   // a dispatcher root: sub-commands, no own arguments, help feature on
+	NeedsInputs         bool   // the seeded body reads an input, so the stub calls Collect
+}
+
+func renderHandlerStubFile(data templateHandlerData) ([]byte, error) {
+	return renderGoFileWithHeader(data.Header, "handler", templateHandlerStub, data)
+}
+
+// templateHandlersImport is one child cmd package import folded into the generated
+// cli file's rollup; composed commands delegate to the child's Handlers().
+type templateHandlersImport struct {
+	Alias string
+	Path  string
+}
+
+// templateHandlersMethod is one ProgramHandlers method in the generated rollup:
+// own commands return a local handler type, composed commands delegate to the
+// child's cmd package. (The rollup is folded into the cli file — see templateRotiniData.)
+type templateHandlersMethod struct {
+	Method         string
+	Composed       bool
+	Passthrough    bool   // delegate via alias.method() instead of alias.Handlers().method()
+	HandlerType    string // own commands: the local handler struct name
+	DelegateAlias  string // composed commands: the child import alias
+	DelegateMethod string // composed commands: the child's ProgramHandlers method, or the convention
+}
+
+// templateInputField is one generated input struct field (flag, argument, env,
+// config, or a <Prefix>Inputs field). Tag is the complete struct-tag literal,
+// backticks included ("" when the field carries no tag) — see inputFieldTag.
+type templateInputField struct {
+	Field   string
+	GoType  string
+	Tag     string
+	Comment string // optional trailing line-comment ("" for none)
+}
+
+// inputFieldTag assembles a generated input field's complete struct-tag literal: the rotini
+// tag plus the optional recon, env, envnest, cfgfile and constraint tags. Every part but Tag
+// may be empty.
+func inputFieldTag(f fieldDef) string {
+	tag := fmt.Sprintf("rotini:%q", f.Tag)
+	if f.Recon != "" {
+		tag += fmt.Sprintf(" recon:%q", f.Recon)
+	}
+	if f.EnvVar != "" {
+		tag += fmt.Sprintf(" env:%q", f.EnvVar)
+	}
+	if f.EnvNest != "" {
+		tag += fmt.Sprintf(" envnest:%q", f.EnvNest)
+	}
+	if f.CfgFile != "" {
+		tag += fmt.Sprintf(" cfgfile:%q", f.CfgFile)
+	}
+	if f.Constraint != "" {
+		tag += " " + f.Constraint
+	}
+	// A tag is any Go string literal. The raw form reads best, but a backquote inside a value
+	// (a pattern or enum member can hold one) would end it early.
+	if strings.Contains(tag, "`") {
+		return strconv.Quote(tag)
+	}
+	return "`" + tag + "`"
+}
+
+// templateInputBlock is the set of generated input types for a single command:
+// <Prefix>Flags, <Prefix>Arguments, optional <Prefix>Env / <Prefix>Config,
+// <Prefix>CommandInputs, and <Prefix>Inputs.
+type templateInputBlock struct {
+	Prefix       string // PascalCase type prefix, e.g. "RotiniGenerate"
+	Flags        []templateInputField
+	Arguments    []templateInputField
+	Env          []templateInputField
+	Config       []templateInputField
+	StdinType    string // Stdin field type (e.g. "*RotiniGenerateStdin"); "" when none
+	StdinFormat  string // stdin decode format for the Stdin field's tag (e.g. "yaml")
+	InputsFields []templateInputField
+}
+
+// templateFeatureVar / templateFeatureCase / templateFeature are the data the
+// rotini template ranges over to emit a feature's embed vars and resolver.
+type templateFeatureVar struct {
+	Name    string // Go var name, e.g. "HelpRotiniGenerate"
+	Embed   string // //go:embed path (embed mode), e.g. "help/rotini_generate.txt"; "" in inline mode
+	Literal string // Go string literal of the content (inline mode), e.g. `"Usage:\n…"`; "" in embed mode
+}
+
+type templateFeatureCase struct {
+	PathsLiteral string // case values, e.g. `"generate", "gen"` (root: `""`)
+	Var          string // the var returned for these paths
+}
+
+type templateFeature struct {
+	Resolver string // resolver func name, e.g. "Help"/"Man"/"Completion"
+	Noun     string // word used in the doc comment + error, e.g. "help"
+	PerShell bool   // completion: resolver takes a shell string, not a command path
+	Vars     []templateFeatureVar
+	Cases    []templateFeatureCase
+}
+
+type templateRotiniData struct {
+	Package       string
+	RuntimeImport string                   // the rotini runtime's import line (identifier `rotini`)
+	Imports       []string                 // pre-rendered import lines (aliased form "alias \"path\"")
+	ChildImports  []templateHandlersImport // composed-child cmd packages the rollup delegates to
+	Methods       []string                 // ProgramHandlers method names, e.g. "RotiniGenerate"
+	RollupMethods []templateHandlersMethod // the generated handlers struct's command→handler methods
+	Definition    string                   // pre-rendered definition var declaration
+	ModelsImport  string                   // models package import line; "" unless the types were split out
+	ModelAliases  []string                 // model type names re-exported here as aliases; empty unless split
+	Blocks        []templateInputBlock
+	OutputTypes   string // pre-rendered output type declarations; "" when none
+	BindMeta      string // pre-rendered bind metadata; "" when none
+	Features      []templateFeature
+	EmbedImport   bool // emit `import _ "embed"` — only when some feature uses //go:embed
+	// PathResolvers is true when some feature emits a path-keyed resolver — help, man or
+	// markdown — which is what needs "strings". Completion is keyed by SHELL and does not,
+	// so a program with only the completion feature on would otherwise import strings and
+	// not use it, and the generated file would not compile.
+	PathResolvers bool
+	// HelpResolver is the help feature's resolver ("Help") when that feature is on, and ""
+	// otherwise. NewProgram hands it to the runtime so [rotini.Context.Help] can find the page
+	// of whatever command is running, composed ones included.
+	HelpResolver string
+	Header       string // the target's conf-declared `header:`; "" for none
+}
+
+func renderRotiniFile(data templateRotiniData) ([]byte, error) {
+	return renderGoFileWithHeader(data.Header, "rotini", templateRotini, data)
+}
+
+// templateModelsData is the models file: nothing but the typed input and output
+// structs, so the package it declares can be imported from anywhere — including a
+// handler package the cmd package itself imports.
+type templateModelsData struct {
+	Package     string
+	Imports     []string // pre-rendered import lines for the field types
+	Blocks      []templateInputBlock
+	OutputTypes string // pre-rendered output type declarations; "" when none
+	Header      string // the target's conf-declared `header:`; "" for none
+}
+
+func renderModelsFile(data templateModelsData) ([]byte, error) {
+	return renderGoFileWithHeader(data.Header, "models", templateModels, data)
+}
+
+// templateDocHeadings holds the resolved section headings (defaults applied).
+// Each value is rendered verbatim — the trailing ":" lives in the value, so an
+// override can drop or restyle it.
+type templateDocHeadings struct {
+	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples string
+}
+
+// templateDocCommandGroup is one bucket of sub-commands in the Commands
+// section. Title is the command's `group` value; "" is the ungrouped bucket,
+// which the template heads with its own default.
+type templateDocCommandGroup struct {
+	Title    string
+	Commands []templateDocCommandRow
+}
+
+type templateDocCommandRow struct {
+	Name       string
+	Summary    string
+	Aliases    []string
+	Group      string // the child command's `group` (buckets it in the Commands section)
+	Deprecated string
+}
+
+type templateDocArgumentRow struct {
+	Name       string
+	Summary    string
+	Required   bool
+	Variadic   bool
+	Default    string
+	Enum       []string
+	Deprecated string
+}
+
+type templateDocFlagRow struct {
+	Identifiers []string
+	Summary     string
+	Type        string // "" for bool flags
+	Required    bool
+	Default     string
+	Implicit    string // the value a bare flag takes (implicit_value); its identifier reads --x[=<type>]
+	Enum        []string
+	Deprecated  string
+	Group       string // the flag's `group` (buckets it in the Flags section)
+}
+
+// templateDocFlagGroup is one bucket of flags in the Flags section: a Title from the spec's
+// `group`, or "" for the ungrouped bucket, which each template heads with its own default.
+type templateDocFlagGroup struct {
+	Title string
+	Flags []templateDocFlagRow
+}
+
+type templateDocEnvRow struct {
+	Var        string
+	Summary    string
+	Type       string
+	Required   bool
+	Default    string
+	Enum       []string
+	Deprecated string
+}
+
+type templateDocConfigRow struct {
+	Name       string
+	Location   string // "<file>.<key>" / "<key>" — where the value is read from
+	Summary    string
+	Type       string
+	Required   bool
+	Default    string
+	Enum       []string
+	Deprecated string
+}
+
+type templateDocExitRow struct {
+	Code    int
+	Summary string
+}
+
+// templateHelpData is the per-command doc-data context. The help and man
+// templates render the same data; man additionally renders ExitStatus and SeeAlso.
+type templateHelpData struct {
+	Header        string
+	Invocation    string // full command path, e.g. "rotini generate"
+	Summary       string
+	Description   string
+	Usage         string // declarative usage override ("" when unset)
+	UsageDerived  string // always-computed usage line
+	Footer        string
+	Headings      templateDocHeadings
+	CommandGroups []templateDocCommandGroup
+	FlagGroups    []templateDocFlagGroup
+	Arguments     []templateDocArgumentRow
+	Flags         []templateDocFlagRow
+	Environment   []templateDocEnvRow
+	Configuration []templateDocConfigRow
+	Cascading     []templateDocFlagRow
+	Examples      []string
+	ExitStatus    []templateDocExitRow
+	SeeAlso       []string
+}
+
+// parseDocTemplate parses doc-template text (help/man) with the shared FuncMap.
+func parseDocTemplate(name, text string) (*template.Template, error) {
+	tmpl, err := template.New(name).Funcs(templateFuncMap()).Parse(text)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s template: %w", name, err)
+	}
+	return tmpl, nil
+}
+
+// renderDocText renders one doc page (help/man): sanitize the row text, execute
+// the template, align tab-separated columns, and tidy the result. It is a pure
+// function of (tmpl, data) so repeated passes produce byte-identical output.
+func renderDocText(tmpl *template.Template, data templateHelpData) (string, error) {
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, sanitizeDocData(data)); err != nil {
+		return "", errors.New(templateFailure(tmpl.Name(), err))
+	}
+
+	return tidy(tabAlign(buffer.String())), nil
+}
+
+// sanitizeDocData replaces tabs/newlines in row text (which would corrupt
+// tabwriter columns) with spaces. Block fields (Header/Description/Footer/
+// Usage) are left intact. Row slices are copied so the source data is not
+// mutated.
+func sanitizeDocData(d templateHelpData) templateHelpData {
+	clean := func(s string) string {
+		return strings.ReplaceAll(strings.ReplaceAll(s, "\t", " "), "\n", " ")
+	}
+	d.CommandGroups = append([]templateDocCommandGroup(nil), d.CommandGroups...)
+	for i := range d.CommandGroups {
+		d.CommandGroups[i].Commands = append([]templateDocCommandRow(nil), d.CommandGroups[i].Commands...)
+		for j := range d.CommandGroups[i].Commands {
+			d.CommandGroups[i].Commands[j].Summary = clean(d.CommandGroups[i].Commands[j].Summary)
+			d.CommandGroups[i].Commands[j].Deprecated = clean(d.CommandGroups[i].Commands[j].Deprecated)
+		}
+	}
+	d.Arguments = append([]templateDocArgumentRow(nil), d.Arguments...)
+	for i := range d.Arguments {
+		d.Arguments[i].Summary = clean(d.Arguments[i].Summary)
+		d.Arguments[i].Deprecated = clean(d.Arguments[i].Deprecated)
+	}
+	cleanFlags := func(rows []templateDocFlagRow) []templateDocFlagRow {
+		rows = append([]templateDocFlagRow(nil), rows...)
+		for i := range rows {
+			rows[i].Summary = clean(rows[i].Summary)
+			rows[i].Deprecated = clean(rows[i].Deprecated)
+		}
+		return rows
+	}
+	d.Flags = cleanFlags(d.Flags)
+	d.Cascading = cleanFlags(d.Cascading)
+	// The templates render flags from their groups, so the grouped rows are what must be clean.
+	d.FlagGroups = append([]templateDocFlagGroup(nil), d.FlagGroups...)
+	for i := range d.FlagGroups {
+		d.FlagGroups[i].Flags = cleanFlags(d.FlagGroups[i].Flags)
+	}
+	d.Environment = append([]templateDocEnvRow(nil), d.Environment...)
+	for i := range d.Environment {
+		d.Environment[i].Summary = clean(d.Environment[i].Summary)
+		d.Environment[i].Deprecated = clean(d.Environment[i].Deprecated)
+	}
+	d.Configuration = append([]templateDocConfigRow(nil), d.Configuration...)
+	for i := range d.Configuration {
+		d.Configuration[i].Summary = clean(d.Configuration[i].Summary)
+		d.Configuration[i].Deprecated = clean(d.Configuration[i].Deprecated)
+	}
+	d.ExitStatus = append([]templateDocExitRow(nil), d.ExitStatus...)
+	for i := range d.ExitStatus {
+		d.ExitStatus[i].Summary = clean(d.ExitStatus[i].Summary)
+	}
+	d.SeeAlso = append([]string(nil), d.SeeAlso...)
+	for i := range d.SeeAlso {
+		d.SeeAlso[i] = clean(d.SeeAlso[i])
+	}
+	return d
+}
+
+// tabAlign aligns each contiguous block of tab-separated lines with tabwriter.
+func tabAlign(s string) string {
+	var buffer bytes.Buffer
+	tw := tabwriter.NewWriter(&buffer, 0, 0, 4, ' ', 0)
+	if _, err := tw.Write([]byte(s)); err != nil {
+		panic(err) // unreachable: writes to a bytes.Buffer cannot fail
+	}
+	if err := tw.Flush(); err != nil {
+		panic(err) // unreachable: flushing to a bytes.Buffer cannot fail
+	}
+	return buffer.String()
+}
+
+// tidy trims trailing whitespace per line and collapses runs of blank lines to
+// a single blank line, then strips leading and trailing blank lines entirely —
+// the rendered page ends exactly at its last line of content, with no trailing
+// newline.
+func tidy(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], " \t")
+	}
+	out := strings.Join(lines, "\n")
+	for strings.Contains(out, "\n\n\n") {
+		out = strings.ReplaceAll(out, "\n\n\n", "\n\n")
+	}
+	return strings.Trim(out, "\n")
+}
+
+// templateFuncMap is the deterministic, dependency-free helper set available to
+// every template (an allowlist — no clock/entropy funcs exist to call, keeping
+// rendering byte-stable).
+func templateFuncMap() template.FuncMap {
+	return template.FuncMap{
+		"join":       strings.Join,
+		"upper":      strings.ToUpper,
+		"lower":      strings.ToLower,
+		"title":      titleASCII,
+		"trim":       strings.TrimSpace,
+		"trimPrefix": func(prefix, s string) string { return strings.TrimPrefix(s, prefix) },
+		"trimSuffix": func(suffix, s string) string { return strings.TrimSuffix(s, suffix) },
+		"replace":    func(old, repl, s string) string { return strings.ReplaceAll(s, old, repl) },
+		"indent":     indentLines,
+		"repeat":     func(n int, s string) string { return strings.Repeat(s, n) },
+		"default": func(def, s string) string {
+			if s == "" {
+				return def
+			}
+			return s
+		},
+		"contains":  func(substr, s string) bool { return strings.Contains(s, substr) },
+		"hasPrefix": func(prefix, s string) bool { return strings.HasPrefix(s, prefix) },
+		"hasSuffix": func(suffix, s string) bool { return strings.HasSuffix(s, suffix) },
+		"first": func(elems []string) string {
+			if len(elems) == 0 {
+				return ""
+			}
+			return elems[0]
+		},
+		"last": func(elems []string) string {
+			if len(elems) == 0 {
+				return ""
+			}
+			return elems[len(elems)-1]
+		},
+	}
+}
+
+// titleASCII upper-cases the first letter of each word (ASCII only). A local
+// implementation: strings.Title is deprecated and golang.org/x/text would add
+// a dependency.
+func titleASCII(s string) string {
+	var b strings.Builder
+	atWordStart := true
+	for _, r := range s {
+		if atWordStart && r >= 'a' && r <= 'z' {
+			b.WriteRune(r - ('a' - 'A'))
+		} else {
+			b.WriteRune(r)
+		}
+		atWordStart = r == ' ' || r == '\t' || r == '-' || r == '_'
+	}
+	return b.String()
+}
+
+// indentLines prefixes every non-empty line of s with n spaces.
+func indentLines(n int, s string) string {
+	pad := strings.Repeat(" ", n)
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if ln != "" {
+			lines[i] = pad + ln
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// templateFailure rewrites text/template's execution error for an EDITABLE template — the one
+// a `template: true` feature seeds for an author to customize, and therefore the one whose
+// errors an author actually reads.
+//
+// Left alone, a bad field reference opens with this package's own "execute <file> template:"
+// prefix, repeats the word that ends it, restates the same file a third time inside an
+// `executing "<file>" at <.Field>` clause it has already located, and finishes at
+// `in type codegen.templateHelpData` — a rotini-INTERNAL Go type the author cannot look up
+// anywhere. What it withholds is the one useful reply: the fields that DO exist are listed in
+// the template's own header comment. The test pins the exact input and output.
+//
+//	help.txt.tmpl:78:2: can't evaluate field NoSuchField — the fields available to this
+//	template are listed in the comment at the top of help.txt.tmpl
+func templateFailure(name string, err error) string {
+	msg := strings.TrimPrefix(err.Error(), "template: ")
+	// text/template restates the file and the expression it has already located:
+	//   help.txt.tmpl:78:2: executing "help.txt.tmpl" at <.X>: can't evaluate field X
+	// Keep the position it found; drop the restatement.
+	if head, after, ok := strings.Cut(msg, `executing "`); ok {
+		if _, detail, found := strings.Cut(after, ": "); found {
+			msg = head + detail
+		}
+	}
+	// Drop the internal data type, which is an implementation detail of this package.
+	if before, _, ok := strings.Cut(msg, " in type codegen."); ok {
+		msg = before
+	}
+	if strings.Contains(msg, "can't evaluate field") {
+		return fmt.Sprintf("%s; the fields available to this template are listed in the comment at the top of %s", msg, name)
+	}
+	return msg
+}

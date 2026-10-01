@@ -1,0 +1,125 @@
+# R7 — the negative rig: make rules fire and judge the message as a stranger would.
+#
+# The in-repo corpus (internal/codegen/testdata/lint) freezes every rule's text. This script
+# is the other half: it runs `rotini validate` as a USER runs it and checks the three things
+# the campaign says a rejection owes the reader — what is wrong, WHERE, and what to do
+# instead — plus the exit code and the stream, which the corpus cannot see.
+
+gomodinit example.com/bad
+
+# A duplicate flag identifier: names both flags, and points at a line.
+! exec rotini validate dup.spec.yaml --config ok.conf.yaml
+stderr '\.spec\.yaml:\d+:\d+'
+stderr 'identifier "-o" is already declared by flag "out"'
+! stdout 'Error'
+
+# An unknown key is rejected by the schema, positioned, and NOT silently ignored.
+! exec rotini validate unknown.spec.yaml --config ok.conf.yaml
+stderr '\.spec\.yaml:\d+:\d+'
+stderr 'bogus_key'
+
+# A type that cannot become Go is caught before codegen, and the message lists what IS legal
+# rather than only saying no.
+! exec rotini validate badtype.spec.yaml --config ok.conf.yaml
+stderr 'is not a Go type'
+stderr 'builtin'
+
+# `timeout` on a local command: the schema accepts the key ONLY so the error can say where it
+# belongs. A generic "unknown property" would leave the author guessing.
+! exec rotini validate timeout.spec.yaml --config ok.conf.yaml
+stderr 'remote_commands'
+
+# collect mode reports every problem at once; fail-fast stops at the first.
+! exec rotini validate many.spec.yaml --config ok.conf.yaml --fail collect
+stderr 'declared twice'
+stderr 'variadic'
+
+! exec rotini validate many.spec.yaml --config ok.conf.yaml --fail fast
+stderr 'declared twice'
+! stderr 'variadic'
+
+# Every problem is its own "Error:" line, from validate and from generate alike — generate
+# used to mark only the first, leaving the rest looking like the informational banner.
+! exec rotini validate many.spec.yaml --config ok.conf.yaml --fail collect
+stderr '^Error: .*declared twice'
+stderr '^Error: .*variadic'
+! exec rotini generate many.spec.yaml --config ok.conf.yaml
+stderr '^Error: .*declared twice'
+stderr '^Error: .*variadic'
+
+# And the valid document passes, silently, with exit 0 — the control case that proves the
+# rejections above are about the documents and not about the harness.
+exec rotini validate ok.spec.yaml --config ok.conf.yaml
+! stderr .
+
+-- ok.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/bad/zz_bad.go
+      package: bad
+-- ok.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  summary: a valid document
+-- dup.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flags:
+    - name: out
+      identifiers:
+        - -o
+      schema:
+        type: string
+    - name: owner
+      identifiers:
+        - -o
+      schema:
+        type: string
+-- unknown.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  bogus_key: nope
+-- badtype.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flags:
+    - name: weird
+      identifiers:
+        - --weird
+      schema:
+        type: 'not a go type!'
+-- timeout.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  commands:
+    - name: build
+      timeout: 10s
+-- many.spec.yaml --
+version: 0.0.0
+command:
+  name: bad
+  flags:
+    - name: out
+      identifiers:
+        - --out
+      schema:
+        type: string
+    - name: out
+      identifiers:
+        - --output
+      schema:
+        type: string
+  arguments:
+    - name: paths
+      schema:
+        type: '[]string'
+    - name: target
+      schema:
+        type: string

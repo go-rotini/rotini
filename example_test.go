@@ -1,11 +1,7 @@
 package rotini
 
-// Runnable godoc Examples for the opt-in services a handler reaches for most:
-// Parser, Binder, the registry (Get/MustGet), and the category
-// taxonomy. Each builds its own small Definition the way the generated
-// framework file would, so the snippets read like handler code.
-
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -88,16 +84,16 @@ func ExampleBinder_Bind() {
 // The registry: anything bound on the Program (or Context) is fetched typed.
 // Get reports absence; MustGet panics — and that panic reaches the
 // Program.WithFunnel funnel as a *PanicError in its panics slice, teardown already done.
-func ExampleMustGet() {
+func ExampleContext_MustGet() {
 	type apiClient struct{ baseURL string }
 
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Bind("api", &apiClient{baseURL: "https://api.example"})
 
-	client := MustGet[*apiClient](rtx, "api")
+	client := rtx.MustGet[*apiClient]("api")
 	fmt.Println(client.baseURL)
 
-	if _, ok := Get[*apiClient](rtx, "other"); !ok {
+	if _, ok := rtx.Get[*apiClient]("other"); !ok {
 		fmt.Println("nothing bound under \"other\"")
 	}
 	// Output:
@@ -105,13 +101,13 @@ func ExampleMustGet() {
 	// nothing bound under "other"
 }
 
-// The category taxonomy: tag errors at the source, map them to conventional
-// exit codes in one switch — typically inside Program.WithFunnel.
+// The category taxonomy: tag errors at the source, map them to exit codes in one
+// switch — typically inside Program.WithFunnel. Here usage errors take the common 2.
 func ExampleCategoryOf() {
 	classify := func(err error) int {
 		switch CategoryOf(err) {
 		case CategoryUsage:
-			return 1
+			return 2
 		case CategoryInternal:
 			return 70
 		default:
@@ -123,7 +119,84 @@ func ExampleCategoryOf() {
 	fmt.Println(classify(InternalError(errors.New("wiring mismatch"))))
 	fmt.Println(classify(errors.New("untagged")))
 	// Output:
-	// 1
+	// 2
 	// 70
 	// 1
+}
+
+// ── the unopinionated path ──────────────────────────────────.
+
+// unopinionatedCmd overrides only Run; the embedded [DefaultHooks] satisfies the rest of
+// [Handlers]. Run reads the raw argv from [Context.Argv], consults the
+// resolved frame's declared flags via [Context.Chain] (spec-aware without a parser), reads
+// an env var with the standard library (env is NOT runtime-mediated — only the streams
+// are), writes through [Context.Stdout] so the program's streams stay injectable, and
+// reports a failure with [Context.HaltWith] rather than printing inline.
+// (Stdin would likewise be read via [Context.Stdin], never os.Stdin.)
+type unopinionatedCmd struct{ DefaultHooks }
+
+func (unopinionatedCmd) Run(_ context.Context, rtx *Context) {
+	leaf := rtx.Chain()[len(rtx.Chain())-1] // the resolved command frame
+
+	// Hand-rolled argv scan — no Parser. The declared flag's identifiers come from the
+	// resolved frame, so the scan stays spec-aware without importing the input helpers.
+	var ids []string
+	for _, f := range leaf.Flags {
+		if f.Name == "name" {
+			ids = f.Identifiers
+		}
+	}
+	name := ""
+	for i := 0; i+1 < len(rtx.Argv); i++ {
+		for _, id := range ids {
+			if rtx.Argv[i] == id {
+				name = rtx.Argv[i+1]
+			}
+		}
+	}
+	if name == "" {
+		// Record and stop; the runtime reports it through the funnel after teardown, and
+		// the default funnel floors the exit to 1.
+		rtx.HaltWith(UsageError(errors.New("--name is required")))
+		return
+	}
+
+	greeting := os.Getenv("GREETING") // env via stdlib, not a rotini helper
+	if greeting == "" {
+		greeting = "hello"
+	}
+	fmt.Fprintf(rtx.Stdout, "%s, %s! (command %q)\n", greeting, name, leaf.Name)
+}
+
+// unopinionatedApp is the aggregate handler set NewProgram resolves "Main" against.
+type unopinionatedApp struct{}
+
+func (unopinionatedApp) Main() Handlers { return unopinionatedCmd{} }
+
+// Example_unopinionated drives the bare program end-to-end through the real Program
+// surface — WithArgs feeds argv, WithExit captures the code without os.Exit, and the
+// handler's [Context.Stdout] is the example's output. No opt-in input helper is imported;
+// WithoutSignalHandling keeps the program minimal (rotini still owns the context, just
+// installs no signal trap).
+func Example_unopinionated() {
+	def := Definition{
+		Name: "greet", Handler: "Main",
+		Flags: []FlagDef{{Name: "name", Identifiers: []string{"--name"}, Type: "string"}},
+	}
+
+	os.Setenv("GREETING", "hi")
+	defer os.Unsetenv("GREETING")
+
+	code := -1
+	NewProgram(def, unopinionatedApp{}).
+		WithArgs([]string{"--name", "ada"}).
+		WithStdout(os.Stdout).
+		WithoutSignalHandling().
+		WithExit(func(c int) { code = c }).
+		Execute()
+
+	fmt.Println("exit:", code)
+	// Output:
+	// hi, ada! (command "greet")
+	// exit: 0
 }

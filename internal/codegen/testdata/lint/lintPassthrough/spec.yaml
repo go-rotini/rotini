@@ -1,0 +1,13 @@
+# A passthrough command owns no flag vocabulary and needs a variadic []string receiver.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: exec
+      passthrough: true
+      flags:
+        - name: force
+          identifiers:
+            - --force
+          schema:
+            type: bool

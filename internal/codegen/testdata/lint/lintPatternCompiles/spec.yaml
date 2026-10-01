@@ -1,0 +1,12 @@
+# The runtime tolerates a pattern that will not compile, so a typo would silently
+# never enforce. Validation is the only place it can be caught.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: tag
+      identifiers:
+        - --tag
+      schema:
+        type: string
+        pattern: '([unclosed'

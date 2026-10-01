@@ -1,0 +1,5 @@
+# The root command is the binary itself: it must be declared inline, never composed.
+version: 0.0.0
+command:
+  name: demo
+  $ref: ./child.spec.yaml

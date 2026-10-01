@@ -1,0 +1,15 @@
+# A group naming a flag the command does not declare could never match at runtime.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: json
+      identifiers:
+        - --json
+      schema:
+        type: bool
+  flag_groups:
+    - kind: mutually_exclusive
+      flags:
+        - json
+        - yaml

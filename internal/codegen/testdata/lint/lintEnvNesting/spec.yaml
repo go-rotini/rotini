@@ -1,0 +1,10 @@
+# nesting aggregates a variable FAMILY into one nested map: env-only, map-typed,
+# and no single default can stand in for a map.
+version: 0.0.0
+command:
+  name: demo
+  env:
+    - name: http
+      schema:
+        type: string
+        nesting: '__'

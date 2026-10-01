@@ -1,0 +1,163 @@
+# R0 — the published setup guide, executed.
+#
+# docs/content/docs/_index.md walks a reader from an empty directory to a working CLI with a
+# handler they wrote. Every command on that page is run here, in the documented order, with
+# the documented results asserted — so the guide cannot quietly stop being true, which is the
+# usual fate of a tutorial.
+#
+# The only departure is the install: the page says
+# `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest` and
+# `go get github.com/go-rotini/rotini@latest`, and this module is wired to the
+# working tree instead. Installing the PUBLISHED module is Mode A,
+# and it has its own gate (.github/workflows/release-fidelity.yml) because it needs a release
+# to install.
+
+# ── Install: Go module setup ─────────────────────────────────────────────────
+gomodinit github.com/me/todo
+
+# ── The files and the loop: initialize ───────────────────────────────────────
+exec rotini init todo
+
+# The page's table of files `rotini init` writes, checked.
+exists cmd/todo/.rotini.spec.yaml
+exists cmd/todo/.rotini.conf.yaml
+exists cmd/todo/main.go
+exists internal/cmd/todo/todo.go
+
+# The page says main.go carries the //go:generate directive.
+grep '//go:generate' cmd/todo/main.go
+grep 'rotini generate' cmd/todo/main.go
+
+exec go mod tidy
+
+# ── The files and the loop: validate, generate, build ────────────────────────
+# "validate the spec without generating (fast; use it in CI)"
+exec rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+
+# "regenerate after a spec change" — the directive in main.go is what makes this work, and
+# it must be a no-op over an unchanged spec.
+cp internal/cmd/todo/zz_rotini.go before.txt
+exec go generate ./...
+cmp internal/cmd/todo/zz_rotini.go before.txt
+
+# "build and run"
+exec go build ./cmd/todo
+exec ./todo$exe --help
+stdout 'Usage:'
+
+# ── Handlers: write one ──────────────────────────────────────────────────────
+# The page shows a handler for a `todo add` command. Declare it, regenerate, and the stub
+# appears at exactly the path the page names.
+cp spec-with-add.yaml cmd/todo/.rotini.spec.yaml
+exec rotini validate ./cmd/todo/.rotini.spec.yaml --config ./cmd/todo/.rotini.conf.yaml
+exec go generate ./...
+exists internal/cmd/todo/todo_add.go
+
+# The generated inputs type is named as the page says, and reached as the page reaches it.
+grep 'TodoAddInputs' internal/cmd/todo/zz_rotini.go
+grep 'Title' internal/cmd/todo/zz_rotini.go
+
+# Replace the seeded stub with the page's handler, verbatim, and it must compile and run.
+cp handler.go.txt internal/cmd/todo/todo_add.go
+exec go build -o todo$exe ./cmd/todo
+
+exec ./todo$exe add 'buy milk'
+stdout 'added: buy milk'
+stdout 'task added'
+
+# "A handler does not print its own errors: it records them, and the runtime reports them
+# once, after teardown." A missing required argument proves it: the error is on stderr, the
+# handler printed nothing, and the exit code is non-zero.
+! exec ./todo$exe add
+stderr 'title'
+! stdout 'added:'
+
+-- spec-with-add.yaml --
+version: 0.0.0
+command:
+  name: todo
+  summary: a task list
+  description: A task list.
+  footer: Use "todo help <command>" for more information about a command.
+  flags:
+    - name: help
+      summary: print help
+      identifiers:
+        - -h
+        - --help
+      schema:
+        type: bool
+    - name: version
+      summary: print version
+      identifiers:
+        - -v
+        - --version
+      schema:
+        type: bool
+  commands:
+    - name: add
+      summary: add a task
+      arguments:
+        - name: title
+          summary: the task title
+          schema:
+            type: string
+            required: true
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema:
+            type: '[]string'
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+    - name: version
+      summary: print version
+      description: Print the todo version.
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+-- handler.go.txt --
+package todo
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handlers = (*todoAddHandlers)(nil)
+
+type todoAddHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	// One line reconciles every declared channel: argv, env, config files, stdin
+	// and defaults, in the documented precedence order.
+	inputs, err := rotini.Collect[TodoAddInputs](rtx)
+	if err != nil {
+		rtx.HaltWith(err) // record it and stop; the funnel picks the exit code
+		return
+	}
+
+	fmt.Fprintln(rtx.Stdout, "added:", inputs.TodoAdd.Arguments.Title)
+	rtx.RecordSuccess("task added")
+}

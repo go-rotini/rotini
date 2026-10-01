@@ -1,0 +1,1 @@
+spec: .rotini.spec.yaml:6:7: command demo: config "timeout": pins `file` "nosuchfile", which is not a `config_files` entry in scope (declared on this command or an ancestor)

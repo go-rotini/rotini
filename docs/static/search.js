@@ -37,120 +37,171 @@
     }, 0);
   });
 
-  let searchData;
+  // Search work is kept off the keystroke. Typing only schedules a search (DEBOUNCE_MS after
+  // the last key), so the input always updates at once. Each page's text is decoded, lowered
+  // and mapped to its headings ONCE when the index loads, and a search shows at most
+  // MAX_HITS snippets per page: the specification page alone is ~140KB, and building a
+  // snippet for every occurrence of a one-letter query used to freeze the page.
+  const DEBOUNCE_MS = 120;
+  const MAX_HITS = 5;
+  const MAX_COUNT = 999;
+  let pages = [];
+  let pending;
+
+  const esc = function (s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
+  const decoder = document.createElement('textarea');
+  function decode(s) { decoder.innerHTML = s; return decoder.value; }
+
+  // Each heading's position in the page text, in page order, so the heading above a hit is a
+  // binary search rather than a rescan of the page.
+  function headingPositions(page, text) {
+    const out = [];
+    let from = 0;
+    (page.headings || []).forEach(function (h) {
+      const pos = text.indexOf(h.title, from);
+      if (pos === -1) return;
+      out.push({ pos: pos, id: h.id });
+      from = pos + h.title.length;
+    });
+    return out;
+  }
+
+  function hitURL(page, pos) {
+    const hs = page.headingPos;
+    let lo = 0, hi = hs.length - 1, best = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (hs[mid].pos <= pos) { best = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    return best >= 0 ? page.url + '#' + hs[best].id : page.url;
+  }
+
+  function snippet(text, pos, len) {
+    const radius = 80;
+    const start = Math.max(0, pos - radius);
+    const end = Math.min(text.length, pos + len + radius);
+    const slice = text.substring(start, end);
+    const rs = pos - start;
+    const br = function (s) { return esc(s).replace(/\n/g, '<br>'); };
+    return (start > 0 ? '...' : '') + br(slice.substring(0, rs)) + '<mark>' +
+      br(slice.substring(rs, rs + len)) + '</mark>' + br(slice.substring(rs + len)) +
+      (end < text.length ? '...' : '');
+  }
+
+  // exactResults finds the query as typed (case-insensitively) — the grep the results present.
+  function exactResults(query) {
+    const lq = query.toLowerCase();
+    const out = [];
+    pages.forEach(function (page) {
+      const hits = [];
+      let count = 0;
+      let from = 0;
+      while (count < MAX_COUNT) {
+        const pos = page.lower.indexOf(lq, from);
+        if (pos === -1) break;
+        if (hits.length < MAX_HITS) hits.push({ html: snippet(page.text, pos, query.length), url: hitURL(page, pos) });
+        count++;
+        from = pos + lq.length;
+      }
+      const inTitle = page.title.toLowerCase().indexOf(lq) !== -1;
+      if (count > 0 || inTitle) out.push({ page: page, hits: hits, count: count, inTitle: inTitle });
+    });
+    out.sort(function (a, b) { return (b.inTitle - a.inTitle) || (b.count - a.count); });
+    return out;
+  }
+
+  // fuzzyResults is the fallback for a query with no exact match, so a misspelling
+  // ("enviornment") still finds the word it meant. Fuse marks the stretches of text that
+  // matched; only those about as long as the query are real near-misses, the rest are
+  // scattered letters.
+  function fuzzyResults(query) {
+    if (!fuse) return [];
+    const minLen = Math.max(3, query.length - 2);
+    return fuse.search(query).map(function (m) {
+      const page = m.item;
+      const ranges = [];
+      (m.matches || []).forEach(function (match) {
+        if (match.key !== 'text') return;
+        match.indices.forEach(function (idx) {
+          if (idx[1] - idx[0] + 1 >= minLen) ranges.push(idx);
+        });
+      });
+      ranges.sort(function (x, y) { return x[0] - y[0]; });
+      const hits = ranges.slice(0, MAX_HITS).map(function (idx) {
+        return { html: snippet(page.text, idx[0], idx[1] - idx[0] + 1), url: hitURL(page, idx[0]) };
+      });
+      return { page: page, hits: hits, count: ranges.length, inTitle: false };
+    }).filter(function (r) { return r.hits.length > 0; });
+  }
+
+  function render(query, found) {
+    if (found.length === 0) {
+      results.innerHTML = '<div class="search_no_results">no results</div>';
+      return;
+    }
+    results.innerHTML = found.map(function (r) {
+      const counted = r.count >= MAX_COUNT ? MAX_COUNT + '+' : String(r.count);
+      const more = r.count > r.hits.length
+        ? '<a class="search_hit search_more" href="' + r.page.url + '">... ' + (r.count >= MAX_COUNT ? 'many' : r.count - r.hits.length) + ' more on this page</a>'
+        : '';
+      return '<div class="search_result">' +
+        '<div class="search_path"><span class="search_prompt">$</span> grep -i <span class="search_query">"' + esc(query) + '"</span> ./' + esc(r.page.title) + '</div>' +
+        '<div class="search_matches">' + counted + ' match' + (r.count !== 1 ? 'es' : '') + '</div>' +
+        r.hits.map(function (hit) { return '<a class="search_hit" href="' + hit.url + '">' + hit.html + '</a>'; }).join('') +
+        more +
+        '</div>';
+    }).join('');
+  }
+
+  function runSearch() {
+    const query = input.value.trim();
+    if (!query || pages.length === 0) {
+      results.style.display = 'none';
+      results.innerHTML = '';
+      return;
+    }
+    let found = exactResults(query);
+    if (found.length === 0) found = fuzzyResults(query);
+    render(query, found);
+    if (document.activeElement === input) results.style.display = 'block';
+  }
+
   fetch('/index.json')
     .then(function (r) { return r.json(); })
     .then(function (data) {
-      searchData = data;
-      fuse = new Fuse(data, {
-        keys: ['title', 'content'],
+      pages = data.map(function (page) {
+        const text = decode(page.content || '');
+        return {
+          title: page.title || '',
+          url: page.url,
+          text: text,
+          lower: text.toLowerCase(),
+          headingPos: headingPositions(page, text)
+        };
+      });
+      fuse = new Fuse(pages, {
+        keys: ['title', 'text'],
         threshold: 0.3,
         ignoreLocation: true,
         includeMatches: true
       });
       if (input.value.trim().length > 0) {
-        input.dispatchEvent(new Event('input'));
+        runSearch();
         results.style.display = 'none';
       }
     });
-
-  function findNearestHeading(page, matchPos) {
-    if (!page.headings || page.headings.length === 0) return null;
-    const content = page.content;
-    let best = null;
-    let searchFrom = 0;
-    for (let i = 0; i < page.headings.length; i++) {
-      const h = page.headings[i];
-      const pos = content.indexOf(h.title, searchFrom);
-      if (pos === -1) continue;
-      if (pos <= matchPos) {
-        best = h;
-      }
-      searchFrom = pos + h.title.length;
-    }
-    return best;
-  }
 
   input.addEventListener('input', function () {
     const query = input.value.trim();
     input.classList.toggle('search_input_expanded', query.length > 0);
     if (clearBtn) clearBtn.classList.toggle('search_clear_visible', query.length > 0);
-    if (!query || !fuse) {
+    clearTimeout(pending);
+    if (!query) {
       results.style.display = 'none';
       results.innerHTML = '';
       return;
     }
-    const matches = fuse.search(query);
-    if (matches.length === 0) {
-      results.style.display = 'block';
-      results.innerHTML = '<div class="search_no_results">no results</div>';
-      return;
-    }
-    results.style.display = 'block';
-    results.innerHTML = matches.map(function (m) {
-      const hits = [];
-      const esc = function (s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;'); };
-      const dec = function (s) { const el = document.createElement('textarea'); el.innerHTML = s; return el.value; };
-      const content = dec(m.item.content);
-      const lowerContent = content.toLowerCase();
-      const lowerQuery = query.toLowerCase();
-      let searchPos = 0;
-      while (true) {
-        const pos = lowerContent.indexOf(lowerQuery, searchPos);
-        if (pos === -1) break;
-        const radius = 80;
-        const start = Math.max(0, pos - radius);
-        const end = Math.min(content.length, pos + query.length + radius);
-        const slice = content.substring(start, end);
-        const relStart = pos - start;
-        const relEnd = relStart + query.length;
-        const before = esc(slice.substring(0, relStart)).replace(/\n/g, '<br>');
-        const matched = esc(slice.substring(relStart, relEnd)).replace(/\n/g, '<br>');
-        const after = esc(slice.substring(relEnd)).replace(/\n/g, '<br>');
-        const prefix = start > 0 ? '...' : '';
-        const suffix = end < content.length ? '...' : '';
-        const heading = findNearestHeading(m.item, pos);
-        const hitUrl = heading ? m.item.url + '#' + heading.id : m.item.url;
-        hits.push({ html: prefix + before + '<mark>' + matched + '</mark>' + after + suffix, url: hitUrl });
-        searchPos = pos + query.length;
-      }
-      if (hits.length === 0 && m.matches) {
-        for (let i = 0; i < m.matches.length; i++) {
-          const match = m.matches[i];
-          if (match.key !== 'content' || match.indices.length === 0) continue;
-          const words = query.toLowerCase().split(/\s+/);
-          for (let j = 0; j < match.indices.length; j++) {
-            const idx = match.indices[j];
-            const matchText = content.substring(idx[0], idx[1] + 1).toLowerCase();
-            const hasWord = words.some(function (w) { return matchText.indexOf(w) !== -1; });
-            if (!hasWord || idx[1] - idx[0] < 3) continue;
-            let ls = content.lastIndexOf('\n', idx[0]);
-            ls = ls === -1 ? 0 : ls + 1;
-            let le = content.indexOf('\n', idx[1]);
-            if (le === -1) le = content.length;
-            const ctx = content.substring(ls, le).trim();
-            const rs = idx[0] - ls;
-            const re = idx[1] - ls + 1;
-            const heading = findNearestHeading(m.item, idx[0]);
-            const hitUrl = heading ? m.item.url + '#' + heading.id : m.item.url;
-            hits.push({ html: '...' + esc(ctx.substring(0, rs)) + '<mark>' + esc(ctx.substring(rs, re)) + '</mark>' + esc(ctx.substring(re)) + '...', url: hitUrl });
-          }
-          break;
-        }
-      }
-      if (hits.length === 0) return '';
-      const hitLinks = hits.map(function (hit) {
-        return '<a class="search_hit" href="' + hit.url + '">' + hit.html + '</a>';
-      }).join('');
-      return '<div class="search_result">' +
-        '<div class="search_path"><span class="search_prompt">$</span> grep -i <span class="search_query">"' + esc(query) + '"</span> ./' + esc(m.item.title) + '</div>' +
-        '<div class="search_matches">' + hits.length + ' match' + (hits.length !== 1 ? 'es' : '') + '</div>' +
-        hitLinks +
-        '</div>';
-    }).join('');
-    if (!results.innerHTML.trim()) {
-      results.innerHTML = '<div class="search_no_results">no results</div>';
-    }
+    pending = setTimeout(runSearch, DEBOUNCE_MS);
   });
 
   results.addEventListener('click', function (e) {
@@ -239,6 +290,7 @@
   results.addEventListener('keydown', handleNav);
 
   function clearSearch() {
+    clearTimeout(pending);
     input.value = '';
     input.classList.remove('search_input_expanded');
     if (clearBtn) clearBtn.classList.remove('search_clear_visible');

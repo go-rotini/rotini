@@ -1,0 +1,17 @@
+# A raw stdin format binds the payload directly, so the declared type has to be what the
+# payload actually becomes. A mismatch would emit a field the binder cannot fill, surfacing at
+# run time as a wiring error instead of here.
+version: 0.0.0
+command:
+  name: demo
+  commands:
+    - name: upper
+      stdin:
+        format: text
+        schema:
+          type: '[]string'
+    - name: sort
+      stdin:
+        format: lines
+        schema:
+          type: string

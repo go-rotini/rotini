@@ -1,4 +1,13 @@
 unleash:
+  # The `mutation` tag turns off the tests that shell out to `go build` (see
+  # internal/codegen/compile_gate_test.go) and the whole e2e tier. Gremlins runs a package's
+  # test suite ONCE PER MUTANT, so a 19-second suite becomes hours; tagged, it is 2 seconds.
+  #
+  # Nothing else sets this tag: `go test ./...`, CI and every other target in the verification
+  # chain run all of those tests. They are skipped here because "it compiles" and "the binary
+  # behaves" are not assertions a flipped conditional usually breaks — they cost the most and
+  # kill the fewest mutants.
+  tags: "mutation"
   timeout-coefficient: 0
   output-statuses: "lckvsr"
   output: test_mutation.json

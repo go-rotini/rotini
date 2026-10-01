@@ -1,0 +1,17 @@
+# The same type backed by two different packages is always a bug.
+version: 0.0.0
+command:
+  name: demo
+  flags:
+    - name: id
+      identifiers:
+        - --id
+      schema:
+        type: uuid.UUID
+        import: github.com/google/uuid
+    - name: other
+      identifiers:
+        - --other
+      schema:
+        type: uuid.UUID
+        import: example.com/fork/uuid

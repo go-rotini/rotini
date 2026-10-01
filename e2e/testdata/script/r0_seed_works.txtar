@@ -1,0 +1,90 @@
+# R0 — the seed path. The highest-value script in the suite: does a brand-new user get a
+# WORKING binary from `rotini init` alone, with no edits?
+#
+# This is audit finding F-06 made permanent. Before it, `rotini init` produced a module that
+# compiled, that TestInitialize_endToEnd verified compiled, and whose --help answered
+#   Error: unknown flag "--help"
+# and exited 1. Every tier stopped at `go build`, so nothing saw it.
+
+gomodinit example.com/demo
+
+exec rotini init demo
+# Success reports like generate and validate: the files written, then the timing line. The
+# module already requires rotini, so there is nothing to warn about. Paths are the OS's own,
+# so the separator is \ on Windows.
+stdout '^spec: cmd[/\\]demo[/\\]\.rotini\.spec\.yaml$'
+stdout '^conf: cmd[/\\]demo[/\\]\.rotini\.conf\.yaml$'
+stdout '^\[\d\d:\d\d:\d\d\] '
+! stderr .
+
+# The seed writes exactly these, and nothing else is required to build.
+exists cmd/demo/main.go
+exists cmd/demo/.rotini.spec.yaml
+exists cmd/demo/.rotini.conf.yaml
+exists internal/cmd/demo/demo.go
+exists internal/cmd/demo/zz_rotini.go
+
+exec go mod tidy
+exec go build -o demo$exe ./cmd/demo
+
+# --help is the first thing anyone types. It exits 0 and prints a usage page.
+exec ./demo$exe --help
+stdout 'Usage:'
+stdout 'demo'
+stdout 'Flags:'
+stdout '--help'
+stdout '--version'
+! stderr .
+
+# -h is the same page.
+exec ./demo$exe -h
+stdout 'Usage:'
+
+# The conventional sub-commands work too.
+exec ./demo$exe help
+stdout 'Usage:'
+
+exec ./demo$exe version
+stdout '0\.0\.0'
+
+exec ./demo$exe --version
+stdout '0\.0\.0'
+
+# `help <command>` resolves another command's page, not the root's.
+exec ./demo$exe help version
+stdout 'demo version'
+
+# A bare invocation of a root that only dispatches shows its help and exits non-zero,
+# as every CLI does — not an empty inputs struct.
+! exec ./demo$exe
+stdout 'Usage:'
+
+# An unknown flag is a usage error on stderr, and says which token was wrong.
+! exec ./demo$exe --nope
+stderr 'nope'
+
+# The hidden __complete entry the generated shell scripts call is wired from the start,
+# even with the completion feature off — it is the runtime's, not the feature's.
+exec ./demo$exe __complete ''
+stdout 'help'
+stdout 'version'
+
+# An entrypoint that never calls WithVersion: --version says so rather than printing a blank
+# line. rotini does not invent a version; "unknown" is the generated handler being honest.
+cp nover.go cmd/demo/main.go
+exec go build -o demo$exe ./cmd/demo
+exec ./demo$exe --version
+stdout '^unknown$'
+exec ./demo$exe version
+stdout '^unknown$'
+
+-- nover.go --
+package main
+
+import (
+	demo "example.com/demo/internal/cmd/demo"
+)
+
+func main() {
+	demo.Program.Execute()
+}
