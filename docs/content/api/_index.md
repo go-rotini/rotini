@@ -90,10 +90,3 @@ code, err := NewProgram(Handlers()).WithStdout(&out).Run([]string{"add", "buy mi
 
 Build a fresh program per test with `NewProgram(Handlers())`: the `With*` methods change the
 program they are called on.
-
-## Also in the box
-
-For a handler that needs more than parsing, the runtime also carries `Subprocess` (run another
-program), `Service` (long-running workers with ordered shutdown), `REPL` (your commands as an
-interactive shell), `ReadSecret` (read input without echo), and `IsTerminal` / `TerminalSize`.
-See [pkg.go.dev](https://pkg.go.dev/github.com/go-rotini/rotini) for each.
