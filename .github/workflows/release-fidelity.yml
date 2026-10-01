@@ -48,7 +48,26 @@ jobs:
           go get -tool "github.com/go-rotini/rotini/cmd/rotini@${VERSION}"
           go get "github.com/go-rotini/rotini@${VERSION}"
 
+          # The tool must report the version it was installed at. That comes from the module
+          # version recorded at build time, since `go tool` passes no -ldflags stamp. A v0.0.0
+          # here means the binary lost track of its own release, and the version check on
+          # every spec and conf would silently switch off.
+          got=$(go tool rotini version | tr -d '\r')
+          if [ "$got" != "$VERSION" ]; then
+            echo "::error::go tool rotini version printed '$got', want '$VERSION'"
+            exit 1
+          fi
+
           go tool rotini init fidelity
+
+          # init stamps that same version, without the v, into the documents it seeds.
+          for doc in cmd/fidelity/.rotini.spec.yaml cmd/fidelity/.rotini.conf.yaml; do
+            if ! grep -qx "version: ${VERSION#v}" "$doc"; then
+              echo "::error::$doc does not declare version: ${VERSION#v}"
+              exit 1
+            fi
+          done
+
           go mod tidy
           go build ./...
 
