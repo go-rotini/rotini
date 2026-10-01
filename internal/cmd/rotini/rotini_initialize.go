@@ -37,13 +37,16 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.BindIfAbsent("initialize", codegen.NewProcessor(version).Initialize)
 	initialize := rtx.MustGet[codegen.InitializeFn]("initialize")
 
-	if err := initialize(args.Name, flags.Format, flags.Force); err != nil {
+	written, err := initialize(args.Name, flags.Format, flags.Force)
+	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
 
-	// Success is silent. The one thing worth saying is a problem the next step would hit: the
-	// scaffold imports the rotini runtime, and rotini does not add it to the user's go.mod —
+	// The same report generate and validate give: the files it wrote, then the timing line.
+	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n%s\n", written.Spec, written.Conf, written.Result)
+
+	// The scaffold imports the rotini runtime, and rotini does not add it to the user's go.mod —
 	// that is a network operation with a side effect on a file rotini does not own. So when
 	// the module does not require it yet, the next `go build` would fail on a missing module,
 	// and the warning says what to run instead.

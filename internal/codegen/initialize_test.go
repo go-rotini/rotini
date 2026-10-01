@@ -30,7 +30,7 @@ func TestInitialize_endToEnd(t *testing.T) {
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
 	t.Chdir(dir)
 
-	if err := NewProcessor("0.0.0").Initialize("demo", "", false); err != nil {
+	if _, err := NewProcessor("0.0.0").Initialize("demo", "", false); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 
@@ -72,7 +72,7 @@ func initDemo(t *testing.T) string {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.27\n")
 	t.Chdir(dir)
-	if err := NewProcessor("0.0.0").Initialize("demo", "", false); err != nil {
+	if _, err := NewProcessor("0.0.0").Initialize("demo", "", false); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
 	return dir
@@ -86,7 +86,7 @@ func TestInitialize_forceNeverDeletes(t *testing.T) {
 	handler := filepath.Join(dir, "internal", "cmd", "demo", "demo_extra.go")
 	writeTestFile(t, filepath.Dir(handler), "demo_extra.go", "package demo\n\n"+stubMarker+"*demoExtraHandlers)(nil)\n\n// edited by hand\n")
 
-	if err := NewProcessor("0.0.0").Initialize("demo", "", true); err != nil {
+	if _, err := NewProcessor("0.0.0").Initialize("demo", "", true); err != nil {
 		t.Fatalf("Initialize --force: %v", err)
 	}
 	if _, err := os.Stat(handler); err != nil {

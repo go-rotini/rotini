@@ -90,8 +90,17 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode str
 // initialize). format selects the serialization; force replaces an existing seed spec and
 // conf. It never deletes a file: handlers for commands the new seed lacks stay until the next
 // generate, which prunes them and says so.
-func (p *Processor) Initialize(name, format string, force bool) error {
-	return p.initialize(name, format, force)
+func (p *Processor) Initialize(name, format string, force bool) (Initialized, error) {
+	start := time.Now()
+	specPath, confPath, err := p.initialize(name, format, force)
+	if err != nil {
+		return Initialized{}, err
+	}
+	return Initialized{
+		Spec:   displayPath(specPath),
+		Conf:   displayPath(confPath),
+		Result: fmt.Sprintf("[%s] %s", start.Format("15:04:05"), roundDuration(time.Since(start))),
+	}, nil
 }
 
 // ─── the staged pipeline ───────────────────────────────────────────────────────.

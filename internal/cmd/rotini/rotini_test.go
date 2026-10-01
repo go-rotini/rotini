@@ -80,9 +80,9 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 				t.Error("--help ran the validate work")
 				return nil
 			}))
-			p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) error {
+			p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
 				t.Error("--help ran the initialize work")
-				return nil
+				return codegen.Initialized{}, nil
 			}))
 
 			if _, err := p.Run(argv); err != nil {
@@ -208,10 +208,10 @@ func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	var gotForce bool
 	t.Chdir(t.TempDir()) // no go.mod requiring rotini: the runtime warning is due
 
-	p, out, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(name, format string, force bool) error {
+	p, _, errb := newTestCLI(t)
+	p.Bind("initialize", codegen.InitializeFn(func(name, format string, force bool) (codegen.Initialized, error) {
 		gotName, gotFormat, gotForce = name, format, force
-		return nil
+		return codegen.Initialized{}, nil
 	}))
 
 	code, err := p.Run([]string{"init", "mycli", "--format", "json", "--force"})
@@ -221,40 +221,47 @@ func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	if gotName != "mycli" || gotFormat != "json" || !gotForce {
 		t.Errorf("initialize got (%q, %q, force=%v), want the parsed argv", gotName, gotFormat, gotForce)
 	}
-	// Success is silent; the only thing said is a warning, and only because the next
-	// `go build` would fail on a missing module.
-	if out.Len() != 0 {
-		t.Errorf("init printed on success:\n%s", out.String())
-	}
+	// The warning is due only because the next `go build` would fail on a missing module.
 	if want := "run `go get github.com/go-rotini/rotini` before building ./cmd/mycli"; !strings.Contains(errb.String(), want) {
 		t.Errorf("stderr = %q, want the runtime warning", errb.String())
 	}
 }
 
-// TestCLI_initializeIsSilentWhenTheRuntimeIsRequired: with the runtime already in go.mod there
-// is nothing to warn about, so a successful init prints nothing at all.
-func TestCLI_initializeIsSilentWhenTheRuntimeIsRequired(t *testing.T) {
+// TestCLI_initializeReportsWhatItWrote: a successful init reports like generate and validate —
+// the spec and conf it wrote, then the timing line — and, with the runtime already in go.mod,
+// has nothing to warn about.
+func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
 	p, out, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) error { return nil }))
+	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+		return codegen.Initialized{
+			Spec:   "cmd/mycli/.rotini.spec.yaml",
+			Conf:   "cmd/mycli/.rotini.conf.yaml",
+			Result: "[12:00:00] 5ms",
+		}, nil
+	}))
 	if code, err := p.Run([]string{"init", "mycli"}); err != nil || code != 0 {
 		t.Fatalf("Run: code %d, %v", code, err)
 	}
-	if out.Len() != 0 || errb.Len() != 0 {
-		t.Errorf("init printed on success: stdout %q, stderr %q", out.String(), errb.String())
+	want := "spec: cmd/mycli/.rotini.spec.yaml\nconf: cmd/mycli/.rotini.conf.yaml\n[12:00:00] 5ms\n"
+	if out.String() != want {
+		t.Errorf("stdout = %q, want %q", out.String(), want)
+	}
+	if errb.Len() != 0 {
+		t.Errorf("stderr = %q, want nothing", errb.String())
 	}
 }
 
 // The name argument is required: without it there is nothing to scaffold.
 func TestCLI_initializeRequiresAName(t *testing.T) {
 	p, _, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) error {
+	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
 		t.Error("initialize ran without a name")
-		return nil
+		return codegen.Initialized{}, nil
 	}))
 
 	code, err := p.Run([]string{"init"})
@@ -306,7 +313,7 @@ func TestCLI_aliases(t *testing.T) {
 			p, _, _ := newTestCLI(t)
 			p.Bind("generate", func(string, string, bool, func(string, error), func([]error)) error { ran = true; return nil })
 			p.Bind("validate", func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
-			p.Bind("initialize", func(string, string, bool) error { ran = true; return nil })
+			p.Bind("initialize", func(string, string, bool) (codegen.Initialized, error) { ran = true; return codegen.Initialized{}, nil })
 
 			argv := []string{tc.alias, "x"}
 			if _, err := p.Run(argv); err != nil {

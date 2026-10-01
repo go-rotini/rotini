@@ -39,22 +39,29 @@ var cliNameRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]*$`)
 // InitializeFn is the signature of [Processor.Initialize]. A command handler binds it
 // under a registry key and fetches it as an injectable service, so tests substitute a
 // double (see [GenerateFn]).
-type InitializeFn = func(name, format string, force bool) error
+type InitializeFn = func(name, format string, force bool) (Initialized, error)
+
+// Initialized reports what an init wrote, in the shape generate and validate report a pass:
+// the spec and conf paths (relative to the working directory when they can be) and the
+// "[15:04:05] 12.3ms" timing line.
+type Initialized struct {
+	Spec, Conf, Result string
+}
 
 // initialize renders and writes the default seed spec and conf for a new CLI
 // named name under cmd/<name>/, validates them, and runs the standard generate
 // over them.
-func (p *Processor) initialize(name, format string, force bool) error {
+func (p *Processor) initialize(name, format string, force bool) (specPath, confPath string, err error) {
 	if name == "" {
-		return errors.New("a CLI name is required")
+		return "", "", errors.New("a CLI name is required")
 	}
 	if !cliNameRe.MatchString(name) {
-		return fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
+		return "", "", fmt.Errorf("invalid CLI name %q: must start with a letter and contain only letters, digits, '-' or '_'", name)
 	}
 
 	moduleRoot, _, err := findModule()
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
 	// The seed serialization: an explicit --format, else rotini's default (yaml).
@@ -63,12 +70,12 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	}
 	f, err := normalizeFormat(format)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
 	cmdDir := filepath.Join(moduleRoot, "cmd", name)
-	specPath := filepath.Join(cmdDir, ".rotini.spec."+string(f))
-	confPath := filepath.Join(cmdDir, ".rotini.conf."+string(f))
+	specPath = filepath.Join(cmdDir, ".rotini.spec."+string(f))
+	confPath = filepath.Join(cmdDir, ".rotini.conf."+string(f))
 
 	if !force {
 		for _, pth := range []string{specPath, confPath} {
@@ -77,7 +84,7 @@ func (p *Processor) initialize(name, format string, force bool) error {
 				if rel, relErr := filepath.Rel(moduleRoot, pth); relErr == nil {
 					display = rel
 				}
-				return fmt.Errorf("%s already exists (use --force to overwrite)", filepath.ToSlash(display))
+				return "", "", fmt.Errorf("%s already exists (use --force to overwrite)", filepath.ToSlash(display))
 			}
 		}
 	}
@@ -85,29 +92,31 @@ func (p *Processor) initialize(name, format string, force bool) error {
 	version := seedVersion(p.version)
 	specBytes, err := renderSpecFile(version, name, f)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if err := writeGeneratedFile(specPath, specBytes); err != nil {
-		return err
+		return "", "", err
 	}
 	confBytes, err := renderConfFile(version, name, f)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if err := writeGeneratedFile(confPath, confBytes); err != nil {
-		return err
+		return "", "", err
 	}
 
 	// Reconcile the just-written seeds, then run the exact same generate `rotini generate`
 	// runs, with no init special-casing.
 	rs, rc, err := p.reconcile(specPath, confPath)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	// Init never deletes a file: over --force, the seed replaces a spec that may have had more
 	// commands, and pruning would take their handlers — edited ones included — with it.
-	_, err = p.validateAndEmit(rs, rc, false)
-	return err
+	if _, err := p.validateAndEmit(rs, rc, false); err != nil {
+		return "", "", err
+	}
+	return specPath, confPath, nil
 }
 
 // normalizeFormat resolves the requested format name to its fileFormat,

@@ -14,6 +14,7 @@ cd helloworld
 go mod init github.com/me/helloworld
 
 go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
+go get github.com/go-rotini/rotini@latest
 go tool rotini init helloworld
 ```
 

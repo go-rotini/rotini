@@ -6,7 +6,8 @@
 # usual fate of a tutorial.
 #
 # The only departure is the install: the page says
-# `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest`, and this module is wired to the
+# `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest` and
+# `go get github.com/go-rotini/rotini@latest`, and this module is wired to the
 # working tree instead. Installing the PUBLISHED module is Mode A,
 # and it has its own gate (.github/workflows/release-fidelity.yml) because it needs a release
 # to install.

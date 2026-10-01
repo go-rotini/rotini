@@ -10,16 +10,18 @@ version; the [spec](/specification) and [conf](/configuration) pages list every 
 ## Install
 
 rotini is one module with two parts: the **tool** that generates your code and the **runtime**
-that code imports. Install the tool as a tool dependency, so every developer on the project
-resolves the same version through `go.mod`:
+that code imports. Add both: the tool as a tool dependency, so every developer on the project
+resolves the same version through `go.mod`, and the runtime as a regular one:
 
 {{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
-mkdir todo && cd todo
+mkdir todo
+cd todo
 go mod init github.com/me/todo
 go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
+go get github.com/go-rotini/rotini@latest
 {{< /code >}}
 
-That also adds the runtime to `go.mod`. rotini requires Go 1.27 or later.
+rotini requires Go 1.27 or later.
 
 The `version:` key at the top of your spec and conf is the minimum rotini they need. An older
 rotini, or a different major version, refuses to generate from them.
@@ -29,6 +31,9 @@ rotini, or a different major version, refuses to generate from them.
 {{< code title="rotini init" language="sh" open="true" collapsible="false" copy="true" >}}
 go tool rotini init todo
 {{< /code >}}
+
+It prints the spec and conf it wrote, then the time and how long it took, the same report
+`go generate` gives. Along with those two files it writes:
 
 | File | What it is | Who edits it |
 |---|---|---|

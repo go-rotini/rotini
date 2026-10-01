@@ -33,4 +33,5 @@ export GOPROXY=file://$work/proxy,file://$(go env GOMODCACHE)/cache/download,htt
 export GONOSUMDB=github.com/go-rotini/rotini
 export GOMODCACHE=$work/modcache
 export GOFLAGS=-modcacherw
+export ROTINI_DEMO_WORK=$work
 EOF

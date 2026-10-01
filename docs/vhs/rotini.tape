@@ -23,6 +23,8 @@ Set WindowBarSize 36
 Set BorderRadius 8
 Set Margin 0
 Set CursorBlink false
+# Each command waits for the prompt to come back before the next is typed, so a slow first run
+# (the go tool compiling rotini on its first use) can never have the next command typed over it.
 
 # Gruvbox dark, the scheme the site's highlighted code uses: a warm grey that stands apart from
 # the page's near-black background, with the site's amber accent for the cursor.
@@ -30,22 +32,37 @@ Set Theme { "name": "rotini-gruvbox", "background": "#282828", "foreground": "#e
 
 Hide
 Type `eval "$(vhs/proxy.sh)" && cd "$(mktemp -d)" && export PS1='\[\e[33m\]$\[\e[0m\] '` Enter
-Type `_fill() { perl -pi -e 's/^  summary: TODO.*/  summary: say hello/; s/^  description: TODO.*/  description: helloworld greets you from the command line./' cmd/helloworld/.rotini.spec.yaml; printf '\033[1A\033[2K\r'; }` Enter
+# Build the rotini tool once off camera, so `go tool rotini init` answers at its real speed
+# instead of pausing to compile on first use. The download cache is then emptied (it is the
+# throwaway one proxy.sh set up, and the guard refuses any other) so the `go get` on camera
+# still downloads; the compiled tool stays in Go's build cache and is reused.
+Type `( w=$(mktemp -d) && cd $w && go mod init warm && go get -tool github.com/go-rotini/rotini/cmd/rotini@latest && go tool rotini version ) >/dev/null 2>&1; [ "$GOMODCACHE" = "$ROTINI_DEMO_WORK/modcache" ] && go clean -modcache` Enter
+Wait@120s /\$\s*$/
+# `go install` lands in a throwaway GOBIN on PATH, never the real one.
+Type `export GOBIN="$PWD/bin" && export PATH="$GOBIN:$PATH"` Enter
+# Fill in the seed's placeholder text off camera, as a user would before building: a detached
+# background helper waits for `rotini init` to write the spec, then edits it. Nothing is typed
+# into the visible terminal, and the double subshell keeps bash from printing job messages.
+Type `( ( f=helloworld/cmd/helloworld/.rotini.spec.yaml; until grep -qs 'summary: TODO' $f; do sleep 0.2; done; sleep 1; perl -pi -e 's/^  summary: TODO.*/  summary: say hello/; s/^  description: TODO.*/  description: helloworld greets you from the command line./' $f ) & )` Enter
 Sleep 10s
 Type "clear" Enter
 Show
 
 Sleep 600ms
 Type@55ms "mkdir "
-Type@60ms "helloworld "
-Sleep 180ms
-Type@38ms "&& "
+Type@60ms "helloworld"
+Sleep 350ms
+Enter
+Wait@90s /\$\s*$/
+Sleep 700ms
+
 Type@87ms "cd "
 Sleep 120ms
 Type@41ms "helloworld"
-Sleep 350ms
+Sleep 300ms
 Enter
-Sleep 900ms
+Wait@90s /\$\s*$/
+Sleep 800ms
 
 Type@58ms "go "
 Sleep 120ms
@@ -57,6 +74,7 @@ Type@62ms "github.co"
 Type@61ms "m/me/helloworld"
 Sleep 400ms
 Enter
+Wait@90s /\$\s*$/
 Sleep 1.2s
 
 Type@39ms "go "
@@ -68,7 +86,18 @@ Type@95ms "github.com/go-roti"
 Type@49ms "ni/rotini/cmd/rotini@latest"
 Sleep 450ms
 Enter
-Sleep 3s
+Wait@90s /\$\s*$/
+Sleep 1.5s
+
+Type@44ms "go "
+Type@58ms "get "
+Sleep 260ms
+Type@66ms "github.com/go-ro"
+Type@47ms "tini/rotini@latest"
+Sleep 400ms
+Enter
+Wait@90s /\$\s*$/
+Sleep 1.5s
 
 Type@75ms "go "
 Sleep 180ms
@@ -79,17 +108,14 @@ Type@60ms "init "
 Type@49ms "helloworld"
 Sleep 350ms
 Enter
-Sleep 2s
+Wait@90s /\$\s*$/
+Sleep 2.5s
 
-# Fill in the seed's placeholder text off camera, as a user would before building. The helper
-# (defined in the setup) also erases its own command line, so no trace of it is left on screen.
-Hide
-Type "_fill" Enter
-Show
 
 Type@70ms "clear"
 Sleep 200ms
 Enter
+Wait@90s /\$\s*$/
 Sleep 500ms
 
 Type@37ms "ls "
@@ -103,6 +129,7 @@ Type@71ms "internal"
 Type@54ms "/cmd/helloworld"
 Sleep 350ms
 Enter
+Wait@90s /\$\s*$/
 Sleep 2.5s
 
 Type@70ms "go "
@@ -116,6 +143,7 @@ Type@41ms "cmd/helloworld/."
 Type@70ms "rotini.spec.yaml"
 Sleep 400ms
 Enter
+Wait@90s /\$\s*$/
 Sleep 2s
 
 Type@52ms "go "
@@ -129,20 +157,23 @@ Sleep 90ms
 Type@80ms "./..."
 Sleep 350ms
 Enter
+Wait@90s /\$\s*$/
 Sleep 2s
 
 Type@66ms "go "
 Sleep 180ms
-Type@69ms "build "
+Type@69ms "install "
 Sleep 90ms
 Type@84ms "./cmd/..."
 Sleep 350ms
 Enter
-Sleep 3s
+Wait@90s /\$\s*$/
+Sleep 1.5s
 
-Type@55ms "./helloworld "
+Type@55ms "helloworld "
 Sleep 90ms
 Type@72ms "--help"
 Sleep 400ms
 Enter
+Wait@90s /\$\s*$/
 Sleep 5s

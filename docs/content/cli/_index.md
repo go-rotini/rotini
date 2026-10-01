@@ -50,7 +50,15 @@ Scaffolds a new CLI: writes the seed spec and conf under `cmd/<name>/`, then run
 
 The entrypoint is **create-once**: it carries your build metadata, so it is never overwritten. `--force` replaces an existing spec and conf with the seed, and nothing else: init never deletes a file. Handlers for commands the seed does not have stay until your next `generate`, which removes them and says so.
 
-`init` prints nothing when it succeeds. The one thing it warns about is a `go.mod` that does not yet require the rotini runtime, since the first build would fail without it.
+On success `init` reports the way `generate` and `validate` do: the spec and conf it wrote, then the time and how long it took.
+
+{{< code title="rotini init mycli — output" language="text" open="true" collapsible="false" copy="false" >}}
+spec: cmd/mycli/.rotini.spec.yaml
+conf: cmd/mycli/.rotini.conf.yaml
+[14:02:11] 21.4ms
+{{< /code >}}
+
+The one thing it warns about is a `go.mod` that does not yet require the rotini runtime, since the first build would fail without it.
 
 {{< code title="$ rotini help initialize" language="text" open="true" collapsible="false" copy="false" >}}
 Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
