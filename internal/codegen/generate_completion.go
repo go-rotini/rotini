@@ -201,7 +201,13 @@ const powershellCompletionTemplate = `# PowerShell completion for PROG
 Register-ArgumentCompleter -Native -CommandName PROG -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
     $tokens = @($commandAst.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })
-    if ($wordToComplete -eq '') { $tokens += '' }
+    # The cursor after a space completes a NEW, empty word, so an empty argument is sent. Before
+    # PowerShell 7.3 (Windows PowerShell 5.1 included), and in Legacy argument passing, an empty
+    # argument is silently dropped on its way to a program; '""' is what arrives as one there.
+    if ($wordToComplete -eq '') {
+        $legacy = $PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy'
+        $tokens += $(if ($legacy) { '""' } else { '' })
+    }
     $lines = @(PROG __complete @tokens 2>$null)
     # A final ":rotini:<directive>" line is the spec's declarative hint for the value
     # being typed; everything else is a candidate.

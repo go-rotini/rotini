@@ -43,8 +43,8 @@ func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 		},
 		{
 			shell: "powershell",
-			want:  `if ($wordToComplete -eq '') { $tokens += '' }`,
-			why:   "powershell got this right first; keep it that way",
+			want:  `$tokens += $(if ($legacy) { '""' } else { '' })`,
+			why:   "the empty current word must reach the binary, and Windows PowerShell 5.1 drops a bare '' argument",
 		},
 	}
 	for _, tt := range tests {

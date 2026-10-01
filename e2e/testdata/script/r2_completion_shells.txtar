@@ -71,7 +71,7 @@ stdout '^:rotini:file yaml yml$'
 [exec:pwsh] env POWERSHELL_TELEMETRY_OPTOUT=1
 [exec:pwsh] exec pwsh -NoProfile -File drive-pwsh.ps1
 [exec:pwsh] stdout 'CANDIDATES: deploy status'
-[exec:pwsh] ! stdout ':rotini:'
+[exec:pwsh] ! stdout 'CANDIDATES: .*:rotini:'
 
 -- a.yaml --
 -- b.yml --
@@ -161,11 +161,23 @@ if ($IsWindows) { $exe += '.exe' }
 $null = [System.Management.Automation.Language.Parser]::ParseFile(
     (Join-Path $PWD 'completion_powershell.ps1'), [ref]$null, [ref]$null)
 
-$lines = @(& $exe __complete '')
+# The empty word the generated script sends for a cursor after a space, chosen the same way.
+$legacy = $PSVersionTable.PSVersion -lt [version]'7.3' -or $PSNativeCommandArgumentPassing -eq 'Legacy'
+$empty = $(if ($legacy) { '""' } else { '' })
+
+# Run __complete, echoing what came back (stderr included) so a failure shows its cause.
+function Invoke-Complete {
+    $out = @(& $exe __complete @args 2>&1 | ForEach-Object { "$_" })
+    Write-Output ("RAN: __complete " + ($args -join ' ') + " -> exit $LASTEXITCODE, $($out.Count) lines")
+    $out | ForEach-Object { Write-Output ("RAW: " + $_) }
+    $script:lines = $out
+}
+
+Invoke-Complete $empty
 $candidates = $lines | Where-Object { $_ -notlike ':rotini:*' } | ForEach-Object { ($_ -split "`t", 2)[0] }
 Write-Output ("CANDIDATES: " + ($candidates -join ' '))
 
-$lines = @(& $exe __complete '--config' '')
+Invoke-Complete '--config' $empty
 $directive = $lines | Where-Object { $_ -like ':rotini:*' } | Select-Object -Last 1
 if (-not $directive) { throw "no directive for a file-valued flag" }
 Write-Output "OK: pwsh separated the directive"
