@@ -37,7 +37,7 @@ internal/cmd/helloworld/
 
 ```yaml
 $schema: ./.rotini-schema.spec.json
-version: 0.0.0
+version: 1.0.0
 command:
   name: helloworld
   summary: TODO — what helloworld does, in one line
@@ -99,7 +99,7 @@ Fill in the `TODO`s, then add commands under `commands:` — for example:
 
 ```yaml
 $schema: ./.rotini-schema.conf.json
-version: 0.0.0
+version: 1.0.0
 generate:
   schemas:
     conf:

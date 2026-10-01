@@ -1,6 +1,6 @@
 # Every key the spec accepts, in one valid file. `rotini validate` checks it on every test run.
 $schema: ./.rotini-schema.spec.json
-version: 0.0.0
+version: 1.0.0
 command:
   name: deploy
   summary: ship services to environments

@@ -31,6 +31,20 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           dry: true
 
+      # A BREAKING CHANGE commit makes semantic-release propose the next major. A v2+ tag is
+      # uninstallable while the module path has no /v2 suffix: `go get @latest` keeps resolving
+      # the last v1, and `@v2.0.0` is rejected. Refuse the release rather than publish a tag no
+      # user can fetch. Moving to v2 means changing the module path first, then this check.
+      - name: Refuse a major version the module path cannot carry
+        if: steps.semrel.outputs.version != ''
+        env:
+          VERSION: ${{ steps.semrel.outputs.version }}
+        run: |
+          if [ "${VERSION%%.*}" != "1" ]; then
+            echo "::error::semantic-release proposed v${VERSION}, but github.com/go-rotini/rotini can only publish v1.x; a v2 needs the module path changed to .../v2 first"
+            exit 1
+          fi
+
       - name: Generate SBOM
         if: steps.semrel.outputs.version != ''
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
