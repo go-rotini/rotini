@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -143,7 +144,13 @@ func TestSubprocess_env(t *testing.T) {
 
 func TestSubprocess_dir(t *testing.T) {
 	dir := t.TempDir()
-	out, err := NewSubprocess("pwd").WithDir(dir).Output(context.Background())
+	// On Windows `pwd` is usually Git Bash's, which prints its own /tmp/... spelling of the
+	// directory; cmd's `cd` prints the Windows path the test compares against.
+	pwd := NewSubprocess("pwd")
+	if runtime.GOOS == "windows" {
+		pwd = NewSubprocess("cmd", "/c", "cd")
+	}
+	out, err := pwd.WithDir(dir).Output(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}

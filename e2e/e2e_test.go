@@ -124,6 +124,12 @@ func TestScripts(t *testing.T) {
 				"NO_COLOR=1",
 				"TERM=dumb",
 			)
+			// Windows decides what is a PROGRAM by extension, from PATHEXT, and testscript
+			// passes almost no variables through. Without it PowerShell takes app.exe for a
+			// document to open rather than a program to run, and captures none of its output.
+			if runtime.GOOS == "windows" {
+				env.Vars = append(env.Vars, "PATHEXT="+os.Getenv("PATHEXT"))
+			}
 			return nil
 		},
 		Cmds: map[string]func(ts *testscript.TestScript, neg bool, args []string){

@@ -454,9 +454,10 @@ func TestCompose_validatesComposedSpecs(t *testing.T) {
 	if err == nil {
 		t.Fatal("the parent validated clean over broken composed specs")
 	}
+	// Paths are reported in the OS's own spelling, so cmd\child\... on Windows.
 	for _, want := range []string{
-		`cmd/child/.rotini.spec.yaml:5:`, `unknown key "bogus_key"`,
-		`cmd/grand/.rotini.spec.yaml:`, "`default` \"abc\" is not a valid integer",
+		filepath.FromSlash(`cmd/child/.rotini.spec.yaml:5:`), `unknown key "bogus_key"`,
+		filepath.FromSlash(`cmd/grand/.rotini.spec.yaml:`), "`default` \"abc\" is not a valid integer",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %q:\n%v", want, err)

@@ -215,7 +215,7 @@ func TestRun_remoteTimeout(t *testing.T) {
 func TestRemoteBinaryPath(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string) string {
-		p := filepath.Join(dir, name)
+		p := filepath.Join(dir, progFile(name))
 		if err := os.WriteFile(p, []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}

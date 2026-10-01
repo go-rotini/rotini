@@ -449,6 +449,15 @@ func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]DiscoveredPlug
 	// a file without one cannot be run, so it is not a plugin.
 	exts := executableExts(runtime.GOOS, os.Getenv("PATHEXT"))
 	scan := func(dir string, report bool) {
+		// A configured path that is a FILE is a misconfiguration on every OS. It is checked
+		// first because the OSes disagree on how reading it fails: "not a directory" elsewhere,
+		// but "path not found" on Windows, which would read as the harmless not-installed case.
+		if report {
+			if fi, err := fs.Stat(os.DirFS(dir), "."); err == nil && !fi.IsDir() {
+				problems = append(problems, &fs.PathError{Op: "readdir", Path: dir, Err: errors.New("not a directory")})
+				return
+			}
+		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			// A plugin directory that does not exist yet is the normal state before the
