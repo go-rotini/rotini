@@ -10,9 +10,10 @@ gomodinit example.com/demo
 
 exec rotini init demo
 # Success reports like generate and validate: the files written, then the timing line. The
-# module already requires rotini, so there is nothing to warn about.
-stdout '^spec: cmd/demo/\.rotini\.spec\.yaml$'
-stdout '^conf: cmd/demo/\.rotini\.conf\.yaml$'
+# module already requires rotini, so there is nothing to warn about. Paths are the OS's own,
+# so the separator is \ on Windows.
+stdout '^spec: cmd[/\\]demo[/\\]\.rotini\.spec\.yaml$'
+stdout '^conf: cmd[/\\]demo[/\\]\.rotini\.conf\.yaml$'
 stdout '^\[\d\d:\d\d:\d\d\] '
 ! stderr .
 

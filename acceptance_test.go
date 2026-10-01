@@ -41,6 +41,9 @@ func acmeBin(t *testing.T) string {
 		}
 		acmeBinDir = dir
 		acmeBinPath = filepath.Join(dir, "acme")
+		if runtime.GOOS == "windows" {
+			acmeBinPath += ".exe" // Windows runs a program only by an executable extension
+		}
 		cmd := exec.Command("go", "build", "-o", acmeBinPath, "./testdata/acmecli")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			acmeBinErr = fmt.Errorf("build fixture: %v\n%s", err, out)

@@ -6,14 +6,24 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+// progFile is the file a program named name lives in: Windows finds a program only by an
+// executable extension, so a plugin there is name.exe.
+func progFile(name string) string {
+	if runtime.GOOS == "windows" {
+		return name + ".exe"
+	}
+	return name
+}
+
 func TestComplete_discoversPlugins(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar", "unrelated"} {
-		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, progFile(n)), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -50,7 +60,7 @@ func TestComplete_discoversPlugins(t *testing.T) {
 func TestDiscoveredPlugins(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar", "acme-zip", "unrelated"} {
-		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, progFile(n)), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -65,8 +75,8 @@ func TestDiscoveredPlugins(t *testing.T) {
 
 	got := DiscoveredPlugins(cmd)
 	want := []DiscoveredPlugin{
-		{Name: "foo", Path: filepath.Join(dir, "acme-foo")},
-		{Name: "zip", Path: filepath.Join(dir, "acme-zip")},
+		{Name: "foo", Path: filepath.Join(dir, progFile("acme-foo"))},
+		{Name: "zip", Path: filepath.Join(dir, progFile("acme-zip"))},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("DiscoveredPlugins = %v, want %v (bar shadowed by declared command; unrelated unprefixed)", got, want)
@@ -75,14 +85,14 @@ func TestDiscoveredPlugins(t *testing.T) {
 	// The path is the one dispatch would run: a copy earlier in the search order shadows a
 	// later one, so listing the later one would name a binary that never runs.
 	earlier := t.TempDir()
-	if err := os.WriteFile(filepath.Join(earlier, "acme-foo"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(earlier, progFile("acme-foo")), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", earlier)
-	if got := DiscoveredPlugins(cmd); len(got) == 0 || got[0].Path != filepath.Join(dir, "acme-foo") {
+	if got := DiscoveredPlugins(cmd); len(got) == 0 || got[0].Path != filepath.Join(dir, progFile("acme-foo")) {
 		t.Errorf("foo = %v, want the plugin-path copy (searched before PATH)", got)
 	}
-	if path, ok := RemoteBinaryPath(cmd, "foo"); !ok || path != filepath.Join(dir, "acme-foo") {
+	if path, ok := RemoteBinaryPath(cmd, "foo"); !ok || path != filepath.Join(dir, progFile("acme-foo")) {
 		t.Errorf("RemoteBinaryPath(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
 	}
 
@@ -165,7 +175,7 @@ func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
 func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar"} {
-		if err := os.WriteFile(filepath.Join(dir, n), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, progFile(n)), []byte("#!/bin/sh\n"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}

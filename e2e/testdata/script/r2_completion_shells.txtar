@@ -59,10 +59,14 @@ stdout '^:rotini:file yaml yml$'
 [exec:fish] stdout 'ENUM: .*text'
 [exec:fish] ! stdout ':rotini:'
 
-# PowerShell reads a config file under $HOME at startup, and testscript hands every script a
-# $HOME that does not exist. Point it at the work directory — last, so nothing above is
-# affected by the change.
+# PowerShell reads a config file under the user's home at startup, and testscript hands every
+# script a home that does not exist: $HOME, and on Windows $USERPROFILE. It also expects the
+# Windows per-user app-data directories, which testscript does not pass through. Point them all
+# at the work directory, last, so nothing above is affected by the change.
 [exec:pwsh] env HOME=$WORK
+[exec:pwsh] env USERPROFILE=$WORK
+[exec:pwsh] env APPDATA=$WORK
+[exec:pwsh] env LOCALAPPDATA=$WORK
 [exec:pwsh] env DOTNET_CLI_HOME=$WORK
 [exec:pwsh] env POWERSHELL_TELEMETRY_OPTOUT=1
 [exec:pwsh] exec pwsh -NoProfile -File drive-pwsh.ps1

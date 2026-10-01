@@ -5,16 +5,21 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
-// writeFakeBinary writes an executable shell script to a fresh dir on PATH and
-// returns the dir. On non-POSIX shells this would need adjusting, but the CI is
-// unix.
+// writeFakeBinary writes an executable shell script to a fresh dir on PATH. Windows cannot run
+// a shell script as a program, so tests built on one skip there; plugin dispatch on Windows is
+// covered by the e2e r9 scripts, which build and run real plugin binaries.
 func writeFakeBinary(t *testing.T, name, body string) {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("a shell-script stand-in for a plugin cannot run on Windows; see e2e r9_plugins")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
@@ -104,14 +109,19 @@ func TestRun_discoveryDispatch(t *testing.T) {
 // sits beside the test binary — exercising the dir/PATH tail.)
 func TestResolveRemoteBinary_resolutionOrder(t *testing.T) {
 	const name = "rotini-resolveorder-plugin-xyz"
+	// The file a program named `name` lives in: Windows finds programs by extension.
+	file := name
+	if runtime.GOOS == "windows" {
+		file += ".exe"
+	}
 
 	dir := t.TempDir()
-	dirBin := filepath.Join(dir, name)
+	dirBin := filepath.Join(dir, file)
 	if err := os.WriteFile(dirBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	pathDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(pathDir, name), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(pathDir, file), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", pathDir)
@@ -313,5 +323,49 @@ func TestRemoteErrorKind_String(t *testing.T) {
 			t.Errorf("kind %d renders %q, already used by another kind", k, s)
 		}
 		seen[s] = true
+	}
+}
+
+// On Windows a program is a file with an executable extension: plugin lookup must find
+// host-sync as host-sync.exe, and discovery must offer host-sync.exe as "sync". These run the
+// Windows rules on any OS, so a macOS or Linux run catches a regression too.
+func TestExecutableNames_windowsRules(t *testing.T) {
+	win := executableExts("windows", "")
+	if want := []string{".com", ".exe", ".bat", ".cmd"}; !slices.Equal(win, want) {
+		t.Fatalf("default PATHEXT = %q, want %q", win, want)
+	}
+	if got := executableExts("windows", ".EXE; .Cmd"); !slices.Equal(got, []string{".exe", ".cmd"}) {
+		t.Errorf("PATHEXT is lower-cased and trimmed: got %q", got)
+	}
+	if got := executableExts("linux", ".exe"); got != nil {
+		t.Errorf("only Windows has executable extensions: got %q", got)
+	}
+
+	if got := executableFileNames("host-sync", win); !slices.Contains(got, "host-sync.exe") || slices.Contains(got, "host-sync") {
+		t.Errorf("windows lookup for host-sync = %q, want host-sync.exe and not the bare name", got)
+	}
+	if got := executableFileNames("host-sync.exe", win); got[0] != "host-sync.exe" {
+		t.Errorf("a name already carrying an extension is tried as given first: got %q", got)
+	}
+	if got := executableFileNames("host-sync", nil); !slices.Equal(got, []string{"host-sync"}) {
+		t.Errorf("elsewhere the file is taken as named: got %q", got)
+	}
+
+	for _, tc := range []struct {
+		file, want string
+		ok         bool
+	}{
+		{"host-sync.exe", "host-sync", true},
+		{"host-sync.EXE", "host-sync", true},
+		{"host-sync.cmd", "host-sync", true},
+		{"host-sync", "host-sync", false},
+		{"host-sync.txt", "host-sync.txt", false},
+	} {
+		if got, ok := trimExecutableExt(tc.file, win); got != tc.want || ok != tc.ok {
+			t.Errorf("trimExecutableExt(%q) = (%q, %v), want (%q, %v)", tc.file, got, ok, tc.want, tc.ok)
+		}
+	}
+	if got, ok := trimExecutableExt("host-sync", nil); got != "host-sync" || !ok {
+		t.Errorf("elsewhere every file counts, unchanged: got (%q, %v)", got, ok)
 	}
 }

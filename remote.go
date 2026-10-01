@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"time"
 )
@@ -233,11 +235,65 @@ func resolveRemoteBinary(name, dir string) (string, error) {
 	return "", fmt.Errorf("%q not found; searched %s", name, strings.Join(searched, ", then "))
 }
 
-// executableAt reports the path dir/name when it exists as a non-directory file.
+// executableAt reports the path of the executable named name in dir, when one exists as a
+// non-directory file. On Windows a program is a file with an executable extension, so
+// "host-sync" is found as host-sync.exe (or any other PATHEXT extension), the way the shell
+// finds it; elsewhere the file is taken as named.
 func executableAt(dir, name string) (string, bool) {
-	p := filepath.Join(dir, name)
-	if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-		return p, true
+	for _, candidate := range executableFileNames(name, executableExts(runtime.GOOS, os.Getenv("PATHEXT"))) {
+		p := filepath.Join(dir, candidate)
+		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
+			return p, true
+		}
 	}
 	return "", false
+}
+
+// executableExts lists the lower-cased extensions that make a file runnable by name on goos:
+// on Windows the PATHEXT list (or its default when unset), elsewhere none, since any file is
+// run as named.
+func executableExts(goos, pathext string) []string {
+	if goos != "windows" {
+		return nil
+	}
+	if pathext == "" {
+		pathext = ".com;.exe;.bat;.cmd"
+	}
+	var out []string
+	for ext := range strings.SplitSeq(pathext, ";") {
+		if ext = strings.ToLower(strings.TrimSpace(ext)); ext != "" {
+			out = append(out, ext)
+		}
+	}
+	return out
+}
+
+// executableFileNames lists the file names that would run as name, in lookup order. With no
+// executable extensions (every OS but Windows) that is name itself. On Windows it is name
+// with each extension added, plus name as given when it already carries one.
+func executableFileNames(name string, exts []string) []string {
+	if len(exts) == 0 {
+		return []string{name}
+	}
+	var out []string
+	if _, ok := trimExecutableExt(name, exts); ok {
+		out = append(out, name)
+	}
+	for _, ext := range exts {
+		out = append(out, name+ext)
+	}
+	return out
+}
+
+// trimExecutableExt strips an executable extension from file, reporting whether it had one.
+// With no executable extensions (every OS but Windows) every file counts, unchanged.
+func trimExecutableExt(file string, exts []string) (string, bool) {
+	if len(exts) == 0 {
+		return file, true
+	}
+	ext := strings.ToLower(filepath.Ext(file))
+	if ext != "" && slices.Contains(exts, ext) {
+		return file[:len(file)-len(ext)], true
+	}
+	return file, false
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -444,6 +445,9 @@ func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]DiscoveredPlug
 	seen := map[string]bool{}
 	var out []DiscoveredPlugin
 	var problems []error
+	// On Windows a plugin is host-foo.exe (or another PATHEXT extension), offered as "foo";
+	// a file without one cannot be run, so it is not a plugin.
+	exts := executableExts(runtime.GOOS, os.Getenv("PATHEXT"))
 	scan := func(dir string, report bool) {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -458,8 +462,8 @@ func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]DiscoveredPlug
 			if e.IsDir() {
 				continue
 			}
-			name := e.Name()
-			if name == d.Prefix || !strings.HasPrefix(name, d.Prefix) {
+			name, runnable := trimExecutableExt(e.Name(), exts)
+			if !runnable || name == d.Prefix || !strings.HasPrefix(name, d.Prefix) {
 				continue
 			}
 			plugin := strings.TrimPrefix(name, d.Prefix)
@@ -467,7 +471,7 @@ func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]DiscoveredPlug
 				continue
 			}
 			seen[plugin] = true
-			out = append(out, DiscoveredPlugin{Name: plugin, Path: filepath.Join(dir, name)})
+			out = append(out, DiscoveredPlugin{Name: plugin, Path: filepath.Join(dir, e.Name())})
 		}
 	}
 	if exe, err := os.Executable(); err == nil {
