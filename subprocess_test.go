@@ -277,3 +277,18 @@ func TestSubprocess_WithStdin(t *testing.T) {
 		t.Errorf("child echoed %q, want the stdin WithStdin supplied", out)
 	}
 }
+
+// Windows programs end lines with "\r\n"; Output must not leave the "\r" behind.
+func TestSubprocess_outputTrimsCRLF(t *testing.T) {
+	sub := NewSubprocess("sh", "-c", `printf 'hello\r\n'`)
+	if runtime.GOOS == "windows" {
+		sub = NewSubprocess("cmd", "/c", "echo hello")
+	}
+	out, err := sub.Output(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "hello" {
+		t.Errorf("Output = %q, want %q", out, "hello")
+	}
+}

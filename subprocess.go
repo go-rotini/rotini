@@ -184,14 +184,15 @@ func (s *Subprocess) Run(ctx context.Context) (int, error) {
 }
 
 // Output runs the command and returns its stdout, trimmed of the trailing
-// newline. Any [Subprocess.WithStdout] is ignored: Output IS the consumer.
+// newline, "\r\n" included, which is how Windows programs end their lines.
+// Any [Subprocess.WithStdout] is ignored: Output IS the consumer.
 func (s *Subprocess) Output(ctx context.Context) (string, error) {
 	var out bytes.Buffer
 	saved := s.stdout
 	s.stdout = &out
 	_, err := s.Run(ctx)
 	s.stdout = saved
-	return strings.TrimRight(out.String(), "\n"), err
+	return strings.TrimRight(out.String(), "\r\n"), err
 }
 
 // drain reads the rest of r and discards it, so a child is never left blocked writing
