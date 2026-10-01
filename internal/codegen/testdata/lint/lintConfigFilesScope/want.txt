@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:11:11: command demo/build: config_files "app": shadows the entry declared on ancestor demo — names cascade and must be unique along the chain (a `file` pin or `config_source` would be ambiguous); rename one
+spec: .rotini.spec.yaml:11:11: command demo/build: config_files "app": shadows the entry declared on ancestor demo; names cascade and must be unique along the chain (a `file` pin or `config_source` would be ambiguous); rename one

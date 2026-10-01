@@ -88,11 +88,11 @@ var byteSizeUnits = map[string]float64{
 func parseByteSize(s string) (int64, error) {
 	m := byteSizeSyntax.FindStringSubmatch(s)
 	if m == nil {
-		return 0, fmt.Errorf("%q is not a size — write a number with an optional unit, e.g. 512Mi, 10MB, 1.5GiB", s)
+		return 0, fmt.Errorf("%q is not a size; write a number with an optional unit, e.g. 512Mi, 10MB, 1.5GiB", s)
 	}
 	mult, ok := byteSizeUnits[strings.ToLower(m[2])]
 	if !ok {
-		return 0, fmt.Errorf("%q has an unknown unit %q — use B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB (decimal) or Ki, Mi, Gi, Ti, Pi, Ei (binary)", s, m[2])
+		return 0, fmt.Errorf("%q has an unknown unit %q; use B, K/KB, M/MB, G/GB, T/TB, P/PB, E/EB (decimal) or Ki, Mi, Gi, Ti, Pi, Ei (binary)", s, m[2])
 	}
 	n, err := strconv.ParseFloat(m[1], 64)
 	if err != nil {
@@ -185,7 +185,7 @@ var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
 	reflect.TypeFor[time.Time](): func(s string) (reflect.Value, error) {
 		t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
 		if err != nil {
-			return reflect.Value{}, errors.New("write it as RFC 3339, e.g. 2026-09-29T14:00:00Z — or declare `type: date` or a `layout:`")
+			return reflect.Value{}, errors.New("write it as RFC 3339, e.g. 2026-09-29T14:00:00Z; or declare `type: date` or a `layout:`")
 		}
 		return reflect.ValueOf(t), nil
 	},
@@ -232,7 +232,7 @@ func parseBool(s string) (bool, error) {
 	case "false", "f", "0", "no", "n", "off":
 		return false, nil
 	}
-	return false, fmt.Errorf("%q is not a boolean — use true/false, t/f, yes/no, y/n, on/off or 1/0", s)
+	return false, fmt.Errorf("%q is not a boolean; use true/false, t/f, yes/no, y/n, on/off or 1/0", s)
 }
 
 // Time layouts beyond Go's reference-time layouts: a Unix timestamp in seconds (fractions

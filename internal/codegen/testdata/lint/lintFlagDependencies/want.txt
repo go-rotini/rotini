@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:12:7: command demo: `flag_dependencies` entry references unknown flag "cert" — it has no matching entry in this command's `flags`
+spec: .rotini.spec.yaml:12:7: command demo: `flag_dependencies` entry references unknown flag "cert"; it has no matching entry in this command's `flags`

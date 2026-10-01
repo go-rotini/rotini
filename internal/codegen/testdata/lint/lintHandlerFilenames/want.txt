@@ -1,2 +1,2 @@
 spec: .rotini.spec.yaml:9:7: command demo/ship: generates handler file "shared.go", already used by command "demo/build"
-spec: .rotini.spec.yaml:12:17: command demo/probe: `filename` "probe_test.go" would be read specially by the go tool (a _test.go test file, or a GOOS/GOARCH build constraint) — choose another name
+spec: .rotini.spec.yaml:12:17: command demo/probe: `filename` "probe_test.go" would be read specially by the go tool (a _test.go test file, or a GOOS/GOARCH build constraint); choose another name

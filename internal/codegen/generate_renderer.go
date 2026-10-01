@@ -777,7 +777,7 @@ func templateFailure(name string, err error) string {
 		msg = before
 	}
 	if strings.Contains(msg, "can't evaluate field") {
-		return fmt.Sprintf("%s — the fields available to this template are listed in the comment at the top of %s", msg, name)
+		return fmt.Sprintf("%s; the fields available to this template are listed in the comment at the top of %s", msg, name)
 	}
 	return msg
 }

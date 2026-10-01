@@ -56,7 +56,7 @@ whose command is gone, delete its marker line or list it under `keep:`. Every pr
 reported:
 
 ```
-Warning: pruned demo_ship.go — its command is no longer in the spec
+Warning: pruned demo_ship.go; its command is no longer in the spec
 ```
 
 What can still surprise you:

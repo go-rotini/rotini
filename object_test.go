@@ -145,7 +145,7 @@ func TestObjectFlag_errors(t *testing.T) {
 		{[]string{"--db", "host=h,port=five"}, `--db: port: "five" is not an integer`},
 		{[]string{"--db", `{"host":5}`}, "--db: host: value is not of type string"},
 		{[]string{"--db", "host"}, `"host" is not key=value`},
-		{[]string{"--db", "pool=3"}, "pool is an object — set its fields as pool.<key>=…"},
+		{[]string{"--db", "pool=3"}, "pool is an object; set its fields as pool.<key>=…"},
 		{[]string{"--db", `{"host":`}, "could not read the value as JSON"},
 		{[]string{"--db.nope=1"}, `--db: unknown key "nope"`},
 		{[]string{"--mount", "dst=x"}, `--mount: missing required property "src"`},

@@ -230,7 +230,7 @@ func resolveRemoteBinary(name, dir string) (string, error) {
 		return p, nil
 	}
 	searched = append(searched, "PATH")
-	return "", fmt.Errorf("%q not found — searched %s", name, strings.Join(searched, ", then "))
+	return "", fmt.Errorf("%q not found; searched %s", name, strings.Join(searched, ", then "))
 }
 
 // executableAt reports the path dir/name when it exists as a non-directory file.

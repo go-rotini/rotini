@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:6:7: command demo: flag "label": sets `dotted_keys` but its type is map[string]string — dotted keys need type "map" (map[string]any) to nest into
+spec: .rotini.spec.yaml:6:7: command demo: flag "label": sets `dotted_keys` but its type is map[string]string; dotted keys need type "map" (map[string]any) to nest into

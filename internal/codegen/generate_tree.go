@@ -135,7 +135,7 @@ func resolveTree(spec *Spec, specPath, moduleName string) (*program, error) {
 func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*program, error) {
 	root := spec.Command
 	if root.Ref != "" {
-		return nil, errors.New("the root command cannot use `$ref` — compose child specs as sub-commands instead")
+		return nil, errors.New("the root command cannot use `$ref`; compose child specs as sub-commands instead")
 	}
 	if root.Name == "" {
 		return nil, errors.New("the root command must have a `name` (it is the binary name)")
@@ -508,7 +508,7 @@ func (gp *program) resolveEnvPrefix() (string, error) {
 		for _, p := range prefixes {
 			parts = append(parts, fmt.Sprintf("%q (from %s)", p, gp.adoptedPrefixes[p]))
 		}
-		return "", fmt.Errorf("composed children declare different env_prefix values — %s; "+
+		return "", fmt.Errorf("composed children declare different env_prefix values; %s; "+
 			"one descriptor carries one prefix, so declare on %q the env_prefix it should use",
 			strings.Join(parts, " and "), gp.rootName)
 	}
@@ -615,7 +615,7 @@ func checkImportableAcrossModules(importPath, childModule, consumingModule, ref 
 		}
 		return fmt.Errorf(
 			"compose %q: the composed CLI's package %q is internal to %q, so this module cannot import it"+
-				" — a spec published for others to compose must put its generated package outside internal/,"+
+				"; a spec published for others to compose must put its generated package outside internal/,"+
 				" so set the cmd package's `file:` in that project's .rotini.conf.yaml to a non-internal path"+
 				" (e.g. scancli/zz_rotini.go) and release it again",
 			ref, importPath, childModule)

@@ -45,7 +45,7 @@ func (p *parsedInputs) detachedHint(extra []string) string {
 	if p == nil || p.detached == nil || !slices.Contains(extra, p.detached[1]) {
 		return ""
 	}
-	return fmt.Sprintf(" — %s takes its value attached: %s=%s", p.detached[0], p.detached[0], p.detached[1])
+	return fmt.Sprintf("; %s takes its value attached: %s=%s", p.detached[0], p.detached[0], p.detached[1])
 }
 
 // covers reports whether chain frame i is one this validation pass judges.
@@ -482,7 +482,7 @@ func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int,
 		if hasInline {
 			return 0, &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  fmt.Sprintf("flag %q is the negated form and takes no value — use %q to set one", name, "--"+fdef.Name),
+				Msg:  fmt.Sprintf("flag %q is the negated form and takes no value; use %q to set one", name, "--"+fdef.Name),
 				Flag: name,
 			}
 		}
@@ -1233,7 +1233,7 @@ func resolveFlagValue(fd FlagDef, label, value string, stdin io.Reader) (string,
 		if len(data) == 0 {
 			return "", &ParseError{
 				Kind: ParseKindInvalidValue,
-				Msg:  fmt.Sprintf("%s: stdin is empty — %q asks for a piped value", label, "-"),
+				Msg:  fmt.Sprintf("%s: stdin is empty; %q asks for a piped value", label, "-"),
 				Flag: label,
 			}
 		}
@@ -1460,7 +1460,7 @@ func checkFrameFit(v reflect.Value, chain []ResolvedCommand, self int) error {
 			Msg: fmt.Sprintf(
 				"rotini: %s describes %d commands but %q is only %d deep: an inputs type covers a "+
 					"command and its ancestors, so a handler collects the type generated for ITS OWN "+
-					"command — a descendant's type cannot be collected from a shallower hook",
+					"command; a descendant's type cannot be collected from a shallower hook",
 				displayTypeName(v.Type()), n, pathOf(chain[:self+1]), self+1),
 		}
 	}
@@ -1825,7 +1825,7 @@ func coerce(f reflect.Value, raw []string) error {
 // unsupportedType is the loud refusal for a field type coerce has no rule for: silence would
 // zero the field and hide a codegen mistake. The fix is to give the type an UnmarshalText.
 func unsupportedType(t reflect.Type) error {
-	return authorMistake(fmt.Sprintf("cannot parse into %s — the type must implement encoding.TextUnmarshaler", t))
+	return authorMistake(fmt.Sprintf("cannot parse into %s; the type must implement encoding.TextUnmarshaler", t))
 }
 
 // authorMistake is a coercion failure no value could have avoided: the field's TYPE is wrong for
@@ -1919,7 +1919,7 @@ func coerceMapDotted(f reflect.Value, raw []string) error {
 		}
 		segs := strings.Split(k, ".")
 		if slices.Contains(segs, "") {
-			return fmt.Errorf("invalid key path %q — empty segment", k)
+			return fmt.Errorf("invalid key path %q; empty segment", k)
 		}
 		cur := m
 		for _, seg := range segs[:len(segs)-1] {
@@ -1944,7 +1944,7 @@ func coerceMap(f reflect.Value, raw []string) error {
 	kt := f.Type().Key()
 	if kt.Kind() != reflect.String {
 		// Silence would leave the field zeroed as though nothing were supplied.
-		return authorMistake(fmt.Sprintf("cannot parse into %s — a map flag's keys must be strings", f.Type()))
+		return authorMistake(fmt.Sprintf("cannot parse into %s; a map flag's keys must be strings", f.Type()))
 	}
 	et := f.Type().Elem()
 	m := reflect.MakeMapWithSize(f.Type(), len(raw))

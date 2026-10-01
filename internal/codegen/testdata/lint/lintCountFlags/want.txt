@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:6:7: command demo: flag "verbose": a count flag has no value to resolve, so `default`, `required` cannot apply — remove them (the generated int field is the occurrence tally)
+spec: .rotini.spec.yaml:6:7: command demo: flag "verbose": a count flag has no value to resolve, so `default`, `required` cannot apply; remove them (the generated int field is the occurrence tally)

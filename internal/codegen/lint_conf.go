@@ -83,7 +83,7 @@ func lintPackageTypes(conf *Conf) []error {
 		if seen[p.Type] {
 			problems = append(problems, &problem{
 				kind: "conf", ptr: packagePointer(i), loc: "generate.packages",
-				msg: fmt.Sprintf("type %q is declared more than once — each package type may appear at most once", p.Type),
+				msg: fmt.Sprintf("type %q is declared more than once; each package type may appear at most once", p.Type),
 			})
 		}
 		seen[p.Type] = true
@@ -104,7 +104,7 @@ func lintFeatureTypes(conf *Conf) []error {
 		if seen[f.Type] {
 			problems = append(problems, &problem{
 				kind: "conf", ptr: featurePointer(i), loc: "generate.features",
-				msg: fmt.Sprintf("type %q is declared more than once — each feature type may appear at most once", f.Type),
+				msg: fmt.Sprintf("type %q is declared more than once; each feature type may appear at most once", f.Type),
 			})
 		}
 		seen[f.Type] = true
@@ -128,7 +128,7 @@ func lintPackageColocation(conf *Conf) []error {
 		if prev, ok := byFile[p.File]; ok && prev != p.Package {
 			problems = append(problems, &problem{
 				kind: "conf", ptr: packagePointer(i), loc: "generate.packages",
-				msg: fmt.Sprintf("file %q is targeted by package %q and %q — targets sharing a file must declare the same package", p.File, prev, p.Package),
+				msg: fmt.Sprintf("file %q is targeted by package %q and %q; targets sharing a file must declare the same package", p.File, prev, p.Package),
 			})
 			continue
 		}
@@ -158,7 +158,7 @@ func lintEntrypoint(conf *Conf) []error {
 			kind: "conf",
 			ptr:  packagePointer(mainAt),
 			loc:  "generate.packages.main.keep",
-			msg:  "has no effect without `generate.packages.main.file` — the entrypoint is only written, and its directory pruned, when `file` is set",
+			msg:  "has no effect without `generate.packages.main.file`; the entrypoint is only written, and its directory pruned, when `file` is set",
 		}}
 	}
 	return nil
@@ -228,19 +228,19 @@ func lintFeatureKnobs(conf *Conf) []error {
 		}
 		name := cf.desc.name
 		if f.EmbedDir != "" && !f.Embed {
-			warn(name, "embed_dir", "is set but `embed` is false — `embed_dir` is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")
+			warn(name, "embed_dir", "is set but `embed` is false; `embed_dir` is used only in embed mode (//go:embed); inline content writes no file, so it is ignored")
 		}
 		if cf.desc.tmplFile == "" { // no editable template (completion)
 			if f.Template {
-				warn(name, "template", name+" has no editable template — `template` has no effect here")
+				warn(name, "template", name+" has no editable template; `template` has no effect here")
 			}
 			if f.TemplateDir != "" {
-				warn(name, "template_dir", name+" has no editable template — `template_dir` has no effect here")
+				warn(name, "template_dir", name+" has no editable template; `template_dir` has no effect here")
 			}
 			continue
 		}
 		if f.TemplateDir != "" && !f.Template {
-			warn(name, "template_dir", "is set but `template` is false — `template_dir` is used only when the editable template is seeded (`template: true`); it is otherwise ignored")
+			warn(name, "template_dir", "is set but `template` is false; `template_dir` is used only when the editable template is seeded (`template: true`); it is otherwise ignored")
 		}
 	}
 	return problems
@@ -290,7 +290,7 @@ func lintModelsKeep(conf *Conf) []error {
 		if p.Type == typeModels && len(p.Keep) > 0 {
 			problems = append(problems, &problem{
 				kind: "conf", ptr: packagePointer(i) + "/keep", loc: "generate.packages.models.keep",
-				msg: "has no effect — nothing is pruned from the models package, so there is nothing to keep; remove it",
+				msg: "has no effect; nothing is pruned from the models package, so there is nothing to keep; remove it",
 			})
 		}
 	}

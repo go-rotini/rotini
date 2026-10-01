@@ -309,7 +309,7 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 			}
 			at := findingAt(fset, fd.Name.Pos(), moduleRoot)
 			at.msg = didYouMean(fmt.Sprintf(
-				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run — rotini.Default%s is what supplies %s",
+				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run; rotini.Default%s is what supplies %s",
 				at.file, at.line, name, recv, match, match,
 			), name, auditedHooks)
 			found = append(found, at)
@@ -405,7 +405,7 @@ func wrongInputsTypes(fset *token.FileSet, files map[string]*ast.File, expected 
 				at.msg = fmt.Sprintf(
 					"%s:%d: %s in %s acquires %s, but this handler implements the command whose inputs are %s. "+
 						"An inputs type binds to the command whose hook is running, so another command's type "+
-						"reads THIS command's frame through the wrong shape — silently, when the two share a flag name",
+						"reads THIS command's frame through the wrong shape, silently when the two share a flag name",
 					at.file, at.line, fn, recv, arg, want)
 				found = append(found, at)
 				return true

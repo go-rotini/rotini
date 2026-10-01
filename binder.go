@@ -202,7 +202,7 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 			if isRawStdinFormat(format) {
 				noun = "payload"
 			}
-			return usageBind(channelStdin, "", fmt.Sprintf("required stdin payload is empty — pipe a %s %s", format, noun), nil)
+			return usageBind(channelStdin, "", fmt.Sprintf("required stdin payload is empty; pipe a %s %s", format, noun), nil)
 		}
 		return nil // nothing piped → leave Stdin nil
 	}
@@ -760,7 +760,7 @@ func (b *Binder) checkDescribed(v reflect.Value) error {
 		return nil
 	}
 	return &WiringError{Msg: "this command declares config: inputs, but the program " +
-		"was built without a BindMeta — call Program.WithBindMeta (the generated NewProgram " +
+		"was built without a BindMeta; call Program.WithBindMeta (the generated NewProgram " +
 		"does) so the binder knows where configuration lives"}
 }
 
@@ -1261,7 +1261,7 @@ func fillEnvNested(env reflect.Value) (map[string]bool, error) {
 			if opt == "required" {
 				name := et.Field(j).Tag.Get("rotini")
 				return filled, usageBind(channelEnv, name,
-					fmt.Sprintf("environment input %q is required — set %s%s* variables", name, base, sep), nil)
+					fmt.Sprintf("environment input %q is required; set %s%s* variables", name, base, sep), nil)
 			}
 			continue
 		}

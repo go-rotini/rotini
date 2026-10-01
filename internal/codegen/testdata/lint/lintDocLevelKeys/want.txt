@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:7:19: command demo/build: sets `env_prefix`, a root-command-level key valid only on the root command — remove it (codegen reads it only at the root, so here it is silently ignored)
+spec: .rotini.spec.yaml:7:19: command demo/build: sets `env_prefix`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)

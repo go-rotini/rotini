@@ -1,5 +1,5 @@
 spec: .rotini.spec.yaml:7:7: command demo: flag "verbose": sets `implicit_value` but its type is bool, which already takes no value
-spec: .rotini.spec.yaml:12:7: command demo: flag "tags": sets `implicit_value` but its type is []string — an optional value applies to a flag that takes exactly one
-spec: .rotini.spec.yaml:17:7: command demo: flag "color": `implicit_value` "sometimes" is not one of the declared `enum` values (always, never, auto) — the flag given bare would always fail
-spec: .rotini.spec.yaml:23:7: command demo: flag "jobs": `implicit_value` 128 is above the declared `maximum` 64 — the flag given bare would always fail
-spec: .rotini.spec.yaml:43:7: command demo: argument "target": sets `implicit_value`, which applies to flags only — it is what a flag given without a value takes
+spec: .rotini.spec.yaml:12:7: command demo: flag "tags": sets `implicit_value` but its type is []string; an optional value applies to a flag that takes exactly one
+spec: .rotini.spec.yaml:17:7: command demo: flag "color": `implicit_value` "sometimes" is not one of the declared `enum` values (always, never, auto); the flag given bare would always fail
+spec: .rotini.spec.yaml:23:7: command demo: flag "jobs": `implicit_value` 128 is above the declared `maximum` 64; the flag given bare would always fail
+spec: .rotini.spec.yaml:43:7: command demo: argument "target": sets `implicit_value`, which applies to flags only; it is what a flag given without a value takes

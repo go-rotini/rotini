@@ -1,1 +1,1 @@
-conf: .rotini.conf.yaml:5:7: generate.packages.main.keep: has no effect without `generate.packages.main.file` — the entrypoint is only written, and its directory pruned, when `file` is set
+conf: .rotini.conf.yaml:5:7: generate.packages.main.keep: has no effect without `generate.packages.main.file`; the entrypoint is only written, and its directory pruned, when `file` is set

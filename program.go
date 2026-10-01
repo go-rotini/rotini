@@ -734,7 +734,7 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	}
 	if len(res.Chain) == 0 {
 		// An empty chain violates the resolver contract.
-		rtx.recordFault(asFault(InternalError(errors.New("resolver returned an empty chain — the root frame is always resolvable"))))
+		rtx.recordFault(asFault(InternalError(errors.New("resolver returned an empty chain; the root frame is always resolvable"))))
 		return p.settle(ctx, rtx)
 	}
 

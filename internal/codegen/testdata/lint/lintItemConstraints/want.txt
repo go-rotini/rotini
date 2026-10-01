@@ -1,2 +1,2 @@
-spec: .rotini.spec.yaml:13:7: command demo: flag "level": `enum` is declared on both the list and its `items`, with different values — they mean the same thing (a rule every element must pass), so declare it once
-spec: .rotini.spec.yaml:27:7: command demo: flag "hosts": `minItems`/`maxItems` on `items` would count values inside ONE element, but an element of a flag list is a single value — put the bound on the list itself
+spec: .rotini.spec.yaml:13:7: command demo: flag "level": `enum` is declared on both the list and its `items`, with different values; they mean the same thing (a rule every element must pass), so declare it once
+spec: .rotini.spec.yaml:27:7: command demo: flag "hosts": `minItems`/`maxItems` on `items` would count values inside ONE element, but an element of a flag list is a single value; put the bound on the list itself

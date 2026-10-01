@@ -350,7 +350,7 @@ func TestTemplateFailure(t *testing.T) {
 		{
 			name: "an unknown field points at the field list, not at a Go type",
 			in:   `template: help.txt.tmpl:78:2: executing "help.txt.tmpl" at <.NoSuchField>: can't evaluate field NoSuchField in type codegen.templateHelpData`,
-			want: `help.txt.tmpl:78:2: can't evaluate field NoSuchField — the fields available to this template are listed in the comment at the top of help.txt.tmpl`,
+			want: `help.txt.tmpl:78:2: can't evaluate field NoSuchField; the fields available to this template are listed in the comment at the top of help.txt.tmpl`,
 		},
 		{
 			name: "another execution failure keeps its position and loses the noise",

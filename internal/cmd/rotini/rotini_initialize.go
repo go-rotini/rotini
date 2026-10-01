@@ -51,7 +51,7 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	// the module does not require it yet, the next `go build` would fail on a missing module,
 	// and the warning says what to run instead.
 	if !requiresRuntime(".") {
-		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet — run `go get %s` before building ./cmd/%s", runtimeModule, runtimeModule, args.Name))
+		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet; run `go get %s` before building ./cmd/%s", runtimeModule, runtimeModule, args.Name))
 	}
 }
 

@@ -101,7 +101,7 @@ func loadRef(locator, consumingModule string) (resolvedRef, error) {
 			childBase: modLocator(module, version, path.Dir(sub)),
 		}, nil
 	case isExternalLocator(locator):
-		return resolvedRef{}, errors.New("external (git/raw) $ref composition is not supported — use a local path or a mod://<module> $ref")
+		return resolvedRef{}, errors.New("external (git/raw) $ref composition is not supported; use a local path or a mod://<module> $ref")
 	default:
 		spec, err := readSpec(locator)
 		if err != nil {
@@ -123,7 +123,7 @@ func modLocator(module, version, sub string) string {
 func parseModLocator(loc string) (module, version, sub string, err error) {
 	module, rest, ok := strings.Cut(strings.TrimPrefix(loc, modScheme), "@")
 	if !ok || module == "" {
-		return "", "", "", fmt.Errorf("invalid module ref %q — want mod://<module>@<version>/<path>", loc)
+		return "", "", "", fmt.Errorf("invalid module ref %q; want mod://<module>@<version>/<path>", loc)
 	}
 	if v, s, ok := strings.Cut(rest, "/"); ok {
 		version, sub = v, path.Clean(s)
@@ -131,7 +131,7 @@ func parseModLocator(loc string) (module, version, sub string, err error) {
 		version, sub = rest, "."
 	}
 	if version == "" {
-		return "", "", "", fmt.Errorf("invalid module ref %q — missing version", loc)
+		return "", "", "", fmt.Errorf("invalid module ref %q; missing version", loc)
 	}
 	return module, version, sub, nil
 }
@@ -167,7 +167,7 @@ func goModDownloadDir(module, version string) (string, error) {
 		return "", fmt.Errorf("go mod download %s@%s: %w", module, version, jsonErr)
 	}
 	if res.Error != "" {
-		return "", fmt.Errorf("module %s@%s not available — add it to go.mod (go get %s@%s): %s", module, version, module, version, res.Error)
+		return "", fmt.Errorf("module %s@%s not available; add it to go.mod (go get %s@%s): %s", module, version, module, version, res.Error)
 	}
 	if res.Dir == "" {
 		return "", fmt.Errorf("module %s@%s resolved to no directory", module, version)

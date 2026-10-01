@@ -1,1 +1,1 @@
-conf: .rotini.conf.yaml:9:7: generate.packages: file "internal/cmd/demo/zz_demo.go" is targeted by package "demo" and "models" — targets sharing a file must declare the same package
+conf: .rotini.conf.yaml:9:7: generate.packages: file "internal/cmd/demo/zz_demo.go" is targeted by package "demo" and "models"; targets sharing a file must declare the same package

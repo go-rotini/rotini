@@ -91,7 +91,7 @@ func lintRootCommand(spec *Spec) []error {
 	var problems []error
 	loc := rootLabel(spec)
 	if spec.Command.Ref != "" {
-		problems = append(problems, &problem{kind: "spec", ptr: rootPointer + "/$ref", loc: loc, msg: "the root command cannot use `$ref` — compose child specs as sub-commands instead"})
+		problems = append(problems, &problem{kind: "spec", ptr: rootPointer + "/$ref", loc: loc, msg: "the root command cannot use `$ref`; compose child specs as sub-commands instead"})
 	}
 	if spec.Command.Name == "" {
 		problems = append(problems, &problem{kind: "spec", ptr: rootPointer, loc: loc, msg: "the root command must have a `name` (it is the binary name)"})
@@ -120,7 +120,7 @@ func lintDocLevelKeys(spec *Spec) []error {
 		add := func(key string) {
 			problems = append(problems, &problem{
 				kind: "spec", ptr: ptr + "/" + key, loc: "command " + path,
-				msg: fmt.Sprintf("sets `%s`, a root-command-level key valid only on the root command — remove it (codegen reads it only at the root, so here it is silently ignored)", key),
+				msg: fmt.Sprintf("sets `%s`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)", key),
 			})
 		}
 		if c.EnvPrefix != "" {
@@ -153,7 +153,7 @@ func lintRefNodeKeys(spec *Spec) []error {
 		reject := func(key string) {
 			problems = append(problems, &problem{
 				kind: "spec", ptr: ptr + "/" + key, loc: loc,
-				msg: fmt.Sprintf("%ssets `%s` on a `$ref` node — a composed command delegates to the child's handler (built against the child's own inputs and output), so `%s` cannot be overlaid here; declare it in the child spec instead", subject, key, key),
+				msg: fmt.Sprintf("%ssets `%s` on a `$ref` node; a composed command delegates to the child's handler (built against the child's own inputs and output), so `%s` cannot be overlaid here; declare it in the child spec instead", subject, key, key),
 			})
 		}
 		if len(c.Flags) > 0 {
@@ -205,7 +205,7 @@ func lintHandlerSource(spec *Spec) []error {
 	if spec.Command.Handler != nil {
 		problems = append(problems, &problem{
 			kind: "spec", ptr: rootPointer + "/handler", loc: rootLabel(spec),
-			msg: "sets `handler` on the root command — handler delegation is supported on sub-commands only (a `$ref` node or an inline command), not the root",
+			msg: "sets `handler` on the root command; handler delegation is supported on sub-commands only (a `$ref` node or an inline command), not the root",
 		})
 	}
 	return problems
@@ -219,14 +219,14 @@ func lintRootAliases(spec *Spec) []error {
 	if len(spec.Command.Aliases) > 0 {
 		problems = append(problems, &problem{
 			kind: "spec", ptr: rootPointer + "/aliases", loc: rootLabel(spec),
-			msg: fmt.Sprintf("the root command cannot declare `aliases` (%s) — it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
+			msg: fmt.Sprintf("the root command cannot declare `aliases` (%s); it is reached by invoking the binary, not by a routing token; declare aliases on sub-commands",
 				quotedList(spec.Command.Aliases)),
 		})
 	}
 	if len(spec.Command.DeprecatedIdentifiers) > 0 {
 		problems = append(problems, &problem{
 			kind: "spec", ptr: rootPointer + "/deprecated_identifiers", loc: rootLabel(spec),
-			msg: fmt.Sprintf("the root command cannot declare `deprecated_identifiers` (%s) — with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
+			msg: fmt.Sprintf("the root command cannot declare `deprecated_identifiers` (%s); with no routing token, a deprecated root alias can never be detected; declare them on sub-commands",
 				quotedList(spec.Command.DeprecatedIdentifiers)),
 		})
 	}
@@ -289,7 +289,7 @@ func lintDuplicateInputNames(spec *Spec) []error {
 			key := channel + "\x00" + name
 			if _, dup := seen[key]; dup {
 				problems = append(problems, inputProblem(ptr, path, channel, name,
-					fmt.Sprintf("declared twice — each %s needs a unique name", channel)))
+					fmt.Sprintf("declared twice; each %s needs a unique name", channel)))
 				return
 			}
 			seen[key] = name
@@ -313,7 +313,7 @@ func lintVariadicArguments(spec *Spec) []error {
 			}
 			if strings.HasPrefix(getSchemaType(a.Schema), "[]") {
 				problems = append(problems, inputProblem(fmt.Sprintf("%s/arguments/%d", ptr, i), path, "argument", a.Name,
-					"variadic but not last — it would absorb every remaining positional, so later arguments could never bind"))
+					"variadic but not last; it would absorb every remaining positional, so later arguments could never bind"))
 			}
 		}
 	})
@@ -350,7 +350,7 @@ func lintRequiredArgumentOrder(spec *Spec) []error {
 			}
 			if firstOptional != "" {
 				problems = append(problems, inputProblem(fmt.Sprintf("%s/arguments/%d", ptr, i), path, "argument", a.Name,
-					fmt.Sprintf("required but comes after optional argument %q — positionals fill in order, so the first value always goes to %q and it can never be left out. Make %q required too, or move %q before it",
+					fmt.Sprintf("required but comes after optional argument %q; positionals fill in order, so the first value always goes to %q and it can never be left out. Make %q required too, or move %q before it",
 						firstOptional, firstOptional, firstOptional, a.Name)))
 			}
 		}
@@ -371,13 +371,13 @@ func lintIgnoreCase(spec *Spec) []error {
 			}
 			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			if len(schema.Enum) == 0 {
-				add("sets `ignore_case` but declares no `enum` — `ignore_case` changes how a value is matched against enum members, so without one it does nothing")
+				add("sets `ignore_case` but declares no `enum`; `ignore_case` changes how a value is matched against enum members, so without one it does nothing")
 				return
 			}
 			seen := map[string]string{}
 			for _, m := range schema.Enum {
 				if prev, ok := seen[strings.ToLower(m)]; ok && prev != m {
-					add(fmt.Sprintf("sets `ignore_case` but enum members %q and %q differ only in case — a value matching both could bind either", prev, m))
+					add(fmt.Sprintf("sets `ignore_case` but enum members %q and %q differ only in case; a value matching both could bind either", prev, m))
 					return
 				}
 				seen[strings.ToLower(m)] = m
@@ -406,9 +406,9 @@ func lintSeparator(spec *Spec) []error {
 			isList, isMap := strings.HasPrefix(t, "[]"), strings.HasPrefix(t, "map[")
 			switch {
 			case channel != "flag" && channel != "argument":
-				add("sets `separator`, which applies to flags and arguments only — an env input's list splits on commas and a configuration file writes a list as a list, so there is nothing for it to choose")
+				add("sets `separator`, which applies to flags and arguments only; an env input's list splits on commas and a configuration file writes a list as a list, so there is nothing for it to choose")
 			case !isList && !isMap:
-				add(fmt.Sprintf("sets `separator` but its type is %s — only a list or map takes several values to split into", displayType(t)))
+				add(fmt.Sprintf("sets `separator` but its type is %s; only a list or map takes several values to split into", displayType(t)))
 			case schema.Separator == `"`:
 				add("sets `separator` to a double quote, which is how an item that contains the separator is quoted")
 			case strings.ContainsAny(schema.Separator, "\r\n"):
@@ -447,14 +447,14 @@ func lintImplicitValue(spec *Spec) []error {
 			t := getSchemaType(schema)
 			switch {
 			case channel != "flag":
-				add("sets `implicit_value`, which applies to flags only — it is what a flag given without a value takes")
+				add("sets `implicit_value`, which applies to flags only; it is what a flag given without a value takes")
 			case t == "bool" || schema.Type == "count":
 				add(fmt.Sprintf("sets `implicit_value` but its type is %s, which already takes no value", displayType(schema.Type)))
 			case strings.HasPrefix(t, "[]") || strings.HasPrefix(t, "map["):
-				add(fmt.Sprintf("sets `implicit_value` but its type is %s — an optional value applies to a flag that takes exactly one", displayType(t)))
+				add(fmt.Sprintf("sets `implicit_value` but its type is %s; an optional value applies to a flag that takes exactly one", displayType(t)))
 			default:
 				if v := defaultViolation(schema, "`implicit_value`", defaultString(schema.ImplicitValue)); v != "" {
-					add(v + " — the flag given bare would always fail")
+					add(v + "; the flag given bare would always fail")
 				}
 			}
 		})
@@ -488,7 +488,7 @@ func lintDottedKeys(spec *Spec) []error {
 			}
 			if t := getSchemaType(schema); t != "map[string]any" {
 				problems = append(problems, inputProblem(ptr, path, channel, name,
-					fmt.Sprintf("sets `dotted_keys` but its type is %s — dotted keys need type \"map\" (map[string]any) to nest into", t)))
+					fmt.Sprintf("sets `dotted_keys` but its type is %s; dotted keys need type \"map\" (map[string]any) to nest into", t)))
 			}
 		})
 	})
@@ -508,16 +508,16 @@ func lintConfigurationFiles(spec *Spec) []error {
 			add := func(msg string) { problems = append(problems, configFileProblem(ptr, path, i, cf.Name, msg)) }
 			switch {
 			case cf.Path == "" && cf.Discover == nil:
-				add("needs a location — set `path` or `discover`")
+				add("needs a location; set `path` or `discover`")
 			case cf.Path != "" && cf.Discover != nil:
-				add("sets both `path` and `discover` — exactly one locates the file")
+				add("sets both `path` and `discover`; exactly one locates the file")
 			}
 			if d := cf.Discover; d != nil {
 				if d.Strategy == "xdg" && d.App == "" {
 					add("`discover` strategy \"xdg\" needs `app` (the directory under the XDG config root)")
 				}
 				if d.Strategy == "walk-up" && d.App != "" {
-					add("`discover` strategy \"walk-up\" does not use `app` — remove it (it would be silently ignored)")
+					add("`discover` strategy \"walk-up\" does not use `app`; remove it (it would be silently ignored)")
 				}
 			}
 		}
@@ -551,10 +551,10 @@ func lintEnvNesting(spec *Spec) []error {
 				return
 			}
 			if t := getSchemaType(schema); t != "map[string]any" {
-				add(fmt.Sprintf("sets `nesting` but its type is %s — a variable family needs type \"map\" (map[string]any) to nest into", t))
+				add(fmt.Sprintf("sets `nesting` but its type is %s; a variable family needs type \"map\" (map[string]any) to nest into", t))
 			}
 			if schema.Default != nil {
-				add("sets both `nesting` and `default` — a nested family has no single default; seed defaults in code or config instead")
+				add("sets both `nesting` and `default`; a nested family has no single default; seed defaults in code or config instead")
 			}
 		})
 	})
@@ -614,9 +614,9 @@ func lintConfigFilesScope(spec *Spec) []error {
 			}
 			switch {
 			case ownName[cf.Name]:
-				add(severityError, "declared twice — logical names identify entries (`file` pins, `config_source`) and must be unique")
+				add(severityError, "declared twice; logical names identify entries (`file` pins, `config_source`) and must be unique")
 			case ancestorName[cf.Name] != "":
-				add(severityError, fmt.Sprintf("shadows the entry declared on ancestor %s — names cascade and must be unique along the chain (a `file` pin or `config_source` would be ambiguous); rename one", ancestorName[cf.Name]))
+				add(severityError, fmt.Sprintf("shadows the entry declared on ancestor %s; names cascade and must be unique along the chain (a `file` pin or `config_source` would be ambiguous); rename one", ancestorName[cf.Name]))
 			}
 			ownName[cf.Name] = true
 
@@ -626,9 +626,9 @@ func lintConfigFilesScope(spec *Spec) []error {
 			}
 			switch {
 			case ownLoc[key] != "":
-				add(severityWarning, fmt.Sprintf("resolves to the same file as %q — the later shadows the earlier (nearest-wins); declare it once", ownLoc[key]))
+				add(severityWarning, fmt.Sprintf("resolves to the same file as %q; the later shadows the earlier (nearest-wins); declare it once", ownLoc[key]))
 			case ancestorLoc[key] != "":
-				add(severityWarning, fmt.Sprintf("resolves to the same file as %s — the nearer shadows it (nearest-wins); declare it once", ancestorLoc[key]))
+				add(severityWarning, fmt.Sprintf("resolves to the same file as %s; the nearer shadows it (nearest-wins); declare it once", ancestorLoc[key]))
 			}
 			if ownLoc[key] == "" {
 				ownLoc[key] = cf.Name
@@ -693,13 +693,13 @@ func lintConfigSource(spec *Spec) []error {
 				return
 			}
 			if t := getSchemaType(schema); t != "string" {
-				add(fmt.Sprintf("sets `config_source` but its type is %s — a file path is a string", t))
+				add(fmt.Sprintf("sets `config_source` but its type is %s; a file path is a string", t))
 			}
 			if claims[target] == nil {
 				claims[target] = map[string]string{}
 			}
 			if prev, dup := claims[target][channel]; dup {
-				add(fmt.Sprintf("claims `config_source` %q, already claimed by %s %q — one %s per entry", target, channel, prev, channel))
+				add(fmt.Sprintf("claims `config_source` %q, already claimed by %s %q; one %s per entry", target, channel, prev, channel))
 				return
 			}
 			claims[target][channel] = name
@@ -758,7 +758,7 @@ func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []er
 	var problems []error
 	inert := func(key, where string) {
 		problems = append(problems, inputProblem(ptr, path, channel, name,
-			fmt.Sprintf("sets `%s`, which applies only to %s — here it would do nothing", key, where)))
+			fmt.Sprintf("sets `%s`, which applies only to %s; here it would do nothing", key, where)))
 	}
 	if schema.Negatable && channel != "flag" {
 		inert("negatable", "bool flags (it derives a --no-<name> form)")
@@ -799,20 +799,20 @@ func lintConstraintApplicability(spec *Spec) []error {
 					add(msg)
 				}
 			case numericBounds && !constraintNumericFamily[elem]:
-				add(fmt.Sprintf("`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf` apply to numeric types, durations and sizes only, not %s — the bound would be silently ignored", typ))
+				add(fmt.Sprintf("`minimum`/`maximum`/`exclusiveMinimum`/`exclusiveMaximum`/`multipleOf` apply to numeric types, durations and sizes only, not %s; the bound would be silently ignored", typ))
 			case numericBounds:
 				for _, key := range boundKeys {
 					if text, ok := boundsByKey(schema)[key].(string); ok {
-						add(fmt.Sprintf("`%s` %q is text, but %s takes a number — a string bound is for a duration or bytesize input", key, text, typ))
+						add(fmt.Sprintf("`%s` %q is text, but %s takes a number; a string bound is for a duration or bytesize input", key, text, typ))
 					}
 				}
 			}
 			if (schema.MinLength != 0 || schema.MaxLength != 0 || schema.Pattern != "") && !stringValued(elem) {
-				add(fmt.Sprintf("`minLength`/`maxLength`/`pattern` apply to string types only, not %s — the constraint would be silently ignored", typ))
+				add(fmt.Sprintf("`minLength`/`maxLength`/`pattern` apply to string types only, not %s; the constraint would be silently ignored", typ))
 			}
 			if (schema.MinItems != 0 || schema.MaxItems != 0) &&
 				!strings.HasPrefix(typ, "[]") && !strings.HasPrefix(typ, "map[") {
-				add(fmt.Sprintf("`minItems`/`maxItems` apply to repeatable (list or map) types only, not %s — the count bound would be silently ignored", typ))
+				add(fmt.Sprintf("`minItems`/`maxItems` apply to repeatable (list or map) types only, not %s; the count bound would be silently ignored", typ))
 			}
 		})
 	})
@@ -869,20 +869,20 @@ func lintPassthrough(spec *Spec) []error {
 			problems = append(problems, &problem{kind: "spec", ptr: ptr + "/" + key, loc: "command " + path, msg: msg})
 		}
 		if len(c.Flags) > 0 {
-			add("flags", "sets `passthrough` and declares `flags`, but a passthrough command parses none — its tokens are raw positionals")
+			add("flags", "sets `passthrough` and declares `flags`, but a passthrough command parses none; its tokens are raw positionals")
 		}
 		if len(c.Commands) > 0 {
-			add("commands", "sets `passthrough` and declares `commands`, but a passthrough command never descends — a child token is a raw positional")
+			add("commands", "sets `passthrough` and declares `commands`, but a passthrough command never descends; a child token is a raw positional")
 		}
 		if len(c.RemoteCommands) > 0 || c.RemoteDiscovery != nil {
-			add("passthrough", "sets `passthrough` and declares `remote_commands` or `remote_discovery`, but a passthrough command never dispatches — the token is a raw positional")
+			add("passthrough", "sets `passthrough` and declares `remote_commands` or `remote_discovery`, but a passthrough command never dispatches; the token is a raw positional")
 		}
 		args := []ArgumentInput{}
 		if c.inputs() != nil {
 			args = c.inputs().Arguments
 		}
 		if len(args) == 0 || getSchemaType(args[len(args)-1].Schema) != "[]string" {
-			add("passthrough", "sets `passthrough` but its last argument is not a variadic []string — declare one to receive the raw tokens")
+			add("passthrough", "sets `passthrough` but its last argument is not a variadic []string; declare one to receive the raw tokens")
 		}
 	})
 	return problems
@@ -901,7 +901,7 @@ func lintCountFlags(spec *Spec) []error {
 			}
 			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			if channel != "flag" {
-				add("`type: count` counts argv flag occurrences — it applies to flags only")
+				add("`type: count` counts argv flag occurrences; it applies to flags only")
 				return
 			}
 			var bad []string
@@ -931,7 +931,7 @@ func lintCountFlags(spec *Spec) []error {
 			}
 			if len(bad) > 0 {
 				sort.Strings(bad)
-				add(fmt.Sprintf("a count flag has no value to resolve, so %s cannot apply — remove them (the generated int field is the occurrence tally)", keyList(bad)))
+				add(fmt.Sprintf("a count flag has no value to resolve, so %s cannot apply; remove them (the generated int field is the occurrence tally)", keyList(bad)))
 			}
 		})
 	})
@@ -958,12 +958,12 @@ func lintVariable(spec *Spec) []error {
 				// A nested env input's variable is its family's PREFIX, which one name has to be.
 				if len(vars) > 1 && schema.Nesting != "" {
 					problems = append(problems, inputProblem(ptr, path, channel, name,
-						fmt.Sprintf("sets `nesting` with %d variables — a nested input reads the family of variables under ONE prefix, so name one", len(vars))))
+						fmt.Sprintf("sets `nesting` with %d variables; a nested input reads the family of variables under ONE prefix, so name one", len(vars))))
 				}
 				return
 			}
 			problems = append(problems, inputProblem(ptr, path, channel, name,
-				"sets `variable`, which names an environment variable — only env inputs and flags (as a flag's env fallback) read one, so here it would be silently ignored"))
+				"sets `variable`, which names an environment variable; only env inputs and flags (as a flag's env fallback) read one, so here it would be silently ignored"))
 		})
 	})
 	return problems
@@ -984,11 +984,11 @@ func lintNegatable(spec *Spec) []error {
 			}
 			add := func(msg string) { problems = append(problems, inputProblem(flagPtr(i), path, "flag", f.Name, msg)) }
 			if t := f.Schema.Type; t != "bool" && t != "boolean" {
-				add(fmt.Sprintf("sets `negatable` but its type is %s — the negated form sets a bool false, so it applies to bool flags only", displayType(t)))
+				add(fmt.Sprintf("sets `negatable` but its type is %s; the negated form sets a bool false, so it applies to bool flags only", displayType(t)))
 				continue
 			}
 			if !slices.ContainsFunc(flagIdentifiers(f), func(id string) bool { return strings.HasPrefix(id, "--") }) {
-				add("sets `negatable` but declares no long identifier — the negated form is derived as \"--no-<name>\", so there is nothing to derive it from")
+				add("sets `negatable` but declares no long identifier; the negated form is derived as \"--no-<name>\", so there is nothing to derive it from")
 			}
 		}
 		// A negated form must not collide with a real identifier on the same command, or
@@ -1010,7 +1010,7 @@ func lintNegatable(spec *Spec) []error {
 				neg := "--no-" + strings.TrimPrefix(id, "--")
 				if owner, clash := declared[neg]; clash {
 					problems = append(problems, inputProblem(flagPtr(i), path, "flag", f.Name,
-						fmt.Sprintf("sets `negatable`, deriving %q, which flag %q already declares — one of the two would never match", neg, owner)))
+						fmt.Sprintf("sets `negatable`, deriving %q, which flag %q already declares; one of the two would never match", neg, owner)))
 				}
 			}
 		}
@@ -1043,7 +1043,7 @@ func lintStdinFormat(spec *Spec) []error {
 		typ := getSchemaType(c.Stdin.Schema)
 		add := func(want string) {
 			problems = append(problems, inputProblem(ptr+"/stdin", path, "stdin", "",
-				fmt.Sprintf("`format` %q binds the payload as %s, but the schema declares %s — declare %s, or use a document format (json/yaml/jsonc/toml) to decode into a typed payload instead",
+				fmt.Sprintf("`format` %q binds the payload as %s, but the schema declares %s; declare %s, or use a document format (json/yaml/jsonc/toml) to decode into a typed payload instead",
 					c.Stdin.Format, want, displayType(typ), want)))
 		}
 		switch c.Stdin.Format {
@@ -1074,15 +1074,15 @@ func lintComplete(spec *Spec) []error {
 			}
 			add := func(msg string) { problems = append(problems, inputProblem(ptr, path, channel, name, msg)) }
 			if channel != "flag" && channel != "argument" {
-				add("sets `complete`, which describes a value typed on the command line — only flags and arguments are, so here it would be silently ignored")
+				add("sets `complete`, which describes a value typed on the command line; only flags and arguments are, so here it would be silently ignored")
 				return
 			}
 			if t := getSchemaType(schema); channel == "flag" && (t == "bool" || t == "boolean" || t == "count") {
-				add(fmt.Sprintf("sets `complete` but its type is %s, which takes no value — there is nothing to complete", t))
+				add(fmt.Sprintf("sets `complete` but its type is %s, which takes no value; there is nothing to complete", t))
 				return
 			}
 			if len(schema.Complete.Extensions) > 0 && schema.Complete.Kind != "file" {
-				add(fmt.Sprintf("sets `complete.extensions` with kind %q — extensions narrow files, so they apply to kind \"file\" only", schema.Complete.Kind))
+				add(fmt.Sprintf("sets `complete.extensions` with kind %q; extensions narrow files, so they apply to kind \"file\" only", schema.Complete.Kind))
 			}
 		})
 	})
@@ -1113,16 +1113,16 @@ func lintDefaultScalar(spec *Spec) []error {
 				if repeatableSchema(schema) {
 					if bad := nonScalarElement(v); bad != "" {
 						problems = append(problems, inputProblem(ptr, path, channel, name,
-							fmt.Sprintf("every element of a multi-value `default` must be a scalar, and one is %s — each element is seeded as one occurrence and coerced through the input's element type, so there is nowhere for a nested list or map to go", bad)))
+							fmt.Sprintf("every element of a multi-value `default` must be a scalar, and one is %s; each element is seeded as one occurrence and coerced through the input's element type, so there is nowhere for a nested list or map to go", bad)))
 					}
 					return
 				}
 				problems = append(problems, inputProblem(ptr, path, channel, name,
-					fmt.Sprintf("a multi-value `default` needs a repeatable type, and this one is %s — each element is seeded as a separate occurrence, which a single-valued input has nowhere to put. Declare the type as a list (e.g. []string) or a map, or give a single scalar default", displayType(schema.Type))))
+					fmt.Sprintf("a multi-value `default` needs a repeatable type, and this one is %s; each element is seeded as a separate occurrence, which a single-valued input has nowhere to put. Declare the type as a list (e.g. []string) or a map, or give a single scalar default", displayType(schema.Type))))
 				return
 			}
 			problems = append(problems, inputProblem(ptr, path, channel, name,
-				fmt.Sprintf("`default` must be a scalar, or a list for a repeatable input — not %s. A default is seeded as argv occurrences and coerced through the input's type, and there is no spelling that turns %s into one",
+				fmt.Sprintf("`default` must be a scalar, or a list for a repeatable input; not %s. A default is seeded as argv occurrences and coerced through the input's type, and there is no spelling that turns %s into one",
 					defaultKindName(schema.Default), defaultKindName(schema.Default))))
 		})
 	})
@@ -1156,7 +1156,7 @@ func lintPatternCompiles(spec *Spec) []error {
 			if s.PatternMessage != "" && s.Pattern == "" {
 				problems = append(problems, &problem{
 					kind: "spec", ptr: ptr, loc: "command " + path,
-					msg: fmt.Sprintf("%s: `pattern_message` %q has no `pattern` beside it — it replaces a pattern's failure message, so it would never be shown", where, s.PatternMessage),
+					msg: fmt.Sprintf("%s: `pattern_message` %q has no `pattern` beside it; it replaces a pattern's failure message, so it would never be shown", where, s.PatternMessage),
 				})
 			}
 		})
@@ -1181,7 +1181,7 @@ func lintPatternCompiles(spec *Spec) []error {
 			}
 			if _, err := regexp.Compile(schema.Pattern); err != nil {
 				problems = append(problems, inputProblem(ptr, path, channel, name,
-					fmt.Sprintf("`pattern` %q does not compile (%v) — it would silently never enforce", schema.Pattern, err)))
+					fmt.Sprintf("`pattern` %q does not compile (%v); it would silently never enforce", schema.Pattern, err)))
 			}
 		})
 	})
@@ -1235,11 +1235,11 @@ func lintFrom(spec *Spec) []error {
 				return
 			}
 			if t := getSchemaType(schema); t == "bool" {
-				add("sets `from` but its type is bool — a bool takes no value to resolve")
+				add("sets `from` but its type is bool; a bool takes no value to resolve")
 			}
 			if slices.Contains(schema.From, "stdin") {
 				if stdinClaim != "" {
-					add(fmt.Sprintf("sets `from: stdin` but %s already consumes stdin — stdin has one consumer", stdinClaim))
+					add(fmt.Sprintf("sets `from: stdin` but %s already consumes stdin; stdin has one consumer", stdinClaim))
 					return
 				}
 				stdinClaim = fmt.Sprintf("flag %q", name)
@@ -1264,7 +1264,7 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 		}
 		for _, d := range deprecated {
 			if !known[d] {
-				report(didYouMean(fmt.Sprintf("`deprecated_identifiers` entry %q is not one of its %s — it could never be reported as deprecated", d, vocab), d, declared))
+				report(didYouMean(fmt.Sprintf("`deprecated_identifiers` entry %q is not one of its %s; it could never be reported as deprecated", d, vocab), d, declared))
 			}
 		}
 	}
@@ -1351,7 +1351,7 @@ func lintImportConsistency(spec *Spec) []error {
 		at := conflictAt[typ]
 		problems = append(problems, &problem{
 			kind: "spec", ptr: at.ptr, loc: at.loc,
-			msg: fmt.Sprintf("type %q is declared with conflicting imports (%s) — a type must have one backing package",
+			msg: fmt.Sprintf("type %q is declared with conflicting imports (%s); a type must have one backing package",
 				typ, quotedList(slices.Sorted(maps.Keys(byType[typ])))),
 		})
 	}
@@ -1368,7 +1368,7 @@ func lintLocalTimeout(spec *Spec) []error {
 			problems = append(problems, &problem{
 				kind: "spec", ptr: ptr + "/timeout",
 				loc: "command " + path,
-				msg: "sets `timeout`, which is not supported on a local command — it is a remote-only, host-side bound with no effect here; set it on a `remote_commands` entry's `timeout` instead",
+				msg: "sets `timeout`, which is not supported on a local command; it is a remote-only, host-side bound with no effect here; set it on a `remote_commands` entry's `timeout` instead",
 			})
 		}
 	})
@@ -1388,7 +1388,7 @@ func lintFlagGroups(spec *Spec) []error {
 		for i, g := range c.FlagGroups {
 			for _, name := range g.Flags {
 				if !known[name] {
-					msg := fmt.Sprintf("`flag_groups` entry (%s) references unknown flag %q — it has no matching entry in this command's `flags`", g.Kind, name)
+					msg := fmt.Sprintf("`flag_groups` entry (%s) references unknown flag %q; it has no matching entry in this command's `flags`", g.Kind, name)
 					problems = append(problems, &problem{kind: "spec", ptr: fmt.Sprintf("%s/flag_groups/%d", ptr, i), loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 				}
 			}
@@ -1409,7 +1409,7 @@ func lintFlagDependencies(spec *Spec) []error {
 		known, ordered := flagNames(c)
 		for i, dep := range c.FlagDependencies {
 			report := func(name string) {
-				msg := fmt.Sprintf("`flag_dependencies` entry references unknown flag %q — it has no matching entry in this command's `flags`", name)
+				msg := fmt.Sprintf("`flag_dependencies` entry references unknown flag %q; it has no matching entry in this command's `flags`", name)
 				problems = append(problems, &problem{kind: "spec", ptr: fmt.Sprintf("%s/flag_dependencies/%d", ptr, i), loc: "command " + path, msg: didYouMean(msg, name, ordered)})
 			}
 			if !known[dep.When] {
@@ -1520,7 +1520,7 @@ func lintHandlerFilenames(spec *Spec) []error {
 			case !strings.HasSuffix(ov, ".go"):
 				problems = append(problems, &problem{kind: "spec", ptr: ptr + "/filename", loc: "command " + display, msg: fmt.Sprintf("`filename` %q must end in \".go\"", ov)})
 			case reservedTrailingToken(strings.TrimSuffix(ov, ".go")):
-				problems = append(problems, &problem{kind: "spec", ptr: ptr + "/filename", loc: "command " + display, msg: fmt.Sprintf("`filename` %q would be read specially by the go tool (a _test.go test file, or a GOOS/GOARCH build constraint) — choose another name", ov)})
+				problems = append(problems, &problem{kind: "spec", ptr: ptr + "/filename", loc: "command " + display, msg: fmt.Sprintf("`filename` %q would be read specially by the go tool (a _test.go test file, or a GOOS/GOARCH build constraint); choose another name", ov)})
 			}
 		}
 		fn := commandStubFilename(rootName, path, c.Filename)
@@ -1572,7 +1572,7 @@ func lintSchemaTypes(spec *Spec) []error {
 			resolved := jsonSchemaTypeToGo(schema.Type)
 			expr, err := parser.ParseExpr(resolved)
 			if err != nil || !isGoTypeExpr(expr) {
-				add(fmt.Sprintf("`type` %q is not a Go type — use a builtin (string, int, bool, []string, map[string]int), a rotini alias (count, duration, date), a JSON Schema name (integer, number, array, object), or an imported type with `import`", schema.Type))
+				add(fmt.Sprintf("`type` %q is not a Go type; use a builtin (string, int, bool, []string, map[string]int), a rotini alias (count, duration, date), a JSON Schema name (integer, number, array, object), or an imported type with `import`", schema.Type))
 				return
 			}
 			// Any bare word parses as a Go type, so `type: strin` used to validate and then
@@ -1581,7 +1581,7 @@ func lintSchemaTypes(spec *Spec) []error {
 			// name. A capitalized one is allowed — it may be a type the author defines in the
 			// generated package.
 			if name := unknownLowercaseTypeName(expr); name != "" {
-				add(didYouMean(fmt.Sprintf("`type` %q is not a type rotini knows — %q is neither a Go builtin nor a rotini type", schema.Type, name),
+				add(didYouMean(fmt.Sprintf("`type` %q is not a type rotini knows; %q is neither a Go builtin nor a rotini type", schema.Type, name),
 					name, knownTypeNames()))
 				return
 			}
@@ -1589,7 +1589,7 @@ func lintSchemaTypes(spec *Spec) []error {
 			// explicit import: rotini only knows the import for its own vocabulary, so
 			// without it the generated file references a package it never imports.
 			if resolved == schema.Type && isQualifiedType(expr) && strings.TrimSpace(schema.Import) == "" {
-				add(fmt.Sprintf("`type` %q is qualified but declares no `import` — the generated code would reference a package it does not import", schema.Type))
+				add(fmt.Sprintf("`type` %q is qualified but declares no `import`; the generated code would reference a package it does not import", schema.Type))
 			}
 		})
 	})
@@ -1765,10 +1765,10 @@ func lintDefaultConstraints(spec *Spec) []error {
 			// Item counts judge the collection, and only for a default that is one.
 			if multi {
 				if n := len(values); schema.MinItems > 0 && n < schema.MinItems {
-					add(fmt.Sprintf("`default` has %d %s but `minItems` is %d — %s",
+					add(fmt.Sprintf("`default` has %d %s but `minItems` is %d; %s",
 						n, pluralWord("value", n), schema.MinItems, defaultFails))
 				} else if schema.MaxItems > 0 && n > schema.MaxItems {
-					add(fmt.Sprintf("`default` has %d %s but `maxItems` is %d — %s",
+					add(fmt.Sprintf("`default` has %d %s but `maxItems` is %d; %s",
 						n, pluralWord("value", n), schema.MaxItems, defaultFails))
 				}
 			}
@@ -1779,7 +1779,7 @@ func lintDefaultConstraints(spec *Spec) []error {
 			}
 			for _, v := range values {
 				if msg := defaultViolation(schema, label, v); msg != "" {
-					add(msg + " — " + defaultFails)
+					add(msg + "; " + defaultFails)
 				}
 			}
 		})
@@ -1884,12 +1884,12 @@ func lintItemConstraints(spec *Spec) []error {
 
 			if it.MinItems > 0 || it.MaxItems > 0 {
 				add("`minItems`/`maxItems` on `items` would count values inside ONE element, but an element of a " +
-					channel + " list is a single value — put the bound on the list itself")
+					channel + " list is a single value; put the bound on the list itself")
 			}
 
 			conflict := func(key string, differ bool) {
 				if differ {
-					add(fmt.Sprintf("`%s` is declared on both the list and its `items`, with different values — "+
+					add(fmt.Sprintf("`%s` is declared on both the list and its `items`, with different values; "+
 						"they mean the same thing (a rule every element must pass), so declare it once", key))
 				}
 			}

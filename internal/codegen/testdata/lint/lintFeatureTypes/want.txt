@@ -1,1 +1,1 @@
-conf: .rotini.conf.yaml:11:7: generate.features: type "help" is declared more than once — each feature type may appear at most once
+conf: .rotini.conf.yaml:11:7: generate.features: type "help" is declared more than once; each feature type may appear at most once

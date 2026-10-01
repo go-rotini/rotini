@@ -129,13 +129,13 @@ func versionProblem(kind, docVersion, binaryVersion string) *problem {
 	case doc.major != bin.major:
 		return &problem{
 			kind: kind, loc: "version", ptr: "/version",
-			msg: fmt.Sprintf("targets rotini %s but this rotini is %s — major version %d and %d are different, incompatible feature sets; install rotini %d.x or migrate this document to %d.x",
+			msg: fmt.Sprintf("targets rotini %s but this rotini is %s; major version %d and %d are different, incompatible feature sets; install rotini %d.x or migrate this document to %d.x",
 				doc, bin, doc.major, bin.major, doc.major, bin.major),
 		}
 	case bin.olderThan(doc):
 		return &problem{
 			kind: kind, loc: "version", ptr: "/version",
-			msg: fmt.Sprintf("targets rotini %s but this rotini is %s — this rotini is older than the document requires; upgrade it (go get -tool github.com/go-rotini/rotini/cmd/rotini@latest), or lower the version to %s if the document does not use anything newer",
+			msg: fmt.Sprintf("targets rotini %s but this rotini is %s; this rotini is older than the document requires; upgrade it (go get -tool github.com/go-rotini/rotini/cmd/rotini@latest), or lower the version to %s if the document does not use anything newer",
 				doc, bin, bin),
 		}
 	}
@@ -204,7 +204,7 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 			if want, ok := strings.CutPrefix(ve.Message, "value is not of type "); ok {
 				msg := fmt.Sprintf("%q must be of type %s", key, want)
 				if hint := schemaHint(strings.TrimSuffix(ve.KeywordLocation, "/type")); hint != "" {
-					msg += " — " + hint
+					msg += "; " + hint
 				}
 				return msg
 			}
@@ -218,7 +218,7 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 			msg := fmt.Sprintf("%s must look like %s", patternSubject(ve.InstanceLocation), quotedOrList(ex))
 			// A key whose likeliest mistake needs more than examples says so in its schema.
 			if hint := schemaHint(node); hint != "" {
-				msg += " — " + hint
+				msg += "; " + hint
 			}
 			return msg
 		}
@@ -578,7 +578,7 @@ func (w *schemaBlockWalker) block(node any, input bool, ptr, noun string) {
 func unknownSchemaKey(key, noun string) string {
 	msg := fmt.Sprintf("unknown key %q in %s", key, noun)
 	if jsonSchemaOnlyKeywords[key] {
-		msg += fmt.Sprintf(" — %q is a JSON Schema keyword rotini's schema blocks do not implement, so it would have done nothing", key)
+		msg += fmt.Sprintf("; %q is a JSON Schema keyword rotini's schema blocks do not implement, so it would have done nothing", key)
 	}
 	return msg
 }

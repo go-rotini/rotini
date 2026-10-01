@@ -177,7 +177,7 @@ func readConf(path string) (*Conf, error) {
 
 // errSpecPathRequired is reported when no spec-file path is supplied and none of the
 // fallback locations resolve to a spec.
-var errSpecPathRequired = errors.New("no .rotini.spec.* file in the working directory — pass the spec's path")
+var errSpecPathRequired = errors.New("no .rotini.spec.* file in the working directory; pass the spec's path")
 
 // fallbackExtensions is the spec/conf discovery precedence: the first
 // .rotini.<type>.<ext> that exists wins.

@@ -87,7 +87,7 @@ func decodeObject(s string, t reflect.Type) (map[string]any, error) {
 	for _, pair := range pairs {
 		key, val, ok := strings.Cut(pair, "=")
 		if !ok || key == "" {
-			return nil, fmt.Errorf("%q is not key=value — write host=db.internal,port=5432, or JSON", pair)
+			return nil, fmt.Errorf("%q is not key=value; write host=db.internal,port=5432, or JSON", pair)
 		}
 		path := strings.Split(key, ".")
 		v, list, err := typedField(t, path, val)
@@ -160,7 +160,7 @@ func typedField(t reflect.Type, path []string, text string) (value any, list boo
 		}
 		return n, false, nil
 	case reflect.Struct:
-		return nil, false, fmt.Errorf("%s is an object — set its fields as %s.<key>=…", strings.Join(path, "."), strings.Join(path, "."))
+		return nil, false, fmt.Errorf("%s is an object; set its fields as %s.<key>=…", strings.Join(path, "."), strings.Join(path, "."))
 	case reflect.Interface:
 		return inferScalar(text), false, nil
 	}

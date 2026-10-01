@@ -1,1 +1,1 @@
-spec: .rotini.spec.yaml:7:7: command demo: env "http": sets `nesting` but its type is string — a variable family needs type "map" (map[string]any) to nest into
+spec: .rotini.spec.yaml:7:7: command demo: env "http": sets `nesting` but its type is string; a variable family needs type "map" (map[string]any) to nest into
