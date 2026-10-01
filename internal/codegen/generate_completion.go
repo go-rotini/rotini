@@ -43,13 +43,15 @@ const bashCompletionTemplate = `# bash completion for PROG
 # for the value being typed — file, directory, or none. It is handled here rather
 # than offered as a candidate.
 
-# compopt does not exist in bash 3.2, which is /bin/bash on every macOS. Calling it there is
-# "command not found" — harmless inside a completion (nothing checks the status) but a failure
-# anywhere the script is driven under 'set -e', and worth saying out loud rather than hiding
-# behind a redirect. The directives still work without it; only bash's own file fallback stays
-# on for a "none" value, which is the most a 3.2 user can get.
+# compopt does not exist in bash 3.2, which is /bin/bash on every macOS, and where it does exist
+# it fails when called outside a live completion. Either failure must stay inside this
+# function: under 'set -e' a failing compopt would end the whole shell before any 'return 0'
+# could run, so its status is absorbed on the spot. The directives still work without it; only
+# bash's own file fallback stays on for a "none" value, which is the most a 3.2 user can get.
 _PROG_compopt() {
-    type compopt >/dev/null 2>&1 && compopt "$@" 2>/dev/null
+    if type compopt >/dev/null 2>&1; then
+        compopt "$@" 2>/dev/null || true
+    fi
     return 0
 }
 
@@ -88,7 +90,9 @@ _PROG_complete() {
             _PROG_compopt -o filenames
             exts="${directive#file }"
             COMPREPLY+=($(compgen -d -- "${COMP_WORDS[$COMP_CWORD]}")) || true
-            for ext in $exts; do
+            # IFS is narrowed to newline above, so the space-separated list is re-separated
+            # by newline; a plain $exts would arrive as ONE extension, "yaml yml".
+            for ext in ${exts// /$'\n'}; do
                 COMPREPLY+=($(compgen -f -X "!*.$ext" -- "${COMP_WORDS[$COMP_CWORD]}")) || true
             done
             ;;

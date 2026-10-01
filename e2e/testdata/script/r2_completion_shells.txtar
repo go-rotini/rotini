@@ -44,6 +44,9 @@ stdout '^:rotini:file yaml yml$'
 [exec:bash] stdout 'CANDIDATES: deploy status'
 [exec:bash] stdout 'ENUM: json text yaml'
 [exec:bash] stdout 'DEEP: json text yaml'
+[exec:bash] stdout 'CONFIG: .*a\.yaml'
+[exec:bash] stdout 'CONFIG: .*b\.yml'
+[exec:bash] ! stdout 'CONFIG: .*c\.txt'
 [exec:bash] ! stdout ':rotini:'
 
 [exec:zsh] exec zsh drive-zsh.sh
@@ -66,6 +69,9 @@ stdout '^:rotini:file yaml yml$'
 [exec:pwsh] stdout 'CANDIDATES: deploy status'
 [exec:pwsh] ! stdout ':rotini:'
 
+-- a.yaml --
+-- b.yml --
+-- c.txt --
 -- drive-bash.sh --
 # Source the generated script and call its completion function the way TAB does.
 set -e
@@ -88,6 +94,10 @@ for c in "${COMPREPLY[@]}"; do
     esac
 done
 echo "OK: bash handled the directive"
+
+# The directive narrows files to its extensions, so the yaml files are offered and the text
+# file is not.
+echo "CONFIG: ${COMPREPLY[@]}"
 
 # The token-preservation check: everything after the first word must reach the binary. bash
 # 3.2 (which IS /bin/bash on macOS) collapses "${arr[@]:off:len}" to one element when IFS
