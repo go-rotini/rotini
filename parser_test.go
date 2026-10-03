@@ -933,6 +933,66 @@ func TestParse_clusteredShortFlags(t *testing.T) {
 	}
 }
 
+// TestParse_clusterValueContainingEquals pins pflag's reading of a short cluster whose tail
+// holds an "=": the attached text is the value, "=" and all. -lapp=web is kubectl's label
+// selector `app=web`; it once parsed as `app`, with "=web" dropped and no error. And an "=value"
+// right after the cluster's last flag is that flag's, a bool included.
+func TestParse_clusterValueContainingEquals(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "all", Identifiers: []string{"-A"}, Type: "bool"},
+			{Name: "watch", Identifiers: []string{"-w"}, Type: "bool"},
+			{Name: "verbose", Identifiers: []string{"-v"}, Type: "count"},
+			{Name: "selector", Identifiers: []string{"-l"}, Type: "string"},
+		},
+	}
+	type inputs struct {
+		App struct {
+			Flags struct {
+				All      bool   `rotini:"all"`
+				Watch    bool   `rotini:"watch"`
+				Verbose  int    `rotini:"verbose"`
+				Selector string `rotini:"selector"`
+			}
+			Arguments struct{}
+		}
+	}
+	cases := []struct {
+		argv     []string
+		all, w   bool
+		selector string
+	}{
+		{[]string{"-lapp=web"}, false, false, "app=web"},
+		{[]string{"-lapp=web,tier=fe"}, false, false, "app=web,tier=fe"},
+		{[]string{"-Alapp=web"}, true, false, "app=web"},
+		{[]string{"-l=app=web"}, false, false, "app=web"},
+		{[]string{"-Al=app=web"}, true, false, "app=web"},
+		{[]string{"-Aw=false"}, true, false, ""},
+		{[]string{"-wA=true"}, true, true, ""},
+	}
+	for _, c := range cases {
+		var got inputs
+		if err := NewParser().Parse(NewContextFor(def, c.argv), &got); err != nil {
+			t.Errorf("%v: Parse: %v", c.argv, err)
+			continue
+		}
+		f := got.App.Flags
+		if f.All != c.all || f.Watch != c.w || f.Selector != c.selector {
+			t.Errorf("%v: got A=%v w=%v l=%q, want A=%v w=%v l=%q", c.argv, f.All, f.Watch, f.Selector, c.all, c.w, c.selector)
+		}
+	}
+
+	// Still errors: a bool cluster's "=value" is the LAST flag's, so one aimed past a value
+	// flag or at a count is rejected, never silently dropped.
+	for _, argv := range [][]string{{"-Aw=maybe"}, {"-Av=3"}} {
+		var got inputs
+		if err := NewParser().Parse(NewContextFor(def, argv), &got); err == nil {
+			t.Errorf("%v: want a parse error, got %+v", argv, got.App.Flags)
+		}
+	}
+}
+
 // An exact multi-char identifier wins over cluster decomposition.
 func TestParse_exactIdentifierBeatsCluster(t *testing.T) {
 	def := Definition{

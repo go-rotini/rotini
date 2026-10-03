@@ -108,7 +108,7 @@ func rootLabel(spec *Spec) string {
 	return "command " + spec.Command.Name
 }
 
-// lintDocLevelKeys rejects env_prefix and schemas on a non-root command. The shared Command
+// lintDocLevelKeys rejects env_prefix, schemas and display_name on a non-root command. The shared Command
 // shape accepts them on every node, but codegen reads them only on the root, so declaring one
 // deeper would be a silent no-op.
 func lintDocLevelKeys(spec *Spec) []error {
@@ -128,6 +128,9 @@ func lintDocLevelKeys(spec *Spec) []error {
 		}
 		if c.Schemas != nil {
 			add("schemas")
+		}
+		if c.DisplayName != "" {
+			add("display_name")
 		}
 	})
 	return problems

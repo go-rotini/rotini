@@ -71,7 +71,11 @@ func rotiniBin(t *testing.T) string {
 	// stamped, and a mismatch between the two would fire the version guard on documents
 	// `rotini init` had just seeded. A script that needs a real version builds its own
 	// stamped binary (see r8_version_guard).
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/rotini")
+	//
+	// -buildvcs=false is what keeps it unstamped. Since Go 1.24 a build inside a git checkout
+	// takes the main module's version from VCS, so on a tagged commit this binary reported
+	// that tag (v1.1.0, or v1.1.0+dirty) and the guard rejected every fixture's `version:`.
+	cmd := exec.Command("go", "build", "-buildvcs=false", "-o", bin, "./cmd/rotini")
 	cmd.Dir = repoRoot(t)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build rotini: %v\n%s", err, out)

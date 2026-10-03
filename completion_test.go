@@ -3,10 +3,14 @@ package rotini
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -809,6 +813,162 @@ func TestCompletionHint_noneIsNotTheSameAsEmpty(t *testing.T) {
 	}
 	if unset != "" {
 		t.Errorf("no hint = %q, want empty so the shell applies its own default", unset)
+	}
+}
+
+// completeIn runs Program.Complete in format and returns its whole stdout.
+func completeIn(t *testing.T, format CompletionFormat, def Definition, handlers any, words ...string) string {
+	t.Helper()
+	out := &bytes.Buffer{}
+	p := NewProgram(def, handlers)
+	p.stdout, p.stderr = out, &bytes.Buffer{}
+	if code, err := p.Complete(words, format); code != 0 || err != nil {
+		t.Fatalf("Complete(%q) = %d, %v", words, code, err)
+	}
+	return out.String()
+}
+
+// TestCobraCompletion_directives pins the hint → ShellCompDirective mapping, the part of Cobra's
+// format a Cobra host acts on. The numbers are Cobra's wire values, not rotini's to choose.
+func TestCobraCompletion_directives(t *testing.T) {
+	cases := []struct {
+		name  string
+		words []string
+		want  string
+	}{
+		{"file with extensions: FilterFileExt, extensions as candidates", []string{"--config", ""}, "yaml\nyml\n:8\n"},
+		{"directory: FilterDirs", []string{"--out", ""}, ":16\n"},
+		{"none: NoFileComp", []string{"--id", ""}, ":4\n"},
+		{"no hint: Default", []string{"--plain", ""}, ":0\n"},
+		{"plain file: Default, whose fallback is files", []string{"open", ""}, ":0\n"},
+		{"candidates ride with Default", []string{"op"}, "open\n:0\n"},
+		{"no words completes a new first word", nil, "open\n:0\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := completeIn(t, CobraCompletion, completionHintDef(), nil, tc.words...); got != tc.want {
+				t.Errorf("Complete(%q, CobraCompletion) = %q, want %q", tc.words, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCobraCompletion_candidatesWinOverAFilteringHint: Cobra reads FilterFileExt's and
+// FilterDirs' candidates as their ARGUMENTS, so emitting either alongside real candidates would
+// turn "debug" into a file extension. The hint is the fallback; a value that has candidates
+// keeps them.
+func TestCobraCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "config", Identifiers: []string{"--config"}, Type: "string", Enum: []string{"base.yaml"},
+				Complete: Completion{Kind: "file", Extensions: []string{"yaml"}}},
+			{Name: "out", Identifiers: []string{"--out"}, Type: "string", Enum: []string{"dist"},
+				Complete: Completion{Kind: "directory"}},
+			{Name: "id", Identifiers: []string{"--id"}, Type: "string", Enum: []string{"a1"},
+				Complete: Completion{Kind: "none"}},
+		},
+	}
+	for words, want := range map[string]string{
+		"--config": "base.yaml\n:0\n",
+		"--out":    "dist\n:0\n",
+		"--id":     "a1\n:4\n", // none is compatible with candidates: it only suppresses files
+	} {
+		if got := completeIn(t, CobraCompletion, def, nil, words, ""); got != want {
+			t.Errorf("Complete(%s, CobraCompletion) = %q, want %q", words, got, want)
+		}
+	}
+}
+
+// TestComplete_formatIsTheOnlyDifference: one answer, computed once, whatever the format — a
+// handler's dynamic completer and a command's description reach every format alike, and rotini's
+// own (nil) format is byte-for-byte what __complete always printed.
+func TestComplete_formatIsTheOnlyDifference(t *testing.T) {
+	if got := completeIn(t, CobraCompletion, dynCompletionDef(), dynCompletionHandlers{}, "build", "--mode", "s"); got != "slow\n:0\n" {
+		t.Errorf("dynamic completer = %q", got)
+	}
+	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "deploy", Handler: "AppDeploy", Summary: "ship it"}}}
+	if got := completeIn(t, CobraCompletion, def, nil, "de"); got != "deploy\tship it\n:0\n" {
+		t.Errorf("Cobra, with a description = %q", got)
+	}
+	if got := completeIn(t, nil, def, nil, "de"); got != "deploy\tship it\n" {
+		t.Errorf("rotini's own, with a description = %q", got)
+	}
+	if got := completeIn(t, nil, completionHintDef(), nil, "--config", ""); got != ":rotini:file yaml yml\n" {
+		t.Errorf("rotini's own hint line = %q", got)
+	}
+}
+
+// TestComplete_customFormat is the point of CompletionFormat: a protocol rotini does not ship is
+// a function. This one is urfave/cli's shape — "value:description", colons in the value escaped
+// — and sees the same candidates and hint the built-ins do.
+func TestComplete_customFormat(t *testing.T) {
+	var seen CompletionResult
+	urfave := func(w io.Writer, r CompletionResult) error {
+		seen = r
+		for _, c := range r.Candidates {
+			line := strings.ReplaceAll(c.Value, ":", `\:`)
+			if c.Description != "" {
+				line += ":" + c.Description
+			}
+			if _, err := fmt.Fprintln(w, line); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{
+		{Name: "deploy", Handler: "AppDeploy", Summary: "ship it"},
+		{Name: "db:migrate", Handler: "AppDbMigrate"},
+	}}
+	if got := completeIn(t, urfave, def, nil, ""); got != "db\\:migrate\ndeploy:ship it\n" {
+		t.Errorf("custom format = %q", got)
+	}
+
+	completeIn(t, urfave, completionHintDef(), nil, "--config", "")
+	if seen.Hint.Kind != "file" || !slices.Equal(seen.Hint.Extensions, []string{"yaml", "yml"}) {
+		t.Errorf("the format was not handed the hint: %+v", seen.Hint)
+	}
+}
+
+// TestComplete_formatError: a format that cannot write fails the request with its error.
+func TestComplete_formatError(t *testing.T) {
+	boom := errors.New("closed pipe")
+	p := NewProgram(completionHintDef(), nil)
+	p.stdout, p.stderr = &bytes.Buffer{}, &bytes.Buffer{}
+	code, err := p.Complete([]string{""}, func(io.Writer, CompletionResult) error { return boom })
+	if code != 1 || !errors.Is(err, boom) {
+		t.Errorf("Complete = %d, %v; want 1 and the format's error", code, err)
+	}
+}
+
+// TestWithCompletion: the setter switches what the hidden __complete entry speaks, and nothing
+// else; nil restores rotini's own. The case that matters is a request with no hint: rotini's
+// format then ends on a candidate, which a Cobra host (Flux takes the last line unconditionally)
+// would swallow as the directive.
+func TestWithCompletion(t *testing.T) {
+	run := func(p *Program, argv ...string) string {
+		t.Helper()
+		out := &bytes.Buffer{}
+		p.stdout, p.stderr = out, &bytes.Buffer{}
+		if code, err := p.Run(argv); code != 0 || err != nil {
+			t.Fatalf("Run(%q) = %d, %v", argv, code, err)
+		}
+		return out.String()
+	}
+	def := completionHintDef()
+
+	if got := run(NewProgram(def, nil), "__complete", "op"); got != "open\n" {
+		t.Errorf("default __complete = %q, want rotini's format (no directive without a hint)", got)
+	}
+	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion), "__complete", "op"); got != "open\n:0\n" {
+		t.Errorf("WithCompletion(CobraCompletion) __complete = %q, want Cobra's format", got)
+	}
+	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion), "__complete", "--id", ""); got != ":4\n" {
+		t.Errorf("WithCompletion(CobraCompletion) hint = %q, want NoFileComp", got)
+	}
+	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion).WithCompletion(nil), "__complete", "op"); got != "open\n" {
+		t.Errorf("WithCompletion(nil) = %q, want rotini's own restored", got)
 	}
 }
 

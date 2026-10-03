@@ -1268,12 +1268,20 @@ func isShortCluster(name string) bool {
 // short flag: booleans are set in turn, and the first value-taking flag consumes the rest of
 // the cluster, else the inline "=value", else the next argv token. It returns how many extra
 // argv tokens it consumed.
+//
+// body and inline arrive split at the token's FIRST "=", so for a value-taking flag the rest of
+// the cluster is rejoined with it: -lapp=web is -l "app=web", a label selector, never -l "app"
+// with "=web" dropped. An "=value" directly after the last flag belongs to that flag, a bool
+// included (-Aw=false sets -w false), which is pflag's reading and so what Cobra users type.
 func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value, typed string) error) (int, error) {
 	for k := range len(body) {
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
 		if !ok {
 			return 0, &ParseError{Kind: ParseKindUnknownFlag, Msg: fmt.Sprintf("unknown flag %q", short), Flag: short, Token: short, Candidates: chainFlagIdentifiers(chain)}
+		}
+		if fdef.Type == "bool" && hasInline && k == len(body)-1 {
+			return 0, addFlag(idx, fdef, inline, short)
 		}
 		if fdef.Type == "bool" || fdef.Type == "count" {
 			v := "true"
@@ -1287,6 +1295,8 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 		}
 		// A value-taking flag ends the cluster: its value is whatever follows.
 		switch rest := body[k+1:]; {
+		case rest != "" && hasInline:
+			return 0, addFlag(idx, fdef, rest+"="+inline, short)
 		case rest != "":
 			return 0, addFlag(idx, fdef, rest, short)
 		case hasInline:

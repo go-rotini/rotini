@@ -59,6 +59,10 @@ field CommandDef.Remotes
 field CommandDef.Summary
 field Completion.Extensions
 field Completion.Kind
+field CompletionCandidate.Description
+field CompletionCandidate.Value
+field CompletionResult.Candidates
+field CompletionResult.Hint
 field ConfigFile.Discover
 field ConfigFile.Format
 field ConfigFile.Name
@@ -195,6 +199,7 @@ field WiringError.Handler
 field WiringError.Msg
 func AtFrame(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
+func CobraCompletion(w io.Writer, result CompletionResult) error
 func CollectP[T any](rtx *Context) (T, Report, error)
 func Collect[T any](rtx *Context) (T, error)
 func DefaultLifecycle(chain []ResolvedCommand, handlers []Handlers) []LifecycleStep
@@ -289,6 +294,7 @@ method ParseError.Unwrap() error
 method ParseKind.String() string
 method Parser.Parse(rtx *Context, out any) error
 method Program.Bind(key string, value any) *Program
+method Program.Complete(words []string, format CompletionFormat) (int, error)
 method Program.Execute() error
 method Program.Run(argv []string) (int, error)
 method Program.RunContext(ctx context.Context, argv []string) (int, error)
@@ -296,6 +302,7 @@ method Program.With(opts ...Option) *Program
 method Program.WithArgs(args []string) *Program
 method Program.WithBindMeta(meta BindMeta) *Program
 method Program.WithBinder(fn func(BindMeta) *Binder) *Program
+method Program.WithCompletion(format CompletionFormat) *Program
 method Program.WithContext(ctx context.Context) *Program
 method Program.WithExit(fn func(int)) *Program
 method Program.WithFunnel(fn FunnelFunc) *Program
@@ -337,6 +344,9 @@ type ByteSize
 type Category
 type CommandDef
 type Completion
+type CompletionCandidate
+type CompletionFormat
+type CompletionResult
 type ConfigFile
 type Constraints
 type Context

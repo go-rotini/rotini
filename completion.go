@@ -2,6 +2,8 @@ package rotini
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -555,48 +557,55 @@ const completionDirectivePrefix = ":rotini:"
 // It answers the same question complete() does — which input's value is being typed — and is
 // kept separate so the candidate list stays a plain list of strings.
 func completionHint(def Definition, words []string) string {
+	return directiveFor(completionHintFor(def, words))
+}
+
+// completionHintFor returns the declared hint for the word being completed, or the zero
+// Completion when there is none. It is the wire-neutral half of completionHint, the hint every
+// [CompletionFormat] a binary answers in is handed, rotini's private one included.
+func completionHintFor(def Definition, words []string) Completion {
 	if len(words) == 0 {
-		return ""
+		return Completion{}
 	}
 	partial := words[len(words)-1]
 	context := words[:len(words)-1]
 
 	cc := walkContext(def, context)
 	if cc.remote {
-		return "" // the remote binary owns its own argument surface
+		return Completion{} // the remote binary owns its own argument surface
 	}
 	cur := cc.chain[len(cc.chain)-1]
 	if cur.Passthrough || cc.afterTerminator {
-		return ""
+		return Completion{}
 	}
 
 	// "--flag <TAB>": the word is the preceding flag's value.
 	if name, ok := pendingValueFlag(context); ok {
 		if fd, _, found := findFlag(cc.chain, name); found && takesSeparateValue(fd) {
-			return directiveFor(fd.Complete)
+			return fd.Complete
 		}
-		return ""
+		return Completion{}
 	}
 
 	// "--flag=<TAB>": the word carries its own flag.
 	if strings.HasPrefix(partial, "-") {
 		if name, _, hasInline := splitFlag(partial); hasInline {
 			if fd, _, found := findFlag(cc.chain, name); found && takesValue(fd) {
-				return directiveFor(fd.Complete)
+				return fd.Complete
 			}
 		}
-		return "" // a flag NAME is being typed; paths are not candidates
+		return Completion{} // a flag NAME is being typed; paths are not candidates
 	}
 
 	// Otherwise the word binds to a positional — but only once dispatch can no longer
 	// descend, since before that it may still be a sub-command name.
 	if cc.positionals == 0 && len(dispatchableNames(cur)) > 0 {
-		return ""
+		return Completion{}
 	}
 	if ad, ok := positionalAt(cur.Arguments, cc.positionals); ok {
-		return directiveFor(ad.Complete)
+		return ad.Complete
 	}
-	return ""
+	return Completion{}
 }
 
 // positionalAt returns the argument the next positional binds to, a trailing variadic
@@ -625,4 +634,150 @@ func directiveFor(c Completion) string {
 		return completionDirectivePrefix + "none"
 	}
 	return ""
+}
+
+// CompletionResult is one completion answer, before any wire format: what a program offers for
+// the word being completed. It is what a [CompletionFormat] renders.
+type CompletionResult struct {
+	// Candidates are the offered values, in order — sub-commands, flags, enum values, or what a
+	// handler's [FlagValueCompleter] or [ArgValueCompleter] returned — already filtered by the
+	// typed prefix, with hidden inputs left out.
+	Candidates []CompletionCandidate
+	// Hint is the spec's declared `complete:` hint for the input being completed, or the zero
+	// value when it declares none. A completer that answers still wins over it: the hint is the
+	// fallback for when Candidates is empty, except kind "none", which also means "never offer
+	// files" when there are candidates.
+	Hint Completion
+}
+
+// CompletionCandidate is one offered value and its optional one-line description.
+type CompletionCandidate struct {
+	Value       string
+	Description string
+}
+
+// CompletionFormat writes a [CompletionResult] to w in one completion protocol — how a host
+// that completes a rotini program expects the answer spelled. rotini computes the answer once;
+// the format only decides the wire shape, so supporting another framework's protocol is a
+// function, not a change to rotini. [CobraCompletion] is the built-in for Cobra-built hosts.
+//
+// A format is called once per request and must write only the answer: whatever it writes is
+// what the host parses.
+type CompletionFormat func(w io.Writer, result CompletionResult) error
+
+// Complete answers one shell-completion request in the given format and returns the exit code,
+// the completion counterpart of [Program.Run]. It is how a program is completed from outside
+// when the host does not call the hidden __complete entry — kubectl, for one, runs a separate
+// kubectl_complete-<plugin> with only the plugin's words:
+//
+//	if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
+//		code, _ := cmd.Program.Complete(os.Args[1:], rotini.CobraCompletion)
+//		os.Exit(code)
+//	}
+//
+// words are the words after the program's own name; the last is the word being completed,
+// empty when the cursor starts a new one, and no words at all completes a new first word. The
+// answer is exactly what __complete computes, written to the program's stdout by format. A nil
+// format answers in rotini's own format, the one __complete uses by default, which is private to
+// rotini's generated scripts.
+//
+// The exit code is 0, or 1 when the format fails to write, with its error.
+func (p *Program) Complete(words []string, format CompletionFormat) (int, error) {
+	if format == nil {
+		format = rotiniCompletion
+	}
+	if len(words) == 0 {
+		words = []string{""}
+	}
+	rtx := p.newRunContext()
+	result := CompletionResult{Hint: completionHintFor(p.def, words)}
+	for _, c := range complete(p.def, words, p.handlers, rtx) {
+		value, desc, _ := strings.Cut(c, "\t")
+		result.Candidates = append(result.Candidates, CompletionCandidate{Value: value, Description: desc})
+	}
+	if err := format(p.stdout, result); err != nil {
+		return 1, err
+	}
+	return 0, nil
+}
+
+// rotiniCompletion is rotini's own format: what the hidden __complete prints by default, and
+// what the generated shell scripts read. One candidate per line ("value\tdescription"), then the
+// hint's ":rotini:" directive line when the input declares one. It is private between a script
+// and the binary from the same generate, so it may change.
+func rotiniCompletion(w io.Writer, result CompletionResult) error {
+	lines := candidateLines(result.Candidates)
+	if d := directiveFor(result.Hint); d != "" {
+		lines = append(lines, d)
+	}
+	return writeLines(w, lines)
+}
+
+// candidateLines renders candidates as "value" or "value\tdescription", the candidate line both
+// built-in formats share.
+func candidateLines(candidates []CompletionCandidate) []string {
+	lines := make([]string, 0, len(candidates)+1)
+	for _, c := range candidates {
+		line := c.Value
+		if c.Description != "" {
+			line += "\t" + c.Description
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// writeLines writes lines, each newline-terminated, in one write.
+func writeLines(w io.Writer, lines []string) error {
+	var b strings.Builder
+	for _, l := range lines {
+		b.WriteString(l)
+		b.WriteByte('\n')
+	}
+	if _, err := io.WriteString(w, b.String()); err != nil {
+		return fmt.Errorf("write completion: %w", err)
+	}
+	return nil
+}
+
+// Cobra's ShellCompDirective values, as they appear on the wire. They are spelled out rather
+// than imported: Cobra's protocol is the interface, and a rotini binary must not link Cobra to
+// speak it.
+const (
+	cobraDirectiveDefault       = 0
+	cobraDirectiveNoFileComp    = 4
+	cobraDirectiveFilterFileExt = 8
+	cobraDirectiveFilterDirs    = 16
+)
+
+// CobraCompletion is the [CompletionFormat] Cobra-built hosts read: one candidate per line
+// ("value\tdescription" allowed), then a final ":<directive>" line carrying a Cobra
+// ShellCompDirective. kubectl reads it from kubectl_complete-<plugin>, and the Docker and Flux
+// CLIs from the plugin's own __complete (see [Program.WithCompletion]).
+//
+// The hint maps onto Cobra's directives: kind none to ShellCompDirectiveNoFileComp, kind
+// directory to ShellCompDirectiveFilterDirs, kind file with extensions to
+// ShellCompDirectiveFilterFileExt (the extensions as the candidates, Cobra's convention), and
+// kind file or no hint at all to ShellCompDirectiveDefault, whose fallback is file completion.
+// Cobra reads the candidates of the filtering directives as their arguments, so a file or
+// directory hint applies only when there are no candidates. The directive line is always
+// written, since Cobra hosts read the last line as the directive unconditionally.
+//
+// Its output is covered by rotini's compatibility promise: it is Cobra's format, not rotini's.
+func CobraCompletion(w io.Writer, result CompletionResult) error {
+	lines := candidateLines(result.Candidates)
+
+	directive := cobraDirectiveDefault
+	switch hint := result.Hint; {
+	case hint.Kind == "none":
+		directive = cobraDirectiveNoFileComp
+	case len(lines) > 0:
+	case hint.Kind == "directory":
+		directive = cobraDirectiveFilterDirs
+	case hint.Kind == "file" && len(hint.Extensions) > 0:
+		directive = cobraDirectiveFilterFileExt
+		lines = append(lines, hint.Extensions...)
+	}
+
+	return writeLines(w, append(lines, fmt.Sprintf(":%d", directive)))
 }

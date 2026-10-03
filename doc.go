@@ -259,7 +259,10 @@
 //     the opt-in: rotini emits nothing of its own, and what to say stays with the program.
 //
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve and orchestration
-//     phases wholesale; [FlagValueCompleter] and [ArgValueCompleter] feed dynamic completion.
+//     phases wholesale; [FlagValueCompleter] and [ArgValueCompleter] feed dynamic completion,
+//     and [Program.Complete] answers it in a host's [CompletionFormat] — [CobraCompletion] for
+//     a Cobra-built host such as kubectl completing a rotini plugin; [Program.WithCompletion]
+//     makes __complete itself answer that way, for hosts that call it (Docker, Flux).
 //
 // # Batteries
 //

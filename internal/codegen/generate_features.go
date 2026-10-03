@@ -122,14 +122,17 @@ func commandHelp(c Command) cmdHelp {
 // flattenFeature produces a node per command for one doc feature across the resolved tree, the
 // root first and then every sub-command in tree order. Each node carries its verbatim page,
 // when the spec set one, and its built doc-data for when it did not.
+//
+// What a page SHOWS is the display name (`kubectl ctx use`); what it is stored as stays the
+// root's real name (man_kubectl-ctx_use.txt), since a file name with spaces in it helps no one.
 func flattenFeature(gp *program, feat docFeature) []helpNode {
 	out := []helpNode{{
 		prefix:   gp.rootPascal,
 		file:     feat.filePrefix + gp.rootName + feat.ext,
 		paths:    []string{""},
-		name:     gp.rootName,
+		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     buildHelpData(gp.rootName, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootRemotes, nil, gp.envPrefix),
+		data:     buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootRemotes, nil, gp.envPrefix),
 	}}
 
 	// cascading carries the cascading flags accumulated from a node's ancestors
@@ -140,7 +143,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			seg := append([]string{n.name}, n.aliases...)
 			childChain := append(append([][]string{}, identChain...), seg)
 			childNames := append(append([]string{}, names...), n.name)
-			invocation := gp.rootName + " " + strings.Join(childNames, " ")
+			invocation := gp.rootDisplay + " " + strings.Join(childNames, " ")
 			out = append(out, helpNode{
 				prefix:   n.prefix,
 				file:     feat.filePrefix + gp.rootName + "_" + strings.Join(childNames, "_") + feat.ext,
