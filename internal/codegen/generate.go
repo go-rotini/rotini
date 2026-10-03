@@ -64,6 +64,7 @@ type program struct {
 
 	// resolved command tree — spec (+ $ref composition) → the model the renderers consume.
 	rootName        string
+	rootDisplay     string // the name rendered pages show: display_name, else rootName
 	rootPascal      string
 	rootInputs      *Inputs
 	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands

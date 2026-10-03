@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -142,6 +143,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 	}
 	gp := &program{
 		rootName:        root.Name,
+		rootDisplay:     cmp.Or(root.DisplayName, root.Name),
 		rootPascal:      toPascalCase(root.Name),
 		rootInputs:      root.inputs(),
 		rootRemotes:     root.RemoteCommands,

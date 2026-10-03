@@ -74,10 +74,11 @@ func canceledExitCode(ctx context.Context) int {
 // The surface groups into seven jobs, and nothing outside them is worth hunting for:
 //
 //   - run it — [Program.Execute] exits, [Program.Run] returns the code, [Program.RunContext]
-//     scopes one invocation
+//     scopes one invocation, [Program.Complete] answers a completion request in a
+//     [CompletionFormat] instead
 //   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr]
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
-//     [Program.WithSignals], [Program.WithoutSignalHandling]
+//     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion]
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithFunnel]
 //   - YOUR dependencies — [Program.Bind] for a key you name, [Program.With] with [Provide]
 //     for a type-checked one
@@ -121,10 +122,11 @@ type Program struct {
 	stderr    io.Writer
 	exit      func(int) // terminal action for Execute; defaults to os.Exit
 
-	teardownOnPanic bool           // does teardown run after a panic? See WithTeardownOnPanic.
-	panicRecover    bool           // is a panic funneled or re-raised? See WithPanicRecover.
-	signalMode      signalTrapMode // see WithSignals / WithoutSignalHandling
-	signalSet       []os.Signal    // signals trapped when on; empty → trapSignals
+	teardownOnPanic bool             // does teardown run after a panic? See WithTeardownOnPanic.
+	panicRecover    bool             // is a panic funneled or re-raised? See WithPanicRecover.
+	signalMode      signalTrapMode   // see WithSignals / WithoutSignalHandling
+	signalSet       []os.Signal      // signals trapped when on; empty → trapSignals
+	completion      CompletionFormat // the format __complete answers in; nil → rotini's own. See WithCompletion.
 
 	// rotini's own seams. These are NOT registry entries: the registry is the user's
 	// namespace, and a value the runtime depends on has no business sharing a flat string
@@ -274,6 +276,26 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 	if ctx != nil {
 		p.ctx = ctx
 	}
+	return p
+}
+
+// WithCompletion sets the [CompletionFormat] the hidden __complete entry answers in, in place of
+// rotini's own. It is for a program that is a plugin of a host which completes it by calling the
+// plugin's own __complete and reading the host's format back. The Docker CLI
+// (`docker-<name> __complete <name> …`) and the Flux CLI (`flux-<name> __complete …`) both do,
+// in Cobra's format:
+//
+//	cmd.Program.WithCompletion(rotini.CobraCompletion).Execute()
+//
+// The cost is rotini's own generated completion scripts for this binary: they read rotini's
+// format, and would misread another. A plugin is completed through its host, so it has no use
+// for them; a standalone CLI should leave this unset. A host that runs a separately named
+// completer with no __complete word — kubectl's kubectl_complete-<name> — is served by calling
+// [Program.Complete] from main instead.
+//
+// A nil format restores rotini's own, as [Program.WithFunnel] restores the default funnel.
+func (p *Program) WithCompletion(format CompletionFormat) *Program {
+	p.completion = format
 	return p
 }
 
@@ -689,7 +711,7 @@ func (p *Program) RunContext(ctx context.Context, argv []string) (int, error) {
 // decides the default signal trap.
 func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (int, error) {
 	if len(argv) > 0 && argv[0] == completeCommand {
-		return p.runComplete(argv[1:])
+		return p.Complete(argv[1:], p.completion)
 	}
 
 	// Run context and signal trapping are independent axes: signalAuto traps iff the caller
@@ -743,22 +765,6 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	}
 	rtx.chain = res.Chain
 	return p.dispatch(ctx, res.Chain, rtx)
-}
-
-// runComplete answers the hidden __complete entry the generated shell scripts call: one
-// candidate per line on stdout, for the words after it.
-func (p *Program) runComplete(words []string) (int, error) {
-	rtx := p.newRunContext()
-	for _, c := range complete(p.def, words, p.handlers, rtx) {
-		fmt.Fprintln(p.stdout, c)
-	}
-	// The declarative hint, when the input being completed declares one, goes last:
-	// a generated script reads the final line and translates it into that shell's
-	// own path completion.
-	if d := completionHint(p.def, words); d != "" {
-		fmt.Fprintln(p.stdout, d)
-	}
-	return 0, nil
 }
 
 // installTrap starts rotini's signal trap for one run and returns the function that removes

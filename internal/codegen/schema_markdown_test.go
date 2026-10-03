@@ -214,7 +214,7 @@ var commandKeyGroups = []struct {
 	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers"}},
 	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies"}},
 	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "remote_commands", "remote_discovery", "plugin_path", "timeout"}},
-	{"Documentation", []string{"summary", "description", "usage", "examples", "exit_status", "see_also", "group", "header", "footer", "headings", "help", "man", "markdown"}},
+	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "header", "footer", "headings", "help", "man", "markdown"}},
 	{"Output and shared types", []string{"output", "schemas"}},
 	{"Generated code", []string{"filename"}},
 }

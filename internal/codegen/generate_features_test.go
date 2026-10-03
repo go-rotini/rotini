@@ -169,13 +169,19 @@ generate:
 // returns the module dir with every emitted path (module-relative, slash-separated).
 func emitFeatureModule(t *testing.T, conf string) (dir string, files []string) {
 	t.Helper()
+	return emitModule(t, featureSpec, conf)
+}
+
+// emitModule is emitFeatureModule for any spec.
+func emitModule(t *testing.T, spec, conf string) (dir string, files []string) {
+	t.Helper()
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
 	dir = t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/acme\n\ngo 1.26\n\nrequire github.com/go-rotini/rotini v0.0.0\n\nreplace github.com/go-rotini/rotini => "+filepath.ToSlash(repoRoot)+"\n")
-	writeTestFile(t, dir, ".rotini.spec.yaml", featureSpec)
+	writeTestFile(t, dir, ".rotini.spec.yaml", spec)
 	writeTestFile(t, dir, ".rotini.conf.yaml", conf)
 	t.Chdir(dir)
 
@@ -489,6 +495,51 @@ generate:
 // NAME line and markdown renders it outright, so help was the only one dropping it.
 //
 // Both directions matter: the fallback must not displace a real description.
+// TestDisplayName pins what display_name changes and what it leaves alone. A kubectl plugin is
+// the binary kubectl-acme, but the user types `kubectl acme`, and its pages should say so —
+// Cobra's CommandDisplayNameAnnotation, as a spec key. The pages it rewrites are the derived
+// ones; the file names, the completion script's target and anything written verbatim keep the
+// real name or the author's words.
+func TestDisplayName(t *testing.T) {
+	const spec = `version: 0.0.0
+command:
+  name: kubectl-acme
+  display_name: kubectl acme
+  summary: an acme plugin
+  footer: Use "kubectl-acme help" (verbatim, never rewritten).
+  commands:
+    - name: deploy
+      summary: deploy a thing
+      arguments:
+        - name: target
+          schema: { type: string }
+`
+	dir, files := emitModule(t, spec, featureConfEmbed)
+
+	read := func(rel string) string { return readEmitted(t, dir, "internal/cmd/acme/renders/"+rel) }
+	for _, c := range []struct{ file, want string }{
+		{"help_kubectl-acme.txt", "  kubectl acme <command>"},
+		{"help_kubectl-acme_deploy.txt", "  kubectl acme deploy [target]"},
+		{"man_kubectl-acme_deploy.txt", "kubectl acme deploy - deploy a thing"},
+		{"markdown_kubectl-acme_deploy.md", "# kubectl acme deploy"},
+	} {
+		if page := read(c.file); !strings.Contains(page, c.want) {
+			t.Errorf("%s lacks %q:\n%s", c.file, c.want, page)
+		}
+	}
+	if page := read("help_kubectl-acme.txt"); !strings.Contains(page, `Use "kubectl-acme help" (verbatim`) {
+		t.Errorf("the verbatim footer was rewritten:\n%s", page)
+	}
+	if script := read("completion_bash.txt"); !strings.Contains(script, "kubectl-acme __complete") || strings.Contains(script, "kubectl acme") {
+		t.Errorf("completion must target the binary, kubectl-acme:\n%s", script)
+	}
+	for _, f := range files {
+		if strings.Contains(f, " ") {
+			t.Errorf("a generated file name contains the display name's space: %s", f)
+		}
+	}
+}
+
 func TestHelpPage_fallsBackToSummary(t *testing.T) {
 	t.Parallel()
 	tmpl, err := parseDocTemplate("help", templateHelp)

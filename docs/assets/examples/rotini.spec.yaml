@@ -6,6 +6,7 @@ command:
   summary: ship services to environments
   description: Deploy builds, ships and rolls back services.
   usage: deploy <command> [flags]
+  display_name: acme deploy
   header: deploy — internal tooling
   footer: Use "deploy help <command>" for more about a command.
   examples:

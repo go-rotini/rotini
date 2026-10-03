@@ -34,6 +34,14 @@ the outcome funnel's contract, and the exit-code floor. The stdin channel is the
 in that order: it fills a command's declared payload field, which no other channel writes, so it
 never competes for one.
 
+Completing a rotini program from outside is covered: `Program.Complete` and
+`Program.WithCompletion` hand a `CompletionFormat` the same `CompletionResult` (candidates,
+descriptions, the spec's hint) that rotini's own completion computes. The built-in
+`CobraCompletion` format's output is covered as behavior: it is Cobra's completion wire format
+(candidate lines, then `:<ShellCompDirective>`), the one kubectl, Docker and Flux read, and it
+follows Cobra's format, not rotini's. Only rotini's OWN format, the default `__complete` output
+below, is private.
+
 ### 2. The spec and conf schema keys
 
 Every key `internal/codegen/schema-spec.json` and `schema-conf.json` accept, and what it
@@ -73,7 +81,7 @@ These change in minor and patch releases. If you depend on one, pin the rotini v
 | **Generated file formatting** | Comment wording, import grouping, blank lines. The *identifiers* are covered (§3); the whitespace around them is not. |
 | **The contents of a newly seeded handler stub** | `rotini init` and the first `generate` write starter code. It is yours from the moment it is written and rotini never overwrites it (it only removes it if its command leaves the spec), so what a *future* rotini would have seeded is not a compatibility surface. |
 | **Anything under `internal/`** | Not importable, by Go's own rule. |
-| **The `__complete` wire protocol** | Private between a generated completion script and the binary that ships with it. Both come from the same `generate`, so they cannot disagree. |
+| **The `__complete` wire protocol** | Private between a generated completion script and the binary that ships with it. Both come from the same `generate`, so they cannot disagree. A host that completes a rotini program from outside uses `Program.Complete` or `Program.WithCompletion` with a `CompletionFormat`, which are covered. |
 | **Benchmark numbers** | Tracked, not promised. |
 
 ## The version guard
