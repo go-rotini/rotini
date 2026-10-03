@@ -120,7 +120,7 @@ func lintDocLevelKeys(spec *Spec) []error {
 		add := func(key string) {
 			problems = append(problems, &problem{
 				kind: "spec", ptr: ptr + "/" + key, loc: "command " + path,
-				msg: fmt.Sprintf("sets `%s`, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)", key),
+				msg: fmt.Sprintf("sets %#q, a root-command-level key valid only on the root command; remove it (codegen reads it only at the root, so here it is silently ignored)", key),
 			})
 		}
 		if c.EnvPrefix != "" {
@@ -153,7 +153,7 @@ func lintRefNodeKeys(spec *Spec) []error {
 		reject := func(key string) {
 			problems = append(problems, &problem{
 				kind: "spec", ptr: ptr + "/" + key, loc: loc,
-				msg: fmt.Sprintf("%ssets `%s` on a `$ref` node; a composed command delegates to the child's handler (built against the child's own inputs and output), so `%s` cannot be overlaid here; declare it in the child spec instead", subject, key, key),
+				msg: fmt.Sprintf("%ssets %#q on a `$ref` node; a composed command delegates to the child's handler (built against the child's own inputs and output), so %#q cannot be overlaid here; declare it in the child spec instead", subject, key, key),
 			})
 		}
 		if len(c.Flags) > 0 {
@@ -758,7 +758,7 @@ func inertKeyProblems(ptr, path, channel, name string, schema *InputSchema) []er
 	var problems []error
 	inert := func(key, where string) {
 		problems = append(problems, inputProblem(ptr, path, channel, name,
-			fmt.Sprintf("sets `%s`, which applies only to %s; here it would do nothing", key, where)))
+			fmt.Sprintf("sets %#q, which applies only to %s; here it would do nothing", key, where)))
 	}
 	if schema.Negatable && channel != "flag" {
 		inert("negatable", "bool flags (it derives a --no-<name> form)")
@@ -803,7 +803,7 @@ func lintConstraintApplicability(spec *Spec) []error {
 			case numericBounds:
 				for _, key := range boundKeys {
 					if text, ok := boundsByKey(schema)[key].(string); ok {
-						add(fmt.Sprintf("`%s` %q is text, but %s takes a number; a string bound is for a duration or bytesize input", key, text, typ))
+						add(fmt.Sprintf("%#q %q is text, but %s takes a number; a string bound is for a duration or bytesize input", key, text, typ))
 					}
 				}
 			}
@@ -841,7 +841,7 @@ func measuredBoundProblems(s *InputSchema, elem string) []string {
 	var out []string
 	for _, key := range boundKeys {
 		if text, ok := boundsByKey(s)[key].(string); ok {
-			out = append(out, fmt.Sprintf("`%s` %q is not %s", key, text, want))
+			out = append(out, fmt.Sprintf("%#q %q is not %s", key, text, want))
 		}
 	}
 	return out
@@ -1889,7 +1889,7 @@ func lintItemConstraints(spec *Spec) []error {
 
 			conflict := func(key string, differ bool) {
 				if differ {
-					add(fmt.Sprintf("`%s` is declared on both the list and its `items`, with different values; "+
+					add(fmt.Sprintf("%#q is declared on both the list and its `items`, with different values; "+
 						"they mean the same thing (a rule every element must pass), so declare it once", key))
 				}
 			}
