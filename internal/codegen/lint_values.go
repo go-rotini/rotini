@@ -41,7 +41,7 @@ func lintValuesParse(spec *Spec) []error {
 			check := func(what, consequence string, values []string) {
 				if msg := runtimeRejects(schema, values); msg != "" {
 					problems = append(problems, inputProblem(ptr, path, channel, name,
-						fmt.Sprintf("`%s` %s; %s", what, msg, consequence)))
+						fmt.Sprintf("%#q %s; %s", what, msg, consequence)))
 				}
 			}
 			if schema.Default != nil {

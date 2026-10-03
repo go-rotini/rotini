@@ -61,16 +61,14 @@ internal/cmd/helloworld/
 
 ### 3. Generate, and fill in the handler
 
-`go generate ./...` creates `internal/cmd/helloworld/helloworld_hello.go`. Replace its `TODO` with the command's work, and add `"strings"` to its imports:
+`go generate ./...` creates `internal/cmd/helloworld/helloworld_hello.go`. Replace the line that prints `inputs` with the command's work, and add `"strings"` to its imports:
 
 {{< code title="internal/cmd/helloworld/helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
 func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rotini.ParseArgv[HelloworldHelloInputs](rtx); err == nil {
-		if argv.Values.HelloworldHello.Flags.Help {
-			fmt.Fprintln(rtx.Stdout, rtx.Help())
-			rtx.HaltWithCode(0)
-			return
-		}
+	if argv, err := rotini.ParseArgv[HelloworldHelloInputs](rtx); err == nil && argv.Values.HelloworldHello.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		rtx.HaltWithCode(0)
+		return
 	}
 
 	inputs, err := rotini.Collect[HelloworldHelloInputs](rtx)

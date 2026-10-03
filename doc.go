@@ -263,44 +263,26 @@
 //
 // # Batteries
 //
-// Beyond the runtime, rotini carries a short shelf of things a binary keeps needing that are
-// awkward to write and easy to get wrong. Importing rotini wires none of them, starts no
-// goroutine and touches no terminal.
+// rotini wires nothing on import, starts no goroutine and touches no terminal. It ships no
+// styler, table, spinner, prompt, pager, terminal probe or process runner: drawing to and
+// reading from a terminal, and running other programs, are solved problems with better
+// libraries behind them (golang.org/x/term, os/exec) than a CLI framework should be writing on
+// the side. The one text helper it keeps is the one its own generated pages need:
 //
-// The shelf is deliberately SHORT. rotini ships no styler, no table, no spinner, no prompt and
-// no pager, because drawing to a terminal is a solved problem with better libraries behind it
-// than a CLI framework should be writing on the side. What stays here is the part underneath
-// those choices: platform questions the standard library will not answer, and process work that
-// is subtly wrong in most hand-rolled versions.
-//
-//   - [Subprocess] wraps os/exec with environment, working-directory and timeout control; a
-//     non-zero exit is a [*SubprocessError] quoting the child's stderr, and [Subprocess.Lines]
-//     streams tagged output as an iterator you can break out of.
-//   - [TerminalSize] reports the terminal's width and height, honoring COLUMNS and LINES and
-//     saying plainly when there is no answer rather than inventing one. [IsTerminal] and
-//     [EnvNoColor] answer the two questions that come before any styling decision; rotini
-//     auto-detects nothing.
-//   - [ReadSecret] reads one line with terminal echo off and puts the echo back on every path,
-//     including a panic — the failure nobody notices until their next shell command.
 //   - [Strip] removes ANSI escape sequences, which is what makes a styled string safe to put
 //     in a man page, a markdown page or a completion description.
 //
 // # Program shapes
 //
-// A rotini binary is not always a one-shot command. These run the same program in a different
-// shape, all resting on [Program.Run] being re-entrant — each dispatch gets a fresh [Context],
-// so nothing leaks between invocations while services bound once up front reach all of them.
-// Run is also safe to call CONCURRENTLY once configuration is done; the handlers value and the
-// program's streams stay shared, so a concurrent host synchronizes those. See [Program.Run].
+// A rotini binary is not always a one-shot command. An interactive loop, a daemon, or a server
+// answering a peer all run the same program in a different shape, resting on [Program.Run]
+// being re-entrant — each dispatch gets a fresh [Context], so nothing leaks between invocations
+// while services bound once up front reach all of them. Run is also safe to call CONCURRENTLY
+// once configuration is done; the handlers value and the program's streams stay shared, so a
+// concurrent host synchronizes those. See [Program.Run].
 //
-//   - [REPL] runs a [Program] as an interactive loop, dispatching each typed line against the
-//     same [Definition] the binary uses. A failing command is reported and the loop continues.
-//     rotini owns the dispatch — [REPL.Complete] answers what your command tree would complete,
-//     which no line editor can — and leaves reading the line to whatever you plug into
-//     [REPL.WithLineReader].
-//   - [Service] runs long-lived workers until the context ends or one fails, with ordered
-//     shutdown hooks that run in every case. Since the runtime already cancels the run context
-//     on SIGINT/SIGTERM, a Service built on that ctx gets graceful shutdown for free.
+// rotini ships no loop of its own. A host calls [Program.RunContext] once per line or request;
+// supplying the context hands signal handling to the host, so it decides what ^C cancels.
 //
 // # What rotini deliberately does not ship
 //

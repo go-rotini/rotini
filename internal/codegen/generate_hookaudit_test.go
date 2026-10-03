@@ -40,9 +40,9 @@ func hookAuditFixture(t *testing.T) (cmdDir string, gen func(*testing.T) []error
 }
 
 // appendToStub adds declarations to a generated stub, the way an author implementing a hook
-// does. The embeds are left in place: the stub's own comment says to implement a hook by
-// "declaring a method with the same name", and never says to remove the no-op it replaces —
-// which is exactly why a misspelled name is silent.
+// does. The embeds are left in place: a hook is implemented by declaring a method with the
+// same name, and nothing says to remove the no-op it replaces — which is exactly why a
+// misspelled name is silent.
 func appendToStub(t *testing.T, cmdDir, file, decls string) {
 	t.Helper()
 	path := filepath.Join(cmdDir, file)

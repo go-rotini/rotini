@@ -1,9 +1,8 @@
 # R4 — a misspelled lifecycle hook is reported at generate time.
 #
-# A handler embeds the Default* no-ops and overrides the hooks it wants. The stub's own comment
-# says to implement one by "declaring a method with the same name" — and says nothing about
-# removing the embed it replaces, because there is no reason to: a method at depth 0 wins over a
-# promoted one. That is what makes a misspelled name SILENT. The embed keeps satisfying
+# A handler embeds the Default* no-ops and overrides the hooks it wants. A hook is implemented by
+# declaring a method with the same name, and nothing says to remove the embed it replaces,
+# because there is no reason to: a method at depth 0 wins over a promoted one. That is what makes a misspelled name SILENT. The embed keeps satisfying
 # Handlers, so the `var _ rotini.Handlers` assertion holds, the package compiles, vet is clean,
 # and the author's hook is dead code that never runs.
 #

@@ -3,7 +3,6 @@ package rotini
 import (
 	"context"
 	"io"
-	"strings"
 	"testing"
 )
 
@@ -85,21 +84,6 @@ func mustResolve(b *testing.B, def Definition, argv []string) []ResolvedCommand 
 		b.Fatal(err)
 	}
 	return res.Chain
-}
-
-// A REPL dispatches once per typed line, so its per-line overhead is the cost of
-// being interactive at all.
-func BenchmarkREPL_perLine(b *testing.B) {
-	h := &testHandlers{log: new([]string)}
-	p := NewProgram(testDef(), h).WithStdout(io.Discard).WithStderr(io.Discard)
-	line := strings.Repeat("run x\n", 100)
-	b.ReportAllocs()
-	for b.Loop() {
-		r := NewREPL(p).WithPrompt("").WithInput(strings.NewReader(line)).WithOutput(io.Discard)
-		if err := r.Run(context.Background()); err != nil {
-			b.Fatal(err)
-		}
-	}
 }
 
 // Run vs RunContext isolates the cost of rotini's signal trap: Run with no supplied

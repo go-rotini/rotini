@@ -129,17 +129,15 @@ Enable `completion`, `man` or `markdown` to generate those from the spec too.
 ### 4. Review the generated handler file and modify
 
 `go generate ./...` creates a handler file for each new command — here
-`internal/cmd/helloworld/helloworld_hello.go`. Replace its `TODO` with the command's work, and
-add `"strings"` to its imports:
+`internal/cmd/helloworld/helloworld_hello.go`. Replace the line that prints `inputs` with the
+command's work, and add `"strings"` to its imports:
 
 ```go
 func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rotini.ParseArgv[HelloworldHelloInputs](rtx); err == nil {
-		if argv.Values.HelloworldHello.Flags.Help {
-			fmt.Fprintln(rtx.Stdout, rtx.Help())
-			rtx.HaltWithCode(0)
-			return
-		}
+	if argv, err := rotini.ParseArgv[HelloworldHelloInputs](rtx); err == nil && argv.Values.HelloworldHello.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		rtx.HaltWithCode(0)
+		return
 	}
 
 	inputs, err := rotini.Collect[HelloworldHelloInputs](rtx)

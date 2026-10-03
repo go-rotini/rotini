@@ -1,12 +1,9 @@
 package rotini
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
-	"time"
 )
 
 // Guards over the TEXT of the package's errors, across every type that renders one. An Error()
@@ -56,26 +53,17 @@ func TestErrorStrings(t *testing.T) {
 }
 
 // TestUserFacingErrorsDoNotNameTheFramework pins the text a CLI's USERS can see when rotini
-// reports on their behalf. It used to lead with "rotini: " — `Error: rotini: shutdown timed
-// out` — so every CLI had to catch and reword each one to avoid telling its users about its
-// implementation. Messages about a mistake in the program itself (a nil
+// reports on their behalf. It used to lead with "rotini: ", so every CLI had to catch and
+// reword each one to avoid telling its users about its implementation. Messages about a mistake in the program itself (a nil
 // context, an inputs type for the wrong command) keep the name: there it tells the developer
 // where to look.
 func TestUserFacingErrorsDoNotNameTheFramework(t *testing.T) {
 	t.Parallel()
-	worker := NewService().WithShutdownTimeout(time.Second).
-		Go("indexer", func(context.Context) error { return errors.New("disk full") }).
-		Run(context.Background())
 	for name, err := range map[string]error{
-		"ErrUsage":           ErrUsage,
-		"ErrInternal":        ErrInternal,
-		"wrapped ErrUsage":   fmt.Errorf("%w: bad flag", ErrUsage),
-		"ErrNotInteractive":  ErrNotInteractive,
-		"ErrInterrupted":     ErrInterrupted,
-		"ErrShutdownTimeout": ErrShutdownTimeout,
-		"a worker failure":   worker,
-		"SubprocessError":    &SubprocessError{Name: "git", ExitCode: 1},
-		"ExitCode":           ExitCode(130),
+		"ErrUsage":         ErrUsage,
+		"ErrInternal":      ErrInternal,
+		"wrapped ErrUsage": fmt.Errorf("%w: bad flag", ErrUsage),
+		"ExitCode":         ExitCode(130),
 	} {
 		if strings.Contains(err.Error(), "rotini") {
 			t.Errorf("%s = %q: names the framework in text the CLI's users read", name, err)

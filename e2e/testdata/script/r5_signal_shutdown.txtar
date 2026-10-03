@@ -1,0 +1,150 @@
+# R5 — the default signal trap, stopped by a REAL signal.
+#
+# program_test.go cancels contexts itself. This proves what an operator actually depends on:
+# a signal the kernel delivers cancels the handler's context, forward progress stops, every
+# teardown hook that began still runs, and the process exits 128+signum — with nothing reported
+# as an error, because a graceful stop is not a failure.
+#
+# The process signals itself so the assertion is deterministic; the signal path is identical.
+
+[!unix] skip 'sends a real signal to its own process'
+
+gomodinit example.com/shutdown
+
+exec rotini generate cmd/shutdown/.rotini.spec.yaml --config cmd/shutdown/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o shutdown$exe ./cmd/shutdown
+
+# ── SIGTERM ──────────────────────────────────────────────────────────────────
+# 128+SIGTERM(15) = 143. Asserting the exact code is the point: a script wrapping the binary
+# branches on it.
+wantexit 143 ./shutdown$exe wait --signal term
+
+! exec ./shutdown$exe wait --signal term
+stdout 'waiting'
+stdout 'canceled'
+
+# Teardown still ran, innermost first: the leaf's PostRun, then the root's cascading hook.
+stdout 'wait teardown'
+stdout 'root teardown'
+cmp stdout term-order.txt
+
+# A graceful stop records nothing, so the funnel reports nothing.
+! stderr .
+
+# ── SIGINT ───────────────────────────────────────────────────────────────────
+# 128+SIGINT(2) = 130, the same path as ^C at a terminal.
+wantexit 130 ./shutdown$exe wait --signal int
+
+! exec ./shutdown$exe wait --signal int
+stdout 'canceled'
+stdout 'root teardown'
+! stderr .
+
+-- term-order.txt --
+waiting
+canceled
+wait teardown
+root teardown
+-- cmd/shutdown/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: shutdown
+  summary: stopped by a signal
+  commands:
+    - name: wait
+      summary: block until the run context is canceled
+      flags:
+        - name: signal
+          summary: which signal to send itself
+          identifiers: [--signal]
+          schema:
+            type: string
+            enum: [term, int]
+            default: term
+-- cmd/shutdown/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/shutdown/zz_shutdown.go
+      package: shutdown
+-- internal/cmd/shutdown/shutdown.go --
+package shutdown
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shutdownHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+}
+
+func (*shutdownHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+
+// CascadingPostRun is the root's teardown. It runs for every command beneath it, including a
+// run a signal cut short.
+func (*shutdownHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "root teardown")
+}
+-- internal/cmd/shutdown/shutdown_wait.go --
+package shutdown
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"syscall"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+type shutdownWaitHandlers struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultCascadingPostRun
+}
+
+// Run blocks on the context the runtime hands it, and sends itself the signal that should
+// cancel it. An operator sends it from outside; the path through the trap is the same.
+func (*shutdownWaitHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rotini.Collect[ShutdownWaitInputs](rtx)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	sig := syscall.SIGTERM
+	if in.ShutdownWait.Flags.Signal == "int" {
+		sig = syscall.SIGINT
+	}
+
+	fmt.Fprintln(rtx.Stdout, "waiting")
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = syscall.Kill(os.Getpid(), sig)
+	}()
+	// The timer is a safety net, not part of the behaviour: a regression that stops routing the
+	// signal should fail an assertion, not hang the suite.
+	select {
+	case <-ctx.Done():
+		fmt.Fprintln(rtx.Stdout, "canceled")
+	case <-time.After(5 * time.Second):
+		fmt.Fprintln(rtx.Stdout, "NEVER CANCELED: the signal did not reach the run context")
+	}
+}
+
+func (*shutdownWaitHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "wait teardown")
+}
+-- cmd/shutdown/main.go --
+package main
+
+import shutdown "example.com/shutdown/internal/cmd/shutdown"
+
+func main() { shutdown.Program.Execute() }

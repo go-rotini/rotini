@@ -554,8 +554,8 @@ func featureEnabled(conf *Conf, kind string) bool {
 
 // commandName returns the command's own name — the last token of its invocation.
 func commandName(invocation string) string {
-	if i := strings.LastIndex(invocation, " "); i >= 0 {
-		return invocation[i+1:]
+	if _, name, ok := strings.CutLast(invocation, " "); ok {
+		return name
 	}
 	return invocation
 }

@@ -94,7 +94,7 @@ func canceledExitCode(ctx context.Context) int {
 // knowing their types.
 //
 // A Program is reusable: [Program.Run] dispatches one invocation and returns instead of
-// exiting, giving each call a fresh [Context]. That is what lets a [REPL], a test, or a server
+// exiting, giving each call a fresh [Context]. That is what lets a REPL, a test, or a server
 // answering a peer drive the same program many times.
 //
 // Configure before the first run. Every With method and [Program.Bind] mutates the Program
@@ -646,8 +646,7 @@ func (p *Program) Execute() error {
 //
 // For hosts that dispatch in a loop: with no supplied context Run installs and tears down the
 // signal trap on every call, about 30µs — negligible once per process, but roughly 20x the
-// dispatch itself when repeated. Prefer [Program.RunContext] or [Program.WithoutSignalHandling],
-// as [REPL] does.
+// dispatch itself when repeated. Prefer [Program.RunContext] or [Program.WithoutSignalHandling].
 //
 // # Concurrency
 //

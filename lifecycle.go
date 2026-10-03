@@ -46,7 +46,7 @@ type Resolution struct {
 // It arrives by value, but a Definition is mostly slices — Commands, Flags, Arguments — and
 // those are the program's own, not a copy. Writing through one (`def.Commands[0].Name = …`)
 // edits the command tree itself, and the edit OUTLIVES the run: the next invocation of the same
-// [Program] sees it, which for a [REPL] means every line after the first.
+// [Program] sees it, which for a REPL means every line after the first.
 //
 // This is the same convention [Context.Chain] states for the frames it hands a handler, and it
 // is what lets one Program serve many runs without rebuilding its tree. A resolver that wants a

@@ -1,0 +1,210 @@
+# R5b — Program.RunContext re-entrancy, from a real binary.
+#
+# rotini ships no interactive loop; a host builds one by dispatching each line through the SAME
+# Program the binary uses. That only works if a dispatch is re-entrant: each line needs a fresh
+# Context, so one command's recorded outcomes and exit code cannot leak into the next, while
+# services bound on the Program are seeded into every line. State persists; failures do not.
+#
+# The loop below is the whole of what a program writes to get that shape — no rotini type
+# beyond Program.
+
+gomodinit example.com/loop
+
+exec rotini generate cmd/loop/.rotini.spec.yaml --config cmd/loop/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o loop$exe ./cmd/loop
+
+# State persists across lines, a failing line does not end the session, and the session itself
+# exits 0.
+stdin session.txt
+exec ./loop$exe
+stdout 'count=1'
+stdout 'count=2'
+stdout 'line exited 1'
+stdout 'count=3'
+
+# The failure was reported EXACTLY once, by the funnel, on stderr.
+stderr 'boom'
+! stdout 'boom'
+
+# ── ^C cancels the LINE, not the session ─────────────────────────────────────
+#
+# Supplying the context to RunContext hands signal handling to the host, so the host decides
+# what an interrupt means. Here it cancels the running line only. What must survive is the
+# line AFTER it: if the session had died, "count=1" would never print.
+[unix] stdin interrupt.txt
+[unix] exec ./loop$exe
+[unix] stdout 'blocking: canceled'
+[unix] stdout 'count=1'
+
+-- session.txt --
+bump
+bump
+explode
+bump
+exit
+-- interrupt.txt --
+block
+bump
+exit
+-- cmd/loop/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: loop
+  summary: a program driven one line at a time
+  commands:
+    - name: bump
+      summary: increment the shared counter
+    - name: explode
+      summary: fail on purpose
+    - name: block
+      summary: block until the line's context is canceled
+-- cmd/loop/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/loop/zz_loop.go
+      package: loop
+-- internal/cmd/loop/loop.go --
+package loop
+
+import (
+	"context"
+	"sync/atomic"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.DefaultCascadingPreRun
+	rotini.DefaultPreRun
+	rotini.DefaultPostRun
+	rotini.DefaultCascadingPostRun
+}
+
+// Counter is the shared service. It is bound on the PROGRAM, so every line sees the same one.
+type Counter struct{ n atomic.Int64 }
+
+func (c *Counter) Bump() int64 { return c.n.Add(1) }
+
+var CounterKey = rotini.NewKey[*Counter]("loop.counter")
+
+type loopHandlers struct{ base }
+
+func (*loopHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+-- internal/cmd/loop/loop_bump.go --
+package loop
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+type loopBumpHandlers struct{ base }
+
+func (*loopBumpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintf(rtx.Stdout, "count=%d\n", CounterKey.MustGet(rtx).Bump())
+}
+-- internal/cmd/loop/loop_explode.go --
+package loop
+
+import (
+	"context"
+	"errors"
+
+	"github.com/go-rotini/rotini"
+)
+
+type loopExplodeHandlers struct{ base }
+
+func (*loopExplodeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	rtx.HaltWith(errors.New("boom"))
+}
+-- internal/cmd/loop/loop_block.go --
+package loop
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/go-rotini/rotini"
+)
+
+type loopBlockHandlers struct{ base }
+
+// Run blocks until its LINE's context is canceled, and interrupts its own process to do it. A
+// user presses ^C; the path through the host's loop is the same either way.
+func (*loopBlockHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintln(rtx.Stdout, "blocking: started")
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		if self, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = self.Signal(os.Interrupt)
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		fmt.Fprintln(rtx.Stdout, "blocking: canceled")
+	case <-time.After(5 * time.Second):
+		fmt.Fprintln(rtx.Stdout, "blocking: NEVER CANCELED: the interrupt did not reach the line")
+	}
+}
+-- cmd/loop/main.go --
+package main
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"os"
+	"os/signal"
+	"strings"
+
+	"github.com/go-rotini/rotini"
+
+	loop "example.com/loop/internal/cmd/loop"
+)
+
+// The loop shape: one Program, dispatched once per line. Each RunContext gets a fresh
+// Context, while the counter bound here reaches every line.
+func main() {
+	p := loop.NewProgram(loop.Handlers()).
+		With(rotini.Provide(loop.CounterKey, &loop.Counter{}))
+
+	// ^C cancels the running line, never the session. rotini installs no trap of its own for
+	// a supplied context, so this handler is the only one.
+	sigint := make(chan os.Signal, 1)
+	signal.Notify(sigint, os.Interrupt)
+
+	lines := bufio.NewScanner(os.Stdin)
+	for lines.Scan() {
+		argv := strings.Fields(lines.Text())
+		if len(argv) == 0 {
+			continue
+		}
+		if argv[0] == "exit" {
+			return
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			select {
+			case <-sigint:
+				cancel()
+			case <-done:
+			}
+		}()
+		code, _ := p.RunContext(ctx, argv)
+		close(done)
+		cancel()
+		if code != 0 {
+			fmt.Printf("line exited %d\n", code)
+		}
+	}
+}

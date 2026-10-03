@@ -14,7 +14,14 @@ ifeq ($(GOBIN),)
 GOBIN := $(shell go env GOPATH)/bin
 endif
 
-.PHONY: all check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race rotini rotini-build rotini-install
+# The development tools (linters, the license and vulnerability checkers, the mutation tester and
+# the JSON Schema code generator) are declared in tools.mod rather than go.mod, so a module that
+# requires rotini never sees them in its own dependency graph. Run them through TOOL, and upgrade
+# them with `make tools-upgrade`, never `go mod tidy -modfile=tools.mod`: tidy scans rotini's own
+# packages and would copy the runtime's dependencies into the tools file.
+TOOL := go tool -modfile=tools.mod
+
+.PHONY: all check-generated clean lint test test-acceptance test-bench test-conformance test-e2e test-fuzz test-mutation test-race tools-upgrade vuln vuln-tools rotini rotini-build rotini-install
 
 all: clean lint test test-conformance test-acceptance test-e2e test-bench test-fuzz test-mutation test-race rotini-build rotini-install
 
@@ -43,9 +50,49 @@ lint:
 	test -z "$$gofmt_unformatted" || (echo "files not formatted:" && echo "$$gofmt_unformatted" && exit 1)
 	@go vet ./...
 	@go mod verify
-	@go tool golangci-lint run ./...
-	@go tool go-licenses check ./...
-	@go tool govulncheck ./...
+	@go mod verify -modfile=tools.mod
+	@$(TOOL) golangci-lint run ./...
+	@$(TOOL) go-licenses check ./...
+	@$(MAKE) --no-print-directory vuln
+	@$(MAKE) --no-print-directory vuln-tools
+
+# govulncheck, one target per dependency graph; lint runs both.
+#
+# vuln scans go.mod from source, which reports only vulnerable code rotini can actually reach.
+# -test brings the test files in, so a test-only module (go-internal) is checked too.
+#
+# vuln-tools scans tools.mod per tool, as a built binary: that is exactly the code that runs, and
+# source mode cannot analyze another module's main packages. The tool list comes from tools.mod
+# itself, so a newly added tool is scanned without editing this file.
+vuln:
+	@$(TOOL) govulncheck -test ./...
+
+vuln-tools:
+	@bin=$$(mktemp -d); trap 'rm -rf "$$bin"' EXIT; \
+	for pkg in $$(go list -modfile=tools.mod tool); do \
+		name=$$(echo "$$pkg" | tr / _); \
+		echo "→ $$pkg"; \
+		go build -modfile=tools.mod -o "$$bin/$$name" "$$pkg" || exit 1; \
+		$(TOOL) govulncheck -mode=binary "$$bin/$$name" || exit 1; \
+	done
+
+# Upgrades every tool in tools.mod to its latest release. tools.mod is rebuilt from scratch
+# rather than edited in place, so it ends up holding exactly what today's tools require: no
+# indirect line left behind by a tool that stopped needing it, and no tidy. The module, go and
+# toolchain lines are copied from go.mod, so both files agree on the Go version. On any failure
+# the previous tools.mod and tools.sum are restored. On success the upgraded tools are
+# vulnerability-scanned; review the diff and commit tools.mod and tools.sum together.
+tools-upgrade:
+	@tools=$$(go list -modfile=tools.mod tool) || exit 1; \
+	backup=$$(mktemp -d); cp tools.mod tools.sum "$$backup"/; \
+	restore() { cp "$$backup"/tools.mod "$$backup"/tools.sum .; rm -rf "$$backup"; echo "tools-upgrade failed; tools.mod and tools.sum restored"; exit 1; }; \
+	{ grep -E '^module ' go.mod; echo; grep -E '^go ' go.mod; echo; grep -E '^toolchain ' go.mod; } > tools.mod; \
+	rm -f tools.sum; \
+	go get -modfile=tools.mod -tool $$(for t in $$tools; do printf '%s@latest ' "$$t"; done) || restore; \
+	go mod verify -modfile=tools.mod || restore; \
+	rm -rf "$$backup"
+	@$(MAKE) --no-print-directory vuln-tools
+	@echo "tools upgraded; review: git diff tools.mod"
 
 test:
 	@go test -v -count=1 -coverprofile=test.out ./...
@@ -77,7 +124,7 @@ test-fuzz:
 	done
 
 test-mutation:
-	@go tool github.com/go-gremlins/gremlins/cmd/gremlins unleash --config .gremlins.yaml
+	@$(TOOL) gremlins unleash --config .gremlins.yaml
 
 test-race:
 	@go test -race -count=1 -coverprofile=test_race.out ./...
