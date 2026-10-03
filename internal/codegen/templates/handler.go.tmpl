@@ -9,17 +9,6 @@ import (
 
 var _ rotini.Handlers = (*{{.HandlersType}})(nil)
 
-// {{.HandlersType}} implements `{{.Invocation}}`.
-//
-// The embedded types are no-op implementations of the hooks this command does not use, so
-// only Run is written below. Implement one by declaring a method with the same name:
-// CascadingPreRun and CascadingPostRun run for every command in the chain, PreRun, Run and
-// PostRun only for this one.
-//
-// One value of this type serves THIS command's hooks for one run, so a field is a fine home
-// for state passing between them — a transaction opened in PreRun and committed in PostRun,
-// say. State that has to reach a DIFFERENT command in the chain does not fit in a field: use
-// the registry (rotini.Key + BindTo) for that. See rotini.Handlers for the full rule.
 type {{.HandlersType}} struct {
 	rotini.DefaultCascadingPreRun
 	rotini.DefaultPreRun
@@ -27,88 +16,77 @@ type {{.HandlersType}} struct {
 	rotini.DefaultCascadingPostRun
 }
 
-// Run performs `{{.Invocation}}`.
-//
-// Collect reconciles every input channel the spec declares for this command into the
-// generated {{.InputsType}}, validated, in the documented precedence. A handler does not print
-// its own errors: it records them, and the runtime reports them once, after teardown.
-//
-// This file was created once and is now yours — rotini never overwrites it. Delete anything
-// below you do not want. If this command leaves the spec, `go generate` removes the file;
-// delete the `var _ rotini.Handlers` line above, or list the file under `keep:`, to hold on
-// to it.
 func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
-{{- if .AnswerBeforeCollect}}
-	// Answered BEFORE Collect, from argv alone.
-	//
-	// ParseArgv reads the command line with no defaults, no fallback and — the point here —
-	// no required or enum validation. Collect validates, so asking it first means
-	// `{{.Invocation}} --{{.HelpFlagName}}` reports a missing argument instead of printing the page:
-	// the user asked NOT to run the command, and was told off for not supplying what
-	// running it would need.
+{{- if and .HelpFlag .VersionFlag}}
 	if argv, err := rotini.ParseArgv[{{.InputsType}}](rtx); err == nil {
-{{- if .HelpFlag}}
 		if argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
 			fmt.Fprintln(rtx.Stdout, rtx.Help())
 			rtx.HaltWithCode(0)
 			return
 		}
-{{- end}}
-{{- if .VersionFlag}}
-		// The entrypoint sets this with rotini.Program.WithVersion, from whatever the
-		// binary was built with.
+
 		if argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
 			version := rtx.Version()
 			if version == "" {
-				version = "unknown" // the entrypoint does not call WithVersion
+				version = "unknown"
 			}
+
 			fmt.Fprintln(rtx.Stdout, version)
 			rtx.HaltWithCode(0)
 			return
 		}
-{{- end}}
 	}
-{{- end}}
-{{- if .NeedsInputs}}
+{{else if .HelpFlag}}
+	if argv, err := rotini.ParseArgv[{{.InputsType}}](rtx); err == nil && argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		rtx.HaltWithCode(0)
+		return
+	}
+{{else if .VersionFlag}}
+	if argv, err := rotini.ParseArgv[{{.InputsType}}](rtx); err == nil && argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
+		version := rtx.Version()
+		if version == "" {
+			version = "unknown"
+		}
 
-	{{if .UsesInputs}}inputs, err{{else}}_, err{{end}} := rotini.Collect[{{.InputsType}}](rtx)
+		fmt.Fprintln(rtx.Stdout, version)
+		rtx.HaltWithCode(0)
+		return
+	}
+{{end}}
+{{- if .NeedsInputs}}
+{{- if .UsesInputs}}
+	inputs, err := rotini.Collect[{{.InputsType}}](rtx)
 	if err != nil {
-		// HaltWith records the error and stops the run as one act, claiming no exit code —
-		// the funnel decides what an input failure costs. It is the correct spelling in
-		// every hook, so failing never has to be written differently depending on which
-		// hook you are in. To record a problem and CONTINUE instead, use rtx.RecordError.
 		rtx.HaltWith(err)
 		return
 	}
+{{else}}
+	if _, err := rotini.Collect[{{.InputsType}}](rtx); err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+{{end}}
 {{- end}}
 {{- if .HelpPathArg}}
-
-	// Resolve the generated help page for the requested command path; no path is the
-	// root's own page.
 	page, err := Help(inputs.{{.Prefix}}.Arguments.{{.HelpPathArg}}...)
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
+
 	fmt.Fprintln(rtx.Stdout, page)
 {{- else if .VersionOnly}}
-
-	// The entrypoint sets this with rotini.Program.WithVersion; rotini never invents one.
 	version := rtx.Version()
 	if version == "" {
-		version = "unknown" // the entrypoint does not call WithVersion
+		version = "unknown"
 	}
+
 	fmt.Fprintln(rtx.Stdout, version)
 {{- else if .PrintHelpWhenBare}}
-
-	// Nothing to do yet: show this command's own help rather than an empty run.
-	// HaltWithCode here, not Halt: "invoked with no sub-command" is a deliberate non-zero
-	// verdict, so the code is the point rather than an artifact of stopping.
 	fmt.Fprintln(rtx.Stdout, rtx.Help())
 	rtx.HaltWithCode(1)
 {{- else}}
-
-	// TODO: replace this with the command's work.
 	fmt.Fprintf(rtx.Stdout, "%s: %+v\n", "{{.Invocation}}", inputs)
 {{- end}}
 }
