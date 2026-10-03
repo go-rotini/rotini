@@ -8,6 +8,7 @@ Contributions are welcome! Here's how to get started.
 git clone https://github.com/go-rotini/rotini.git
 cd rotini
 go mod download
+go mod download -modfile=tools.mod   # the development tools, kept out of go.mod
 make all   # run every project process (lint, the full test suite, build, install)
 ```
 

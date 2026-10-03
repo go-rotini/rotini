@@ -839,7 +839,7 @@ When true, the input must be provided (or stdin must not be empty for stdin inpu
 
 `boolean` · default `false`
 
-When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. It does not prompt: a handler that wants to ask for the value interactively calls rotini.ReadSecret(rtx.Stdin), which reads a line without echoing it; for non-interactive supply, pair secret with from: [file] (token file) or an env input.
+When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 
 ### `separator`
 

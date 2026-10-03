@@ -19,8 +19,6 @@ const ParseKindUnspecified
 const RemoteBinaryNotFound
 const RemoteSpawnFailed
 const RemoteTimeout
-const StreamStderr
-const StreamStdout
 field ArgDef.Complete
 field ArgDef.Constraints
 field ArgDef.Default
@@ -140,8 +138,6 @@ field Layer.Values
 field LifecycleStep.Do
 field LifecycleStep.Name
 field LifecycleStep.Undo
-field Line.Stream
-field Line.Text
 field Outcome.Errors
 field Outcome.Infos
 field Outcome.Panics
@@ -194,11 +190,6 @@ field ResolvedCommand.Passthrough
 field ResolvedCommand.PluginPath
 field ResolvedCommand.Remotes
 field ServiceError.Key
-field SubprocessError.Args
-field SubprocessError.Cause
-field SubprocessError.ExitCode
-field SubprocessError.Name
-field SubprocessError.Stderr
 field WiringError.Command
 field WiringError.Handler
 field WiringError.Msg
@@ -212,18 +203,13 @@ func Defaults[T any](rtx *Context) (Layer[T], error)
 func Deprecations(rtx *Context) []Deprecation
 func DiscoveredPlugins(cmd ResolvedCommand) []DiscoveredPlugin
 func DiscoveryDiagnostics(cmd ResolvedCommand) []error
-func EnvNoColor() bool
 func ExitCode(code int) error
 func InternalError(err error) error
-func IsTerminal(stream any) bool
 func NewBinder(meta BindMeta) *Binder
 func NewContextFor(def Definition, argv []string) *Context
 func NewKey[T any](name string) Key[T]
 func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
-func NewREPL(program *Program) *REPL
-func NewService() *Service
-func NewSubprocess(name string, args ...string) *Subprocess
 func NewSuggestor() *Suggestor
 func OverlayInputsP[T any](layers ...Layer[T]) (T, Report)
 func OverlayInputs[T any](layers ...Layer[T]) T
@@ -233,10 +219,8 @@ func ParseFiles[T any](rtx *Context) (Layer[T], error)
 func ParseStdin[T any](rtx *Context) (Layer[T], error)
 func Provide[T any](k Key[T], value T) Option
 func Ptr[T any](v T) *T
-func ReadSecret(r io.Reader) ([]byte, error)
 func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool)
 func Strip(text string) string
-func TerminalSize(stream any) (cols, rows int, ok bool)
 func UsageError(err error) error
 method ArgValueCompleter.CompleteArgValue
 method Base64Bytes.MarshalText() ([]byte, error)
@@ -327,17 +311,6 @@ method Program.WithStdout(w io.Writer) *Program
 method Program.WithTeardownOnPanic(enabled bool) *Program
 method Program.WithVersion(version string) *Program
 method Program.WithoutSignalHandling() *Program
-method REPL.Complete(line string, pos int) []string
-method REPL.Run(ctx context.Context) error
-method REPL.WithErrorEcho(enabled bool) *REPL
-method REPL.WithExitCommands(words ...string) *REPL
-method REPL.WithInput(in io.Reader) *REPL
-method REPL.WithIntercept(fn func(ctx context.Context, line string) (bool, error)) *REPL
-method REPL.WithInterrupts(ch <-chan struct{}) *REPL
-method REPL.WithLineReader(fn func(ctx context.Context, prompt string) (string, error)) *REPL
-method REPL.WithOutput(out io.Writer) *REPL
-method REPL.WithPrompt(prompt string) *REPL
-method REPL.WithPromptFunc(fn func() string) *REPL
 method RemoteError.Error() string
 method RemoteError.Unwrap() []error
 method RemoteErrorKind.String() string
@@ -345,25 +318,8 @@ method Report.Fields() []FieldPath
 method Report.History(path FieldPath) []Provenance
 method Report.Validate() error
 method Report.Winner(path FieldPath) (Provenance, bool)
-method Service.Go(name string, fn func(context.Context) error) *Service
-method Service.Run(ctx context.Context) error
-method Service.WithShutdown(fn func(context.Context) error) *Service
-method Service.WithShutdownTimeout(d time.Duration) *Service
 method ServiceError.Error() string
 method ServiceError.Unwrap() []error
-method Stream.String() string
-method Subprocess.Lines(ctx context.Context) iter.Seq2[Line, error]
-method Subprocess.Output(ctx context.Context) (string, error)
-method Subprocess.Run(ctx context.Context) (int, error)
-method Subprocess.WithDir(dir string) *Subprocess
-method Subprocess.WithEnv(entries ...string) *Subprocess
-method Subprocess.WithStderr(w io.Writer) *Subprocess
-method Subprocess.WithStdin(r io.Reader) *Subprocess
-method Subprocess.WithStdout(w io.Writer) *Subprocess
-method Subprocess.WithTimeout(d time.Duration) *Subprocess
-method Subprocess.WithoutParentEnv() *Subprocess
-method SubprocessError.Error() string
-method SubprocessError.Unwrap() []error
 method Suggestor.Closest(input string, candidates []string) (suggestion string, ok bool)
 method Suggestor.For(err error) []string
 method Suggestor.Suggest(input string, candidates []string) []string
@@ -407,7 +363,6 @@ type Key
 type Layer
 type Lifecycle
 type LifecycleStep
-type Line
 type Option
 type Outcome
 type PanicError
@@ -418,7 +373,6 @@ type PathFromDef
 type Presence
 type Program
 type Provenance
-type REPL
 type RemoteDef
 type RemoteDiscoveryDef
 type RemoteDispatch
@@ -428,16 +382,9 @@ type Report
 type Resolution
 type ResolvedCommand
 type Resolver
-type Service
 type ServiceError
-type Stream
-type Subprocess
-type SubprocessError
 type Suggestor
 type WiringError
 var ErrInternal
-var ErrInterrupted
-var ErrNotInteractive
 var ErrServiceNotFound
-var ErrShutdownTimeout
 var ErrUsage
