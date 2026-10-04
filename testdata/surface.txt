@@ -165,6 +165,9 @@ field Outcome.Infos
 field Outcome.Panics
 field Outcome.Successes
 field Outcome.Warnings
+field Page.Content
+field Page.Name
+field Page.Path
 field PanicError.Stack
 field PanicError.Value
 field ParseError.Candidates
@@ -372,6 +375,7 @@ type NoPostRun
 type NoPreRun
 type Option
 type Outcome
+type Page
 type PanicError
 type ParseError
 type ParseKind

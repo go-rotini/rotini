@@ -50,6 +50,9 @@ type docFeature struct {
 	// manPages: files are named as man pages, <page-name>.<section> (taskr-add.1), rather than
 	// <filePrefix><path><ext>, and pages render as roff through renderManText.
 	manPages bool
+	// pagesFunc names the generated function listing every visible command's page
+	// (ManPages, MarkdownPages); "" for features that do not get one.
+	pagesFunc string
 }
 
 var (
@@ -62,15 +65,17 @@ var (
 	manFeatureDesc = docFeature{
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
 		tmplFile: manTemplateName, embedded: templateMan,
-		verbatim: func(h cmdHelp) string { return h.Man },
-		strip:    true, // a roff man page carries no legitimate SGR
-		manPages: true,
+		verbatim:  func(h cmdHelp) string { return h.Man },
+		strip:     true, // a roff man page carries no legitimate SGR
+		manPages:  true,
+		pagesFunc: "ManPages",
 	}
 	markdownFeatureDesc = docFeature{
 		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
 		ext: ".md", filePrefix: "markdown_", tmplFile: markdownTemplateName, embedded: templateMarkdown,
-		verbatim: func(h cmdHelp) string { return h.Markdown },
-		strip:    true, // a markdown file carries no legitimate SGR
+		verbatim:  func(h cmdHelp) string { return h.Markdown },
+		strip:     true, // a markdown file carries no legitimate SGR
+		pagesFunc: "MarkdownPages",
 	}
 	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
 	// no template, no verbatim. Scripts come from completionScript at codegen.
@@ -94,6 +99,8 @@ type helpNode struct {
 	name     string           // the command's invocation name, e.g. "rotini generate"
 	verbatim string           // command.help — the exact page; "" means render from data
 	data     templateHelpData // rendering inputs (used when verbatim == "")
+	path     []string         // the canonical command path below the root; nil for the root
+	listed   bool             // in ManPages/MarkdownPages: neither it nor an ancestor is hidden
 }
 
 // cmdHelp bundles a command's resolved help-presentation fields, which live
@@ -168,12 +175,13 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
 		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix), nil, gp.tree),
+		listed:   true,
 	}}
 
 	// cascading carries the cascading flags accumulated from a node's ancestors
 	// (the root's own cascading flags seed the root's children, and so on down).
-	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow)
-	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow) {
+	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool)
+	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool) {
 		for _, n := range nodes {
 			seg := append([]string{n.name}, n.aliases...)
 			childChain := append(append([][]string{}, identChain...), seg)
@@ -186,12 +194,14 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
 				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix), childNames, n.children),
+				path:     childNames,
+				listed:   listed && !n.hidden,
 			})
 			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
-			walk(n.children, childChain, childNames, childCascading)
+			walk(n.children, childChain, childNames, childCascading, listed && !n.hidden)
 		}
 	}
-	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs))
+	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs), true)
 	return out
 }
 
@@ -733,6 +743,19 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 	h := templateFeature{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
 	if feat.manPages && len(nodes) > 0 {
 		h.Section = nodes[0].data.Section
+	}
+	if feat.pagesFunc != "" {
+		h.PagesFunc = feat.pagesFunc
+		for _, hn := range nodes {
+			if !hn.listed {
+				continue
+			}
+			path := "nil"
+			if len(hn.path) > 0 {
+				path = goStringSlice(hn.path)
+			}
+			h.Pages = append(h.Pages, templateFeaturePage{Name: hn.data.PageName, PathLiteral: path, Var: feat.varPrefix + hn.prefix})
+		}
 	}
 	for i, hn := range nodes {
 		name := feat.varPrefix + hn.prefix

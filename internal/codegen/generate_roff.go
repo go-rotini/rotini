@@ -74,20 +74,40 @@ func roffLines(s string) string {
 // roffBlock escapes a paragraph-structured block such as a description: each line is escaped,
 // and a run of blank lines becomes one ".PP" paragraph break, because a blank line in roff is
 // not a paragraph break but a stray vertical space.
+//
+// Indented lines — a table of commands, a code sample — are kept exactly as laid out, in a
+// .nf no-fill block. Otherwise roff would fill them into the surrounding paragraph and lose
+// the columns the author lined up.
 func roffBlock(s string) string {
 	var out []string
-	pending := false
-	for l := range strings.SplitSeq(strings.TrimSpace(s), "\n") {
+	pending, noFill := false, false
+	for l := range strings.SplitSeq(strings.Trim(s, "\n"), "\n") {
 		l = strings.TrimRight(l, " \t")
 		if l == "" {
+			if noFill {
+				out = append(out, ".fi")
+				noFill = false
+			}
 			pending = len(out) > 0
 			continue
 		}
+		indented := l[0] == ' ' || l[0] == '\t'
 		if pending {
 			out = append(out, ".PP")
 			pending = false
 		}
-		out = append(out, roffEscapeLine(l))
+		switch {
+		case indented && !noFill:
+			out = append(out, ".nf")
+			noFill = true
+		case !indented && noFill:
+			out = append(out, ".fi")
+			noFill = false
+		}
+		out = append(out, roffEscapeLine(strings.ReplaceAll(l, "\t", "    ")))
+	}
+	if noFill {
+		out = append(out, ".fi")
 	}
 	return strings.Join(out, "\n")
 }

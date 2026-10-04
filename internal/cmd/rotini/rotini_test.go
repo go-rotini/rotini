@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 
@@ -67,6 +68,10 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 		{"initialize", "--format", "xml", "--help"},
 		{"validate", "--fail", "slow", "--help"},
 		{"version", "extra", "--help"},
+		{"completion", "--help"},
+		{"completion", "tcsh", "--help"},
+		{"man", "--help"},
+		{"man", "--dir", "/nonexistent/must-not-be-created", "--help"},
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			p, out, _ := newTestCLI(t)
@@ -586,4 +591,93 @@ func TestCLI_suggestsNearestSpelling(t *testing.T) {
 			}
 		})
 	}
+}
+
+// `rotini completion <shell>` prints the generated script for each shell, and refuses one it
+// has no script for as the user's mistake.
+func TestCLI_completion(t *testing.T) {
+	for shell, want := range map[string]string{
+		"bash":       "-F _rotini_complete rotini",
+		"zsh":        "#compdef rotini",
+		"fish":       "complete -c rotini",
+		"powershell": "Register-ArgumentCompleter",
+	} {
+		p, out, _ := newTestCLI(t)
+		if code, err := p.Run([]string{"completion", shell}); code != 0 || err != nil {
+			t.Fatalf("completion %s = (%d, %v)", shell, code, err)
+		}
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("completion %s lacks %q:\n%s", shell, want, out.String())
+		}
+	}
+
+	p, _, errb := newTestCLI(t)
+	if code, _ := p.Run([]string{"completion", "tcsh"}); code != 1 || !strings.Contains(errb.String(), `"tcsh"`) {
+		t.Errorf("completion tcsh = exit %d, stderr %q; want a usage error naming the shell", code, errb.String())
+	}
+}
+
+// `rotini man [command...]` prints one roff page; with no command it is rotini's own.
+func TestCLI_man(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"man"}, `.TH "ROTINI" 1 `},
+		{[]string{"man", "generate"}, `.TH "ROTINI\-GENERATE" 1 `},
+		{[]string{"man", "gen"}, `.TH "ROTINI\-GENERATE" 1 `}, // an alias names the same page
+	} {
+		p, out, _ := newTestCLI(t)
+		if code, err := p.Run(tc.argv); code != 0 || err != nil {
+			t.Fatalf("%q = (%d, %v)", tc.argv, code, err)
+		}
+		if !strings.HasPrefix(out.String(), tc.want) {
+			t.Errorf("%q printed %q…, want a page starting %q", tc.argv, firstLine(out.String()), tc.want)
+		}
+	}
+
+	p, _, errb := newTestCLI(t)
+	if code, _ := p.Run([]string{"man", "genrate"}); code != 1 || !strings.Contains(errb.String(), `did you mean "generate"`) {
+		t.Errorf("man genrate = exit %d, stderr %q; want a usage error with a suggestion", code, errb.String())
+	}
+}
+
+// `rotini man --dir <path>` writes every page as <name>.<section>, through the generated
+// ManPages and ManSection, creating the directory.
+func TestCLI_manDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "man", "man1")
+	p, out, _ := newTestCLI(t)
+	if code, err := p.Run([]string{"man", "--dir", dir}); code != 0 || err != nil {
+		t.Fatalf("man --dir = (%d, %v)", code, err)
+	}
+	if !strings.Contains(out.String(), "wrote 8 man pages to "+dir) {
+		t.Errorf("stdout = %q, want it to say what it wrote", out.String())
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	want := []string{"rotini-completion.1", "rotini-generate.1", "rotini-help.1", "rotini-initialize.1",
+		"rotini-man.1", "rotini-validate.1", "rotini-version.1", "rotini.1"}
+	if !slices.Equal(names, want) {
+		t.Errorf("wrote %q, want %q", names, want)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "rotini-man.1"))
+	if page, _ := Man("man"); string(body) != page {
+		t.Error("the file written for rotini man differs from what `rotini man man` prints")
+	}
+
+	p, _, errb := newTestCLI(t)
+	if code, _ := p.Run([]string{"man", "generate", "--dir", dir}); code == 0 || !strings.Contains(errb.String(), "--dir writes every page") {
+		t.Errorf("man generate --dir = exit %d, stderr %q; want a usage error", code, errb.String())
+	}
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }

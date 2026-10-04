@@ -43,6 +43,9 @@ func TestRoffEscape(t *testing.T) {
 	if got, want := roffBlock("first para\nstill first\n\n\n.second para"), "first para\nstill first\n.PP\n\\&.second para"; got != want {
 		t.Errorf("roffBlock = %q, want %q", got, want)
 	}
+	if got, want := roffBlock("Install it:\n\n  bash   source it\n  zsh    save it\nThen go."), "Install it:\n.PP\n.nf\n  bash   source it\n  zsh    save it\n.fi\nThen go."; got != want {
+		t.Errorf("roffBlock keeps indented lines as laid out: got %q, want %q", got, want)
+	}
 	if got, want := roffLines("$ app --x\n.dot\n"), "$ app \\-\\-x\n\\&.dot"; got != want {
 		t.Errorf("roffLines = %q, want %q", got, want)
 	}
@@ -383,6 +386,86 @@ func TestManPages_verbatimIsExact(t *testing.T) {
 	dir, _ := emitModule(t, spec, manConfEmbed)
 	if got := manPages(t, dir)["acme-status.1"]; got != page {
 		t.Errorf("verbatim page = %q, want %q", got, page)
+	}
+}
+
+// pageListsTest runs inside a generated module: ManPages and MarkdownPages list every visible
+// command once, in tree order, under step 4's page names, with the content the resolvers return.
+const pageListsTest = `package acme
+
+import (
+	"slices"
+	"testing"
+)
+
+func TestPageLists(t *testing.T) {
+	want := []string{"acme", "acme-deploy", "acme-status"} // the hidden "secret" is left out
+	wantPaths := [][]string{nil, {"deploy"}, {"status"}}
+
+	var names []string
+	for i, p := range ManPages() {
+		names = append(names, p.Name)
+		if !slices.Equal(p.Path, wantPaths[i]) {
+			t.Errorf("ManPages()[%d].Path = %q, want %q", i, p.Path, wantPaths[i])
+		}
+		if got, err := Man(p.Path...); err != nil || got != p.Content {
+			t.Errorf("Man(%q) disagrees with ManPages: %v", p.Path, err)
+		}
+	}
+	if !slices.Equal(names, want) {
+		t.Errorf("ManPages names = %q, want %q", names, want)
+	}
+
+	names = nil
+	for _, p := range MarkdownPages() {
+		names = append(names, p.Name)
+		if got, err := Markdown(p.Path...); err != nil || got != p.Content {
+			t.Errorf("Markdown(%q) disagrees with MarkdownPages: %v", p.Path, err)
+		}
+	}
+	if !slices.Equal(names, want) {
+		t.Errorf("MarkdownPages names = %q, want %q", names, want)
+	}
+	if ManSection != "1" {
+		t.Errorf("ManSection = %q, want 1", ManSection)
+	}
+}
+`
+
+// TestPageLists: the generated ManPages and MarkdownPages, compiled and run inside the
+// generated module, in both sourcing modes.
+func TestPageLists(t *testing.T) {
+	skipUnlessCompiling(t)
+	if testing.Short() {
+		t.Skip("compiles and tests the generated module; skipped under -short")
+	}
+	for _, embed := range []string{"true", "false"} {
+		t.Run("embed="+embed, func(t *testing.T) {
+			conf := strings.Replace(manConfEmbed, "      embed: true\n",
+				"      embed: "+embed+"\n    - type: markdown\n      enabled: true\n      embed: "+embed+"\n", 1)
+			dir, _ := emitModule(t, manSpec, conf)
+			writeTestFile(t, filepath.Join(dir, "internal", "cmd", "acme"), "pages_test.go", pageListsTest)
+			for _, args := range [][]string{{"mod", "tidy"}, {"test", "./internal/cmd/acme"}} {
+				cmd := exec.Command("go", args...)
+				cmd.Dir = dir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
+				}
+			}
+		})
+	}
+}
+
+// TestPageLists_onlyForEnabledFeatures: a page list is generated only for a feature that is on,
+// and help, which has no page list, gets none.
+func TestPageLists_onlyForEnabledFeatures(t *testing.T) {
+	dir, _ := emitModule(t, manSpec, manConfEmbed)
+	gen := readEmitted(t, dir, "internal/cmd/acme/zz_acme.go")
+	if !strings.Contains(gen, "func ManPages() []rotini.Page") {
+		t.Error("ManPages was not generated with man on")
+	}
+	if strings.Contains(gen, "MarkdownPages") || strings.Contains(gen, "HelpPages") {
+		t.Error("a page list was generated for a feature that is off or has none")
 	}
 }
 

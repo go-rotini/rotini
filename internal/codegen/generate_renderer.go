@@ -414,6 +414,13 @@ type templateFeatureVar struct {
 	Literal string // Go string literal of the content (inline mode), e.g. `"Usage:\n…"`; "" in embed mode
 }
 
+// templateFeaturePage is one entry of a generated page list: a rotini.Page literal's fields.
+type templateFeaturePage struct {
+	Name        string // the page name, e.g. "taskr-add"
+	PathLiteral string // the command path as a Go literal: `[]string{"add"}`, or `nil` for the root
+	Var         string // the var holding the page
+}
+
 type templateFeatureCase struct {
 	PathsLiteral string // case values, e.g. `"generate", "gen"` (root: `""`)
 	Var          string // the var returned for these paths
@@ -424,8 +431,12 @@ type templateFeature struct {
 	Noun     string // word used in the doc comment + error, e.g. "help"
 	PerShell bool   // completion: resolver takes a shell string, not a command path
 	Section  string // man: the section the pages were generated for, emitted as ManSection; "" otherwise
-	Vars     []templateFeatureVar
-	Cases    []templateFeatureCase
+	// PagesFunc is the generated page-list function (ManPages, MarkdownPages), and Pages its
+	// entries, the visible commands in tree order; "" and nil for features without one.
+	PagesFunc string
+	Pages     []templateFeaturePage
+	Vars      []templateFeatureVar
+	Cases     []templateFeatureCase
 }
 
 type templateRotiniData struct {

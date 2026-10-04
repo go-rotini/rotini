@@ -31,6 +31,8 @@ Commands:
   validate, val       validate a spec and conf
   help                print help
   version             print version
+  completion          print a shell completion script
+  man                 print or install the man pages
 
 Flags:
   -v, --version    print version
@@ -159,6 +161,71 @@ Examples:
   rotini help
   rotini help generate
   rotini help init
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+## rotini completion
+
+Prints the shell completion script for bash, zsh, fish or PowerShell. It is the companion's own
+generated `Completion(shell)`: the same function any rotini CLI gets with the `completion`
+feature on.
+
+{{< code title="$ rotini help completion" language="text" open="true" collapsible="false" copy="false" >}}
+Print the completion script for a shell. Load it once per session, or install it so
+every new shell has it:
+
+  bash        source <(rotini completion bash)
+              or save it to ~/.local/share/bash-completion/completions/rotini
+  zsh         rotini completion zsh > "${fpath[1]}/_rotini"
+              then start a new shell (compinit must be enabled)
+  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish
+  powershell  rotini completion powershell | Out-String | Invoke-Expression
+              add that line to $PROFILE to load it in every session
+
+Usage:
+  rotini completion <shell> [flags]
+
+Arguments:
+  <shell>    the shell to print the script for [bash|zsh|fish|powershell]
+
+Flags:
+  -h, --help    print help
+
+Examples:
+  rotini completion bash
+  rotini completion zsh > "${fpath[1]}/_rotini"
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+## rotini man
+
+Prints a command's man page, or with `--dir` writes every page into a directory, named
+`rotini.1`, `rotini-generate.1` and so on. It is built on the companion's own generated `Man`,
+`ManPages()` and `ManSection`, the functions any rotini CLI gets with the `man` feature on, so
+its `--dir` is a working example of shipping every page of your own CLI.
+
+{{< code title="$ rotini help man" language="text" open="true" collapsible="false" copy="false" >}}
+Print a command's man page as roff, the markup the man program reads, or write every
+page into a directory with --dir. With no command, it prints the page for rotini itself.
+
+The pages are named after the command path, rotini-generate.1, so a directory written
+with --dir can be added to MANPATH or copied into a man1 directory.
+
+Usage:
+  rotini man [command...] [flags]
+
+Arguments:
+  [command...]    the command whose page to print (default rotini itself)
+
+Flags:
+  --dir string    write every page into this directory instead of printing one
+  -h, --help      print help
+
+Examples:
+  rotini man generate > rotini-generate.1
+  rotini man --dir ~/.local/share/man/man1
 
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}

@@ -184,5 +184,18 @@ func {{.Resolver}}(path ...string) (string, error) {
 		return "", fmt.Errorf("no {{.Noun}} for command %q", strings.Join(path, " "))
 	}
 }
+{{- if .PagesFunc}}
+
+// {{.PagesFunc}} returns every command's {{.Noun}} page, root first in tree order, leaving out
+// hidden commands and the commands below them. Each page's Content is what {{.Resolver}}
+// returns for its Path.
+func {{.PagesFunc}}() []rotini.Page {
+	return []rotini.Page{
+{{- range .Pages}}
+		{Name: {{printf "%q" .Name}}, Path: {{.PathLiteral}}, Content: {{.Var}}},
+{{- end}}
+	}
+}
+{{- end}}
 {{- end}}
 {{- end}}
