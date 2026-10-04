@@ -14,6 +14,12 @@ type Conf struct {
 	Version string `json:"version"`
 }
 
+// Opt-in: write the contract document, one JSON file describing the whole cli for scripts, tools and AI agents. Every visible command is listed with its arguments, flags (inherited cascading flags included), environment variables, configuration keys and stdin; a `parameters` JSON Schema combining its arguments and flags; its output shape where one is declared; and its exit statuses. The format is rotini's own, described by schema-contract.json in the rotini repository, and the shape of a line rotini.StructuredReporter writes to stderr is included under `errors`.
+type ContractConfig struct {
+	// Module-root-relative path (no leading slash) ending in '.json' the contract document is written to. Rewritten on every `generate`.
+	File string `json:"file"`
+}
+
 // One rendered/derived codegen feature, discriminated by 'type' (help/completion/man/markdown): a toggle (enabled) plus two orthogonal sourcing knobs — embed (//go:embed a rendered file in 'embed_dir' vs an inline string literal) and template (seed the editable rendering template into 'template_dir' vs render from the built-in). The two dirs default from the cmd package — embed_dir to '<cmd-package>/renders', template_dir to '<cmd-package>/templates'. In embed mode embed_dir must resolve under the cmd package (//go:embed cannot reach outside it); inline features and template_dir have no such constraint. Output files never collide: help pages are 'help_*.txt', man pages '<page-name>.<section>' (taskr-add.1), markdown 'markdown_*.md', completion scripts 'completion_<shell>.txt', with pruning scoped to each feature's own files.
 type Feature struct {
 	// How this feature's generated content is sourced into the cmd package's generated file. true: the rendered content is written to a file under 'embed_dir' and the Go var is backed by a //go:embed directive. false (the default): no output file is written — the Go var is a hardcoded string literal holding the content inline, so the generated .go is self-contained. Var names and the resolver are identical either way.
@@ -34,12 +40,20 @@ type Feature struct {
 
 // Controls `rotini generate`: where rotini's JSON Schemas are written ('schemas'), where the generated code is written ('packages'), and which derived doc/completion outputs are emitted ('features').
 type GenerateConfig struct {
+	// Opt-in: where to write the contract document, a JSON description of every command's inputs, output and exit statuses.
+	Contract *ContractConfig `json:"contract,omitempty"`
 	// The derived codegen outputs, one per `type` (help / completion / man / markdown), each an opt-in toggle plus its embed/template sourcing knobs.
 	Features []Feature `json:"features,omitempty"`
 	// Generated code targets, one per `type` (main / cmd / models). 'main' is the binary entrypoint (create-once). 'cmd' is the cli package: the editable per-command handler stubs PLUS the one generated file (the framework glue, the handlers rollup, and — unless 'models' splits them out — the typed input/output structs). 'models' is OPTIONAL: declare it to put the typed structs in their own package, which a handler package sourced via a command's `handler:` can import without an import cycle. The rotini runtime is NOT generated — it is an ordinary library dependency the generated code imports (`go get github.com/go-rotini/rotini`).
 	Packages []PackageConfig `json:"packages,omitempty"`
 	// Opt-in: where to write rotini's own embedded conf- and spec-schema JSON Schemas into this project, so a document's `$schema:` key (what `rotini init` seeds) can point at a local copy instead of a remote URL.
 	Schemas *SchemasConfig `json:"schemas,omitempty"`
+}
+
+// A directory of JSON Schemas, one per declared output: '<page-name>.output.json' for a command's `output:` (taskr-list.output.json) and '<page-name>.exit-<code>.output.json' for an `exit_status` entry's `output:`. A schema is standard JSON Schema (draft-07): rotini's type names are written as JSON Schema types, and the spec's named schemas it references are included as definitions. Hidden commands get none. Rewritten on every `generate`; a '*.output.json' file in the directory that no output produces any more is removed.
+type OutputSchemasConfig struct {
+	// Module-root-relative directory (no leading slash) the output schemas are written to.
+	Dir string `json:"dir"`
 }
 
 type PackageConfig struct {
@@ -67,6 +81,8 @@ type SchemaConfig struct {
 type SchemasConfig struct {
 	// Where to write rotini's conf-schema (the schema for this .rotini.conf file).
 	Conf *SchemaConfig `json:"conf,omitempty"`
+	// Where to write one JSON Schema per command output declared in the spec, so scripts and other tools can validate what a command writes.
+	Output *OutputSchemasConfig `json:"output,omitempty"`
 	// Where to write rotini's spec-schema (the schema for .rotini.spec files).
 	Spec *SchemaConfig `json:"spec,omitempty"`
 }

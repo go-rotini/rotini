@@ -15,8 +15,8 @@
 
        DATA (see helpData): .PageName .Section .Source .Date .RelatedPages .Summary
          .Description .Invocation .Usage/.UsageDerived .CommandGroups[] .Arguments[]
-         .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .ExitStatus[]
-         .Examples[] .SeeAlso[]
+         .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Output .ExitStatus[]
+         .Examples[] .SeeAlso[]   (.Output is nil when the command declares no output)
        HELPERS: roff, roffBlock, roffLines, roffArg, join, upper, lower, title, trim,
                 trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
                 hasPrefix, hasSuffix, first, last. */ -}}
@@ -61,10 +61,18 @@
 \fB{{roff .Name}}\fR{{with .Location}} ({{roff .}}){{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}
 {{end}}{{end}}
+{{with .Output}}.SH OUTPUT
+{{with .Description}}{{roffBlock .}}
+.PP
+{{end}}Writes \fB{{roff .Type}}\fR to standard output.
+{{range .Fields}}.TP
+\fB{{roff .Name}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Description}}{{if .Required}} (required){{end}}
+{{end}}{{end}}
 {{with .ExitStatus}}.SH "EXIT STATUS"
 {{range .}}.TP
 \fB{{.Code}}\fR
-{{roff .Summary}}
+{{roff .Summary}}{{with .Output}} (writes \fB{{roff .}}\fR to standard output){{end}}
 {{end}}{{end}}
 {{with .Examples}}.SH EXAMPLES
 .RS 4

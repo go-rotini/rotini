@@ -18,6 +18,10 @@ var (
 	schemaSpecFileBytes []byte
 	//go:embed schema-conf.json
 	schemaConfFileBytes []byte
+	//go:embed schema-contract.json
+	schemaContractFileBytes []byte
+	//go:embed schema-error.json
+	errorSchemaBytes []byte
 )
 
 // The embedded rotini JSON Schemas are immutable, so each is compiled at most

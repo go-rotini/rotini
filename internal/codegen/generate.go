@@ -128,6 +128,7 @@ func (p *program) generate() error {
 		do   func() error
 	}{
 		{"emit schemas", p.emitSchemas},
+		{"emit contract", p.emitContract},
 		{"emit models file", p.emitModelsFile},
 		{"emit cmd file", p.emitCmdFile},
 		{"emit feature outputs", p.emitFeatures},
@@ -382,6 +383,12 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		if outputTypes, err = buildOutputTypes(gp, lay.cmdPkgName); err != nil {
 			return nil, err
 		}
+	}
+	if declaresOutput(gp) { // the Definition records each output's Go type
+		if imports == nil {
+			imports = map[string]bool{}
+		}
+		imports["reflect"] = true
 	}
 
 	return renderRotiniFile(templateRotiniData{

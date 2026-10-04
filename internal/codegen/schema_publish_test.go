@@ -15,8 +15,10 @@ var updateSchemas = flag.Bool("update-schemas", false, "rewrite the module-root 
 // publishedSchemas maps each module-root published file to the embedded bytes it must equal.
 func publishedSchemas() map[string][]byte {
 	return map[string][]byte{
-		"schema-spec.json": schemaSpecFileBytes,
-		"schema-conf.json": schemaConfFileBytes,
+		"schema-spec.json":     schemaSpecFileBytes,
+		"schema-conf.json":     schemaConfFileBytes,
+		"schema-contract.json": schemaContractFileBytes,
+		"schema-error.json":    errorSchemaBytes,
 	}
 }
 

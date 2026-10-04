@@ -20,12 +20,16 @@ command:
     cascading: "Global Flags:"
     environment: "Environment:"
     configuration: "Configuration:"
+    output: "Output:"
     examples: "Examples:"
   exit_status:
     - code: 0
       summary: success
     - code: 1
       summary: the deploy failed
+    - code: 3
+      summary: some targets failed; stdout lists the ones that shipped
+      output: { type: array, items: { $ref: "#/schemas/Target" } }
   env_prefix: DEPLOY
   plugin_path: ~/.deploy/plugins
   plugin_discovery:

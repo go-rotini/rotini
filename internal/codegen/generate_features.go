@@ -152,7 +152,8 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	}
 	// withPage fills the man page fields every feature's data carries: the page's own name, and
 	// the pages it cross-references — its parent's, then each visible child's.
-	withPage := func(d templateHelpData, names []string, children []rnode) templateHelpData {
+	withPage := func(d templateHelpData, names []string, children []rnode, output *Schema) templateHelpData {
+		d.Output = outputDoc(output, gp.schemas)
 		d.PageName = manPageName(gp.rootName, names)
 		d.Section = section
 		d.Source = gp.rootDisplay
@@ -174,7 +175,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix), nil, gp.tree),
+		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix), nil, gp.tree, gp.rootOutput),
 		listed:   true,
 	}}
 
@@ -193,7 +194,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix), childNames, n.children),
+				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix), childNames, n.children, n.output),
 				path:     childNames,
 				listed:   listed && !n.hidden,
 			})
@@ -275,7 +276,7 @@ func completionNodes() []helpNode {
 func resolveHeadings(h cmdHelp) templateDocHeadings {
 	// Defaults carry the trailing ":" so an override is rendered verbatim — a spec
 	// author can drop or restyle the colon (the template adds nothing).
-	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:"}
+	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -293,6 +294,7 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 	override(&hd.Configuration, o.Configuration)
 	override(&hd.Cascading, o.Cascading)
 	override(&hd.Examples, o.Examples)
+	override(&hd.Output, o.Output)
 	return hd
 }
 
@@ -314,7 +316,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		SeeAlso:     h.SeeAlso,
 	}
 	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, templateDocExitRow(e))
+		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Summary: e.Summary, Output: shapeTypeName(e.Output)})
 	}
 	var cmds []templateDocCommandRow
 	for _, c := range children {

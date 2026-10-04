@@ -43,6 +43,7 @@ func renderDefinition(gp *program) string {
 		b.WriteString("Passthrough: true,\n")
 	}
 	writeInputDefsLiteral(&b, gp.rootInputs, gp.schemas)
+	b.WriteString(outputDefLiteral(gp.rootPascal+"Output", gp.rootOutput, gp.schemas))
 	if cl := rnodesLiteral(gp.rootName, gp.tree, gp.schemas); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
 	}
@@ -455,6 +456,9 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 			b.WriteString("Deprecated: " + strconv.Quote(n.deprecated) + ",\n")
 		}
 		writeInputDefsLiteral(b, n.inputs, schemas)
+		if !n.composed { // a composed command's output type lives in its own cli's package
+			b.WriteString(outputDefLiteral(n.prefix+"Output", n.output, schemas))
+		}
 		if cl := rnodesLiteral(host, n.children, schemas); cl != "" {
 			b.WriteString("Commands: " + cl + ",\n")
 		}

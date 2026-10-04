@@ -281,7 +281,7 @@ Exact, verbatim markdown reference page for this command (the markdown feature's
 
 [`Schema`](#schema)
 
-This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handler have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract.
+The shape of what this command writes to stdout when it succeeds, as a schema. rotini generates a typed '<Prefix>Output' Go type (a named-type alias when the shape is a '$ref' to a document-level schema), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
 
 #### `schemas`
 
@@ -611,6 +611,12 @@ Executable-name prefix to discover. Default: the host binary name followed by '-
 
 The exit status code being documented (0-255 — the range a process can actually return).
 
+### `output`
+
+[`Schema`](#schema)
+
+The shape stdout still carries when the command exits with this code, for an outcome that is not plain success but prints data anyway (`3: some tasks failed; stdout lists what succeeded`). Documented in the EXIT STATUS section and described in the output schema files and the contract document.
+
 ### `summary`
 
 `string`
@@ -663,6 +669,12 @@ Heading rendered above the examples section of the generated help page. Rendered
 `string`
 
 Heading rendered above the flags section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Flags:".
+
+### `output`
+
+`string`
+
+Heading rendered above the Output section, which describes what the command writes when it declares `output:`. Rendered verbatim — include any trailing ':' you want. Default: "Output:".
 
 ### `usage`
 

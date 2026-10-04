@@ -169,7 +169,7 @@ type Command struct {
 	Markdown string `json:"markdown,omitempty"`
 	// Command name used in routing. As the root command (the document itself) this is the binary name and must be set — the root cannot use '$ref'.
 	Name string `json:"name,omitempty"`
-	// This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handler have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract.
+	// The shape of what this command writes to stdout when it succeeds, as a schema. rotini generates a typed '<Prefix>Output' Go type (a named-type alias when the shape is a '$ref' to a document-level schema), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
 	Output *Schema `json:"output,omitempty"`
 	// When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no declared plugins or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
 	Passthrough bool `json:"passthrough,omitempty"`
@@ -247,6 +247,8 @@ type EnvInput struct {
 type ExitStatusEntry struct {
 	// The exit status code being documented (0-255 — the range a process can actually return).
 	Code int `json:"code"`
+	// The shape stdout still carries when the command exits with this code, for an outcome that is not plain success but prints data anyway (`3: some tasks failed; stdout lists what succeeded`). Documented in the EXIT STATUS section and described in the output schema files and the contract document.
+	Output *Schema `json:"output,omitempty"`
 	// What this exit code means.
 	Summary string `json:"summary,omitempty"`
 }
@@ -314,6 +316,8 @@ type HelpHeadings struct {
 	Examples string `json:"examples,omitempty"`
 	// Heading rendered above the flags section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Flags:".
 	Flags string `json:"flags,omitempty"`
+	// Heading rendered above the Output section, which describes what the command writes when it declares `output:`. Rendered verbatim — include any trailing ':' you want. Default: "Output:".
+	Output string `json:"output,omitempty"`
 	// Heading rendered above the usage section of the generated help page. Rendered verbatim — include any trailing ':' you want. Default: "Usage:".
 	Usage string `json:"usage,omitempty"`
 }

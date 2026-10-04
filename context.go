@@ -16,7 +16,7 @@ import (
 // every hook, so all hooks share the same bindings and exit state and no records leak between
 // invocations.
 //
-// The surface groups into seven jobs, and nothing outside them is worth hunting for:
+// The surface groups into eight jobs, and nothing outside them is worth hunting for:
 //
 //   - what was typed — the [Context.Argv], [Context.Stdin], [Context.Stdout] and
 //     [Context.Stderr] fields above
@@ -27,6 +27,9 @@ import (
 //     [Context.InputsWithReport] for the same plus where each value came from, and the
 //     per-channel [Context.ArgvInputs], [Context.EnvInputs], [Context.FileInputs],
 //     [Context.StdinInputs] and [Context.DefaultInputs]
+//   - output — [Context.WriteOutput] writes the command's declared output to stdout,
+//     [Context.WriteOutputItem] one item of a stream, and [Context.CheckOutput] checks a value
+//     against the declared shape without writing it
 //   - YOUR dependencies — [Context.GetDependency] and [Context.MustGetDependency] to read one,
 //     [Context.SetDependency] and [Context.SetDependencyIfAbsent] to set one for this run
 //   - report what happened — [Context.RecordInfo], [Context.RecordSuccess],
@@ -120,6 +123,10 @@ type Context struct {
 	version  string
 	help     HelpFunc
 	parser   *Parser
+
+	// outputChecks makes WriteOutput and WriteOutputItem check each value against the declared
+	// output schema before writing it. See [Program.WithOutputChecks].
+	outputChecks bool
 
 	// flagStdinMemo is stdin as the flag channel saw it: read once, the first time a `from: [stdin]`
 	// flag's "-" asks for it, and replayed to every later parse of the same run. Parsing argv
@@ -228,6 +235,28 @@ func NewContextFor(def Definition, argv []string) *Context {
 // neither widens nor narrows that.
 func (rtx *Context) CommandChain() []Command {
 	return slices.Clone(rtx.chain)
+}
+
+// invokedCommand is the command the user invoked: the last of the chain, whichever hook is
+// running.
+func (rtx *Context) invokedCommand() Command {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	if len(rtx.chain) == 0 {
+		return Command{}
+	}
+	return rtx.chain[len(rtx.chain)-1]
+}
+
+// commandName is the invoked command as typed, its ancestors included: "taskr list".
+func (rtx *Context) commandName() string {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	names := make([]string, 0, len(rtx.chain))
+	for _, c := range rtx.chain {
+		names = append(names, c.Name)
+	}
+	return strings.Join(names, " ")
 }
 
 // markInvoked sets Invoked on the last command of chain and clears it everywhere else, so

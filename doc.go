@@ -270,6 +270,12 @@
 //   - [Deprecations] reports the deprecated aliases and identifiers this invocation actually
 //     used. It is a plain function over the [Context] and needs nothing registered.
 //
+//   - [Context.WriteOutput] is an optional helper that writes a command's output in the format the
+//     handler passes: json, yaml and toml by rotini, any other by the handler's renderer. [Context.WriteOutputItem] writes one
+//     item of a stream. [Context.CheckOutput], [Program.WithOutputChecks] and [DecodeOutput]
+//     check values against the declared shape, and [StructuredReporter] reports a run's
+//     outcome as JSON lines on stderr when the program's own rule says the run is structured.
+//
 //   - The per-channel methods ([Context.ArgvInputs], [Context.EnvInputs],
 //     [Context.FileInputs], [Context.StdinInputs], [Context.DefaultInputs], merged by
 //     [MergeInputs] or [MergeInputsWithReport]) acquire channels one at a time, for programs

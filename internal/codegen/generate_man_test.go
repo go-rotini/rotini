@@ -92,6 +92,16 @@ command:
       summary: success
     - code: 2
       summary: usage error
+    - code: 3
+      summary: some deploys failed
+      output: {type: array, items: {$ref: "#/schemas/Status"}}
+  schemas:
+    Status:
+      type: object
+      required: [service]
+      properties:
+        service: {type: string, description: the service .name}
+        healthy: {type: boolean, description: whether it answers its \\health check}
   see_also:
     - git(1)
   flags:
@@ -130,8 +140,18 @@ command:
           identifiers: [--replicas, -r]
           group: tuning
           schema: {type: int, minimum: 1, maximum: 10, default: 1}
+      output: {$ref: "#/schemas/Status"}
     - name: status
       summary: show status
+      flags:
+        - name: format
+          summary: output format
+          identifiers: [-o, --format]
+          schema: {type: string, default: text, enum: [text, json, yaml]}
+      output:
+        type: array
+        description: One status per service.
+        items: {$ref: "#/schemas/Status"}
     - name: secret
       summary: hidden helper
       hidden: true

@@ -72,7 +72,7 @@ func canceledExitCode(ctx context.Context) int {
 // with [NewProgram] and calls [Program.Execute]. Every With method returns the receiver, so
 // they chain.
 //
-// The surface groups into seven jobs, and nothing outside them is worth hunting for:
+// The surface groups into eight jobs, and nothing outside them is worth hunting for:
 //
 //   - run it — [Program.Execute] exits, [Program.Run] returns the code, [Program.RunContext]
 //     scopes one invocation, [Program.Complete] answers a completion request in a
@@ -81,6 +81,8 @@ func canceledExitCode(ctx context.Context) int {
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion]
 //   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
+//   - output — [Program.WithOutputChecks] checks every output written with [Context.WriteOutput]
+//     against the command's declared contract
 //   - YOUR dependencies — [Program.WithDependency], or [Program.With] with the
 //     [WithDependency] option to register several at once
 //   - rotini's own seams — [Program.WithVersion], [Program.WithParser], [Program.WithInputReader],
@@ -138,6 +140,8 @@ type Program struct {
 	version  string                           // WithVersion
 	help     HelpFunc                         // WithHelp: nil → no pages
 	parser   *Parser                          // WithParser: nil → a default, built per run
+
+	outputChecks bool // WithOutputChecks: check every written output against its schema
 }
 
 // NewProgram wires a generated command tree and its aggregate handler set to the runtime.
@@ -208,6 +212,21 @@ func (p *Program) WithExit(fn func(int)) *Program {
 	if fn != nil {
 		p.exit = fn
 	}
+	return p
+}
+
+// WithOutputChecks makes every [Context.WriteOutput] and [Context.WriteOutputItem] call check
+// its value against the command's declared output schema before writing it. A value that does
+// not match is an internal error naming each field at fault, and nothing is written. It is off
+// by default; turn it on in tests, or in a debug build, to check every command's output
+// contract at once:
+//
+//	p := cmd.NewProgram(cmd.Handlers()).WithOutputChecks()
+//
+// Only output written through WriteOutput is seen. To check captured stdout, use
+// [DecodeOutput].
+func (p *Program) WithOutputChecks() *Program {
+	p.outputChecks = true
 	return p
 }
 
@@ -449,6 +468,7 @@ func (p *Program) newRunContext() *Context {
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
 	rtx.meta, rtx.readerFn = p.meta, p.readerFn
 	rtx.version, rtx.parser, rtx.help = p.version, p.parser, p.help
+	rtx.outputChecks = p.outputChecks
 	return rtx
 }
 

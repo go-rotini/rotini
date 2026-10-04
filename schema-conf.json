@@ -57,6 +57,10 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Feature" },
           "description": "The derived codegen outputs, one per `type` (help / completion / man / markdown), each an opt-in toggle plus its embed/template sourcing knobs."
+        },
+        "contract": {
+          "$ref": "#/definitions/ContractConfig",
+          "description": "Opt-in: where to write the contract document, a JSON description of every command's inputs, output and exit statuses."
         }
       }
     },
@@ -72,6 +76,36 @@
         "spec": {
           "$ref": "#/definitions/SchemaConfig",
           "description": "Where to write rotini's spec-schema (the schema for .rotini.spec files)."
+        },
+        "output": {
+          "$ref": "#/definitions/OutputSchemasConfig",
+          "description": "Where to write one JSON Schema per command output declared in the spec, so scripts and other tools can validate what a command writes."
+        }
+      }
+    },
+    "OutputSchemasConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dir"],
+      "description": "A directory of JSON Schemas, one per declared output: '<page-name>.output.json' for a command's `output:` (taskr-list.output.json) and '<page-name>.exit-<code>.output.json' for an `exit_status` entry's `output:`. A schema is standard JSON Schema (draft-07): rotini's type names are written as JSON Schema types, and the spec's named schemas it references are included as definitions. Hidden commands get none. Rewritten on every `generate`; a '*.output.json' file in the directory that no output produces any more is removed.",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "pattern": "^[^/\\\\].*$", "examples": ["schemas/output"],
+          "description": "Module-root-relative directory (no leading slash) the output schemas are written to."
+        }
+      }
+    },
+    "ContractConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file"],
+      "description": "Opt-in: write the contract document, one JSON file describing the whole cli for scripts, tools and AI agents. Every visible command is listed with its arguments, flags (inherited cascading flags included), environment variables, configuration keys and stdin; a `parameters` JSON Schema combining its arguments and flags; its output shape where one is declared; and its exit statuses. The format is rotini's own, described by schema-contract.json in the rotini repository, and the shape of a line rotini.StructuredReporter writes to stderr is included under `errors`.",
+      "properties": {
+        "file": {
+          "type": "string",
+          "pattern": "^[^/\\\\].*\\.json$", "examples": ["cli-contract.json"],
+          "description": "Module-root-relative path (no leading slash) ending in '.json' the contract document is written to. Rewritten on every `generate`."
         }
       }
     },

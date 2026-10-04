@@ -44,6 +44,7 @@ field Command.Handler
 field Command.Invoked
 field Command.Matched
 field Command.Name
+field Command.Output
 field Command.Passthrough
 field Command.PluginDiscovery
 field Command.PluginPath
@@ -59,6 +60,7 @@ field CommandDef.Flags
 field CommandDef.Handler
 field CommandDef.Hidden
 field CommandDef.Name
+field CommandDef.Output
 field CommandDef.Passthrough
 field CommandDef.PluginDiscovery
 field CommandDef.PluginPath
@@ -99,6 +101,7 @@ field Definition.FlagGroups
 field Definition.Flags
 field Definition.Handler
 field Definition.Name
+field Definition.Output
 field Definition.Passthrough
 field Definition.PluginDiscovery
 field Definition.PluginPath
@@ -165,6 +168,8 @@ field Outcome.Infos
 field Outcome.Panics
 field Outcome.Successes
 field Outcome.Warnings
+field OutputDef.Schema
+field OutputDef.Type
 field Page.Content
 field Page.Name
 field Page.Path
@@ -203,6 +208,7 @@ field WiringError.Handler
 field WiringError.Msg
 func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
+func DecodeOutput[T any](p *Program, data []byte, format string) (T, error)
 func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
 func Deprecations(rtx *Context) []Deprecation
@@ -219,6 +225,7 @@ func NewSuggestor() *Suggestor
 func PluginCompletion(w io.Writer, result CompletionResult) error
 func Ptr[T any](v T) *T
 func StripANSI(text string) string
+func StructuredReporter(structured func(rtx *Context) bool) Reporter
 func UsageError(err error) error
 func WithDependency[T any](dep Dependency[T], value T) Option
 method ArgValueCompleter.CompleteArgValue
@@ -233,6 +240,7 @@ method Command.DiscoveredPlugins() []DiscoveredPlugin
 method Command.PluginBinary(name string) (string, bool)
 method Command.PluginDiscoveryErrors() []error
 method Context.ArgvInputs[T any]() (InputLayer[T], error)
+method Context.CheckOutput(v any) error
 method Context.Command() Command
 method Context.CommandChain() []Command
 method Context.CommandPath() string
@@ -263,6 +271,8 @@ method Context.WithInputReader(fn func(InputSettings) *InputReader) *Context
 method Context.WithInputSettings(meta InputSettings) *Context
 method Context.WithParser(parser *Parser) *Context
 method Context.WithVersion(version string) *Context
+method Context.WriteOutputItem[T any](item T, format string, render func(io.Writer, string, T) error) error
+method Context.WriteOutput[T any](v T, format string, render func(io.Writer, string, T) error) error
 method Dependency.Name() string
 method Dependency.String() string
 method DependencyError.Error() string
@@ -313,6 +323,7 @@ method Program.WithHelp(help HelpFunc) *Program
 method Program.WithInputReader(fn func(InputSettings) *InputReader) *Program
 method Program.WithInputSettings(meta InputSettings) *Program
 method Program.WithLifecycle(fn Lifecycle) *Program
+method Program.WithOutputChecks() *Program
 method Program.WithPanicRecover(enabled bool) *Program
 method Program.WithParser(parser *Parser) *Program
 method Program.WithReporter(fn Reporter) *Program
@@ -375,6 +386,7 @@ type NoPostRun
 type NoPreRun
 type Option
 type Outcome
+type OutputDef
 type Page
 type PanicError
 type ParseError

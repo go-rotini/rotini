@@ -489,7 +489,7 @@ func renderModelsFile(data templateModelsData) ([]byte, error) {
 // Each value is rendered verbatim — the trailing ":" lives in the value, so an
 // override can drop or restyle it.
 type templateDocHeadings struct {
-	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples string
+	Usage, Commands, Arguments, Flags, Environment, Configuration, Cascading, Examples, Output string
 }
 
 // templateDocCommandGroup is one bucket of sub-commands in the Commands
@@ -561,6 +561,7 @@ type templateDocConfigRow struct {
 type templateDocExitRow struct {
 	Code    int
 	Summary string
+	Output  string // the shape stdout carries with this code, as a type name; "" for none
 }
 
 // templateHelpData is the per-command doc-data context. The help and man
@@ -592,6 +593,10 @@ type templateHelpData struct {
 	Source       string   // the program, for the page header: the root's display_name, else its name
 	Date         string   // the header date: SOURCE_DATE_EPOCH's day (YYYY-MM-DD) when set, else ""
 	RelatedPages []string // page names to cross-reference: the parent's, then each visible child's
+
+	// Output is what the command writes when it does its work and succeeds, from its `output:`;
+	// nil when it declares none.
+	Output *templateDocOutput
 }
 
 // parseDocTemplate parses doc-template text (help/man) with the shared FuncMap.
@@ -729,6 +734,15 @@ func sanitizeDocData(d templateHelpData) templateHelpData {
 	d.ExitStatus = append([]templateDocExitRow(nil), d.ExitStatus...)
 	for i := range d.ExitStatus {
 		d.ExitStatus[i].Summary = clean(d.ExitStatus[i].Summary)
+	}
+	if d.Output != nil {
+		out := *d.Output
+		out.Description = clean(out.Description)
+		out.Fields = append([]templateDocOutputField(nil), out.Fields...)
+		for i := range out.Fields {
+			out.Fields[i].Description = clean(out.Fields[i].Description)
+		}
+		d.Output = &out
 	}
 	d.SeeAlso = append([]string(nil), d.SeeAlso...)
 	for i := range d.SeeAlso {

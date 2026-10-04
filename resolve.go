@@ -39,7 +39,8 @@ type Command struct {
 	// directory as searched: a leading ~ and $VAR references in the declared path are already
 	// expanded.
 	PluginPath  string
-	Passthrough bool // every token after this command is a raw positional (no flag parsing)
+	Passthrough bool       // every token after this command is a raw positional (no flag parsing)
+	Output      *OutputDef // what the command writes to stdout (nil = not declared); see [Context.WriteOutput]
 
 	// Invoked reports whether this is the command the user invoked: the last command in the
 	// chain. Exactly one entry of [Context.CommandChain] has it set. In a cascading hook,
@@ -72,6 +73,7 @@ func rootFrame(def Definition) Command {
 		FlagGroups: def.FlagGroups, FlagDependencies: def.FlagDependencies,
 		Commands: def.Commands, Plugins: def.Plugins, PluginDiscovery: def.PluginDiscovery,
 		PluginPath: expandPluginPath(def.PluginPath), Passthrough: def.Passthrough,
+		Output: def.Output,
 	}
 }
 
@@ -83,6 +85,7 @@ func cmdFrame(c CommandDef) Command {
 		FlagGroups: c.FlagGroups, FlagDependencies: c.FlagDependencies,
 		Commands: c.Commands, Plugins: c.Plugins, PluginDiscovery: c.PluginDiscovery,
 		PluginPath: expandPluginPath(c.PluginPath), Passthrough: c.Passthrough,
+		Output: c.Output,
 	}
 }
 

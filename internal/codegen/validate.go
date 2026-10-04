@@ -524,6 +524,15 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 	if out, ok := c["output"]; ok {
 		w.block(out, false, ptr+"/output", "the output schema")
 	}
+	if statuses, ok := c["exit_status"].([]any); ok {
+		for i, s := range statuses {
+			if e, ok := s.(map[string]any); ok {
+				if out, ok := e["output"]; ok {
+					w.block(out, false, fmt.Sprintf("%s/exit_status/%d/output", ptr, i), "an exit status output schema")
+				}
+			}
+		}
+	}
 	if named, ok := c["schemas"].(map[string]any); ok {
 		for _, n := range slices.Sorted(maps.Keys(named)) {
 			w.block(named[n], false, ptr+"/schemas/"+escapePointer(n), "a named schema")

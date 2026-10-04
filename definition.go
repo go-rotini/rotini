@@ -22,6 +22,7 @@ type Definition struct {
 	PluginDiscovery  *PluginDiscoveryDef // plugin auto-discovery on the root command (nil = off)
 	PluginPath       string              // extra directory searched for BOTH declared and discovered plugins
 	Passthrough      bool                // every token after the program name is a raw positional (no flag parsing)
+	Output           *OutputDef          // what the root command writes to stdout (nil = not declared)
 }
 
 // FlagGroupKind names a cross-flag presence rule. The value is the spec's `kind`.
@@ -145,6 +146,7 @@ type CommandDef struct {
 	PluginDiscovery  *PluginDiscoveryDef // plugin auto-discovery on this command (nil = off)
 	PluginPath       string              // extra directory searched for BOTH this command's declared plugins and its discovered plugins
 	Passthrough      bool                // every token after this command is a raw positional (no flag parsing)
+	Output           *OutputDef          // what the command writes to stdout (nil = not declared)
 }
 
 // Constraints carries the validation bounds a spec may declare on a flag or argument. The

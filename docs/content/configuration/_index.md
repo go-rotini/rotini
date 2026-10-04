@@ -48,6 +48,12 @@ Controls how `rotini validate` and `rotini generate` report problems (collect ev
 
 Controls `rotini generate`: where rotini's JSON Schemas are written ('schemas'), where the generated code is written ('packages'), and which derived doc/completion outputs are emitted ('features').
 
+### `contract`
+
+[`ContractConfig`](#contractconfig)
+
+Opt-in: where to write the contract document, a JSON description of every command's inputs, output and exit statuses.
+
 ### `features`
 
 array of [`Feature`](#feature)
@@ -76,6 +82,17 @@ Controls how `rotini validate`, and the validation `rotini generate` runs first,
 `string` · one of `fast`, `collect` · default `collect`
 
 fast = stop at and report the first problem; collect = run to completion and report every problem at once (default).
+
+
+## ContractConfig
+
+Opt-in: write the contract document, one JSON file describing the whole cli for scripts, tools and AI agents. Every visible command is listed with its arguments, flags (inherited cascading flags included), environment variables, configuration keys and stdin; a `parameters` JSON Schema combining its arguments and flags; its output shape where one is declared; and its exit statuses. The format is rotini's own, described by schema-contract.json in the rotini repository, and the shape of a line rotini.StructuredReporter writes to stderr is included under `errors`.
+
+### `file`
+
+`string` · **required**
+
+Module-root-relative path (no leading slash) ending in '.json' the contract document is written to. Rewritten on every `generate`.
 
 
 ## Feature
@@ -172,6 +189,12 @@ Where to write rotini's embedded JSON Schemas into this project. Each entry is o
 
 Where to write rotini's conf-schema (the schema for this .rotini.conf file).
 
+### `output`
+
+[`OutputSchemasConfig`](#outputschemasconfig)
+
+Where to write one JSON Schema per command output declared in the spec, so scripts and other tools can validate what a command writes.
+
 ### `spec`
 
 [`SchemaConfig`](#schemaconfig)
@@ -188,4 +211,15 @@ A single schema write target: the project-relative path the embedded JSON Schema
 `string` · **required**
 
 Module-root-relative path file (no leading slash) ending in '.json' where the embedded JSON Schema is written. Overwritten from the embedded bytes on every `generate`; never pruned. Point a document's `$schema:` key at it for local editor completion and validation.
+
+
+## OutputSchemasConfig
+
+A directory of JSON Schemas, one per declared output: '<page-name>.output.json' for a command's `output:` (taskr-list.output.json) and '<page-name>.exit-<code>.output.json' for an `exit_status` entry's `output:`. A schema is standard JSON Schema (draft-07): rotini's type names are written as JSON Schema types, and the spec's named schemas it references are included as definitions. Hidden commands get none. Rewritten on every `generate`; a '*.output.json' file in the directory that no output produces any more is removed.
+
+### `dir`
+
+`string` · **required**
+
+Module-root-relative directory (no leading slash) the output schemas are written to.
 

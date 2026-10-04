@@ -269,6 +269,7 @@ var schemaBlockLocations = map[string]string{
 	"ConfigurationFile.schema": "  config_files:\n    - name: main\n      path: c.yaml\n      schema: { type: object, bogus: 1 }\n",
 	"BaseSchema.properties":    "  output: { type: object, properties: { p: { type: string, bogus: 1 } } }\n",
 	"BaseSchema.items":         "  output: { type: array, items: { type: string, bogus: 1 } }\n",
+	"ExitStatusEntry.output":   "  exit_status:\n    - code: 3\n      output: { type: object, bogus: 1 }\n",
 }
 
 func TestSchemaBlockProblems_reachesEveryBlockLocation(t *testing.T) {

@@ -7,6 +7,10 @@ generate:
       file: cmd/deploy/.rotini-schema.spec.json
     conf:
       file: cmd/deploy/.rotini-schema.conf.json
+    output:
+      dir: cmd/deploy/schemas/output
+  contract:
+    file: cmd/deploy/cli-contract.json
   packages:
     - type: main
       file: cmd/deploy/main.go
