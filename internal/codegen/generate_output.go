@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// The output shape, as the generated pages describe it: what a command writes to stdout when it
-// succeeds, from its `output:`.
+// This file describes a command's `output:` schema (what it writes to stdout on success) for
+// the generated help, man, and markdown pages.
 
 // templateDocOutput is a command's Output section: the shape and its top-level fields.
 type templateDocOutput struct {
@@ -62,8 +62,8 @@ func resolveShape(s *Schema, schemas map[string]Schema) *Schema {
 	return &named
 }
 
-// shapeTypeName names a shape the way a reader thinks of it: the schema it references (TaskList),
-// a list of one ([]Task), or its JSON type.
+// shapeTypeName names a shape for display: the schema it references (TaskList), a list of one
+// ([]Task), "object" for an untyped shape with properties, or its declared type.
 func shapeTypeName(s *Schema) string {
 	switch {
 	case s == nil:

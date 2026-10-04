@@ -38,7 +38,7 @@ func (*rotiniValidateHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.SetDependencyIfAbsent(validateDep, codegen.NewProcessor(version).Validate)
 	validate := rtx.MustGetDependency(validateDep)
 
-	// Warnings never fail the run; they print as each pass reports them.
+	// Warnings never fail the run.
 	if err := validate(spec, conf, flags.Watch, flags.Fail, printResult(rtx), printWarnings(rtx)); err != nil {
 		haltWithProblems(rtx, err)
 		return

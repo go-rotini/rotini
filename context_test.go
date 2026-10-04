@@ -90,10 +90,8 @@ func TestMustGet_panicsOnWrongType(t *testing.T) {
 	_ = rtx.MustGetDependency(NewDependency[*int]("buf")) // bound, but not an *int → panics
 }
 
-// The registry is the DI seam shared by every hook, and concurrent tooling (tickers,
-// completers, a handler's own goroutines) may read and write it at once. This hammers
-// Bind/Has/Value/Get from many goroutines so the race detector proves the RWMutex
-// guards every path, and confirms all bindings survive the storm.
+// TestContext_concurrentRegistry sets and reads dependencies from many goroutines; under
+// -race it pins that every path is locked, and that every dependency survives.
 func TestContext_concurrentRegistry(t *testing.T) {
 	rtx := newContext()
 	const (
@@ -123,9 +121,8 @@ func TestContext_concurrentRegistry(t *testing.T) {
 	}
 }
 
-// TestContext_ArgsField locks the W1 contract: rtx.Argv is the exact argument
-// vector the invocation was given — os.Args[1:] or the Program.WithArgs
-// override — exposed as a plain field (the live slice, not a copy).
+// TestContext_ArgsField pins that rtx.Argv is exactly the argument vector the invocation was
+// given.
 func TestContext_ArgsField(t *testing.T) {
 	argv := []string{"--verbose", "run", "alice", "--", "-not-a-flag"}
 
@@ -149,8 +146,8 @@ func TestContext_ArgsField(t *testing.T) {
 
 // ── outcome recording ───────────────────────────────────────────.
 
-// TestContext_RecordError_api pins the bare recording API: append accumulates in
-// order, nil is a no-op, and Errors returns a copy (not the live slice).
+// TestContext_RecordError_api: errors accumulate in order, nil is ignored, and the snapshot is
+// a copy.
 func TestContext_RecordError_api(t *testing.T) {
 	rtx := NewContextFor(testDef(), nil)
 	if got := rtx.copyErrors(); got != nil {
@@ -170,9 +167,7 @@ func TestContext_RecordError_api(t *testing.T) {
 	}
 }
 
-// TestContext_RecordWarning_api mirrors the error API for the warning channel:
-// order, nil no-op, copy-not-live, nil-receiver safe — and warnings are kept
-// SEPARATE from errors.
+// TestContext_RecordWarning_api: as for errors, and warnings stay separate from errors.
 func TestContext_RecordWarning_api(t *testing.T) {
 	rtx := NewContextFor(testDef(), nil)
 	if got := rtx.copyWarnings(); got != nil {
@@ -196,8 +191,7 @@ func TestContext_RecordWarning_api(t *testing.T) {
 	}
 }
 
-// TestContext_RecordSuccess_api mirrors it for the success channel; an empty
-// string is the no-op (success carries a message).
+// TestContext_RecordSuccess_api: as for errors, with an empty string ignored.
 func TestContext_RecordSuccess_api(t *testing.T) {
 	rtx := NewContextFor(testDef(), nil)
 	if got := rtx.copySuccesses(); got != nil {
@@ -219,9 +213,8 @@ func TestContext_RecordSuccess_api(t *testing.T) {
 	}
 }
 
-// TestContext_Panics_api pins the private fault channel: recordFault (the
-// lifecycle's, not a handler's) accumulates; Panics returns a copy; nil is a
-// no-op; and faults are independent of the error channel.
+// TestContext_Panics_api: faults accumulate in order, nil is ignored, the snapshot is a copy,
+// and faults stay separate from errors.
 func TestContext_Panics_api(t *testing.T) {
 	rtx := NewContextFor(testDef(), nil)
 	if got := rtx.copyFaults(); got != nil {
@@ -249,11 +242,9 @@ func TestContext_Panics_api(t *testing.T) {
 	}
 }
 
-// TestRun_recordedErrorsFireReporter pins the firing contract and the locked edges, with
-// a CUSTOM reporter: it fires iff ≥1 channel recorded something (edge 1); record-without-exit
-// still fires it (edge 2); a custom reporter OWNS the exit code — the error floor is the
-// DEFAULT reporter's, so a custom reporter that sets no code exits 0 (edge 3); and the
-// HaltWithCode/Exit choice still governs teardown.
+// TestRun_recordedErrorsFireReporter pins, with a custom reporter: it fires iff a channel
+// recorded something, including without a stop; a reporter that sets no code exits 0; and
+// HaltWithCode versus Exit still governs teardown.
 func TestRun_recordedErrorsFireReporter(t *testing.T) {
 	errA := UsageError(errors.New("bad flag")) // carries ErrUsage through the join
 	errB := errors.New("also bad")
@@ -336,9 +327,8 @@ func TestRun_recordedErrorsFireReporter(t *testing.T) {
 	})
 }
 
-// TestRun_defaultReporterPrintsErrors is the end-to-end golden: with no custom reporter,
-// the default prints one program-name-prefixed line per recorded error to
-// stderr and exits 1 (rotini holds no exit-code constants — any error is 1).
+// TestRun_defaultReporterPrintsErrors: the default reporter prints one "Error:" line per
+// recorded error to stderr and exits 1 for any category.
 func TestRun_defaultReporterPrintsErrors(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -371,12 +361,7 @@ func TestRun_defaultReporterPrintsErrors(t *testing.T) {
 	}
 }
 
-// TestContext_Failed covers the one bit of outcome state a teardown hook can read.
-//
-// A PostRun that owns a transaction has to choose commit or rollback, and before Failed there
-// was no way to ask: Context had five Record* methods and no reader, while the Outcome that
-// answers the question reaches the reporter only after every teardown has already run. A program
-// had to keep its own parallel "did we fail" flag, which a panic would not set.
+// TestContext_Failed: only a recorded error or a fault counts as failure.
 func TestContext_Failed(t *testing.T) {
 	t.Parallel()
 	t.Run("a clean run has not failed", func(t *testing.T) {
@@ -407,13 +392,7 @@ func TestContext_Failed(t *testing.T) {
 	})
 }
 
-// TestContext_Halt covers stopping the lifecycle without claiming an exit code.
-//
-// Before Halt, HaltWithCode was the only way to stop, and it does two jobs at once. A program
-// whose reporter owns exit codes therefore wrote a meaningless number purely to halt — and
-// because the number then looked redundant, deleting it read as tidying while silently
-// removing the halt. That is how one bad flag came to be reported three times in
-// example-lifecycle, with a fourth misleading error from a hook whose setup had been skipped.
+// TestContext_Halt pins that Halt stops forward progress without setting an exit code.
 func TestContext_Halt(t *testing.T) {
 	t.Parallel()
 
@@ -472,19 +451,12 @@ func TestContext_Halt(t *testing.T) {
 		if rtx.stopped {
 			t.Error("Halt stopped a lifecycle that had already finished")
 		}
-		// A nil receiver is NOT part of this contract — it panics, like every other
-		// method. See TestContext_nilReceiverPanicsAtTheCall.
+		// A nil receiver panics; see TestContext_nilReceiverPanicsAtTheCall.
 	})
 }
 
-// TestContext_seamAccessorsAreRaceFree pins that every seam accessor reads under the same lock
-// its setter writes under.
-//
-// Version() did not: it read rtx.version unlocked while WithVersion wrote it under the write
-// lock, which -race reported the moment a handler goroutine touched both. The Context is
-// explicitly designed for concurrent access from goroutines a handler spawns — that is why
-// every Record* method is mutex-guarded — so an unsynchronized accessor is a defect, not a
-// theoretical one.
+// TestContext_seamAccessorsAreRaceFree pins, under -race, that seam accessors read under the
+// lock their setters write under.
 func TestContext_seamAccessorsAreRaceFree(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 
@@ -505,16 +477,8 @@ func TestContext_seamAccessorsAreRaceFree(t *testing.T) {
 	wg.Wait()
 }
 
-// TestContext_chainIsACopy pins S2: the chain a handler receives cannot reach the run.
-//
-// Chain() used to return the live slice with a doc asking callers to "treat the slice as
-// read-only" — a request, not a guarantee. One assignment through it rewrote the invocation:
-//
-//	Path() before="app run"   after mutating what Chain() returned="app HIJACKED"
-//
-// and with it Command(), the input reader's leaf anchoring and configuration-file scoping, silently,
-// for the rest of the run. Every other internal slice the Context hands out is copied; this
-// was the one that was not.
+// TestContext_chainIsACopy pins that modifying the slice CommandChain returns does not affect
+// the run.
 func TestContext_chainIsACopy(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -527,7 +491,6 @@ func TestContext_chainIsACopy(t *testing.T) {
 		t.Fatalf("Path() = %q, want %q — the fixture is wrong", want, "app run")
 	}
 
-	// Every mutation a handler could plausibly make to the slice it was handed.
 	got := rtx.CommandChain()
 	got[1].Name = "HIJACKED"
 	got[0], got[1] = got[1], got[0]
@@ -545,7 +508,7 @@ func TestContext_chainIsACopy(t *testing.T) {
 	}
 }
 
-// Two calls hand back independent slices, so one handler's edits cannot reach another's.
+// Two CommandChain calls return independent slices.
 func TestContext_chainCopiesAreIndependent(t *testing.T) {
 	rtx := NewContextFor(Definition{
 		Name: "app", Handler: "App",
@@ -559,16 +522,8 @@ func TestContext_chainCopiesAreIndependent(t *testing.T) {
 	}
 }
 
-// TestContext_nilReceiverPanicsAtTheCall pins S3: every exported method dereferences, the
-// same rule Program follows.
-//
-// Half of them used to tolerate a nil receiver and half did not, so rtx.CommandChain() answered
-// while rtx.CommandPath() panicked — three views of the same data, two behaviours. Tolerating
-// it is the worse of the two: a nil that reports "nothing recorded" or "no chain" hides the
-// mistake and surfaces it later, at a call that was not wrong.
-//
-// rotini's own entry points that ACCEPT a Context from a caller still check it; the guard
-// belongs at that boundary, not on every method behind it — see
+// TestContext_nilReceiverPanicsAtTheCall pins that Context methods panic on a nil receiver.
+// Functions taking a Context as an argument check it instead; see
 // TestContext_boundaryStillRejectsNil.
 func TestContext_nilReceiverPanicsAtTheCall(t *testing.T) {
 	for name, call := range map[string]func(*Context){
@@ -598,9 +553,8 @@ func TestContext_nilReceiverPanicsAtTheCall(t *testing.T) {
 	}
 }
 
-// TestContext_boundaryStillRejectsNil is the other half of the contract: a function that takes
-// a Context from a caller reports a nil one rather than panicking, because there the nil is an
-// argument to validate rather than a receiver that should never have been nil.
+// TestContext_boundaryStillRejectsNil: functions that take a Context as an argument handle a
+// nil one without panicking.
 func TestContext_boundaryStillRejectsNil(t *testing.T) {
 	if got := Deprecations(nil); got != nil {
 		t.Errorf("Deprecations(nil) = %v, want nil", got)
@@ -619,9 +573,7 @@ func TestContext_boundaryStillRejectsNil(t *testing.T) {
 	}
 }
 
-// TestContext_argsStayLiveButChainDoesNot pins the two halves of the slice rule in one place,
-// because they are easy to conflate: Args is deliberately the live argv, Chain deliberately is
-// not.
+// TestContext_argsStayLiveButChainDoesNot: Argv is the live slice; CommandChain is a copy.
 func TestContext_argsStayLiveButChainDoesNot(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "run", Handler: "AppRun"}}}
 	rtx := NewContextFor(def, []string{"run", "x"})
@@ -638,18 +590,10 @@ func TestContext_argsStayLiveButChainDoesNot(t *testing.T) {
 	}
 }
 
-// Failing from a hook is the most common thing a handler does, and it used to be a two-part
-// ritual — record, then stop — whose second half is the half that decides anything and the half
-// that can go missing. These tests pin both the shape of the hazard and the one-call cure.
+// ── Halt and HaltWith ───────────────────────────────────────────────────────.
 
-// TestHalt_isLoadBearingInSetupAndInertElsewhere is the fact the whole finding rests on, and it
-// was not written down anywhere before: Halt stops FORWARD progress, so it does something in
-// exactly two of the five hooks.
-//
-// The unwind loop never consults `stopped` (see the teardown guard in dispatch — only exitNow
-// and a panic cut it short), and Run is the last forward step of the default plan. So a Halt in
-// Run, PostRun or CascadingPostRun changes nothing at all. The generated stub used to teach it
-// in Run, which is why the ritual was learned as boilerplate and then omitted where it counts.
+// TestHalt_isLoadBearingInSetupAndInertElsewhere pins that Halt affects only CascadingPreRun and
+// PreRun: the unwind ignores `stopped`, and Run is the last forward step.
 func TestHalt_isLoadBearingInSetupAndInertElsewhere(t *testing.T) {
 	full := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun", "run.PreRun", "run.Run",
@@ -660,8 +604,7 @@ func TestHalt_isLoadBearingInSetupAndInertElsewhere(t *testing.T) {
 		hook string
 		want []string
 	}{
-		// Setup: the command is prevented from proceeding. Teardown still unwinds for the
-		// steps that began — that is the contract, and Halt does not touch it.
+		// Setup: the command does not proceed; begun steps still unwind.
 		{"CascadingPreRun", []string{
 			"app.CascadingPreRun", "run.CascadingPreRun",
 			"run.CascadingPostRun", "app.CascadingPostRun",
@@ -710,11 +653,8 @@ func TestHaltWith_isExactlyRecordErrorPlusHalt(t *testing.T) {
 	}
 }
 
-// TestHaltWith_stopsTheWorkTheHookRefused is the harm the finding is about, stated as a test.
-//
-// The exit code and stderr are IDENTICAL whether or not a setup hook halts — so this asserts
-// the only thing that differs: whether Run got to do work the setup had already established it
-// must not do. That is why no output-asserting test caught the original bug.
+// TestHaltWith_stopsTheWorkTheHookRefused pins that HaltWith in a setup hook prevents Run. The
+// exit code and stderr match either way, so the test asserts on which hooks ran.
 func TestHaltWith_stopsTheWorkTheHookRefused(t *testing.T) {
 	boom := errors.New("no connection was opened")
 
@@ -725,8 +665,7 @@ func TestHaltWith_stopsTheWorkTheHookRefused(t *testing.T) {
 		t.Errorf("Run executed after its setup hook failed: %v", halted)
 	}
 
-	// The two-part form with the stop omitted — the mistake. Kept here so the difference is
-	// visible in one place: same verdict, work still done.
+	// RecordError without a stop: same verdict, but Run still executes.
 	_, leaked := runActs(t, []string{"run", "x"}, map[string]act{
 		"run": {at: "CascadingPreRun", do: func(rtx *Context) { rtx.RecordError(boom) }},
 	})
@@ -735,10 +674,8 @@ func TestHaltWith_stopsTheWorkTheHookRefused(t *testing.T) {
 	}
 }
 
-// TestHaltWith_isCorrectInEveryHook is the property that removes the hook-dependent knowledge:
-// whichever hook a handler is in, one call records the failure and stops whatever forward
-// progress remains. Where Halt is inert HaltWith degrades to recording, which is what a failure
-// in Run or a teardown hook wants anyway.
+// TestHaltWith_isCorrectInEveryHook pins that HaltWith in any hook reaches the reporter and
+// fails the run.
 func TestHaltWith_isCorrectInEveryHook(t *testing.T) {
 	for _, hook := range []string{"CascadingPreRun", "PreRun", "Run", "PostRun", "CascadingPostRun"} {
 		t.Run(hook, func(t *testing.T) {
@@ -758,9 +695,7 @@ func TestHaltWith_isCorrectInEveryHook(t *testing.T) {
 	}
 }
 
-// TestHaltWith_nilErrorStillHalts: a nil error records nothing (RecordError's documented
-// behaviour) but the halt stands, so a caller passing a maybe-nil error needs no guard and
-// cannot accidentally turn the stop into a fall-through.
+// TestHaltWith_nilErrorStillHalts: a nil error records nothing but still halts.
 func TestHaltWith_nilErrorStillHalts(t *testing.T) {
 	code, log := runActs(t, []string{"run", "x"}, map[string]act{
 		"run": {at: "PreRun", do: func(rtx *Context) { rtx.HaltWith(nil) }},
@@ -773,9 +708,7 @@ func TestHaltWith_nilErrorStillHalts(t *testing.T) {
 	}
 }
 
-// TestRecordError_aloneStillContinues guards the choice HaltWith must NOT take away. Recording
-// without stopping is a real pattern — collect every problem, or let a later hook decide by
-// gating on Failed — and it has to keep working exactly as before.
+// TestRecordError_aloneStillContinues pins that RecordError alone does not stop the run.
 func TestRecordError_aloneStillContinues(t *testing.T) {
 	var sawFailed bool
 	code, log := runActs(t, []string{"run", "x"}, map[string]act{
@@ -796,9 +729,8 @@ func TestRecordError_aloneStillContinues(t *testing.T) {
 	}
 }
 
-// TestHaltWith_inTheReporterDoesNotReenter: Halt is documented as a no-op inside the reporter, where
-// the lifecycle has already run. HaltWith inherits that, so a reporter that fails while reporting
-// cannot stall the settle it is part of.
+// TestHaltWith_inTheReporterDoesNotReenter: HaltWith inside the reporter returns without
+// re-entering the run.
 func TestHaltWith_inTheReporterDoesNotReenter(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(errors.New("original"))
@@ -817,14 +749,10 @@ func TestHaltWith_inTheReporterDoesNotReenter(t *testing.T) {
 	}
 }
 
-// Frame tracks the lifecycle's progress, which makes it the one thing a handler reads off the
-// Context that is not fixed for the run. The Context promises goroutine-safe reads, and that
-// promise holds — the frame is mutex-guarded — but "safe" and "unchanging" are different claims,
-// and only the first one is true here.
+// ── Command from goroutines ─────────────────────────────────────────────────.
 //
-// These pin the documented behaviour so it is a contract rather than an accident: a goroutine
-// the hook WAITS for sees its spawner's frame; one that outlives the hook sees whatever step is
-// running when it looks.
+// A goroutine the hook waits for sees its spawner's command; one that outlives the hook sees
+// the step running when it calls Command.
 
 type fgHandlers struct {
 	NoPreRun
@@ -859,8 +787,8 @@ type fgProg struct {
 func (p fgProg) App() Handler    { return fgHandlers{cascading: p.cascading} }
 func (p fgProg) AppRun() Handler { return fgLeaf{onRun: p.onRun} }
 
-// TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame is the supported shape: fan out, wait,
-// return. Everything the goroutines read is the frame their spawner was in.
+// TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame: goroutines the hook waits for read
+// the hook's own command.
 func TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame(t *testing.T) {
 	var seen []string
 	var mu sync.Mutex
@@ -892,13 +820,8 @@ func TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame(t *testing.T) {
 	}
 }
 
-// TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep is the documented hazard, pinned so
-// it cannot change silently in either direction.
-//
-// It is NOT a data race — run this file under -race and it is clean. The value is simply the
-// step running at the moment of the call, which for a detached goroutine is not its spawner's.
-// The guidance on Frame is to capture what you need before spawning, and the second half of this
-// test is that capture working.
+// TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep: a detached goroutine reads the
+// current step, while a value captured before spawning stays stable.
 func TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan struct{})
@@ -907,7 +830,7 @@ func TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep(t *testing.T) {
 
 	p := NewProgram(testDef(), fgProg{
 		cascading: func(rtx *Context) {
-			capturedFrame = rtx.Command() // the remedy: read it while the hook still owns the frame
+			capturedFrame = rtx.Command() // captured while the hook is running
 			go func() {
 				defer close(done)
 				<-release // resume only after the spawning hook has returned
@@ -929,7 +852,7 @@ func TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep(t *testing.T) {
 	if detached != "run" {
 		t.Errorf("a detached goroutine read Command() = %q; the documented behaviour is the current step, %q", detached, "run")
 	}
-	// The captured value is stable, which is what the doc tells authors to rely on.
+	// The captured value is stable.
 	if captured != "app" {
 		t.Errorf("the captured frame changed under the caller: %q, want %q", captured, "app")
 	}
@@ -970,9 +893,8 @@ func TestCommand_outsideAHookIsTheInvokedCommand(t *testing.T) {
 	}
 }
 
-// TestInvoked answers the question a cascading hook has: it runs at every depth, so "is this
-// invocation about ME, or am I an ancestor of it?" is real. Invoked is set by position, so it is
-// right even when a name repeats in the chain.
+// TestInvoked pins that a cascading hook's Command().Invoked is true only for the invoked
+// command.
 func TestInvoked(t *testing.T) {
 	for _, tc := range []struct {
 		argv     []string
@@ -1033,8 +955,8 @@ func TestInvoked_isExactlyTheLastCommand(t *testing.T) {
 	}
 }
 
-// TestCommandPathAndHelp_followTheRunningCommand: CommandPath and Help describe the same command
-// Command does, so the three always agree — in a cascading hook that is the hook's own command.
+// TestCommandPathAndHelp_followTheRunningCommand: in a cascading hook, CommandPath and Help
+// describe the hook's own command.
 func TestCommandPathAndHelp_followTheRunningCommand(t *testing.T) {
 	var midPath, rootPath, midHelp, rootHelp string
 	h := fProg{
@@ -1054,8 +976,7 @@ func TestCommandPathAndHelp_followTheRunningCommand(t *testing.T) {
 	}
 }
 
-// Command and Path answer "which command am I?" — the question every handler that
-// logs, audits, or builds an error message asks.
+// Command and CommandPath report the running command in Run.
 func TestContext_commandAndPath(t *testing.T) {
 	var cmd Command
 	var path string
@@ -1073,7 +994,7 @@ func TestContext_commandAndPath(t *testing.T) {
 	}
 }
 
-// An alias reports the CANONICAL name, so a path is stable to log and compare on.
+// An alias reports the canonical name.
 func TestContext_pathIsCanonicalNotTyped(t *testing.T) {
 	var path string
 	var matched string
@@ -1092,8 +1013,7 @@ func TestContext_pathIsCanonicalNotTyped(t *testing.T) {
 	}
 }
 
-// A bare root invocation still has a command and a path — the root is a command like
-// any other, not a special case the caller has to handle.
+// A bare root invocation has a command and a path.
 func TestContext_commandAtRoot(t *testing.T) {
 	var cmd Command
 	var path string

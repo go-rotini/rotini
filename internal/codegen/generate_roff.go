@@ -8,19 +8,17 @@ import (
 
 // roff escaping for the man feature's template.
 //
-// A man page is roff source: a line starting with "." or "'" is a formatting request, and "\"
-// starts an escape sequence. Text a spec supplies — a summary, a description, a flag name — is
-// none of those, so before it reaches the page it has to be made inert. These helpers are in
-// every template's FuncMap, so an author's own man template can use them too.
+// A man page is roff source: a line starting with "." or "'" is a request and "\" starts an
+// escape. Spec-supplied text must be made inert before it reaches the page. These helpers are
+// in every template's FuncMap, so a custom man template can use them too.
 //
 // The rules:
-//   - "\" becomes "\e", the escape that prints a backslash
-//   - "-" becomes "\-", so an option like --verbose stays a plain hyphen-minus that can be
-//     copied and pasted, rather than a typographic hyphen
-//   - "'" and "`" become "\(aq" and "\(ga", so quotes in code are not turned into curly ones
-//   - a line that would still start with "." gets a leading "\&", which makes it text
-//   - characters outside ASCII become "\[uXXXX]", which both groff and mandoc read
-//   - tabs become spaces and other control characters are dropped
+//   - "\" becomes "\e", which prints a backslash.
+//   - "-" becomes "\-", so --verbose stays a copyable hyphen-minus, not a typographic hyphen.
+//   - "'" and "`" become "\(aq" and "\(ga", so quotes in code are not curled.
+//   - A line that would still start with "." gets a leading "\&", which makes it text.
+//   - Non-ASCII characters become "\[uXXXX]", which groff and mandoc both read.
+//   - Tabs become spaces; other control characters are dropped.
 
 // roffEscapeLine escapes one line of text for a roff text line.
 func roffEscapeLine(s string) string {
@@ -41,7 +39,7 @@ func roffEscapeLine(s string) string {
 		case r == '\t':
 			b.WriteByte(' ')
 		case r < 0x20 || r == 0x7f:
-			// Other control characters have no place on a page.
+			// Dropped.
 		case r > 0x7f:
 			fmt.Fprintf(&b, `\[u%04X]`, r)
 		default:
@@ -60,9 +58,8 @@ func roffInline(s string) string {
 	return roffEscapeLine(strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ")), " "))
 }
 
-// roffLines escapes each line of s separately, keeping the line breaks: for text inside a
-// no-fill (.nf) block, such as a usage override or an example, where each line stands as
-// written.
+// roffLines escapes each line of s separately, keeping the line breaks, for text inside a
+// no-fill (.nf) block such as a usage override or an example.
 func roffLines(s string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
 	for i, l := range lines {
@@ -71,13 +68,10 @@ func roffLines(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// roffBlock escapes a paragraph-structured block such as a description: each line is escaped,
-// and a run of blank lines becomes one ".PP" paragraph break, because a blank line in roff is
-// not a paragraph break but a stray vertical space.
-//
-// Indented lines — a table of commands, a code sample — are kept exactly as laid out, in a
-// .nf no-fill block. Otherwise roff would fill them into the surrounding paragraph and lose
-// the columns the author lined up.
+// roffBlock escapes a paragraph-structured block such as a description. Each line is escaped,
+// and a run of blank lines becomes one ".PP", since a blank roff line is stray vertical space,
+// not a paragraph break. Indented lines (a command table, a code sample) go in a .nf no-fill
+// block so roff keeps their columns instead of filling them into the paragraph.
 func roffBlock(s string) string {
 	var out []string
 	pending, noFill := false, false

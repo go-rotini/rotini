@@ -12,9 +12,8 @@ import (
 	"testing"
 )
 
-// TestProgram_WithExit_capturesCode proves WithExit makes Execute hand the resolved code
-// to a callback instead of calling os.Exit, so Execute returns and a test can assert on
-// the code — here a handler's rtx.HaltWithCode(1).
+// TestProgram_WithExit_capturesCode pins that WithExit receives the resolved code in place of
+// os.Exit.
 func TestProgram_WithExit_capturesCode(t *testing.T) {
 	var code int
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { rtx.HaltWithCode(1) }}
@@ -29,9 +28,8 @@ func TestProgram_WithExit_capturesCode(t *testing.T) {
 	}
 }
 
-// TestProgram_WithStderr_capturesDiagnostics proves WithStderr redirects the runtime's
-// own diagnostics: a panicking hook is reported to the default reporter, which writes to
-// the program's stderr and exits 1.
+// TestProgram_WithStderr_capturesDiagnostics pins that the default reporter writes a hook
+// panic to the program's stderr and exits 1.
 func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	var code int
 	errb := &bytes.Buffer{}
@@ -51,8 +49,8 @@ func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	}
 }
 
-// TestProgram_WithStdout_capturesRuntimeOutput proves WithStdout redirects what the
-// runtime writes directly — here the hidden __complete entry's candidates.
+// TestProgram_WithStdout_capturesRuntimeOutput pins that __complete candidates go to the
+// program's stdout.
 func TestProgram_WithStdout_capturesRuntimeOutput(t *testing.T) {
 	out := &bytes.Buffer{}
 	code := -1
@@ -68,10 +66,7 @@ func TestProgram_WithStdout_capturesRuntimeOutput(t *testing.T) {
 	}
 }
 
-// TestProgram_Run_isReentrant proves the contract [Program.Run] exists for: a Program is
-// reusable across invocations (the REPL / daemon / stdio-server case). Each call gets a
-// fresh Context, so neither the recorded outcomes nor the exit code of one run leak into
-// the next.
+// TestProgram_Run_isReentrant pins that consecutive runs share neither records nor exit code.
 func TestProgram_Run_isReentrant(t *testing.T) {
 	var n int
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -100,9 +95,8 @@ func TestProgram_Run_isReentrant(t *testing.T) {
 	}
 }
 
-// TestProgram_Run_seedsBoundServicesPerRun pins the registry half of the re-entrancy contract:
-// dependencies registered with [Program.WithDependency] reach EVERY run, while one a handler
-// makes DURING a run is local to that run.
+// TestProgram_Run_seedsBoundServicesPerRun pins that Program dependencies reach every run
+// while one set during a run stays local to it.
 func TestProgram_Run_seedsBoundServicesPerRun(t *testing.T) {
 	var seeded, leaked []bool
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -126,9 +120,8 @@ func TestProgram_Run_seedsBoundServicesPerRun(t *testing.T) {
 	}
 }
 
-// TestProgram_RunContext_scopesOneInvocation pins why RunContext exists alongside
-// WithContext: a host that dispatches many invocations (a REPL, a stdio server)
-// must be able to scope EACH one without permanently changing the program.
+// TestProgram_RunContext_scopesOneInvocation pins that RunContext applies its context to one
+// invocation without modifying the program.
 func TestProgram_RunContext_scopesOneInvocation(t *testing.T) {
 	var seen []bool
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {}}
@@ -139,7 +132,7 @@ func TestProgram_RunContext_scopesOneInvocation(t *testing.T) {
 		t.Fatalf("RunContext = %v", err)
 	}
 	cancel()
-	// The program was NOT mutated: a later plain Run still owns its own context.
+	// The program was not modified: a later Run owns its own context.
 	if p.ctx != nil {
 		t.Error("RunContext mutated the program's context")
 	}
@@ -165,13 +158,11 @@ func TestProgram_RunContext_cancellationHalts(t *testing.T) {
 	}
 }
 
-// A nil context is a wiring mistake, reported rather than panicking deeper.
+// A nil context is reported as an error rather than panicking.
 func TestProgram_RunContext_nilContext(t *testing.T) {
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
 
-	// Declared rather than passed as a literal nil: "never pass a nil Context" is
-	// right at every real call site, and vet and IDE inspections say so. The point
-	// here is that the guard exists for callers who get it wrong anyway.
+	// A variable rather than a literal nil, which vet flags.
 	var missing context.Context
 	code, err := p.RunContext(missing, []string{"run", "x"})
 	if !errors.Is(err, ErrInternal) || code == 0 {
@@ -197,8 +188,8 @@ func TestRun_recordSuccess_defaultToStdout(t *testing.T) {
 	}
 }
 
-// TestRun_recordInfo_defaultToStdout: a recorded info reaches the default reporter, prints
-// to stdout (like success, by intent only), and never changes the exit code.
+// TestRun_recordInfo_defaultToStdout: a recorded info prints to stdout and does not change
+// the exit code.
 func TestRun_recordInfo_defaultToStdout(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordInfo("scanning 12 files")
@@ -229,9 +220,8 @@ func TestRun_recordWarning_defaultNonFatal(t *testing.T) {
 	}
 }
 
-// TestRun_reporterReceivesAllChannels: a run that records an info, a success, a warning,
-// AND an error hands ALL of them to the single reporter in ONE call (cross-channel
-// visibility), each slice in recording order. The reporter owns the exit code.
+// TestRun_reporterReceivesAllChannels: every channel reaches the reporter in one call, each
+// slice in recording order.
 func TestRun_reporterReceivesAllChannels(t *testing.T) {
 	var gotInfos, gotSuccesses []string
 	var gotWarnings, gotErrors []error
@@ -265,10 +255,9 @@ func TestRun_reporterReceivesAllChannels(t *testing.T) {
 	}
 }
 
-// TestRun_exitCode_reporterIsFinalAuthority pins the exit-code model: the DEFAULT reporter
-// floors a recorded error to 1, but a CUSTOM reporter OWNS the code — one that ignores the
-// error exits 0, one that calls rtx.Exit(7) exits 7, and rtx.Exit even OVERRIDES a code a
-// handler set during the lifecycle.
+// TestRun_exitCode_reporterIsFinalAuthority pins the exit-code model: the default reporter
+// floors a recorded error to 1; a custom reporter owns the code, and its rtx.Exit overrides a
+// code set during the lifecycle.
 func TestRun_exitCode_reporterIsFinalAuthority(t *testing.T) {
 	rec := func(rtx *Context) { rtx.RecordError(errors.New("boom")) }
 
@@ -278,7 +267,7 @@ func TestRun_exitCode_reporterIsFinalAuthority(t *testing.T) {
 		t.Errorf("default reporter: code = %d, want 1 (floors)", code)
 	}
 
-	// Custom reporter that sets no code → exits 0 (no floor; the reporter owns the code).
+	// Custom reporter that sets no code → exits 0 (no floor).
 	pc, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
 	pc.WithReporter(func(context.Context, *Context, Outcome) {})
 	if code, _ := pc.Run(pc.args); code != 0 {
@@ -292,7 +281,7 @@ func TestRun_exitCode_reporterIsFinalAuthority(t *testing.T) {
 		t.Errorf("custom reporter rtx.Exit(7): code = %d, want 7", code)
 	}
 
-	// A handler set 2 during the lifecycle; the reporter OVERRIDES it to 5.
+	// A handler set 2 during the lifecycle; the reporter overrides it to 5.
 	po, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(errors.New("boom"))
 		rtx.HaltWithCode(2)
@@ -303,9 +292,8 @@ func TestRun_exitCode_reporterIsFinalAuthority(t *testing.T) {
 	}
 }
 
-// TestRun_faultExit_defaultFloorsButReporterCanMask: the DEFAULT reporter floors a recovered
-// panic to non-zero, but — per the single-reporter model — a CUSTOM reporter is the final
-// authority and MAY mask it to 0 (it owns the exit entirely).
+// TestRun_faultExit_defaultFloorsButReporterCanMask: the default reporter floors a recovered
+// panic to non-zero; a custom reporter may leave it at 0.
 func TestRun_faultExit_defaultFloorsButReporterCanMask(t *testing.T) {
 	panicRun := func(_ *Context) { panic("kaboom") }
 
@@ -315,7 +303,7 @@ func TestRun_faultExit_defaultFloorsButReporterCanMask(t *testing.T) {
 		t.Error("default reporter let a panic exit 0; want non-zero (the floor)")
 	}
 
-	// A custom reporter that sets no code masks the fault to 0 (it owns the exit).
+	// A custom reporter that sets no code leaves the fault at 0.
 	pc, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: panicRun}, []string{"run"})
 	var sawPanic bool
 	pc.WithReporter(func(_ context.Context, _ *Context, out Outcome) {
@@ -327,9 +315,8 @@ func TestRun_faultExit_defaultFloorsButReporterCanMask(t *testing.T) {
 	}
 }
 
-// TestRun_errorAndPanic_arriveTogether: a run that records an error AND then panics hands
-// BOTH to the one reporter — a non-empty errors slice and a non-empty panics slice — and the
-// default floors the exit to 1.
+// TestRun_errorAndPanic_arriveTogether: an error and a later panic both reach the reporter,
+// and the default floors the exit to 1.
 func TestRun_errorAndPanic_arriveTogether(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(UsageError(errors.New("bad input")))
@@ -347,9 +334,8 @@ func TestRun_errorAndPanic_arriveTogether(t *testing.T) {
 	}
 }
 
-// TestRun_wiringFaultArrivesAsPanic: a Definition↔handlers mismatch is a rotini-detected
-// fault — it arrives in the reporter's panics slice (carrying the *WiringError), NOT the
-// errors slice, and the default exits 1.
+// TestRun_wiringFaultArrivesAsPanic: a Definition/handlers mismatch arrives in the panics
+// slice as a *WiringError, and the default exits 1.
 func TestRun_wiringFaultArrivesAsPanic(t *testing.T) {
 	var gotErrors []error
 	var seen *PanicError
@@ -378,8 +364,7 @@ func TestRun_wiringFaultArrivesAsPanic(t *testing.T) {
 	}
 }
 
-// TestRun_resolverFaultArrivesAsPanic: a custom resolver's error is a resolution-phase
-// fault → the reporter's panics slice, not its errors slice.
+// TestRun_resolverFaultArrivesAsPanic: a custom resolver's error arrives in the panics slice.
 func TestRun_resolverFaultArrivesAsPanic(t *testing.T) {
 	var nErrors, nPanics int
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, []string{"run"})
@@ -397,8 +382,8 @@ func TestRun_resolverFaultArrivesAsPanic(t *testing.T) {
 	}
 }
 
-// TestRun_silentRun_doesNotInvokeReporter: a run that records nothing and never faults does
-// not invoke the reporter and exits 0.
+// TestRun_silentRun_doesNotInvokeReporter: a run that records nothing skips the reporter and
+// exits 0.
 func TestRun_silentRun_doesNotInvokeReporter(t *testing.T) {
 	fired := false
 	h := &testHandlers{log: new([]string)} // onRun nil → a clean run
@@ -452,8 +437,7 @@ func TestProgram_WithContext_threadsToHooks(t *testing.T) {
 	}
 }
 
-// A fresh program has no base context (the sentinel for "rotini owns the lifecycle and
-// installs the default signal trap"); WithContext(nil) must be a no-op that preserves it.
+// A fresh program has no base context, and WithContext(nil) leaves it unset.
 func TestProgram_WithContext_nilIgnored(t *testing.T) {
 	p := newCtxProgram(ctxRec{})
 	if p.ctx != nil {
@@ -495,8 +479,7 @@ func newLifeProgram(h lifeRec) *Program {
 	return p
 }
 
-// A non-canceled WithContext context runs the full lifecycle (regression guard
-// for the symmetric-halt change).
+// A non-canceled WithContext context runs the full lifecycle.
 func TestProgram_WithContext_noCancelRunsFullLifecycle(t *testing.T) {
 	var order []string
 	p := newLifeProgram(lifeRec{order: &order}).WithContext(context.Background())
@@ -555,9 +538,8 @@ func TestExitCode_isCancelCause(t *testing.T) {
 	}
 }
 
-// The recommended way for a handler to cancel the run: the caller binds its own
-// cancel func; the handler retrieves it via MustGet and calls it. A plain cancel
-// halts forward progress, runs teardown, and exits 0.
+// A handler cancels the run through a cancel func registered as a dependency: forward
+// progress halts, teardown runs, and the exit is 0.
 func TestProgram_handlerCancelsViaBoundCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var order []string
@@ -576,7 +558,7 @@ func TestProgram_handlerCancelsViaBoundCancel(t *testing.T) {
 	}
 }
 
-// Binding a WithCancelCause cancel lets a handler choose the exit code with ExitCause.
+// A WithCancelCause cancel lets a handler choose the exit code with ExitCause.
 func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	var order []string
@@ -619,8 +601,8 @@ func TestProgram_panic_withTeardownOnPanicFalse_skipsTeardown(t *testing.T) {
 	}
 }
 
-// WithPanicRecover(false) with the default PanicForward(true): teardown still runs, THEN the
-// panic is re-raised raw. The closure recovers it so the test process survives.
+// WithPanicRecover(false) with the default WithTeardownOnPanic(true): teardown runs, then the
+// panic is re-raised. The closure recovers it so the test process survives.
 func TestProgram_withPanicRecoverFalse_forwardTrue_teardownThenRepanic(t *testing.T) {
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
@@ -637,8 +619,8 @@ func TestProgram_withPanicRecoverFalse_forwardTrue_teardownThenRepanic(t *testin
 	}
 }
 
-// WithPanicRecover(false) + WithTeardownOnPanic(false): "panic now" — the panic propagates
-// immediately, skipping teardown.
+// WithPanicRecover(false) + WithTeardownOnPanic(false): the panic propagates immediately,
+// skipping teardown.
 func TestProgram_withPanicRecoverFalse_forwardFalse_panicsNow(t *testing.T) {
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { panic("boom") }}
@@ -699,10 +681,8 @@ func TestRun_aliasResolves(t *testing.T) {
 	}
 }
 
-// Under §17 the runtime no longer rejects an unknown command itself: it resolves
-// what it can and dispatches the leaf handler. A typo of a sub-command lands on
-// the (branching) root handler, which surfaces the error only if it opts into
-// Parse — see TestParse_unknownCommand. run itself succeeds and runs that handler.
+// The runtime does not reject an unknown command: a mistyped sub-command resolves to the
+// root handler, which reports it only if it parses its inputs (see TestParse_unknownCommand).
 func TestRun_unresolvedDispatchesLeaf(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&testHandlers{log: &log}, []string{"ru"})
@@ -846,10 +826,8 @@ func TestRun_hardExitInTeardownSkipsRemainingTeardown(t *testing.T) {
 	}
 }
 
-// A hard Exit skips remaining teardown but does NOT bypass the reporter: a panic
-// recovered before the Exit is still handed to the reporter after the (skipped)
-// teardown. Run panics, then the leaf's PostRun hard-Exits — the trailing
-// CascadingPostRuns are skipped, yet the reporter still fires with the panic.
+// A hard Exit skips remaining teardown but not the reporter: Run panics, the leaf's PostRun
+// calls Exit, the CascadingPostRuns are skipped, and the reporter still receives the panic.
 func TestRun_hardExitStillRoutesPendingPanicToReporter(t *testing.T) {
 	var log []string
 	var seen *PanicError
@@ -971,8 +949,7 @@ func TestRun_teardownPanicContinuesAndReportersOnce(t *testing.T) {
 // errOutcomeTest is a stand-in error for the Outcome predicate table.
 var errOutcomeTest = errors.New("outcome test")
 
-// TestOutcome_EmptyAndFailed pins the two predicates the runtime and the default reporter key
-// on, so a custom reporter can rely on them meaning exactly what the engine means.
+// TestOutcome_EmptyAndFailed pins the Empty and Failed predicates.
 func TestOutcome_EmptyAndFailed(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -999,9 +976,8 @@ func TestOutcome_EmptyAndFailed(t *testing.T) {
 	}
 }
 
-// TestReporter_receivesEveryChannelByName is the reason Outcome is a struct: a reporter reads
-// each channel by name, so the two []string channels and the two []error channels cannot be
-// transposed by a call site that gets the order wrong.
+// TestReporter_receivesEveryChannelByName pins that each record lands in its own named
+// Outcome field.
 func TestReporter_receivesEveryChannelByName(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordInfo("an info")
@@ -1056,8 +1032,7 @@ func firstErr(e []error) string {
 	return e[0].Error()
 }
 
-// syncWriter serializes writes, standing in for the concurrency-safe writer a program driving
-// concurrent runs must supply.
+// syncWriter serializes writes, as concurrent runs sharing a stream require.
 type syncWriter struct {
 	mu sync.Mutex
 	w  io.Writer
@@ -1069,10 +1044,8 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	return s.w.Write(p)
 }
 
-// concurrentHandlers is a handler set with NO shared mutable state, so this test measures
-// rotini's own concurrency safety rather than the shared recording fixture's. That split is
-// the contract itself: rotini gives each run its own Context, but the handlers value passed
-// to NewProgram is shared across runs, so handler state is the author's to protect.
+// concurrentHandlers has no shared mutable state, so the test exercises only rotini's own
+// concurrency safety; the handlers value is shared across runs.
 type concurrentHandlers struct{ seen chan string }
 
 func (c *concurrentHandlers) App() Handler    { return &concurrentHandler{} }
@@ -1090,7 +1063,7 @@ func (h *concurrentHandler) Run(_ context.Context, rtx *Context) {
 	if h.seen == nil {
 		return
 	}
-	// A service bound once, before any run, must be visible to every run.
+	// A dependency registered before any run is visible to every run.
 	if v, ok := rtx.GetDependency(NewDependency[string]("shared")); !ok || v != "bound once" {
 		h.seen <- "missing shared service"
 		return
@@ -1099,19 +1072,13 @@ func (h *concurrentHandler) Run(_ context.Context, rtx *Context) {
 	h.seen <- rtx.CommandPath()
 }
 
-// TestRun_concurrentDispatch pins what doc.go promises: Run is not merely re-entrant (the
-// REPL's requirement — one dispatch after another) but safe to call CONCURRENTLY once
-// configuration is done, which is what a concurrent host will assume when a peer
-// pipelines requests. Each run gets its own Context with its own records, while services
-// bound before the runs reach all of them.
-//
-// It runs under -race in CI; without that this test proves much less.
+// TestRun_concurrentDispatch pins that Run is safe for concurrent use: each run keeps its own
+// records, and dependencies registered beforehand reach all of them. Meaningful under -race.
 func TestRun_concurrentDispatch(t *testing.T) {
 	const runs = 32
 
-	// Concurrent runs SHARE the program's streams, so the writer has to be safe for
-	// concurrent use. os.Stdout is; a bytes.Buffer is not. That requirement is part of the
-	// contract, and it is why this test wraps its buffers rather than passing them raw.
+	// Concurrent runs share the program's streams, so the buffers are wrapped for
+	// concurrent writes.
 	seen := make(chan string, runs)
 	p := NewProgram(testDef(), &concurrentHandlers{seen: seen}).
 		WithStdout(&syncWriter{w: new(bytes.Buffer)}).
@@ -1119,9 +1086,7 @@ func TestRun_concurrentDispatch(t *testing.T) {
 		WithExit(func(int) {})
 	p.WithDependency(NewDependency[any]("shared"), any("bound once"))
 
-	// Signal trapping is per-run: every concurrent run would install its own handler and
-	// all of them would observe one signal. A concurrent driver therefore supplies its own
-	// context, which is exactly what doc.go tells it to do.
+	// A supplied context keeps each concurrent run from installing its own signal trap.
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
@@ -1153,8 +1118,7 @@ func TestRun_concurrentDispatch(t *testing.T) {
 	}
 }
 
-// TestRun_recordsDoNotLeakBetweenRuns is the other half of re-entrancy: run N+1 must see none
-// of run N's records. Every re-entrant host depends on it.
+// TestRun_recordsDoNotLeakBetweenRuns pins that a run sees none of the previous run's records.
 func TestRun_recordsDoNotLeakBetweenRuns(t *testing.T) {
 	var got []Outcome
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -1179,16 +1143,12 @@ func TestRun_recordsDoNotLeakBetweenRuns(t *testing.T) {
 	}
 }
 
-// ── Execute's returned error (P4) ────────────────────────────────────────────
+// ── Execute's returned error ─────────────────────────────────────────────────
 //
-// Execute returns an error that, under the default exit action, is unreachable: os.Exit ends
-// the process before the return statement runs. That was undocumented and untested, so the
-// seam an embedder depends on had nothing holding it in place. These pin the contract the
-// doc now states: the error is the run's own failure, joined, and it arrives exactly when the
-// exit action returns.
+// The error joins the run's failures and is returned only when the exit action returns.
 
 // TestExecute_returnsTheRunsFailure: with a returning exit action, the recorded error reaches
-// the caller — and reaches it as a value, not as text.
+// the caller as a value.
 func TestExecute_returnsTheRunsFailure(t *testing.T) {
 	boom := &ParseError{Kind: ParseKindUnknownFlag, Msg: "unknown flag \"--nope\""}
 
@@ -1204,7 +1164,7 @@ func TestExecute_returnsTheRunsFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("Execute() = nil, want the error the run recorded")
 	}
-	// errors.As reaches through the join, which is the point of returning a value at all.
+	// errors.As reaches through the join.
 	var pe *ParseError
 	if !errors.As(err, &pe) {
 		t.Errorf("errors.As(*ParseError) failed on %v — the caller cannot classify the failure", err)
@@ -1248,9 +1208,8 @@ func TestExecute_returnsNilOnACleanRun(t *testing.T) {
 	}
 }
 
-// TestExecute_exitRunsBeforeTheReturn pins the ordering the doc rests on: the exit action is
-// called with the resolved code FIRST, and only then does Execute return. Under os.Exit that
-// ordering is exactly why the error cannot arrive.
+// TestExecute_exitRunsBeforeTheReturn pins that the exit action is called before Execute
+// returns.
 func TestExecute_exitRunsBeforeTheReturn(t *testing.T) {
 	var order []string
 
@@ -1271,15 +1230,10 @@ func TestExecute_exitRunsBeforeTheReturn(t *testing.T) {
 	}
 }
 
-// ── WithArgs' scope (P5) ─────────────────────────────────────────────────────
+// ── WithArgs' scope ──────────────────────────────────────────────────────────
 
-// TestWithArgs_onlyExecuteConsultsIt pins the boundary the doc now states.
-//
-// WithArgs used to be documented as "overrides the argument vector", which reads like a
-// program-level setting. It is not: Run and RunContext take argv as a parameter and use
-// exactly what they were given. The behaviour is deliberate — Run is the re-entrant core a
-// REPL calls once per line, so inheriting a program-level default would answer the wrong
-// question — but nothing said so and nothing held it in place.
+// TestWithArgs_onlyExecuteConsultsIt pins that only Execute reads WithArgs; Run and
+// RunContext use the argv they are passed.
 func TestWithArgs_onlyExecuteConsultsIt(t *testing.T) {
 	var got []string
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -1293,7 +1247,7 @@ func TestWithArgs_onlyExecuteConsultsIt(t *testing.T) {
 		t.Errorf("Execute saw %q, want the vector set by WithArgs", got)
 	}
 
-	// Run does not: it uses exactly what it was handed.
+	// Run does not.
 	got = nil
 	p2, _, _ := newTestProgram(h, []string{"run", "from-withargs"})
 	if _, err := p2.Run([]string{"run", "explicit"}); err != nil {
@@ -1303,8 +1257,7 @@ func TestWithArgs_onlyExecuteConsultsIt(t *testing.T) {
 		t.Errorf("Run(argv) saw %q, want the argv it was passed", got)
 	}
 
-	// And Run(nil) means "no arguments", NOT "fall back to WithArgs". The fallback is
-	// deliberately absent: it would make a REPL line silently inherit the process's argv.
+	// Run(nil) means no arguments, not a fallback to WithArgs.
 	got = nil
 	p3, _, _ := newTestProgram(h, []string{"run", "from-withargs"})
 	if _, err := p3.Run(nil); err != nil {
@@ -1315,8 +1268,7 @@ func TestWithArgs_onlyExecuteConsultsIt(t *testing.T) {
 	}
 }
 
-// TestWithArgs_nilIsIgnored: a nil vector leaves the default in place, so a conditional
-// caller cannot accidentally erase os.Args by passing a nil slice.
+// TestWithArgs_nilIsIgnored: a nil vector leaves the default in place.
 func TestWithArgs_nilIsIgnored(t *testing.T) {
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, []string{"run", "kept"})
 	p.WithArgs(nil)
@@ -1329,12 +1281,8 @@ func TestWithArgs_nilIsIgnored(t *testing.T) {
 	}
 }
 
-// TestPanicKnobs_allFourQuadrants exercises the renamed option against its partner, so the
-// rename is shown to be behaviour-preserving rather than assumed to be.
-//
-// The two are orthogonal: WithPanicRecover decides where the panic GOES, WithTeardownOnPanic
-// decides whether teardown still RUNS. The old name conflated them, which is the whole reason
-// for the rename — so the grid is worth having written down.
+// TestPanicKnobs_allFourQuadrants covers every combination of WithPanicRecover (where the
+// panic goes) and WithTeardownOnPanic (whether teardown runs).
 func TestPanicKnobs_allFourQuadrants(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
@@ -1375,13 +1323,8 @@ func TestPanicKnobs_allFourQuadrants(t *testing.T) {
 	}
 }
 
-// TestDispatch_nilHandlersIsAWiringFault: NewProgram's handlers parameter is `any`, and the
-// generated NewProgram takes an interface — so NewProgram(nil) compiles, and used to crash out
-// of Run with `reflect: call of reflect.Value.MethodByName on zero Value`.
-//
-// Two promises were broken at once: the comment at that line says "a wiring failure is
-// detected and routed as a fault, never panicked", and the error taxonomy says rotini's own
-// messages never leak internals. A reflect panic escaping a public API is both.
+// TestDispatch_nilHandlersIsAWiringFault: NewProgram(nil) compiles, and a run reports it as a
+// *WiringError fault rather than a reflect panic.
 func TestDispatch_nilHandlersIsAWiringFault(t *testing.T) {
 	var out, errs bytes.Buffer
 	p := NewProgram(testDef(), nil)
@@ -1411,12 +1354,9 @@ func TestDispatch_nilHandlersIsAWiringFault(t *testing.T) {
 	}
 }
 
-// TestProgram_WithHelp_pageOfTheRunningCommand proves [Context.Help] asks the PROGRAM for the
-// running command's page, keyed by canonical names — so a command reached by an alias, or one
-// composed from another spec whose handler was generated knowing only its own tree, still
-// prints the page of the program it runs in. That last case is why it is a Program seam: a
-// composed child's handler used to print a page baked into its own package, which lacked the
-// parent's path and the flags the parent passes down.
+// TestProgram_WithHelp_pageOfTheRunningCommand pins that [Context.Help] asks the program's
+// HelpFunc for the running command's page by canonical names, including when reached by an
+// alias.
 func TestProgram_WithHelp_pageOfTheRunningCommand(t *testing.T) {
 	var got []string
 	var asked [][]string
@@ -1438,7 +1378,7 @@ func TestProgram_WithHelp_pageOfTheRunningCommand(t *testing.T) {
 		t.Errorf("asked for %q, want the canonical path [run] — not the alias typed", asked)
 	}
 
-	// No pages, or none for this command: the empty string, never a panic or a guess.
+	// No pages, or none for this command: the empty string.
 	got = nil
 	NewProgram(testDef(), h).WithArgs([]string{"run", "x"}).WithExit(func(int) {}).Execute()
 	if len(got) != 1 || got[0] != "" {
@@ -1469,13 +1409,8 @@ type ocLeaf struct {
 
 func (h ocLeaf) Run(_ context.Context, rtx *Context) { h.do(rtx) }
 
-// TestOutcome_reporterCannotRewriteTheRunsError is the C2 rule applied to the last value that
-// crosses the boundary.
-//
-// Outcome is passed by value, but its slices are headers over shared arrays. Run's error used to
-// be built AFTER the reporter, so a reporter writing out.Errors[0] silently changed what Run
-// returned — while out.Errors = append(…) did not, because append reallocates. Propagating for
-// an index write and vanishing for an append is the worst shape an aliasing bug can take.
+// TestOutcome_reporterCannotRewriteTheRunsError pins that a reporter writing to
+// out.Errors[i] does not change the error Run returns.
 func TestOutcome_reporterCannotRewriteTheRunsError(t *testing.T) {
 	recorded := errors.New("the real failure")
 	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) { rtx.RecordError(recorded) }}).
@@ -1494,8 +1429,8 @@ func TestOutcome_reporterCannotRewriteTheRunsError(t *testing.T) {
 	}
 }
 
-// TestOutcome_reporterStillOwnsTheExitCode is the other half: the reporter remains the final
-// authority on the code, which is what Context.Exit is for there.
+// TestOutcome_reporterStillOwnsTheExitCode pins that Context.Exit in the reporter sets the
+// final code.
 func TestOutcome_reporterStillOwnsTheExitCode(t *testing.T) {
 	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) { rtx.RecordError(errors.New("x")) }}).
 		WithStdout(io.Discard).WithStderr(io.Discard)
@@ -1510,9 +1445,8 @@ func TestOutcome_reporterStillOwnsTheExitCode(t *testing.T) {
 	}
 }
 
-// TestOutcome_customReporterOwnsTheExitEntirely pins the documented consequence: a custom reporter
-// that sets no code exits 0, even for a run that recorded errors. "Owns the exit entirely"
-// includes owning the failure to claim one.
+// TestOutcome_customReporterOwnsTheExitEntirely: a custom reporter that sets no code exits 0,
+// even when the run recorded errors.
 func TestOutcome_customReporterOwnsTheExitEntirely(t *testing.T) {
 	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) { rtx.RecordError(errors.New("x")) }}).
 		WithStdout(io.Discard).WithStderr(io.Discard)
@@ -1523,9 +1457,8 @@ func TestOutcome_customReporterOwnsTheExitEntirely(t *testing.T) {
 	}
 }
 
-// TestOutcome_defaultReporterOrderAndStreams pins what the WithReporter doc promises: the order, the
-// prefixes, and which stream each channel lands on. Separate streams hide the order, so this
-// points both at one writer.
+// TestOutcome_defaultReporterOrderAndStreams pins the default reporter's order, prefixes and
+// streams. Stdout and stderr share one writer so the order is observable.
 func TestOutcome_defaultReporterOrderAndStreams(t *testing.T) {
 	var both strings.Builder
 	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) {
@@ -1546,9 +1479,8 @@ func TestOutcome_defaultReporterOrderAndStreams(t *testing.T) {
 	}
 }
 
-// TestOutcome_defaultReporterFloorIsFlat pins the DELIBERATE design Category documents: rotini
-// labels, the reporter decides, and the default maps every failure to 1 rather than inventing a
-// category→code table nobody asked for.
+// TestOutcome_defaultReporterFloorIsFlat pins that the default reporter exits 1 for every
+// failure category.
 func TestOutcome_defaultReporterFloorIsFlat(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -1569,8 +1501,7 @@ func TestOutcome_defaultReporterFloorIsFlat(t *testing.T) {
 	}
 }
 
-// TestOutcome_warningsNeverRaiseTheExit: a warning is non-fatal by definition, and the channel
-// would be pointless if it could fail a run.
+// TestOutcome_warningsNeverRaiseTheExit: a recorded warning leaves the exit code at 0.
 func TestOutcome_warningsNeverRaiseTheExit(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordWarning(errors.New("careful"))
@@ -1585,8 +1516,7 @@ func TestOutcome_warningsNeverRaiseTheExit(t *testing.T) {
 	}
 }
 
-// TestProgram_WithStdin is the seam doc.go and Context's doc comment both tell testers to
-// use to drive a handler, and nothing exercised it.
+// TestProgram_WithStdin pins that WithStdin becomes the handler's rtx.Stdin.
 func TestProgram_WithStdin(t *testing.T) {
 	var got string
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {

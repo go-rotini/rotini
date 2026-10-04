@@ -17,10 +17,10 @@ import (
 	"github.com/go-rotini/yaml"
 )
 
-// Structured output: a command's spec may declare the shape of what it writes (`output:`), and
-// how the command writes it, and in which format, is the handler's own code. [Context.WriteOutput]
-// is an optional helper for it: it writes json, yaml or toml itself, hands any other format to
-// the handler's renderer, and checks the value is the declared type:
+// Structured output: a command's spec may declare the shape of what it writes (`output:`); the
+// handler decides how and in which format to write it. [Context.WriteOutput] is an optional
+// helper: it writes json, yaml or toml itself, hands any other format to the handler's
+// renderer, and checks the value is the declared type:
 //
 //	in, err := rtx.Inputs[TaskrListInputs]()
 //	…
@@ -28,8 +28,8 @@ import (
 //
 //	func renderTaskTable(w io.Writer, format string, v TaskrListOutput) error { … }
 //
-// The format is whatever the handler passes, typically the value of a flag the author declared;
-// rotini neither adds that flag nor knows which one it is. Output goes to rtx.Stdout.
+// The format is whatever the handler passes, typically the value of a flag the author declared.
+// Output goes to rtx.Stdout.
 
 // OutputDef is what a command declares it writes to stdout when it succeeds: the spec's
 // `output:`, recorded by `rotini generate`. A nil OutputDef means the command declares none.
@@ -50,10 +50,9 @@ var machineFormats = []string{"json", "yaml", "toml"}
 // yaml or toml by rotini, any other format by render, which may be nil when the handler only
 // ever passes those three. An empty format means json.
 //
-// It returns an internal error — the program's bug, not the user's — when v is not the type the
-// command declares as its output, when no renderer is passed for a format rotini does not
+// It returns an internal error when v is not the type the command declares as its output, when no renderer is passed for a format rotini does not
 // write, or, with [Program.WithOutputChecks], when v does not match the declared shape. Nothing
-// is written then. A command that declares no output may still use it; nothing is checked.
+// is written then. A renderer's error is returned unwrapped. A command that declares no output may still use it; nothing is checked.
 func (rtx *Context) WriteOutput[T any](v T, format string, render func(io.Writer, string, T) error) error {
 	return writeOutput(rtx, v, format, render, false)
 }
@@ -71,8 +70,7 @@ func (rtx *Context) WriteOutputItem[T any](item T, format string, render func(io
 //
 //	taskr list: output does not match its contract: output.tasks[2].status: value must be one of "open", "done"
 //
-// It checks without writing, so a handler, or a test, can check a value it builds before
-// committing to it. [Program.WithOutputChecks] makes every WriteOutput call check.
+// It writes nothing. [Program.WithOutputChecks] makes every WriteOutput call check.
 func (rtx *Context) CheckOutput(v any) error {
 	cmd := rtx.invokedCommand()
 	name := rtx.commandName()

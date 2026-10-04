@@ -51,8 +51,8 @@ func (*rotiniManHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprint(rtx.Stdout, page)
 }
 
-// writeManPages writes every page ManPages lists into dir as <name>.<section>, creating dir
-// when it does not exist, and says what it wrote.
+// writeManPages writes every page ManPages lists into dir as <name>.<section>, creating dir as
+// needed, and records a success naming the count.
 func writeManPages(rtx *rotini.Context, dir string) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		rtx.HaltWith(fmt.Errorf("create %s: %w", dir, err))

@@ -48,12 +48,8 @@ func ovDef() Definition {
 	}
 }
 
-// ovLayers acquires the four standard layers in conventional precedence order
-// (defaults < files < env < argv), failing the test on any acquisition error.
-// TestCollect pins the one-liner (ergonomics E4): every channel reconciled in
-// one call, equivalent to InputReader.Read AND to InputsWithReport's overlaid layers; the
-// P variant adds the provenance Report (closing the E2 audit's finding 3 —
-// one-call and where-did-this-come-from compose now).
+// TestCollect pins that Inputs reconciles every channel in one call and matches both
+// InputReader.Read and InputsWithReport's merged value.
 func TestCollect(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: from-file\n  token: from-file-token\n")
 	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
@@ -112,6 +108,8 @@ func TestCollect(t *testing.T) {
 	}
 }
 
+// ovLayers acquires the four standard layers in precedence order (defaults < files < env <
+// argv), failing the test on any acquisition error.
 func ovLayers(t *testing.T, rtx *Context, meta InputSettings) []InputLayer[ovInputs] {
 	t.Helper()
 	rtx.WithInputSettings(meta) // the channel functions derive their meta from the Context
@@ -590,10 +588,9 @@ func ExampleMergeInputsWithReport() {
 	// Output: teal from env
 }
 
-// The env and files layers bind a flag's fallback exactly as the InputReader does — they share
-// bindFlagFallback. Each case here was wrong on this path too: a config list bound as the one
-// string "[a b]", an env list ignored its separator, and a bad value was silently dropped.
-func TestOverlay_flagFallbacksMatchTheBinder(t *testing.T) {
+// The env and files layers bind a flag's fallback as the InputReader does: a config list and
+// map bind element-wise, an env list splits on its separator, and a bad value is an error.
+func TestOverlay_flagFallbacksMatchTheInputReader(t *testing.T) {
 	cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v}\n")
 	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
@@ -619,16 +616,8 @@ func TestOverlay_flagFallbacksMatchTheBinder(t *testing.T) {
 	}
 }
 
-// Inputs and the per-channel layer functions must agree about which frames a struct describes.
-//
-// They did not, for one release of this work: the anchor moved from the leaf to the caller's
-// own frame everywhere, but the fit check that came with it was added only to Inputs and
-// InputsWithReport. ArgvInputs, Defaults, EnvInputs and FileInputs went on accepting a struct
-// that could not describe the running command and returning it zeroed with a nil error — the
-// same silent failure the anchor work existed to remove, left in the corner of the same API.
-//
-// These are the tests that would have caught that, so they assert the whole family together
-// rather than one function.
+// Fixtures for the anchor tests: every input entry point must agree on which commands a struct
+// describes, so they are asserted together.
 
 type acFlags struct {
 	Own  bool `rotini:"own"`
@@ -639,14 +628,14 @@ type acCmd struct {
 	Arguments struct{}
 }
 
-// acDeep describes three commands. The root's hook is one deep, so it can never be right there.
+// acDeep describes three commands, too many for the root's hook, which is one deep.
 type acDeep struct {
 	A acCmd
 	B acCmd
 	C acCmd
 }
 
-// acOwn describes one command — what a root hook legitimately collects.
+// acOwn describes one command, which a root hook can collect.
 type acOwn struct{ Root acCmd }
 
 func acDefs(own string) []FlagDef {
@@ -686,8 +675,7 @@ func (h acRootH) CascadingPreRun(_ context.Context, rtx *Context) {
 	}
 }
 
-// acEntryPoints is every public way to acquire inputs, so a new one cannot be added without
-// deciding what it does here.
+// acEntryPoints calls every public input entry point with acDeep and returns each error.
 func acEntryPoints(rtx *Context) map[string]error {
 	_, ec := rtx.Inputs[acDeep]()
 	_, _, ep := rtx.InputsWithReport[acDeep]()
@@ -701,9 +689,8 @@ func acEntryPoints(rtx *Context) map[string]error {
 	}
 }
 
-// TestAnchor_everyEntryPointRejectsATooDeepType is the regression. A struct describing more
-// commands than the caller is deep cannot be describing the caller, and every entry point has to
-// say so rather than hand back zeros.
+// TestAnchor_everyEntryPointRejectsATooDeepType pins that every entry point rejects a struct
+// describing more commands than the caller is deep, rather than returning zeros.
 func TestAnchor_everyEntryPointRejectsATooDeepType(t *testing.T) {
 	var got map[string]error
 	p := NewProgram(acDef(), acProg{inRootHook: func(rtx *Context) { got = acEntryPoints(rtx) }}).
@@ -724,8 +711,8 @@ func TestAnchor_everyEntryPointRejectsATooDeepType(t *testing.T) {
 	}
 }
 
-// TestAnchor_everyEntryPointAcceptsTheCallersOwnType is the other half: the check must not fire
-// on the type a hook is supposed to collect, in any of the six.
+// TestAnchor_everyEntryPointAcceptsTheCallersOwnType pins that no entry point rejects the
+// hook's own inputs type.
 func TestAnchor_everyEntryPointAcceptsTheCallersOwnType(t *testing.T) {
 	var errs map[string]error
 	var own bool
@@ -754,15 +741,6 @@ func TestAnchor_everyEntryPointAcceptsTheCallersOwnType(t *testing.T) {
 	}
 }
 
-// Inputs and InputsWithReport are two code paths to one answer: Inputs goes through
-// [InputReader.Read], InputsWithReport acquires five layers separately and overlays them.
-// TestCollect pins that they agree for one argv shape. These pin that they agree across the
-// whole precedence matrix — and, which nothing covered, that they FAIL the same way.
-//
-// The failure half matters most. A handler reaches for InputsWithReport when it wants
-// provenance, often after starting with Inputs; if the two disagreed on which inputs are legal,
-// that swap would change behaviour while looking like it only added a Report.
-
 func describeErr(err error) string {
 	if err == nil {
 		return "<nil>"
@@ -770,6 +748,9 @@ func describeErr(err error) string {
 	return fmt.Sprintf("%T: %s", err, err.Error())
 }
 
+// TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix pins that Inputs (via InputReader.Read)
+// and InputsWithReport (separate layers, overlaid) agree on values and on errors across the
+// precedence matrix.
 func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
 	withFiles := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
@@ -801,23 +782,19 @@ func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 			viaCollect, errCollect := mk().Inputs[ovInputs]()
 			viaCollectP, _, errCollectP := mk().InputsWithReport[ovInputs]()
 
-			// The verdict must be identical: swapping Inputs for InputsWithReport to gain provenance
-			// must not change which inputs are legal.
 			if describeErr(errCollect) != describeErr(errCollectP) {
 				t.Errorf("the two paths disagree on failure:\n  Inputs  → %s\n  InputsWithReport → %s",
 					describeErr(errCollect), describeErr(errCollectP))
 			}
 
-			// On SUCCESS the values must be identical too.
 			if errCollect == nil && !reflect.DeepEqual(viaCollect, viaCollectP) {
 				t.Errorf("the two paths disagree on values:\n  Inputs  → %+v\n  InputsWithReport → %+v",
 					viaCollect.App, viaCollectP.App)
 			}
 
-			// On FAILURE they deliberately differ, and the difference is pinned rather than
-			// left to be rediscovered: Inputs stops at the first argv problem, before the env
-			// and config channels are read, so a config-supplied default (Retries, recon
-			// default=3) is absent from its partial value and present in InputsWithReport's.
+			// On failure the partial values differ by design: Inputs stops at the first argv
+			// error before reading config, so the config default Retries=3 is absent from it
+			// and present in InputsWithReport's merged value.
 			if errCollect != nil {
 				if viaCollect.App.Config.Retries != 0 {
 					t.Errorf("Inputs's partial value gained a config default it should not have read: %d",
@@ -841,8 +818,7 @@ func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 	}
 }
 
-// TestCollect_isIdempotent: a handler that collects twice — or a helper that collects for
-// itself — must get the same answer, since the Context is shared across a run's hooks.
+// TestCollect_isIdempotent pins that repeated Inputs calls on one Context return the same value.
 func TestCollect_isIdempotent(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
 	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
@@ -858,8 +834,8 @@ func TestCollect_isIdempotent(t *testing.T) {
 	}
 }
 
-// TestReport_validateChecksWhatWasSupplied pins the rule Validate's doc now states, because the
-// two halves look the same from the outside and only one of them fires on an absent field.
+// TestReport_validateChecksWhatWasSupplied pins that Validate's presence rules fire on an
+// absent field and its value rules do not.
 func TestReport_validateChecksWhatWasSupplied(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -885,15 +861,14 @@ func TestReport_validateChecksWhatWasSupplied(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A PRESENCE rule fires on absence: --mode is required and nothing supplied it.
+	// A presence rule fires on absence: --mode is required and nothing supplied it.
 	merged, rep := MergeInputsWithReport(argvOnly)
 	if e := rep.Validate(); e == nil {
 		t.Error("a required input nobody supplied passed validation")
 	}
 
-	// A VALUE rule does not fire on absence: Color merged as "" — not in its enum — because no
-	// layer claimed it. Dropping the defaults layer is what exposes this, which is why the doc
-	// says to build custom precedence from all five channels.
+	// A value rule does not fire on absence: without the defaults layer Color merges as "",
+	// outside its enum, because no layer supplied it.
 	if merged.App.Flags.Color != "" {
 		t.Fatalf("fixture no longer demonstrates the case: Color = %q", merged.App.Flags.Color)
 	}
@@ -914,11 +889,9 @@ func TestReport_validateChecksWhatWasSupplied(t *testing.T) {
 	}
 }
 
-// TestCollect_isCorrectInACascadingHookAtEveryDepth is the finding, fixed. The same call reads
-// mid's own flag whether or not a sub-command was invoked, and whether mid's type spans its
-// whole lineage (an ordinary cli) or only itself (a composed child).
-//
-// Before this, three of these four cells returned false with a nil error.
+// TestCollect_isCorrectInACascadingHookAtEveryDepth pins that mid's cascading hook reads its own
+// flag whether or not a subcommand was invoked, and whether mid's type spans its whole lineage
+// (an ordinary CLI) or only itself (a composed child).
 func TestCollect_isCorrectInACascadingHookAtEveryDepth(t *testing.T) {
 	for _, argv := range [][]string{
 		{"mid", "--midonly"},         // mid IS the leaf
@@ -944,8 +917,8 @@ func TestCollect_isCorrectInACascadingHookAtEveryDepth(t *testing.T) {
 	}
 }
 
-// TestCollect_doesNotSeeADescendantsFlag is the other half of correctness: anchoring on the
-// caller's frame must not reach DOWN the chain either.
+// TestCollect_doesNotSeeADescendantsFlag pins that anchoring on the running command does not
+// read a descendant's flags.
 func TestCollect_doesNotSeeADescendantsFlag(t *testing.T) {
 	runF(t, []string{"mid", "leaf", "--leafonly"}, func(rtx *Context) {
 		own, err := rtx.Inputs[fMidOwn]()
@@ -958,11 +931,8 @@ func TestCollect_doesNotSeeADescendantsFlag(t *testing.T) {
 	}, nil)
 }
 
-// TestCollect_rejectsADescendantsType is the exact check the frame makes possible: a struct that
-// describes more commands than the caller is deep cannot be describing the caller.
-//
-// Under leaf-anchoring this was silent — the struct did not fit, binding was skipped, and every
-// field came back zero with a nil error.
+// TestCollect_rejectsADescendantsType pins that collecting a struct that describes more
+// commands than the caller is deep is an error naming the type and the depths.
 func TestCollect_rejectsADescendantsType(t *testing.T) {
 	var err error
 	runF(t, []string{"mid", "leaf"}, nil, func(rtx *Context) {
@@ -978,8 +948,8 @@ func TestCollect_rejectsADescendantsType(t *testing.T) {
 	}
 }
 
-// TestCollect_leafRunIsUnchanged pins the compatibility claim: for a leaf hook the frame IS the
-// leaf, so the anchor reduces to what it always was.
+// TestCollect_leafRunIsUnchanged pins that a leaf's Run collects its full lineage, including
+// ancestors' flags.
 func TestCollect_leafRunIsUnchanged(t *testing.T) {
 	var got fLeafSpan
 	var err error
@@ -996,9 +966,8 @@ func TestCollect_leafRunIsUnchanged(t *testing.T) {
 	}
 }
 
-// TestProvenance_listRawIsTheSameFromEveryLayer: a report shows a list the same way whichever
-// layer supplied it. The argv layer joined values with ", " and the env and config fallbacks
-// with ",", so one list printed two ways in the same report.
+// TestProvenance_listRawIsTheSameFromEveryLayer pins that a list's Raw provenance is joined
+// with ", " whichever layer supplied it.
 func TestProvenance_listRawIsTheSameFromEveryLayer(t *testing.T) {
 	t.Setenv("PORTS", "1,2")
 	rtx := NewContextFor(tbListDef(), []string{"--ports", "1,2"})

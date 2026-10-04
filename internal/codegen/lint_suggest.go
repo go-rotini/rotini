@@ -2,13 +2,11 @@ package codegen
 
 import "fmt"
 
-// Author-facing typo-suggestion utilities used by validate-time lint rules (a misspelled
-// flag/schema name gets a "did you mean?"). These run at codegen time only — they are
-// NOT the end-user-runtime suggestor (which is opt-in and lives in the runtime).
+// Typo suggestions for lint messages, used at codegen time only. The runtime's opt-in
+// Suggestor is separate.
 
-// didYouMean appends a "; did you mean %q?" suffix to msg when one of candidates is
-// a near-match (edit distance < 3) for name, else returns msg unchanged. Shared by
-// the rules that suggest a fix for a typo'd flag or schema name.
+// didYouMean appends "; did you mean %q?" to msg when a candidate is within edit distance 2
+// of name, and returns msg unchanged otherwise.
 func didYouMean(msg, name string, candidates []string) string {
 	if s := closestName(name, candidates); s != "" {
 		return msg + fmt.Sprintf("; did you mean %q?", s)

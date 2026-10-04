@@ -6,10 +6,8 @@ import (
 	"testing"
 )
 
-// TestGeneratedNamesKeepGoInitialisms pins the casing of every name codegen makes up — the names
-// a user's handler code types. Go writes initialisms in capitals (APIGroup, URL, IP), and so do
-// its linters; generated code used to produce ApiGroup and Url, which a user could not change
-// and a linter would flag in their own code that referenced it.
+// TestGeneratedNamesKeepGoInitialisms pins Go initialism casing (APIGroup, URL, IP) on every
+// generated identifier.
 func TestGeneratedNamesKeepGoInitialisms(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{
@@ -57,9 +55,8 @@ func TestGeneratedNamesKeepGoInitialisms(t *testing.T) {
 	}
 }
 
-// TestCommandStubFilename_underscoresDashes pins Go's file-name convention for the stubs: a
-// command's '-' is written '_'. The reserved-suffix escape still applies to the
-// result, so a dashed name that ENDS in a reserved token after the rewrite is escaped too.
+// TestCommandStubFilename_underscoresDashes pins that '-' in stub names is written '_', and
+// that the reserved-token escape applies to the rewritten name.
 func TestCommandStubFilename_underscoresDashes(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ root, path, override, want string }{
@@ -76,10 +73,8 @@ func TestCommandStubFilename_underscoresDashes(t *testing.T) {
 	}
 }
 
-// TestStubUnderItsDashedName_isStillTheStub proves a project generated before stub names used
-// '_' survives regeneration: its handler file under the old name is neither duplicated by a
-// fresh stub under the new name (which fails the build with every type declared twice) nor
-// pruned as an orphan (which would delete the user's code).
+// TestStubUnderItsDashedName_isStillTheStub pins that a stub under the legacy dashed name is
+// neither duplicated under the new name nor pruned on regeneration.
 func TestStubUnderItsDashedName_isStillTheStub(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

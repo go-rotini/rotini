@@ -13,13 +13,11 @@ import (
 	"time"
 )
 
-// This file is the process tier of the input conformance suite: it builds the
-// fixture binary (testdata/acmecli) once and runs it as a subprocess — the
-// only honest way to witness real exit codes (os.Exit through the default
-// trap), auto-detected pipes vs. no-pipe stdin, the __complete wire protocol,
-// and signal handling. `make test-acceptance` runs it. The matrix IDs owned
-// by this tier (TestConformance_matrixComplete enforces the exactly-once
-// split with the in-process tier):
+// This file is the process tier of the input conformance suite: it builds the fixture binary
+// (testdata/acmecli) once and runs it as a subprocess, to observe real exit codes, pipe
+// detection on stdin, the __complete wire protocol and signal handling. `make test-acceptance`
+// runs it. The matrix IDs owned by this tier (TestConformance_matrixComplete enforces the
+// exactly-once split with the in-process tier):
 
 var acceptanceMatrixIDs = []string{"ARG-04", "STDIN-02", "STDIN-07"}
 
@@ -65,8 +63,8 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// acmeRun runs the fixture binary with args; stdin nil means the child gets
-// /dev/null (a character device — exactly the "no pipe" condition).
+// acmeRun runs the fixture binary with args; a nil stdin gives the child /dev/null, a
+// character device and so the "no pipe" condition.
 func acmeRun(t *testing.T, stdin string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(acmeBin(t), args...)
@@ -85,12 +83,8 @@ func acmeRun(t *testing.T, stdin string, args ...string) (stdout, stderr string,
 	return out.String(), errb.String(), code
 }
 
-// ARG-04: a missing required positional is a usage error, with the message on stderr and
-// NOTHING executed.
-//
-// Exit 1 is the DEFAULT REPORTER's flat floor, not a category mapping: rotini labels the error
-// CategoryUsage and leaves the code to the reporter (see Category). A program wanting the common
-// "2 means the command line was wrong" convention maps it itself.
+// ARG-04: a missing required positional is a usage error, reported on stderr with nothing
+// executed. Exit 1 is the default reporter's flat floor, not a category mapping.
 func TestAcceptance_ARG_04_missingRequired(t *testing.T) {
 	stdout, stderr, code := acmeRun(t, "", "widget", "get")
 	if code != 1 {
@@ -116,9 +110,8 @@ func TestAcceptance_STDIN_02_autoDetectedPipe(t *testing.T) {
 	}
 }
 
-// STDIN-07: "-" with nothing piped (the child's stdin is /dev/null — a
-// character device, the same condition as an interactive TTY) must error
-// promptly, never hang. The test's own timeout is the no-hang assertion.
+// STDIN-07: "-" with nothing piped (/dev/null, treated like an interactive terminal) errors
+// promptly; the test's timeout is the no-hang assertion.
 func TestAcceptance_STDIN_07_dashWithoutPipe(t *testing.T) {
 	stdout, stderr, code := acmeRun(t, "", "apply", "-f", "-")
 	if code != 1 {
@@ -140,8 +133,7 @@ func TestAcceptance_completionProtocol(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	// One candidate per line; a described candidate is "name\tdescription",
-	// an undescribed one is bare — both shapes ride the same wire.
+	// One candidate per line: "name\tdescription", or bare "name" without a description.
 	byName := map[string]string{}
 	for line := range strings.SplitSeq(strings.TrimRight(stdout, "\n"), "\n") {
 		name, desc, _ := strings.Cut(line, "\t")

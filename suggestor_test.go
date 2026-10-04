@@ -7,13 +7,10 @@ import (
 	"testing"
 )
 
-// The Suggestor's job is one question — "did they mean X?" — and it has two ways to be wrong:
-// staying silent on a real typo, and inventing a match for a word that was not one. The second
-// is the expensive one, because a confident wrong guess is what makes people stop trusting the
-// feature, so the corpus below measures both directions and the defaults are pinned against it.
+// The corpora below measure both failure modes of the Suggestor's defaults: silence on a real
+// typo, and a suggestion for a word that is not one.
 
-// cliVocabulary is a realistic command-and-flag namespace: real names from this repo's examples
-// and companion CLI, long enough to have genuine near-collisions in it.
+// cliVocabulary is a realistic command-and-flag namespace with genuine near-collisions.
 var cliVocabulary = []string{
 	"install", "uninstall", "generate", "validate", "initialize", "version", "list",
 	"--verbose", "--version", "--output", "--shutdown-timeout", "--shutdown", "schedule",
@@ -21,8 +18,8 @@ var cliVocabulary = []string{
 	"done", "purge", "compact", "search", "show", "albums", "artists", "songs", "config",
 }
 
-// cliTypos covers the shapes people actually produce: a dropped character, a doubled one, a
-// transposition, an adjacent-key slip, and a truncation.
+// cliTypos covers dropped, doubled and transposed characters, adjacent-key slips and
+// truncations.
 var cliTypos = map[string]string{
 	"instal": "install", "installl": "install", "isntall": "install",
 	"gnerate": "generate", "genrate": "generate", "generaet": "generate",
@@ -37,18 +34,15 @@ var cliTypos = map[string]string{
 	"albms": "albums", "artsits": "artists", "confg": "config", "remvoe": "remove",
 }
 
-// notTypos are words that are NOT near-misses of anything in the vocabulary. Every suggestion
-// here is a confident wrong guess. Several are deliberately plausible-looking CLI verbs, which
-// is exactly when a ranker is most tempted to invent something.
+// notTypos are words that are not near-misses of anything in the vocabulary, several of them
+// plausible CLI verbs; any suggestion for one is a wrong guess.
 var notTypos = []string{
 	"kubernetes", "frobnicate", "xyzzy", "docker", "terraform", "ansible", "helm",
 	"migrate", "deploy", "rollback", "commit", "branch", "checkout", "prune",
 	"aaaaaa", "zzz", "foobar", "widget", "sync", "watch", "logs", "exec",
 }
 
-// shortVocabulary is the second corpus, and the one the first one's absence nearly shipped a
-// bug through. Most CLIs have several four-character commands; a threshold tuned only on longer
-// words goes completely silent on them.
+// shortVocabulary covers short commands, which a threshold tuned only on longer words misses.
 var shortVocabulary = []string{
 	"help", "list", "add", "get", "run", "show", "init",
 	"push", "pull", "diff", "log", "set", "rm", "up", "down",
@@ -61,20 +55,13 @@ var shortTypos = map[string]string{
 	"psuh": "push", "dwon": "down", "dif": "diff",
 }
 
-// shortNotTypos are short words that are NOT near-misses of shortVocabulary — the set most
-// likely to produce a wrong guess, since at three or four characters everything is close to
-// everything.
+// shortNotTypos are short words that are not near-misses of shortVocabulary.
 var shortNotTypos = []string{
 	"exec", "sync", "watch", "tail", "make", "test", "bash", "grep", "sed", "awk", "cat", "cp", "ls",
 }
 
-// TestSuggestor_defaultsAreCorrectOnBothAxes is the measurement that chose the algorithm and the
-// threshold, kept as a test so a change to either has to beat it.
-//
-// The nine selectable algorithms this type used to carry were a survey, not an answer, and the
-// default was the wrong end of it: Levenshtein at 0.6 with case-folding off invented three
-// matches from this corpus and could not suggest anything for "--VERBOSE". Optimal string
-// alignment at 0.8 is perfect in both directions.
+// TestSuggestor_defaultsAreCorrectOnBothAxes pins the default algorithm and threshold against
+// the long corpus: every typo suggested correctly, no non-typo matched.
 func TestSuggestor_defaultsAreCorrectOnBothAxes(t *testing.T) {
 	s := NewSuggestor()
 
@@ -104,13 +91,8 @@ func TestSuggestor_defaultsAreCorrectOnBothAxes(t *testing.T) {
 	}
 }
 
-// TestSuggestor_shortCommandsAreNotABlindSpot is the test the first corpus could not have
-// written, because it had no short words in it.
-//
-// The default was 0.75 only after a real binary was run: at 0.8 — which looked perfect on the
-// long corpus — `hlep` suggested NOTHING, because a threshold of 0.8 allows one edit per five
-// characters and `help` is four. Every four-character command in every CLI was silently
-// unreachable. Reading the table would never have shown it.
+// TestSuggestor_shortCommandsAreNotABlindSpot pins that the default threshold catches typos of
+// short commands (`hlep` → `help`), missing at most one, without false positives.
 func TestSuggestor_shortCommandsAreNotABlindSpot(t *testing.T) {
 	s := NewSuggestor()
 
@@ -120,9 +102,8 @@ func TestSuggestor_shortCommandsAreNotABlindSpot(t *testing.T) {
 			missed = append(missed, typo+"→"+got+" (want "+want+")")
 		}
 	}
-	// "hel" → "help" is a 3-character input: one edit is a third of the word, and catching
-	// it needs a threshold loose enough to start inventing matches. Staying silent there is
-	// the correct end to fail on, so one miss is the documented budget.
+	// "hel" → "help" is the budgeted miss: catching a one-edit typo of a three-character input
+	// needs a threshold loose enough to invent matches.
 	if len(missed) > 1 {
 		slices.Sort(missed)
 		t.Errorf("missed %d/%d short-command typos (budget 1): %v",
@@ -142,10 +123,8 @@ func TestSuggestor_shortCommandsAreNotABlindSpot(t *testing.T) {
 	}
 }
 
-// TestSuggestor_aSingleEditFloorIsWorseThanAThreshold records an alternative that was tried and
-// rejected, so it is not re-proposed: "always allow one edit, whatever the length" catches the
-// three-character cases but takes short false positives from 0 to 2 ("cp" → "up", "sed" → "set").
-// A distance of 2 is far worse — 8 short and 4 long wrong guesses.
+// TestSuggestor_aSingleEditFloorIsWorseThanAThreshold pins that a fixed one-edit floor, unlike
+// the score threshold, produces false positives on short words ("cp" → "up").
 func TestSuggestor_aSingleEditFloorIsWorseThanAThreshold(t *testing.T) {
 	withinOneEdit := func(input string, candidates []string) (string, bool) {
 		for _, c := range candidates {
@@ -167,10 +146,8 @@ func TestSuggestor_aSingleEditFloorIsWorseThanAThreshold(t *testing.T) {
 	}
 }
 
-// TestSuggestor_thresholdIsNotACliff: the defaults must not be a lucky point. A user who nudges
-// the minimum score in either direction should get gracefully more or less, not a collapse —
-// which is the property that ruled Jaro–Winkler out, since it was clean at 0.8 and wrong seven
-// times at 0.7.
+// TestSuggestor_thresholdIsNotACliff pins that minimum scores near the default (0.70–0.85)
+// invent no matches, and that 0.70 still catches every long-corpus typo.
 func TestSuggestor_thresholdIsNotACliff(t *testing.T) {
 	for _, score := range []float64{0.7, 0.75, 0.8, 0.85} {
 		s := NewSuggestor().WithMinScore(score)
@@ -189,7 +166,6 @@ func TestSuggestor_thresholdIsNotACliff(t *testing.T) {
 			t.Errorf("min score %.2f invented %d match(es) for non-typos", score, invented)
 		}
 	}
-	// And loosening it does not suddenly lose the easy ones.
 	s := NewSuggestor().WithMinScore(0.7)
 	for typo, want := range cliTypos {
 		if got, ok := s.Closest(typo, cliVocabulary); !ok || got != want {
@@ -198,13 +174,8 @@ func TestSuggestor_thresholdIsNotACliff(t *testing.T) {
 	}
 }
 
-// TestSuggestor_caseIsNeverTheUsersProblem. Case-folding used to be opt-in, so a user typing
-// --VERBOSE got nothing at all from a default Suggestor. There is no version of a CLI where
-// that is the right answer, so there is no longer a setting for it.
-//
-// The case-ONLY typo is the sharp one, and it is what this test was written to catch: folding
-// before the exact-match check made "--VERBOSE" look correctly spelled and silenced it. A wrong
-// case is the mistake a user is least able to see in their own terminal.
+// TestSuggestor_caseIsNeverTheUsersProblem pins case-insensitive matching, including a
+// case-only typo ("--VERBOSE"), which the exact-match check must not silence.
 func TestSuggestor_caseIsNeverTheUsersProblem(t *testing.T) {
 	s := NewSuggestor()
 	for input, want := range map[string]string{
@@ -225,13 +196,8 @@ func TestSuggestor_caseIsNeverTheUsersProblem(t *testing.T) {
 	}
 }
 
-// TestSuggestor_exactMatchIsNotATypo: a token that is in the vocabulary was typed correctly, so
-// there is nothing to suggest. Without this the ranker answers "did you mean install?" to
-// someone who typed install.
-//
-// "Exactly" is byte-for-byte, and the distinction is load-bearing in the other direction: see
-// TestSuggestor_caseIsNeverTheUsersProblem. Folding first would have silenced the case typo,
-// which is the one a user is least able to spot on their own.
+// TestSuggestor_exactMatchIsNotATypo pins that a token matching a candidate byte-for-byte gets
+// no suggestion.
 func TestSuggestor_exactMatchIsNotATypo(t *testing.T) {
 	s := NewSuggestor()
 	for _, input := range []string{"install", "--verbose", "schedule"} {
@@ -243,9 +209,8 @@ func TestSuggestor_exactMatchIsNotATypo(t *testing.T) {
 
 // ── For: the ParseError adapter ──────────────────────────────────────────────
 
-// TestSuggestorFor_closesTheLoop covers the reason the method exists. rotini owns the error, so
-// it knows both what the user typed and what would have been valid there; without For, every
-// program writes the same errors.As-plus-two-nil-checks before it can ask.
+// TestSuggestorFor_closesTheLoop pins that For ranks a ParseError's Token against its
+// Candidates.
 func TestSuggestorFor_closesTheLoop(t *testing.T) {
 	err := &ParseError{
 		Kind:       ParseKindUnknownCommand,
@@ -259,8 +224,8 @@ func TestSuggestorFor_closesTheLoop(t *testing.T) {
 	}
 }
 
-// TestSuggestorFor_wrappedErrorsStillResolve: a reporter sees whatever the run recorded, which is
-// rarely the bare *ParseError. errors.As is the whole reason this works through a wrapper.
+// TestSuggestorFor_wrappedErrorsStillResolve pins that For finds a *ParseError inside a joined
+// or wrapped error.
 func TestSuggestorFor_wrappedErrorsStillResolve(t *testing.T) {
 	inner := &ParseError{Kind: ParseKindUnknownFlag, Token: "--vebose", Candidates: []string{"--verbose"}}
 	wrapped := UsageError(errors.New("wrapping: " + inner.Error()))
@@ -271,9 +236,8 @@ func TestSuggestorFor_wrappedErrorsStillResolve(t *testing.T) {
 	}
 }
 
-// TestSuggestorFor_offeringNothingIsARealAnswer pins every way For declines, because a caller
-// branches on the empty slice and each of these must produce one rather than a panic or a
-// misleading hit.
+// TestSuggestorFor_offeringNothingIsARealAnswer pins every way For declines with an empty
+// result.
 func TestSuggestorFor_offeringNothingIsARealAnswer(t *testing.T) {
 	cases := map[string]error{
 		"nil error":            nil,
@@ -294,9 +258,8 @@ func TestSuggestorFor_offeringNothingIsARealAnswer(t *testing.T) {
 
 // ── ranking mechanics ────────────────────────────────────────────────────────
 
-// TestSuggestor_ranksAndCaps: several candidates can be genuinely close, and picking one
-// arbitrarily is worse than offering both — "--vers" really is ambiguous between --verbose and
-// --version, and that is the user's call.
+// TestSuggestor_ranksAndCaps pins that several close candidates are offered and that
+// WithMaxResults caps them.
 func TestSuggestor_ranksAndCaps(t *testing.T) {
 	candidates := []string{"--version", "--verbose", "--verify", "--quiet"}
 
@@ -309,9 +272,8 @@ func TestSuggestor_ranksAndCaps(t *testing.T) {
 	}
 }
 
-// TestSuggestor_isDeterministic. Ties break by longer shared prefix, then lexicographically, so
-// the same typo never produces different advice on different runs — which a map iteration or an
-// unstable sort would otherwise cause, intermittently, in a help message.
+// TestSuggestor_isDeterministic pins the tie-break (longer shared prefix, then lexicographic)
+// so the same input always yields the same order.
 func TestSuggestor_isDeterministic(t *testing.T) {
 	candidates := []string{"bravo", "alpha", "brava", "bravx"}
 	first := NewSuggestor().WithMinScore(0.5).WithMaxResults(0).Suggest("bravz", candidates)
@@ -322,8 +284,8 @@ func TestSuggestor_isDeterministic(t *testing.T) {
 	}
 }
 
-// TestSuggestor_skipsEmptyAndDuplicateCandidates: a generated vocabulary can carry both, and
-// neither should reach the output.
+// TestSuggestor_skipsEmptyAndDuplicateCandidates pins that empty and case-folded duplicate
+// candidates never reach the output.
 func TestSuggestor_skipsEmptyAndDuplicateCandidates(t *testing.T) {
 	got := NewSuggestor().Suggest("instal", []string{"", "install", "install", "INSTALL", ""})
 	if len(got) != 1 || got[0] != "install" {
@@ -331,8 +293,8 @@ func TestSuggestor_skipsEmptyAndDuplicateCandidates(t *testing.T) {
 	}
 }
 
-// TestSuggestor_nilAndEmptyInputs: a nil Suggestor is a caller that forgot to construct one,
-// and it must not panic inside a reporter that is already reporting a failure.
+// TestSuggestor_nilAndEmptyInputs pins that a nil Suggestor, an empty input and no candidates
+// all return nothing without panicking.
 func TestSuggestor_nilAndEmptyInputs(t *testing.T) {
 	var nilSuggestor *Suggestor
 	if got := nilSuggestor.Suggest("instal", cliVocabulary); got != nil {
@@ -352,8 +314,7 @@ func TestSuggestor_nilAndEmptyInputs(t *testing.T) {
 	}
 }
 
-// TestSuggestor_withMinScoreRejectsNonsense: a score outside [0,1] is a caller bug, and
-// silently adopting it would either suggest everything or nothing.
+// TestSuggestor_withMinScoreRejectsNonsense pins that a score outside [0,1] is ignored.
 func TestSuggestor_withMinScoreRejectsNonsense(t *testing.T) {
 	for _, bad := range []float64{-1, 1.5} {
 		s := NewSuggestor().WithMinScore(bad)
@@ -363,10 +324,8 @@ func TestSuggestor_withMinScoreRejectsNonsense(t *testing.T) {
 	}
 }
 
-// TestOptimalStringAlignment_transpositionCostsOne is why this metric and not Levenshtein: a
-// swapped pair of letters is the commonest typo there is, and under Levenshtein it costs two
-// edits — which at a 0.8 threshold on a short word is the difference between suggesting and
-// staying silent.
+// TestOptimalStringAlignment_transpositionCostsOne pins that an adjacent transposition is one
+// edit, plus the empty and identical cases.
 func TestOptimalStringAlignment_transpositionCostsOne(t *testing.T) {
 	if got := optimalStringAlignment("isntall", "install"); got != 1 {
 		t.Errorf("optimalStringAlignment(isntall, install) = %d, want 1", got)

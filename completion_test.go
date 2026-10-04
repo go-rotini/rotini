@@ -58,9 +58,8 @@ func TestComplete_discoversPlugins(t *testing.T) {
 	}
 }
 
-// TestDiscoveredPlugins covers the public data feed a help renderer uses to list
-// runtime plugins: discovered names minus declared collisions, nil for no/hidden
-// discovery, sorted + deduped.
+// TestDiscoveredPlugins pins discovered names minus declared collisions, sorted and deduped,
+// and nil for absent or hidden discovery.
 func TestDiscoveredPlugins(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar", "acme-zip", "unrelated"} {
@@ -86,8 +85,7 @@ func TestDiscoveredPlugins(t *testing.T) {
 		t.Errorf("DiscoveredPlugins = %v, want %v (bar shadowed by declared command; unrelated unprefixed)", got, want)
 	}
 
-	// The path is the one dispatch would run: a copy earlier in the search order shadows a
-	// later one, so listing the later one would name a binary that never runs.
+	// The path is the one dispatch would run: an earlier copy in search order shadows a later one.
 	earlier := t.TempDir()
 	if err := os.WriteFile(filepath.Join(earlier, progFile("acme-foo")), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
@@ -100,7 +98,7 @@ func TestDiscoveredPlugins(t *testing.T) {
 		t.Errorf("PluginBinary(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
 	}
 
-	// Hidden discovery → nil (the section is suppressed).
+	// Hidden discovery → nil.
 	hidden := cmd
 	hd := *cmd.PluginDiscovery
 	hd.Hidden = true
@@ -115,9 +113,8 @@ func TestDiscoveredPlugins(t *testing.T) {
 	}
 }
 
-// TestPluginDiscoveryErrors surfaces a misconfigured discovery path as data: an unusable
-// author-configured path is reported (with the offending path + cause), a clean path reports
-// nothing, and listing still works (DiscoveredPlugins never errors).
+// TestPluginDiscoveryErrors pins that an unusable configured plugin path is reported with its
+// path and cause, a clean or not-yet-existing path reports nothing, and listing still works.
 func TestPluginDiscoveryErrors(t *testing.T) {
 	// A path that is not a directory is a real diagnostic.
 	file := filepath.Join(t.TempDir(), "plugins")
@@ -137,8 +134,7 @@ func TestPluginDiscoveryErrors(t *testing.T) {
 		t.Errorf("DiscoveredPlugins with only a bad path = %v, want nil", got)
 	}
 
-	// A path that does not exist YET is not a problem: it is where plugins go once one is
-	// installed. Reporting it made every fresh install look misconfigured.
+	// A path that does not exist yet is not a problem.
 	absent := bad
 	absent.PluginPath = filepath.Join(t.TempDir(), "no-such-subdir")
 	if probs := absent.PluginDiscoveryErrors(); len(probs) != 0 {
@@ -160,8 +156,7 @@ func TestPluginDiscoveryErrors(t *testing.T) {
 	}
 }
 
-// Incidental scan locations are not reported: a missing $PATH entry is normal, not a
-// misconfiguration, so it must never surface as a diagnostic (only the configured path does).
+// Incidental scan locations are not reported: a missing $PATH entry is not a diagnostic.
 func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(t.TempDir(), "missing-path-entry"))
 	cmd := Command{
@@ -173,9 +168,8 @@ func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
 	}
 }
 
-// TestDiscoveredPlugins_viaChain proves the documented help-handler seam: a handler
-// reads its command's discovery off rtx.CommandChain() and gets the runtime plugin list —
-// the path that closes static help's plugin blind spot (D-REMOTE-HELP).
+// TestDiscoveredPlugins_viaChain pins that a handler reads its command's discovered plugins
+// off rtx.CommandChain().
 func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar"} {
@@ -293,10 +287,8 @@ func TestComplete_nestedSubcommands(t *testing.T) {
 	}
 }
 
-// BenchmarkComplete budgets the per-keystroke completion path — the generated
-// shell scripts call __complete on every TAB, so this must stay comfortably
-// sub-millisecond. The ceiling exists so future token handling (from:, dotted
-// keys) cannot quietly make typing laggy; `make test-bench` reports it.
+// BenchmarkComplete measures the per-keystroke completion path, which the generated scripts
+// call on every TAB and must stay sub-millisecond; `make test-bench` reports it.
 func BenchmarkComplete(b *testing.B) {
 	def := completionDef()
 	cases := []struct {
@@ -368,9 +360,8 @@ func TestComplete_fromFileFallsBack(t *testing.T) {
 	}
 }
 
-// TestComplete_noAutoHelpFlag pins the ethos: completion never auto-adds -h/--help.
-// They appear only when the CLI declares a help flag (Pillar 1 — no framework-injected
-// flags).
+// TestComplete_noAutoHelpFlag pins that completion offers -h/--help only when the CLI declares
+// a help flag.
 func TestComplete_noAutoHelpFlag(t *testing.T) {
 	// No declared help flag → completion offers none.
 	bare := completionDef()
@@ -426,10 +417,9 @@ func dynCompletionDef() Definition {
 	}
 }
 
-// TestComplete_dynamicFlagValue covers the FlagValueCompleter opt-in: a completer's
-// candidates take precedence over the static enum and are prefix-filtered; a flag with
-// no completer (or a nil return) falls back to the enum; and with no handlers bound the
-// behavior is the pure-static enum (backward compatible).
+// TestComplete_dynamicFlagValue pins that a FlagValueCompleter's candidates win over the enum
+// and are prefix-filtered, and that no completer, a nil return, or no handlers falls back to
+// the enum.
 func TestComplete_dynamicFlagValue(t *testing.T) {
 	def := dynCompletionDef()
 	agg := dynCompletionHandlers{}
@@ -454,8 +444,8 @@ func TestComplete_dynamicFlagValue(t *testing.T) {
 	}
 }
 
-// TestComplete_dynamicReceivesContext proves the completer is handed the resolved chain
-// and the completion words via rtx, and can read services bound on the Program.
+// TestComplete_dynamicReceivesContext pins that the completer's rtx carries the resolved
+// chain, the completion words and the Program's dependencies.
 func TestComplete_dynamicReceivesContext(t *testing.T) {
 	def := dynCompletionDef()
 	rtx := newContext()
@@ -496,8 +486,7 @@ func TestComplete_runIntercept(t *testing.T) {
 	}
 }
 
-// TestComplete_dynamicViaProgram exercises the full path the shell scripts hit: the
-// __complete intercept threads p.handlers + p.rtx into completion, so a bound handler's
+// TestComplete_dynamicViaProgram pins the __complete path end to end: a handler's
 // FlagValueCompleter drives the candidates printed to stdout.
 func TestComplete_dynamicViaProgram(t *testing.T) {
 	out := &bytes.Buffer{}
@@ -672,9 +661,8 @@ func TestComplete_descriptions(t *testing.T) {
 	}
 }
 
-// TestComplete_stripsStyledSummary pins E6-S2: a summary carrying ANSI (a
-// styled value the author also uses on the help-list surface) reaches the
-// completion wire as PLAIN text — escapes would corrupt the shell's rendering.
+// TestComplete_stripsStyledSummary pins that an ANSI-styled summary reaches the completion
+// wire as plain text.
 func TestComplete_stripsStyledSummary(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -706,9 +694,8 @@ func TestComplete_pluginOpaque(t *testing.T) {
 	}
 }
 
-// TestComplete_nestedPlugin confirms declared plugins declared on a sub-command
-// (now carried by CommandDef.Plugins) complete by name at depth, and that
-// completion goes opaque past them.
+// TestComplete_nestedPlugin pins that plugins declared on a sub-command complete by name, and
+// that completion goes opaque past them.
 func TestComplete_nestedPlugin(t *testing.T) {
 	def := Definition{
 		Name: "acme", Handler: "Acme",
@@ -750,9 +737,7 @@ func completionHintDef() Definition {
 	}
 }
 
-// TestCompletionHint covers the declarative hint — the case between a static enum and writing
-// a Go completer, which is "this is a file". It is the commonest value shape there is, and
-// before this key the only way to say it was code.
+// TestCompletionHint pins the directive line each declared complete: hint produces.
 func TestCompletionHint(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -779,9 +764,8 @@ func TestCompletionHint(t *testing.T) {
 	}
 }
 
-// TestCompletionHint_isSeparableFromCandidates: the directive rides the same stream as the
-// candidates, so it has to be unmistakable — a shell script that treated it as a candidate
-// would offer the user a line of punctuation.
+// TestCompletionHint_isSeparableFromCandidates pins that the directive line, which shares the
+// candidates' stream, is distinguishable from every candidate.
 func TestCompletionHint_isSeparableFromCandidates(t *testing.T) {
 	def := completionHintDef()
 	for _, words := range [][]string{{""}, {"--"}, {"--config", ""}, {"open", ""}} {
@@ -796,10 +780,8 @@ func TestCompletionHint_isSeparableFromCandidates(t *testing.T) {
 	}
 }
 
-// TestCompletionHint_noneIsNotTheSameAsEmpty pins the distinction the key exists for: with no
-// hint the shell applies its own default (file completion, in bash and zsh), and "none"
-// suppresses it. Collapsing the two would make an opaque identifier offer the user the
-// contents of the current directory as if they were plausible answers.
+// TestCompletionHint_noneIsNotTheSameAsEmpty pins that no hint leaves the shell's default
+// while "none" emits a directive suppressing it.
 func TestCompletionHint_noneIsNotTheSameAsEmpty(t *testing.T) {
 	def := completionHintDef()
 	none := completionHint(def, []string{"--id", ""})
@@ -828,8 +810,8 @@ func completeIn(t *testing.T, format CompletionFormat, def Definition, handlers 
 	return out.String()
 }
 
-// TestPluginCompletion_directives pins the hint → directive mapping, the part of the plugin
-// hosts' format they act on. The numbers are the hosts' wire values, not rotini's to choose.
+// TestPluginCompletion_directives pins the hint → directive mapping; the numbers are the
+// plugin hosts' wire values.
 func TestPluginCompletion_directives(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -853,10 +835,9 @@ func TestPluginCompletion_directives(t *testing.T) {
 	}
 }
 
-// TestPluginCompletion_candidatesWinOverAFilteringHint: the hosts read the file-extension (8)
-// and directory (16) directives' candidates as their ARGUMENTS, so emitting either alongside real candidates would
-// turn "debug" into a file extension. The hint is the fallback; a value that has candidates
-// keeps them.
+// TestPluginCompletion_candidatesWinOverAFilteringHint pins that real candidates suppress the
+// file-extension (8) and directory (16) directives, whose candidates the hosts read as
+// arguments.
 func TestPluginCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -880,9 +861,8 @@ func TestPluginCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
 	}
 }
 
-// TestComplete_formatIsTheOnlyDifference: one answer, computed once, whatever the format — a
-// handler's dynamic completer and a command's description reach every format alike, and rotini's
-// own (nil) format is byte-for-byte what __complete always printed.
+// TestComplete_formatIsTheOnlyDifference pins that every format receives the same answer, and
+// that the nil format matches __complete's output byte for byte.
 func TestComplete_formatIsTheOnlyDifference(t *testing.T) {
 	if got := completeIn(t, PluginCompletion, dynCompletionDef(), dynCompletionHandlers{}, "build", "--mode", "s"); got != "slow\n:0\n" {
 		t.Errorf("dynamic completer = %q", got)
@@ -899,9 +879,8 @@ func TestComplete_formatIsTheOnlyDifference(t *testing.T) {
 	}
 }
 
-// TestComplete_customFormat is the point of CompletionFormat: a protocol rotini does not ship is
-// a function. This one is a "value:description" shape, colons in the value escaped,
-// and sees the same candidates and hint the built-ins do.
+// TestComplete_customFormat pins that a custom CompletionFormat (here "value:description",
+// colons escaped) sees the same candidates and hint the built-ins do.
 func TestComplete_customFormat(t *testing.T) {
 	var seen CompletionResult
 	colonFormat := func(w io.Writer, r CompletionResult) error {
@@ -931,7 +910,7 @@ func TestComplete_customFormat(t *testing.T) {
 	}
 }
 
-// TestComplete_formatError: a format that cannot write fails the request with its error.
+// TestComplete_formatError pins that a format's write error fails the request.
 func TestComplete_formatError(t *testing.T) {
 	boom := errors.New("closed pipe")
 	p := NewProgram(completionHintDef(), nil)
@@ -942,10 +921,9 @@ func TestComplete_formatError(t *testing.T) {
 	}
 }
 
-// TestWithCompletion: the setter switches what the hidden __complete entry speaks, and nothing
-// else; nil restores rotini's own. The case that matters is a request with no hint: rotini's
-// format then ends on a candidate, which a plugin host (Flux takes the last line unconditionally)
-// would swallow as the directive.
+// TestWithCompletion pins that the setter switches the format __complete writes and nil
+// restores rotini's own. With no hint, rotini's format ends on a candidate, which a plugin host
+// would read as the directive.
 func TestWithCompletion(t *testing.T) {
 	run := func(p *Program, argv ...string) string {
 		t.Helper()
@@ -988,8 +966,8 @@ type lenientHandlers struct{}
 
 type lenientShow struct{ deployArgCompleter }
 
-// CompleteArgValue is the recipe FlagValueCompleter's doc gives, verbatim in shape: the root's
-// flags, read at the root's frame, from the line and the environment, with nothing validated.
+// CompleteArgValue follows the FlagValueCompleter doc recipe: the root's flags, read as the
+// root command from the line and the environment, with nothing validated.
 func (lenientShow) CompleteArgValue(rtx *Context, arg, partial string) []string {
 	var in lenientRootInputs
 	AsCommand(0, func(_ context.Context, rtx *Context) {
@@ -1002,10 +980,8 @@ func (lenientShow) CompleteArgValue(rtx *Context, arg, partial string) []string 
 
 func (lenientHandlers) AppShow() Handler { return lenientShow{} }
 
-// TestComplete_lenientParseOfAnAncestorsFlags proves the documented way a completer reads what
-// the user has said so far: a root flag on the line, else its environment fallback, though the
-// line is half-typed and a required flag is missing. rubectl hand-copied the env lookup instead,
-// and its first attempt missed it and completed nothing.
+// TestComplete_lenientParseOfAnAncestorsFlags pins the documented recipe: a completer reads a
+// root flag from the line, else its environment fallback, though a required flag is missing.
 func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -1024,10 +1000,9 @@ func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 	}
 }
 
-// TestComplete_followsTheParsersFlagValueRule: completion walks the line with the parser's rule
-// for which word is a flag's value, so it descends where dispatch will (`--color sub <TAB>`,
-// `-vn 5 sub <TAB>`), and a bare optional-value flag is not waiting for a value — its value must
-// be attached — so the next word completes as a command.
+// TestComplete_followsTheParsersFlagValueRule pins that completion uses the parser's rule for
+// which word is a flag's value (`--color sub <TAB>`, `-vn 5 sub <TAB>`), so a bare
+// optional-value flag does not consume the next word.
 func TestComplete_followsTheParsersFlagValueRule(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App",
 		Flags: []FlagDef{

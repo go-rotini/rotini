@@ -18,20 +18,9 @@ import (
 // `go test . -run Surface -update-surface`.
 var updateSurface = flag.Bool("update-surface", false, "update the exported API surface snapshot")
 
-// TestExportedSurface is the API freeze. Every generated CLI and every handler written
-// against rotini depends on these symbols, so the surface is the one thing that must not
-// drift by accident: a rename, a signature change, or a newly exported helper fails here
-// until the snapshot is updated DELIBERATELY (with -update-surface), which puts the
-// change in the diff where a reviewer sees it.
-//
-// It covers exported funcs, types, consts, vars, methods, STRUCT FIELDS and INTERFACE
-// METHODS. The last two matter as much as the rest and were missing at first: codegen emits
-// composite literals against Definition, FlagDef, ArgDef and InputSettings, so removing a field is
-// a bigger break than removing a function — it fails in every generated file in every project
-// at once, rather than at one call site.
-//
-// It is a snapshot, not a policy — it says nothing about whether a change is good, only
-// that it was intended.
+// TestExportedSurface is the API freeze: any rename, signature change or newly exported symbol
+// fails until the snapshot is updated with -update-surface, so the change shows in review. It
+// covers exported funcs, types, consts, vars, methods, struct fields and interface methods.
 func TestExportedSurface(t *testing.T) {
 	got := strings.Join(exportedSurface(t), "\n") + "\n"
 	golden := filepath.Join("testdata", "surface.txt")
@@ -56,11 +45,7 @@ func TestExportedSurface(t *testing.T) {
 
 // exportedSurface renders one stable line per exported declaration of the package:
 // "func Name(sig)", "type Name", "method Recv.Name(sig)", "const Name", "var Name".
-//
-// Functions and methods carry their SIGNATURE, not just their name. COMPATIBILITY.md promises
-// shape, and a signature IS shape: changing PanicError.Unwrap from `error` to `[]error` is a
-// breaking change that a name-only guard waves through — which is exactly what happened while
-// this file was being reviewed.
+// Functions and methods carry their signature, since a signature change is a breaking change.
 func exportedSurface(t *testing.T) []string {
 	t.Helper()
 	entries, err := filepath.Glob("*.go")
@@ -99,14 +84,12 @@ func exportedSurface(t *testing.T) []string {
 	return out
 }
 
-// signature renders a func type's parameters and results as source, so the surface records the
-// shape a caller depends on rather than only the name they call.
+// signature renders a func type's parameters and results as source.
 func signature(fset *token.FileSet, ft *ast.FuncType) string {
 	var b strings.Builder
 	if err := printer.Fprint(&b, fset, ft); err != nil {
 		return "(?)"
 	}
-	// printer writes "func(a int) error"; the leading keyword is noise beside the name.
 	return strings.TrimPrefix(b.String(), "func")
 }
 
@@ -136,16 +119,9 @@ func exportedSpecs(decl *ast.GenDecl) []string {
 	return out
 }
 
-// exportedMembers renders a type's exported STRUCT FIELDS and INTERFACE METHODS.
-//
-// They belong in the freeze because they are load-bearing API, not implementation: codegen
-// writes composite literals against Definition, FlagDef, ArgDef and InputSettings, every handler
-// implements Handler, and a custom reporter reads Outcome by field name. Renaming or removing
-// one of those breaks every generated file in every project — a bigger break than deleting a
-// function, and until now the snapshot could not see it.
-//
-// An embedded field is recorded under the embedded type's own name, which is how a caller
-// refers to it (Constraints promoted into FlagDef, say).
+// exportedMembers renders a type's exported struct fields and interface methods, which
+// generated code and handlers depend on by name. An embedded field is recorded under the
+// embedded type's name (Constraints in FlagDef, say).
 func exportedMembers(spec *ast.TypeSpec) []string {
 	var out []string
 	switch t := spec.Type.(type) {

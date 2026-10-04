@@ -239,9 +239,8 @@ func TestSplitPairs(t *testing.T) {
 	}
 }
 
-// TestInferScalar pins what a value means where the schema says nothing about it: exactly what
-// the JSON spelling of the same value means, and nothing looser. The same patch used to store
-// the number 5 when written as JSON and the text "5" when written as key=value.
+// TestInferScalar pins that an untyped key=value value means exactly what its JSON spelling
+// means, and nothing looser.
 func TestInferScalar(t *testing.T) {
 	for text, want := range map[string]any{
 		"true": true, "false": false, "null": nil,
@@ -256,8 +255,8 @@ func TestInferScalar(t *testing.T) {
 	}
 }
 
-// TestObjectFlag_freeFormValuesTypeLikeJSON proves one meaning per value across an object flag's
-// spellings: inside a free-form map, key=value and JSON agree.
+// TestObjectFlag_freeFormValuesTypeLikeJSON pins that key=value and JSON spellings type a
+// free-form map's values identically.
 func TestObjectFlag_freeFormValuesTypeLikeJSON(t *testing.T) {
 	type patch struct {
 		Spec map[string]any `json:"spec"`
@@ -275,9 +274,8 @@ func TestObjectFlag_freeFormValuesTypeLikeJSON(t *testing.T) {
 	}
 }
 
-// TestObjectFlag_uint8FieldFromPairs: every integer width takes key=value. uint8 alone fell
-// through to text — the signed branch listed int8, the unsigned one skipped uint8 — and the
-// value then failed to decode into the field.
+// TestObjectFlag_uint8FieldFromPairs pins that every integer width, uint8 included, takes a
+// key=value value.
 func TestObjectFlag_uint8FieldFromPairs(t *testing.T) {
 	type pool struct {
 		Level uint8 `json:"level"`

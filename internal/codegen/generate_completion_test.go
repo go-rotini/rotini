@@ -8,17 +8,11 @@ import (
 	"testing"
 )
 
-// The completion scripts are generated SHELL, and Go's tooling sees them as opaque strings.
-// Nothing in the codegen suite executes them, so a script can be wrong in a way that compiles,
-// renders, round-trips through every golden file — and offers the user nothing. Three such bugs
-// shipped at once, one per shell, all of the same shape: the tokens the shell hands the binary
-// were silently truncated, so completion worked for the first word and failed everywhere else.
-//
-// These tests pin the exact idioms that fix them. They are written against the idiom rather
-// than the behavior because two of the three shells are not installed on most CI runners; the
-// bash one, which is, is exercised for real in e2e/testdata/script/r2_completion_shells.txtar.
+// These tests pin the shell idioms that pass every token, including an empty current word, to
+// the binary. They check the idiom rather than behavior because most shells are absent on CI;
+// bash is exercised for real in e2e/testdata/script/r2_completion_shells.txtar.
 
-// TestCompletionScripts_preserveEveryToken guards the token-assembly line of each shell script.
+// TestCompletionScripts_preserveEveryToken pins the token-assembly line of each shell script.
 func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -61,13 +55,9 @@ func TestCompletionScripts_preserveEveryToken(t *testing.T) {
 	}
 }
 
-// TestCompletionScript_bashSlicesBeforeNarrowingIFS is the specific reject for the bash bug.
-//
-// bash 3.2 — /bin/bash on every macOS — collapses "${array[@]:offset:length}" into a single
-// IFS-joined element whenever IFS does not contain a space. The script declared IFS=$'\n' on
-// its `local` line, one line above the slice, so `prog hash --algorithm <TAB>` sent the binary
-// ONE argument, "hash --algorithm ", which matches no command. Top-level completion still
-// worked (a one-element slice survives being joined), which is why it looked fine.
+// TestCompletionScript_bashSlicesBeforeNarrowingIFS pins that the bash script slices COMP_WORDS
+// before narrowing IFS: bash 3.2 (macOS /bin/bash) joins "${array[@]:offset:length}" into one
+// element when IFS lacks a space, so every word after the first would be lost.
 func TestCompletionScript_bashSlicesBeforeNarrowingIFS(t *testing.T) {
 	t.Parallel()
 	script, err := completionScript("prog", "bash")
@@ -87,8 +77,7 @@ func TestCompletionScript_bashSlicesBeforeNarrowingIFS(t *testing.T) {
 }
 
 // TestCompletionScripts_parseInTheirOwnShell runs each generated script through its shell's
-// syntax checker, for the shells this machine actually has. A generated script that does not
-// parse is the one failure mode a user cannot work around, and it is invisible to `go test`.
+// syntax checker, skipping shells that are not installed.
 func TestCompletionScripts_parseInTheirOwnShell(t *testing.T) {
 	t.Parallel()
 	checks := []struct {

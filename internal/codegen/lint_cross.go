@@ -5,11 +5,8 @@ import (
 	"strings"
 )
 
-// This file holds the lint rules that need BOTH documents: a problem in the spec that is only a
-// problem because of how the conf configures generation. They run after each document has
-// passed on its own, and report against the spec, which is where the fix goes.
-
-// lintAcross runs the rules that read the spec and the conf together.
+// lintAcross runs the rules that need both documents: spec problems that arise from how the
+// conf configures generation. Problems are positioned in the spec.
 func (p *Processor) lintAcross(rs *reconciledSpec, rc *reconciledConf) []error {
 	if rs == nil || rc == nil {
 		return nil
@@ -19,14 +16,10 @@ func (p *Processor) lintAcross(rs *reconciledSpec, rc *reconciledConf) []error {
 	return problems
 }
 
-// lintManPageNames rejects two commands whose man pages would share one name, when the man
-// feature is on. A page is named after the command path joined with "-" and lowercased, so
-// `notes tag-remove` and `notes tag remove` are both notes-tag-remove, and `Add` and `add` are one
-// file on a case-insensitive file system. One page would overwrite the other, and the name is
-// also how `man` finds a page and how pages refer to each other.
-//
-// It checks the commands this spec declares. Commands composed in from another spec exist only
-// once the whole tree is assembled, so generate checks those too.
+// lintManPageNames rejects two commands whose man pages would share a name when the man
+// feature is enabled. Page names join the command path with "-" and lowercase it, so `notes
+// tag-remove` and `notes tag remove` collide. Only this spec's commands are checked; generate
+// checks composed ones.
 func lintManPageNames(spec *Spec, conf *Conf) []error {
 	if spec == nil || conf == nil || conf.Generate == nil {
 		return nil

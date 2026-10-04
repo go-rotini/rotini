@@ -1,9 +1,7 @@
 package codegen
 
-// This file owns reading inputs: spec/conf file decoding (serialization chosen
-// from the extension, via go-rotini/fs), raw-JSON conversion for schema
-// validation, the spec/conf discovery fallbacks, and module resolution.
-// Writing outputs lives in generate_writer.go.
+// Reading inputs: spec and conf decoding (format chosen by extension), conversion to JSON
+// for schema validation, spec and conf discovery, and module resolution.
 
 import (
 	"encoding/json"
@@ -26,8 +24,8 @@ const (
 	fileTypeConf fileType = "conf"
 )
 
-// fileFormat is a supported spec/conf serialization. Its value doubles as the
-// canonical file extension (and the seed transcode target — see convert).
+// fileFormat is a supported spec/conf serialization. Its value is also the canonical file
+// extension.
 type fileFormat string
 
 const (
@@ -56,9 +54,8 @@ func detectFileFormat(path string) fileFormat {
 	}
 }
 
-// readRaw detects path's serialization format from its extension and reads the
-// file's bytes, erroring on an unknown extension or a read failure. It is the shared
-// preamble of readFile and reconcileDoc.
+// readRaw detects path's format from its extension and reads the file, erroring on an
+// unknown extension or a read failure.
 func readRaw(path string) (fileFormat, []byte, error) {
 	format := detectFileFormat(path)
 	if format == formatUnknown {
@@ -66,8 +63,7 @@ func readRaw(path string) (fileFormat, []byte, error) {
 	}
 	data, err := fs.ReadFile(path)
 	if err != nil {
-		// The fs error nests the os one, so its text names the path three times; a missing
-		// file is common enough to deserve one plain sentence.
+		// The fs error repeats the path; report a missing file plainly.
 		if errors.Is(err, os.ErrNotExist) {
 			return format, nil, fmt.Errorf("%s: %w", path, os.ErrNotExist)
 		}
@@ -76,9 +72,8 @@ func readRaw(path string) (fileFormat, []byte, error) {
 	return format, data, nil
 }
 
-// readFile reads the file at path and decodes it into a value of type T, choosing the
-// decoder from the file extension. YAML, JSON, JSONC, and TOML all honor the json
-// struct tags carried by the generated Spec and Conf types.
+// readFile reads and decodes the file at path into a T, choosing the decoder by extension.
+// Every decoder honors the json struct tags on the generated Spec and Conf types.
 func readFile[T any](path string) (*T, error) {
 	format, data, err := readRaw(path)
 	if err != nil {
@@ -87,10 +82,8 @@ func readFile[T any](path string) (*T, error) {
 	return decodeData[T](format, data, path)
 }
 
-// decodeData decodes one read document into a value of type T. path labels a
-// decode failure; the loaders use this (rather than readFile) so one read feeds
-// both the decoded struct and the raw JSON instance (bytesToJSON) — validation
-// then judges exactly the bytes generation consumes.
+// decodeData decodes one read document into a T and normalizes it. path labels a failure.
+// Loaders call it directly so one read feeds both the decoded value and bytesToJSON.
 func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) {
 	out := new(T)
 	var err error
@@ -115,14 +108,9 @@ func decodeData[T any](format fileFormat, data []byte, path string) (*T, error) 
 	return out, nil
 }
 
-// decodeError is a document that read fine but would not decode into rotini's Go types — almost
-// always a value of the wrong type, such as `minimum: "five"` or `required: [name]` on an input.
-//
-// It carries the raw bytes so the Processor can hand the same document to the schema validator,
-// which says what is wrong with a position and a JSON pointer. The decoder's own message says
-// neither, and leaks Go types to someone who wrote YAML:
-//
-//	decode spec.yaml: yaml: unmarshal errors: line 17: cannot unmarshal !!seq into Go value of type bool
+// decodeError reports a document that read but did not decode into rotini's Go types,
+// usually a value of the wrong type. It carries the raw bytes so the Processor can run the
+// schema validator instead, whose positioned message is clearer than the decoder's.
 type decodeError struct {
 	path   string
 	format fileFormat
@@ -133,9 +121,8 @@ type decodeError struct {
 func (e *decodeError) Error() string { return fmt.Sprintf("decode %s: %v", e.path, e.err) }
 func (e *decodeError) Unwrap() error { return e.err }
 
-// bytesToJSON converts one read document to canonical JSON bytes, whatever its source
-// serialization, for the jsonschema validator. The raw instance is returned rather than a
-// decoded struct, so rules like additionalProperties:false still see unknown fields.
+// bytesToJSON converts a document in any supported format to JSON for the schema validator.
+// Converting the raw document, not the decoded struct, keeps unknown fields visible.
 func bytesToJSON(format fileFormat, data []byte) ([]byte, error) {
 	var (
 		out []byte
@@ -159,40 +146,31 @@ func bytesToJSON(format fileFormat, data []byte) ([]byte, error) {
 	return out, nil
 }
 
-// readSpec reads and decodes the rotini spec file at path (serialization chosen from
-// the extension). It does not validate against the schema — the Processor's reconcile +
-// validate stages do that.
+// readSpec reads and decodes the spec at path without schema validation.
 func readSpec(path string) (*Spec, error) {
 	return readFile[Spec](path)
 }
 
-// readConf reads and decodes the rotini conf file at path (serialization chosen from
-// the extension). It does not validate against the schema — the Processor's reconcile +
-// validate stages do that.
+// readConf reads and decodes the conf at path without schema validation.
 func readConf(path string) (*Conf, error) {
 	return readFile[Conf](path)
 }
 
-// ─── discovery ───────────────────────────────────────────────────────────────.
-
-// errSpecPathRequired is reported when no spec-file path is supplied and none of the
-// fallback locations resolve to a spec.
+// errSpecPathRequired is returned when no spec path is given and none is discovered.
 var errSpecPathRequired = errors.New("no .rotini.spec.* file in the working directory; pass the spec's path")
 
-// fallbackExtensions is the spec/conf discovery precedence: the first
-// .rotini.<type>.<ext> that exists wins.
+// fallbackExtensions is the discovery precedence: the first .rotini.<type>.<ext> that exists
+// wins.
 var fallbackExtensions = []string{"yml", "yaml", "toml", "json", "jsonc"}
 
-// discoverFile returns the first existing .rotini.<fileType>.<ext> in dir, in
-// fallbackExtensions precedence, or ("", false) when none exist. The
-// extension-fallback search is delegated to go-rotini/fs.
+// discoverFile returns the first existing .rotini.<ft>.<ext> in dir in fallbackExtensions
+// order, or ("", false).
 func discoverFile(dir string, ft fileType) (string, bool) {
 	return fs.FindWithExtensions(dir, ".rotini."+string(ft), fallbackExtensions)
 }
 
-// resolveSpecPath resolves the spec file path: the given path when set, otherwise the
-// first .rotini.spec.* in the working directory, or "" when none is found (callers
-// treat that as the required-spec error).
+// resolveSpecPath returns path when set, otherwise the first .rotini.spec.* in the working
+// directory, or "" when none is found.
 func resolveSpecPath(path string) (string, error) {
 	if path != "" {
 		return path, nil
@@ -205,12 +183,10 @@ func resolveSpecPath(path string) (string, error) {
 	return found, nil
 }
 
-// ResolvePaths resolves the spec and conf files a generate or validate of specPath and
-// confPath reads, by the same rules the pipeline uses: an empty specPath is the first
-// .rotini.spec.* in the working directory, and an empty confPath is the first .rotini.conf.*
-// beside the spec. conf is "" when there is none, and the conf defaults apply. A path the
-// caller gave is returned as given; whether it exists is the pipeline's to report. A
-// discovered path is made relative to the working directory, for display.
+// ResolvePaths resolves the spec and conf paths the pipeline would read. An empty specPath
+// discovers the first .rotini.spec.* in the working directory; an empty confPath discovers
+// the first .rotini.conf.* beside the spec, and conf is "" when there is none. Given paths
+// are returned unchanged and unchecked; discovered paths are made relative for display.
 func ResolvePaths(specPath, confPath string) (spec, conf string, err error) {
 	spec, err = resolveSpecPath(specPath)
 	if err != nil {
@@ -221,7 +197,7 @@ func ResolvePaths(specPath, confPath string) (spec, conf string, err error) {
 	}
 	conf = resolveConfBesideSpec(spec, confPath)
 	if specPath == "" {
-		spec = displayPath(spec) // discovered from the working directory, so absolute
+		spec = displayPath(spec)
 	}
 	if confPath == "" && conf != "" {
 		conf = displayPath(conf)
@@ -229,9 +205,8 @@ func ResolvePaths(specPath, confPath string) (spec, conf string, err error) {
 	return spec, conf, nil
 }
 
-// resolveConfBesideSpec resolves the conf file path: the given path when set,
-// otherwise the first .rotini.conf.* beside the spec, or "" when none is found
-// (callers fall back to a default Conf).
+// resolveConfBesideSpec returns confPath when set, otherwise the first .rotini.conf.* beside
+// the spec, or "" when none is found.
 func resolveConfBesideSpec(specPath, confPath string) string {
 	if confPath != "" {
 		return confPath
@@ -240,10 +215,7 @@ func resolveConfBesideSpec(specPath, confPath string) string {
 	return found
 }
 
-// discoverConf returns the first .rotini.conf.* file that exists in dir, or an
-// error when none is found. Unlike resolveConfBesideSpec it errors on a miss —
-// its callers expect a conf to be present (a module-root conf, a composed
-// child's conf).
+// discoverConf returns the first .rotini.conf.* in dir, or an error when none exists.
 func discoverConf(dir string) (string, error) {
 	if found, ok := discoverFile(dir, fileTypeConf); ok {
 		return found, nil
@@ -251,15 +223,14 @@ func discoverConf(dir string) (string, error) {
 	return "", fmt.Errorf("no .rotini.%s.* file found in %s", fileTypeConf, dir)
 }
 
-// findModule walks up from the working directory to the nearest go.mod and
-// returns the module root directory and the module path declared in it.
+// findModule walks up from the working directory to the nearest go.mod and returns the
+// module root directory and module path.
 func findModule() (root, name string, err error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", "", fmt.Errorf("get working directory: %w", err)
 	}
-	// fs.FindUp walks up to the nearest go.mod; the high ancestor bound keeps
-	// the original unbounded-to-root reach (fs defaults to 32).
+	// Raise fs's default ancestor bound (32) to effectively reach the filesystem root.
 	goMod, ok, err := fs.FindUp("go.mod", dir, fs.WithMaxAncestors(256))
 	if err != nil {
 		return "", "", fmt.Errorf("find go.mod: %w", err)

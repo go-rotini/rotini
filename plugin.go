@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// Plugin dispatch: resolving a co-located `<program>-<name>` binary and exec'ing it with the
-// program's streams — canceling the run's context kills the plugin — the git-style
-// sub-command model, declared in the spec as plugins / plugin_discovery.
+// Plugin dispatch resolves a co-located plugin binary (declared in the spec as plugins or
+// plugin_discovery) and execs it with the program's streams. Canceling the run's context kills
+// the plugin.
 
 // PluginErrorKind classifies a plugin-dispatch failure: the plugin binary could
 // not be located, it exceeded its declared timeout, or it could not be spawned.
@@ -27,9 +27,8 @@ const (
 	PluginNotFound PluginErrorKind = iota
 	// PluginTimeout: the plugin ran past its declared timeout and was killed.
 	PluginTimeout
-	// PluginStartFailed: the binary was found but could not be started (a fork/
-	// exec or pipe failure — NOT the plugin's own non-zero exit, which passes
-	// through untouched).
+	// PluginStartFailed: the binary was found but could not be started (a fork,
+	// exec or pipe failure). The plugin's own non-zero exit is not an error kind.
 	PluginStartFailed
 )
 
@@ -47,18 +46,17 @@ func (k PluginErrorKind) String() string {
 	}
 }
 
-// PluginError reports a rotini-authored failure carrying out a plugin dispatch — not the
-// plugin's own non-zero exit, which passes through untouched. It is typed so a reporter can
-// special-case a timeout or a missing plugin without matching the message:
+// PluginError reports a failure by rotini to carry out a plugin dispatch. The plugin's own
+// non-zero exit is not a PluginError; its exit code passes through unchanged.
 //
 //	var re *rotini.PluginError
 //	if errors.As(err, &re) && re.Kind == rotini.PluginTimeout {
 //	    fmt.Fprintf(os.Stderr, "%s timed out after %s\n", re.Name, re.Timeout)
 //	}
 //
-// A missing binary is [CategoryUsage] when discovered (the user's typo) and [CategoryInternal]
+// A missing binary is [CategoryUsage] when discovered (a mistyped token) and [CategoryInternal]
 // when declared (an install problem); a spawn failure is [CategoryInternal]; a timeout is
-// deliberately [CategoryNone], operational and neither party's fault, but still As-able here.
+// [CategoryNone].
 type PluginError struct {
 	Name    string          // the declared plugin name (or discovery token)
 	Binary  string          // the plugin binary that was sought or spawned
@@ -90,28 +88,25 @@ func (e *PluginError) Unwrap() []error {
 	return out
 }
 
-// PluginDispatch is a resolved declared plugin invocation: Def.Binary run with Args. Dir is
-// the command's plugin path, searched after the host binary's own directory and before PATH,
-// for declared and discovered plugins alike; empty means no plugin path. The default
-// resolver produces one for declared and discovered plugins.
+// PluginDispatch is a resolved plugin invocation, declared or discovered: Def.Binary run with
+// Args. Dir is the command's plugin path, searched after the host binary's own directory and
+// before PATH; empty means none.
 type PluginDispatch struct {
 	Def  PluginDef
 	Args []string
 	Dir  string
-	// Discovered marks a plugin-discovery dispatch rather than a declared plugin command,
-	// which decides the error category when the binary cannot be resolved.
+	// Discovered marks a plugin-discovery dispatch rather than a declared plugin, which
+	// decides the error category when the binary cannot be resolved.
 	Discovered bool
 }
 
 // execPlugin locates and runs the co-located plugin binary, passing stdio through, honoring
-// the run context and any timeout, and returning the plugin's exit code. rotini-authored
-// diagnostics are recorded as errors and routed through the reporter; the plugin's own non-zero
-// exit passes through untouched.
+// the run context and any timeout, and returning the plugin's exit code. rotini's own dispatch
+// failures are recorded as errors and routed through the reporter; the plugin's non-zero exit
+// passes through unchanged.
 func (p *Program) execPlugin(ctx context.Context, rtx *Context, r *PluginDispatch) (int, error) {
 	path, err := resolvePluginBinary(r.Def.Binary, r.Dir)
 	if err != nil {
-		// A DISCOVERED token's missing binary is the user's typo (Usage); a
-		// DECLARED plugin's is an install/wiring problem (Internal).
 		cat := CategoryInternal
 		if r.Discovered {
 			cat = CategoryUsage
@@ -129,11 +124,9 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, r *PluginDispatc
 	}
 
 	cmd := exec.CommandContext(ctx, path, r.Args...)
-	// All three streams come from the Program, not from the process, so a host that redirects
-	// them — a test, a REPL feeding a plugin, an embedding program — redirects the plugin too.
-	//
-	// By default p.stdin IS os.Stdin, and exec.Cmd hands an *os.File to the child as a raw
-	// descriptor, so an interactive plugin still gets the real terminal.
+	// All three streams come from the Program, so redirecting them redirects the plugin too.
+	// By default p.stdin is os.Stdin, which exec.Cmd passes as a raw descriptor, so an
+	// interactive plugin still gets the terminal.
 	cmd.Stdin = p.stdin
 	cmd.Stdout = p.stdout
 	cmd.Stderr = p.stderr
@@ -142,9 +135,7 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, r *PluginDispatc
 	case err == nil:
 		return 0, nil
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		// Deliberately CategoryNone (cat unset): a timeout is operational —
-		// neither the user's command nor the author's wiring is "wrong" — but
-		// still As-able as a *PluginError so a reporter can special-case it.
+		// cat is left unset: a timeout is operational, so CategoryNone.
 		return p.pluginFailure(ctx, rtx, &PluginError{
 			Name: r.Def.Name, Binary: r.Def.Binary, Kind: PluginTimeout, Timeout: r.Def.Timeout,
 			Msg: fmt.Sprintf("%s: timed out after %s", r.Def.Name, r.Def.Timeout),
@@ -160,32 +151,22 @@ func (p *Program) execPlugin(ctx context.Context, rtx *Context, r *PluginDispatc
 	}
 }
 
-// pluginFailure records a rotini-authored plugin dispatch error and reports it through the
-// reporter. A missing, timed-out or unspawnable plugin is environmental — the author cannot
-// control whether the consumer installed it — so it is a recorded error, not a fault.
+// pluginFailure records a plugin dispatch error and settles the run. A missing, timed-out or
+// unspawnable plugin is environmental, so it is a recorded error, not a fault.
 func (p *Program) pluginFailure(ctx context.Context, rtx *Context, re *PluginError) (int, error) {
 	rtx.RecordError(re)
 	return p.settle(ctx, rtx)
 }
 
-// PluginBinary reports the executable the named declared plugin of cmd would run, and
-// whether it resolves at all. It searches exactly where dispatch searches, in the same order,
-// which is the entire reason it exists.
+// PluginBinary reports the executable the named plugin of cmd would run, and whether it
+// resolves. It searches where dispatch searches, in the same order: next to the host binary,
+// then the command's plugin path, then PATH. Use it, not exec.LookPath, to check which
+// plugins are installed.
 //
-// A plugin host's first extra command is always a doctor — "what is installed, what is missing"
-// — and without this it has to reimplement rotini's search order from the outside. That order
-// is three steps, the same for both kinds of plugin: next to the host binary, then the
-// command's plugin_path, then PATH. Reaching for exec.LookPath, which is the obvious thing,
-// reports every plugin installed beside the host binary as missing — the git/kubectl convention
-// and the first location rotini tries.
-//
-// name may be a declared plugin's name or one of its aliases, or a discovered plugin's token.
-// It returns "", false when cmd declares no such plugin and has no discovery to fall back on.
-//
-// Like [Command.DiscoveredPlugins], this touches the filesystem on every call and answers about
-// right now: a plugin installed after it returns false will still dispatch.
+// name may be a declared plugin's name or alias, or a discovered plugin's token. It returns
+// "", false when cmd declares no such plugin and has no discovery, or when the binary is not
+// found. It reads the filesystem on every call.
 func (cmd Command) PluginBinary(name string) (string, bool) {
-	// The plugin path applies to both kinds, so it is read once rather than per branch.
 	dir := cmd.PluginPath
 	var binary string
 	switch rd, ok := findPlugin(cmd, name); {
@@ -203,16 +184,9 @@ func (cmd Command) PluginBinary(name string) (string, bool) {
 	return path, true
 }
 
-// resolvePluginBinary finds the plugin binary: first adjacent to the running
-// executable (the git/kubectl convention), then in dir (the command's plugin_path,
-// when set), then anywhere on PATH.
-//
-// dir is the command's PluginPath, and it is the same for both kinds of plugin — a declared
-// one and a discovered one are the same binaries in the same place, so either can be
-// installed in the plugin path.
-//
-// The failure message names the locations actually searched, and only those: telling a user
-// rotini looked in a directory it never consulted would send them hunting in the wrong place.
+// resolvePluginBinary finds the plugin binary: first next to the running executable, then in
+// dir (the command's plugin path, when set), then on PATH. The error names only the locations
+// actually searched.
 func resolvePluginBinary(name, dir string) (string, error) {
 	searched := []string{}
 	if exe, err := os.Executable(); err == nil {

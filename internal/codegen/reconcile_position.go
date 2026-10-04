@@ -1,10 +1,8 @@
 package codegen
 
-// Mapping JSON-pointer instance locations back to line:column positions in the original source
-// bytes, so a validation problem can name the place the user actually typed. Each format
-// delegates to its codec's RFC-6901 locator over a parsed AST whose nodes carry positions;
-// JSON is served by the jsonc parser. Parsing is lazy and cached per document, since locators
-// are consulted only on the failure path.
+// Mapping JSON pointers to line:column positions in the original source. Each format uses
+// its codec's RFC 6901 pointer over a positioned AST; JSON uses the jsonc parser. Parsing is
+// lazy and cached per document, since locators are consulted only when problems exist.
 
 import (
 	"sync"
@@ -14,22 +12,17 @@ import (
 	"github.com/go-rotini/yaml"
 )
 
-// sourceLocator resolves a JSON-pointer instance location ("/command/flags/0/schema")
-// to a 1-based line:column in the original source. ok is
-// false when the pointer cannot be resolved (or the document fails to parse);
-// callers then degrade to pointer-only reporting.
+// sourceLocator resolves a JSON pointer ("/command/flags/0/schema") to a 1-based line and
+// column in the original source. ok is false when the pointer does not resolve or the
+// document does not parse.
 type sourceLocator func(pointer string) (line, col int, ok bool)
 
-// newSourceLocator builds the locator for one read document. It is cheap to
-// build — parsing happens lazily, at most once, on the first lookup — because
-// locators are only consulted on the failure path. A nil return means the
-// format is unrecognized.
+// newSourceLocator builds the locator for one document, or nil for an unrecognized format.
 func newSourceLocator(format fileFormat, data []byte) sourceLocator {
 	switch format {
 	case formatYAML:
 		return yamlLocator(data)
 	case formatJSON, formatJSONC:
-		// JSON is a subset of JSONC, so one parser serves both.
 		return jsoncLocator(data)
 	case formatTOML:
 		return tomlLocator(data)
@@ -58,8 +51,7 @@ func yamlLocator(data []byte) sourceLocator {
 	}
 }
 
-// jsoncLocator resolves a pointer via jsonc.PathPointer; it serves both JSON
-// and JSONC documents.
+// jsoncLocator resolves a pointer via jsonc.PathPointer for JSON and JSONC documents.
 func jsoncLocator(data []byte) sourceLocator {
 	parse := sync.OnceValues(func() (*jsonc.File, error) { return jsonc.Parse(data) })
 	return func(pointer string) (int, int, bool) {
@@ -79,8 +71,7 @@ func jsoncLocator(data []byte) sourceLocator {
 	}
 }
 
-// tomlLocator resolves a pointer via toml.PathPointer. (TOML positions are now
-// supported — previously these problems degraded to pointer-only.)
+// tomlLocator resolves a pointer via toml.PathPointer.
 func tomlLocator(data []byte) sourceLocator {
 	parse := sync.OnceValues(func() (*toml.File, error) { return toml.Parse(data) })
 	return func(pointer string) (int, int, bool) {

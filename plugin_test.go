@@ -12,9 +12,8 @@ import (
 	"time"
 )
 
-// writeFakeBinary writes an executable shell script to a fresh dir on PATH. Windows cannot run
-// a shell script as a program, so tests built on one skip there; plugin dispatch on Windows is
-// covered by the e2e r9 scripts, which build and run real plugin binaries.
+// writeFakeBinary writes an executable shell script to a fresh dir on PATH. Tests built on it
+// skip on Windows; the e2e scripts cover plugin dispatch there with real binaries.
 func writeFakeBinary(t *testing.T, name, body string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -67,19 +66,16 @@ func TestRun_pluginNotFound(t *testing.T) {
 
 	p, _, errb := pluginProgram(def, []string{"missing"})
 	code, err := p.Run(p.args)
-	// A DECLARED plugin whose binary is missing is internal, so the default
-	// reporter exits 1 (it maps no category to a code).
+	// A declared plugin's missing binary is internal; the default reporter exits 1.
 	if code != 1 {
 		t.Errorf("missing plugin exit = %d, want %d", code, 1)
 	}
 	if !strings.Contains(errb.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", errb)
 	}
-	// A DECLARED plugin whose binary is missing is an install/wiring problem.
 	if CategoryOf(err) != CategoryInternal {
 		t.Errorf("CategoryOf = %v, want internal", CategoryOf(err))
 	}
-	// EH6: a typed, As-able *PluginError naming the kind.
 	var re *PluginError
 	if !errors.As(err, &re) || re.Kind != PluginNotFound {
 		t.Errorf("err = %v, want a *PluginError of kind binary-not-found", err)
@@ -102,11 +98,9 @@ func TestRun_discoveryDispatch(t *testing.T) {
 	}
 }
 
-// resolvePluginBinary searches adjacent-to-executable → discovery dir → PATH, in that
-// order. This pins the dir > PATH precedence, the fall-through to PATH when dir misses,
-// and the not-found error naming all three locations. (The adjacent step uses the live
-// os.Executable() dir, which a test cannot seed, so the plugin name is one that never
-// sits beside the test binary — exercising the dir/PATH tail.)
+// TestResolvePluginBinary_resolutionOrder pins plugin path before PATH, the fall-through to
+// PATH, and the not-found error. The next-to-executable step cannot be seeded, so the plugin
+// names never exist beside the test binary.
 func TestResolvePluginBinary_resolutionOrder(t *testing.T) {
 	const name = "rotini-resolveorder-plugin-xyz"
 	// The file a program named `name` lives in: Windows finds programs by extension.
@@ -126,7 +120,7 @@ func TestResolvePluginBinary_resolutionOrder(t *testing.T) {
 	}
 	t.Setenv("PATH", pathDir)
 
-	// dir (discovery path) wins over a same-named binary on PATH.
+	// The plugin path wins over a same-named binary on PATH.
 	if got, err := resolvePluginBinary(name, dir); err != nil {
 		t.Fatalf("resolve via dir: %v", err)
 	} else if got != dirBin {
@@ -140,7 +134,6 @@ func TestResolvePluginBinary_resolutionOrder(t *testing.T) {
 		t.Errorf("resolved %q, want the PATH copy under %q", got, pathDir)
 	}
 
-	// Nowhere → an error naming every search location.
 	_, err := resolvePluginBinary("rotini-absent-plugin-zzz", "")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Errorf("absent binary: err = %v, want a 'not found' error", err)
@@ -152,28 +145,24 @@ func TestRun_discoveryMissing(t *testing.T) {
 
 	p, _, errb := pluginProgram(def, []string{"no-such-plugin-xyz"})
 	code, err := p.Run(p.args)
-	// A DISCOVERED token resolving to no binary is the user's typo (usage), so
-	// the default reporter exits 1 (it maps no category to a code).
+	// A discovered token with no binary is a usage error; the default reporter exits 1.
 	if code != 1 {
 		t.Errorf("missing discovered plugin exit = %d, want %d", code, 1)
 	}
 	if !strings.Contains(errb.String(), "not found") {
 		t.Errorf("stderr = %q, want 'not found'", errb)
 	}
-	// A DISCOVERED token that resolves to no binary is the user's typo.
 	if CategoryOf(err) != CategoryUsage {
 		t.Errorf("CategoryOf = %v, want usage", CategoryOf(err))
 	}
-	// EH6: same typed *PluginError, but usage-categorized for a discovered miss.
 	var re *PluginError
 	if !errors.As(err, &re) || re.Kind != PluginNotFound {
 		t.Errorf("err = %v, want a *PluginError of kind binary-not-found", err)
 	}
 }
 
-// TestRun_pluginTimeout: a plugin that runs past its declared timeout is killed
-// and surfaced as a *PluginError of kind timeout — deliberately CategoryNone
-// (operational). It is still a recorded error, so the default reporter exits 1.
+// TestRun_pluginTimeout pins that a plugin past its timeout is killed and reported as a
+// CategoryNone *PluginError of kind timeout, exiting 1.
 func TestRun_pluginTimeout(t *testing.T) {
 	writeFakeBinary(t, "app-slow", "#!/bin/sh\nsleep 5\n")
 	def := Definition{Name: "app", Handler: "App", Plugins: []PluginDef{
@@ -200,18 +189,8 @@ func TestRun_pluginTimeout(t *testing.T) {
 	}
 }
 
-// TestPluginBinary covers the doctor seam: asking, from outside, whether a plugin
-// sub-command would actually resolve.
-//
-// It exists because the obvious way to answer that — exec.LookPath — is wrong. Dispatch looks
-// NEXT TO THE HOST BINARY first (the git/kubectl convention), then in the command's
-// PluginPath, then on PATH. A doctor built on LookPath reports every conventionally installed
-// plugin as missing, which is what example-plug's `plugins` command did before this.
-//
-// The PluginPath half is the same for both kinds of plugin, and deliberately so: the path
-// used to live on PluginDiscovery, where only DISCOVERED plugins could reach it, so an author
-// had no way to say where a DECLARED plugin lived. They are the same binaries in the same
-// directory; configuring that twice, or only for one of them, was the accident.
+// TestPluginBinary pins that Command.PluginBinary resolves declared plugins, aliases and
+// discovered tokens through the same plugin path dispatch uses.
 func TestPluginBinary(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name string) string {
@@ -273,8 +252,6 @@ func TestPluginBinary(t *testing.T) {
 		}
 	})
 	t.Run("an alias answers identically to its plugin", func(t *testing.T) {
-		// "f" is an alias of "found": an alias that resolved differently from its own
-		// plugin would make the doctor disagree with dispatch.
 		byName, okName := cmd.PluginBinary("found")
 		byAlias, okAlias := cmd.PluginBinary("f")
 		if byName != byAlias || okName != okAlias {
@@ -283,16 +260,8 @@ func TestPluginBinary(t *testing.T) {
 	})
 }
 
-// TestRun_pluginHonorsProgramStdin covers the third stream.
-//
-// execPlugin wired the child's stdout and stderr from the Program — honoring
-// [Program.WithStdout] and [Program.WithStderr] — and then set cmd.Stdin = os.Stdin, reaching
-// around [Program.WithStdin] to the process. Two streams redirected and one not is invisible
-// until something actually feeds a plugin: a test, a REPL wrapping one, a host embedding the
-// CLI. example-plug's suite could dispatch to a real plugin and could not give it input.
-//
-// The default is unaffected — p.stdin IS os.Stdin unless replaced — so an interactive plugin
-// still receives the terminal, which exec.Cmd passes through as a raw fd for an *os.File.
+// TestRun_pluginHonorsProgramStdin pins that a plugin reads the Program's stdin, not the
+// process's.
 func TestRun_pluginHonorsProgramStdin(t *testing.T) {
 	writeFakeBinary(t, "app-cat", "#!/bin/sh\nwc -l\n")
 	def := Definition{
@@ -326,9 +295,8 @@ func TestPluginErrorKind_String(t *testing.T) {
 	}
 }
 
-// On Windows a program is a file with an executable extension: plugin lookup must find
-// host-sync as host-sync.exe, and discovery must offer host-sync.exe as "sync". These run the
-// Windows rules on any OS, so a macOS or Linux run catches a regression too.
+// TestExecutableNames_windowsRules pins the Windows executable-extension rules (host-sync found
+// as host-sync.exe, offered as "sync") on every OS.
 func TestExecutableNames_windowsRules(t *testing.T) {
 	win := executableExts("windows", "")
 	if want := []string{".com", ".exe", ".bat", ".cmd"}; !slices.Equal(win, want) {

@@ -11,22 +11,12 @@ import (
 	"testing"
 )
 
-// doc.go makes a promise about validation that is easy to state and easy to break:
-//
-//	Nothing schema-accepted is silently ignored — a key either has a consumer or
-//	validation rejects it.
-//
-// The reference files enforced it by hand, with a ✘ marker for any key that had no consumer
-// yet. A marker only works while someone is looking, and seven keys were added to the schemas
-// in one sitting — `variable:` had in fact been accepted and ignored on three channels for
-// some time, documented as env-only and enforced nowhere.
-//
-// So the promise is a test. Every field of every generated schema type must be READ somewhere
-// in non-test source: by codegen, by the runtime, or by a lint rule that rejects it. Rejecting
-// a key is a consumer — that is exactly what `timeout` on a local command is for.
+// These tests enforce doc.go's promise that nothing schema-accepted is silently ignored:
+// every field of every generated schema type must be read in non-test source, by codegen,
+// the runtime, a template, or a lint rule that rejects it.
 
-// unreadSchemaFields lists fields that are deliberately never read, with the reason. It should
-// stay empty; an entry is a decision, not a waiver.
+// unreadSchemaFields lists fields that are deliberately never read, with the reason. It
+// should stay empty.
 var unreadSchemaFields = map[string]string{}
 
 // TestEverySchemaKeyHasAConsumer walks the generated schema types and fails on any field no
@@ -87,16 +77,9 @@ func schemaFields(t *testing.T, files ...string) map[string]string {
 	return out
 }
 
-// readFieldNames collects every selector ".Name" appearing in the package's non-test source,
-// in the runtime, and in the codegen TEMPLATES — the three places a spec key ends up being
-// acted on.
-//
-// The templates matter and were missed at first. A key can reach codegen by a whole-struct
-// CONVERSION — `templateDocExitRow(e)` copies every field of an ExitStatusEntry in one
-// expression — and then be read only by `{{.Code}}` in man.txt.tmpl. No Go selector exists
-// anywhere for it. `exit_status.code` is exactly that shape, and it passed this test for
-// months on an unrelated `.Code` in the JSON-RPC server that used to live in the runtime;
-// deleting that server is what exposed the blind spot.
+// readFieldNames collects every ".Name" selector in this package's non-test source, the
+// runtime, and the codegen templates. Templates count because a field copied by whole-struct
+// conversion may be read only there (e.g. `{{.Code}}` in man.txt.tmpl).
 func readFieldNames(t *testing.T) map[string]bool {
 	t.Helper()
 	read := map[string]bool{}
@@ -112,7 +95,7 @@ func readFieldNames(t *testing.T) map[string]bool {
 			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 				continue
 			}
-			// The generated schema types DECLARE the fields; they do not read them.
+			// The generated schema types declare the fields rather than read them.
 			if name == "schema_spec.go" || name == "schema_conf.go" {
 				continue
 			}
@@ -130,8 +113,8 @@ func readFieldNames(t *testing.T) map[string]bool {
 	}
 
 	collect(".")                       // internal/codegen
-	collect(filepath.Join("..", "..")) // the runtime, where several keys are finally acted on
-	collectTemplates(t, read)          // the output stage, where a converted struct is finally read
+	collect(filepath.Join("..", "..")) // the runtime
+	collectTemplates(t, read)
 	return read
 }
 

@@ -6,10 +6,10 @@ import (
 	"time"
 )
 
-// Definition is the compiled command tree for a generated rotini program: codegen emits it as
-// a Go literal, and the runtime parses argv, dispatches and completes against it (help pages
-// are rendered at codegen and supplied through [Program.WithHelp]). Every type in this file is data only, with no behavior, which is what lets the
-// generated file read as a description of the CLI rather than as code.
+// Definition is the compiled command tree of a generated rotini program. Codegen emits it as a
+// Go literal; the runtime parses argv, dispatches and completes against it. Help pages are
+// rendered at codegen and supplied through [Program.WithHelp]. The Definition types are data
+// only, with no behavior.
 type Definition struct {
 	Name             string
 	Handler          string // ProgramHandlers method for the root command, e.g. "Rotini"
@@ -75,7 +75,7 @@ type InputSettings struct {
 	// joined into the config precedence after the declared config_files, so explicit
 	// files beat ambient services. Codegen never emits one; the program appends its own.
 	// A per-input `file:` pin stays a config_files anchor and cannot name a custom
-	// source, and a source name colliding with a declared file is rejected loudly.
+	// source, and a source name colliding with a declared file is rejected.
 	Sources []recon.Source
 	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
 	// self-contained JSON Schema the input reader validates the decoded payload against.
@@ -110,7 +110,7 @@ type PathFromDef struct {
 }
 
 // DiscoverDef locates a configuration file at run time. The strategy orders the directories
-// searched for File; the first containing it wins, and a file found nowhere is simply absent.
+// searched for File; the first containing it wins, and a file found nowhere is absent.
 type DiscoverDef struct {
 	Strategy string // "walk-up" (working directory up to the filesystem root) | "xdg" ($XDG_CONFIG_HOME/<app>, default ~/.config/<app>)
 	File     string // the file name looked for in each searched directory
@@ -169,14 +169,14 @@ type Constraints struct {
 }
 
 // Ptr returns a pointer to v, for the presence-carrying [Constraints] bounds:
-// Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0. It is superseded by the
-// built-in new(v), which go fix inlines it to.
+// Constraints{Minimum: rotini.Ptr(0.0)} declares an enforced >= 0. Prefer the built-in new(v);
+// go fix inlines Ptr to it.
 //
 //go:fix inline
 func Ptr[T any](v T) *T { return new(v) }
 
-// takesValue reports whether a flag consumes a value token — everything but the presence
-// flags, bool (inline value form only) and count.
+// takesValue reports whether a flag consumes a value token: every type but bool (which takes
+// a value only in the inline form) and count.
 func takesValue(fd FlagDef) bool { return fd.Type != "bool" && fd.Type != "count" }
 
 // takesSeparateValue reports whether fd's value may be the NEXT word: a value-taking flag whose
@@ -197,10 +197,6 @@ type FlagDef struct {
 	// each element is seeded as one occurrence, exactly as if the user had repeated the
 	// flag. It is used only when Default is empty, and only when the input is unset from
 	// every channel — a default never merges with a supplied value.
-	//
-	// It exists because Default is one string: before it, a repeatable flag could not
-	// express a multi-value default at all, and the only advice was to seed it in the
-	// handler, which is the one thing declaring inputs in a spec exists to avoid.
 	Defaults []string
 	Enum     []string
 	// IgnoreCase matches a value against Enum without regard to case (`--mode FAST` against
@@ -230,9 +226,7 @@ type FlagDef struct {
 	// [Deprecation] carrying it. Empty means the flag is not deprecated as a whole.
 	Deprecated string
 	// Negatable adds a "--no-<x>" form for every long identifier of a bool flag, which sets
-	// it false. It is how an author expresses "turn this off for one run" when a default, a
-	// config file or an environment variable already turned it on — the direction a plain
-	// bool cannot express at all.
+	// it false, overriding a true default, config value or environment variable.
 	Negatable  bool
 	DottedKeys bool     // map flag whose key=value keys are '.'-separated paths into nested maps (spec dotted_keys)
 	KeyPaths   []string // a map flag's declared key paths (from its schema's properties), completed up to the '='
@@ -243,21 +237,15 @@ type FlagDef struct {
 	Constraints
 }
 
-// Completion is a declarative hint about what an input's VALUE is, for the shell to complete.
-//
-// It covers the case between a static Enum and a [FlagValueCompleter]: "this is a file", which
-// is the commonest value shape there is and the one that previously required writing Go. The
-// hint reaches the shell as a directive on the last line of the hidden __complete output, and
-// each generated script translates it into that shell's own path completion.
-//
-// A dynamic completer still wins when it answers — the hint is the fallback, not a ceiling.
+// Completion is a declarative hint about what an input's value is, for the shell to complete.
+// It reaches the shell as a directive on the last line of the hidden __complete output, and
+// each generated script translates it into that shell's own path completion. A dynamic
+// completer ([FlagValueCompleter], [ArgValueCompleter]) wins when it answers; the hint is the
+// fallback.
 type Completion struct {
 	// Kind is "file", "directory", or "none". Empty means no hint: the shell applies its
-	// own default, which for bash and zsh is file completion.
-	//
-	// "none" is not the same as empty. It SUPPRESSES the shell's default, which is how an
-	// opaque identifier — a container id, an API resource name — stops a shell offering
-	// the contents of the current directory as if they were plausible values.
+	// own default, which for bash and zsh is file completion. "none" suppresses that
+	// default, for opaque values such as resource IDs.
 	Kind string
 	// Extensions narrows Kind "file" to these suffixes, written without a dot
 	// ("yaml", "json"). Empty offers every file.

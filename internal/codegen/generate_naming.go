@@ -9,12 +9,11 @@ import (
 	"unicode"
 )
 
-// Generic naming helpers: Go casing, import-path rendering, and reserved-filename
-// handling for generated identifiers, packages, and stub files.
+// This file holds naming helpers: Go identifier casing, import rendering, and stub file names.
 
-// fieldImport returns the Go import path backing a field's schema: the explicit
-// spec `import:` when set, otherwise the import rotini knows is needed for its own
-// built-in type aliases (duration/time/datetime/date → "time"). "" means no import.
+// fieldImport returns the Go import path a field's type needs: the explicit spec `import:`,
+// else the import a built-in type alias requires (see builtinImport), else "". For an array,
+// the element's `import:` or built-in type is used.
 func fieldImport(schema *InputSchema) string {
 	if schema == nil {
 		return ""
@@ -22,8 +21,6 @@ func fieldImport(schema *InputSchema) string {
 	if imp := strings.TrimSpace(schema.Import); imp != "" {
 		return imp
 	}
-	// An array's element type carries the import: explicit items.import first,
-	// then the built-in vocabulary (items duration → "time").
 	if schema.Items != nil && jsonSchemaTypeToGo(schema.Type) == "[]string" {
 		if imp := strings.TrimSpace(schema.Items.Import); imp != "" {
 			return imp
@@ -33,9 +30,8 @@ func fieldImport(schema *InputSchema) string {
 	return builtinImport(schema.Type)
 }
 
-// builtinImport returns the import path rotini's own type vocabulary requires, or
-// "" when the type needs none. The rotini-defined types (bytesize, hexbytes, base64bytes)
-// need no entry: the generated file already imports the runtime.
+// builtinImport returns the standard-library import a rotini type alias requires, or "" when
+// none is needed. rotini's own types (bytesize, hexbytes, base64bytes) use the runtime import.
 func builtinImport(rotiniType string) string {
 	if elem, ok := strings.CutPrefix(rotiniType, "[]"); ok {
 		return builtinImport(elem)
@@ -58,9 +54,9 @@ func builtinImport(rotiniType string) string {
 	return ""
 }
 
-// parseAliasPath splits the `alias path` external-Go-binding form (shared by an input
-// type's `import:` and a command's `handler.import`) into its alias and path;
-// a bare path derives its alias from the last segment.
+// parseAliasPath splits an "alias path" import (an input's `import:` or a command's
+// `handler.import`) into alias and path. A bare path derives its alias from the last segment
+// via identAlias.
 func parseAliasPath(imp string) (alias, importPath string) {
 	imp = strings.TrimSpace(imp)
 	if a, p, ok := strings.Cut(imp, " "); ok {
@@ -69,8 +65,8 @@ func parseAliasPath(imp string) (alias, importPath string) {
 	return identAlias(filepath.Base(imp)), imp
 }
 
-// renderImports turns a set of spec `import:` values into sorted Go import specs:
-// a plain path becomes "path"; the aliased form "alias path" becomes alias "path".
+// renderImports turns a set of import values into sorted Go import specs: "path" becomes
+// `"path"` and "alias path" becomes `alias "path"`.
 func renderImports(set map[string]bool) []string {
 	out := make([]string, 0, len(set))
 	for imp := range set {
@@ -84,10 +80,9 @@ func renderImports(set map[string]bool) []string {
 	return out
 }
 
-// toPascalCase converts a name to PascalCase, treating '-', '_' and ' ' as word
-// boundaries (e.g. "foo_bar" -> "FooBar", "generate" -> "Generate"). A word that is one of Go's
-// initialisms is written in capitals, as Go's own naming convention and its linters expect:
-// "api-resources" -> "APIResources", "base-url" -> "BaseURL", "apiKey" -> "APIKey".
+// toPascalCase converts a name to PascalCase, treating '-', '_' and ' ' as word boundaries
+// ("foo_bar" -> "FooBar") and capitalizing Go initialisms ("api-resources" -> "APIResources",
+// "base-url" -> "BaseURL", "apiKey" -> "APIKey").
 func toPascalCase(s string) string {
 	var b strings.Builder
 	for _, word := range strings.FieldsFunc(s, func(r rune) bool { return r == '-' || r == '_' || r == ' ' }) {
@@ -98,9 +93,9 @@ func toPascalCase(s string) string {
 	return b.String()
 }
 
-// initialismCase rewrites an already-PascalCase identifier so its initialism words are in
-// capitals: "ApiVersion" -> "APIVersion", "HttpGetUrl" -> "HTTPGetURL". Words are split where a
-// lower-case letter or digit meets an upper-case one, so a run already in capitals is one word.
+// initialismCase capitalizes the initialism words of a PascalCase identifier: "ApiVersion" ->
+// "APIVersion", "HttpGetUrl" -> "HTTPGetURL". Words split where a non-capital meets a capital,
+// so a run of capitals is one word.
 func initialismCase(name string) string {
 	r := []rune(name)
 	var b strings.Builder
@@ -119,8 +114,8 @@ func initialismCase(name string) string {
 	return b.String()
 }
 
-// goInitialisms are the words Go writes in capitals inside an identifier — the list Go's
-// linters check (golint's commonInitialisms).
+// goInitialisms are the initialisms written in capitals inside identifiers (golint's
+// commonInitialisms).
 var goInitialisms = map[string]bool{
 	"ACL": true, "API": true, "ASCII": true, "CPU": true, "CSS": true, "DNS": true, "EOF": true,
 	"GUID": true, "HTML": true, "HTTP": true, "HTTPS": true, "ID": true, "IP": true, "JSON": true,
@@ -130,9 +125,8 @@ var goInitialisms = map[string]bool{
 	"XMPP": true, "XSRF": true, "XSS": true,
 }
 
-// lowerFirst returns s as an unexported identifier: its first rune lower-cased, or the whole
-// leading initialism when s starts with one — "APIResources" -> "apiResources", "URL" -> "url",
-// never "aPIResources".
+// lowerFirst returns s as an unexported identifier, lower-casing its first rune or its whole
+// leading capital run: "APIResources" -> "apiResources", "URL" -> "url".
 func lowerFirst(s string) string {
 	if s == "" {
 		return ""
@@ -154,9 +148,8 @@ func lowerFirst(s string) string {
 	return string(r)
 }
 
-// goReservedFilenames are the trailing "_"-separated tokens the go tool reads specially from a
-// file's name alone: "test", and the GOOS and GOARCH names, which imply a build constraint.
-// One set, since stubFilename needs membership rather than which rule matched.
+// goReservedFilenames are the trailing "_"-separated file name tokens the go tool treats
+// specially: "test", and the GOOS and GOARCH names, which imply a build constraint.
 var goReservedFilenames = func() map[string]bool {
 	m := map[string]bool{}
 	for _, s := range []string{
@@ -176,18 +169,16 @@ var goReservedFilenames = func() map[string]bool {
 	return m
 }()
 
-// reservedTrailingToken reports whether stem's trailing "_"-separated token is one the
-// go tool reads specially from a file's name — "test" (a "_test.go" test file) or a
-// GOOS/GOARCH (an implicit build constraint).
+// reservedTrailingToken reports whether stem's trailing "_"-separated token is in
+// goReservedFilenames.
 func reservedTrailingToken(stem string) bool {
 	parts := strings.Split(stem, "_")
 	return goReservedFilenames[parts[len(parts)-1]]
 }
 
-// stubFilename builds a handler-stub file name from base, escaping the names the go tool would
-// read specially by appending a trailing underscore. That makes the trailing "_"-separated
-// token empty, which matches no rule, so a command named "test" or "windows" still compiles
-// into the ordinary build.
+// stubFilename builds a handler-stub file name from base. A reserved trailing token gets a
+// trailing underscore ("app_test_.go"), so a command named "test" or "windows" still builds
+// on every platform.
 func stubFilename(base string) string {
 	if reservedTrailingToken(base) {
 		base += "_"
@@ -195,11 +186,9 @@ func stubFilename(base string) string {
 	return base + ".go"
 }
 
-// commandStubFilename returns a command's stub file name: its explicit `filename` override, or
-// the derived "<root>[_<path>].go", with every '-' in a command name written '_' as Go file
-// names are ("config_get_contexts.go", not "config_get-contexts.go"). Codegen and
-// lintHandlerFilenames share this derivation, so naming and uniqueness validation agree — two
-// commands that differ only by '-' versus '_' are reported there as a clash.
+// commandStubFilename returns a command's stub file name: its `filename` override, else
+// "<root>[_<path>].go" with '-' written as '_' ("config_get_contexts.go"). lintHandlerFilenames
+// shares this derivation, so it reports commands differing only by '-' versus '_' as a clash.
 func commandStubFilename(rootName, path, override string) string {
 	if override != "" {
 		return override
@@ -211,11 +200,9 @@ func commandStubFilename(rootName, path, override string) string {
 	return stubFilename(strings.ReplaceAll(base, "-", "_"))
 }
 
-// dashedStubFilename is the name commandStubFilename gave a stub before it wrote '-' as '_' —
-// "config_get-contexts.go" — or "" when the two names are the same. A stub is create-once and
-// then the user's, so one seeded under the old name is still THIS command's handler: codegen
-// must neither seed a second copy beside it (the package would declare every type twice) nor
-// prune it as an orphan (which would delete the user's code). See stubFileFor.
+// dashedStubFilename returns the legacy stub name that kept '-' ("config_get-contexts.go"),
+// or "" when it equals the current name. An existing stub under the legacy name is still the
+// command's handler, so codegen neither seeds a duplicate nor prunes it; see stubFileFor.
 func dashedStubFilename(rootName, path, override string) string {
 	if override != "" {
 		return ""
@@ -230,8 +217,8 @@ func dashedStubFilename(rootName, path, override string) string {
 	return ""
 }
 
-// stubFileFor returns the file name of c's stub in dir: the one under its old dashed name when
-// that exists and the current one does not, else the current name.
+// stubFileFor returns the file name of c's stub in dir: the legacy dashed name when only that
+// file exists, else the current name.
 func stubFileFor(dir string, c genCommand) string {
 	if c.dashedFilename == "" {
 		return c.filename

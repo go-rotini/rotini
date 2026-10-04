@@ -11,12 +11,12 @@ import (
 	"strings"
 )
 
-// The machine-readable side of the contract: one JSON Schema file per declared output
-// (generate.schemas.output) and the contract document (generate.contract). Both are opt-in, and
-// both describe only what help already shows: hidden commands and inputs are left out.
+// This file emits the machine-readable contract: one JSON Schema file per declared output
+// (generate.schemas.output) and the contract document (generate.contract). Both are opt-in
+// and, like help, omit hidden commands and inputs.
 
-// contractFormat names the contract document's format and its version. A change that would
-// break a reader bumps the number.
+// contractFormat names the contract document's format and version. Breaking changes bump
+// the version.
 const contractFormat = "rotini-contract/1"
 
 // contractDoc is the contract document. Its format is described by schema-contract.json.
@@ -98,7 +98,7 @@ type contractExit struct {
 	Output  any    `json:"output,omitempty"`
 }
 
-// contractNode is one visible command as the contract and the output schema files see it.
+// contractNode is one visible command as described by the contract and output schema files.
 type contractNode struct {
 	path      []string // names below the root; empty for the root
 	help      cmdHelp
@@ -110,8 +110,8 @@ type contractNode struct {
 	deprecate string
 }
 
-// contractNodes lists the visible commands depth-first, the root first. A hidden command and
-// everything beneath it is left out, as help leaves it out.
+// contractNodes lists the visible commands depth-first, root first. A hidden command and its
+// subtree are omitted.
 func (p *program) contractNodes() []contractNode {
 	visible := func(in *Inputs) []FlagInput {
 		var out []FlagInput
@@ -184,12 +184,12 @@ func underModule(root, key, rel string) (string, error) {
 	return abs, nil
 }
 
-// outputSchemaSuffix ends every file the output schemas directory holds that rotini wrote. Only
-// files with it are ever removed from the directory.
+// outputSchemaSuffix is the suffix of every output schema file rotini writes. Pruning only
+// removes files with this suffix.
 const outputSchemaSuffix = ".output.json"
 
-// writeOutputSchemas writes one JSON Schema per declared output into dir and removes the ones
-// no output produces any more.
+// writeOutputSchemas writes one JSON Schema per declared output (command and per-exit-status)
+// into dir and, unless pruning is skipped, removes stale ones.
 func (p *program) writeOutputSchemas(dir string, nodes []contractNode) error {
 	absDir, err := underModule(p.module.root, "generate.schemas.output.dir", dir)
 	if err != nil {
@@ -235,9 +235,8 @@ func (p *program) writeOutputSchemas(dir string, nodes []contractNode) error {
 	return nil
 }
 
-// outputSchemaFile renders one output's JSON Schema file: the shape as standard JSON Schema,
-// with the named schemas it reaches as definitions. ok is false when the shape references a
-// schema this document does not declare (a composed command's, which its own cli describes).
+// outputSchemaFile renders one output's JSON Schema file (see outputSchemaDoc) with the given
+// title and description. ok is false when the shape references an undeclared schema.
 func outputSchemaFile(title, description string, shape *Schema, schemas map[string]Schema) ([]byte, bool) {
 	body, ok := outputSchemaDoc(shape, schemas)
 	if !ok {
@@ -250,8 +249,8 @@ func outputSchemaFile(title, description string, shape *Schema, schemas map[stri
 	return marshalJSONFile(body), true
 }
 
-// outputSchemaDoc is an output shape as a self-contained standard JSON Schema: the shape, with
-// the named schemas it reaches as definitions. ok is false when it references a schema this
+// outputSchemaDoc renders an output shape as a self-contained standard JSON Schema, with the
+// named schemas it reaches as definitions. ok is false when it references a schema this
 // document does not declare.
 func outputSchemaDoc(shape *Schema, schemas map[string]Schema) (map[string]any, bool) {
 	body, ok := standardSchema(schemaToDoc(*shape)).(map[string]any)
@@ -269,8 +268,9 @@ func outputSchemaDoc(shape *Schema, schemas map[string]Schema) (map[string]any, 
 	return body, true
 }
 
-// outputDefLiteral renders a command's `Output: &rotini.OutputDef{…}` field, or "" when it
-// declares no output. typeName is its generated <Prefix>Output type.
+// outputDefLiteral renders a command's `Output: &rotini.OutputDef{Type, Schema}` field, or ""
+// when it declares no output. typeName is its generated <Prefix>Output type; Schema is omitted
+// when the shape cannot be rendered self-contained.
 func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema) string {
 	if shape == nil {
 		return ""
@@ -286,8 +286,8 @@ func outputDefLiteral(typeName string, shape *Schema, schemas map[string]Schema)
 	return b.String()
 }
 
-// declaresOutput reports whether the generated Definition records any output type, so the
-// file imports reflect.
+// declaresOutput reports whether the generated Definition records any output type, which
+// requires importing reflect.
 func declaresOutput(gp *program) bool {
 	if gp.rootOutput != nil {
 		return true
@@ -484,8 +484,7 @@ func (p *program) contractSources(c *contractCommand, in *Inputs) {
 }
 
 // inputJSONSchema describes an input's value as standard JSON Schema: its type, constraints,
-// enum and default. An input marked `secret` keeps its default out of the contract, whichever
-// channel it is read from: the document is meant to be handed to other tools.
+// enum, and default. A `secret` input's default is omitted.
 func inputJSONSchema(s *InputSchema) any {
 	base := BaseSchema{}
 	if s != nil {
@@ -505,12 +504,11 @@ func inputJSONSchema(s *InputSchema) any {
 	return standardSchema(doc)
 }
 
-// standardSchema rewrites a schema document in the spec's vocabulary into standard JSON Schema
-// (draft-07), in place, and returns it. rotini's type names become JSON Schema types: Go names
-// (int, float64, []string, map[string]int) by their JSON shape, and value types (duration, ip,
-// bytesize, …) as the strings they are written as, with a `format` where JSON Schema has one.
-// A type rotini does not know (an imported Go type) constrains nothing. `nullable` becomes a
-// "null" alternative, and rotini's own keys (import, pattern_message) are dropped.
+// standardSchema rewrites a spec-vocabulary schema document into standard JSON Schema
+// (draft-07) in place and returns it. Go type names map to their JSON shape; value types
+// (duration, ip, bytesize, …) become strings, with a `format` where JSON Schema has one; an
+// unknown type (an imported Go type) constrains nothing. `nullable` becomes a "null"
+// alternative, and rotini-only keys (import, pattern_message) are dropped.
 func standardSchema(v any) any {
 	switch t := v.(type) {
 	case map[string]any:
@@ -550,8 +548,8 @@ func standardSchema(v any) any {
 	}
 }
 
-// standardType is the JSON Schema for one of rotini's type names. existing holds the keys the
-// schema already declares, so a declared `items` or `format` is kept rather than replaced.
+// standardType returns the JSON Schema for a rotini type name. existing holds the schema's
+// declared keys, so a declared `items`, `additionalProperties`, or `format` is kept.
 func standardType(typ string, existing map[string]any) map[string]any {
 	if elem, ok := strings.CutPrefix(typ, "[]"); ok {
 		out := map[string]any{"type": "array"}
@@ -601,8 +599,8 @@ func standardType(typ string, existing map[string]any) map[string]any {
 	}
 }
 
-// marshalJSONFile renders v as an indented JSON file ending in a newline. encoding/json sorts
-// map keys, so the same value always gives the same bytes.
+// marshalJSONFile renders v as indented JSON with a trailing newline. Output is deterministic
+// because encoding/json sorts map keys.
 func marshalJSONFile(v any) []byte {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

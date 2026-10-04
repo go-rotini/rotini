@@ -77,24 +77,17 @@ var InputSettings = rotini.InputSettings{
 	EnvPrefix: "DEMO",
 }
 
-// NewProgram builds the program from the generated command tree and the typed
-// ProgramHandlers. Construct your program with this so the compiler verifies your handlers
-// satisfy ProgramHandlers; the command tree stays an unexported implementation detail.
+// NewProgram builds the program from the generated command tree and handlers. Taking
+// ProgramHandlers makes the compiler check that every command has a handler.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	// InputSettings is a DESCRIPTION of this program, like the command tree above it, so it
-	// travels as a typed option rather than as a registry entry — the registry is yours.
 	return rotini.NewProgram(definition, handlers).
 		WithInputSettings(InputSettings)
 }
 
-// handlers is the generated ProgramHandlers implementation: each method wires a command to its
-// handler, whether a local type or a composed command's delegated package. Program is the
-// ready-to-run program, and Handlers returns a fresh value.
-//
-// Every method below returns a NEW handler per call, which is what makes a handler's fields
-// per-run state: the runtime asks once per command per run and uses what it gets. If you supply
-// your own ProgramHandlers instead of this one, keep that property — a method returning a shared
-// value makes its handler's fields shared across runs, and a data race under concurrent ones.
+// handlers is the generated ProgramHandlers: each method returns a command's handler, local or
+// from a composed command's package. Each call returns a new handler, so a handler's fields
+// are per-run state; a custom ProgramHandlers must do the same, or its handlers share state
+// across concurrent runs.
 type handlers struct{}
 
 var _ ProgramHandlers = (*handlers)(nil)

@@ -5,9 +5,7 @@ import (
 	"testing"
 )
 
-// TestConstraintRendering pins the EXACT struct-tag + Go-literal output of
-// constraintTags/constraintsLiteral before they are deduped behind eachConstraint —
-// the emitted bytes (not just compilation) must stay identical.
+// TestConstraintRendering pins the exact output of constraintTags and constraintsLiteral.
 func TestConstraintRendering(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	s := &InputSchema{
@@ -33,13 +31,7 @@ func TestConstraintRendering(t *testing.T) {
 }
 
 // TestDefinitionTypePreservesParserSemantics pins the split between the Definition's type
-// string and the generated field's Go type.
-//
-// This exists because it was broken in exactly the way a unit test could not see: parser_test
-// hand-builds a Definition with Type "existingfile" and passes, while every CODEGEN path ran
-// the name through jsonSchemaTypeToGo and emitted "string", so the parse-time existence check
-// never fired for a real CLI. The e2e tier now covers the behavior end to end; this covers the
-// seam itself, so a future "simplify" that collapses the two back together fails here first.
+// string (which keeps parser-significant names) and the generated field's Go type.
 func TestDefinitionTypePreservesParserSemantics(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -71,9 +63,8 @@ func TestDefinitionTypePreservesParserSemantics(t *testing.T) {
 	}
 }
 
-// TestDefinitionTypeReachesEmittedLiterals walks the same types through the actual FlagDef and
-// ArgDef emitters, because the helper being right is worth nothing if a call site skips it —
-// which is precisely how the original defect survived.
+// TestDefinitionTypeReachesEmittedLiterals pins that the FlagDef and ArgDef emitters use
+// definitionType.
 func TestDefinitionTypeReachesEmittedLiterals(t *testing.T) {
 	t.Parallel()
 	in := &Inputs{
@@ -93,9 +84,8 @@ func TestDefinitionTypeReachesEmittedLiterals(t *testing.T) {
 	}
 }
 
-// An object flag's definition carries the named schema it is validated against, and its default
-// as the JSON document the flag decodes — one per element for a list. The generic rendering would
-// turn a mapping into key=value occurrences, which loses nesting and splits a value on its commas.
+// TestFlagDefsLiteral_objectFlags pins that an object flag carries its ObjectSchema and a
+// JSON-encoded default (one document per element for a list).
 func TestFlagDefsLiteral_objectFlags(t *testing.T) {
 	schemas := map[string]Schema{
 		"DB": {BaseSchema: BaseSchema{Type: "object", Properties: map[string]Schema{
@@ -127,8 +117,8 @@ func TestFlagDefsLiteral_objectFlags(t *testing.T) {
 	}
 }
 
-// `date` means a calendar date, so it carries Layout "2006-01-02" to the runtime — on the
-// definition for argv, and as a struct tag for env and config — and an explicit `layout:` wins.
+// TestLayoutFor pins that `date` gets Layout "2006-01-02" (on the definition for argv, as a
+// struct tag for env and config) and that an explicit `layout:` wins.
 func TestLayoutFor(t *testing.T) {
 	for _, tc := range []struct {
 		schema *InputSchema
@@ -158,7 +148,8 @@ func TestLayoutFor(t *testing.T) {
 	}
 }
 
-// A `deprecated:` message is compiled into the definition, where rotini.Deprecations reads it.
+// TestDefsLiteral_deprecatedMessages pins that `deprecated:` messages reach the flag, argument,
+// and command literals.
 func TestDefsLiteral_deprecatedMessages(t *testing.T) {
 	in := &Inputs{
 		Flags:     []FlagInput{{Name: "conf", Identifiers: []string{"--conf"}, Deprecated: "use --config"}},

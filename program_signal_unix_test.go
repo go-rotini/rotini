@@ -13,17 +13,15 @@ import (
 	"time"
 )
 
-// swapTrapSignals temporarily replaces the default trapped signal set so a test can use
-// a benign signal (SIGUSR1) instead of SIGINT/SIGTERM, which would disturb the test
-// runner. It returns a restore func. These tests must not run in parallel.
+// swapTrapSignals replaces the default trapped signals with SIGUSR1, which does not disturb
+// the test runner, and returns a restore func. These tests must not run in parallel.
 func swapTrapSignals(sigs ...os.Signal) func() {
 	prev := trapSignals
 	trapSignals = sigs
 	return func() { trapSignals = prev }
 }
 
-// sigRec records every lifecycle hook and runs a fire func in Run (used to raise a
-// signal mid-lifecycle).
+// sigRec records every lifecycle hook and runs fire in Run to raise a signal mid-lifecycle.
 type sigRec struct {
 	log  *[]string
 	fire func(ctx context.Context)
@@ -54,11 +52,8 @@ func newSigProgram(h sigRec) *Program {
 	return p
 }
 
-// The default signal handler (installed because no WithContext is supplied) must, on the
-// first signal, cancel the run context AND halt the lifecycle like rtx.Exit: a cooperative
-// handler observes the cancellation and returns, every begun teardown hook still runs, and
-// the run exits with the conventional signal code (128+signum — for the benign SIGUSR1
-// stand-in that is its own number, not 130).
+// With no WithContext, the first signal cancels the run context and halts the lifecycle:
+// every begun teardown hook runs and the exit code is 128+signum (SIGUSR1's, here).
 func TestDefaultSignals_gracefulShutdownRunsTeardown(t *testing.T) {
 	defer swapTrapSignals(syscall.SIGUSR1)()
 
@@ -84,9 +79,8 @@ func TestDefaultSignals_gracefulShutdownRunsTeardown(t *testing.T) {
 	}
 }
 
-// A second signal forces exit immediately, via the program's exit action (so it is
-// captured here instead of terminating the test), skipping any remaining work — the
-// escape hatch for a handler that would otherwise ignore the first signal's cancellation.
+// A second signal calls the exit action immediately, skipping remaining work, so a handler
+// that ignores cancellation can still be interrupted.
 func TestDefaultSignals_secondSignalForcesExit(t *testing.T) {
 	defer swapTrapSignals(syscall.SIGUSR1)()
 
@@ -122,12 +116,10 @@ func TestDefaultSignals_secondSignalForcesExit(t *testing.T) {
 	}
 }
 
-// When the caller supplies its own context (WithContext), rotini installs no signal trap
-// at all — the caller owns signal handling — so a trapped signal does not cancel the run.
+// With WithContext, rotini installs no signal trap, so a signal does not cancel the run.
 func TestDefaultSignals_withContextOptsOut(t *testing.T) {
 	defer swapTrapSignals(syscall.SIGUSR1)()
-	// Ignore SIGUSR1 at the OS level for the duration so the self-kill is a no-op rather
-	// than terminating the process (default SIGUSR1 disposition is terminate).
+	// Ignore SIGUSR1 so the self-kill does not terminate the process (its default action).
 	signal.Ignore(syscall.SIGUSR1)
 	defer signal.Reset(syscall.SIGUSR1)
 
@@ -147,13 +139,11 @@ func TestDefaultSignals_withContextOptsOut(t *testing.T) {
 	<-delivered
 }
 
-// WithoutSignalHandling suppresses the trap WITHOUT surrendering the context: rotini still
-// owns a cancelable run context (no WithContext here), but installs no signal.Notify, so a
-// trapped signal does not cancel the run.
+// WithoutSignalHandling disables the trap without a supplied context, so a signal does not
+// cancel the run.
 func TestWithoutSignalHandling_suppressesTrap(t *testing.T) {
 	defer swapTrapSignals(syscall.SIGUSR1)()
-	// Ignore SIGUSR1 at the OS level so the self-kill is a no-op rather than terminating the
-	// process (default SIGUSR1 disposition is terminate, and rotini installs no handler here).
+	// Ignore SIGUSR1 so the self-kill does not terminate the process (its default action).
 	signal.Ignore(syscall.SIGUSR1)
 	defer signal.Reset(syscall.SIGUSR1)
 
@@ -173,8 +163,7 @@ func TestWithoutSignalHandling_suppressesTrap(t *testing.T) {
 	<-delivered
 }
 
-// WithSignals forces the trap on for a custom set (no swapTrapSignals — the set is explicit),
-// even though no WithContext was supplied. The graceful action and 128+signum exit hold.
+// WithSignals traps an explicit signal set with the same graceful halt and 128+signum exit.
 func TestWithSignals_trapsCustomSet(t *testing.T) {
 	var log []string
 	h := sigRec{log: &log, fire: func(ctx context.Context) {
@@ -198,10 +187,8 @@ func TestWithSignals_trapsCustomSet(t *testing.T) {
 	}
 }
 
-// WithSignals atop a WithContext context: rotini derives a cancelable CHILD of the caller's
-// context to drive the trap (the two axes are independent — a supplied context no longer
-// forces the trap off). The signal cancels the child, the lifecycle halts gracefully, and
-// teardown runs.
+// WithSignals with WithContext: the signal cancels a derived child of the caller's context,
+// the lifecycle halts, and teardown runs.
 func TestWithSignals_withContext_derivesChildAndTraps(t *testing.T) {
 	var log []string
 	h := sigRec{log: &log, fire: func(ctx context.Context) {
@@ -223,9 +210,8 @@ func TestWithSignals_withContext_derivesChildAndTraps(t *testing.T) {
 	}
 }
 
-// The derived child stays a CHILD: canceling the caller's parent context still propagates
-// down and halts the run (parent→child cancellation), proving rotini never inverts the
-// hierarchy. No signal is raised here — only the parent cancel.
+// With WithSignals and WithContext, canceling the caller's context still halts the run
+// through the derived child. No signal is raised.
 func TestWithSignals_withContext_parentCancelStillHalts(t *testing.T) {
 	parent, cancel := context.WithCancel(context.Background())
 	var log []string
@@ -245,8 +231,7 @@ func TestWithSignals_withContext_parentCancelStillHalts(t *testing.T) {
 	}
 }
 
-// signalExitCode maps any trapped signal to 128+signum (SIGINT→130, SIGTERM→143,
-// SIGHUP→129), not just the two defaults — the generalization WithSignals relies on.
+// signalExitCode maps any signal to 128+signum (SIGINT→130, SIGTERM→143, SIGHUP→129).
 func TestSignalExitCode_mapping(t *testing.T) {
 	cases := []struct {
 		sig  syscall.Signal

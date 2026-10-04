@@ -8,10 +8,10 @@ import (
 	"github.com/go-rotini/recon"
 )
 
-// The à-la-carte input surface: per-channel acquisition, each returning a sparsely-populated
-// [InputLayer] over the generated inputs type, and [MergeInputs], which merges layers where slice
-// order is precedence. [Context.Inputs] is the convenience path over the same machinery; these exist
-// so a handler can acquire, inspect, reorder, or replace any channel individually:
+// The per-channel input surface: each acquisition method returns a sparse [InputLayer] over the
+// generated inputs type, and [MergeInputs] merges layers with slice order as precedence.
+// [Context.Inputs] is the convenience path over the same machinery; these let a handler
+// acquire, inspect, reorder, or replace any channel individually:
 //
 //	defaults, _ := rtx.DefaultInputs[MycliInputs]()
 //	files, _    := rtx.FileInputs[MycliInputs]()
@@ -21,8 +21,7 @@ import (
 //	if err := report.Validate(); err != nil { /* handler owns it */ }
 
 // FieldPath identifies one leaf field of a generated inputs struct by its dot-joined Go field
-// path, e.g. "RotiniGenerate.Flags.ConfFilePath". The channel parsers and the overlay derive
-// it from the same type, so the two can never disagree.
+// path, e.g. "RotiniGenerate.Flags.ConfFilePath".
 type FieldPath string
 
 // InputSource records which layer supplied a field's value and the raw text it supplied. Raw is
@@ -32,12 +31,12 @@ type InputSource struct {
 	Raw   string // the supplied text, a list's values joined with ", " whichever layer supplied it ("" when non-textual, e.g. a decoded stdin document); "[redacted]" for secrets
 }
 
-// Presence maps each field a layer actually supplied to its provenance. It is what makes
-// overlay precedence real: a layer's absent fields are skipped, never copied.
+// Presence maps each field a layer supplied to its provenance. Overlay copies only these
+// fields, so a layer's absent fields never overwrite a lower layer's values.
 type Presence map[FieldPath]InputSource
 
-// InputLayer is one input channel's view of the inputs type T: the values it supplied — everything
-// else is T's zero value — and exactly which fields those are. Layers from rotini's channel
+// InputLayer is one input channel's view of the inputs type T: the values it supplied (all
+// other fields are zero) and which fields those are. Layers from rotini's channel
 // parsers also carry unexported data that [InputReport.Validate] uses; a hand-built InputLayer
 // participates in overlay and provenance but contributes nothing to validation. A nil or empty
 // Set means the layer supplied nothing: overlaying it leaves every field as it was.
@@ -50,7 +49,7 @@ type InputLayer[T any] struct {
 }
 
 // layerCore is the channel parsers' validation payload, in the same store shape the Parser
-// validates, so a merged Report reuses the exact validation and error text of [Parser.Parse].
+// validates, so a merged [InputReport] reuses the validation and error text of [Parser.Parse].
 type layerCore struct {
 	chain       []Command
 	store       *parsedInputs
@@ -59,35 +58,24 @@ type layerCore struct {
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
 
-// Inputs is the typical handler's entire input story: every declared channel — argv,
-// environment, configuration files, the stdin payload, defaults — acquired, reconciled in the
-// standard precedence (defaults < files < env < argv), and validated, in one call:
+// Inputs acquires every declared channel (argv, environment, configuration files, the stdin
+// payload, defaults), reconciles them in the standard precedence defaults < files < env < argv,
+// validates the result, and returns it:
 //
 //	inputs, err := rtx.Inputs[MycliDeployInputs]()
 //
-// The stdin channel is not in that order because it never competes: it fills the leaf command's
-// declared payload field, which no other channel writes. It is overlaid last, and where it sits
-// makes no difference.
+// Stdin is outside that order because it never competes: it fills only the leaf command's
+// payload field, which no other channel writes.
 //
-// On failure the returned T holds whatever was filled before the failure, including the value
-// that failed. **It is not a result — check the error and stop.** It is deliberately weaker
-// than [Context.InputsWithReport]'s: Inputs stops at the first argv problem, before the
-// environment and configuration channels are read at all, because an argv error is the one
-// worth reporting; so a config-supplied default that InputsWithReport would show is simply
-// absent here. InputsWithReport hands its merged value back on purpose, paired with the Report
-// that explains it.
+// T must be the inputs type generated for the command whose hook is running ([Context.Command]),
+// in any hook. Its last field describes that command and the preceding fields its ancestors, so
+// the struct is anchored on the running command regardless of how deep the invocation went. A
+// type that cannot be anchored there is an error, not a silent zero value.
 //
-// **A handler collects the type generated for its own command, in any hook.** That is the whole
-// rule. An inputs struct's last field describes the collecting command and the fields before it
-// describe its ancestors, so Inputs anchors the struct on [Context.Command] — the command whose
-// hook is running. A leaf's Run, a cascading hook three commands up, a composed child mounted
-// under someone else's umbrella: same call, correct in each. Anchoring on the running command,
-// rather than inferring it from the struct's shape, is what makes the answer independent of how
-// deep this invocation went; a type that cannot sit there is an error, never a silent zero. A
-// caller who wants to read the chain directly has [Context.CommandChain].
-//
-// It is [InputReader.Read] under the hood, so errors are the same data-shaped [*ParseError]s and
-// [*InputError]s. Use [Context.InputsWithReport] when "where did this value come from" matters.
+// Inputs delegates to [InputReader.Read]; errors are [*ParseError] and [*InputError] values. On
+// error the returned T is partially filled and must not be used. Inputs stops at the first argv
+// error, before the environment and configuration channels are read; use
+// [Context.InputsWithReport] for a merged value and per-field provenance alongside the error.
 func (rtx *Context) Inputs[T any]() (T, error) {
 	var t T
 	err := readerFor(rtx).Read(rtx, &t)
@@ -95,11 +83,10 @@ func (rtx *Context) Inputs[T any]() (T, error) {
 }
 
 // InputsWithReport is [Context.Inputs] with provenance: the same reconciled, validated inputs
-// plus the [InputReport] answering Winner and History per field. It overlays the per-channel
-// layers in the standard precedence, producing the same values Inputs does at the cost of
-// acquiring each channel separately. A validation failure returns the merged inputs and the
-// report alongside the error, so a reporter can still say which layer supplied the offending
-// value.
+// plus an [InputReport] giving each field's Winner and History. It acquires each channel
+// separately and overlays the layers in the standard precedence. An acquisition error returns
+// the zero T; a validation error returns the merged inputs and report alongside it, so the
+// caller can see which layer supplied the offending value.
 func (rtx *Context) InputsWithReport[T any]() (T, InputReport, error) {
 	var zero T
 	defaults, err := rtx.DefaultInputs[T]()
@@ -123,8 +110,7 @@ func (rtx *Context) InputsWithReport[T any]() (T, InputReport, error) {
 		return zero, InputReport{}, err
 	}
 	merged, report := MergeInputsWithReport(defaults, files, env, argv, stdin)
-	// No frame-fit check here: every layer above already ran it through layerAnchor, over the
-	// same type and chain, so a struct that cannot sit on the chain never reaches this point.
+	// No fit check needed: every layer above already ran layerAnchor over the same type and chain.
 	if err := report.Validate(); err != nil {
 		return merged, report, err
 	}
@@ -169,9 +155,9 @@ func (rtx *Context) StdinInputs[T any]() (InputLayer[T], error) {
 	return InputLayer[T]{Name: "stdin", Values: t, Set: set, core: core}, err
 }
 
-// DefaultInputs synthesizes the spec's declared defaults as an explicit layer — conventionally
-// layer 0, which makes "no input at all" visible and testable. Flag and argument defaults come
-// from the resolved chain; env and config defaults from their recon tags.
+// DefaultInputs synthesizes the spec's declared defaults as an explicit layer, conventionally
+// the lowest. Flag and argument defaults come from the resolved chain; env and config defaults
+// from their recon tags.
 func (rtx *Context) DefaultInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := defaultsLayer(rtx, reflect.ValueOf(&t).Elem())
@@ -238,9 +224,9 @@ func copyFieldByPath(dst, src reflect.Value, path FieldPath) {
 
 // ── the report ───────────────────────────────────────────────────────────────.
 
-// InputReport is the merged provenance of one overlay: which layer won each field,
-// every layer that set it (low → high), and validation over the merged values. The zero InputReport
-// is usable: it reports no fields, and its Validate returns nil.
+// InputReport is the merged provenance of one overlay: which layer won each field, every layer
+// that set it (low → high), and validation over the merged values. The zero InputReport reports
+// no fields, and its Validate returns nil.
 type InputReport struct {
 	set     Presence
 	history map[FieldPath][]InputSource
@@ -255,14 +241,13 @@ func (r InputReport) Winner(path FieldPath) (InputSource, bool) {
 	return p, ok
 }
 
-// History returns every layer that set path, low → high precedence — the last
-// element is the winner.
+// History returns every layer that set path, low → high precedence; the last element is the
+// winner.
 func (r InputReport) History(path FieldPath) []InputSource {
 	return r.history[path]
 }
 
-// Fields returns every field any layer set, sorted, for stable doctor-style
-// output.
+// Fields returns every field any layer set, sorted.
 func (r InputReport) Fields() []FieldPath {
 	return sortedPaths(r.set)
 }
@@ -271,19 +256,14 @@ func (r InputReport) Fields() []FieldPath {
 // constraints, flag groups and dependencies — with "explicitly set" meaning set by the argv
 // layer. Run it after the overlay so a required flag satisfied by any layer passes.
 //
-// It checks what the layers SUPPLIED, which is not the same as checking the merged struct
-// field by field:
+// It checks what the layers supplied, not the merged struct field by field:
 //
-//   - PRESENCE rules fire on absence. A required input no layer supplied is an error.
-//   - VALUE rules fire only on a value some layer supplied. A field nobody supplied is absent,
-//     and its zero value is not measured against its enum or bounds.
+//   - Presence rules fire on absence: a required input no layer supplied is an error.
+//   - Value rules fire only on a supplied value: an unsupplied field's zero value is not checked
+//     against its enum or bounds.
 //
-// That distinction is invisible while the defaults layer is present, because a declared default
-// supplies the field. Drop [Context.DefaultInputs] from a custom precedence and an
-// enum-constrained flag can merge as "" — legally, because nothing claimed it — so build custom
-// precedence from all five channels unless leaving one out is the point.
-//
-// Hand-built layers contribute values but nothing to validate.
+// A merge that omits [Context.DefaultInputs] can therefore yield an enum-constrained flag as ""
+// without error. Hand-built layers contribute values but nothing to validate.
 func (r InputReport) Validate() error {
 	if r.chain == nil || r.store == nil {
 		return nil
@@ -346,7 +326,8 @@ func (r *InputReport) finalize() {
 	}
 }
 
-// argvSetAt returns frame idx's argv-set record, nil-safe.
+// argvSetAt returns the argv-set record at chain index idx, or nil when p is nil or idx is out
+// of range.
 func (p *parsedInputs) argvSetAt(idx int) map[string]bool {
 	if p == nil || idx < 0 || idx >= len(p.argvSet) {
 		return nil
@@ -356,14 +337,9 @@ func (p *parsedInputs) argvSetAt(idx int) map[string]bool {
 
 // ── channel cores (shared, non-generic) ──────────────────────────────────────.
 
-// layerAnchor is frameAnchor plus checkFrameFit, for the per-channel layer functions.
-//
-// Every layer goes through this rather than calling frameAnchor directly, so the anchor and the
-// fit check cannot drift apart: a layer computing the anchor alone would accept a struct that
-// cannot describe the running command and return it zeroed, with a nil error.
-//
-// Callers invoke it where they would have computed the anchor, which is after any parse step, so
-// a malformed command line still reports itself before this does.
+// layerAnchor is checkFrameFit plus frameAnchor, so no layer can accept a struct that does not
+// describe the running command and return it zeroed with a nil error. Callers invoke it after
+// any parse step, so a malformed command line reports itself first.
 func layerAnchor(rtx *Context, v reflect.Value, chain []Command) (int, error) {
 	self := rtx.frameIndex()
 	if err := checkFrameFit(v, chain, self); err != nil {
@@ -417,7 +393,6 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 		return nil, nil, err
 	}
 
-	// Flag defaults bind through the same store machinery as parsed values.
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	applyDefaults(chain, store)
 	anchor, err := layerAnchor(rtx, v, chain)
@@ -428,8 +403,8 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 		return nil, nil, err
 	}
 
-	// Argument defaults are sparse (per index); record them for the overlay's
-	// gap rule and set the corresponding fields directly.
+	// Argument defaults are sparse (per index); they are recorded for the overlay's gap rule
+	// and bound into their fields directly below.
 	leaf := chain[len(chain)-1]
 	argDefaults := map[int]string{}
 	for i, ad := range leaf.Arguments {
@@ -451,7 +426,6 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				Raw:   redactValue(fd.Default, fd.Secret),
 			}
 		})
-		// Positional defaults: bind per-index into the Arguments struct.
 		if scope == len(chain)-1 {
 			idx := 0
 			eachTaggedField(ci, "Arguments", func(fieldName, _ string, _ reflect.StructTag, f reflect.Value) {
@@ -503,8 +477,7 @@ func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCo
 	}
 	defer envReg.Close()
 
-	// Flag env-fallbacks read the plain env projection of the recon key, the
-	// same source order reconcileFlags gives them.
+	// Flag env fallbacks read the env projection of the recon key, as in reconcileFlags.
 	flagReg, err := recon.New(recon.WithSource(flagEnvSource(v, b.envPrefix)))
 	if err != nil {
 		return nil, nil, internalBind(channelEnv, "", "could not build the environment registry", err)
@@ -688,8 +661,8 @@ func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layer
 
 // ── shared walking helpers ───────────────────────────────────────────────────.
 
-// layerChain validates the context and returns its resolved chain — the same
-// preconditions Parser.parseBind enforces.
+// layerChain validates the context and returns its resolved chain, enforcing the same
+// preconditions as Parser.parseBind.
 func layerChain(rtx *Context) ([]Command, error) {
 	if rtx == nil {
 		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
@@ -702,8 +675,8 @@ func layerChain(rtx *Context) ([]Command, error) {
 }
 
 // walkCommandStructs visits each per-command CommandInputs field with its Go field name and
-// chain scope index, the struct's first field sitting at chain frame offset (the anchor
-// frameAnchor derives from the collecting command's own frame).
+// chain index, the struct's first field sitting at chain index offset (the anchor frameAnchor
+// computes).
 func walkCommandStructs(v reflect.Value, chain []Command, offset int, visit func(topName string, scope int, ci reflect.Value)) {
 	if v.Kind() != reflect.Struct {
 		return

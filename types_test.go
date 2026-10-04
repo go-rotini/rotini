@@ -113,8 +113,7 @@ func TestParseDuration_daysAndWeeks(t *testing.T) {
 	}
 }
 
-// coerce is where every flag value becomes a Go value, so each new type is driven through it —
-// the same path a real parse takes — rather than only through its own parser.
+// Each value type is driven through coerce, the path a real parse takes.
 func TestCoerce_valueTypes(t *testing.T) {
 	var fields struct {
 		URL   *url.URL
@@ -166,8 +165,8 @@ func TestCoerce_valueTypes(t *testing.T) {
 	}
 }
 
-// A bad value is a typed coerceError naming the value and the type — which is what lets the
-// caller redact a secret and name the flag the user typed.
+// A bad value is a typed coerceError naming the value and the type, so the caller can redact a
+// secret and name the flag the user typed.
 func TestCoerce_valueTypesRejectBadInput(t *testing.T) {
 	var fields struct {
 		URL  *url.URL
@@ -219,7 +218,7 @@ func TestParseBool_spellings(t *testing.T) {
 	}
 }
 
-// The spelling reaches a bool flag through the one coercion path every source shares.
+// The extended bool spellings reach a bool flag through the coercion path every source shares.
 func TestParse_boolFlagSpellings(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -299,10 +298,8 @@ func TestCoerceWithLayout(t *testing.T) {
 	}
 }
 
-// TestFormatDuration pins how a duration bound prints in an error: as a user writes one. A
-// `maximum: 30d` used to be reported as "must be <= 720h0m0s" — a spelling the user never wrote,
-// in hours because Go's formatter has no days. Every output parses back to the
-// same duration.
+// TestFormatDuration pins that a duration bound prints as a user writes one (days as "d", no
+// zero units) and that every output parses back to the same duration.
 func TestFormatDuration(t *testing.T) {
 	for d, want := range map[time.Duration]string{
 		30 * 24 * time.Hour:          "30d",

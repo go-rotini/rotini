@@ -10,19 +10,13 @@ import (
 	"testing"
 )
 
-// Program and Context both open their doc with a map of their own surface, grouped by job, so
-// `go doc Program` hands a reader the shape before the alphabet. That is only useful while it is
-// COMPLETE: a map missing an entry is worse than no map, because it is read as exhaustive.
-//
-// Both maps were built by hand and verified once, by eye. These keep them true — adding a method
-// without placing it in a group, or renaming one out from under a group, now fails here.
+// Program and Context open their doc with a map of their surface, grouped by job. A map is read
+// as exhaustive, so these tests fail when a method is missing from it or a mapped name no
+// longer exists.
 
-// packageDoc parses this package's non-test sources into go/doc's view of it.
-//
-// The files are walked here rather than with parser.ParseDir, which is deprecated, and NOT with
-// golang.org/x/tools/go/packages, which is what the deprecation points at: rotini's module
-// imports nothing outside the go-rotini family, and a doc-shape assertion is not worth being the
-// first thing to break that, even in a test.
+// packageDoc parses this package's non-test sources into go/doc's view of it. It walks the
+// files itself because parser.ParseDir is deprecated and its replacement,
+// golang.org/x/tools/go/packages, would add a dependency outside the go-rotini family.
 func packageDoc(t *testing.T) *doc.Package {
 	t.Helper()
 	entries, err := os.ReadDir(".")
@@ -91,8 +85,8 @@ func TestTypeDocsMapEveryMethod(t *testing.T) {
 	}
 }
 
-// TestTypeDocsNameNothingImaginary is the other direction: a group pointing at a method that no
-// longer exists sends a reader to a dead link, which is how a rename leaves debris behind.
+// TestTypeDocsNameNothingImaginary pins the reverse direction: every method a doc map links to
+// exists.
 func TestTypeDocsNameNothingImaginary(t *testing.T) {
 	d := packageDoc(t)
 	for _, typeName := range mappedTypes {

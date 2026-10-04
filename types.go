@@ -17,29 +17,24 @@ import (
 	"time"
 )
 
-// Value types rotini parses for you: the input types CLIs commonly accept that neither Go's
-// builtins nor encoding.TextUnmarshaler cover.
+// Value types beyond Go's builtins and encoding.TextUnmarshaler, by two mechanisms:
 //
-// Two mechanisms, chosen by what the Go type can say about itself:
-//
-//   - A standard-library type that is already distinct — *url.URL, mail.Address, *time.Location,
-//     net.HardwareAddr — is parsed through [valueParsers], keyed on the type itself. A spec's
-//     `type: url` generates a `*url.URL` field and needs nothing else.
-//   - A value whose Go representation would be ambiguous — a byte size is an int64, hex and
-//     base64 are []byte — gets a small named type here that parses itself ([ByteSize], [HexBytes],
-//     [Base64Bytes]). A plain int64 field could not tell the parser that "512Mi" is a size.
+//   - A distinct standard-library type (*url.URL, mail.Address, *time.Location,
+//     net.HardwareAddr) is parsed through [valueParsers], keyed on the type itself.
+//   - A value whose Go representation is ambiguous (a byte size is an int64; hex and base64 are
+//     []byte) gets a named type that parses itself: [ByteSize], [HexBytes], [Base64Bytes].
 
 // ByteSize is a count of bytes that parses human sizes: `512Mi`, `10MB`, `1.5GiB`, `4096`.
 //
-// Suffixes follow the SI and IEC standards, so the `i` is what makes a unit binary:
+// Suffixes follow the SI and IEC standards; the `i` makes a unit binary:
 //
 //	B                  1
-//	K  KB   M  MB  …   1000, 1000², … (decimal, as kubectl reads them)
+//	K  KB   M  MB  …   1000, 1000², … (decimal)
 //	Ki KiB  Mi MiB …   1024, 1024², … (binary)
 //
 // Letters are case-insensitive and fractions are allowed (`1.5Gi`); the result is rounded to a
-// whole number of bytes. Note that some tools — docker's `-m 512m`, notably — read a bare `m` as
-// binary. rotini follows the standard; write `512Mi` when a mebibyte is what you mean.
+// whole number of bytes. A bare `m` is decimal (megabytes), unlike some tools that read it as
+// binary.
 //
 // A spec declares one with `type: bytesize`.
 type ByteSize int64
@@ -151,10 +146,10 @@ func (b Base64Bytes) MarshalText() ([]byte, error) { return []byte(b.String()), 
 // String renders the bytes as standard, padded base64.
 func (b Base64Bytes) String() string { return base64.StdEncoding.EncodeToString(b) }
 
-// valueParsers parse the standard-library types CLIs commonly take as input but that do not
-// implement encoding.TextUnmarshaler, keyed on the exact field type. [coerce] consults it before
-// anything else — including pointer dereferencing, since *url.URL and *time.Location are built by
-// their parsers rather than filled in place.
+// valueParsers parse standard-library input types that do not implement
+// encoding.TextUnmarshaler, keyed on the exact field type. [coerce] consults it before anything
+// else, including pointer dereferencing, because *url.URL and *time.Location are built by their
+// parsers rather than filled in place.
 var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
 	reflect.TypeFor[*url.URL](): func(s string) (reflect.Value, error) {
 		u, err := url.Parse(s)
@@ -180,8 +175,8 @@ var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
 		}
 		return reflect.ValueOf(loc), nil
 	},
-	// time.Time parses itself (RFC 3339), but its error — cannot parse "" as "T" — explains
-	// nothing to someone who typed a date where a timestamp was wanted.
+	// time.Time parses itself, but this entry replaces its unhelpful layout error with one
+	// that names the expected format.
 	reflect.TypeFor[time.Time](): func(s string) (reflect.Value, error) {
 		t, err := time.Parse(time.RFC3339, strings.TrimSpace(s))
 		if err != nil {
@@ -198,8 +193,7 @@ var valueParsers = map[reflect.Type]func(string) (reflect.Value, error){
 	},
 }
 
-// valueTypeLabels name the value types in a parse error the way a user thinks of them: "is not
-// a valid URL" rather than "is not a valid *url.URL".
+// valueTypeLabels name value types in a parse error in user terms ("URL", not "*url.URL").
 var valueTypeLabels = map[reflect.Type]string{
 	reflect.TypeFor[*url.URL]():         "URL",
 	reflect.TypeFor[mail.Address]():     "email address",
@@ -222,9 +216,8 @@ func typeLabel(t reflect.Type) string {
 	return t.String()
 }
 
-// parseBool reads the spellings of true and false CLIs and config files use, case-insensitively:
-// true/false, t/f, 1/0, yes/no, y/n, on/off. strconv.ParseBool stops at the first three, so
-// `--cache=off` or `APP_DEBUG=yes` was an error.
+// parseBool reads true/false, t/f, 1/0, yes/no, y/n and on/off, case-insensitively: a wider
+// set than strconv.ParseBool accepts.
 func parseBool(s string) (bool, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "true", "t", "1", "yes", "y", "on":
@@ -320,8 +313,7 @@ func coerceWithLayout(f reflect.Value, raw []string, layout string) error {
 // durationDays matches a day or week component of a duration: `7d`, `1.5w`.
 var durationDays = regexp.MustCompile(`(\d*\.?\d+)([dw])`)
 
-// parseDuration is [time.ParseDuration] plus days (`d`, 24h) and weeks (`w`, 168h), which Go's
-// parser stops short of and which retention, expiry and `--since` flags reach for constantly.
+// parseDuration is [time.ParseDuration] plus days (`d`, 24h) and weeks (`w`, 168h).
 // Components combine as usual: `1d12h`, `2w3d`, `1.5d`.
 func parseDuration(s string) (time.Duration, error) {
 	expanded := s
@@ -338,10 +330,9 @@ func parseDuration(s string) (time.Duration, error) {
 	return d, nil
 }
 
-// formatDuration writes d the way a duration input is written: whole days as "d", and no zero
-// units — "30d", "1d12h", "1h30m", "90s" rather than Go's "720h0m0s". It is how a bound prints
-// in an error, so `maximum: 30d` is reported as "<= 30d", not in a spelling the user never wrote
-// and Go's formatter cannot produce (it has no days).
+// formatDuration writes d the way a duration input is written, with whole days as "d" and no
+// zero units ("30d", "1d12h", "1h30m", "90s"), so a bound such as `maximum: 30d` prints in an
+// error as the spec wrote it.
 func formatDuration(d time.Duration) string {
 	if d < 0 {
 		return "-" + formatDuration(-d)

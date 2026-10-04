@@ -10,15 +10,12 @@ import (
 	"testing"
 )
 
-// This file is the in-process tier of the input conformance suite: the input
-// matrix, encoded as code. `make test-conformance` runs it.
-//
-// TestConformance_matrixComplete below holds the canonical ID list; that list,
-// plus each case's own comment, IS the matrix definition — there is no separate
-// prose document to keep in sync. Every ID appears exactly once across the whole
-// suite: most here, and the handful only a real process can witness (exit codes,
-// auto-detected pipes, the no-pipe sentinel) in the acceptance tier
-// (acceptance_test.go). TestConformance_matrixComplete enforces that split.
+// This file is the in-process tier of the input conformance suite; `make
+// test-conformance` runs it. TestConformance_matrixComplete holds the canonical
+// ID list, which with each case's comment is the matrix definition. Every ID
+// appears exactly once: here, or in the acceptance tier (acceptance_test.go)
+// for cases only a real process can observe (exit codes, auto-detected pipes,
+// the no-pipe sentinel).
 
 // ── the acme fixture ─────────────────────────────────────────────────────────
 //
@@ -582,7 +579,6 @@ func conformanceCases() []inputCase {
 				}
 			}},
 
-		// ── CFG — config files ──
 		{id: "FLAG-12", args: []string{"--loud", "-ll", "deploy"},
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// A count flag tallies occurrences across long, short, and
@@ -602,6 +598,7 @@ func conformanceCases() []inputCase {
 				}
 			}},
 
+		// ── CFG — config files ──
 		{id: "CFG-01", args: []string{"--config", "../explicit.yaml", "deploy"},
 			files: map[string]string{"explicit.yaml": "acme:\n  output: from-explicit\n"},
 			check: func(t *testing.T, rtx *Context, meta InputSettings) {
@@ -643,8 +640,8 @@ func conformanceCases() []inputCase {
 				if !strings.Contains(err.Error(), "broken.yaml") {
 					t.Errorf("err = %v, want the offending file named", err)
 				}
-				// EH4: a malformed file the user supplied is a typed, usage-class
-				// *InputError that never leaks recon's parser text.
+				// A malformed user-supplied file is a usage-class *InputError
+				// that does not leak recon's parser text.
 				var be *InputError
 				if !errors.As(err, &be) || be.Channel != "config" {
 					t.Errorf("err = %v, want a config *InputError", err)

@@ -90,8 +90,8 @@ func TestCategory_String(t *testing.T) {
 	}
 }
 
-// TestCategory_severityOrdering pins the ordering CategoryOf's doc tells reporters to rely on when
-// summarizing a run: a plain comparison must keep the worst category.
+// TestCategory_severityOrdering pins none < usage < internal, so a plain comparison keeps the
+// worst category.
 func TestCategory_severityOrdering(t *testing.T) {
 	if !(CategoryNone < CategoryUsage && CategoryUsage < CategoryInternal) {
 		t.Fatal("the categories are no longer ordered none < usage < internal")
@@ -112,15 +112,13 @@ func TestCategory_severityOrdering(t *testing.T) {
 	}
 }
 
-// TestCategory_usageWinsWithinOneError documents the other half: for a SINGLE value carrying
-// both sentinels, usage wins. It is pinned so the tie-break cannot change silently.
+// TestCategory_usageWinsWithinOneError pins that a single error carrying both sentinels reports
+// usage, regardless of join order.
 func TestCategory_usageWinsWithinOneError(t *testing.T) {
 	both := errors.Join(UsageError(errors.New("bad input")), InternalError(errors.New("a bug")))
 	if got := CategoryOf(both); got != CategoryUsage {
 		t.Errorf("CategoryOf(join(usage, internal)) = %v, want usage", got)
 	}
-	// And the reverse order gives the same answer — the tie-break is the test order, not the
-	// argument order, which is what makes it predictable.
 	flipped := errors.Join(InternalError(errors.New("a bug")), UsageError(errors.New("bad input")))
 	if got := CategoryOf(flipped); got != CategoryUsage {
 		t.Errorf("CategoryOf(join(internal, usage)) = %v, want usage", got)

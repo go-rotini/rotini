@@ -7,27 +7,22 @@ import (
 	"strings"
 )
 
-// This file holds the conf lint STAGE: the lintConf method plus the rotini-specific
-// conf rules (the checks the JSON Schema cannot express). Each rule is a pure
-// func(*Conf) []error, registered in confLints.
+// The conf lint stage: rotini-specific rules the JSON Schema cannot express. Each rule
+// is a pure func(*Conf) []error registered in confLints.
 
-// lintConf is the lint stage for the conf: it runs every conf rule over the reconciled
-// conf, returning every problem. It assumes the conf is schema-valid (the Processor runs
-// it only after validateConf passes).
+// lintConf runs every conf rule and positions each problem in source. It assumes the conf
+// is schema-valid.
 func (p *Processor) lintConf(rc *reconciledConf) []error {
 	problems := make([]error, 0, len(confLints))
 	for _, rule := range confLints {
 		problems = append(problems, rule(rc.conf)...)
 	}
-	locateProblems(problems, rc.path, rc.locate) // same file:line:col contract as the spec rules
+	locateProblems(problems, rc.path, rc.locate)
 	return problems
 }
 
-// packagePointer and featurePointer address one entry of the conf's generate arrays, so a
-// conf problem lands on the line the author wrote rather than on a dotted label they have to
-// go find. The index is the array position, which is how the document is actually shaped.
-// A negative index means "not found", which yields no pointer rather than an unresolvable
-// one — an unplaced problem is still worth reporting.
+// packagePointer and featurePointer return the JSON pointer of the i'th generate.packages
+// or generate.features entry. A negative index yields "", leaving the problem unplaced.
 func packagePointer(i int) string {
 	if i < 0 {
 		return ""
@@ -42,8 +37,7 @@ func featurePointer(i int) string {
 	return fmt.Sprintf("/generate/features/%d", i)
 }
 
-// featureIndex returns the array position of the named feature, or -1 when the conf declares
-// none — the rules below report against an entry, so they need where it sits.
+// featureIndex returns the array position of the named feature, or -1 when absent.
 func featureIndex(conf *Conf, name string) int {
 	if conf.Generate == nil {
 		return -1
@@ -56,9 +50,8 @@ func featureIndex(conf *Conf, name string) int {
 	return -1
 }
 
-// confLints is the ordered set of conf rules run after the conf is schema-valid,
-// mirroring specLints. Like the spec rules, they reject configuration that would
-// be silently ignored or that generate would reject later — validate is the gate.
+// confLints is the ordered set of conf rules. They reject configuration that would be
+// silently ignored or that generate would reject later.
 var confLints = []func(*Conf) []error{
 	lintPackageTypes,
 	lintFeatureTypes,
@@ -71,10 +64,8 @@ var confLints = []func(*Conf) []error{
 	lintModelsKeep,
 }
 
-// lintFeatureSection rejects `section` on any feature but man. A section is a man page
-// concept — the number in a page's header and file name — so on help, markdown or completion it
-// would be silently ignored. It is an error rather than a warning because nothing else could
-// have been meant: the setting belongs on the man entry.
+// lintFeatureSection rejects `section`, the man page section number, on any feature but man,
+// where it would be silently ignored.
 func lintFeatureSection(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
@@ -91,9 +82,9 @@ func lintFeatureSection(conf *Conf) []error {
 	return problems
 }
 
-// lintPackageTypes rejects a generate.packages array naming the same `type` twice, which would
-// make a target's destination ambiguous. The JSON Schema cannot express it: uniqueItems
-// compares whole items, not one field.
+// lintPackageTypes rejects a generate.packages array naming the same `type` twice, which
+// would make a target's destination ambiguous. JSON Schema uniqueItems compares whole items,
+// so it cannot express this.
 func lintPackageTypes(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
@@ -112,9 +103,7 @@ func lintPackageTypes(conf *Conf) []error {
 	return problems
 }
 
-// lintFeatureTypes rejects a generate.features array that names the same `type`
-// twice, for the same reason as lintPackageTypes (the schema enums the type but
-// cannot bound it to one entry).
+// lintFeatureTypes rejects a generate.features array naming the same `type` twice.
 func lintFeatureTypes(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil
@@ -158,10 +147,8 @@ func lintPackageColocation(conf *Conf) []error {
 	return problems
 }
 
-// lintEntrypoint rejects a main block whose `keep` would be silently ignored: keep only takes
-// effect once the entrypoint is actually written and its directory pruned, and that happens
-// only when `file` is set. (The entrypoint's Go package is always `main`, which the schema
-// fixes, so there is no package name to reconcile here.)
+// lintEntrypoint rejects `keep` on a main package with no `file`: the entrypoint is written,
+// and its directory pruned, only when `file` is set.
 func lintEntrypoint(conf *Conf) []error {
 	if conf.Generate == nil || conf.Generate.mainPkg() == nil {
 		return nil
@@ -185,15 +172,12 @@ func lintEntrypoint(conf *Conf) []error {
 	return nil
 }
 
-// lintFeatureDirs rejects an enabled embedding feature whose explicit embed_dir cannot resolve
-// under the cmd package, which //go:embed could never reach. Only embed mode is checked: an
-// inline feature writes no embedded file, and template_dir is never embedded. An unset
-// embed_dir defaults under the cmd package, so only an explicit one can escape it.
+// lintFeatureDirs rejects an enabled embed-mode feature whose explicit embed_dir does not
+// resolve under the cmd package, where //go:embed could not reach it.
 //
-// With no cmd package declared, the cmd package is the default internal/cmd/<root name>. The
-// root name lives in the spec, which conf lint does not see, so the check there is that the
-// directory sits under internal/cmd/<some name>; generate, which knows the name, holds it to
-// the exact directory.
+// With no cmd package file declared, the default is internal/cmd/<root name>. The root name
+// lives in the spec, so this rule only requires internal/cmd/<some name>; generate checks the
+// exact directory.
 func lintFeatureDirs(conf *Conf) []error {
 	if conf.Generate == nil || len(conf.Generate.Features) == 0 {
 		return nil
@@ -226,10 +210,9 @@ func lintFeatureDirs(conf *Conf) []error {
 	return problems
 }
 
-// lintFeatureKnobs warns when an enabled feature sets a directory knob its mode ignores: an
-// `embed_dir` without embed mode, a `template_dir` without seeding a template, or either on
-// completion, which has no editable template. It warns rather than fails because the override
-// is inert rather than broken. Disabled features are left alone as staged config.
+// lintFeatureKnobs warns when an enabled feature sets a knob its mode ignores: `embed_dir`
+// without `embed`, `template_dir` without `template`, or `template`/`template_dir` on a
+// feature with no editable template (completion). Disabled features are skipped.
 func lintFeatureKnobs(conf *Conf) []error {
 	if conf.Generate == nil || len(conf.Generate.Features) == 0 {
 		return nil
@@ -267,9 +250,8 @@ func lintFeatureKnobs(conf *Conf) []error {
 	return problems
 }
 
-// lintSchemaFiles rejects a generate.schemas file that generate could not write: the path is
-// module-root-relative, so an absolute one, or one climbing out of the module with "..", has no
-// place to go. Generate refuses both; validate is the gate, so it refuses them first.
+// lintSchemaFiles rejects a generate.schemas file path that is absolute or escapes the module
+// root; the path must be module-root-relative.
 func lintSchemaFiles(conf *Conf) []error {
 	if conf.Generate == nil || conf.Generate.Schemas == nil {
 		return nil
@@ -299,9 +281,7 @@ func lintSchemaFiles(conf *Conf) []error {
 	return problems
 }
 
-// lintModelsKeep rejects `keep` on the models package. Pruning runs over the cmd and main
-// packages only — the models package holds one generated file and no stubs to prune — so a
-// keep list there would be accepted and silently do nothing.
+// lintModelsKeep rejects `keep` on the models package, which is never pruned.
 func lintModelsKeep(conf *Conf) []error {
 	if conf.Generate == nil {
 		return nil

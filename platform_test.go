@@ -10,18 +10,11 @@ import (
 	"testing"
 )
 
-// Platform behavior, asserted rather than assumed.
-//
-// CI runs the suite on ubuntu, macos and windows, but nothing platform-SPECIFIC was ever
-// checked: the config channel resolves paths, expands "~", and walks up to a filesystem root,
-// and all three of those differ on Windows. A suite that merely runs on three platforms
-// proves the code compiles there, not that it behaves there.
+// Platform-specific behavior of the config channel: path resolution, "~" expansion and the
+// walk up to a filesystem root, all of which differ on Windows.
 
-// TestConfigPath_tildeExpansion covers the schema's claim that a config path "supports ~ for
-// home dir". It is the one piece of shell syntax rotini honors itself, because the path comes
-// from a file rather than from a shell that would already have expanded it — and the claim
-// rests on one option at one call site, which is exactly the kind of thing that regresses
-// silently.
+// TestConfigPath_tildeExpansion: a leading "~" in a config path is the home directory; the
+// path comes from a file, so no shell has expanded it.
 func TestConfigPath_tildeExpansion(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -35,9 +28,7 @@ func TestConfigPath_tildeExpansion(t *testing.T) {
 	}{
 		{"tilde and a child", "~/.config/app.yaml", filepath.Join(home, ".config", "app.yaml")},
 		{"an absolute path is untouched", filepath.Join(home, "x.yaml"), filepath.Join(home, "x.yaml")},
-		// A relative path is resolved against the working directory, as any path is; the
-		// point here is that an INTERIOR "~" is an ordinary directory name, not a second
-		// home reference.
+		// An interior "~" is an ordinary directory name, not a home reference.
 		{"a tilde inside the path is not a home reference", filepath.Join("a", "~", "x.yaml"), ""},
 	}
 	for _, tc := range cases {
@@ -60,9 +51,8 @@ func TestConfigPath_tildeExpansion(t *testing.T) {
 			if tc.want != "" && got != filepath.Clean(tc.want) {
 				t.Errorf("path %q resolved to %q, want %q", tc.in, got, tc.want)
 			}
-			// The literal "~" segment survives: only a LEADING one is a home
-			// reference. (Checking that the result is outside $HOME would not work —
-			// a checkout usually lives under it.)
+			// The literal "~" segment survives. Comparing against $HOME would not work: a
+			// checkout usually lives under it.
 			if tc.want == "" && !strings.Contains(got, string(filepath.Separator)+"~"+string(filepath.Separator)) {
 				t.Errorf("path %q resolved to %q — an interior ~ is a directory name and must survive", tc.in, got)
 			}
@@ -70,9 +60,8 @@ func TestConfigPath_tildeExpansion(t *testing.T) {
 	}
 }
 
-// TestDiscoverWalkUp_reachesTheRoot: the walk-up strategy climbs one parent at a time and has
-// to STOP — at "/" on unix and at a drive root on Windows. Getting the stop condition wrong is
-// an infinite loop in a user's CLI, which is why it is asserted rather than trusted.
+// TestDiscoverWalkUp_reachesTheRoot: the walk-up strategy stops at "/" on unix and at a drive
+// root on Windows.
 func TestDiscoverWalkUp_reachesTheRoot(t *testing.T) {
 	deep := t.TempDir()
 	for _, seg := range []string{"a", "b", "c"} {
@@ -91,8 +80,7 @@ func TestDiscoverWalkUp_reachesTheRoot(t *testing.T) {
 		t.Fatal("walk-up produced no directories to search")
 	}
 
-	// The last directory is the root: its parent is itself, which is the only portable
-	// way to say "root" and the condition the loop actually tests.
+	// The last directory is the root: its parent is itself, the portable test for a root.
 	last := dirs[len(dirs)-1]
 	if parent := filepath.Dir(last); parent != last {
 		t.Errorf("the walk stopped at %q, whose parent is %q — it did not reach a root", last, parent)
@@ -102,11 +90,8 @@ func TestDiscoverWalkUp_reachesTheRoot(t *testing.T) {
 	}
 }
 
-// TestDiscoverXDG_isLiteralOnEveryPlatform pins a deliberate cross-platform decision that the
-// schema now states outright: 'xdg' means $XDG_CONFIG_HOME (default ~/.config) EVERYWHERE,
-// including Windows and macOS. rotini does not substitute %APPDATA% or
-// ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same
-// path on every machine and a dotfiles repository works unchanged.
+// TestDiscoverXDG_isLiteralOnEveryPlatform: 'xdg' means $XDG_CONFIG_HOME (default ~/.config)
+// on every platform, with no %APPDATA% or ~/Library/Application Support substitution.
 func TestDiscoverXDG_isLiteralOnEveryPlatform(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	base := os.Getenv("XDG_CONFIG_HOME")
@@ -138,8 +123,7 @@ func TestDiscoverXDG_isLiteralOnEveryPlatform(t *testing.T) {
 	}
 }
 
-// TestDiscoverDirs_unknownStrategy: an unrecognized strategy is an error, not a silent empty
-// search that would look like "the file is simply absent".
+// TestDiscoverDirs_unknownStrategy: an unrecognized strategy is an error, not an empty search.
 func TestDiscoverDirs_unknownStrategy(t *testing.T) {
 	if _, err := discoverDirs(&DiscoverDef{Strategy: "magic", File: "x"}); err == nil {
 		t.Fatal("an unknown discover strategy returned no error")

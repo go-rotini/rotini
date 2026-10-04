@@ -11,14 +11,8 @@ import (
 	"github.com/go-rotini/fs"
 )
 
-// `rotini generate --watch` and `rotini validate --watch` are declared in the companion CLI's
-// spec, rendered into its help pages, and were shipped with no test at all — watchLoop and
-// forwardChanges sat at 0% coverage. Watch mode is also the feature most likely to be left
-// running for hours in someone's terminal, so the three properties that matter are pinned
-// here: it passes once up front, it re-passes on a change, and a canceled context ends it
-// cleanly rather than hanging or erroring.
-//
-// watchLoop takes a context precisely so these can be driven without a real signal.
+// Watch-mode tests pin that watchLoop passes once up front, re-passes on change, and returns
+// nil on cancellation. They drive it with a context rather than a real signal.
 
 // watchFixture writes a spec (and optionally a conf) into a temp dir and returns their paths.
 func watchFixture(t *testing.T, withConf bool) (specPath, confPath string) {
@@ -78,9 +72,7 @@ func (p *passCounter) await(t *testing.T, n int, within time.Duration) {
 	}
 }
 
-// TestWatchLoop_initialPassThenCancel: watch mode runs the pass once immediately, so the
-// author sees the result without touching anything, and a canceled context returns nil —
-// a clean interrupt is not an error.
+// TestWatchLoop_initialPassThenCancel pins one immediate pass and a nil return on cancel.
 func TestWatchLoop_initialPassThenCancel(t *testing.T) {
 	specPath, confPath := watchFixture(t, true)
 	counter := newPassCounter()
@@ -122,7 +114,7 @@ func TestWatchLoop_initialPassThenCancel(t *testing.T) {
 	}
 }
 
-// TestWatchLoop_rerunsOnChange is the feature itself: editing the spec runs the pass again.
+// TestWatchLoop_rerunsOnChange pins that editing the spec runs the pass again.
 func TestWatchLoop_rerunsOnChange(t *testing.T) {
 	specPath, _ := watchFixture(t, false)
 	counter := newPassCounter()
@@ -148,8 +140,8 @@ func TestWatchLoop_rerunsOnChange(t *testing.T) {
 	}
 }
 
-// TestWatchLoop_missingConfIsNotWatched: the conf is optional, so naming one that does not
-// exist must not fail watch setup — the spec alone is still watched.
+// TestWatchLoop_missingConfIsNotWatched pins that a nonexistent conf does not fail watch
+// setup; the spec alone is watched.
 func TestWatchLoop_missingConfIsNotWatched(t *testing.T) {
 	specPath, _ := watchFixture(t, false)
 	missingConf := filepath.Join(filepath.Dir(specPath), "absent.conf.yaml")
@@ -173,8 +165,8 @@ func TestWatchLoop_missingConfIsNotWatched(t *testing.T) {
 	}
 }
 
-// TestWatchLoop_unwatchablePathErrors: a spec that cannot be watched is a setup failure and
-// has to be reported rather than silently degrading to a single pass.
+// TestWatchLoop_unwatchablePathErrors pins that an unwatchable spec is a returned setup
+// error.
 func TestWatchLoop_unwatchablePathErrors(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope", "deeper", ".rotini.spec.yaml")
 	counter := newPassCounter()
@@ -188,13 +180,8 @@ func TestWatchLoop_unwatchablePathErrors(t *testing.T) {
 	}
 }
 
-// TestForwardChanges_coalesces pins the property that keeps an editor's save burst (write +
-// chmod + the rename of an atomic save) from triggering a regeneration each: while a pass is
-// still pending, further events fold into the one already queued.
-//
-// The burst is delivered and the channel closed before anything drains `changed`, so the
-// forwarder observes all five with a signal already pending — which is exactly the condition
-// a mid-regeneration burst creates.
+// TestForwardChanges_coalesces pins that events arriving while a signal is pending fold into
+// it. The burst is delivered and the channel closed before `changed` is drained.
 func TestForwardChanges_coalesces(t *testing.T) {
 	events := make(chan fs.WatchEvent, 8)
 	changed := make(chan struct{}, 1) // capacity 1, exactly as watchLoop allocates it
@@ -207,8 +194,7 @@ func TestForwardChanges_coalesces(t *testing.T) {
 	done := make(chan struct{})
 	go func() { forwardChanges(context.Background(), events, changed); close(done) }()
 
-	// Closing the event channel ends the forwarder, and it only ends once every buffered
-	// event has been handled — so this also pins "drains before returning".
+	// The forwarder returns only after handling every buffered event.
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -226,8 +212,7 @@ func TestForwardChanges_coalesces(t *testing.T) {
 	}
 }
 
-// TestForwardChanges_stopsOnCancel: the forwarder is a goroutine per watched file, so it has
-// to end with the context or watch mode leaks one per pass.
+// TestForwardChanges_stopsOnCancel pins that the forwarder goroutine exits on cancellation.
 func TestForwardChanges_stopsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

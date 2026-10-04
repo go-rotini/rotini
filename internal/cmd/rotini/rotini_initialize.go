@@ -43,13 +43,10 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 		return
 	}
 
-	// The same report generate and validate give: the files it wrote, then the timing line.
 	fmt.Fprintf(rtx.Stdout, "spec: %s\nconf: %s\n%s\n", written.Spec, written.Conf, written.Result)
 
-	// The scaffold imports the rotini runtime, and rotini does not add it to the user's go.mod —
-	// that is a network operation with a side effect on a file rotini does not own. So when
-	// the module does not require it yet, the next `go build` would fail on a missing module,
-	// and the warning says what to run instead.
+	// init does not edit go.mod, so it warns when the module does not yet require the runtime
+	// the scaffold imports.
 	if !requiresRuntime(".") {
 		rtx.RecordWarning(fmt.Errorf("go.mod does not require %s yet; run `go get %s` before building ./cmd/%s", runtimeModule, runtimeModule, args.Name))
 	}
@@ -59,9 +56,8 @@ func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 const runtimeModule = "github.com/go-rotini/rotini"
 
 // modRequires reports whether go.mod text requires module or declares it as its own module. It
-// reads the file line by line rather than through golang.org/x/mod: every project that runs
-// rotini as a tool would otherwise take that module on for this one question. A requirement's
-// line starts with the module path — inside a require block, or after `require` on one line.
+// scans lines rather than using golang.org/x/mod, to avoid the dependency: a matching line
+// starts with the module path, inside a require block or after `require` or `module`.
 func modRequires(gomod, module string) bool {
 	for line := range strings.SplitSeq(gomod, "\n") {
 		if i := strings.Index(line, "//"); i >= 0 {
@@ -78,9 +74,9 @@ func modRequires(gomod, module string) bool {
 	return false
 }
 
-// requiresRuntime reports whether the go.mod governing dir — the nearest one at or above it —
-// already requires the rotini runtime, or IS the runtime. With no readable go.mod it reports
-// false, so the `go get` step is shown rather than silently dropped.
+// requiresRuntime reports whether the nearest go.mod at or above dir requires the rotini
+// runtime or is the runtime's own. With no readable go.mod it reports false, so the warning
+// is shown.
 func requiresRuntime(dir string) bool {
 	dir, err := filepath.Abs(dir)
 	if err != nil {

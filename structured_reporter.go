@@ -20,12 +20,11 @@ import (
 // a [*ParseError], kind from a [*PluginError] too. Each line's shape is described by
 // schema-error.json in the rotini repository, and the contract document includes it.
 //
-// When structured reports false, or is nil, it reports exactly as the default reporter does.
-// Either way the exit code is decided as the default reporter decides it.
+// When structured reports false, or is nil, it reports as the default reporter does. Either way
+// the exit code follows the default reporter's rule.
 //
-// Which runs are structured is the program's call — typically whether its own format flag asks
-// for json. The reporter runs after the command, and the run may have failed because parsing
-// did, so read the flag from [Context.Argv] rather than from validated inputs:
+// structured is the program's own rule, typically whether its format flag asks for json. The
+// run may have failed in parsing, so the rule should read [Context.Argv], not validated inputs:
 //
 //	cmd.Program.WithReporter(rotini.StructuredReporter(func(rtx *rotini.Context) bool {
 //	    return slices.Contains(rtx.Argv, "--json")

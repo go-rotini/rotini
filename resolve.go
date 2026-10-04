@@ -8,15 +8,12 @@ import (
 	"strings"
 )
 
-// Command resolution: turning an argv into the chain of commands it names, plus the flag-token
-// helpers reading argv requires. Resolution is required — dispatch cannot pick a handler
-// without it — where parser.go's [Parser] is the opt-in service that parses and validates a
-// command's declared inputs once dispatch has chosen it.
+// Command resolution turns argv into the chain of commands it names. It always runs before
+// dispatch; parsing a command's declared inputs ([Parser]) is a separate, later step.
 
-// Command is one node on the invoked command path, root → leaf: the flattened command-tree data
-// the runtime resolved for this invocation. It is exposed via [Context.CommandChain] so opt-in
-// tooling binds inputs against the exact command whose handler ran — including a statically
-// composed child, whose chain is its full path under the parent.
+// Command is one node on the invoked command path, root → leaf, as resolved for this
+// invocation and exposed via [Context.CommandChain]. For a statically composed child, the chain
+// is its full path under the parent.
 //
 // Fields copy the matching [Definition] (root) or [CommandDef] fields; an empty slice means the
 // command declares none of that kind.
@@ -33,25 +30,22 @@ type Command struct {
 	Commands              []CommandDef        // sub-commands; empty for a leaf
 	Plugins               []PluginDef         // co-located plugin binaries dispatched as sub-commands
 	PluginDiscovery       *PluginDiscoveryDef // plugin auto-discovery (nil = off)
-	// PluginPath is the extra directory this command's plugin binaries may live in, searched
-	// for BOTH declared and discovered plugins — they are the same binaries in the
-	// same place. Empty means only the host binary's directory and PATH are searched. It is the
-	// directory as searched: a leading ~ and $VAR references in the declared path are already
-	// expanded.
+	// PluginPath is an extra directory searched for this command's declared and discovered
+	// plugin binaries, with a leading ~ and $VAR references already expanded. Empty means only
+	// the host binary's directory and PATH are searched.
 	PluginPath  string
 	Passthrough bool       // every token after this command is a raw positional (no flag parsing)
 	Output      *OutputDef // what the command writes to stdout (nil = not declared); see [Context.WriteOutput]
 
 	// Invoked reports whether this is the command the user invoked: the last command in the
-	// chain. Exactly one entry of [Context.CommandChain] has it set. In a cascading hook,
-	// rtx.Command().Invoked tells the command the user ran from an ancestor of it.
+	// chain. Exactly one entry of [Context.CommandChain] has it set; in a cascading hook,
+	// rtx.Command().Invoked distinguishes the invoked command from its ancestors.
 	Invoked bool
 }
 
 // expandPluginPath expands a leading ~ to the user's home directory and $VAR / ${VAR}
-// references from the environment, the way a shell would — so `plugin_path: ~/.app/plugins`
-// means what it says, as a configuration file's path does. When the home directory cannot be
-// found the ~ is left in place, and the search simply finds nothing there.
+// references from the environment, as a shell would. When the home directory cannot be found
+// the ~ is left in place.
 func expandPluginPath(dir string) string {
 	if dir == "" {
 		return ""
@@ -94,7 +88,7 @@ func cmdFrame(c CommandDef) Command {
 // stop at the first positional. A token naming a declared plugin returns the chain so far plus
 // a non-nil [PluginDispatch] to exec instead.
 //
-// It is deliberately lenient: unknown flags, missing values and bad input are not errors here.
+// It is lenient by design: unknown flags, missing values and bad input are left to the parser.
 func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
 	chain := []Command{rootFrame(def)}
 	if def.Passthrough {
@@ -110,9 +104,8 @@ func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
 			i += flagTokenWidth(chain, argv, i)
 			continue
 		}
-		// A non-flag token that still begins with "-" (a negative-number argument like
-		// "-5", or bare "-") is a positional, never a command or plugin name — those
-		// begin with a letter. Stop descending so it is not mis-dispatched.
+		// A non-flag token beginning with "-" (a negative number, or bare "-") is a
+		// positional, never a command or plugin name.
 		if strings.HasPrefix(tok, "-") {
 			break
 		}
@@ -127,13 +120,10 @@ func resolveChain(def Definition, argv []string) ([]Command, *PluginDispatch) {
 			continue
 		}
 		if rd, ok := findPlugin(cur, tok); ok {
-			// The plugin path applies to a DECLARED plugin too: an author who says where
-			// this command's plugins live means it for all of them.
 			return chain, &PluginDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: cur.PluginPath}
 		}
-		// Plugin discovery: at a discovery-enabled command, an unmatched token is
-		// dispatched to the sibling executable <prefix><token> (kubectl-plugin style).
-		// The binary is resolved (and any error reported) at exec time.
+		// At a discovery-enabled command, an unmatched token dispatches to the executable
+		// <prefix><token>; the binary is located (and any error reported) at exec time.
 		if d := cur.PluginDiscovery; d != nil {
 			rd := PluginDef{Name: tok, Binary: d.Prefix + tok}
 			return chain, &PluginDispatch{Def: rd, Args: append([]string{}, argv[i+1:]...), Dir: cur.PluginPath, Discovered: true}

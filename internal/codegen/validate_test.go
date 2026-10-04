@@ -24,8 +24,8 @@ func validateInModule(t *testing.T, spec, conf, failMode string) (err error, war
 	return err, warnings
 }
 
-// TestValidate_accepts pins the happy path of the `rotini validate` command: a
-// schema-valid, lint-clean pair passes with no error and no warnings.
+// TestValidate_accepts pins that a schema-valid, lint-clean pair passes with no error or
+// warnings.
 func TestValidate_accepts(t *testing.T) {
 	err, warnings := validateInModule(t, goldenSpec, goldenConf, "")
 	if err != nil {
@@ -36,9 +36,8 @@ func TestValidate_accepts(t *testing.T) {
 	}
 }
 
-// TestValidate_reportsSchemaProblemsWithPosition covers the reporting contract that
-// makes validation usable: a rejected value names its source line:col, not just a
-// JSON pointer.
+// TestValidate_reportsSchemaProblemsWithPosition pins that a schema problem names its
+// source line:col.
 func TestValidate_reportsSchemaProblemsWithPosition(t *testing.T) {
 	const bad = `version: 0.0.0
 command:
@@ -58,8 +57,8 @@ command:
 	}
 }
 
-// TestValidate_failFastStopsAtFirst covers the one configurable knob: `collect`
-// (the default) reports every problem, `fast` stops at the first.
+// TestValidate_failFastStopsAtFirst pins that `collect` (the default) reports every problem
+// and `fast` stops at the first.
 func TestValidate_failFastStopsAtFirst(t *testing.T) {
 	const twoProblems = `version: 0.0.0
 command:
@@ -77,8 +76,7 @@ command:
 	}
 }
 
-// TestValidate_confProblemsAreTagged proves the conf half is validated too, and that
-// a conf finding is distinguishable from a spec finding.
+// TestValidate_confProblemsAreTagged pins that conf problems are reported and tagged "conf".
 func TestValidate_confProblemsAreTagged(t *testing.T) {
 	const badConf = `version: 0.0.0
 generate:
@@ -95,9 +93,8 @@ generate:
 	}
 }
 
-// TestProblem_ErrorAndUnwrap pins the finding type itself: how it renders with and
-// without a source position, and that a typed cause stays errors.As-reachable through
-// it (so a caller can branch on the cause, not the message).
+// TestProblem_ErrorAndUnwrap pins problem rendering with and without a position, and that a
+// typed cause is reachable via errors.As.
 func TestProblem_ErrorAndUnwrap(t *testing.T) {
 	positioned := &problem{kind: "spec", loc: "/command/name", pos: "spec.yaml:3:9", msg: "bad"}
 	if got, want := positioned.Error(), "spec: spec.yaml:3:9: /command/name: bad"; got != want {
@@ -120,10 +117,7 @@ func TestProblem_ErrorAndUnwrap(t *testing.T) {
 
 // ── version + fail-mode ─────────────────────────────────────.
 
-// TestVersionProblem pins the compatibility rule a document's `version` expresses: a
-// MINIMUM, not an equality. The exact-match rule this replaced meant every rotini patch
-// release invalidated every spec and conf in every project until each was hand-edited —
-// the whole table below, rows 3 through 6, used to be errors.
+// TestVersionProblem pins that a document's `version` is a minimum within one major.
 func TestVersionProblem(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -133,7 +127,7 @@ func TestVersionProblem(t *testing.T) {
 		{"exact match", "1.2.3", "1.2.3", false},
 		{"v prefix on the binary", "1.2.3", "v1.2.3", false},
 
-		// Same major, binary at or ahead of the document: the point of the change.
+		// Same major, binary at or ahead of the document.
 		{"binary a patch ahead", "1.2.3", "1.2.9", false},
 		{"binary a minor ahead", "1.2.3", "1.4.0", false},
 		{"binary far ahead, same major", "1.0.0", "1.99.99", false},
@@ -171,8 +165,7 @@ func TestVersionProblem(t *testing.T) {
 			if got.loc != "version" {
 				t.Errorf("version problem loc = %q, want \"version\"", got.loc)
 			}
-			// The message has to say which way the mismatch runs and what to do about
-			// it — "they do not match" leaves the reader to guess which side to change.
+			// The message names both versions and the remedy.
 			for _, want := range []string{tc.doc, tc.binary} {
 				if !strings.Contains(got.msg, strings.TrimPrefix(want, "v")) {
 					t.Errorf("message %q does not name %q", got.msg, want)
@@ -236,12 +229,6 @@ func TestFailFast(t *testing.T) {
 }
 
 // ── strictness inside schema blocks ──────────────────────────────────────────
-//
-// Every object in a spec was closed to unknown keys except the `schema:` blocks, which could not
-// be: they inherit BaseSchema through allOf, and Draft 7 cannot combine that with
-// additionalProperties:false. The schema's comment said Go's DisallowUnknownFields covered it;
-// nothing set that option, so any key at all — a typo, or a JSON Schema keyword rotini does not
-// implement — was silently accepted.
 
 const blockSpecHead = "version: 0.0.0\ncommand:\n  name: t\n  summary: s\n"
 
@@ -254,10 +241,9 @@ func blockProblems(t *testing.T, yamlBody string) []error {
 	return schemaBlockProblems(instance)
 }
 
-// schemaBlockLocations maps every place the spec schema lets a schema block appear to a snippet
-// that plants a bogus key there. TestSchemaBlockProblems_reachesEveryBlockLocation derives the
-// real list FROM the schema, so a new schema-bearing key fails that test until it is added here —
-// and until schemaBlockProblems actually reaches it.
+// schemaBlockLocations maps every schema-block location in the spec schema to a snippet that
+// plants a bogus key there. TestSchemaBlockProblems_reachesEveryBlockLocation derives the
+// locations from the schema, so a new one fails until it is added here and walked.
 var schemaBlockLocations = map[string]string{
 	"FlagInput.schema":         "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n      schema: { type: string, bogus: 1 }\n",
 	"ArgumentInput.schema":     "  arguments:\n    - name: a\n      schema: { type: string, bogus: 1 }\n",
@@ -348,7 +334,8 @@ func TestSchemaBlockProblems_acceptsEveryDefinedKey(t *testing.T) {
 	}
 }
 
-// A JSON Schema keyword the author expected to DO something gets a sharper message than a typo.
+// TestSchemaBlockProblems_explainsUnimplementedJSONSchemaKeywords pins the distinct message for
+// an unimplemented JSON Schema keyword versus a typo.
 func TestSchemaBlockProblems_explainsUnimplementedJSONSchemaKeywords(t *testing.T) {
 	problems := blockProblems(t, "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n"+
 		"      schema: { type: array, uniqueItems: true, defualt: [x] }\n")
@@ -364,7 +351,8 @@ func TestSchemaBlockProblems_explainsUnimplementedJSONSchemaKeywords(t *testing.
 	}
 }
 
-// The full workflow: strictness problems are positioned like every other schema problem.
+// TestValidate_rejectsUnknownKeysInSchemaBlocksWithPosition pins that schema-block problems
+// are positioned through the full workflow.
 func TestValidate_rejectsUnknownKeysInSchemaBlocksWithPosition(t *testing.T) {
 	err, _ := validateInModule(t, blockSpecHead+"  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n"+
 		"      schema: { type: string, totallyMadeUpKey: 42 }\n", goldenConf, "")
@@ -376,14 +364,10 @@ func TestValidate_rejectsUnknownKeysInSchemaBlocksWithPosition(t *testing.T) {
 	}
 }
 
-// ── mistyped values: the decoder no longer gets the last word ────────────────
-//
-// A value of the wrong type failed in the Go decoder, which runs before validation and stops at
-// the first mismatch — so the user saw a raw decoder message with no column and Go type names,
-// one mistake per round trip:
-//
-//	decode spec.yaml: yaml: unmarshal errors: line 17: cannot unmarshal !!seq into Go value of type bool
+// ── mistyped values ──────────────────────────────────────────────────────────
 
+// TestValidate_typeErrorsAreReportedByTheSchemaWithPositions pins that decode failures are
+// reported as positioned schema problems, all at once, without decoder text.
 func TestValidate_typeErrorsAreReportedByTheSchemaWithPositions(t *testing.T) {
 	err, _ := validateInModule(t, blockSpecHead+
 		"  flags:\n"+
@@ -409,8 +393,8 @@ func TestValidate_typeErrorsAreReportedByTheSchemaWithPositions(t *testing.T) {
 	}
 }
 
-// When the schema accepts a document but the Go types reject it, the schema and the types
-// disagree. That is a rotini bug, and the message has to say so rather than blame the user.
+// TestExplainDecodeFailure_schemaAcceptsButTypesReject pins that a schema/type disagreement is
+// reported as a rotini bug.
 func TestExplainDecodeFailure_schemaAcceptsButTypesReject(t *testing.T) {
 	p := NewProcessor("0.0.0")
 	body := blockSpecHead + "  flags:\n    - name: f\n      identifiers: [--f]\n      summary: s\n" +
@@ -425,7 +409,8 @@ func TestExplainDecodeFailure_schemaAcceptsButTypesReject(t *testing.T) {
 	}
 }
 
-// Errors that are not decode failures — a missing file, say — pass through untouched.
+// TestExplainDecodeFailure_passesOtherErrorsThrough pins that non-decode errors are returned
+// unchanged.
 func TestExplainDecodeFailure_passesOtherErrorsThrough(t *testing.T) {
 	orig := errors.New("no such file")
 	if got := NewProcessor("0.0.0").explainDecodeFailure("spec", orig); got != orig {

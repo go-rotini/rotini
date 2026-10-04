@@ -5,10 +5,8 @@ import (
 	"testing"
 )
 
-// TestInitialismIdents_generatedTypes proves the schema types keep their wire names while their
-// Go names get the same casing: fields renamed, a synthesized nested type renamed with every
-// reference to it, and the top-level names the rest of the program refers to left exactly as
-// written.
+// TestInitialismIdents_generatedTypes pins initialism casing on generated fields and nested
+// types (with their references), while JSON tags and fixed top-level names are unchanged.
 func TestInitialismIdents_generatedTypes(t *testing.T) {
 	t.Parallel()
 	src := "type Resource struct {\n\tApiVersion string `json:\"apiVersion\"`\n\tSpec *ResourceApiSpec `json:\"spec\"`\n}\n\n" +

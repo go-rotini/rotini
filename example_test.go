@@ -7,9 +7,8 @@ import (
 	"os"
 )
 
-// Parser.Parse fills the generated input struct from argv alone: typed
-// coercion, defaults, enum and constraint checks — failing with a
-// data-shaped *ParseError.
+// Parser.Parse fills the generated input struct from argv alone, with typed coercion,
+// defaults, and enum and constraint checks, failing with a *ParseError.
 func ExampleParser_Parse() {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -49,8 +48,8 @@ func ExampleParser_Parse() {
 	// Output: api → prod (verbosity 2)
 }
 
-// InputReader.Read reconciles every declared channel in one call — here a flag
-// satisfied from its environment fallback because argv didn't set it.
+// InputReader.Read reconciles every declared channel in one call; here a flag unset in argv
+// is read from its environment fallback.
 func ExampleInputReader_Read() {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -81,9 +80,9 @@ func ExampleInputReader_Read() {
 	// Output: port: 9090
 }
 
-// Dependencies: a typed handle names a dependency once, and every read is typed.
-// GetDependency reports absence; MustGetDependency panics — and that panic reaches the
-// reporter as a *PanicError in its panics slice, teardown already done.
+// A typed handle names a dependency once, and every read is typed. GetDependency reports
+// absence; MustGetDependency panics, and in a hook that panic reaches the reporter as a
+// *PanicError after teardown.
 func ExampleContext_MustGetDependency() {
 	type apiClient struct{ baseURL string }
 	api := NewDependency[*apiClient]("api")
@@ -102,8 +101,8 @@ func ExampleContext_MustGetDependency() {
 	// nothing registered as "other"
 }
 
-// The category taxonomy: tag errors at the source, map them to exit codes in one
-// switch — typically inside Program.WithReporter. Here usage errors take the common 2.
+// Errors are tagged with a category at the source and mapped to exit codes in one switch,
+// typically inside a reporter. Here usage errors map to 2.
 func ExampleCategoryOf() {
 	classify := func(err error) int {
 		switch CategoryOf(err) {
@@ -127,20 +126,16 @@ func ExampleCategoryOf() {
 
 // ── the unopinionated path ──────────────────────────────────.
 
-// unopinionatedCmd overrides only Run; the embedded [NoHooks] satisfies the rest of
-// [Handler]. Run reads the raw argv from [Context.Argv], consults the
-// resolved frame's declared flags via [Context.CommandChain] (spec-aware without a parser), reads
-// an env var with the standard library (env is NOT runtime-mediated — only the streams
-// are), writes through [Context.Stdout] so the program's streams stay injectable, and
-// reports a failure with [Context.HaltWith] rather than printing inline.
-// (Stdin would likewise be read via [Context.Stdin], never os.Stdin.)
+// unopinionatedCmd defines only Run; the embedded [NoHooks] supplies the other hooks. Run
+// scans the raw [Context.Argv] for a flag declared on the resolved command
+// ([Context.CommandChain]), reads an environment variable with the standard library, writes
+// through [Context.Stdout], and fails with [Context.HaltWith].
 type unopinionatedCmd struct{ NoHooks }
 
 func (unopinionatedCmd) Run(_ context.Context, rtx *Context) {
 	leaf := rtx.CommandChain()[len(rtx.CommandChain())-1] // the resolved command frame
 
-	// Hand-rolled argv scan — no Parser. The declared flag's identifiers come from the
-	// resolved frame, so the scan stays spec-aware without importing the input helpers.
+	// Scan argv without a Parser, using the identifiers the resolved command declares.
 	var ids []string
 	for _, f := range leaf.Flags {
 		if f.Name == "name" {
@@ -156,8 +151,7 @@ func (unopinionatedCmd) Run(_ context.Context, rtx *Context) {
 		}
 	}
 	if name == "" {
-		// Record and stop; the runtime reports it through the reporter after teardown, and
-		// the default reporter floors the exit to 1.
+		// Reported after teardown; the default reporter exits 1.
 		rtx.HaltWith(UsageError(errors.New("--name is required")))
 		return
 	}
@@ -174,11 +168,8 @@ type unopinionatedApp struct{}
 
 func (unopinionatedApp) Main() Handler { return unopinionatedCmd{} }
 
-// Example_unopinionated drives the bare program end-to-end through the real Program
-// surface — WithArgs feeds argv, WithExit captures the code without os.Exit, and the
-// handler's [Context.Stdout] is the example's output. No opt-in input helper is imported;
-// WithoutSignalHandling keeps the program minimal (rotini still owns the context, just
-// installs no signal trap).
+// Example_unopinionated runs a program without the input helpers: WithArgs supplies argv,
+// WithExit captures the code, and WithoutSignalHandling installs no signal trap.
 func Example_unopinionated() {
 	def := Definition{
 		Name: "greet", Handler: "Main",

@@ -9,13 +9,11 @@ import (
 	"time"
 )
 
-// Go-literal SOURCE emission: the Definition / InputSettings / *Def builders the generated
-// framework file embeds. The typed-input field derivation that feeds these (and the
-// shared eachConstraint enumerator) lives in generate_inputs.go.
+// This file emits the Go source literals in the generated cmd file: the Definition,
+// InputSettings, and their *Def elements. Field derivation lives in generate_inputs.go.
 
-// writeInputDefsLiteral writes the literal fields an Inputs contributes to a Definition or
-// CommandDef literal, omitting any that render empty. Shared by renderDefinition (the root) and
-// rnodesLiteral (each command node) so the field set is enumerated once.
+// writeInputDefsLiteral writes the fields an Inputs contributes to a Definition or
+// CommandDef literal, omitting empty ones. renderDefinition and rnodesLiteral share it.
 func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Schema) {
 	if fl := flagDefsLiteral(in, schemas); fl != "" {
 		b.WriteString("Flags: " + fl + ",\n")
@@ -31,9 +29,9 @@ func writeInputDefsLiteral(b *strings.Builder, in *Inputs, schemas map[string]Sc
 	}
 }
 
-// renderDefinition renders the `var definition = rotini.Definition{…}` literal — the compiled
-// command tree the runtime parses against. It is unexported: end-users hold the *Program, never
-// the Definition. The output is gofmt'd with the rest of the file, so it need only be valid Go.
+// renderDefinition renders the unexported `var definition = rotini.Definition{…}` literal,
+// the command tree the runtime parses against. The output is gofmt'd with the rest of the
+// file, so it need only be valid Go.
 func renderDefinition(gp *program) string {
 	var b strings.Builder
 	b.WriteString("var definition = " + rotiniPkgName + ".Definition{\n")
@@ -60,12 +58,10 @@ func renderDefinition(gp *program) string {
 	return b.String()
 }
 
-// renderInputSettings renders the `var InputSettings = rotini.InputSettings{…}` descriptor the
-// default input reader consumes — the env prefix, config-file sources and stdin schemas.
+// renderInputSettings renders the `var InputSettings = rotini.InputSettings{…}` descriptor
+// the default input reader consumes: the env prefix, config-file sources, and stdin schemas.
+// It is always emitted, even when empty, because NewProgram references it unconditionally.
 func renderInputSettings(gp *program) string {
-	// Emitted UNCONDITIONALLY: an empty descriptor is the
-	// honest zero — handler and main.go code can reference InputSettings uniformly,
-	// and the generated NewProgram binds it under rotini.InputSettings either way.
 	files := gp.configFiles
 	stdinSchemas := collectStdinSchemas(gp)
 	var b strings.Builder
@@ -80,9 +76,8 @@ func renderInputSettings(gp *program) string {
 	return b.String()
 }
 
-// renderConfigFiles renders the InputSettings literal's ConfigFiles field — one
-// rotini.ConfigFile per declared document-level source. Writes nothing when the
-// CLI declares no configuration_files.
+// renderConfigFiles renders the InputSettings literal's ConfigFiles field, one
+// rotini.ConfigFile per scoped configuration_files entry, or nothing when there are none.
 func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile) {
 	if len(files) == 0 {
 		return
@@ -112,8 +107,7 @@ func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile
 	b.WriteString("},\n")
 }
 
-// renderDiscover renders a config file's `Discover:` field (the spec's discover:
-// strategy) inline, or nothing when the source names a fixed path.
+// renderDiscover renders a config file's Discover field, or nothing when d is nil.
 func renderDiscover(b *strings.Builder, d *ConfigurationFileDiscover) {
 	if d == nil {
 		return
@@ -125,8 +119,8 @@ func renderDiscover(b *strings.Builder, d *ConfigurationFileDiscover) {
 	b.WriteString("}")
 }
 
-// renderPathFrom renders a config file's `PathFrom:` field — the flag and/or env
-// var whose value supplies the file's path at run time.
+// renderPathFrom renders a config file's PathFrom field: the flag and/or env var whose
+// value supplies the file's path at run time.
 func renderPathFrom(b *strings.Builder, c pathFromClaim) {
 	b.WriteString(", PathFrom: &" + rotiniPkgName + ".PathFromDef{")
 	if c.flag != "" {
@@ -141,9 +135,8 @@ func renderPathFrom(b *strings.Builder, c pathFromClaim) {
 	b.WriteString("}")
 }
 
-// renderStdinSchemas renders the InputSettings literal's StdinSchemas field — the
-// per-command validation schema for a declared stdin payload, keyed by command
-// path and emitted in sorted order so the output is deterministic.
+// renderStdinSchemas renders the InputSettings literal's StdinSchemas field: each command's
+// stdin validation schema keyed by command path, in sorted order.
 func renderStdinSchemas(b *strings.Builder, schemas map[string]string) {
 	if len(schemas) == 0 {
 		return
@@ -160,9 +153,8 @@ func renderStdinSchemas(b *strings.Builder, schemas map[string]string) {
 	b.WriteString("},\n")
 }
 
-// goRawString renders s as a Go string literal, preferring a backtick raw string
-// (clean for embedded JSON) and falling back to a quoted literal if s contains a
-// backtick.
+// goRawString renders s as a backtick raw string literal, or a quoted literal when s
+// contains a backtick.
 func goRawString(s string) string {
 	if !strings.Contains(s, "`") {
 		return "`" + s + "`"
@@ -170,9 +162,8 @@ func goRawString(s string) string {
 	return strconv.Quote(s)
 }
 
-// discoveryLiteral renders the *rotini.PluginDiscoveryDef literal for a command's
-// plugin discovery, or "" when discovery is off. The prefix defaults to "<host>-"
-// (the root binary name) when the spec leaves it unset.
+// discoveryLiteral renders the *rotini.PluginDiscoveryDef literal for a command's plugin
+// discovery, or "" when discovery is off. The prefix defaults to "<host>-".
 func discoveryLiteral(host string, d *PluginDiscovery) string {
 	if d == nil {
 		return ""
@@ -190,9 +181,8 @@ func discoveryLiteral(host string, d *PluginDiscovery) string {
 	return b.String()
 }
 
-// sliceLiteral renders a "[]rotini.<typeName>{ ... }" Go literal (one element per
-// item), or "" when items is empty. renderItem writes one element's body — the
-// text between the element's surrounding "{" and "}," which sliceLiteral supplies.
+// sliceLiteral renders a "[]rotini.<typeName>{…}" literal with one element per item, or ""
+// when items is empty. renderItem writes each element's body; sliceLiteral adds the braces.
 func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.Builder, item T)) string {
 	if len(items) == 0 {
 		return ""
@@ -208,8 +198,8 @@ func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.
 	return b.String()
 }
 
-// pluginDefsLiteral renders the []rotini.PluginDef literal for a command's
-// declared plugins. The expected binary is "<host>-<name>".
+// pluginDefsLiteral renders the []rotini.PluginDef literal for a command's declared
+// plugins. Each binary is "<host>-<name>"; an invalid or non-positive timeout is omitted.
 func pluginDefsLiteral(host string, rcs []PluginSpec) string {
 	return sliceLiteral("PluginDef", rcs, func(b *strings.Builder, rc PluginSpec) {
 		b.WriteString("Name: " + strconv.Quote(rc.Name))
@@ -228,6 +218,8 @@ func pluginDefsLiteral(host string, rcs []PluginSpec) string {
 	})
 }
 
+// flagDefsLiteral renders the []rotini.FlagDef literal for a command's flags, or "" when
+// there are none.
 func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 	if in == nil {
 		return ""
@@ -273,8 +265,8 @@ func flagDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 	})
 }
 
-// layoutFor is the layout a time input's value is parsed under: its declared `layout:`, else
-// "2006-01-02" for `type: date` (or a list of dates), else "" — RFC 3339.
+// layoutFor is the layout a time input is parsed under: its declared `layout:`, else
+// "2006-01-02" for `type: date` (or a list of dates), else "" (RFC 3339).
 func layoutFor(schema *InputSchema) string {
 	if schema == nil {
 		return ""
@@ -292,8 +284,8 @@ func layoutFor(schema *InputSchema) string {
 	return ""
 }
 
-// objectRef is the named schema an object-valued input refers to — its own $ref, or its
-// items' for a list of objects — when that schema is an object; "" otherwise.
+// objectRef returns the $ref of an object-valued input (its own, or its items' for a list),
+// or "" when the input does not refer to an object schema.
 func objectRef(schema *InputSchema, schemas map[string]Schema) string {
 	if schema == nil {
 		return ""
@@ -309,8 +301,8 @@ func objectRef(schema *InputSchema, schemas map[string]Schema) string {
 	return ref
 }
 
-// objectSchemaFor renders the JSON Schema an object flag's value is validated against — the
-// same self-contained form a stdin payload of that shape meets — or "" for any other flag.
+// objectSchemaFor renders the self-contained JSON Schema an object flag's value is validated
+// against, or "" for any other flag.
 func objectSchemaFor(schema *InputSchema, schemas map[string]Schema) string {
 	ref := objectRef(schema, schemas)
 	if ref == "" {
@@ -319,9 +311,9 @@ func objectSchemaFor(schema *InputSchema, schemas map[string]Schema) string {
 	return validationSchema(Schema{Ref: ref}, schemas)
 }
 
-// withObjectDefault returns schema with an object flag's default re-encoded as JSON — one
-// document for a single object, one per element for a list — the form the flag decodes. The
-// generic rendering would turn a mapping into key=value occurrences and flatten nesting.
+// withObjectDefault returns schema with an object flag's default re-encoded as JSON (one
+// document for an object, one per element for a list), the form the flag decodes, instead
+// of the generic key=value rendering.
 func withObjectDefault(schema *InputSchema) *InputSchema {
 	if schema == nil || schema.Default == nil {
 		return schema
@@ -359,10 +351,9 @@ func completionLiteral(schema *InputSchema) string {
 	return out + "}"
 }
 
-// keyPaths flattens a map flag's declared properties into the key vocabulary
-// shell completion offers before the '=': dotted paths through nested object
-// properties when the flag opts into dotted_keys, top-level property names
-// otherwise. Sorted, since properties is a map. Nil for non-map flags.
+// keyPaths lists the sorted keys shell completion offers before a map flag's '=': dotted
+// paths through nested properties when dotted_keys is set, else top-level property names.
+// It returns nil for non-map flags.
 func keyPaths(schema *InputSchema) []string {
 	if schema == nil || !strings.HasPrefix(getSchemaType(schema), "map[") || len(schema.Properties) == 0 {
 		return nil
@@ -387,6 +378,8 @@ func keyPaths(schema *InputSchema) []string {
 	return out
 }
 
+// argDefsLiteral renders the []rotini.ArgDef literal for a command's arguments, or "" when
+// there are none. A list-typed argument is variadic.
 func argDefsLiteral(in *Inputs, schemas map[string]Schema) string {
 	if in == nil {
 		return ""
@@ -430,9 +423,9 @@ func flagDependenciesLiteral(in *Inputs) string {
 	})
 }
 
-// rnodesLiteral renders the []rotini.CommandDef literal for a resolved command
-// tree (recursing into children), or "" when nodes is empty. host prefixes the
-// plugin binary names for any discovery nodes.
+// rnodesLiteral renders the []rotini.CommandDef literal for a resolved command tree,
+// recursively, or "" when nodes is empty. host prefixes plugin binary names unless a node
+// carries its own pluginHost.
 func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		b.WriteString("Name: " + strconv.Quote(n.name) + ",\n")
@@ -478,8 +471,8 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 	})
 }
 
-// writeSchemaCommon appends the Required/Default/Enum fields shared by FlagDef
-// and ArgDef literals, omitting zero values.
+// writeSchemaCommon appends the schema fields shared by FlagDef and ArgDef literals
+// (Required, Default(s), Enum, Secret, Separator, Layout, Constraints), omitting zero values.
 func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	if schema == nil {
 		return
@@ -487,8 +480,8 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 	if schema.Required {
 		b.WriteString(", Required: true")
 	}
-	// A list default emits Defaults (one seeded occurrence per element); anything else
-	// emits the single Default. They are never both set from a spec.
+	// A list or map default emits Defaults (one seeded occurrence each); anything else
+	// emits the single Default.
 	if list := defaultList(schema.Default); len(list) > 0 {
 		b.WriteString(", Defaults: " + goStringSlice(list))
 	} else if d := defaultString(schema.Default); d != "" {
@@ -515,9 +508,8 @@ func writeSchemaCommon(b *strings.Builder, schema *InputSchema) {
 }
 
 // constraintsLiteral renders a rotini.Constraints{…} literal from a schema's declared bounds,
-// or "" when none are set. The numeric bounds are presence-carrying: a declared bound, 0
-// included, emits a rotini.Ptr literal. Length and count bounds keep the zero-sentinel
-// convention.
+// or "" when none are set. Numeric bounds are emitted as rotini.Ptr literals, so a declared 0
+// is kept; length and count bounds treat 0 as unset.
 func constraintsLiteral(schema *InputSchema) string {
 	var parts []string
 	eachConstraint(schema, func(_, field, _, litVal string) {
@@ -529,21 +521,16 @@ func constraintsLiteral(schema *InputSchema) string {
 	return rotiniPkgName + ".Constraints{" + strings.Join(parts, ", ") + "}"
 }
 
-// definitionType resolves an input schema to the type string carried on the emitted
-// FlagDef/ArgDef, which is NOT always the field's Go type. A few declared names carry
-// PARSE-TIME semantics that the Go type erases:
+// definitionType resolves an input schema to the type string on the emitted FlagDef/ArgDef,
+// which can differ from the field's Go type (goFieldType):
 //
-//   - `count` tallies occurrences; the field is an int
-//   - `existingfile`/`existingdir` are checked for existence and kind; the field is a string
+//   - Parser-significant names (`count`, `existingfile`, `existingdir`, and lists of them)
+//     are kept as declared, since their Go types (int, string) would erase the parse-time
+//     behavior.
+//   - A named scalar schema (`schemas: {Kind: {type: string}}`) resolves to its underlying
+//     type, since the parser dispatches its checks on the type string.
 //
-// Run those through jsonSchemaTypeToGo and the parser sees "int"/"string" and does nothing —
-// the declared behavior silently never fires. The Definition keeps the declared name; the
-// struct field keeps the Go type (goFieldType, which is getSchemaType-based, still applies).
-//
-// A reference to a named SCALAR schema (`schemas: {Kind: {type: string, pattern: …}}`) is the
-// opposite case: the field is the named Go type, but the parser must see the underlying one.
-// Checks dispatch on the type string, so "Kind" matched no family and the pattern, lengths and
-// bounds the input inherited from the schema were silently never checked. schemas may be nil.
+// schemas may be nil.
 func definitionType(schema *InputSchema, schemas map[string]Schema) string {
 	if schema == nil {
 		return getSchemaType(schema)
@@ -557,13 +544,11 @@ func definitionType(schema *InputSchema, schemas map[string]Schema) string {
 	if parserSignificantType(schema.Type) {
 		return schema.Type
 	}
-	// The Go-style list spelling, `[]existingfile`: resolving it would turn the element into a
-	// plain string and erase the existence check.
+	// Go-style list spelling: `[]existingfile`.
 	if elem, ok := strings.CutPrefix(schema.Type, "[]"); ok && parserSignificantType(elem) {
 		return schema.Type
 	}
-	// An array's ELEMENT can be parser-significant too: the parser checks each value of a
-	// repeatable input against the element type, so `[]existingfile` has to reach it whole.
+	// JSON Schema spelling: `type: array` with parser-significant `items`.
 	if t := getSchemaType(schema); strings.HasPrefix(t, "[]") && schema.Items != nil &&
 		schema.Items.Ref == "" && parserSignificantType(schema.Items.Type) {
 		return "[]" + schema.Items.Type
@@ -571,9 +556,9 @@ func definitionType(schema *InputSchema, schemas map[string]Schema) string {
 	return getSchemaType(schema)
 }
 
-// namedScalarType resolves typ — or, for a list, its element — when it names a non-object
-// schema in schemas, to the Go type that schema declares: "Kind" → "string", "[]Kind" →
-// "[]string". It returns "" when typ names no such schema.
+// namedScalarType resolves typ (or a list's element) that names a non-object schema to the
+// type that schema declares: "Kind" → "string", "[]Kind" → "[]string". It returns "" when
+// typ names no such schema.
 func namedScalarType(typ string, schemas map[string]Schema) string {
 	elem, list := strings.CutPrefix(typ, "[]")
 	src, ok := schemas[elem]
@@ -590,17 +575,16 @@ func namedScalarType(typ string, schemas map[string]Schema) string {
 	return resolved
 }
 
-// parserSignificantType reports whether a declared type name means something to the parser
-// that its Go type would erase. Keep in sync with the parser's own isPathType and its count
-// handling — schema_consumers_test.go asserts every schema type name has a consumer, and
+// parserSignificantType reports whether a declared type name has parser behavior its Go type
+// would erase. Keep in sync with the parser's isPathType and count handling;
 // TestDefinitionTypePreservesParserSemantics pins this set.
 func parserSignificantType(t string) bool {
 	return t == "count" || t == "existingfile" || t == "existingdir"
 }
 
-// getSchemaType resolves an input schema to the Definition's type string,
-// defaulting to "string". An array schema honors its `items:` element type
-// ("array" + items int → "[]int"); without items it stays "[]string".
+// getSchemaType resolves an input schema to its Go type expression, defaulting to "string".
+// A $ref yields the named type; an array uses its `items:` element type ("array" + items int
+// → "[]int"), else "[]string".
 func getSchemaType(schema *InputSchema) string {
 	if schema != nil {
 		if name := refTypeName(schema.Ref); name != "" {
@@ -639,9 +623,7 @@ func goStringSlice(ss []string) string {
 }
 
 // defaultList renders a multi-value default as the argv occurrences it seeds: one per list
-// element, or one `key=value` per map entry; nil when the default is a scalar. Each element becomes one seeded occurrence, so the elements are stringified
-// individually rather than the list being stringified as a whole — which is what produced
-// `Default: "[a b c]"`, a single flag value spelled like Go debug output.
+// element, or one `key=value` per map entry; nil when the default is a scalar.
 func defaultList(v any) []string {
 	switch x := v.(type) {
 	case []any:
@@ -651,9 +633,7 @@ func defaultList(v any) []string {
 		}
 		return out
 	case map[string]any:
-		// A MAP-typed flag is repeatable too: it takes `key=value` pairs, so its default
-		// is written as a mapping and seeded as those same pairs. Sorted by key, because
-		// a generated literal must be byte-stable across runs and Go map order is not.
+		// Sorted by key so the generated literal is byte-stable across runs.
 		keys := make([]string, 0, len(x))
 		for k := range x {
 			keys = append(keys, k)

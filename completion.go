@@ -24,14 +24,12 @@ const completeCommand = "__complete"
 // CompleteFlagValue with the flag's logical name and the word being typed. A nil return falls
 // back to the flag's static enum; a non-nil return, empty included, is authoritative.
 //
-// rtx carries the resolved chain, the completion words in [Context.Argv], and every service
-// bound on the Program, so a completer can reach a bound API client or the filesystem.
+// rtx carries the resolved chain, the completion words in [Context.Argv], and the dependencies
+// registered with [Program.WithDependency].
 //
-// The line is half-typed, so a completer cannot [Context.Inputs]: required inputs are missing and
-// validation would fail. To read what the user has said so far — a --kubeconfig on the line, or
-// the environment variable that flag falls back to — overlay the lenient layers, which bind
-// without validating. Flags of an ancestor (a root's global flags, say) are read with that
-// ancestor's type, running as that ancestor:
+// The line is half-typed, so [Context.Inputs] would fail validation. To read what has been
+// typed so far, merge the lenient per-channel layers, which bind without validating. Flags of
+// an ancestor are read with that ancestor's inputs type, running as that ancestor:
 //
 //	var in AppInputs
 //	rotini.AsCommand(0, func(_ context.Context, rtx *rotini.Context) {
@@ -40,20 +38,19 @@ const completeCommand = "__complete"
 //		in = rotini.MergeInputs(env, argv) // argv wins, as it would at run time
 //	})(context.Background(), rtx)
 //
-// It is entirely opt-in, a panic in it is not recovered, and it may be called on every
-// keystroke — so it must be read-only and fast.
+// A panic in a completer is not recovered. It may run on every keystroke, so it must be
+// read-only and fast.
 //
-// A candidate may carry a one-line description after a tab, "value\tdescription", the same
-// wire shape command and flag candidates use: zsh, fish and powershell render it beside the
-// value, and bash strips it.
+// A candidate may carry a one-line description after a tab, "value\tdescription": zsh, fish
+// and powershell render it beside the value, and bash strips it.
 type FlagValueCompleter interface {
 	CompleteFlagValue(rtx *Context, flag, partial string) []string
 }
 
 // ArgValueCompleter is the positional-argument counterpart of [FlagValueCompleter]: completion
 // calls CompleteArgValue on the invoked command's handler with the argument's logical name and
-// the word being typed. The same contract applies — a nil return falls back to the static
-// enum, and the optional "value\tdescription" shape is available.
+// the word being typed. The same contract applies: a nil return falls back to the static
+// enum, and a candidate may carry a "value\tdescription" suffix.
 type ArgValueCompleter interface {
 	CompleteArgValue(rtx *Context, arg, partial string) []string
 }
@@ -126,8 +123,8 @@ func completePendingFlagValue(cc completionContext, context, words []string, par
 }
 
 // completeFlagWord handles a word beginning with "-": either a flag name, or a flag's value in
-// the inline "--flag=value" form. Only declared, non-hidden flags are offered — rotini
-// auto-adds none — and the whole chain contributes, since ancestor flags resolve on descendants.
+// the inline "--flag=value" form. Only declared, non-hidden flags are offered, and the whole
+// chain contributes, since ancestor flags resolve on descendants.
 func completeFlagWord(cc completionContext, words []string, partial string, handlers any, rtx *Context) ([]string, bool) {
 	if cc.afterTerminator || !strings.HasPrefix(partial, "-") {
 		return nil, false
@@ -307,37 +304,28 @@ type DiscoveredPlugin struct {
 // DiscoveredPlugins returns each plugin discovered for cmd — an executable "<prefix>foo" found
 // next to the binary, in the plugin path, or on PATH — deduped and sorted by name, with any
 // name colliding with a declared sub-command, declared plugin or alias removed. It returns nil
-// when cmd has no discovery or discovery is hidden.
-//
-// It is the data feed for surfacing runtime plugins in help or a `plugin list`, which codegen
-// cannot know about. rotini renders nothing itself; a handler formats the result however it
-// likes:
+// when cmd has no discovery or discovery is hidden. rotini renders nothing; a handler lists
+// the result itself:
 //
 //	chain := rtx.CommandChain()
 //	for _, p := range chain[len(chain)-1].DiscoveredPlugins() {
 //		fmt.Fprintf(out, "  %s\t%s\n", p.Name, p.Path)
 //	}
 //
-// It touches the filesystem on every call and is best-effort: an unreadable directory
-// contributes nothing rather than erroring. See [Command.PluginDiscoveryErrors] to learn whether the
-// author-configured path itself failed.
+// It reads the filesystem on every call and is best-effort: an unreadable directory
+// contributes nothing. [Command.PluginDiscoveryErrors] reports failures of the configured
+// plugin path.
 func (cmd Command) DiscoveredPlugins() []DiscoveredPlugin {
 	plugins, _ := discoveredFor(cmd)
 	return plugins
 }
 
-// PluginDiscoveryErrors returns the problems encountered while scanning cmd's author-configured
-// discovery path — typically that it is unreadable, or not a directory — and nil when there is
-// no discovery, none is configured, discovery is hidden, or the path scanned cleanly. A path
-// that does not exist is not a problem: it is where plugins go once one is installed, and
-// before that it is empty. The incidental locations, next to the binary and the entries of
-// $PATH, are deliberately not reported: a missing $PATH entry is normal, not a
-// misconfiguration.
-//
-// It is the data feed for a doctor or completion handler that wants to tell the author their
-// discovery path is wrong; rotini prints no warning itself, which would corrupt completion
-// output. Each error carries the offending path and cause, so a caller can classify with
-// errors.Is(err, fs.ErrPermission).
+// PluginDiscoveryErrors returns the problems encountered scanning cmd's configured plugin
+// path — typically that it is unreadable or not a directory — and nil when there is no
+// discovery, no plugin path, discovery is hidden, or the path scanned cleanly. A path that
+// does not exist is not a problem. The directory of the binary and the $PATH entries are not
+// reported. rotini prints no warning itself, since that would corrupt completion output. Each
+// error carries the path and cause, so errors.Is(err, fs.ErrPermission) classifies it.
 func (cmd Command) PluginDiscoveryErrors() []error {
 	_, problems := discoveredFor(cmd)
 	return problems
@@ -542,11 +530,10 @@ func withDescription(name, summary string) string {
 	return name + "\t" + summary
 }
 
-// completionDirectivePrefix marks the directive line in __complete's output. A candidate could
-// in principle start with a colon, so the marker is a word no plausible value begins with.
-//
-// The protocol is private between a generated script and the binary from the same generate
-// pass, which is what makes it safe to extend (see COMPATIBILITY.md).
+// completionDirectivePrefix marks the directive line in __complete's output. It is a word no
+// plausible candidate begins with, since a bare colon could start a value. The protocol is
+// private between a generated script and the binary from the same generate pass, so it may be
+// extended (see COMPATIBILITY.md).
 const completionDirectivePrefix = ":rotini:"
 
 // completionHint returns the directive line for the word being completed, or "" when the input
@@ -557,15 +544,14 @@ const completionDirectivePrefix = ":rotini:"
 //	:rotini:directory       complete directories only
 //	:rotini:none            complete NOTHING — suppress the shell's file fallback
 //
-// It answers the same question complete() does — which input's value is being typed — and is
-// kept separate so the candidate list stays a plain list of strings.
+// It is kept separate from complete so the candidate list stays a plain list of strings.
 func completionHint(def Definition, words []string) string {
 	return directiveFor(completionHintFor(def, words))
 }
 
 // completionHintFor returns the declared hint for the word being completed, or the zero
-// Completion when there is none. It is the wire-neutral half of completionHint, the hint every
-// [CompletionFormat] a binary answers in is handed, rotini's private one included.
+// Completion when there is none. It is the wire-neutral half of completionHint, handed to
+// every [CompletionFormat].
 func completionHintFor(def Definition, words []string) Completion {
 	if len(words) == 0 {
 		return Completion{}
@@ -659,20 +645,18 @@ type CompletionCandidate struct {
 	Description string
 }
 
-// CompletionFormat writes a [CompletionResult] to w in one completion protocol — how a host
-// that completes a rotini program expects the answer spelled. rotini computes the answer once;
-// the format only decides the wire shape, so supporting another host's protocol is a function,
-// not a change to rotini. [PluginCompletion] is the built-in for the plugin hosts kubectl, Docker
-// and Flux.
+// CompletionFormat writes a [CompletionResult] to w in one completion protocol, the wire shape
+// a completing host expects. rotini computes the answer; the format only encodes it.
+// [PluginCompletion] is the built-in for the plugin hosts kubectl, Docker and Flux.
 //
-// A format is called once per request and must write only the answer: whatever it writes is
-// what the host parses.
+// A format is called once per request and must write only the answer, since the host parses
+// all of it.
 type CompletionFormat func(w io.Writer, result CompletionResult) error
 
 // Complete answers one shell-completion request in the given format and returns the exit code,
-// the completion counterpart of [Program.Run]. It is how a program is completed from outside
-// when the host does not call the hidden __complete entry — kubectl, for one, runs a separate
-// kubectl_complete-<plugin> with only the plugin's words:
+// the completion counterpart of [Program.Run]. It serves hosts that do not call the hidden
+// __complete entry; kubectl, for example, runs a separate kubectl_complete-<plugin> with only
+// the plugin's words:
 //
 //	if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
 //		code, _ := cmd.Program.Complete(os.Args[1:], rotini.PluginCompletion)
@@ -681,9 +665,9 @@ type CompletionFormat func(w io.Writer, result CompletionResult) error
 //
 // words are the words after the program's own name; the last is the word being completed,
 // empty when the cursor starts a new one, and no words at all completes a new first word. The
-// answer is exactly what __complete computes, written to the program's stdout by format. A nil
-// format answers in rotini's own format, the one __complete uses by default, which is private to
-// rotini's generated scripts.
+// answer is what __complete computes, written to the program's stdout by format. A nil format
+// uses rotini's own format, the __complete default, which is private to rotini's generated
+// scripts.
 //
 // The exit code is 0, or 1 when the format fails to write, with its error.
 func (p *Program) Complete(words []string, format CompletionFormat) (int, error) {
@@ -745,8 +729,7 @@ func writeLines(w io.Writer, lines []string) error {
 }
 
 // The directive numbers of the plugin hosts' completion format, as they appear on the wire: a
-// bit set telling the shell what to do once the candidates are shown. They are fixed by the
-// hosts that read them, not rotini's to choose.
+// bit set telling the shell what to do once the candidates are shown. The hosts fix the values.
 const (
 	pluginDirectiveDefault       = 0  // fall back to completing file names
 	pluginDirectiveNoFileComp    = 4  // offer no file names
@@ -765,10 +748,8 @@ const (
 // file completion. The hosts read the candidates of the filtering directives as their
 // arguments, so a file or directory hint applies only when there are no candidates. The
 // directive line is always written, since the hosts read the last line as the directive
-// unconditionally.
-//
-// Its output is covered by rotini's compatibility promise: the format is the hosts', not
-// rotini's, so it does not change.
+// unconditionally. The format belongs to the hosts and is covered by rotini's compatibility
+// promise.
 func PluginCompletion(w io.Writer, result CompletionResult) error {
 	lines := candidateLines(result.Candidates)
 

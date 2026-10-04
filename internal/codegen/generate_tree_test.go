@@ -7,15 +7,9 @@ import (
 	"testing"
 )
 
-// TestGenerateCompose_localRef covers composition mode 3: a parent command tree that
-// pulls in a sibling spec with a local "$ref". The child's tree merges in and codegen
-// auto-delegates the composed command to the child's OWN generated package.
-//
-// The build step is the load-bearing half. Delegation across packages only type-checks
-// because both generated packages import the SAME github.com/go-rotini/rotini — so
-// childcli.Handlers().Child() satisfies the parent's rotini.Handler. When the runtime
-// was emitted per-project, each package got its own incompatible rotini.Context and this
-// could not compile.
+// TestGenerateCompose_localRef pins local "$ref" composition: the child's tree is grafted
+// into the parent, the composed command delegates to the child's generated package, and the
+// result builds, since both packages share the rotini runtime.
 func TestGenerateCompose_localRef(t *testing.T) {
 	skipUnlessCompiling(t)
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
@@ -61,8 +55,8 @@ generate:
 `)
 	t.Chdir(dir)
 
-	// The child is generated first: the parent's rollup imports the child's cmd package,
-	// whose location the parent reads from the CHILD's conf (childCmdImport).
+	// Generate the child first: the parent reads the child's cmd package location from the
+	// child's conf (childCmdImport).
 	for _, cli := range []string{"child", "parent"} {
 		spec := "cmd/" + cli + "/.rotini.spec.yaml"
 		conf := "cmd/" + cli + "/.rotini.conf.yaml"
@@ -81,8 +75,7 @@ generate:
 			t.Errorf("parent rollup missing %q", want)
 		}
 	}
-	// The child contributes the tree, not a stub in the parent's package: the parent
-	// must NOT get its own handler file for the composed command.
+	// The composed command gets no stub in the parent's package.
 	if _, err := readEmittedIfExists(dir, "internal/cmd/parent/parent_child.go"); err == nil {
 		t.Error("parent got a handler stub for the composed command; it must delegate to the child")
 	}

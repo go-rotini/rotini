@@ -29,10 +29,8 @@ func TestResolveChain_descendsAndSkipsFlagValues(t *testing.T) {
 	}
 }
 
-// A command tree deeper than two levels resolves all the way to the leaf, with
-// flags (and their separate values) interleaved at every level and a trailing
-// positional stopping descent — the recursive descent isn't special-cased to one or
-// two levels.
+// A command tree deeper than two levels resolves to the leaf, with flags (and their separate
+// values) interleaved at every level and a trailing positional stopping descent.
 func TestResolveChain_deepThreeLevels(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -193,10 +191,8 @@ func TestResolveChain_negativeNumberAsFlagValue(t *testing.T) {
 	}
 }
 
-// TestResolve_pluginPathExpandsHome proves a declared plugin_path means what a shell would make
-// of it: `~/.app/plugins` is under the user's home and `$VAR` reads the environment, as a
-// configuration file's path does. Unexpanded, the search looked in a directory literally named
-// "~" and the not-found message claimed to have searched "~/.app/plugins".
+// TestResolve_pluginPathExpandsHome pins that a declared plugin_path expands a leading ~ to the
+// home directory and $VAR from the environment.
 func TestResolve_pluginPathExpandsHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -217,11 +213,9 @@ func TestResolve_pluginPathExpandsHome(t *testing.T) {
 	}
 }
 
-// TestResolver_definitionIsTheProgramsOwnTree is the hazard the Resolver doc now names.
-//
-// Definition arrives by value, but it is mostly slices, and those are the program's own. An edit
-// through one outlives the run — which for a REPL means every line after the
-// first sees a tree the previous line rewrote.
+// TestResolver_definitionIsTheProgramsOwnTree pins the documented Resolver convention: the
+// Definition is passed by value, but its slices are the program's own, so an edit through one
+// persists into later runs.
 func TestResolver_definitionIsTheProgramsOwnTree(t *testing.T) {
 	var ran []string
 	p := NewProgram(testDef(), seamProgram{ran: &ran}).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -248,12 +242,10 @@ func TestResolver_definitionIsTheProgramsOwnTree(t *testing.T) {
 	if !strings.HasSuffix(secondSaw, "through-the-slice") {
 		t.Fatalf("the fixture no longer demonstrates the hazard: %q", secondSaw)
 	}
-	// The behaviour is the documented convention, not a bug to fix: deep-copying the tree per
-	// run is what the convention exists to avoid. This pins that the doc and the runtime agree.
 }
 
-// TestResolver_emptyChainIsReportedNotCrashed: Resolution.Chain is documented non-empty, and a
-// custom resolver is the only thing that can break that.
+// TestResolver_emptyChainIsReportedNotCrashed pins that a custom resolver returning an empty
+// chain is reported as a failure and runs no handler.
 func TestResolver_emptyChainIsReportedNotCrashed(t *testing.T) {
 	var ran []string
 	p := NewProgram(testDef(), seamProgram{ran: &ran}).
@@ -272,7 +264,7 @@ func TestResolver_emptyChainIsReportedNotCrashed(t *testing.T) {
 	}
 }
 
-// TestResolver_errorIsRoutedNotPanicked.
+// TestResolver_errorIsRoutedNotPanicked pins that a resolver error is reported, not panicked.
 func TestResolver_errorIsRoutedNotPanicked(t *testing.T) {
 	p := NewProgram(testDef(), seamProgram{ran: new([]string)}).
 		WithResolver(func(Definition, []string) (Resolution, error) {
@@ -286,10 +278,8 @@ func TestResolver_errorIsRoutedNotPanicked(t *testing.T) {
 }
 
 // TestResolve_agreesWithTheParserOnFlagValues pins command resolution to the parser's rule for
-// which word is a flag's value. They used to disagree: the resolver skipped the word after ANY
-// value-taking flag, so `app --color sub` (an optional value, which must be attached) never
-// reached sub, and it skipped nothing after a short cluster, so in `app -vn 5 sub` the 5 ended
-// descent and sub was never reached either.
+// which word is a flag's value: an optional value is never a separate word (`app --color sub`),
+// and a short cluster's last flag takes the next word (`app -vn 5 sub`).
 func TestResolve_agreesWithTheParserOnFlagValues(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App",
 		Flags: []FlagDef{

@@ -39,13 +39,8 @@ func schemaDocPages() []schemaDocPage {
 	}
 }
 
-// TestSchemaDocsInSync keeps the published reference pages identical to what the schemas say.
-//
-// rotini's real documentation has always been in the schemas — a paragraph per key, saying
-// what it does, what it rejects and why, and test-guarded for accuracy. The published site had
-// a hand-written skeleton instead: 974 lines for a 119-key schema, which nobody could keep in
-// step by hand and nobody did. Generating the pages means writing a key documents it, and
-// there is no second copy to drift.
+// TestSchemaDocsInSync pins the published reference pages to what renderSchemaMarkdown
+// produces from the embedded schemas.
 func TestSchemaDocsInSync(t *testing.T) {
 	root := filepath.Join("..", "..")
 	table := inputChannelTable(t)
@@ -82,9 +77,8 @@ func TestSchemaDocsInSync(t *testing.T) {
 	}
 }
 
-// TestSchemaDocsAreComplete is the guard that makes the generated pages worth publishing:
-// every definition and every key the schema declares has to appear, or the page is a partial
-// reference presented as a full one.
+// TestSchemaDocsAreComplete pins that the rendered spec page has a section per definition, an
+// entry per sampled key, and the schema descriptions.
 func TestSchemaDocsAreComplete(t *testing.T) {
 	page, err := renderSchemaMarkdown(schemaDocPages()[0], "")
 	if err != nil {
@@ -103,8 +97,6 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 		}
 	}
 
-	// A sample of keys across the channels, including every one added in the schema
-	// finishing pass — the ones most likely to be added without documenting.
 	for _, key := range []string{
 		"name", "$ref", "flags", "arguments", "env", "config", "config_files", "stdin",
 		"flag_groups", "flag_dependencies", "passthrough", "handler", "plugins",
@@ -116,8 +108,7 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 		}
 	}
 
-	// Descriptions are the whole point: a page of key names with no prose would pass the
-	// checks above and be worthless.
+	// Key names alone would pass the checks above; require description prose too.
 	for _, phrase := range []string{
 		"env_prefix",
 		"TextUnmarshaler",
@@ -129,20 +120,10 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 	}
 }
 
-// Rendering the embedded JSON Schemas as Markdown reference pages.
-//
-// rotini's real documentation has always lived in the schemas: every key carries a paragraph
-// saying what it does, what it rejects, and why — and TestReferenceDocsValidate keeps them
-// honest by failing the build when they drift. What the published site had instead was a
-// hand-written skeleton: 974 lines of prose for a 119-key schema, which no one could keep in
-// step by hand and no one did.
-//
-// So the site's reference pages are GENERATED from the same bytes validation judges. There is
-// no second copy to drift, writing a key documents it, and TestSchemaDocsInSync fails until
-// the pages are regenerated.
+// The docs site's reference pages are generated from the embedded JSON Schemas, so key
+// descriptions have a single source.
 
-// schemaDoc is the subset of JSON Schema the renderer reads. It is deliberately not a full
-// Draft-7 model: these are rotini's own schemas, whose shapes are known.
+// schemaDoc is the subset of JSON Schema the renderer reads from rotini's own schemas.
 type schemaDoc struct {
 	Title       string               `json:"title"`
 	Description string               `json:"description"`
@@ -160,7 +141,7 @@ type schemaDoc struct {
 }
 
 // renderSchemaMarkdown renders one schema as a Hugo content page: the document's own keys
-// first, then a section per definition, each a table of keys with their full descriptions.
+// first, then a section per definition, each listing its keys with their descriptions.
 func renderSchemaMarkdown(page schemaDocPage, channelTable string) (string, error) {
 	var doc schemaDoc
 	if err := json.Unmarshal(page.raw, &doc); err != nil {
@@ -204,9 +185,8 @@ func renderSchemaMarkdown(page schemaDocPage, channelTable string) (string, erro
 	return b.String(), nil
 }
 
-// commandKeyGroups orders a command's keys by the job each does, most-reached-for first — the
-// command section is the one an author reads most, and alphabetical order put `name` 27th.
-// TestCommandKeyGroupsCoverTheSchema fails until a new Command key is placed in a group.
+// commandKeyGroups groups and orders the Command section's keys by purpose, most used first.
+// TestCommandKeyGroupsCoverTheSchema requires every Command key to be placed.
 var commandKeyGroups = []struct {
 	title string
 	keys  []string
@@ -229,9 +209,7 @@ func renderGroupedKeys(doc schemaDoc, required []string) string {
 	return b.String()
 }
 
-// keyOrder lists a shape's keys required first, in the order the schema requires them, then
-// the rest alphabetically — what a reader needs to write a valid document comes before what
-// refines it.
+// keyOrder lists a shape's required keys in schema order, then the rest alphabetically.
 func keyOrder(doc schemaDoc, required []string) []string {
 	out := make([]string, 0, len(doc.Properties))
 	seen := map[string]bool{}
@@ -248,9 +226,8 @@ func keyOrder(doc schemaDoc, required []string) []string {
 	return out
 }
 
-// definitionOrder lists the definitions in the order a reader meets them, walking from the
-// document's own keys through every reference — so Command follows the document, and the
-// shapes a command's keys name follow it. A definition nothing references comes last.
+// definitionOrder lists definitions breadth-first by first reference from the document's
+// keys, with unreferenced definitions last.
 func definitionOrder(doc schemaDoc) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -303,7 +280,7 @@ func definitionOrder(doc schemaDoc) []string {
 	return out
 }
 
-// TestCommandKeyGroupsCoverTheSchema: every Command key is placed in exactly one group.
+// TestCommandKeyGroupsCoverTheSchema pins that every Command key is in exactly one group.
 func TestCommandKeyGroupsCoverTheSchema(t *testing.T) {
 	var doc schemaDoc
 	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
@@ -328,12 +305,8 @@ func TestCommandKeyGroupsCoverTheSchema(t *testing.T) {
 	}
 }
 
-// renderKeyList renders the named properties of a schema, in the order given, as a definition
-// list — one entry per key under a heading of the given level, its type and whether it is
-// required on one line, and the schema's own paragraph beneath.
-//
-// A list rather than a table: these descriptions are paragraphs, and a table cell is the wrong
-// shape for a paragraph.
+// renderKeyList renders the named properties in order, each under a heading of the given
+// level with a one-line fact row (type, required, enum, default) and its description.
 func renderKeyList(doc schemaDoc, required, names []string, heading string) string {
 	if len(doc.Properties) == 0 {
 		return "_No keys._\n"
@@ -397,9 +370,8 @@ func typeLabel(p schemaDoc) string {
 	return ""
 }
 
-// flattenAllOf merges an allOf-composed definition into one shape, so a schema written as
-// "the object, plus an if/then" documents as the object. rotini uses allOf for inheritance
-// (Schema and InputSchema over BaseSchema) and for conditional requirements.
+// flattenAllOf merges an allOf-composed definition's properties into one shape. rotini uses
+// allOf for inheritance (Schema and InputSchema over BaseSchema) and conditional requirements.
 func flattenAllOf(doc schemaDoc) schemaDoc {
 	if len(doc.AllOf) == 0 {
 		return doc
@@ -459,9 +431,8 @@ var probeChannels = []struct{ name, decl string }{
 	{"config", "  config:\n    - name: x\n      summary: s\n      schema: %s\n"},
 }
 
-// inputKeySamples is one valid use of each input-schema key, with whatever companion key it
-// needs (ignore_case needs an enum, negatable a bool). TestInputChannelTableCoversEveryKey fails
-// until a new key gets one here, so the reference's channel table never silently omits a key.
+// inputKeySamples is one valid use of each input-schema key with any companion key it needs.
+// TestInputChannelTableCoversEveryKey requires an entry for every key.
 var inputKeySamples = map[string]string{
 	"$ref":             `{"$ref": "Name"}`,
 	"complete":         `{"type": "string", "complete": {"kind": "file"}}`,
@@ -501,9 +472,8 @@ var inputKeySamples = map[string]string{
 	"variable":         `{"type": "string", "variable": "X_VAR"}`,
 }
 
-// inputChannelTable renders which input-schema keys each input channel accepts, by ASKING the
-// validator: every sample above is validated on every channel. The rules live in a dozen lint
-// rules, and a table written by hand would drift from them silently; this one cannot.
+// inputChannelTable renders which input-schema keys each channel accepts by validating every
+// sample on every channel, so the table always matches the lint rules.
 func inputChannelTable(t *testing.T) string {
 	t.Helper()
 	accepts := func(schema, decl string) bool {
@@ -520,8 +490,7 @@ func inputChannelTable(t *testing.T) string {
 			false, "collect", func(string, error) {}, func(w []error) { warnings = append(warnings, w...) })
 		return err == nil && len(warnings) == 0
 	}
-	// Every channel must accept a plain input, or a rejection below would be the probe's fault
-	// rather than the key's.
+	// A plain input must pass on every channel, or rejections below would be the probe's fault.
 	for _, ch := range probeChannels {
 		if !accepts(inputKeySamples["type"], ch.decl) {
 			t.Fatalf("the probe's plain %s input is rejected — fix the probe before trusting the table", ch.name)
@@ -551,8 +520,8 @@ func inputChannelTable(t *testing.T) string {
 	return b.String()
 }
 
-// TestInputChannelTableCoversEveryKey keeps the channel table complete: every key an input's
-// schema accepts needs a sample in inputKeySamples.
+// TestInputChannelTableCoversEveryKey pins that every input-schema key has a sample in
+// inputKeySamples.
 func TestInputChannelTableCoversEveryKey(t *testing.T) {
 	var doc schemaDoc
 	if err := json.Unmarshal(schemaSpecFileBytes, &doc); err != nil {
@@ -570,9 +539,8 @@ func TestInputChannelTableCoversEveryKey(t *testing.T) {
 	}
 }
 
-// TestEveryKeyExamplesAreValidAndComplete keeps the "every key" examples on the spec and conf
-// pages honest: each must pass `rotini validate` with no problems, and each must use every key
-// its schema declares. A new key fails this until it is added to the example.
+// TestEveryKeyExamplesAreValidAndComplete pins that the spec and conf "every key" examples
+// validate cleanly and use every key their schema declares.
 func TestEveryKeyExamplesAreValidAndComplete(t *testing.T) {
 	root := filepath.Join("..", "..")
 	mod := t.TempDir()

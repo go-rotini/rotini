@@ -6,9 +6,7 @@ import (
 	"testing"
 )
 
-// Guards over the TEXT of the package's errors, across every type that renders one. An Error()
-// with no test is a message no one has read, and for a framework whose pitch includes actionable,
-// non-leaky messages these are the wrong place to have a gap.
+// Tests over the text of the package's errors, for every type that renders one.
 
 func TestErrorStrings(t *testing.T) {
 	cases := []struct {
@@ -35,8 +33,7 @@ func TestErrorStrings(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			msg := tc.err.Error()
-			// rotini's name belongs in a message about a mistake in the PROGRAM (a service
-			// never bound), not in one its users read as a result of running it.
+			// rotini's name belongs only in messages about a mistake in the program.
 			if tc.name == "ExitCause cancellation cause" && strings.Contains(msg, "rotini") {
 				t.Errorf("%s message %q names the framework to the CLI's users", tc.name, msg)
 			}
@@ -52,11 +49,9 @@ func TestErrorStrings(t *testing.T) {
 	}
 }
 
-// TestUserFacingErrorsDoNotNameTheFramework pins the text a CLI's USERS can see when rotini
-// reports on their behalf. It used to lead with "rotini: ", so every CLI had to catch and
-// reword each one to avoid telling its users about its implementation. Messages about a mistake in the program itself (a nil
-// context, an inputs type for the wrong command) keep the name: there it tells the developer
-// where to look.
+// TestUserFacingErrorsDoNotNameTheFramework pins that errors a CLI's users can see do not
+// start with "rotini: ". Messages about a mistake in the program itself (a nil context, an
+// inputs type for the wrong command) keep the name.
 func TestUserFacingErrorsDoNotNameTheFramework(t *testing.T) {
 	t.Parallel()
 	for name, err := range map[string]error{

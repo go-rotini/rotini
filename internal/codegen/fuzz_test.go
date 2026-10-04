@@ -7,15 +7,9 @@ import (
 	"testing"
 )
 
-// The spec and conf loader is the surface that eats bytes rotini did not write: four codecs
-// (yaml, json, jsonc, toml), a canonical-JSON re-encode, JSON Schema validation, 35 lint
-// rules, and a source locator that maps a JSON pointer back to a line and column across all
-// four formats. Before this file, only the argv parser was fuzzed — CONTRIBUTING.md claimed
-// "parser / spec decoding", and spec decoding was not.
-//
-// The invariant is not "accepts" or "rejects". It is: NEVER PANIC, always produce a located
-// problem instead. reconcile_position.go, which computes file:line:col over four different
-// decoders, is exactly where a malformed document crashes rather than reporting.
+// The fuzz targets feed arbitrary bytes through decoding, schema validation, lint and source
+// location. The invariant is that validation never panics and never fails with an empty
+// message.
 
 // FuzzValidateSpec drives the whole validate stage with arbitrary spec bytes.
 func FuzzValidateSpec(f *testing.F) {
@@ -40,8 +34,6 @@ func FuzzValidateSpec(f *testing.F) {
 		mustWrite(t, filepath.Join(dir, ".rotini.conf.yaml"), lintFixtureConf)
 		t.Chdir(dir)
 
-		// Errors are the expected outcome for almost every input. A panic is the failure,
-		// and so is an error whose text is empty — a rejection nobody can act on.
 		err := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect",
 			func(string, error) {}, func([]error) {})
 		if err != nil && strings.TrimSpace(err.Error()) == "" {

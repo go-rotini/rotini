@@ -22,9 +22,7 @@ type onlyRun struct {
 
 func (o *onlyRun) Run(ctx context.Context, rtx *Context) { o.ran = true }
 
-// granular embeds individual defaults and overrides one hook (CascadingPreRun) plus
-// the mandatory Run — proving the defaults mix and match and that an explicit hook
-// shadows a default it does not embed.
+// granular embeds three no-ops and defines CascadingPreRun and Run itself.
 type granular struct {
 	NoPreRun
 	NoPostRun
@@ -35,9 +33,7 @@ type granular struct {
 func (g *granular) CascadingPreRun(ctx context.Context, rtx *Context) { g.preRan = true }
 func (g *granular) Run(ctx context.Context, rtx *Context)             {}
 
-// Compile-time proof that both shapes satisfy the lifecycle interface. (A handler that
-// embedded the defaults but omitted Run would fail to compile here — the guarantee
-// that Run is mandatory.)
+// Both shapes satisfy Handler; one without Run would not compile.
 var (
 	_ Handler = (*onlyRun)(nil)
 	_ Handler = (*granular)(nil)
@@ -47,7 +43,7 @@ func TestDefaultEmbeds_bundleSatisfiesInterfaceAndNoOps(t *testing.T) {
 	h := &onlyRun{}
 	var iface Handler = h
 
-	// The four embedded hooks run as harmless no-ops (nil rtx is fine — they ignore it).
+	// The four embedded hooks are no-ops, even with a nil rtx.
 	iface.CascadingPreRun(context.Background(), nil)
 	iface.PreRun(context.Background(), nil)
 	iface.PostRun(context.Background(), nil)
@@ -63,7 +59,7 @@ func TestDefaultEmbeds_granularAndOverride(t *testing.T) {
 	g := &granular{}
 	var iface Handler = g
 
-	// The explicitly-defined CascadingPreRun is used (not a default — none was embedded).
+	// The explicitly defined CascadingPreRun is used.
 	iface.CascadingPreRun(context.Background(), nil)
 	if !g.preRan {
 		t.Error("explicit CascadingPreRun did not run")
@@ -97,8 +93,7 @@ var overriderPreRan bool
 func (*overrider) PreRun(ctx context.Context, rtx *Context) { overriderPreRan = true }
 func (*overrider) Run(ctx context.Context, rtx *Context)    {}
 
-// dhHandlers is the shape NoHooks exists for: a handler written by hand, behind a spec's
-// `handler: {import, convention}`, with only the hook it actually implements written out.
+// dhHandlers is a hand-written handler embedding NoHooks and defining only Run.
 type dhHandlers struct {
 	NoHooks
 	ran *bool
@@ -111,8 +106,8 @@ type dhProgram struct{ ran *bool }
 func (p dhProgram) App() Handler    { return &dhHandlers{ran: p.ran} }
 func (p dhProgram) AppRun() Handler { return &dhHandlers{ran: p.ran} }
 
-// TestNoHooks_satisfiesHandlerWithOnlyRun is the whole point: one embed plus Run, and the
-// promotion through two levels still produces a complete Handler.
+// TestNoHooks_satisfiesHandlerWithOnlyRun: NoHooks plus Run is a complete Handler through
+// two levels of promotion.
 func TestNoHooks_satisfiesHandlerWithOnlyRun(t *testing.T) {
 	var ran bool
 	p := NewProgram(testDef(), dhProgram{ran: &ran}).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -124,8 +119,7 @@ func TestNoHooks_satisfiesHandlerWithOnlyRun(t *testing.T) {
 	}
 }
 
-// TestNoHooks_isTheSameFourNoOps pins that it adds no behaviour of its own — it is an
-// assembly of the existing embeds, not a new kind of hook.
+// TestNoHooks_isTheSameFourNoOps pins that NoHooks adds no behavior beyond the four no-ops.
 func TestNoHooks_isTheSameFourNoOps(t *testing.T) {
 	var h NoHooks
 	ctx, rtx := context.Background(), newContext()
@@ -145,8 +139,7 @@ func TestNoHooks_isTheSameFourNoOps(t *testing.T) {
 	}
 }
 
-// TestNoHooks_ownMethodWins: embedding it must not make implementing a hook any different
-// from before — a method on the outer type shadows the promoted no-op.
+// TestNoHooks_ownMethodWins: a method on the outer type shadows the promoted no-op.
 func TestNoHooks_ownMethodWins(t *testing.T) {
 	log := []string{}
 	p := NewProgram(testDef(), dhOverride{log: &log}).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -171,13 +164,9 @@ type dhOverrideLeaf struct {
 func (h *dhOverrideLeaf) PreRun(context.Context, *Context) { *h.log = append(*h.log, "PreRun") }
 func (h *dhOverrideLeaf) Run(context.Context, *Context)    { *h.log = append(*h.log, "Run") }
 
-// TestNoHooks_stillRequiresRunAtCompileTime is the property that must survive collapsing
-// the embeds, and it cannot be asserted from inside a passing test binary — a program that does
-// not compile cannot be linked into this one. So it is compiled out of process.
-//
-// Without it, a handler could embed NoHooks, forget Run entirely, satisfy Handler, and do
-// nothing at runtime. The whole reason `rotini generate`'s hook audit skips Run is that the
-// compiler owns that case.
+// TestNoHooks_stillRequiresRunAtCompileTime pins that NoHooks without Run does not satisfy
+// Handler. A compile failure cannot be asserted in-process, so the program is compiled out of
+// process. `rotini generate`'s hook audit relies on this to skip Run.
 func TestNoHooks_stillRequiresRunAtCompileTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles a throwaway package")
@@ -217,19 +206,16 @@ func main() {}
 	}
 }
 
-// The instance-lifetime contract documented on [Handler], pinned.
+// ── handler instance lifetime ───────────────────────────────────────────────.
 //
-// It is load-bearing rather than incidental: the docs now tell authors that a field is the right
-// home for state flowing between one command's own hooks, and that advice is only true because
-// dispatch asks the ProgramHandlers for a handler once per frame per run and reuses that value
-// for the frame's hooks. If that ever changed, generated CLIs would lose state silently between
-// PreRun and Run, so it is asserted rather than described.
+// Dispatch asks the handler set once per command per run and reuses that value for the
+// command's hooks, which is what makes a field valid state between those hooks.
 
 // ltFrame records the pointer identity of the handler serving each hook it runs.
 type ltFrame struct {
 	name string
 	seen *[]ltSighting
-	// state exists to prove a field survives from one of THIS frame's hooks to another.
+	// state shows a field surviving between this command's hooks.
 	state string
 }
 
@@ -270,8 +256,8 @@ func find(seen []ltSighting, frame, hook string) *ltSighting {
 	return nil
 }
 
-// TestHandlerLifetime_oneValuePerFrameForTheWholeRun is the fact the "use a field" advice rests
-// on: every hook belonging to one command is served by the same value.
+// TestHandlerLifetime_oneValuePerFrameForTheWholeRun: every hook of one command is served by
+// the same value.
 func TestHandlerLifetime_oneValuePerFrameForTheWholeRun(t *testing.T) {
 	var seen []ltSighting
 	p := NewProgram(testDef(), ltFresh{seen: &seen}).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -287,7 +273,7 @@ func TestHandlerLifetime_oneValuePerFrameForTheWholeRun(t *testing.T) {
 	if pre.ptr != run.ptr || run.ptr != post.ptr {
 		t.Error("the leaf's PreRun, Run and PostRun were served by different handler values")
 	}
-	// …so a field set in PreRun is still there in Run and PostRun. This is the documented use.
+	// …so a field set in PreRun is still there in Run and PostRun.
 	if run.state != "from PreRun" || post.state != "from PreRun" {
 		t.Errorf("a field did not survive PreRun → Run → PostRun: run=%q post=%q", run.state, post.state)
 	}
@@ -305,8 +291,8 @@ func TestHandlerLifetime_oneValuePerFrameForTheWholeRun(t *testing.T) {
 	}
 }
 
-// TestHandlerLifetime_differentFramesGetDifferentValues is the limit of that advice, and the
-// reason the registry exists: state travelling DOWN the chain cannot ride a field.
+// TestHandlerLifetime_differentFramesGetDifferentValues: different commands get different
+// values, so a field cannot carry state down the chain.
 func TestHandlerLifetime_differentFramesGetDifferentValues(t *testing.T) {
 	var seen []ltSighting
 	p := NewProgram(testDef(), ltFresh{seen: &seen}).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -322,8 +308,8 @@ func TestHandlerLifetime_differentFramesGetDifferentValues(t *testing.T) {
 	}
 }
 
-// TestHandlerLifetime_generatedWiringIsFreshPerRun pins what generated code gives you: a new
-// value each run, so a field is per-run state and nothing leaks between invocations.
+// TestHandlerLifetime_generatedWiringIsFreshPerRun: generated-style wiring yields a new value
+// each run, so fields do not carry over between runs.
 func TestHandlerLifetime_generatedWiringIsFreshPerRun(t *testing.T) {
 	var seen []ltSighting
 	p := NewProgram(testDef(), ltFresh{seen: &seen}).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -347,11 +333,7 @@ func TestHandlerLifetime_generatedWiringIsFreshPerRun(t *testing.T) {
 	}
 }
 
-// ltShared is the shape the docs warn about: a hand-written aggregate returning one value.
-//
-// Sharing is not itself wrong — a STATELESS handler is the common case and is fine shared — so
-// this is not something the runtime can reject. It is a contract the author keeps, which is why
-// the doc says to return a new value per call if your handlers keep state in fields.
+// ltShared is a hand-written handler set that returns one shared value on every call.
 type ltShared struct {
 	root *ltFrame
 	leaf *ltFrame
@@ -360,8 +342,8 @@ type ltShared struct {
 func (w ltShared) App() Handler    { return w.root }
 func (w ltShared) AppRun() Handler { return w.leaf }
 
-// TestHandlerLifetime_sharedWiringPersistsAcrossRuns demonstrates the hazard concretely: the
-// runtime uses whatever the wiring method returns, so freshness is the author's to provide.
+// TestHandlerLifetime_sharedWiringPersistsAcrossRuns: the runtime uses whatever the wiring
+// method returns, so a shared value's fields persist across runs.
 func TestHandlerLifetime_sharedWiringPersistsAcrossRuns(t *testing.T) {
 	var seen []ltSighting
 	w := ltShared{root: &ltFrame{name: "app", seen: &seen}, leaf: &ltFrame{name: "run", seen: &seen}}
@@ -383,9 +365,8 @@ func TestHandlerLifetime_sharedWiringPersistsAcrossRuns(t *testing.T) {
 	}
 }
 
-// TestHandlerLifetime_generatedWiringIsRaceFreeUnderConcurrentRuns is the claim that matters for
-// a REPL or a concurrent host: with a fresh value per call, handler fields are per-run state and
-// concurrent runs cannot collide. Meaningful under -race; harmless without it.
+// TestHandlerLifetime_generatedWiringIsRaceFreeUnderConcurrentRuns: with a fresh value per call,
+// concurrent runs do not share handler fields. Meaningful under -race.
 func TestHandlerLifetime_generatedWiringIsRaceFreeUnderConcurrentRuns(t *testing.T) {
 	seen := make([]ltSighting, 0)
 	var mu sync.Mutex
@@ -408,8 +389,7 @@ func TestHandlerLifetime_generatedWiringIsRaceFreeUnderConcurrentRuns(t *testing
 	wg.Wait()
 }
 
-// ltRecording is ltFresh with a mutex-guarded sink, so the TEST's own bookkeeping is not what
-// -race reports on.
+// ltRecording is ltFresh with a mutex-guarded sink, so the test's own bookkeeping is race-free.
 type ltRecording struct{ record func(ltSighting) }
 
 func (w ltRecording) App() Handler    { return &ltConcurrent{name: "app", record: w.record} }
@@ -429,8 +409,8 @@ func (h *ltConcurrent) Run(context.Context, *Context) {
 func (h *ltConcurrent) PostRun(context.Context, *Context)          {}
 func (h *ltConcurrent) CascadingPostRun(context.Context, *Context) {}
 
-// TestDefaultEmbedsAreNoOps executes the four embeddable defaults. Every generated stub embeds
-// them, so "does nothing, safely, with a nil context" is a real contract.
+// TestDefaultEmbedsAreNoOps pins that the four No* hooks do nothing, including with a nil
+// context.
 func TestDefaultEmbedsAreNoOps(t *testing.T) {
 	var h struct {
 		NoCascadingPreRun
@@ -444,8 +424,7 @@ func TestDefaultEmbedsAreNoOps(t *testing.T) {
 	h.PostRun(ctx, rtx)
 	h.CascadingPostRun(ctx, rtx)
 
-	// A no-op must not have recorded anything, or an "empty" handler would not settle
-	// silently.
+	// A no-op records nothing.
 	if !(Outcome{
 		Infos:     rtx.copyInfos(),
 		Successes: rtx.copySuccesses(),
@@ -456,8 +435,7 @@ func TestDefaultEmbedsAreNoOps(t *testing.T) {
 		t.Error("a default hook recorded something")
 	}
 
-	// They also have to be callable with a nil context — the defaults are reached through
-	// an interface a user may drive directly in a test.
+	// They are callable with a nil context.
 	h.PreRun(ctx, nil)
 	h.PostRun(ctx, nil)
 }

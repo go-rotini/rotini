@@ -12,24 +12,15 @@ import (
 	"testing"
 )
 
-// The lint layer rejects a mistake before any code exists, each rule naming the offending
-// thing, its file:line:col, and what to do instead. Every rule had coverage; NOT ONE had a test that
-// asserted what it SAYS. A refactor that turned lintConfigSource's sentence into
-// "invalid config_source" would have passed the entire suite.
-//
-// So the messages are a shipped artifact and get the same freeze testdata/surface.txt gives
-// the exported API: one fixture directory per rule, holding the minimal documents that trip
-// exactly that rule and the exact output they produce.
+// Lint messages are user-facing output, so each rule's exact report is pinned by a fixture:
 //
 //	internal/codegen/testdata/lint/<ruleName>/
 //	    spec.yaml     the documents (conf.yaml is optional; a minimal valid one is supplied)
 //	    conf.yaml
 //	    want.txt      every problem reported, verbatim
 //
-// Recording a fixture is not the assertion — READING it is. When -update writes a want.txt,
-// judge the message as a stranger would: does it name the thing, say where, and say what to
-// do instead? A correct rejection with a useless message is a bug, and this is where it is
-// caught.
+// When -update-lint rewrites a want.txt, review the message itself: it should name the
+// subject, its position, and the fix.
 
 // updateLintFixtures rewrites every want.txt:
 // `go test ./internal/codegen -run LintFixtures -update-lint`.
@@ -37,8 +28,7 @@ var updateLintFixtures = flag.Bool("update-lint", false, "rewrite the lint fixtu
 
 const lintFixtureDir = "testdata/lint"
 
-// lintFixtureConf is the conf used when a fixture supplies no conf.yaml of its own: minimal,
-// valid, and irrelevant to every spec rule, so a spec fixture stays about its own rule.
+// lintFixtureConf is the minimal valid conf used when a fixture supplies no conf.yaml.
 const lintFixtureConf = `version: 0.0.0
 generate:
   packages:
@@ -48,8 +38,7 @@ generate:
 `
 
 // ruleNames returns the registered lint rules' function names, which are also their fixture
-// directory names. Taking them from the registries rather than a hand-kept list is what makes
-// TestLintFixturesComplete able to fail on a rule someone added without a fixture.
+// directory names.
 func ruleNames() []string {
 	var names []string
 	add := func(fn any) {
@@ -66,9 +55,8 @@ func ruleNames() []string {
 	return names
 }
 
-// TestLintFixturesComplete fails when a rule has no fixture directory, or a directory names no
-// rule. Modeled on TestConformance_matrixComplete, which keeps the input matrix honest the
-// same way: adding a rule without a fixture breaks the build, so the corpus cannot rot.
+// TestLintFixturesComplete pins a one-to-one match between registered rules and fixture
+// directories.
 func TestLintFixturesComplete(t *testing.T) {
 	entries, err := os.ReadDir(lintFixtureDir)
 	if err != nil {
@@ -117,9 +105,8 @@ func runLintFixture(t *testing.T, rule string) {
 	}
 	dir := filepath.Join(lintFixtureDir, rule)
 
-	// A fixture is a whole little module: spec.yaml and conf.yaml become the two documents
-	// validate is pointed at, and any other file (a child spec a $ref composes, a config
-	// file an input pins) is copied in beside them under its own name.
+	// A fixture is a small module: spec.yaml and conf.yaml become the validated documents,
+	// and any other file (a composed child spec, a pinned config file) is copied alongside.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("fixture %s: %v", rule, err)
@@ -156,8 +143,7 @@ func runLintFixture(t *testing.T, rule string) {
 
 	t.Chdir(mod)
 
-	// "collect" so the whole report is recorded, not just the first problem: a fixture that
-	// trips more rules than it meant to is itself worth seeing in the diff.
+	// "collect" records the whole report, so a fixture tripping extra rules shows in the diff.
 	var warnings []error
 	failure := NewProcessor("0.0.0").Validate(".rotini.spec.yaml", ".rotini.conf.yaml", false, "collect",
 		func(string, error) {},
@@ -181,7 +167,6 @@ func runLintFixture(t *testing.T, rule string) {
 		t.Errorf("fixture %s: report changed.\n--- want ---\n%s\n--- got ---\n%s", rule, want, got)
 	}
 
-	// A fixture exists to make a rule fire. One that reports nothing is silently useless.
 	if strings.TrimSpace(got) == "" {
 		t.Errorf("fixture %s produced no problems — it no longer trips its rule", rule)
 	}
@@ -202,17 +187,11 @@ func lintReport(failure error, warnings []error) string {
 	return b.String()
 }
 
-// lineColRe matches the full position promise: file:line:col.
+// lineColRe matches a file:line:col position.
 var lineColRe = regexp.MustCompile(`\.rotini\.(spec|conf)\.yaml:\d+:\d+`)
 
-// TestLintProblemsArePositioned is the claim README.md and doc.go both make about validation:
-// a problem is reported at a file:line:col, not just named. Before the fixture corpus existed,
-// no rule produced a position — locateProblems only placed JSON Schema violations, whose loc
-// happens to be a pointer, and every lint rule's loc is a human label.
-//
-// A rule that genuinely has nowhere to point is named in unpositionable rather than left to
-// erode the promise silently. None does today: even a type imported two ways is placed where
-// the conflicting import is written. Anything reporting without a position is a regression.
+// TestLintProblemsArePositioned pins that every fixture problem names its file and a
+// line:col. A rule that cannot be positioned must be listed in unpositionable; none is.
 func TestLintProblemsArePositioned(t *testing.T) {
 	unpositionable := map[string]string{}
 
@@ -234,13 +213,9 @@ func TestLintProblemsArePositioned(t *testing.T) {
 				if line == "" {
 					continue
 				}
-				// EVERY problem names its file — a message without one is unusable
-				// from a Makefile or against several documents.
 				if !strings.Contains(line, ".rotini.spec.yaml") && !strings.Contains(line, ".rotini.conf.yaml") {
 					t.Errorf("%s names no file at all:\n%s", rule, line)
 				}
-				// A line:col is the stronger promise, and a few rules genuinely cannot
-				// make it: a conflict ACROSS declarations has no single node to point at.
 				positioned := lineColRe.MatchString(line)
 				if why, ok := unpositionable[rule]; ok {
 					if positioned {

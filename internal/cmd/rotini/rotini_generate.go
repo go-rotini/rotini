@@ -38,9 +38,7 @@ func (*rotiniGenerateHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.SetDependencyIfAbsent(generateDep, codegen.NewProcessor(version).Generate)
 	generate := rtx.MustGetDependency(generateDep)
 
-	// The warnings are validate's, plus what the pass removed — generating is not supposed to
-	// be destructive, so on the rare occasion it is, it says so — and what the handler-hook
-	// audit found in files rotini did not write.
+	// Warnings are validate's, plus each pruned file and the handler audit's findings.
 	if err := generate(spec, conf, flags.Watch, printResult(rtx), printWarnings(rtx)); err != nil {
 		haltWithProblems(rtx, err)
 		return

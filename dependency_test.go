@@ -9,9 +9,6 @@ import (
 	"testing"
 )
 
-// A typed Dependency exists so the stored name and the type assertion cannot drift, and so a
-// handler needs neither. These pin both halves.
-
 type demoStore interface{ All() []string }
 
 type memDemoStore struct{ items []string }
@@ -159,9 +156,8 @@ func TestDependency_nameAndString(t *testing.T) {
 	}
 }
 
-// A dependency declared over an INTERFACE accepts a concrete value once the type is named —
-// the shape a real CLI has, where a constructor returns a concrete type. Go infers T from both
-// arguments, so without the type argument this would not compile.
+// A dependency declared over an interface accepts a concrete value when the type argument is
+// explicit; this test passes by compiling.
 func TestDependency_acceptsAssignableConcreteType(t *testing.T) {
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
 	p.WithDependency[demoStore](demoStoreDep, memDemoStore{items: []string{"x"}}) // concrete, not demoStore
@@ -214,10 +210,8 @@ func TestWithDependency_lastWins(t *testing.T) {
 	}
 }
 
-// TestWith_toleratesNothing covers the degenerate OPTION inputs, so a caller assembling an
-// option slice conditionally does not have to guard every element.
-//
-// A nil *Program is deliberately NOT in that set: see TestProgram_nilReceiverPanicsAtTheCall.
+// TestWith_toleratesNothing pins that With accepts no options and skips nil options. A nil
+// *Program is not tolerated; see TestProgram_nilReceiverPanicsAtTheCall.
 func TestWith_toleratesNothing(t *testing.T) {
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
 	if p.With() != p {
@@ -231,11 +225,8 @@ func TestWith_toleratesNothing(t *testing.T) {
 	}
 }
 
-// TestProgram_nilReceiverPanicsAtTheCall pins the contract the whole surface follows: a nil
-// *Program is a caller bug, and every method dereferences rather than checking.
-//
-// Two of these methods used to return the nil receiver instead, which is worse: the nil then
-// travels down the chain and panics somewhere later, at a call that was not the mistake.
+// TestProgram_nilReceiverPanicsAtTheCall pins that Program methods panic on a nil receiver at
+// the call itself rather than returning the nil down the chain.
 func TestProgram_nilReceiverPanicsAtTheCall(t *testing.T) {
 	for name, call := range map[string]func(*Program){
 		"With":              func(p *Program) { p.With(WithDependency(NewDependency[int]("x"), 1)) },
@@ -254,8 +245,8 @@ func TestProgram_nilReceiverPanicsAtTheCall(t *testing.T) {
 	}
 }
 
-// TestWith_carriesAnArbitraryOption proves Option is not for dependencies only: it is an
-// ordinary function over the program, so a caller can bundle any configuration into one value.
+// TestWith_carriesAnArbitraryOption pins that an Option can carry any program configuration,
+// not only dependencies.
 func TestWith_carriesAnArbitraryOption(t *testing.T) {
 	var out bytes.Buffer
 	quiet := Option(func(p *Program) { p.WithStdout(&out).WithoutSignalHandling() })

@@ -7,17 +7,12 @@ import (
 	"testing"
 )
 
-// The hook audit closes the one way a lifecycle hook can go wrong silently.
-//
-// Two of the three ways are already loud, and these tests pin that division of labour rather
-// than re-testing the compiler: a hook that is MISSING and a hook whose SIGNATURE drifted both
-// break the `var _ rotini.Handler` assertion every stub carries. A hook whose NAME is
-// misspelled does not — the embedded No* still satisfies the interface — and that is what
-// the audit is for.
+// The hook audit reports misspelled hook names, which the `var _ rotini.Handler` assertion
+// cannot catch because the embedded No* still satisfies the interface. Missing hooks and
+// drifted signatures are left to the compiler.
 
-// hookAuditFixture generates a two-command project in a temp module and returns a function that
-// re-runs generate, returning its notices. The cmd package directory is returned so a test can
-// edit the stub the way an author would.
+// hookAuditFixture generates a two-command project in a temp module and returns the cmd
+// package directory and a function that re-runs generate and returns its notices.
 func hookAuditFixture(t *testing.T) (cmdDir string, gen func(*testing.T) []error) {
 	t.Helper()
 	dir := t.TempDir()
@@ -39,10 +34,8 @@ func hookAuditFixture(t *testing.T) (cmdDir string, gen func(*testing.T) []error
 	return filepath.Join(dir, "internal", "cmd", "demo"), gen
 }
 
-// appendToStub adds declarations to a generated stub, the way an author implementing a hook
-// does. The embeds are left in place: a hook is implemented by declaring a method with the
-// same name, and nothing says to remove the no-op it replaces — which is exactly why a
-// misspelled name is silent.
+// appendToStub appends declarations to a generated stub, leaving its No* embeds in place as an
+// author implementing a hook would.
 func appendToStub(t *testing.T, cmdDir, file, decls string) {
 	t.Helper()
 	path := filepath.Join(cmdDir, file)
@@ -55,8 +48,8 @@ func appendToStub(t *testing.T, cmdDir, file, decls string) {
 	}
 }
 
-// TestHookAudit_reportsAMisspelledHook is the finding itself: the method compiles, satisfies
-// Handler, and never runs. The notice has to carry enough to act on without opening the file.
+// TestHookAudit_reportsAMisspelledHook pins the notice for a misspelled hook and its actionable
+// details.
 func TestHookAudit_reportsAMisspelledHook(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	appendToStub(t, cmdDir, "demo_build.go", `
@@ -81,8 +74,8 @@ func (*demoBuildHandler) Prerun(ctx context.Context, rtx *rotini.Context) {}
 	}
 }
 
-// TestHookAudit_isQuietOnCorrectCode guards the audit against being noise. A warning that
-// fires on working code gets ignored, and then the real one is ignored with it.
+// TestHookAudit_isQuietOnCorrectCode pins silence for correctly spelled hooks and ordinary
+// helper methods.
 func TestHookAudit_isQuietOnCorrectCode(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	appendToStub(t, cmdDir, "demo_build.go", `
@@ -106,9 +99,7 @@ func (*demoBuildHandler) loadConfig() error   { return nil }
 	}
 }
 
-// TestHookAudit_ignoresNonHandlerTypes keeps the audit scoped to types that actually implement
-// Handler, found through the assertion. A helper type in the same package is not a handler,
-// and a method on it is none of the audit's business.
+// TestHookAudit_ignoresNonHandlerTypes pins that methods on non-handler types are not audited.
 func TestHookAudit_ignoresNonHandlerTypes(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	writeTestFile(t, cmdDir, "helpers.go", `package demo
@@ -123,8 +114,8 @@ func (migrator) PostRunn() error { return nil }
 	}
 }
 
-// TestHookAudit_findsHooksInAnyFileOfThePackage: an author who puts the hook in its own file
-// beside the stub has made the same mistake, so the audit reads the package, not one file.
+// TestHookAudit_findsHooksInAnyFileOfThePackage pins that the audit reads every file in the
+// package, not only the stub.
 func TestHookAudit_findsHooksInAnyFileOfThePackage(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	writeTestFile(t, cmdDir, "lifecycle.go", `package demo
@@ -143,25 +134,21 @@ func (*demoBuildHandler) PostRunn(ctx context.Context, rtx *rotini.Context) {}
 	}
 }
 
-// TestHookAudit_neverFailsTheGenerate: these are the author's files, and they are read at the
-// one moment they are most likely to be mid-edit. A file that will not parse is skipped — the
-// compiler is about to report it far better than the audit could — and generate still succeeds,
-// because refusing to regenerate over a syntax error would be a worse bug than the one this
-// step exists to catch.
+// TestHookAudit_neverFailsTheGenerate pins that an unparseable handler file is skipped and
+// generate still succeeds.
 func TestHookAudit_neverFailsTheGenerate(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	writeTestFile(t, cmdDir, "broken.go", "package demo\n\nfunc (*demoBuildHandler) Prerun( {\n")
 	if notices := gen(t); len(notices) != 0 {
 		t.Errorf("an unparseable file reported %v, want it skipped", notices)
 	}
-	// And the pass still emitted: the generated file is present and current.
 	if _, err := os.Stat(filepath.Join(cmdDir, "zz_demo.go")); err != nil {
 		t.Errorf("generate did not emit while a handler file was unparseable: %v", err)
 	}
 }
 
-// TestHookAudit_reportsEveryOffenderInOrder: warnings are sorted by file then line so two runs
-// over the same tree read the same, which is what makes them diffable in CI.
+// TestHookAudit_reportsEveryOffenderInOrder pins that every offender is reported, sorted by
+// file then line.
 func TestHookAudit_reportsEveryOffenderInOrder(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	appendToStub(t, cmdDir, "demo_build.go", `
@@ -193,8 +180,8 @@ func (*demoBuildHandler) PreRunn(ctx context.Context, rtx *rotini.Context) {}
 	}
 }
 
-// TestHookAudit_readsTheAssertionLoosely: an author may rewrite the assertion, and the runtime
-// may be imported under an alias. Neither should switch the audit off silently.
+// TestHookAudit_readsTheAssertionLoosely pins that a rewritten assertion or an aliased runtime
+// import still identifies a handler type.
 func TestHookAudit_readsTheAssertionLoosely(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	writeTestFile(t, cmdDir, "aliased.go", `package demo
@@ -224,10 +211,8 @@ func (aliasedHandler) PostRunn(ctx context.Context, rtx *rt.Context) {}
 	}
 }
 
-// A `handler: {import, convention}` package is the bring-your-own seam: one Handler
-// implementation, written by hand, shared by several CLIs. It is where a misspelled hook is
-// least likely to be noticed — nobody regenerates it, and it has no stub to compare against —
-// and for a while it was the one place the audit did not look.
+// handlerPkgSpec delegates the `check` command to a hand-written package through a
+// `handler: {import, convention}` block.
 const handlerPkgSpec = `version: 0.0.0
 command:
   name: demo
@@ -261,8 +246,8 @@ func handlerPkgFixture(t *testing.T, handlerBody string) (pkgDir string, gen fun
 	return filepath.Join(dir, "handlers", "check"), gen
 }
 
-// handlerPkg is the real shape: no `var _ rotini.Handler` assertion, because the convention
-// function's return type already proves the type implements it.
+// handlerPkg returns a hand-written handler package source with extra appended. Like real ones,
+// it has no `var _ rotini.Handler` assertion; the convention function's return type suffices.
 func handlerPkg(extra string) string {
 	return `package check
 
@@ -283,8 +268,8 @@ func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {}
 ` + extra
 }
 
-// TestHookAudit_reachesAHandlerPackage is the gap closed: the audit follows `handler:` into a
-// package this module owns.
+// TestHookAudit_reachesAHandlerPackage pins that the audit follows `handler:` into an in-module
+// package.
 func TestHookAudit_reachesAHandlerPackage(t *testing.T) {
 	_, gen := handlerPkgFixture(t, handlerPkg(`
 func (*handlers) CascadingPrerun(ctx context.Context, rtx *rotini.Context) {}
@@ -301,9 +286,8 @@ func (*handlers) CascadingPrerun(ctx context.Context, rtx *rotini.Context) {}
 	}
 }
 
-// TestHookAudit_findsHandlerTypesWithoutAnAssertion pins the mechanism that makes the above
-// possible: a type is a handler if a function RETURNS it as rotini.Handler, not only if an
-// assertion names it. Without this the audit walks the package and finds nothing to check.
+// TestHookAudit_findsHandlerTypesWithoutAnAssertion pins that the handler-package fixture has
+// no assertion, so the audit must find its type through a function returning rotini.Handler.
 func TestHookAudit_findsHandlerTypesWithoutAnAssertion(t *testing.T) {
 	dir, gen := handlerPkgFixture(t, handlerPkg(""))
 	if notices := gen(t); len(notices) != 0 {
@@ -318,7 +302,7 @@ func TestHookAudit_findsHandlerTypesWithoutAnAssertion(t *testing.T) {
 	}
 }
 
-// TestHookAudit_isQuietOnACorrectHandlerPackage guards against the new reach becoming noise.
+// TestHookAudit_isQuietOnACorrectHandlerPackage pins silence for a correct handler package.
 func TestHookAudit_isQuietOnACorrectHandlerPackage(t *testing.T) {
 	_, gen := handlerPkgFixture(t, handlerPkg(`
 // A correctly spelled hook, and an ordinary helper.
@@ -331,9 +315,8 @@ func (*handlers) prepare() error { return nil }
 	}
 }
 
-// TestHookAudit_skipsHandlerPackagesInOtherModules is the deliberate boundary: a dependency's
-// source is not this tool's to lint, and resolving an import path outside this module would mean
-// consulting the build list or the module cache.
+// TestHookAudit_skipsHandlerPackagesInOtherModules pins that handler packages outside this
+// module are not audited.
 func TestHookAudit_skipsHandlerPackagesInOtherModules(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/demo\n\ngo 1.26\n")
@@ -352,16 +335,8 @@ func TestHookAudit_skipsHandlerPackagesInOtherModules(t *testing.T) {
 	}
 }
 
-// The last silent misalignment: a handler collecting ANOTHER command's generated inputs type.
-//
-// The runtime cannot catch it. An inputs struct binds to the frame whose hook is running, so an
-// ancestor's type lands on the caller's own frame and reads it through the wrong shape — and the
-// alignment guard passes whenever the two commands share a flag name, which cascading flags
-// guarantee. Closing it at runtime needs a frame to carry a grafted command's origin identity,
-// which nothing does, because a composed child is renamed by the umbrella that mounts it.
-//
-// Codegen has what the runtime lacks: it knows which command each stub implements. The question
-// never crosses a package, so renaming and composition do not arise.
+// The inputs audit reports a handler acquiring another command's generated inputs type, which
+// binds to the running command's frame and reads it through the wrong shape.
 
 const twoCommandSpec = `version: 0.0.0
 command:
@@ -422,7 +397,8 @@ func (*demoBuildHandler) Run(ctx context.Context, rtx *rotini.Context) {
 `
 }
 
-// TestInputsAudit_reportsAnotherCommandsType is the residue, closed.
+// TestInputsAudit_reportsAnotherCommandsType pins the notice for acquiring a parent's inputs
+// type.
 func TestInputsAudit_reportsAnotherCommandsType(t *testing.T) {
 	gen := inputsAuditFixture(t, buildStub(`in, err := rtx.Inputs[DemoInputs]()
 	_, _ = in, err`))
@@ -438,8 +414,8 @@ func TestInputsAudit_reportsAnotherCommandsType(t *testing.T) {
 	}
 }
 
-// TestInputsAudit_coversEveryAcquirer: rtx.Inputs is not the only way in. The per-channel
-// methods take the same type argument and land on the same frame.
+// TestInputsAudit_coversEveryAcquirer pins that every inputs-acquiring method is audited, not
+// only rtx.Inputs.
 func TestInputsAudit_coversEveryAcquirer(t *testing.T) {
 	for _, fn := range []string{"Inputs", "InputsWithReport", "DefaultInputs", "ArgvInputs", "EnvInputs", "FileInputs", "StdinInputs"} {
 		t.Run(fn, func(t *testing.T) {
@@ -455,8 +431,7 @@ func TestInputsAudit_coversEveryAcquirer(t *testing.T) {
 	}
 }
 
-// TestInputsAudit_isQuietOnTheOwnType guards against the check becoming noise: the generated
-// stub already collects its own type, and every example must stay silent.
+// TestInputsAudit_isQuietOnTheOwnType pins silence for a handler acquiring its own inputs type.
 func TestInputsAudit_isQuietOnTheOwnType(t *testing.T) {
 	gen := inputsAuditFixture(t, buildStub(`in, err := rtx.Inputs[DemoBuildInputs]()
 	_, _ = in, err`))
@@ -465,9 +440,8 @@ func TestInputsAudit_isQuietOnTheOwnType(t *testing.T) {
 	}
 }
 
-// TestInputsAudit_ignoresAHandWrittenStruct is the shape the `handler:` seam uses: a shared
-// handler declares its own inputs struct because it cannot name any host CLI's generated one.
-// An unrecognized type argument is supported, not a mistake.
+// TestInputsAudit_ignoresAHandWrittenStruct pins silence for a hand-written inputs struct, as a
+// shared `handler:` package declares.
 func TestInputsAudit_ignoresAHandWrittenStruct(t *testing.T) {
 	gen := inputsAuditFixture(t, `package demo
 

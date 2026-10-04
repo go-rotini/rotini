@@ -51,8 +51,8 @@ func TestRoffEscape(t *testing.T) {
 	}
 }
 
-// TestWrapRoffText: a filled text line longer than the width breaks at spaces, which roff
-// rejoins, and a piece that would start with "." is kept text.
+// TestWrapRoffText pins that a long filled line breaks at spaces and that a piece starting with
+// "." is escaped as text.
 func TestWrapRoffText(t *testing.T) {
 	for _, tc := range []struct {
 		in    string
@@ -249,10 +249,9 @@ func TestManPages_shape(t *testing.T) {
 	}
 }
 
-// TestManPages_lintClean runs every rendered page through a real man page checker: mandoc
-// (shipped with macOS and the BSDs) or groff (most Linux systems). It is skipped when neither
-// is installed. The one finding allowed is mandoc's "missing date" warning: the header date is
-// empty on purpose unless SOURCE_DATE_EPOCH sets it, so regenerating never changes a page.
+// TestManPages_lintClean runs every rendered page through mandoc or groff, skipping when
+// neither is installed. mandoc's "missing date" warning is allowed: the date is empty unless
+// SOURCE_DATE_EPOCH sets it.
 func TestManPages_lintClean(t *testing.T) {
 	dir, _ := emitModule(t, manSpec, manConfEmbed)
 	pages := manPages(t, dir)
@@ -283,8 +282,8 @@ func TestManPages_lintClean(t *testing.T) {
 	}
 }
 
-// TestManPages_section: a section set in the conf is the page header's section, the file
-// extension, the cross-references' section and the ManSection constant.
+// TestManPages_section pins that a conf section sets the header section, the file extension,
+// the cross-reference sections and the ManSection constant.
 func TestManPages_section(t *testing.T) {
 	conf := strings.Replace(manConfEmbed, "      embed: true\n", "      embed: true\n      section: 8\n", 1)
 	dir, files := emitModule(t, manSpec, conf)
@@ -307,7 +306,7 @@ func TestManPages_section(t *testing.T) {
 	}
 }
 
-// TestManPages_sourceDateEpoch: the header date is empty unless SOURCE_DATE_EPOCH names one.
+// TestManPages_sourceDateEpoch pins that SOURCE_DATE_EPOCH sets the header date.
 func TestManPages_sourceDateEpoch(t *testing.T) {
 	t.Setenv("SOURCE_DATE_EPOCH", "1759276800") // 2025-10-01T00:00:00Z
 	dir, _ := emitModule(t, manSpec, manConfEmbed)
@@ -316,11 +315,11 @@ func TestManPages_sourceDateEpoch(t *testing.T) {
 	}
 }
 
-// TestManPages_nameCollision: two commands whose pages would share a name are an error, which
-// validate reports on the command that collides.
+// TestManPages_nameCollision pins that validate reports two commands sharing a man page name,
+// placed in the spec, and only when the man feature is on.
 func TestManPages_nameCollision(t *testing.T) {
-	// Two commands that differ only in case. (A dash collision, `tag-remove` against
-	// `tag remove`, is already refused by the handler-file rule, so it never reaches this one.)
+	// Two commands that differ only in case. A dash collision (`tag-remove` against
+	// `tag remove`) is refused earlier by the handler-file rule.
 	const spec = `version: 0.0.0
 command:
   name: notes
@@ -346,7 +345,6 @@ command:
 		t.Errorf("the collision is not placed in the spec: %v", got)
 	}
 
-	// The same spec with man off is fine: the names only matter for man pages.
 	off := strings.Replace(strings.ReplaceAll(manConfEmbed, "acme", "notes"), "enabled: true", "enabled: false", 1)
 	writeTestFile(t, dir, ".rotini.conf.yaml", off)
 	got = nil
@@ -356,9 +354,8 @@ command:
 	}
 }
 
-// TestManPages_pruning: the first generate after upgrading removes the man_*.txt pages rotini
-// wrote before v1.2.0; a change of section removes the previous section's pages; and a file in
-// renders/ that rotini did not write is left alone.
+// TestManPages_pruning pins that generate removes pre-v1.2.0 man_*.txt pages and pages from a
+// previous section, and leaves other files in renders/ alone.
 func TestManPages_pruning(t *testing.T) {
 	dir, _ := emitModule(t, manSpec, manConfEmbed)
 	renders := filepath.Join(dir, "internal", "cmd", "acme", "renders")
@@ -397,8 +394,7 @@ func TestManPages_pruning(t *testing.T) {
 	}
 }
 
-// TestManPages_verbatimIsExact: a command's `man:` page is written exactly as given — rotini
-// does not escape or reshape roff the author wrote.
+// TestManPages_verbatimIsExact pins that a command's `man:` page is written byte-for-byte.
 func TestManPages_verbatimIsExact(t *testing.T) {
 	const page = ".TH CUSTOM 1\n.SH NAME\ncustom \\- written by hand\n"
 	spec := strings.Replace(manSpec, "    - name: status\n      summary: show status\n",
@@ -410,7 +406,7 @@ func TestManPages_verbatimIsExact(t *testing.T) {
 }
 
 // pageListsTest runs inside a generated module: ManPages and MarkdownPages list every visible
-// command once, in tree order, under step 4's page names, with the content the resolvers return.
+// command once, in tree order, under its man page name, with the content the resolvers return.
 const pageListsTest = `package acme
 
 import (
@@ -452,8 +448,7 @@ func TestPageLists(t *testing.T) {
 }
 `
 
-// TestPageLists: the generated ManPages and MarkdownPages, compiled and run inside the
-// generated module, in both sourcing modes.
+// TestPageLists runs pageListsTest inside the generated module, in both embed and inline mode.
 func TestPageLists(t *testing.T) {
 	skipUnlessCompiling(t)
 	if testing.Short() {
@@ -476,8 +471,8 @@ func TestPageLists(t *testing.T) {
 	}
 }
 
-// TestPageLists_onlyForEnabledFeatures: a page list is generated only for a feature that is on,
-// and help, which has no page list, gets none.
+// TestPageLists_onlyForEnabledFeatures pins that a page list is generated only for an enabled
+// man or markdown feature, never for help.
 func TestPageLists_onlyForEnabledFeatures(t *testing.T) {
 	dir, _ := emitModule(t, manSpec, manConfEmbed)
 	gen := readEmitted(t, dir, "internal/cmd/acme/zz_acme.go")

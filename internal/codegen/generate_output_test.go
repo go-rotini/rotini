@@ -9,8 +9,8 @@ import (
 	"testing"
 )
 
-// outputConf renders all three page features from manSpec, whose `status` declares the long
-// form of output, `deploy` the short form, and the root an exit status that writes output.
+// outputConf renders all three page features from manSpec, whose `status` declares an inline
+// array output, `deploy` a $ref output, and the root an exit status that writes output.
 const outputConf = `version: 0.0.0
 generate:
   packages:
@@ -76,7 +76,7 @@ func TestOutputSection(t *testing.T) {
 	}
 }
 
-// TestOutputSection_headingOverride: `headings.output` on a command replaces its help heading verbatim.
+// TestOutputSection_headingOverride pins that `headings.output` replaces the help heading verbatim.
 func TestOutputSection_headingOverride(t *testing.T) {
 	spec := strings.Replace(manSpec, "      summary: show status\n", "      summary: show status\n      headings:\n        output: \"Writes:\"\n", 1)
 	dir, _ := emitModule(t, spec, outputConf)
@@ -119,9 +119,8 @@ generate:
       package: acme
 `
 
-// TestOutputSchemaFiles: one standard JSON Schema per declared output, named after the page,
-// with the named schemas it reaches as definitions; none for a hidden command or an undeclared
-// output; and a stale file the directory still holds is removed.
+// TestOutputSchemaFiles pins one JSON Schema file per declared output, named after the page,
+// none for hidden commands, and removal of stale files only.
 func TestOutputSchemaFiles(t *testing.T) {
 	dir, _ := emitModule(t, manSpec, contractConf)
 	outDir := filepath.Join(dir, "schemas", "output")
@@ -162,7 +161,7 @@ func TestOutputSchemaFiles(t *testing.T) {
 		t.Errorf("Status.healthy should be a JSON Schema boolean:\n%s", status)
 	}
 
-	// A file no output produces any more is removed; any other file is left alone.
+	// A stale *.output.json is removed; other files are left alone.
 	writeTestFile(t, dir, "schemas/output/acme-gone.output.json", "{}")
 	writeTestFile(t, dir, "schemas/output/notes.json", "{}")
 	if err := NewProcessor("0.0.0").Generate(".rotini.spec.yaml", ".rotini.conf.yaml", false, func(string, error) {}, func([]error) {}); err != nil {
@@ -176,8 +175,8 @@ func TestOutputSchemaFiles(t *testing.T) {
 	}
 }
 
-// TestContractDocument: the contract validates against its own published schema, and carries
-// what a tool definition needs for each visible command.
+// TestContractDocument pins that the contract validates against schema-contract.json and
+// describes each visible command's inputs, parameters, and outputs.
 func TestContractDocument(t *testing.T) {
 	dir, _ := emitModule(t, manSpec, contractConf)
 	raw, err := os.ReadFile(filepath.Join(dir, "cli-contract.json"))
@@ -238,8 +237,8 @@ func TestContractDocument(t *testing.T) {
 	}
 }
 
-// TestInputJSONSchema_secretDefault: a secret input's default never reaches the contract,
-// whatever its channel; any other input's does.
+// TestInputJSONSchema_secretDefault pins that a secret input's default is omitted from the
+// contract while other defaults are kept.
 func TestInputJSONSchema_secretDefault(t *testing.T) {
 	t.Parallel()
 	secret, _ := json.Marshal(inputJSONSchema(&InputSchema{BaseSchema: BaseSchema{Type: "string"}, Default: "hunter2", Secret: true}))

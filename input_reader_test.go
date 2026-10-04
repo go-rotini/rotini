@@ -76,11 +76,9 @@ func TestInputReader_fillsEnvAndConfig(t *testing.T) {
 	}
 }
 
-// TestInputReader_customSources pins the InputSettings.Sources seam (ergonomics E1/
-// E3-S4): custom recon sources join the config layer AFTER the declared
-// configuration_files — explicit files beat ambient services — serving both
-// config inputs and flags' config fallbacks, through Bind and the per-channel
-// surface alike.
+// TestInputReader_customSources pins InputSettings.Sources: custom recon sources join the
+// config layer after the declared configuration_files and serve both config inputs and flags'
+// config fallbacks, through Read and the per-channel surface alike.
 func TestInputReader_customSources(t *testing.T) {
 	vault := func() recon.Source {
 		// MapSource takes the NESTED shape a config decoder produces.
@@ -239,7 +237,7 @@ func TestInputReader_discoverXDG(t *testing.T) {
 }
 
 // Config-schema shapes (spec configuration_files[].schema): the loaded
-// document is validated at bind time, before any value is read (fidelity F1).
+// document is validated at bind time, before any value is read.
 const tbCfgSchema = `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","required":["api"],"properties":{"api":{"type":"object","required":["endpoint"],"properties":{"endpoint":{"type":"string"}}}}}`
 
 func TestInputReader_configSchemaValidation(t *testing.T) {
@@ -413,9 +411,8 @@ func TestInputReader_explicitEnvVar(t *testing.T) {
 		t.Errorf("Env.Token = %q, want s3cret (from $WIDGET_TOKEN, not $TOKEN)", in.App.Env.Token)
 	}
 
-	// Regression (found by the conformance suite): the explicit variable must
-	// resolve ON ITS OWN — with no convention-named $TOKEN anchoring the
-	// registry snapshot, $WIDGET_TOKEN used to silently not bind at all.
+	// The explicit variable must resolve on its own, with no convention-named
+	// $TOKEN set.
 	os.Unsetenv("TOKEN")
 	var alone tbEnvVarInputs
 	if err := NewInputReader(InputSettings{}).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &alone); err != nil {
@@ -668,8 +665,7 @@ func TestInputReader_flagFallbackPrecedence(t *testing.T) {
 }
 
 // Required-fallback shapes: a *required* flag that declares a recon key, with no
-// default, must be satisfiable from env or config — not only from argv. (Regression
-// for the bug where the Parser's required-check fired before fallback ran.)
+// default, must be satisfiable from env or config, not only from argv.
 type tbReqFlags struct {
 	Token string `rotini:"token" recon:"api.token"`
 }
@@ -722,8 +718,7 @@ func TestInputReader_requiredFlagMissingEverywhere(t *testing.T) {
 	}
 }
 
-// Enum-on-reconciled: an env/config-supplied flag value must be enum-checked too
-// (previously the enum check was bypassed because it ran before reconciliation).
+// Enum-on-reconciled: an env/config-supplied flag value must be enum-checked too.
 type tbEnumFlags struct {
 	Color string `rotini:"color" recon:"create.color"`
 }
@@ -751,9 +746,8 @@ func TestInputReader_enumCheckedOnReconciledValue(t *testing.T) {
 	}
 }
 
-// Constraints are enforced over the fully-reconciled value, so a bound that a
-// config-supplied flag violates is caught (proving A1 runs at the single post-
-// reconciliation validation locus, not just on argv).
+// Constraints are enforced over the reconciled value, so a bound that a
+// config-supplied flag violates is caught.
 type tbPortFlags struct {
 	Port int `rotini:"port" recon:"create.port"`
 }
@@ -785,7 +779,7 @@ func TestInputReader_constraintCheckedOnReconciledValue(t *testing.T) {
 }
 
 // Channel-constraint shapes carry the validation struct-tags codegen emits on env/
-// config fields (A2d), which the input reader enforces over the reconciled value.
+// config fields, which the input reader enforces over the reconciled value.
 type tbEnvPort struct {
 	App struct {
 		Flags     struct{}
@@ -1001,9 +995,9 @@ func TestParseStdinTag(t *testing.T) {
 	}
 }
 
-// TestInputReader_chainConfigFiles pins the cascade (D-W3.1): config_files in scope for
-// the invoked chain = the union along it, NEAREST-WINS (deepest command first), with
-// off-branch sources excluded and unscoped (Scope=="") sources always in scope, last.
+// TestInputReader_chainConfigFiles pins the config_files cascade: the union along the invoked
+// chain, nearest-wins (deepest command first), off-branch sources excluded, and unscoped
+// (Scope=="") sources always in scope, last.
 func TestInputReader_chainConfigFiles(t *testing.T) {
 	b := &InputReader{configFiles: []ConfigFile{
 		{Name: "rootA", Scope: "app"},
@@ -1047,9 +1041,8 @@ func beBind(t *testing.T) error {
 	return NewInputReader(InputSettings{}).Read(rtx, &in)
 }
 
-// TestInputError_envCoercion_isCleanUsage is EH4's headline: the famous
-// "recon: coerce …: string → bool" leak becomes a typed, categorized,
-// non-leaky *InputError — while the recon cause stays reachable via errors.As.
+// TestInputError_envCoercion_isCleanUsage pins that an env coercion failure is a usage-class
+// *InputError whose message omits recon's text, with the recon cause reachable via errors.As.
 func TestInputError_envCoercion_isCleanUsage(t *testing.T) {
 	t.Setenv("LOUD", "junk") // not a bool
 	err := beBind(t)
@@ -1137,13 +1130,7 @@ func TestInputError_typeContract(t *testing.T) {
 
 // ── WithInputReader as an override ────────────────────────────────────────────────.
 
-// A WithInputReader function replaces the input reader Inputs would build — and RECEIVES the
-// meta, so an override starts from the generated descriptor instead of having to reproduce it.
-//
-// The shape matters. This used to be a registry key holding an *InputReader, which meant the
-// caller had to find InputSettings and pass it themselves; the obvious call,
-// NewInputReader(InputSettings{}), turned the configuration-file channel off in silence.
-// Handing the meta to the function makes that mistake unwritable.
+// A WithInputReader function replaces the input reader Inputs would build.
 func TestWithInputReader_overridesTheDefault(t *testing.T) {
 	custom := NewInputReader(InputSettings{EnvPrefix: "SENTINEL"})
 
@@ -1160,7 +1147,7 @@ func TestWithInputReader_overridesTheDefault(t *testing.T) {
 	}
 }
 
-// The override receives the program's meta, which is the whole reason for the signature.
+// The override receives the program's InputSettings.
 func TestWithInputReader_receivesTheProgramsMeta(t *testing.T) {
 	meta := InputSettings{EnvPrefix: "ACME", ConfigFiles: []ConfigFile{{Name: "project", Scope: "app"}}}
 
@@ -1180,8 +1167,7 @@ func TestWithInputReader_receivesTheProgramsMeta(t *testing.T) {
 	}
 }
 
-// With nothing supplied, Inputs still works: the default is built from the descriptor, so
-// WithInputReader is an override rather than a prerequisite.
+// Without WithInputReader, the default reader is built from the InputSettings.
 func TestWithInputReader_defaultsWhenUnset(t *testing.T) {
 	var got *InputReader
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = readerFor(rtx) }}
@@ -1212,9 +1198,7 @@ func TestWithInputReader_ignoresANilResult(t *testing.T) {
 
 // ── raw stdin formats (text / lines) ─────────────────────────────────────────
 //
-// The grep/jq/fmt family, whose stdin is not a document. Before these formats a command
-// consuming plain text could not declare its stdin channel at all: it read rtx.Stdin
-// directly, which appears in no help page, no completion and no validation.
+// Payloads bound as text rather than decoded as a document.
 
 type tbTextCmd struct {
 	Flags     struct{}
@@ -1302,9 +1286,8 @@ func TestInputReader_stdinLines(t *testing.T) {
 	}
 }
 
-// TestInputReader_rawStdinNilVsEmpty: the payload is a POINTER so a filter can tell "nothing was
-// piped" from "an empty payload was piped" — for a filter that is a real difference, and it is
-// why the field is not a plain string.
+// TestInputReader_rawStdinNilVsEmpty pins that nothing piped leaves the pointer payload nil, so
+// a handler can tell it apart from an empty payload.
 func TestInputReader_rawStdinNilVsEmpty(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Stdin = strings.NewReader("")
@@ -1318,8 +1301,8 @@ func TestInputReader_rawStdinNilVsEmpty(t *testing.T) {
 	}
 }
 
-// TestInputReader_rawStdinRequired: `required: true` on a raw payload rejects an empty stdin, with
-// a usage-class message naming the format rather than a nil the handler dereferences.
+// TestInputReader_rawStdinRequired pins that a required raw payload rejects an empty stdin with
+// a usage-class error naming the format.
 func TestInputReader_rawStdinRequired(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Stdin = strings.NewReader("")
@@ -1339,23 +1322,18 @@ func TestInputReader_rawStdinRequired(t *testing.T) {
 	}
 }
 
-// ── the descriptor's absence is now distinguishable (C1 Tier 1) ──────────────.
+// ── absent vs empty InputSettings ────────────────────────────────────────────.
 
-// newInputReaderWithoutDescriptor builds a input reader the way a hand-assembled program
-// produces one: no InputSettings was ever supplied, as distinct from an empty one.
+// newInputReaderWithoutDescriptor builds an input reader for which no InputSettings was ever
+// supplied, as distinct from an empty one.
 func newInputReaderWithoutDescriptor() *InputReader {
 	b := NewInputReader(InputSettings{})
 	b.described = false
 	return b
 }
 
-// TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor is the one silent failure that
-// survived moving InputSettings off the registry — and the first time it has been detectable.
-//
-// A command with `config:` inputs resolves them out of the sources in InputSettings. A program
-// assembled without one (hand-built, rather than through the generated NewProgram) used to
-// fill every configuration value with its zero and say nothing. Now it is a wiring fault,
-// because that is whose mistake it is.
+// TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor pins that config inputs with no
+// InputSettings supplied are a *WiringError naming WithInputSettings, not silently zero.
 func TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor(t *testing.T) {
 	type inputs struct {
 		App struct {
@@ -1383,10 +1361,7 @@ func TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor(t *testing.T) {
 	}
 }
 
-// An EMPTY descriptor is a different statement from an absent one — "this program has no
-// configuration sources" is a choice, and it stays legal. Telling the two apart is only
-// possible because the descriptor is a typed option; a registry entry read absent and zero
-// identically, which is exactly how the silent case survived.
+// An explicitly empty InputSettings (no configuration sources) is legal.
 func TestCheckDescribed_anEmptyDescriptorIsLegal(t *testing.T) {
 	type inputs struct {
 		App struct {
@@ -1405,8 +1380,7 @@ func TestCheckDescribed_anEmptyDescriptorIsLegal(t *testing.T) {
 	}
 }
 
-// A command with NO config: inputs needs no descriptor, so a bare program still works. This is
-// the common case for a CLI that reads only argv, and it must not have been made noisier.
+// A command with no config inputs needs no InputSettings.
 func TestCheckDescribed_noConfigInputsNeedsNoDescriptor(t *testing.T) {
 	type inputs struct {
 		App struct {
@@ -1448,8 +1422,7 @@ func tbFallbackDef(secret bool) Definition {
 	}
 }
 
-// A bad env or config value for a flag is the user's error exactly as `--port abc` is. It used
-// to be dropped: `PORT=abc` bound port 0 and the command ran.
+// A bad env or config value for a flag is a usage error naming its source, as `--port abc` is.
 func TestInputReader_badFallbackValueIsAUsageError(t *testing.T) {
 	t.Run("env", func(t *testing.T) {
 		t.Setenv("PORT", "abc")
@@ -1508,8 +1481,7 @@ type tbChannelEnumInputs struct {
 	}
 }
 
-// An enum on an env or config input was advertised in help and never checked: MODE=bogus bound
-// "bogus". It is now enforced there exactly as on argv.
+// An enum on an env or config input is enforced as on argv, including ignorecase.
 func TestInputReader_channelEnumEnforced(t *testing.T) {
 	bind := func(t *testing.T, meta InputSettings) (tbChannelEnumInputs, error) {
 		t.Helper()
@@ -1571,10 +1543,8 @@ func tbListDef() Definition {
 	}}
 }
 
-// A list or map flag that also declares a fallback (key: or variable:) was broken on every
-// channel: its argv values were re-read through the fallback registry and came back as the
-// single string "[a b]" (or "map[k:v]", which then failed as not key=value), and a config
-// file's YAML list bound the same way.
+// A list or map flag that declares a fallback binds element-wise from argv, a config file's
+// list or map, and env (split only on a declared separator).
 func TestInputReader_listAndMapFlagsWithAFallback(t *testing.T) {
 	bind := func(t *testing.T, argv []string, meta InputSettings) tbListInputs {
 		t.Helper()
@@ -1659,8 +1629,8 @@ func TestInputReader_severalVariableNames(t *testing.T) {
 	})
 }
 
-// An environment variable that is set but empty is unset, for a flag's fallback: the config file
-// and then the default supply the value, rather than "" outranking them and failing to parse.
+// For a flag's fallback, an environment variable that is set but empty counts as unset, so the
+// config file supplies the value.
 func TestInputReader_emptyEnvFallsThrough(t *testing.T) {
 	cfg := writeConfig(t, "port: 9090\n")
 	t.Setenv("PORT", "")
@@ -1672,9 +1642,8 @@ func TestInputReader_emptyEnvFallsThrough(t *testing.T) {
 	}
 }
 
-// An env or config input's bool takes the spellings a flag's does. recon alone accepts only
-// true/false/1/0, so CACHE=yes failed on an env input while working as a flag's fallback.
-// A string input whose value is "yes" is untouched.
+// An env or config input's bool accepts the spellings a flag's does (yes, on, ...); a string
+// input whose value is "yes" is untouched.
 func TestInputReader_boolSpellingsOnEnvAndConfig(t *testing.T) {
 	type inputs struct {
 		App struct {
@@ -1708,8 +1677,7 @@ func TestInputReader_boolSpellingsOnEnvAndConfig(t *testing.T) {
 	}
 }
 
-// A date on an env or config input reads the same way a date flag does: the generated layout
-// tag reaches recon through the source, which alone would demand RFC 3339.
+// A time on an env or config input parses under its generated layout tag, as a flag's does.
 func TestInputReader_channelTimeLayouts(t *testing.T) {
 	type inputs struct {
 		App struct {
@@ -1744,9 +1712,8 @@ func TestInputReader_channelTimeLayouts(t *testing.T) {
 	}
 }
 
-// An env or config duration reads days and weeks like a flag does, and a duration or size bound
-// applies on those channels too — recon's own parser stops at hours, and a duration read as a
-// plain integer never met its bound.
+// An env or config duration accepts days and weeks as a flag's does, and duration and size
+// bounds apply on those channels.
 func TestInputReader_channelDurationsAndBounds(t *testing.T) {
 	type inputs struct {
 		App struct {
@@ -1785,9 +1752,8 @@ func TestInputReader_channelDurationsAndBounds(t *testing.T) {
 	}
 }
 
-// A parent collecting its own inputs (in CascadingPreRun, say) judges only its own frames: the
-// leaf's required flag is the leaf's handler's business. Judging it here failed `app sub --help`
-// before sub's handler could answer the --help.
+// A parent collecting its own inputs validates only the commands its type describes, so a
+// leaf's required flag does not fail the parent's collect (e.g. `app sub -h`).
 func TestInputReader_validatesOnlyTheFramesTheTypeDescribes(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -1835,9 +1801,8 @@ func TestInputReader_validatesOnlyTheFramesTheTypeDescribes(t *testing.T) {
 	}
 }
 
-// TestReconBind_unrecognizedCause covers the fallback arm of reconBind: a recon failure that
-// is none of the four typed ones still has to produce a categorized, non-leaky *InputError
-// naming the channel in plain words ("environment", not "env").
+// TestReconBind_unrecognizedCause pins reconBind's fallback arm: an untyped recon failure is a
+// usage-class *InputError naming the channel in plain words, without the raw cause text.
 func TestReconBind_unrecognizedCause(t *testing.T) {
 	cause := errors.New("some unrecognized recon failure")
 	cases := []struct {
@@ -1878,16 +1843,9 @@ func TestReconBind_unrecognizedCause(t *testing.T) {
 	}
 }
 
-// TestReconBind_rootPathIsNamedByChannel pins how a failure about the payload AS A WHOLE is
-// phrased. recon reports an empty Path for a document-level problem — a JSON stdin payload
-// missing its own required property, say — and the message used to interpolate that empty
-// string into the per-input noun:
-//
-//	Error: stdin field "": missing required property "name"
-//
-// A reader then hunts for a field called "", while the real subject sits in the detail behind
-// an empty pair of quotes. An empty path now falls back to the channel's own name, and a
-// NON-empty one is untouched, which is the half a naive fix would break.
+// TestReconBind_rootPathIsNamedByChannel pins that a recon error with an empty Path (a
+// document-level failure) is labeled by the channel name, while a non-empty Path keeps the
+// per-field label.
 func TestReconBind_rootPathIsNamedByChannel(t *testing.T) {
 	root, field := recon.Path{}, recon.Path{"tags"}
 	cases := []struct {
@@ -1941,8 +1899,7 @@ func TestTrimAcquiredPayload_oneRuleForBothPaths(t *testing.T) {
 		})
 	}
 
-	// The property that actually matters: both entry points agree. resolveFlagValue reads
-	// the sentinel side; bindRawStdin reads the channel side.
+	// The argv sentinels (resolveFlagValue) and the stdin channel (bindRawStdin) must agree.
 	const payload = "  hello  \n"
 	dir := t.TempDir()
 	file := filepath.Join(dir, "value.txt")
