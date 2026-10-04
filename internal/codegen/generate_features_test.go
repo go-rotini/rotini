@@ -304,7 +304,8 @@ func TestGenerateFeatures_embed(t *testing.T) {
 	for _, want := range []string{
 		"internal/cmd/acme/renders/help_acme.txt",
 		"internal/cmd/acme/renders/help_acme_deploy.txt",
-		"internal/cmd/acme/renders/man_acme.txt",
+		"internal/cmd/acme/renders/acme.1",
+		"internal/cmd/acme/renders/acme-deploy.1",
 		"internal/cmd/acme/renders/markdown_acme.md",
 		"internal/cmd/acme/renders/completion_bash.txt",
 		"internal/cmd/acme/renders/completion_zsh.txt",
@@ -520,7 +521,9 @@ command:
 	for _, c := range []struct{ file, want string }{
 		{"help_kubectl-acme.txt", "  kubectl acme <command>"},
 		{"help_kubectl-acme_deploy.txt", "  kubectl acme deploy [target]"},
-		{"man_kubectl-acme_deploy.txt", "kubectl acme deploy - deploy a thing"},
+		{"kubectl-acme-deploy.1", `.TH "KUBECTL\-ACME\-DEPLOY" 1 "" "kubectl acme" "User Commands"`},
+		{"kubectl-acme-deploy.1", `kubectl\-acme\-deploy \- deploy a thing`},
+		{"kubectl-acme-deploy.1", `\fBkubectl acme deploy\fR [target]`},
 		{"markdown_kubectl-acme_deploy.md", "# kubectl acme deploy"},
 	} {
 		if page := read(c.file); !strings.Contains(page, c.want) {

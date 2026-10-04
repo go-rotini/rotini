@@ -267,7 +267,7 @@ Exact, verbatim help page for this command. When set, rotini writes it byte-for-
 
 `string`
 
-Exact, verbatim man page for this command (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it as given — byte-for-byte except that ANSI styling is removed, since a man page carries none — and ignores the structured doc-fields for the man page; when unset, the man page is rendered from those fields through the man template.
+Exact, verbatim man page for this command, written in roff, the markup the man program reads (the man feature's per-command escape, mirroring 'help'). When set, rotini writes it as given — byte-for-byte except that ANSI styling is removed, since a man page carries none — and ignores the structured doc-fields for the man page; when unset, the page is rendered as roff from those fields through the man template. Either way the page is named after the command path joined with '-' and lowercased, with the man section as its extension (deploy-status.1).
 
 #### `markdown`
 

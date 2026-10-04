@@ -15,7 +15,7 @@ func emittedPages(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	err := filepath.WalkDir(".", func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || (!strings.HasSuffix(p, ".txt") && !strings.HasSuffix(p, ".md")) {
+		if err != nil || d.IsDir() || (!strings.HasSuffix(p, ".txt") && !strings.HasSuffix(p, ".md") && !strings.HasSuffix(p, ".1")) {
 			return err
 		}
 		b, err := os.ReadFile(p)
@@ -86,7 +86,7 @@ command:
 		"cmd/root/.rotini.conf.yaml": verbatimConf("root"),
 	})
 	pages := emittedPages(t)
-	for _, f := range []string{"help_root_exact.txt", "man_root_exact.txt", "markdown_root_exact.md"} {
+	for _, f := range []string{"help_root_exact.txt", "root-exact.1", "markdown_root_exact.md"} {
 		got, ok := pageEnding(pages, f)
 		if !ok {
 			t.Fatalf("no emitted file ending %s; have %v", f, keysOf(pages))

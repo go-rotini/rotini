@@ -29,6 +29,7 @@ generate:
       enabled: true
     - type: man
       enabled: false
+      section: 1
     - type: markdown
       enabled: false
 validate:

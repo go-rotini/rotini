@@ -117,6 +117,38 @@ func stubLooksGenerated(path string) (bool, error) {
 	return strings.Contains(string(body), stubMarker) || strings.Contains(string(body), legacyStubMarker), nil
 }
 
+// owns reports whether a file in the feature's embed_dir is one this feature writes, and so
+// one pruning may remove when no current command claims it. Anything else in the directory
+// is left alone.
+//
+// For most features that is the feature's own prefix and extension (help_*.txt). Man pages
+// are named as man pages instead, <page-name>.<section>, so a man file is one whose name is
+// this program's root page or one of its sub-pages with a single-digit section: taskr.1,
+// taskr-add.8. That also catches pages left behind by a change of section. The man_*.txt
+// files rotini wrote before v1.2.0 are recognized too, so the first generate after an upgrade
+// removes them.
+func (o featureOutput) owns(name string) bool {
+	if o.desc.manPages {
+		if len(o.nodes) == 0 {
+			return false
+		}
+		root := o.nodes[0].data.PageName
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "man_"+root) && strings.HasSuffix(lower, ".txt") {
+			return true
+		}
+		base, section, ok := strings.Cut(name, ".")
+		if !ok || len(section) != 1 || section[0] < '1' || section[0] > '9' {
+			return false
+		}
+		return base == root || strings.HasPrefix(base, root+"-")
+	}
+	if !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
+		return false
+	}
+	return o.desc.filePrefix == "" || strings.HasPrefix(name, o.desc.filePrefix)
+}
+
 // pruneFeatureOutputs removes each enabled feature's orphaned pages — those for commands no
 // longer in the spec. Only files matching the feature's unique prefix and suffix are
 // candidates, so features sharing one embed dir never prune each other's files. The editable
@@ -147,10 +179,7 @@ func pruneFeatureOutputs(lay layout, keepList []string, outputs []featureOutput)
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
-				continue
-			}
-			if o.desc.filePrefix != "" && !strings.HasPrefix(name, o.desc.filePrefix) {
+			if e.IsDir() || !o.owns(name) {
 				continue
 			}
 			if protected[name] {

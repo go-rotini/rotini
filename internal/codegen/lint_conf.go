@@ -66,8 +66,29 @@ var confLints = []func(*Conf) []error{
 	lintEntrypoint,
 	lintFeatureDirs,
 	lintFeatureKnobs,
+	lintFeatureSection,
 	lintSchemaFiles,
 	lintModelsKeep,
+}
+
+// lintFeatureSection rejects `section` on any feature but man. A section is a man page
+// concept — the number in a page's header and file name — so on help, markdown or completion it
+// would be silently ignored. It is an error rather than a warning because nothing else could
+// have been meant: the setting belongs on the man entry.
+func lintFeatureSection(conf *Conf) []error {
+	if conf.Generate == nil {
+		return nil
+	}
+	var problems []error
+	for i, f := range conf.Generate.Features {
+		if f.Section != 0 && f.Type != "man" {
+			problems = append(problems, &problem{
+				kind: "conf", ptr: featurePointer(i), loc: "generate.features." + f.Type + ".section",
+				msg: "`section` is the man page section and applies only to the man feature; move it to the man entry or remove it",
+			})
+		}
+	}
+	return problems
 }
 
 // lintPackageTypes rejects a generate.packages array naming the same `type` twice, which would

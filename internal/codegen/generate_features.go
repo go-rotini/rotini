@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 	"unicode"
 
 	"github.com/go-rotini/rotini"
@@ -46,6 +47,9 @@ type docFeature struct {
 	verbatim   func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
 	perShell   bool                 // completion: keyed by shell name, not command path
 	strip      bool                 // strip spec-authored ANSI from the output (man/markdown — never help)
+	// manPages: files are named as man pages, <page-name>.<section> (taskr-add.1), rather than
+	// <filePrefix><path><ext>, and pages render as roff through renderManText.
+	manPages bool
 }
 
 var (
@@ -57,9 +61,10 @@ var (
 	}
 	manFeatureDesc = docFeature{
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
-		ext: ".txt", filePrefix: "man_", tmplFile: manTemplateName, embedded: templateMan,
+		tmplFile: manTemplateName, embedded: templateMan,
 		verbatim: func(h cmdHelp) string { return h.Man },
-		strip:    true, // a roff/plain man page carries no legitimate SGR
+		strip:    true, // a roff man page carries no legitimate SGR
+		manPages: true,
 	}
 	markdownFeatureDesc = docFeature{
 		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
@@ -124,15 +129,45 @@ func commandHelp(c Command) cmdHelp {
 // when the spec set one, and its built doc-data for when it did not.
 //
 // What a page SHOWS is the display name (`kubectl ctx use`); what it is stored as stays the
-// root's real name (man_kubectl-ctx_use.txt), since a file name with spaces in it helps no one.
+// root's real name (help_kubectl-ctx_use.txt, kubectl-ctx-use.1), since a file name with spaces
+// in it helps no one.
 func flattenFeature(gp *program, feat docFeature) []helpNode {
+	section := manSection(gp.conf)
+	date := manDate()
+	file := func(names []string) string {
+		if feat.manPages {
+			return manPageName(gp.rootName, names) + "." + section
+		}
+		if len(names) == 0 {
+			return feat.filePrefix + gp.rootName + feat.ext
+		}
+		return feat.filePrefix + gp.rootName + "_" + strings.Join(names, "_") + feat.ext
+	}
+	// withPage fills the man page fields every feature's data carries: the page's own name, and
+	// the pages it cross-references — its parent's, then each visible child's.
+	withPage := func(d templateHelpData, names []string, children []rnode) templateHelpData {
+		d.PageName = manPageName(gp.rootName, names)
+		d.Section = section
+		d.Source = gp.rootDisplay
+		d.Date = date
+		if len(names) > 0 {
+			d.RelatedPages = append(d.RelatedPages, manPageName(gp.rootName, names[:len(names)-1]))
+		}
+		for _, c := range children {
+			if !c.hidden {
+				d.RelatedPages = append(d.RelatedPages, manPageName(gp.rootName, append(slices.Clone(names), c.name)))
+			}
+		}
+		return d
+	}
+
 	out := []helpNode{{
 		prefix:   gp.rootPascal,
-		file:     feat.filePrefix + gp.rootName + feat.ext,
+		file:     file(nil),
 		paths:    []string{""},
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix),
+		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix), nil, gp.tree),
 	}}
 
 	// cascading carries the cascading flags accumulated from a node's ancestors
@@ -146,11 +181,11 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			invocation := gp.rootDisplay + " " + strings.Join(childNames, " ")
 			out = append(out, helpNode{
 				prefix:   n.prefix,
-				file:     feat.filePrefix + gp.rootName + "_" + strings.Join(childNames, "_") + feat.ext,
+				file:     file(childNames),
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix),
+				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix), childNames, n.children),
 			})
 			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
 			walk(n.children, childChain, childNames, childCascading)
@@ -158,6 +193,54 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 	}
 	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs))
 	return out
+}
+
+// manPageName is a command's man page name: the root's name and the command path joined with
+// "-", lowercased — taskr, taskr-add, kubectl-ctx-use. It is the name man looks the page up by,
+// and the one used everywhere: the .TH header, the file, and cross-references. display_name
+// changes what a page says, not what it is called.
+func manPageName(root string, path []string) string {
+	return strings.ToLower(strings.Join(append([]string{root}, path...), "-"))
+}
+
+// manSection is the man section the conf sets on the man feature, "1" when it sets none.
+func manSection(conf *Conf) string {
+	if conf != nil && conf.Generate != nil {
+		if f := conf.Generate.featureOf("man"); f != nil && f.Section != 0 {
+			return strconv.Itoa(f.Section)
+		}
+	}
+	return "1"
+}
+
+// manDate is the date a man page's header carries: the day SOURCE_DATE_EPOCH names, in UTC, when
+// it is set, and "" otherwise. A page that carried the day it was generated would change on every
+// regeneration and break "regenerating changes nothing"; SOURCE_DATE_EPOCH is how a packager
+// asks for a fixed, reproducible date.
+func manDate() string {
+	secs, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("SOURCE_DATE_EPOCH")), 10, 64)
+	if err != nil {
+		return ""
+	}
+	return time.Unix(secs, 0).UTC().Format("2006-01-02")
+}
+
+// manPageCollisions reports each pair of commands whose man pages would share one name — which
+// happens because a command name may itself contain "-" (`notes tag-remove` and
+// `notes tag remove`), or through lowercasing (`Add` and `add`, the same file on a
+// case-insensitive file system). Both pages would be written to one file, and one would be lost.
+func manPageCollisions(nodes []helpNode) []error {
+	first := map[string]string{}
+	var problems []error
+	for _, n := range nodes {
+		page := n.data.PageName
+		if prev, ok := first[page]; ok {
+			problems = append(problems, fmt.Errorf("commands %q and %q both have the man page name %q; rename one of them", prev, n.name, page))
+			continue
+		}
+		first[page] = n.name
+	}
+	return problems
 }
 
 // completionNodes produces one node per supported shell for the completion
@@ -648,6 +731,9 @@ func permute(chain [][]string) []string {
 // cases the framework template emits (one resolver per feature).
 func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool, contents []string) templateFeature {
 	h := templateFeature{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
+	if feat.manPages && len(nodes) > 0 {
+		h.Section = nodes[0].data.Section
+	}
 	for i, hn := range nodes {
 		name := feat.varPrefix + hn.prefix
 		v := templateFeatureVar{Name: name}
@@ -718,7 +804,11 @@ func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedT
 			contents[i] = stripForFeature(feat, hn.verbatim)
 			continue
 		}
-		rendered, err := renderDocText(tmpl, hn.data)
+		render := renderDocText
+		if feat.manPages {
+			render = renderManText
+		}
+		rendered, err := render(tmpl, hn.data)
 		if err != nil {
 			return nil, fmt.Errorf("render %s for %q: %w", feat.name, hn.name, err)
 		}

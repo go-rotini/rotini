@@ -198,11 +198,19 @@ The conf's `features:` turn on output generated from the spec:
 |---|---|
 | `help` (on in the conf `rotini init` writes) | `Help(path...)` pages, printed by `--help` and `help <command>` |
 | `completion` | `Completion(shell)` scripts for bash, zsh, fish and PowerShell |
-| `man` | `Man(path...)` man pages |
+| `man` | `Man(path...)` man pages, in roff, plus a `ManSection` constant |
 | `markdown` | `Markdown(path...)` reference pages |
 
 A command exposes one with a few lines, e.g. a `completion` command whose handler prints the
 script `Completion(shell)` returns.
+
+Man pages are roff, the markup the `man` program reads, so `man -l taskr-add.1` displays one and
+a package installs them like any other. Each page is named after its command path joined with
+`-`: `taskr`, `taskr-add`. With `embed: true` the files are written under that name with the
+section as the extension (`taskr-add.1`), so `cp renders/*.1 /usr/local/share/man/man1/` installs
+them. The section is 1 unless the man feature sets `section:` (8 for a daemon or admin tool).
+The header's date stays empty, so regenerating never changes a page, unless `SOURCE_DATE_EPOCH`
+is set when you generate.
 
 A rotini program can also be completed by another program, such as the host of a plugin, in
 whatever format that host reads. rotini computes the answer: the candidates, their descriptions,

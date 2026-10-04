@@ -1,0 +1,114 @@
+# R2 — man pages are real roff pages: a man page checker accepts them and man displays them.
+#
+# The man feature used to write plain text laid out to LOOK like a man page, which `man` could
+# not format and a package could not install. Each command now gets a roff page named after its
+# path (notes-add), with the section as the extension in embed mode (notes-add.1).
+
+gomodinit example.com/notes
+
+exec rotini generate cmd/notes/.rotini.spec.yaml --config cmd/notes/.rotini.conf.yaml
+
+# One page per command, under its man page name.
+exists internal/cmd/notes/renders/notes.1
+exists internal/cmd/notes/renders/notes-add.1
+grep '^\.TH "NOTES\\-ADD" 1 "" "notes" "User Commands"$' internal/cmd/notes/renders/notes-add.1
+grep '^notes\\-add \\- add a note$' internal/cmd/notes/renders/notes-add.1
+grep '^\\&\.starts with a dot, which roff would read as a request$' internal/cmd/notes/renders/notes-add.1
+
+# A man page checker finds nothing wrong (mandoc on macOS and the BSDs, groff on Linux). The
+# empty header date is a mandoc warning, not an error: it stays empty so regenerating never
+# changes a page.
+[exec:mandoc] exec mandoc -Tlint -W error internal/cmd/notes/renders/notes.1 internal/cmd/notes/renders/notes-add.1
+[exec:mandoc] ! stdout .
+[!exec:mandoc] [exec:groff] exec groff -man -Tutf8 -ww -z internal/cmd/notes/renders/notes-add.1
+[!exec:mandoc] [exec:groff] ! stderr .
+
+# And it displays as a man page.
+[exec:mandoc] exec mandoc -Tascii internal/cmd/notes/renders/notes-add.1
+[exec:mandoc] stdout 'NOTES-ADD\(1\)'
+[exec:mandoc] stdout 'add a note'
+[exec:mandoc] stdout 'a tag'
+[!exec:mandoc] [exec:man] env MANPAGER=cat
+[!exec:mandoc] [exec:man] exec man -l internal/cmd/notes/renders/notes-add.1
+[!exec:mandoc] [exec:man] stdout 'add a note'
+
+# The program's Man resolver serves the same page, and ManSection names its section.
+exec go mod tidy
+exec go build -o notes$exe ./cmd/notes
+exec ./notes$exe page add
+stdout '^\.TH "NOTES\\-ADD" 1 '
+grep 'const ManSection = "1"' internal/cmd/notes/zz_notes.go
+
+-- cmd/notes/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: notes
+  summary: keep notes
+  commands:
+    - name: add
+      summary: add a note
+      description: |
+        Add a note to the list.
+
+        .starts with a dot, which roff would read as a request
+      arguments:
+        - name: text
+          summary: the note
+          schema: {type: string, required: true}
+      flags:
+        - name: tag
+          summary: a tag
+          identifiers: [--tag, -t]
+          schema: {type: "[]string"}
+    - name: page
+      summary: print a command's man page
+      arguments:
+        - name: path
+          summary: the command path
+          schema: {type: "[]string"}
+-- cmd/notes/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  packages:
+    - type: main
+      file: cmd/notes/main.go
+      package: main
+    - type: cmd
+      file: internal/cmd/notes/zz_notes.go
+      package: notes
+  features:
+    - type: man
+      enabled: true
+      embed: true
+-- internal/cmd/notes/notes_page.go --
+package notes
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-rotini/rotini"
+)
+
+var _ rotini.Handler = (*notesPageHandler)(nil)
+
+type notesPageHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+func (*notesPageHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[NotesPageInputs]()
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	page, err := Man(in.NotesPage.Arguments.Path...)
+	if err != nil {
+		rtx.HaltWith(err)
+		return
+	}
+	fmt.Fprint(rtx.Stdout, page)
+}

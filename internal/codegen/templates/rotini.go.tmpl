@@ -166,6 +166,11 @@ func {{.Resolver}}(shell string) (string, error) {
 	}
 }
 {{- else}}
+{{- if .Section}}
+// ManSection is the man section these pages were generated for: the number after the dot in a
+// page's file name ({{"<page-name>"}}.{{.Section}}) and in the cross-references between pages.
+const ManSection = "{{.Section}}"
+{{end}}
 // {{.Resolver}} returns the generated {{.Noun}} text for the command identified by path
 // (command names or aliases; no arguments for the root command). It returns an
 // error when path does not match a known command.

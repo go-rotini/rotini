@@ -423,6 +423,7 @@ type templateFeature struct {
 	Resolver string // resolver func name, e.g. "Help"/"Man"/"Completion"
 	Noun     string // word used in the doc comment + error, e.g. "help"
 	PerShell bool   // completion: resolver takes a shell string, not a command path
+	Section  string // man: the section the pages were generated for, emitted as ManSection; "" otherwise
 	Vars     []templateFeatureVar
 	Cases    []templateFeatureCase
 }
@@ -572,6 +573,14 @@ type templateHelpData struct {
 	Examples      []string
 	ExitStatus    []templateDocExitRow
 	SeeAlso       []string
+
+	// The man page fields. They are set for every feature, and the man template is what uses
+	// them.
+	PageName     string   // the page's name: the command path joined with "-", lowercased (taskr-add)
+	Section      string   // the man section, "1" unless the conf sets another
+	Source       string   // the program, for the page header: the root's display_name, else its name
+	Date         string   // the header date: SOURCE_DATE_EPOCH's day (YYYY-MM-DD) when set, else ""
+	RelatedPages []string // page names to cross-reference: the parent's, then each visible child's
 }
 
 // parseDocTemplate parses doc-template text (help/man) with the shared FuncMap.
@@ -593,6 +602,71 @@ func renderDocText(tmpl *template.Template, data templateHelpData) (string, erro
 	}
 
 	return tidy(tabAlign(buffer.String())), nil
+}
+
+// renderManText renders one roff man page. It does not align columns or keep blank lines as
+// renderDocText does: roff lays out its own columns, and a blank line in roff is stray vertical
+// space rather than a paragraph break (the template writes .PP for that). So each line loses
+// trailing whitespace, blank lines are dropped, and the page ends with a newline, as a source
+// file should.
+func renderManText(tmpl *template.Template, data templateHelpData) (string, error) {
+	var buffer bytes.Buffer
+	if err := tmpl.Execute(&buffer, sanitizeDocData(data)); err != nil {
+		return "", errors.New(templateFailure(tmpl.Name(), err))
+	}
+	var lines []string
+	fill := true // outside a .nf … .fi block, where roff joins text lines anyway
+	prev := ""   // the previous line: the line after .TP is its tag and must stay one line
+	for l := range strings.SplitSeq(buffer.String(), "\n") {
+		l = strings.TrimRight(l, " \t")
+		switch {
+		case l == "":
+			continue
+		case l == ".nf" || strings.HasPrefix(l, ".nf ") || l == ".EX":
+			fill = false
+		case l == ".fi" || strings.HasPrefix(l, ".fi ") || l == ".EE":
+			fill = true
+		}
+		if fill && !strings.HasPrefix(l, ".") && prev != ".TP" {
+			lines = append(lines, wrapRoffText(l, manLineWidth)...)
+		} else {
+			lines = append(lines, l)
+		}
+		prev = l
+	}
+	return strings.Join(lines, "\n") + "\n", nil
+}
+
+// manLineWidth is the longest text line a rendered man page keeps; mandoc's style check flags
+// input lines longer than 80 bytes.
+const manLineWidth = 80
+
+// wrapRoffText breaks one filled roff text line at spaces so no piece is longer than width
+// bytes, where it can (a single longer word stays whole). In fill mode roff joins text lines
+// with a space, so this changes nothing on the page. A piece that would begin with "." gets the
+// "\&" that keeps it text rather than a request.
+func wrapRoffText(line string, width int) []string {
+	if len(line) <= width {
+		return []string{line}
+	}
+	var out []string
+	var cur strings.Builder
+	for word := range strings.SplitSeq(line, " ") {
+		if cur.Len() > 0 && cur.Len()+1+len(word) > width {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+		if cur.Len() > 0 {
+			cur.WriteByte(' ')
+		} else if strings.HasPrefix(word, ".") {
+			cur.WriteString(`\&`)
+		}
+		cur.WriteString(word)
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return out
 }
 
 // sanitizeDocData replaces tabs/newlines in row text (which would corrupt
@@ -717,6 +791,11 @@ func templateFuncMap() template.FuncMap {
 			}
 			return elems[len(elems)-1]
 		},
+		// roff escaping, for man page templates (see generate_roff.go).
+		"roff":      roffInline,
+		"roffLines": roffLines,
+		"roffBlock": roffBlock,
+		"roffArg":   roffArg,
 	}
 }
 

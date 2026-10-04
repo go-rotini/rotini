@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -250,7 +251,18 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 		return warnings, confErrs[0]
 	}
 
-	return warnings, errors.Join(append(specErrs, confErrs...)...)
+	// The rules that read both documents need each to be sound on its own first.
+	var crossErrs []error
+	if len(specErrs) == 0 && len(confErrs) == 0 {
+		var crossWarns []error
+		crossErrs, crossWarns = splitProblems(p.lintAcross(rs, rc))
+		warnings = append(warnings, crossWarns...)
+		if fast && len(crossErrs) > 0 {
+			return warnings, crossErrs[0]
+		}
+	}
+
+	return warnings, errors.Join(slices.Concat(specErrs, confErrs, crossErrs)...)
 }
 
 // validateAndEmit is the gate-then-emit step: validation must pass (the gate — invalid input

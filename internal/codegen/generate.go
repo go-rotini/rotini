@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -246,6 +247,13 @@ func (p *program) resolveFeatures() error {
 			nodes = completionNodes()
 		} else {
 			nodes = flattenFeature(p, f.desc)
+		}
+		if f.desc.manPages {
+			// validate catches this in one spec; this also covers commands composed in from
+			// other specs, which only exist once the whole tree is assembled.
+			if problems := manPageCollisions(nodes); len(problems) > 0 {
+				return errors.Join(problems...)
+			}
 		}
 		absEmbedDir := filepath.Join(p.module.root, filepath.FromSlash(f.cfg.EmbedDir))
 		absTemplateDir := filepath.Join(p.module.root, filepath.FromSlash(f.cfg.TemplateDir))
