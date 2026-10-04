@@ -3021,3 +3021,56 @@ func TestCoerce_narrowNumberBoundsBind(t *testing.T) {
 		t.Errorf("bounds bound as %+v", f)
 	}
 }
+
+// cascadeInputs is a root with a `--region` flag and a `--name` flag, and a `deploy` sub-command
+// with its own `--name`.
+type cascadeInputs struct {
+	App struct {
+		Flags struct {
+			Region string `rotini:"region"`
+			Name   string `rotini:"name"`
+		}
+		Arguments struct{}
+	}
+	AppDeploy struct {
+		Flags struct {
+			Name string `rotini:"name"`
+		}
+		Arguments struct{}
+	}
+}
+
+func cascadeDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "region", Identifiers: []string{"--region"}, Type: "string"},
+			{Name: "name", Identifiers: []string{"--name"}, Type: "string"},
+		},
+		Commands: []CommandDef{{
+			Name: "deploy", Handler: "AppDeploy",
+			Flags: []FlagDef{{Name: "name", Identifiers: []string{"--name"}, Type: "string"}},
+		}},
+	}
+}
+
+// TestParse_cascadingIsHelpOnly pins the parsing the docs promise whatever `cascading` says. The
+// spec key changes generated help only, and never reaches the runtime: FlagDef has no such
+// field. So a flag works anywhere after the name of the command that declares it, sub-commands'
+// names included, and never before it, which is what lets a parent and a child both declare
+// --name; and the invoked command's inputs carry every ancestor's flags.
+func TestParse_cascadingIsHelpOnly(t *testing.T) {
+	for _, argv := range [][]string{
+		{"--region", "eu", "--name", "parent", "deploy", "--name", "child"},
+		{"--name", "parent", "deploy", "--region", "eu", "--name", "child"}, // after the sub-command's name
+	} {
+		in, err := NewContextFor(cascadeDef(), argv).Inputs[cascadeInputs]()
+		if err != nil {
+			t.Fatalf("%q: %v", argv, err)
+		}
+		if in.App.Flags.Region != "eu" || in.App.Flags.Name != "parent" || in.AppDeploy.Flags.Name != "child" {
+			t.Errorf("%q bound %+v / %+v, want region=eu, the parent's name=parent and the child's name=child",
+				argv, in.App.Flags, in.AppDeploy.Flags)
+		}
+	}
+}

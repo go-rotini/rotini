@@ -84,10 +84,16 @@ commands:
   types rotini parses for you: `duration`, `date`, `url`, `ip`, `bytesize` and
   [more](/specification#type).
 - **Rules** — `required`, `default`, `enum`, `pattern`, `minimum`/`maximum`, lengths and item
-  counts — are checked before your handler runs, and a bad value is a usage error naming the
-  flag the user typed.
+  counts — are checked when the handler reads its inputs with `rtx.Inputs`, which the generated
+  stub does first thing, and a bad value is a usage error naming the flag the user typed.
 - **A flag works anywhere after the command that declares it**, including after a
-  sub-command's name. A flag written *before* a sub-command's name belongs to a parent.
+  sub-command's name. A flag written *before* a sub-command's name belongs to a parent, which is
+  what lets a parent and a sub-command both declare a flag with the same name.
+- **`cascading: true` also shows a flag in its sub-commands' help.** It changes help only: every
+  sub-command's page lists the flag under "Global Flags", where otherwise only its own command's
+  page lists it. Parsing is the same either way, and a sub-command's handler sees the value
+  either way, since its generated inputs include every parent's flags. So a flag that
+  sub-commands are meant to use should be `cascading: true`, so their help pages show it.
 
 ## Where values come from
 
