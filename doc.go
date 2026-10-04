@@ -282,7 +282,7 @@
 //   - [Program.WithResolver] and [Program.WithLifecycle] replace the resolve and orchestration
 //     phases wholesale; [FlagValueCompleter] and [ArgValueCompleter] feed dynamic completion,
 //     and [Program.Complete] answers it in a host's [CompletionFormat] — [PluginCompletion] for
-//     a Cobra-built host such as kubectl completing a rotini plugin; [Program.WithCompletion]
+//     a plugin host such as kubectl completing a rotini plugin; [Program.WithCompletion]
 //     makes __complete itself answer that way, for hosts that call it (Docker, Flux).
 //
 // # Batteries

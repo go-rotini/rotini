@@ -284,7 +284,7 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 // rotini's own. It is for a program that is a plugin of a host which completes it by calling the
 // plugin's own __complete and reading the host's format back. The Docker CLI
 // (`docker-<name> __complete <name> …`) and the Flux CLI (`flux-<name> __complete …`) both do,
-// in Cobra's format:
+// in the format [PluginCompletion] writes:
 //
 //	cmd.Program.WithCompletion(rotini.PluginCompletion).Execute()
 //

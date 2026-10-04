@@ -497,10 +497,9 @@ generate:
 //
 // Both directions matter: the fallback must not displace a real description.
 // TestDisplayName pins what display_name changes and what it leaves alone. A kubectl plugin is
-// the binary kubectl-acme, but the user types `kubectl acme`, and its pages should say so —
-// Cobra's CommandDisplayNameAnnotation, as a spec key. The pages it rewrites are the derived
-// ones; the file names, the completion script's target and anything written verbatim keep the
-// real name or the author's words.
+// the binary kubectl-acme, but the user types `kubectl acme`, and its pages should say so. The
+// pages it rewrites are the derived ones; the file names, the completion script's target and
+// anything written verbatim keep the real name or the author's words.
 func TestDisplayName(t *testing.T) {
 	const spec = `version: 0.0.0
 command:

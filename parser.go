@@ -1272,7 +1272,8 @@ func isShortCluster(name string) bool {
 // body and inline arrive split at the token's FIRST "=", so for a value-taking flag the rest of
 // the cluster is rejoined with it: -lapp=web is -l "app=web", a label selector, never -l "app"
 // with "=web" dropped. An "=value" directly after the last flag belongs to that flag, a bool
-// included (-Aw=false sets -w false), which is pflag's reading and so what Cobra users type.
+// included (-Aw=false sets -w false): the reading the standard short-flag syntax gives, and so
+// what users of other CLIs type.
 func parseCluster(chain []Command, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value, typed string) error) (int, error) {
 	for k := range len(body) {
 		short := "-" + body[k:k+1]

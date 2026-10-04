@@ -10,8 +10,8 @@ import (
 // This is the one piece of escape handling rotini keeps, because rotini generates text that has
 // to arrive unstyled: a man page, a markdown page and a completion description are read by
 // something that would print the escapes literally. Measuring display width, wrapping and
-// truncating styled text belong to whatever library draws it — muesli/reflow and lipgloss do
-// them properly, with grapheme-cluster segmentation rotini would only approximate.
+// truncating styled text belong to whatever library draws it, which can do them properly, with
+// the grapheme-cluster segmentation rotini would only approximate.
 
 var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 

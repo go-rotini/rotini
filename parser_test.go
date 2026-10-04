@@ -934,7 +934,7 @@ func TestParse_clusteredShortFlags(t *testing.T) {
 	}
 }
 
-// TestParse_clusterValueContainingEquals pins pflag's reading of a short cluster whose tail
+// TestParse_clusterValueContainingEquals pins the standard reading of a short cluster whose tail
 // holds an "=": the attached text is the value, "=" and all. -lapp=web is kubectl's label
 // selector `app=web`; it once parsed as `app`, with "=web" dropped and no error. And an "=value"
 // right after the cluster's last flag is that flag's, a bool included.

@@ -828,9 +828,9 @@ func completeIn(t *testing.T, format CompletionFormat, def Definition, handlers 
 	return out.String()
 }
 
-// TestCobraCompletion_directives pins the hint → ShellCompDirective mapping, the part of Cobra's
-// format a Cobra host acts on. The numbers are Cobra's wire values, not rotini's to choose.
-func TestCobraCompletion_directives(t *testing.T) {
+// TestPluginCompletion_directives pins the hint → directive mapping, the part of the plugin
+// hosts' format they act on. The numbers are the hosts' wire values, not rotini's to choose.
+func TestPluginCompletion_directives(t *testing.T) {
 	cases := []struct {
 		name  string
 		words []string
@@ -853,11 +853,11 @@ func TestCobraCompletion_directives(t *testing.T) {
 	}
 }
 
-// TestCobraCompletion_candidatesWinOverAFilteringHint: Cobra reads FilterFileExt's and
-// FilterDirs' candidates as their ARGUMENTS, so emitting either alongside real candidates would
+// TestPluginCompletion_candidatesWinOverAFilteringHint: the hosts read the file-extension (8)
+// and directory (16) directives' candidates as their ARGUMENTS, so emitting either alongside real candidates would
 // turn "debug" into a file extension. The hint is the fallback; a value that has candidates
 // keeps them.
-func TestCobraCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
+func TestPluginCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
@@ -889,7 +889,7 @@ func TestComplete_formatIsTheOnlyDifference(t *testing.T) {
 	}
 	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "deploy", Handler: "AppDeploy", Summary: "ship it"}}}
 	if got := completeIn(t, PluginCompletion, def, nil, "de"); got != "deploy\tship it\n:0\n" {
-		t.Errorf("Cobra, with a description = %q", got)
+		t.Errorf("PluginCompletion, with a description = %q", got)
 	}
 	if got := completeIn(t, nil, def, nil, "de"); got != "deploy\tship it\n" {
 		t.Errorf("rotini's own, with a description = %q", got)
@@ -900,11 +900,11 @@ func TestComplete_formatIsTheOnlyDifference(t *testing.T) {
 }
 
 // TestComplete_customFormat is the point of CompletionFormat: a protocol rotini does not ship is
-// a function. This one is urfave/cli's shape — "value:description", colons in the value escaped
-// — and sees the same candidates and hint the built-ins do.
+// a function. This one is a "value:description" shape, colons in the value escaped,
+// and sees the same candidates and hint the built-ins do.
 func TestComplete_customFormat(t *testing.T) {
 	var seen CompletionResult
-	urfave := func(w io.Writer, r CompletionResult) error {
+	colonFormat := func(w io.Writer, r CompletionResult) error {
 		seen = r
 		for _, c := range r.Candidates {
 			line := strings.ReplaceAll(c.Value, ":", `\:`)
@@ -921,11 +921,11 @@ func TestComplete_customFormat(t *testing.T) {
 		{Name: "deploy", Handler: "AppDeploy", Summary: "ship it"},
 		{Name: "db:migrate", Handler: "AppDbMigrate"},
 	}}
-	if got := completeIn(t, urfave, def, nil, ""); got != "db\\:migrate\ndeploy:ship it\n" {
+	if got := completeIn(t, colonFormat, def, nil, ""); got != "db\\:migrate\ndeploy:ship it\n" {
 		t.Errorf("custom format = %q", got)
 	}
 
-	completeIn(t, urfave, completionHintDef(), nil, "--config", "")
+	completeIn(t, colonFormat, completionHintDef(), nil, "--config", "")
 	if seen.Hint.Kind != "file" || !slices.Equal(seen.Hint.Extensions, []string{"yaml", "yml"}) {
 		t.Errorf("the format was not handed the hint: %+v", seen.Hint)
 	}
@@ -944,7 +944,7 @@ func TestComplete_formatError(t *testing.T) {
 
 // TestWithCompletion: the setter switches what the hidden __complete entry speaks, and nothing
 // else; nil restores rotini's own. The case that matters is a request with no hint: rotini's
-// format then ends on a candidate, which a Cobra host (Flux takes the last line unconditionally)
+// format then ends on a candidate, which a plugin host (Flux takes the last line unconditionally)
 // would swallow as the directive.
 func TestWithCompletion(t *testing.T) {
 	run := func(p *Program, argv ...string) string {
@@ -962,7 +962,7 @@ func TestWithCompletion(t *testing.T) {
 		t.Errorf("default __complete = %q, want rotini's format (no directive without a hint)", got)
 	}
 	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion), "__complete", "op"); got != "open\n:0\n" {
-		t.Errorf("WithCompletion(PluginCompletion) __complete = %q, want Cobra's format", got)
+		t.Errorf("WithCompletion(PluginCompletion) __complete = %q, want the plugin hosts' format", got)
 	}
 	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion), "__complete", "--id", ""); got != ":4\n" {
 		t.Errorf("WithCompletion(PluginCompletion) hint = %q, want NoFileComp", got)

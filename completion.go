@@ -661,8 +661,9 @@ type CompletionCandidate struct {
 
 // CompletionFormat writes a [CompletionResult] to w in one completion protocol — how a host
 // that completes a rotini program expects the answer spelled. rotini computes the answer once;
-// the format only decides the wire shape, so supporting another framework's protocol is a
-// function, not a change to rotini. [PluginCompletion] is the built-in for Cobra-built hosts.
+// the format only decides the wire shape, so supporting another host's protocol is a function,
+// not a change to rotini. [PluginCompletion] is the built-in for the plugin hosts kubectl, Docker
+// and Flux.
 //
 // A format is called once per request and must write only the answer: whatever it writes is
 // what the host parses.
@@ -743,42 +744,43 @@ func writeLines(w io.Writer, lines []string) error {
 	return nil
 }
 
-// Cobra's ShellCompDirective values, as they appear on the wire. They are spelled out rather
-// than imported: Cobra's protocol is the interface, and a rotini binary must not link Cobra to
-// speak it.
+// The directive numbers of the plugin hosts' completion format, as they appear on the wire: a
+// bit set telling the shell what to do once the candidates are shown. They are fixed by the
+// hosts that read them, not rotini's to choose.
 const (
-	cobraDirectiveDefault       = 0
-	cobraDirectiveNoFileComp    = 4
-	cobraDirectiveFilterFileExt = 8
-	cobraDirectiveFilterDirs    = 16
+	pluginDirectiveDefault       = 0  // fall back to completing file names
+	pluginDirectiveNoFileComp    = 4  // offer no file names
+	pluginDirectiveFilterFileExt = 8  // complete file names with these extensions
+	pluginDirectiveFilterDirs    = 16 // complete directory names only
 )
 
-// PluginCompletion is the [CompletionFormat] Cobra-built hosts read: one candidate per line
-// ("value\tdescription" allowed), then a final ":<directive>" line carrying a Cobra
-// ShellCompDirective. kubectl reads it from kubectl_complete-<plugin>, and the Docker and Flux
-// CLIs from the plugin's own __complete (see [Program.WithCompletion]).
+// PluginCompletion is the [CompletionFormat] the plugin hosts kubectl, Docker and Flux read: one
+// candidate per line ("value\tdescription" allowed), then a final ":<directive>" line, a number
+// telling the shell what to do next. kubectl reads it from kubectl_complete-<plugin>, and the
+// Docker and Flux CLIs from the plugin's own __complete (see [Program.WithCompletion]).
 //
-// The hint maps onto Cobra's directives: kind none to ShellCompDirectiveNoFileComp, kind
-// directory to ShellCompDirectiveFilterDirs, kind file with extensions to
-// ShellCompDirectiveFilterFileExt (the extensions as the candidates, Cobra's convention), and
-// kind file or no hint at all to ShellCompDirectiveDefault, whose fallback is file completion.
-// Cobra reads the candidates of the filtering directives as their arguments, so a file or
-// directory hint applies only when there are no candidates. The directive line is always
-// written, since Cobra hosts read the last line as the directive unconditionally.
+// The hint maps onto the directives: kind none to 4, offer no file names; kind directory to 16,
+// directory names only; kind file with extensions to 8, file names with those extensions, which
+// the format carries as the candidates; and kind file or no hint at all to 0, whose fallback is
+// file completion. The hosts read the candidates of the filtering directives as their
+// arguments, so a file or directory hint applies only when there are no candidates. The
+// directive line is always written, since the hosts read the last line as the directive
+// unconditionally.
 //
-// Its output is covered by rotini's compatibility promise: it is Cobra's format, not rotini's.
+// Its output is covered by rotini's compatibility promise: the format is the hosts', not
+// rotini's, so it does not change.
 func PluginCompletion(w io.Writer, result CompletionResult) error {
 	lines := candidateLines(result.Candidates)
 
-	directive := cobraDirectiveDefault
+	directive := pluginDirectiveDefault
 	switch hint := result.Hint; {
 	case hint.Kind == "none":
-		directive = cobraDirectiveNoFileComp
+		directive = pluginDirectiveNoFileComp
 	case len(lines) > 0:
 	case hint.Kind == "directory":
-		directive = cobraDirectiveFilterDirs
+		directive = pluginDirectiveFilterDirs
 	case hint.Kind == "file" && len(hint.Extensions) > 0:
-		directive = cobraDirectiveFilterFileExt
+		directive = pluginDirectiveFilterFileExt
 		lines = append(lines, hint.Extensions...)
 	}
 
