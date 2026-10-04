@@ -13,7 +13,7 @@ import (
 // featureSpec is the feature-and-channel-rich counterpart to goldenSpec: where that one
 // is a byte-stability net over a minimal CLI, this one turns EVERY derived output on and
 // declares every input channel, so the help/man/markdown/completion renderers and the
-// schema/BindMeta emitters actually run. Kept functional (assert on what was emitted)
+// schema/InputSettings emitters actually run. Kept functional (assert on what was emitted)
 // rather than byte-golden — a snapshot of four rendered doc formats would churn on any
 // wording change without catching more.
 const featureSpec = `version: 0.0.0

@@ -14,11 +14,11 @@ import (
 
 // Generate-time audit of the handler files rotini does not own.
 //
-// A handler embeds the Default* no-ops and overrides the hooks it wants. If an override's
-// NAME is wrong, the embedded no-op keeps satisfying Handlers and the author's method becomes
+// A handler embeds the No* no-ops and overrides the hooks it wants. If an override's
+// NAME is wrong, the embedded no-op keeps satisfying Handler and the author's method becomes
 // dead code: it compiles, `go vet` is clean, and staticcheck's unused is deliberately
 // conservative about exported methods, so nothing reports it. The stub's
-// `var _ rotini.Handlers` assertion catches a missing hook and a drifted signature, but it
+// `var _ rotini.Handler` assertion catches a missing hook and a drifted signature, but it
 // cannot catch this one — the embed still supplies a valid method, so the interface holds.
 //
 // This is the remaining gap, and it is reported where every other "you wrote something that
@@ -31,7 +31,7 @@ import (
 
 // auditedHooks are the hook names a near-miss is measured against.
 //
-// Run is deliberately ABSENT. There is no DefaultRun, so a misspelled Run leaves the type
+// Run is deliberately ABSENT. There is no no-op Run, so a misspelled Run leaves the type
 // without one and the assertion fails to compile — the mistake is already loud. Only the four
 // hooks with an embeddable no-op can be typo'd silently, and leaving Run out also keeps the
 // audit away from a three-letter target, where an edit distance of 2 would match ordinary
@@ -44,7 +44,7 @@ var auditedHooks = []string{"CascadingPreRun", "PreRun", "PostRun", "CascadingPo
 // gone, so the audit sees exactly the files the author will build.
 //
 // It covers the cmd package AND every package a spec's `handler:` block points at that lives in
-// this module — the bring-your-own seam, where a Handlers implementation is written by hand and
+// this module — the bring-your-own seam, where a Handler implementation is written by hand and
 // shared by several CLIs, and therefore the place a misspelled hook is LEAST likely to be noticed.
 // A handler package outside this module is skipped deliberately: that is a dependency's source,
 // and linting someone else's package is not this tool's business.
@@ -156,15 +156,15 @@ func inModuleDir(importPath string, m module) (string, bool) {
 	return "", false
 }
 
-// handlerTypeNames collects the type names this package declares that implement rotini.Handlers,
+// handlerTypeNames collects the type names this package declares that implement rotini.Handler,
 // found two ways:
 //
-//  1. The `var _ rotini.Handlers = (*T)(nil)` assertion every generated stub carries, which is
+//  1. The `var _ rotini.Handler = (*T)(nil)` assertion every generated stub carries, which is
 //     also what identifies a stub for pruning (see stubMarker).
-//  2. Any function RETURNING rotini.Handlers, through the types its body names.
+//  2. Any function RETURNING rotini.Handler, through the types its body names.
 //
 // The second is what reaches a hand-written handler package. The `handler: {import, convention}`
-// seam is a package exporting `func Health() rotini.Handlers { return &handlers{} }` — the
+// seam is a package exporting `func Health() rotini.Handler { return &handlers{} }` — the
 // convention function's return type is the proof it implements the interface, so such a package
 // has no reason to write the assertion as well, and the real ones do not. Finding types only
 // through the assertion would have audited every generated stub and none of the files the seam
@@ -218,25 +218,25 @@ func declaredTypeNames(files map[string]*ast.File) map[string]bool {
 	return declared
 }
 
-// collectAssertedTypes reads `var _ rotini.Handlers = (*T)(nil)` — the generated stub's form.
+// collectAssertedTypes reads `var _ rotini.Handler = (*T)(nil)` — the generated stub's form.
 func collectAssertedTypes(gd *ast.GenDecl, collect func(ast.Node)) {
 	if gd.Tok != token.VAR {
 		return
 	}
 	for _, sp := range gd.Specs {
 		vs, ok := sp.(*ast.ValueSpec)
-		if !ok || !assertsHandlers(vs.Type) || len(vs.Values) == 0 {
+		if !ok || !assertsHandler(vs.Type) || len(vs.Values) == 0 {
 			continue
 		}
 		collect(vs.Values[0])
 	}
 }
 
-// collectConstructedTypes reads `func Check() rotini.Handlers { return &handlers{} }` — the
+// collectConstructedTypes reads `func Check() rotini.Handler { return &handlers{} }` — the
 // hand-written handler package's form, where the return type is the proof and no assertion is
 // written.
 func collectConstructedTypes(fd *ast.FuncDecl, collect func(ast.Node)) {
-	if !returnsHandlers(fd) || fd.Body == nil {
+	if !returnsHandler(fd) || fd.Body == nil {
 		return
 	}
 	for _, st := range fd.Body.List {
@@ -250,28 +250,28 @@ func collectConstructedTypes(fd *ast.FuncDecl, collect func(ast.Node)) {
 	}
 }
 
-// returnsHandlers reports whether fn's signature returns the Handlers interface — the proof a
+// returnsHandler reports whether fn's signature returns the Handler interface — the proof a
 // hand-written handler package gives that its type implements it, in place of an assertion.
-func returnsHandlers(fn *ast.FuncDecl) bool {
+func returnsHandler(fn *ast.FuncDecl) bool {
 	if fn.Type == nil || fn.Type.Results == nil {
 		return false
 	}
 	for _, r := range fn.Type.Results.List {
-		if assertsHandlers(r.Type) {
+		if assertsHandler(r.Type) {
 			return true
 		}
 	}
 	return false
 }
 
-// assertsHandlers reports whether a var's declared type is the Handlers interface, under any
-// package qualifier (rotini.Handlers, rt.Handlers) or none (a dot import).
-func assertsHandlers(t ast.Expr) bool {
+// assertsHandler reports whether a var's declared type is the Handler interface, under any
+// package qualifier (rotini.Handler, rt.Handler) or none (a dot import).
+func assertsHandler(t ast.Expr) bool {
 	switch v := t.(type) {
 	case *ast.SelectorExpr:
-		return v.Sel != nil && v.Sel.Name == "Handlers"
+		return v.Sel != nil && v.Sel.Name == "Handler"
 	case *ast.Ident:
-		return v.Name == "Handlers"
+		return v.Name == "Handler"
 	}
 	return false
 }
@@ -309,7 +309,7 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 			}
 			at := findingAt(fset, fd.Name.Pos(), moduleRoot)
 			at.msg = didYouMean(fmt.Sprintf(
-				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run; rotini.Default%s is what supplies %s",
+				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run; rotini.No%s is what supplies %s",
 				at.file, at.line, name, recv, match, match,
 			), name, auditedHooks)
 			found = append(found, at)
@@ -336,11 +336,11 @@ func receiverTypeName(t ast.Expr) string {
 
 // ─── the inputs-type audit ──────────────────────────────────────────────────.
 
-// collectFuncs are the generic entry points that acquire a command's own declared inputs. Each
-// takes the inputs type as its type argument, which is what the audit reads.
-var collectFuncs = map[string]bool{
-	"Collect": true, "CollectP": true,
-	"Defaults": true, "ParseArgv": true, "ParseEnv": true, "ParseFiles": true, "ParseStdin": true,
+// inputsMethods are the generic Context methods that acquire a command's own declared inputs.
+// Each takes the inputs type as its type argument, which is what the audit reads.
+var inputsMethods = map[string]bool{
+	"Inputs": true, "InputsWithReport": true,
+	"DefaultInputs": true, "ArgvInputs": true, "EnvInputs": true, "FileInputs": true, "StdinInputs": true,
 }
 
 // inputsTypeExpectations maps each generated handler type to the inputs type its command owns,
@@ -398,7 +398,7 @@ func wrongInputsTypes(fset *token.FileSet, files map[string]*ast.File, expected 
 					return true
 				}
 				fn, arg, ok := genericCallTypeArg(call)
-				if !ok || !collectFuncs[fn] || arg == want || !known[arg] {
+				if !ok || !inputsMethods[fn] || arg == want || !known[arg] {
 					return true
 				}
 				at := findingAt(fset, call.Pos(), moduleRoot)

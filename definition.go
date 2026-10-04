@@ -18,9 +18,9 @@ type Definition struct {
 	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
 	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
 	Commands         []CommandDef
-	RemoteCommands   []RemoteDef         // co-located plugin binaries dispatched as sub-commands of the root
-	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on the root command (nil = off)
-	PluginPath       string              // extra directory searched for BOTH declared remotes and discovered plugins
+	Plugins          []PluginDef         // co-located plugin binaries dispatched as sub-commands of the root
+	PluginDiscovery  *PluginDiscoveryDef // plugin auto-discovery on the root command (nil = off)
+	PluginPath       string              // extra directory searched for BOTH declared and discovered plugins
 	Passthrough      bool                // every token after the program name is a raw positional (no flag parsing)
 }
 
@@ -53,9 +53,9 @@ type FlagDependency struct {
 	Requires []string // flags that must also be set when When is set
 }
 
-// RemoteDef describes a co-located sub-command, kubectl/git plugin style: invoking it execs
+// PluginDef describes a co-located sub-command, kubectl/git plugin style: invoking it execs
 // the sibling Binary with the remaining arguments passed through.
-type RemoteDef struct {
+type PluginDef struct {
 	Name    string
 	Aliases []string
 	Summary string        // one-line description (completion candidates carry it as "name\tsummary")
@@ -63,10 +63,10 @@ type RemoteDef struct {
 	Timeout time.Duration // 0 means no timeout
 }
 
-// BindMeta is the generated descriptor the [Binder] consumes to fill the non-argv input
+// InputSettings is the generated descriptor the [InputReader] consumes to fill the non-argv input
 // channels. It carries the document-level concerns the dispatch-time [Definition] omits.
-type BindMeta struct {
-	ConfigFiles []ConfigFile // per-command config_files sources, each tagged with its Scope; the binder scopes them to the invoked chain (cascade, nearest-wins)
+type InputSettings struct {
+	ConfigFiles []ConfigFile // per-command config_files sources, each tagged with its Scope; the input reader scopes them to the invoked chain (cascade, nearest-wins)
 	// EnvPrefix scopes every derived env-var name under "<EnvPrefix>_". Explicit variable
 	// names are exempt, and with a prefix set the unprefixed names no longer bind.
 	EnvPrefix string
@@ -77,11 +77,11 @@ type BindMeta struct {
 	// source, and a source name colliding with a declared file is rejected loudly.
 	Sources []recon.Source
 	// StdinSchemas maps a command's stdin payload type name ("<Prefix>Stdin") to a
-	// self-contained JSON Schema the binder validates the decoded payload against.
+	// self-contained JSON Schema the input reader validates the decoded payload against.
 	StdinSchemas map[string]string
 }
 
-// ConfigFile is one configuration-file source the binder reads (reconciled by recon).
+// ConfigFile is one configuration-file source the input reader reads (reconciled by recon).
 // Exactly one of Path and Discover locates the file (the spec enforces this).
 type ConfigFile struct {
 	Name string // logical name
@@ -90,10 +90,10 @@ type ConfigFile struct {
 	// unscoped, in scope for every command; generated descriptors always set it.
 	Scope    string
 	Path     string       // fixed file path (may contain ~)
-	Format   string       // "json" | "yaml" | "toml"; "" lets the binder infer from the extension
+	Format   string       // "json" | "yaml" | "toml"; "" lets the input reader infer from the extension
 	Discover *DiscoverDef // run-time location strategy, instead of a fixed Path
 	PathFrom *PathFromDef // runtime inputs that supply/override the path (spec config_source)
-	// Schema is the self-contained JSON Schema the binder validates the loaded document
+	// Schema is the self-contained JSON Schema the input reader validates the loaded document
 	// against at bind time; "" is none. The file that actually resolved is the one
 	// validated, and an absent optional file passes vacuously.
 	Schema string
@@ -116,16 +116,16 @@ type DiscoverDef struct {
 	App      string // the application directory under the XDG config root (xdg only)
 }
 
-// RemoteDiscoveryDef enables plugin discovery on a command: an unmatched token execs the
+// PluginDiscoveryDef enables plugin discovery on a command: an unmatched token execs the
 // sibling binary Prefix+<token>, and `<Prefix>*` executables are offered as completion
 // candidates unless Hidden. A nil pointer means discovery is off for that command.
-type RemoteDiscoveryDef struct {
+type PluginDiscoveryDef struct {
 	Prefix string // executable-name prefix, e.g. "acme-"
 	Hidden bool   // dispatch discovered plugins but omit them from completion listings
 }
 
 // CommandDef describes one command node within a [Definition]. Handler is the ProgramHandlers
-// method name the runtime invokes to obtain this command's [Handlers].
+// method name the runtime invokes to obtain this command's [Handler].
 type CommandDef struct {
 	Name                  string
 	Aliases               []string
@@ -141,9 +141,9 @@ type CommandDef struct {
 	FlagGroups       []FlagGroup      // cross-flag presence rules validated at parse time
 	FlagDependencies []FlagDependency // conditional cross-flag requirements validated at parse time
 	Commands         []CommandDef
-	Remotes          []RemoteDef         // co-located remote binaries dispatched as sub-commands of this command
-	Discovery        *RemoteDiscoveryDef // plugin auto-discovery on this command (nil = off)
-	PluginPath       string              // extra directory searched for BOTH this command's declared remotes and its discovered plugins
+	Plugins          []PluginDef         // plugin binaries dispatched as sub-commands of this command
+	PluginDiscovery  *PluginDiscoveryDef // plugin auto-discovery on this command (nil = off)
+	PluginPath       string              // extra directory searched for BOTH this command's declared plugins and its discovered plugins
 	Passthrough      bool                // every token after this command is a raw positional (no flag parsing)
 }
 

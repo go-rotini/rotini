@@ -428,7 +428,7 @@ func collectValidation(err error, out *[]string) {
 
 // objectFieldFlag resolves a per-field flag — `--db.host` for an object flag `--db` — to the
 // object flag and the field path it sets, or ok=false.
-func objectFieldFlag(chain []ResolvedCommand, name string) (fd FlagDef, idx int, field string, ok bool) {
+func objectFieldFlag(chain []Command, name string) (fd FlagDef, idx int, field string, ok bool) {
 	if !strings.HasPrefix(name, "--") {
 		return FlagDef{}, 0, "", false
 	}

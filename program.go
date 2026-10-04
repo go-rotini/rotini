@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"reflect"
 	"runtime/debug"
+	"slices"
 	"syscall"
 )
 
@@ -38,17 +39,17 @@ const (
 	signalOn                         // WithSignals(...): always trap
 )
 
-// ExitCode returns a context-cancellation cause that sets the process exit code used when
+// ExitCause returns a context-cancellation cause that sets the process exit code used when
 // that cancellation halts the run:
 //
 //	ctx, cancel := context.WithCancelCause(parent)
 //	prog.WithContext(ctx)
-//	cancel(rotini.ExitCode(3)) // exits 3
+//	cancel(rotini.ExitCause(3)) // exits 3
 //
-// Canceling without an ExitCode cause still halts cleanly, with the code falling through to
+// Canceling without an ExitCause cause still halts cleanly, with the code falling through to
 // the normal resolution. Cancellation never preempts a running hook, and teardown always
 // runs. See [Program.WithContext].
-func ExitCode(code int) error { return exitCodeError{code: code} }
+func ExitCause(code int) error { return exitCodeError{code: code} }
 
 // exitCodeError carries a process exit code as a context-cancellation cause.
 type exitCodeError struct{ code int }
@@ -79,26 +80,26 @@ func canceledExitCode(ctx context.Context) int {
 //   - streams — [Program.WithStdin], [Program.WithStdout], [Program.WithStderr]
 //   - process — [Program.WithExit], [Program.WithArgs], [Program.WithContext],
 //     [Program.WithSignals], [Program.WithoutSignalHandling], [Program.WithCompletion]
-//   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithFunnel]
-//   - YOUR dependencies — [Program.Bind] for a key you name, [Program.With] with [Provide]
-//     for a type-checked one
-//   - rotini's own seams — [Program.WithVersion], [Program.WithParser], [Program.WithBinder],
-//     and the two the generated code handles for you, [Program.WithBindMeta] and
+//   - failure — [Program.WithTeardownOnPanic], [Program.WithPanicRecover], [Program.WithReporter]
+//   - YOUR dependencies — [Program.WithDependency], or [Program.With] with the
+//     [WithDependency] option to register several at once
+//   - rotini's own seams — [Program.WithVersion], [Program.WithParser], [Program.WithInputReader],
+//     and the two the generated code handles for you, [Program.WithInputSettings] and
 //     [Program.WithHelp]
 //   - replace a phase — [Program.WithResolver], [Program.WithLifecycle]
 //
 // Which of the two a setting is follows one rule: if rotini itself reads it — the runtime or
 // the code it generates — it is a typed option on the Program; if only your code reads it, it
-// is a registry binding. rotini's own settings are typed so that a key you choose can never
+// is a dependency. rotini's own settings are typed options so that a name you choose can never
 // shadow one of them, and a wrong type is a compile error rather than an input channel that
-// quietly stops working. Your services live in the registry because rotini has no business
-// knowing their types.
+// quietly stops working. Your dependencies are registered by name because rotini has no
+// business knowing their types.
 //
 // A Program is reusable: [Program.Run] dispatches one invocation and returns instead of
 // exiting, giving each call a fresh [Context]. That is what lets a REPL, a test, or a server
 // answering a peer drive the same program many times.
 //
-// Configure before the first run. Every With method and [Program.Bind] mutates the Program
+// Configure before the first run. Every With method mutates the Program
 // without synchronization, so a concurrent host finishes configuring, then dispatches. Applied
 // between sequential runs they simply take effect on the next one.
 //
@@ -109,21 +110,21 @@ func canceledExitCode(ctx context.Context) int {
 //
 // The zero value is not usable; start from [NewProgram].
 type Program struct {
-	ctx       context.Context
-	args      []string
-	def       Definition
-	handlers  any
-	rtx       *Context   // seed registry: Program.Bind lands here; each run's Context clones it
-	funnelFn  FunnelFunc // nil → defaultFunnel
-	resolver  Resolver   // nil → DefaultResolver
-	lifecycle Lifecycle  // nil → DefaultLifecycle
-	stdin     io.Reader
-	stdout    io.Writer
-	stderr    io.Writer
-	exit      func(int) // terminal action for Execute; defaults to os.Exit
+	ctx        context.Context
+	args       []string
+	def        Definition
+	handlers   any
+	rtx        *Context  // seed dependencies: Program.WithDependency lands here; each run's Context clones them
+	reporterFn Reporter  // nil → defaultReporter
+	resolver   Resolver  // nil → DefaultResolver
+	lifecycle  Lifecycle // nil → DefaultLifecycle
+	stdin      io.Reader
+	stdout     io.Writer
+	stderr     io.Writer
+	exit       func(int) // terminal action for Execute; defaults to os.Exit
 
 	teardownOnPanic bool             // does teardown run after a panic? See WithTeardownOnPanic.
-	panicRecover    bool             // is a panic funneled or re-raised? See WithPanicRecover.
+	panicRecover    bool             // is a panic reported or re-raised? See WithPanicRecover.
 	signalMode      signalTrapMode   // see WithSignals / WithoutSignalHandling
 	signalSet       []os.Signal      // signals trapped when on; empty → trapSignals
 	completion      CompletionFormat // the format __complete answers in; nil → rotini's own. See WithCompletion.
@@ -131,12 +132,12 @@ type Program struct {
 	// rotini's own seams. These are NOT registry entries: the registry is the user's
 	// namespace, and a value the runtime depends on has no business sharing a flat string
 	// keyspace with the program's own services, where a name collision or a wrong type
-	// would degrade an input channel in silence. See [Program.WithBindMeta].
-	meta     *BindMeta              // WithBindMeta: the generated descriptor; nil → none
-	binderFn func(BindMeta) *Binder // WithBinder: nil → NewBinder
-	version  string                 // WithVersion
-	help     HelpFunc               // WithHelp: nil → no pages
-	parser   *Parser                // WithParser: nil → a default, built per run
+	// would degrade an input channel in silence. See [Program.WithInputSettings].
+	meta     *InputSettings                   // WithInputSettings: the generated descriptor; nil → none
+	readerFn func(InputSettings) *InputReader // WithInputReader: nil → NewInputReader
+	version  string                           // WithVersion
+	help     HelpFunc                         // WithHelp: nil → no pages
+	parser   *Parser                          // WithParser: nil → a default, built per run
 }
 
 // NewProgram wires a generated command tree and its aggregate handler set to the runtime.
@@ -159,7 +160,7 @@ func NewProgram(def Definition, handlers any) *Program {
 }
 
 // WithStdin overrides the program's standard input (default os.Stdin) — what a handler reads
-// via [Context.Stdin] and what the Binder decodes a stdin channel from. A nil reader is
+// via [Context.Stdin] and what the InputReader decodes a stdin channel from. A nil reader is
 // ignored.
 func (p *Program) WithStdin(r io.Reader) *Program {
 	if r != nil {
@@ -169,7 +170,7 @@ func (p *Program) WithStdin(r io.Reader) *Program {
 }
 
 // WithStdout overrides the program's standard output (default os.Stdout), where the runtime
-// writes completion candidates and the default funnel writes infos and successes. A nil writer
+// writes completion candidates and the default reporter writes infos and successes. A nil writer
 // is ignored.
 func (p *Program) WithStdout(w io.Writer) *Program {
 	if w != nil {
@@ -179,7 +180,7 @@ func (p *Program) WithStdout(w io.Writer) *Program {
 }
 
 // WithStderr overrides the program's standard error (default os.Stderr), where the runtime
-// writes its diagnostics and the default funnel reports. A nil writer is ignored.
+// writes its diagnostics and the default reporter reports. A nil writer is ignored.
 func (p *Program) WithStderr(w io.Writer) *Program {
 	if w != nil {
 		p.stderr = w
@@ -222,13 +223,13 @@ func (p *Program) WithTeardownOnPanic(enabled bool) *Program {
 }
 
 // WithPanicRecover controls where a hook panic goes. The default, true, recovers it and routes
-// it to the funnel, so users of the built CLI never see a raw stack dump. Pass false to re-raise
+// it to the reporter, so users of the built CLI never see a raw stack dump. Pass false to re-raise
 // it to the caller instead — for embedding rotini under your own recover, a crash reporter, or
 // debugging.
 //
 // It composes with [Program.WithTeardownOnPanic], which is the separate question of whether
 // teardown still runs:
-//   - recover=true (the default)  → the panic never leaves rotini; it reaches the funnel as a
+//   - recover=true (the default)  → the panic never leaves rotini; it reaches the reporter as a
 //     [*PanicError], and teardown runs or not according to WithTeardownOnPanic.
 //   - recover=false, teardown=true  → teardown runs, THEN the panic is re-raised (its stack
 //     roots at the re-raise, not the original site).
@@ -259,12 +260,12 @@ func (p *Program) WithArgs(args []string) *Program {
 	return p
 }
 
-// WithContext sets the base context threaded to every lifecycle hook, the funnel, and any
-// remote exec, so a caller can cancel or time-bound the whole run. A nil context is ignored.
+// WithContext sets the base context threaded to every lifecycle hook, the reporter, and any
+// plugin exec, so a caller can cancel or time-bound the whole run. A nil context is ignored.
 //
 // Cancellation is cooperative — it cannot preempt a hook that ignores it — but once the
 // context is canceled rotini starts no further forward hook, and teardown for every begun
-// setup hook still runs in reverse. Attach the process exit code with [ExitCode]; without one
+// setup hook still runs in reverse. Attach the process exit code with [ExitCause]; without one
 // the code falls through to the normal resolution. To stop without canceling the context, use
 // [Context.HaltWithCode] or [Context.Exit].
 //
@@ -293,7 +294,7 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 // completer with no __complete word — kubectl's kubectl_complete-<name> — is served by calling
 // [Program.Complete] from main instead.
 //
-// A nil format restores rotini's own, as [Program.WithFunnel] restores the default funnel.
+// A nil format restores rotini's own, as [Program.WithReporter] restores the default reporter.
 func (p *Program) WithCompletion(format CompletionFormat) *Program {
 	p.completion = format
 	return p
@@ -329,8 +330,8 @@ func (p *Program) WithSignals(sigs ...os.Signal) *Program {
 // method, and for a single step the method reads better; Option exists for steps that are
 // values — passed around, collected into a slice, or grouped under one [Program.With].
 //
-// The typed registry is the main user: [Provide] returns an Option binding a [Key]'s value, so
-// several type-checked binds sit together in one With call inside the chain.
+// Dependencies are the main user: [WithDependency] returns an Option registering one, so
+// several type-checked registrations sit together in one With call inside the chain.
 //
 // An Option is an ordinary function, so a program can carry its own:
 //
@@ -344,14 +345,14 @@ type Option func(*Program)
 //
 //	cmd.Program.
 //		With(
-//			rotini.Provide(tasks.StoreKey, store),
-//			rotini.Provide(tasks.ClientKey, client),
+//			rotini.WithDependency(tasks.Store, store),
+//			rotini.WithDependency(tasks.Client, client),
 //		).
 //		WithVersion(version).
 //		Execute()
 //
-// Options are applied left to right, so a later one overwrites an earlier one binding the
-// same key — the same rule [Program.Bind] follows. A nil Option is skipped.
+// Options are applied left to right, so a later one replaces an earlier one registering the
+// same dependency. A nil Option is skipped.
 func (p *Program) With(opts ...Option) *Program {
 	for _, opt := range opts {
 		if opt != nil {
@@ -363,35 +364,35 @@ func (p *Program) With(opts ...Option) *Program {
 
 // ── rotini's own seams ──────────────────────────────────────────────────────.
 //
-// These are typed options rather than registry entries so the registry belongs to the user
-// alone: a key the program chooses can never collide with one rotini reads, and a wrong type
+// These are typed options rather than dependencies so the dependencies belong to the user
+// alone: a name the program chooses can never collide with one rotini reads, and a wrong type
 // is a compile error rather than a zero value that silently degrades an input channel.
 
-// WithBindMeta supplies the generated binding descriptor — the configuration sources, the
-// env prefix and the stdin schemas [Collect] reconciles from. The generated NewProgram calls
+// WithInputSettings supplies the generated binding descriptor — the configuration sources, the
+// env prefix and the stdin schemas [Context.Inputs] reconciles from. The generated NewProgram calls
 // it; a hand-built program calls it when it wants those channels.
 //
 // It is a description of the program, like [Definition], not a dependency — which is why it
-// travels as a typed option rather than as a registry entry.
-func (p *Program) WithBindMeta(meta BindMeta) *Program {
+// travels as a typed option rather than as a registered dependency.
+func (p *Program) WithInputSettings(meta InputSettings) *Program {
 	p.meta = &meta
 	return p
 }
 
-// WithBinder replaces the binder [Collect] and the per-channel helpers use. fn receives the
-// program's [BindMeta], so a custom binder is built FROM the generated descriptor rather than
-// having to reproduce it:
+// WithInputReader replaces the input reader [Context.Inputs] and the per-channel helpers use.
+// fn receives the program's [InputSettings], so a custom input reader is built FROM the
+// generated descriptor rather than having to reproduce it:
 //
-//	p.WithBinder(func(meta rotini.BindMeta) *rotini.Binder {
+//	p.WithInputReader(func(meta rotini.InputSettings) *rotini.InputReader {
 //		meta.Sources = append(meta.Sources, mySource)
-//		return rotini.NewBinder(meta)
+//		return rotini.NewInputReader(meta)
 //	})
 //
-// That signature is the point: a replacement binder starts from the descriptor, so it cannot
+// That signature is the point: a replacement input reader starts from the descriptor, so it cannot
 // silently lose the configuration files the spec declared. A nil fn is ignored.
-func (p *Program) WithBinder(fn func(BindMeta) *Binder) *Program {
+func (p *Program) WithInputReader(fn func(InputSettings) *InputReader) *Program {
 	if fn != nil {
-		p.binderFn = fn
+		p.readerFn = fn
 	}
 	return p
 }
@@ -425,8 +426,8 @@ func (p *Program) WithHelp(help HelpFunc) *Program {
 	return p
 }
 
-// WithParser replaces the [Parser] that [Context.Parser] returns. [Collect] and the [Binder]
-// always use the default parser, so this changes only what a handler gets from
+// WithParser replaces the [Parser] that [Context.Parser] returns. [Context.Inputs] and the
+// [InputReader] always use the default parser, so this changes only what a handler gets from
 // [Context.Parser]. A nil parser is ignored.
 func (p *Program) WithParser(parser *Parser) *Program {
 	if parser != nil {
@@ -435,23 +436,9 @@ func (p *Program) WithParser(parser *Parser) *Program {
 	return p
 }
 
-// Bind registers a service on the program's registry under key, overwriting any prior
-// binding. It is the dependency-injection seam: bind a real implementation in production or a
-// double in tests, and handler code retrieves either through [Context.Get] or
-// [Context.MustGet].
-//
-// It is YOUR namespace. rotini's own seams — the binder, the parser, the version, the help
-// pages, the generated [BindMeta] — are typed options on the Program, not
-// entries here, so a key you choose can never shadow one of them and a type you get wrong can
-// never degrade an input channel in silence.
-func (p *Program) Bind(key string, value any) *Program {
-	p.rtx.Bind(key, value)
-	return p
-}
-
 // newRunContext builds the per-invocation [Context] — fresh outcome channels and exit state,
-// the services bound via [Program.Bind], and the program's streams. Every run gets its own,
-// which is what makes a Program re-entrant.
+// the dependencies registered via [Program.WithDependency], and the program's streams. Every
+// run gets its own, which is what makes a Program re-entrant.
 func (p *Program) newRunContext() *Context {
 	rtx := newContext()
 	if p.rtx != nil {
@@ -460,12 +447,12 @@ func (p *Program) newRunContext() *Context {
 		}
 	}
 	rtx.Stdin, rtx.Stdout, rtx.Stderr = p.stdin, p.stdout, p.stderr
-	rtx.meta, rtx.binderFn = p.meta, p.binderFn
+	rtx.meta, rtx.readerFn = p.meta, p.readerFn
 	rtx.version, rtx.parser, rtx.help = p.version, p.parser, p.help
 	return rtx
 }
 
-// Outcome is everything a run recorded, handed to the funnel in one value. Each slice is in
+// Outcome is everything a run recorded, handed to the reporter in one value. Each slice is in
 // recording order, and this struct is the only way the records surface — [Context] keeps them
 // private so nothing can read a partial run.
 //
@@ -473,7 +460,7 @@ func (p *Program) newRunContext() *Context {
 // that will be written against a frozen v1: at a call site the channels are named, so Infos
 // and Successes (both []string) and Warnings and Errors (both []error) cannot be silently
 // transposed; and a channel added later is an additive field rather than a breaking change to
-// every custom funnel in existence.
+// every custom reporter in existence.
 type Outcome struct {
 	// Infos are [Context.RecordInfo] messages: neutral output, no bearing on the exit code.
 	Infos []string
@@ -489,53 +476,53 @@ type Outcome struct {
 }
 
 // Empty reports whether the run recorded nothing at all — a silent success. The runtime skips
-// the funnel entirely in that case, so a funnel never sees an empty Outcome.
+// the reporter entirely in that case, so a reporter never sees an empty Outcome.
 func (o Outcome) Empty() bool {
 	return len(o.Infos)+len(o.Successes)+len(o.Warnings)+len(o.Errors)+len(o.Panics) == 0
 }
 
-// Failed reports whether the run recorded an error or a panic — what the default funnel's
+// Failed reports whether the run recorded an error or a panic — what the default reporter's
 // exit floor keys on.
 func (o Outcome) Failed() bool { return len(o.Errors) > 0 || len(o.Panics) > 0 }
 
-// FunnelFunc is the program's outcome funnel. The runtime calls it once, after the lifecycle
+// Reporter is the program's outcome reporter. The runtime calls it once, after the lifecycle
 // and its teardown settle, with everything the run recorded (see [Outcome]).
 //
-// The funnel decides what to print, where, in what order, and the final exit code: it is the
+// The reporter decides what to print, where, in what order, and the final exit code: it is the
 // last authority, so [Context.Exit] inside it overrides whatever the lifecycle set
 // ([Context.HaltWithCode] is a no-op here).
 //
 // It is the last authority on the CODE, not on what the run recorded. The [Outcome] is the
-// funnel's own copy to read; the error [Program.Run] returns is built before the funnel is
-// called, so editing the slices it was handed changes nothing but the funnel's own view.
+// reporter's own copy to read; the error [Program.Run] returns is built before the reporter is
+// called, so editing the slices it was handed changes nothing but the reporter's own view.
 //
-// Nothing recovers a panic from inside a funnel — it is the last thing a run does, and a funnel
-// for the funnel is not a thing. A funnel that can fail should handle its own failure, write to
+// Nothing recovers a panic from inside a reporter — it is the last thing a run does, and a reporter
+// for the reporter is not a thing. A reporter that can fail should handle its own failure, write to
 // rtx.Stderr and set a code with [Context.Exit]; recording there is dropped, because the Outcome
 // was snapshotted before it ran.
-type FunnelFunc func(ctx context.Context, rtx *Context, out Outcome)
+type Reporter func(ctx context.Context, rtx *Context, out Outcome)
 
-// WithFunnel sets the program's outcome funnel — the one place a run's recorded channels are
+// WithReporter sets the program's outcome reporter — the one place a run's recorded channels are
 // reported. It runs once per run, after the lifecycle settles, whenever any channel recorded
-// something; a clean run never invokes it. See [FunnelFunc].
+// something; a clean run never invokes it. See [Reporter].
 //
 // The default prints info → warning → error → panic → success (infos and successes to stdout,
 // the rest to stderr) and applies an exit floor: a recorded error or panic exits non-zero
-// unless a handler already set a deliberate code. A custom funnel owns the exit entirely.
+// unless a handler already set a deliberate code. A custom reporter owns the exit entirely.
 //
 // A nil fn RESTORES the default, which is why this one seam accepts nil rather than ignoring
 // it: "report the way rotini does" is a thing a host may want back, and there is no other way
 // to ask for it. The seams that replace a value rather than a behavior — [Program.WithStdout],
 // [Program.WithResolver] and the rest — ignore nil instead, so a conditional caller cannot
 // erase a stream or a phase by passing one.
-func (p *Program) WithFunnel(fn FunnelFunc) *Program {
-	p.funnelFn = fn
+func (p *Program) WithReporter(fn Reporter) *Program {
+	p.reporterFn = fn
 	return p
 }
 
-// PanicError carries a panic recovered from a lifecycle hook to the funnel: Value is what was
+// PanicError carries a panic recovered from a lifecycle hook to the reporter: Value is what was
 // passed to panic, Stack the goroutine stack captured at the recovery point. Error renders
-// Value alone, so default output stays one line; a funnel that wants the stack asks for it
+// Value alone, so default output stays one line; a reporter that wants the stack asks for it
 // with errors.As.
 //
 // It also carries the faults rotini detects rather than recovers — a [*WiringError], a resolver
@@ -555,7 +542,7 @@ func (e *PanicError) Error() string { return fmt.Sprintf("%v", e.Value) }
 // The floor matters. A recovered panic is a bug in the program by definition — [CategoryInternal]
 // is literally "the end-user cannot fix it; the author must" — but a panic value is usually not
 // an error at all (panic("boom")), and without the floor CategoryOf reported [CategoryNone] for
-// it. That is not merely uninformative: none sorts BELOW usage, so a funnel keeping the most
+// it. That is not merely uninformative: none sorts BELOW usage, so a reporter keeping the most
 // severe category across a run would rank a crash under a mistyped flag.
 //
 // A panicked error value still wins the classification, because [CategoryOf] tests [ErrUsage]
@@ -570,8 +557,8 @@ func (e *PanicError) Unwrap() []error {
 
 // WiringError reports that the generated [Definition] and the handler set are out of sync — a
 // resolved command names a handler method that does not exist, or whose return value does not
-// implement [Handlers]. It is a build-time bug surfaced at run time, always
-// [CategoryInternal], and names the offending command and method so a funnel need not match on
+// implement [Handler]. It is a build-time bug surfaced at run time, always
+// [CategoryInternal], and names the offending command and method so a reporter need not match on
 // the message.
 //
 // Command and Handler are empty when the fault is not about one command — [NewProgram] was
@@ -591,7 +578,7 @@ func (e *WiringError) Unwrap() error { return ErrInternal }
 // WithResolver overrides the resolve phase — argv to invocation target, plus the argv the
 // parsers later see. Wrap [DefaultResolver] rather than re-deriving it: a resolver that
 // rewrites tokens should rewrite argv, hand it to the default, and return the result, so
-// routing and parsing agree. A resolver error is routed through the funnel as a fault and
+// routing and parsing agree. A resolver error is routed through the reporter as a fault and
 // fails the run.
 //
 // Completion candidates walk the [Definition], so a resolver-only alias is dispatchable but
@@ -605,7 +592,7 @@ func (p *Program) WithResolver(fn Resolver) *Program {
 
 // WithLifecycle overrides the run phase's plan — which declared hooks run, in what pairing and
 // order (see [Lifecycle] and [DefaultLifecycle]). The semantics around the plan — halting,
-// the balanced reverse unwind, teardown to completion, the panic funnel, exit codes — stay
+// the balanced reverse unwind, teardown to completion, the panic reporter, exit codes — stay
 // fixed. Wrap [DefaultLifecycle] rather than re-deriving it. A nil lifecycle is ignored.
 func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 	if fn != nil {
@@ -621,7 +608,7 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 //
 // The error is the run's own failure: every [Context.RecordError] value and every recovered
 // fault, joined with errors.Join — so errors.Is and errors.As reach each one, and a caller can
-// branch on a [*ParseError] or a [*BindError] rather than on text.
+// branch on a [*ParseError] or an [*InputError] rather than on text.
 //
 // It is reachable only when the exit action RETURNS. Under the default action, os.Exit, the
 // process is already gone by then and the return statement never runs, which is why the
@@ -635,8 +622,8 @@ func (p *Program) WithLifecycle(fn Lifecycle) *Program {
 //	code := -1
 //	err := cmd.Program.WithExit(func(c int) { code = c }).Execute()
 //
-// The error is not the reporting channel. By the time Execute returns, the funnel has already
-// printed everything the run recorded ([Program.WithFunnel]). The return exists so an embedder
+// The error is not the reporting channel. By the time Execute returns, the reporter has already
+// printed everything the run recorded ([Program.WithReporter]). The return exists so an embedder
 // can ACT on the failure — retry, wrap, classify with [CategoryOf] — without re-deriving it
 // from what was written to a stream. A caller that only wants the number can use
 // [Program.Run], which returns both and never exits.
@@ -656,15 +643,15 @@ func (p *Program) Execute() error {
 
 // Run dispatches one invocation of argv and returns its exit code — the re-entrant core
 // [Program.Execute] is built on. It resolves the invoked command (flag parsing stays the
-// handler's opt-in via [Parser.Parse]), execs a remote sub-command if one was selected, and
+// handler's opt-in via [Parser.Parse]), execs a declared plugin if one was selected, and
 // otherwise dispatches the lifecycle.
 //
 // Unlike Execute, Run never ends the process, which is what makes a Program reusable: a REPL,
 // a daemon or a test can call it once per line and inspect the code.
 //
 // Each call gets a fresh [Context], so one invocation never inherits the previous one's
-// records or status. Services bound with [Program.Bind] are seeded into every run; one a
-// handler binds mid-run stays local to that run.
+// records or status. Dependencies registered with [Program.WithDependency] are seeded into
+// every run; one a handler sets mid-run with [Context.SetDependency] stays local to that run.
 //
 // For hosts that dispatch in a loop: with no supplied context Run installs and tears down the
 // signal trap on every call, about 30µs — negligible once per process, but roughly 20x the
@@ -672,10 +659,9 @@ func (p *Program) Execute() error {
 //
 // # Concurrency
 //
-// Run is safe to call concurrently once the program is configured — every With* option and
-// [Program.Bind] must happen before the first run, since none of them is synchronized. Each
-// concurrent run has its own [Context], so records, exit state and mid-run bindings never
-// cross between them.
+// Run is safe to call concurrently once the program is configured — every With* option must
+// happen before the first run, since none of them is synchronized. Each concurrent run has its
+// own [Context], so records, exit state and mid-run dependencies never cross between them.
 //
 // Two things stay SHARED, and a concurrent host owns both:
 //
@@ -750,8 +736,8 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 		rtx.recordFault(asFault(internalUnlessTagged(fmt.Errorf("resolve: %w", err))))
 		return p.settle(ctx, rtx)
 	}
-	if res.Remote != nil {
-		return p.execRemote(ctx, rtx, res.Remote)
+	if res.Plugin != nil {
+		return p.execPlugin(ctx, rtx, res.Plugin)
 	}
 	if len(res.Chain) == 0 {
 		// An empty chain violates the resolver contract.
@@ -763,8 +749,12 @@ func (p *Program) runWith(runCtx context.Context, hasCtx bool, argv []string) (i
 	if res.Argv != nil {
 		rtx.Argv = res.Argv
 	}
-	rtx.chain = res.Chain
-	return p.dispatch(ctx, res.Chain, rtx)
+	// A copy, so marking the invoked command never writes into a slice a custom resolver may
+	// share between runs.
+	chain := slices.Clone(res.Chain)
+	markInvoked(chain)
+	rtx.chain = chain
+	return p.dispatch(ctx, chain, rtx)
 }
 
 // installTrap starts rotini's signal trap for one run and returns the function that removes
@@ -812,15 +802,15 @@ func internalUnlessTagged(err error) error {
 // panics. Stack is empty: this was detected and routed, never unwound.
 func asFault(err error) *PanicError { return &PanicError{Value: err} }
 
-// settle is the single run tail: it hands every populated outcome channel to the funnel and
-// resolves the exit code. Both the dispatch tail and the resolve/wiring/remote early returns
+// settle is the single run tail: it hands every populated outcome channel to the reporter and
+// resolves the exit code. Both the dispatch tail and the resolve/wiring/plugin early returns
 // go through it, so every run path reports the same way.
 //
-// A handler's explicit exit code is already in rtx.exitCode when the funnel runs, but the
-// funnel is the final authority — it runs in the funnel stage, where rtx.Exit overrides. The
-// exit floors live in defaultFunnel, so a custom funnel simply does not inherit them.
+// A handler's explicit exit code is already in rtx.exitCode when the reporter runs, but the
+// reporter is the final authority — it runs in the reporter stage, where rtx.Exit overrides. The
+// exit floors live in defaultReporter, so a custom reporter simply does not inherit them.
 func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
-	// Snapshot the private channels once; they surface only as the funnel's argument.
+	// Snapshot the private channels once; they surface only as the reporter's argument.
 	out := Outcome{
 		Infos:     rtx.copyInfos(),
 		Successes: rtx.copySuccesses(),
@@ -829,26 +819,26 @@ func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
 		Panics:    rtx.copyFaults(),
 	}
 
-	// The run's error is built BEFORE the funnel sees the Outcome, and that ordering is the
+	// The run's error is built BEFORE the reporter sees the Outcome, and that ordering is the
 	// point. Outcome is passed by value but its slices are headers over shared arrays, so a
-	// funnel writing out.Errors[0] used to reach this line and change what Run returns —
+	// reporter writing out.Errors[0] used to reach this line and change what Run returns —
 	// while out.Errors = append(...) did not, because append reallocates. Aliasing that
 	// propagates for an index write and vanishes for an append is a trap, not a feature.
 	//
-	// The funnel is the final authority on the EXIT CODE, through [Context.Exit], and that
+	// The reporter is the final authority on the EXIT CODE, through [Context.Exit], and that
 	// still holds because rtx.exitCode is read after it runs. It is not an authority on what
 	// the run recorded: that is the run's own account of itself.
 	err := joinOutcome(out.Errors, out.Panics)
 
-	// A clean run that recorded nothing never invokes the funnel.
+	// A clean run that recorded nothing never invokes the reporter.
 	if !out.Empty() {
-		fn := p.funnelFn
+		fn := p.reporterFn
 		if fn == nil {
-			fn = p.defaultFunnel
+			fn = p.defaultReporter
 		}
-		rtx.funnelStage = true // rtx.Exit now overrides; rtx.HaltWithCode is a no-op
+		rtx.reporterStage = true // rtx.Exit now overrides; rtx.HaltWithCode is a no-op
 		fn(ctx, rtx, out)
-		rtx.funnelStage = false
+		rtx.reporterStage = false
 	}
 	return rtx.exitCode, err
 }
@@ -867,11 +857,11 @@ func joinOutcome(errs []error, faults []*PanicError) error {
 	return errors.Join(all...)
 }
 
-// defaultFunnel prints each channel in the order info → warning → error → panic → success,
+// defaultReporter prints each channel in the order info → warning → error → panic → success,
 // infos and successes to stdout and the rest to stderr, then applies the exit floor: an error
 // or fault exits 1 unless a handler already set a deliberate code, which it never downgrades.
 // A [*PanicError]'s Stack is never printed — it stays for an errors.As.
-func (p *Program) defaultFunnel(_ context.Context, rtx *Context, out Outcome) {
+func (p *Program) defaultReporter(_ context.Context, rtx *Context, out Outcome) {
 	for _, s := range out.Infos {
 		fmt.Fprintln(p.stdout, s)
 	}
@@ -893,10 +883,10 @@ func (p *Program) defaultFunnel(_ context.Context, rtx *Context, out Outcome) {
 	}
 }
 
-// resolveHandlers asks the program's handler set for each frame's [Handlers], by the Handler
+// resolveHandlers asks the program's handler set for each frame's [Handler], by the Handler
 // name the Definition recorded. A wiring failure is returned for the caller to route as a
 // fault, never panicked.
-func (p *Program) resolveHandlers(chain []ResolvedCommand) ([]Handlers, *WiringError) {
+func (p *Program) resolveHandlers(chain []Command) ([]Handler, *WiringError) {
 	hv := reflect.ValueOf(p.handlers)
 	if !hv.IsValid() {
 		// reflect.ValueOf(nil) is the zero Value, whose MethodByName panics with a
@@ -906,7 +896,7 @@ func (p *Program) resolveHandlers(chain []ResolvedCommand) ([]Handlers, *WiringE
 			Msg: "no handlers: NewProgram was given a nil handlers value",
 		}
 	}
-	handlers := make([]Handlers, len(chain))
+	handlers := make([]Handler, len(chain))
 	for i, f := range chain {
 		m := hv.MethodByName(f.Handler)
 		if !m.IsValid() {
@@ -916,11 +906,11 @@ func (p *Program) resolveHandlers(chain []ResolvedCommand) ([]Handlers, *WiringE
 			}
 		}
 		out := m.Call(nil)
-		h, ok := reflect.TypeAssert[Handlers](out[0])
+		h, ok := reflect.TypeAssert[Handler](out[0])
 		if !ok || h == nil {
 			return nil, &WiringError{
 				Command: f.Name, Handler: f.Handler,
-				Msg: fmt.Sprintf("handler %q does not implement Handlers", f.Handler),
+				Msg: fmt.Sprintf("handler %q does not implement Handler", f.Handler),
 			}
 		}
 		handlers[i] = h
@@ -928,7 +918,7 @@ func (p *Program) resolveHandlers(chain []ResolvedCommand) ([]Handlers, *WiringE
 	return handlers, nil
 }
 
-// dispatch resolves each command in the chain to its [Handlers], asks the lifecycle planner
+// dispatch resolves each command in the chain to its [Handler], asks the lifecycle planner
 // for the step plan, and executes it as a balanced LIFO setup/teardown:
 //
 //   - Forward: each step's Do in plan order, halting the moment a hook calls Halt, HaltWith,
@@ -937,11 +927,11 @@ func (p *Program) resolveHandlers(chain []ResolvedCommand) ([]Handlers, *WiringE
 //     HaltWithCode inside an Undo neither aborts the rest nor displaces the first failure; a
 //     hard Exit skips what remains, and so does a panic under WithTeardownOnPanic(false).
 //
-// A recovered panic is routed to the funnel once, after teardown. A canceled run context is
+// A recovered panic is routed to the reporter once, after teardown. A canceled run context is
 // converted into a [Context.HaltWithCode] between forward hooks — teardown still runs, and the
 // exit code is the cancellation cause's or 0. That conversion happens only on the dispatch
 // goroutine, so rtx stays single-writer.
-func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Context) (int, error) {
+func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (int, error) {
 	handlers, werr := p.resolveHandlers(chain)
 	if werr != nil {
 		rtx.recordFault(asFault(werr))
@@ -959,7 +949,7 @@ func (p *Program) dispatch(ctx context.Context, chain []ResolvedCommand, rtx *Co
 	// run wraps every hook so a panic leaves the lifecycle in control. The one combination not
 	// recovered is panicRecover=false with teardownOnPanic=false, where the hook runs unguarded
 	// so the panic propagates with its original stack. panicValue holds the first panic when it will be
-	// re-panicked after teardown rather than funneled.
+	// re-panicked after teardown rather than reported.
 	panicked := false
 	var panicValue any
 	run := func(hook func(context.Context, *Context)) {

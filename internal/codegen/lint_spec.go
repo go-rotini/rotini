@@ -55,7 +55,7 @@ var specLints = []func(*Spec) []error{
 	lintDuplicateInputNames,
 	lintVariadicArguments,
 	lintDeprecatedIdentifiers,
-	lintRemoteTimeouts,
+	lintPluginTimeouts,
 	lintDottedKeys,
 	lintFrom,
 	lintConfigurationFiles,
@@ -108,9 +108,9 @@ func rootLabel(spec *Spec) string {
 	return "command " + spec.Command.Name
 }
 
-// lintDocLevelKeys rejects env_prefix, schemas and display_name on a non-root command. The shared Command
-// shape accepts them on every node, but codegen reads them only on the root, so declaring one
-// deeper would be a silent no-op.
+// lintDocLevelKeys rejects env_prefix, schemas and display_name on a non-root command. The
+// shared Command shape accepts them on every node, but codegen reads them only on the root, so
+// declaring one deeper would be a silent no-op.
 func lintDocLevelKeys(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -140,7 +140,7 @@ func lintDocLevelKeys(spec *Spec) []error {
 // whose handler is generated against the child's own inputs and output, so a handler-coupled
 // key overlaid on the ref node would produce a parser the delegated handler does not match.
 // The generator honors only the identity and presentation keys plus the additive `commands:`;
-// declare inputs, output and remotes in the child spec instead.
+// declare inputs, output and plugins in the child spec instead.
 func lintRefNodeKeys(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -186,11 +186,11 @@ func lintRefNodeKeys(spec *Spec) []error {
 		if c.Output != nil {
 			reject("output")
 		}
-		if len(c.RemoteCommands) > 0 {
-			reject("remote_commands")
+		if len(c.Plugins) > 0 {
+			reject("plugins")
 		}
-		if c.RemoteDiscovery != nil {
-			reject("remote_discovery")
+		if c.PluginDiscovery != nil {
+			reject("plugin_discovery")
 		}
 		if c.Passthrough {
 			reject("passthrough")
@@ -237,8 +237,8 @@ func lintRootAliases(spec *Spec) []error {
 }
 
 // lintSiblingCollisions rejects duplicate dispatch tokens among one command's children:
-// sub-command and remote-command names and aliases share one namespace, and dispatch tries
-// sub-commands first, so a colliding remote would be silently shadowed.
+// sub-command and plugin names and aliases share one namespace, and dispatch tries
+// sub-commands first, so a colliding plugin would be silently shadowed.
 func lintSiblingCollisions(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -270,8 +270,8 @@ func lintSiblingCollisions(spec *Spec) []error {
 			}
 			claim(owner, fmt.Sprintf("%s/commands/%d", ptr, i), append([]string{child.Name}, child.Aliases...)...)
 		}
-		for i, r := range c.RemoteCommands {
-			claim("remote "+r.Name, fmt.Sprintf("%s/remote_commands/%d", ptr, i), append([]string{r.Name}, r.Aliases...)...)
+		for i, r := range c.Plugins {
+			claim("plugin "+r.Name, fmt.Sprintf("%s/plugins/%d", ptr, i), append([]string{r.Name}, r.Aliases...)...)
 		}
 	})
 	return problems
@@ -877,8 +877,8 @@ func lintPassthrough(spec *Spec) []error {
 		if len(c.Commands) > 0 {
 			add("commands", "sets `passthrough` and declares `commands`, but a passthrough command never descends; a child token is a raw positional")
 		}
-		if len(c.RemoteCommands) > 0 || c.RemoteDiscovery != nil {
-			add("passthrough", "sets `passthrough` and declares `remote_commands` or `remote_discovery`, but a passthrough command never dispatches; the token is a raw positional")
+		if len(c.Plugins) > 0 || c.PluginDiscovery != nil {
+			add("passthrough", "sets `passthrough` and declares `plugins` or `plugin_discovery`, but a passthrough command never dispatches; the token is a raw positional")
 		}
 		args := []ArgumentInput{}
 		if c.inputs() != nil {
@@ -1032,7 +1032,7 @@ func displayType(t string) string {
 
 // lintStdinFormat enforces the raw stdin formats' contract. 'text' binds the whole payload as
 // one string and 'lines' binds it as []string, so the declared schema type has to be the type
-// the payload actually becomes — otherwise codegen would emit a field the binder cannot fill,
+// the payload actually becomes — otherwise codegen would emit a field the input reader cannot fill,
 // and the mismatch would surface at run time as a wiring error instead of here.
 //
 // The four document formats are unconstrained: their payload decodes into the generated
@@ -1288,20 +1288,20 @@ func lintDeprecatedIdentifiers(spec *Spec) []error {
 	return problems
 }
 
-// lintRemoteTimeouts rejects a remote_commands timeout that does not parse as a
-// Go duration — codegen would otherwise drop it silently, leaving the remote
+// lintPluginTimeouts rejects a plugins timeout that does not parse as a
+// Go duration — codegen would otherwise drop it silently, leaving the plugin
 // unbounded despite the declared limit.
-func lintRemoteTimeouts(spec *Spec) []error {
+func lintPluginTimeouts(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
-		for i, r := range c.RemoteCommands {
+		for i, r := range c.Plugins {
 			if r.Timeout == "" {
 				continue
 			}
 			if d, err := time.ParseDuration(r.Timeout); err != nil || d <= 0 {
 				problems = append(problems, &problem{
-					kind: "spec", ptr: fmt.Sprintf("%s/remote_commands/%d", ptr, i), loc: "command " + path,
-					msg: fmt.Sprintf("remote_commands %q: `timeout` %q is not a positive Go duration (e.g. \"10s\", \"1m30s\")", r.Name, r.Timeout),
+					kind: "spec", ptr: fmt.Sprintf("%s/plugins/%d", ptr, i), loc: "command " + path,
+					msg: fmt.Sprintf("plugins %q: `timeout` %q is not a positive Go duration (e.g. \"10s\", \"1m30s\")", r.Name, r.Timeout),
 				})
 			}
 		}
@@ -1361,9 +1361,9 @@ func lintImportConsistency(spec *Spec) []error {
 	return problems
 }
 
-// lintLocalTimeout rejects a `timeout` on a command. A timeout is a remote-only, host-side
-// bound set per remote_commands entry; on a local command it is never honored. The
-// remote_commands timeout is a separate field and is left untouched.
+// lintLocalTimeout rejects a `timeout` on a command. A timeout is a plugin-only, host-side
+// bound set per plugins entry; on a local command it is never honored. The
+// plugins timeout is a separate field and is left untouched.
 func lintLocalTimeout(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -1371,7 +1371,7 @@ func lintLocalTimeout(spec *Spec) []error {
 			problems = append(problems, &problem{
 				kind: "spec", ptr: ptr + "/timeout",
 				loc: "command " + path,
-				msg: "sets `timeout`, which is not supported on a local command; it is a remote-only, host-side bound with no effect here; set it on a `remote_commands` entry's `timeout` instead",
+				msg: "sets `timeout`, which is not supported on a local command; it is a plugin-only, host-side bound with no effect here; set it on a `plugins` entry's `timeout` instead",
 			})
 		}
 	})

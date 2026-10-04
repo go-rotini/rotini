@@ -27,7 +27,7 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 	// conf already declare what the body needs.
 	base := templateHandlerData{
 		Package:       "cli",
-		HandlersType:  "appSubHandlers",
+		HandlerType:   "appSubHandler",
 		InputsType:    "AppSubInputs",
 		Invocation:    "app sub",
 		Prefix:        "AppSub",
@@ -72,7 +72,7 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 		ChildImports:  []templateHandlersImport{{Alias: "childcli", Path: "example.com/child/cli"}},
 		Methods:       []string{"App", "AppGenerate"},
 		RollupMethods: []templateHandlersMethod{
-			{Method: "App", HandlerType: "appHandlers"},
+			{Method: "App", HandlerType: "appHandler"},
 			{Method: "AppChild", Composed: true, DelegateAlias: "childcli", DelegateMethod: "Child"},
 		},
 		Definition: "var definition = rotini.Definition{}",
@@ -97,8 +97,8 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 			},
 			{Prefix: "AppGenerate"},
 		},
-		OutputTypes: "type AppOutput struct{}",
-		BindMeta:    "var bindMeta = map[string]string{}",
+		OutputTypes:   "type AppOutput struct{}",
+		InputSettings: "var bindMeta = map[string]string{}",
 		Features: []templateFeature{
 			{
 				Resolver: "Help", Noun: "help",
@@ -120,7 +120,7 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 	}
 	// The rollup is folded into the cli file: the handlers struct + its per-command
 	// wiring (own commands return a local stub; composed commands delegate).
-	if !strings.Contains(string(out), "return &appHandlers{}") {
+	if !strings.Contains(string(out), "return &appHandler{}") {
 		t.Error("rollup wiring for an own command is missing from the generated cli file")
 	}
 	if !strings.Contains(string(out), "childcli.Handlers().Child()") {

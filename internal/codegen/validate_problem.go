@@ -12,7 +12,7 @@ import (
 
 // severity classifies a validation problem. The zero value is an error (fails
 // validation); a warning is surfaced separately but does NOT fail. The validate
-// command routes the two to the funnel (as its errors and warnings respectively).
+// command routes the two to the reporter (as its errors and warnings respectively).
 type severity int
 
 const (

@@ -43,7 +43,7 @@ func TestDocLinksResolve(t *testing.T) {
 		}
 		// Exported fields are linkable, and so are INTERFACE methods — which go/doc does not
 		// list under the type, because they have no concrete receiver. Missing them would
-		// flag [Handlers.PreRun] as dangling when godoc resolves it perfectly well.
+		// flag [Handler.PreRun] as dangling when godoc resolves it perfectly well.
 		if ts, ok := ty.Decl.Specs[0].(*ast.TypeSpec); ok {
 			switch t := ts.Type.(type) {
 			case *ast.StructType:

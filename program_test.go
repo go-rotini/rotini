@@ -30,7 +30,7 @@ func TestProgram_WithExit_capturesCode(t *testing.T) {
 }
 
 // TestProgram_WithStderr_capturesDiagnostics proves WithStderr redirects the runtime's
-// own diagnostics: a panicking hook is funneled to the default funnel, which writes to
+// own diagnostics: a panicking hook is reported to the default reporter, which writes to
 // the program's stderr and exits 1.
 func TestProgram_WithStderr_capturesDiagnostics(t *testing.T) {
 	var code int
@@ -100,26 +100,26 @@ func TestProgram_Run_isReentrant(t *testing.T) {
 	}
 }
 
-// TestProgram_Run_seedsBoundServicesPerRun pins the registry half of the re-entrancy
-// contract: services bound with [Program.Bind] reach EVERY run, while a binding a handler
+// TestProgram_Run_seedsBoundServicesPerRun pins the registry half of the re-entrancy contract:
+// dependencies registered with [Program.WithDependency] reach EVERY run, while one a handler
 // makes DURING a run is local to that run.
 func TestProgram_Run_seedsBoundServicesPerRun(t *testing.T) {
 	var seeded, leaked []bool
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		_, ok := rtx.Get[string]("seeded")
+		_, ok := rtx.GetDependency(NewDependency[string]("seeded"))
 		seeded = append(seeded, ok)
-		_, ok = rtx.Get[string]("per-run")
+		_, ok = rtx.GetDependency(NewDependency[string]("per-run"))
 		leaked = append(leaked, ok)
-		rtx.Bind("per-run", "bound during this run")
+		rtx.SetDependency(NewDependency[any]("per-run"), any("bound during this run"))
 	}}
 	p, _, _ := newTestProgram(h, nil)
-	p.Bind("seeded", "bound before any run")
+	p.WithDependency(NewDependency[any]("seeded"), any("bound before any run"))
 
 	p.Run([]string{"run", "x"})
 	p.Run([]string{"run", "x"})
 
 	if want := []bool{true, true}; !slices.Equal(seeded, want) {
-		t.Errorf("Program.Bind visibility = %v, want %v — a seeded service reaches every run", seeded, want)
+		t.Errorf("Program.WithDependency visibility = %v, want %v — a seeded dependency reaches every run", seeded, want)
 	}
 	if want := []bool{false, false}; !slices.Equal(leaked, want) {
 		t.Errorf("in-run Bind visibility = %v, want %v — a run's own binding must not leak forward", leaked, want)
@@ -179,9 +179,9 @@ func TestProgram_RunContext_nilContext(t *testing.T) {
 	}
 }
 
-// ── outcome funnel ──────────────────────────────────────────.
+// ── outcome reporter ──────────────────────────────────────────.
 
-// TestRun_recordSuccess_defaultToStdout: a recorded success reaches the default funnel,
+// TestRun_recordSuccess_defaultToStdout: a recorded success reaches the default reporter,
 // which prints it to stdout, and the run stays exit 0.
 func TestRun_recordSuccess_defaultToStdout(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -197,7 +197,7 @@ func TestRun_recordSuccess_defaultToStdout(t *testing.T) {
 	}
 }
 
-// TestRun_recordInfo_defaultToStdout: a recorded info reaches the default funnel, prints
+// TestRun_recordInfo_defaultToStdout: a recorded info reaches the default reporter, prints
 // to stdout (like success, by intent only), and never changes the exit code.
 func TestRun_recordInfo_defaultToStdout(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -213,7 +213,7 @@ func TestRun_recordInfo_defaultToStdout(t *testing.T) {
 	}
 }
 
-// TestRun_recordWarning_defaultNonFatal: a recorded warning reaches the default funnel
+// TestRun_recordWarning_defaultNonFatal: a recorded warning reaches the default reporter
 // (stderr) and does NOT fail the run.
 func TestRun_recordWarning_defaultNonFatal(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -229,10 +229,10 @@ func TestRun_recordWarning_defaultNonFatal(t *testing.T) {
 	}
 }
 
-// TestRun_funnelReceivesAllChannels: a run that records an info, a success, a warning,
-// AND an error hands ALL of them to the single funnel in ONE call (cross-channel
-// visibility), each slice in recording order. The funnel owns the exit code.
-func TestRun_funnelReceivesAllChannels(t *testing.T) {
+// TestRun_reporterReceivesAllChannels: a run that records an info, a success, a warning,
+// AND an error hands ALL of them to the single reporter in ONE call (cross-channel
+// visibility), each slice in recording order. The reporter owns the exit code.
+func TestRun_reporterReceivesAllChannels(t *testing.T) {
 	var gotInfos, gotSuccesses []string
 	var gotWarnings, gotErrors []error
 	var gotPanics []*PanicError
@@ -243,7 +243,7 @@ func TestRun_funnelReceivesAllChannels(t *testing.T) {
 		rtx.RecordError(UsageError(errors.New("e")))
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+	p.WithReporter(func(_ context.Context, rtx *Context, out Outcome) {
 		infos := out.Infos
 		successes := out.Successes
 		warnings := out.Warnings
@@ -261,74 +261,74 @@ func TestRun_funnelReceivesAllChannels(t *testing.T) {
 		t.Errorf("warnings=%v errors=%v panics=%v, want 1 warning, 1 error, 0 panics", gotWarnings, gotErrors, gotPanics)
 	}
 	if code != 1 {
-		t.Errorf("code = %d, want 1 (the funnel chose it)", code)
+		t.Errorf("code = %d, want 1 (the reporter chose it)", code)
 	}
 }
 
-// TestRun_exitCode_funnelIsFinalAuthority pins the exit-code model: the DEFAULT funnel
-// floors a recorded error to 1, but a CUSTOM funnel OWNS the code — one that ignores the
+// TestRun_exitCode_reporterIsFinalAuthority pins the exit-code model: the DEFAULT reporter
+// floors a recorded error to 1, but a CUSTOM reporter OWNS the code — one that ignores the
 // error exits 0, one that calls rtx.Exit(7) exits 7, and rtx.Exit even OVERRIDES a code a
 // handler set during the lifecycle.
-func TestRun_exitCode_funnelIsFinalAuthority(t *testing.T) {
+func TestRun_exitCode_reporterIsFinalAuthority(t *testing.T) {
 	rec := func(rtx *Context) { rtx.RecordError(errors.New("boom")) }
 
-	// Default funnel → floors to 1.
+	// Default reporter → floors to 1.
 	pd, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
 	if code, _ := pd.Run(pd.args); code != 1 {
-		t.Errorf("default funnel: code = %d, want 1 (floors)", code)
+		t.Errorf("default reporter: code = %d, want 1 (floors)", code)
 	}
 
-	// Custom funnel that sets no code → exits 0 (no floor; the funnel owns the code).
+	// Custom reporter that sets no code → exits 0 (no floor; the reporter owns the code).
 	pc, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
-	pc.WithFunnel(func(context.Context, *Context, Outcome) {})
+	pc.WithReporter(func(context.Context, *Context, Outcome) {})
 	if code, _ := pc.Run(pc.args); code != 0 {
-		t.Errorf("custom funnel without an exit: code = %d, want 0 (funnel owns the code)", code)
+		t.Errorf("custom reporter without an exit: code = %d, want 0 (reporter owns the code)", code)
 	}
 
-	// Custom funnel that calls rtx.Exit(7) → that code wins.
+	// Custom reporter that calls rtx.Exit(7) → that code wins.
 	ps, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: rec}, []string{"run"})
-	ps.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(7) })
+	ps.WithReporter(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(7) })
 	if code, _ := ps.Run(ps.args); code != 7 {
-		t.Errorf("custom funnel rtx.Exit(7): code = %d, want 7", code)
+		t.Errorf("custom reporter rtx.Exit(7): code = %d, want 7", code)
 	}
 
-	// A handler set 2 during the lifecycle; the funnel OVERRIDES it to 5.
+	// A handler set 2 during the lifecycle; the reporter OVERRIDES it to 5.
 	po, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(errors.New("boom"))
 		rtx.HaltWithCode(2)
 	}}, []string{"run"})
-	po.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(5) })
+	po.WithReporter(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(5) })
 	if code, _ := po.Run(po.args); code != 5 {
-		t.Errorf("funnel override: code = %d, want 5 (the funnel is the final authority)", code)
+		t.Errorf("reporter override: code = %d, want 5 (the reporter is the final authority)", code)
 	}
 }
 
-// TestRun_faultExit_defaultFloorsButFunnelCanMask: the DEFAULT funnel floors a recovered
-// panic to non-zero, but — per the single-funnel model — a CUSTOM funnel is the final
+// TestRun_faultExit_defaultFloorsButReporterCanMask: the DEFAULT reporter floors a recovered
+// panic to non-zero, but — per the single-reporter model — a CUSTOM reporter is the final
 // authority and MAY mask it to 0 (it owns the exit entirely).
-func TestRun_faultExit_defaultFloorsButFunnelCanMask(t *testing.T) {
+func TestRun_faultExit_defaultFloorsButReporterCanMask(t *testing.T) {
 	panicRun := func(_ *Context) { panic("kaboom") }
 
-	// Default funnel floors a fault to non-zero.
+	// Default reporter floors a fault to non-zero.
 	pd, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: panicRun}, []string{"run"})
 	if code, _ := pd.Run(pd.args); code == 0 {
-		t.Error("default funnel let a panic exit 0; want non-zero (the floor)")
+		t.Error("default reporter let a panic exit 0; want non-zero (the floor)")
 	}
 
-	// A custom funnel that sets no code masks the fault to 0 (it owns the exit).
+	// A custom reporter that sets no code masks the fault to 0 (it owns the exit).
 	pc, _, _ := newTestProgram(&testHandlers{log: new([]string), onRun: panicRun}, []string{"run"})
 	var sawPanic bool
-	pc.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+	pc.WithReporter(func(_ context.Context, _ *Context, out Outcome) {
 		panics := out.Panics
 		sawPanic = len(panics) == 1
 	})
 	if code, _ := pc.Run(pc.args); code != 0 || !sawPanic {
-		t.Errorf("custom funnel: (code, sawPanic) = (%d, %v), want (0, true) — the funnel owns the exit", code, sawPanic)
+		t.Errorf("custom reporter: (code, sawPanic) = (%d, %v), want (0, true) — the reporter owns the exit", code, sawPanic)
 	}
 }
 
 // TestRun_errorAndPanic_arriveTogether: a run that records an error AND then panics hands
-// BOTH to the one funnel — a non-empty errors slice and a non-empty panics slice — and the
+// BOTH to the one reporter — a non-empty errors slice and a non-empty panics slice — and the
 // default floors the exit to 1.
 func TestRun_errorAndPanic_arriveTogether(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
@@ -336,7 +336,7 @@ func TestRun_errorAndPanic_arriveTogether(t *testing.T) {
 		panic("kaboom")
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	code, err := p.Run(p.args) // default funnel
+	code, err := p.Run(p.args) // default reporter
 	if code != 1 {
 		t.Errorf("code = %d, want 1 (any error or fault floors)", code)
 	}
@@ -348,14 +348,14 @@ func TestRun_errorAndPanic_arriveTogether(t *testing.T) {
 }
 
 // TestRun_wiringFaultArrivesAsPanic: a Definition↔handlers mismatch is a rotini-detected
-// fault — it arrives in the funnel's panics slice (carrying the *WiringError), NOT the
+// fault — it arrives in the reporter's panics slice (carrying the *WiringError), NOT the
 // errors slice, and the default exits 1.
 func TestRun_wiringFaultArrivesAsPanic(t *testing.T) {
 	var gotErrors []error
 	var seen *PanicError
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, nil)
 	p.def = Definition{Name: "app", Handler: "Nope"} // no such handler method
-	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+	p.WithReporter(func(_ context.Context, rtx *Context, out Outcome) {
 		errs := out.Errors
 		panics := out.Panics
 		gotErrors = errs
@@ -379,14 +379,14 @@ func TestRun_wiringFaultArrivesAsPanic(t *testing.T) {
 }
 
 // TestRun_resolverFaultArrivesAsPanic: a custom resolver's error is a resolution-phase
-// fault → the funnel's panics slice, not its errors slice.
+// fault → the reporter's panics slice, not its errors slice.
 func TestRun_resolverFaultArrivesAsPanic(t *testing.T) {
 	var nErrors, nPanics int
 	p, _, _ := newTestProgram(&testHandlers{log: new([]string)}, []string{"run"})
 	p.WithResolver(func(Definition, []string) (Resolution, error) {
 		return Resolution{}, errors.New("routing table on fire")
 	})
-	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+	p.WithReporter(func(_ context.Context, _ *Context, out Outcome) {
 		errs := out.Errors
 		panics := out.Panics
 		nErrors, nPanics = len(errs), len(panics)
@@ -397,17 +397,17 @@ func TestRun_resolverFaultArrivesAsPanic(t *testing.T) {
 	}
 }
 
-// TestRun_silentRun_doesNotInvokeFunnel: a run that records nothing and never faults does
-// not invoke the funnel and exits 0.
-func TestRun_silentRun_doesNotInvokeFunnel(t *testing.T) {
+// TestRun_silentRun_doesNotInvokeReporter: a run that records nothing and never faults does
+// not invoke the reporter and exits 0.
+func TestRun_silentRun_doesNotInvokeReporter(t *testing.T) {
 	fired := false
 	h := &testHandlers{log: new([]string)} // onRun nil → a clean run
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(context.Context, *Context, Outcome) { fired = true })
+	p.WithReporter(func(context.Context, *Context, Outcome) { fired = true })
 
 	code, err := p.Run(p.args)
 	if fired {
-		t.Error("a silent successful run invoked the funnel; want no call")
+		t.Error("a silent successful run invoked the reporter; want no call")
 	}
 	if code != 0 || err != nil {
 		t.Errorf("run() = (%d, %v), want (0, nil)", code, err)
@@ -431,7 +431,7 @@ func (h ctxRec) Run(ctx context.Context, _ *Context) {
 
 type ctxAgg struct{ h ctxRec }
 
-func (a ctxAgg) Main() Handlers { return a.h }
+func (a ctxAgg) Main() Handler { return a.h }
 
 func newCtxProgram(h ctxRec) *Program {
 	p := NewProgram(Definition{Name: "app", Handler: "Main"}, ctxAgg{h})
@@ -487,7 +487,7 @@ func (h lifeRec) CascadingPostRun(context.Context, *Context) {
 
 type lifeAgg struct{ h lifeRec }
 
-func (a lifeAgg) Main() Handlers { return a.h }
+func (a lifeAgg) Main() Handler { return a.h }
 
 func newLifeProgram(h lifeRec) *Program {
 	p := NewProgram(Definition{Name: "app", Handler: "Main"}, lifeAgg{h})
@@ -510,18 +510,18 @@ func TestProgram_WithContext_noCancelRunsFullLifecycle(t *testing.T) {
 }
 
 // Canceling a caller-owned context mid-lifecycle halts forward progress (no
-// further setup/PreRun/Run starts) but still runs teardown, and the ExitCode
+// further setup/PreRun/Run starts) but still runs teardown, and the ExitCause
 // cause sets the process exit code.
 func TestProgram_WithContext_cancelHaltsForwardRunsTeardown(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	var order []string
-	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { cancel(ExitCode(3)) }}
+	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { cancel(ExitCause(3)) }}
 	code, err := newLifeProgram(h).WithContext(ctx).Run(nil)
 	if err != nil {
 		t.Fatalf("run err = %v, want nil (cancel is a clean stop, not an error)", err)
 	}
 	if code != 3 {
-		t.Errorf("exit code = %d, want 3 (from the ExitCode cancellation cause)", code)
+		t.Errorf("exit code = %d, want 3 (from the ExitCause cancellation cause)", code)
 	}
 	want := []string{"CascadingPreRun", "CascadingPostRun"}
 	if !slices.Equal(order, want) {
@@ -529,7 +529,7 @@ func TestProgram_WithContext_cancelHaltsForwardRunsTeardown(t *testing.T) {
 	}
 }
 
-// Canceling without an ExitCode cause halts cleanly and exits 0 (the code falls
+// Canceling without an ExitCause cause halts cleanly and exits 0 (the code falls
 // through to the normal resolution).
 func TestProgram_WithContext_cancelWithoutCodeExitsZero(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -537,7 +537,7 @@ func TestProgram_WithContext_cancelWithoutCodeExitsZero(t *testing.T) {
 	h := lifeRec{order: &order, onCascadingPreRun: func(context.Context, *Context) { cancel() }}
 	code, _ := newLifeProgram(h).WithContext(ctx).Run(nil)
 	if code != 0 {
-		t.Errorf("exit code = %d, want 0 (plain cancel, no ExitCode cause)", code)
+		t.Errorf("exit code = %d, want 0 (plain cancel, no ExitCause cause)", code)
 	}
 	want := []string{"CascadingPreRun", "CascadingPostRun"}
 	if !slices.Equal(order, want) {
@@ -545,13 +545,13 @@ func TestProgram_WithContext_cancelWithoutCodeExitsZero(t *testing.T) {
 	}
 }
 
-// ExitCode's cause is matchable via context.Cause for callers/loggers.
+// ExitCause's cause is matchable via context.Cause for callers/loggers.
 func TestExitCode_isCancelCause(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
-	cancel(ExitCode(7))
+	cancel(ExitCause(7))
 	var ec exitCodeError
 	if !errors.As(context.Cause(ctx), &ec) || ec.code != 7 {
-		t.Errorf("context.Cause = %v, want an ExitCode(7) cause", context.Cause(ctx))
+		t.Errorf("context.Cause = %v, want an ExitCause(7) cause", context.Cause(ctx))
 	}
 }
 
@@ -562,9 +562,9 @@ func TestProgram_handlerCancelsViaBoundCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
-		rtx.MustGet[context.CancelFunc]("cancel")()
+		rtx.MustGetDependency(NewDependency[context.CancelFunc]("cancel"))()
 	}}
-	code, err := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).Run(nil)
+	code, err := newLifeProgram(h).WithContext(ctx).WithDependency(NewDependency[any]("cancel"), any(cancel)).Run(nil)
 	if err != nil {
 		t.Fatalf("run err = %v, want nil", err)
 	}
@@ -576,16 +576,16 @@ func TestProgram_handlerCancelsViaBoundCancel(t *testing.T) {
 	}
 }
 
-// Binding a WithCancelCause cancel lets a handler choose the exit code with ExitCode.
+// Binding a WithCancelCause cancel lets a handler choose the exit code with ExitCause.
 func TestProgram_handlerCancelsWithExitCode(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	var order []string
 	h := lifeRec{order: &order, onCascadingPreRun: func(_ context.Context, rtx *Context) {
-		rtx.MustGet[context.CancelCauseFunc]("cancel")(ExitCode(3))
+		rtx.MustGetDependency(NewDependency[context.CancelCauseFunc]("cancel"))(ExitCause(3))
 	}}
-	code, _ := newLifeProgram(h).WithContext(ctx).Bind("cancel", cancel).Run(nil)
+	code, _ := newLifeProgram(h).WithContext(ctx).WithDependency(NewDependency[any]("cancel"), any(cancel)).Run(nil)
 	if code != 3 {
-		t.Errorf("exit code = %d, want 3 (bound cancel with ExitCode(3))", code)
+		t.Errorf("exit code = %d, want 3 (bound cancel with ExitCause(3))", code)
 	}
 	if want := []string{"CascadingPreRun", "CascadingPostRun"}; !slices.Equal(order, want) {
 		t.Errorf("hook order = %v, want %v", order, want)
@@ -659,11 +659,11 @@ func TestProgram_withPanicRecoverFalse_forwardFalse_panicsNow(t *testing.T) {
 
 func TestRun_lifecycleOrderAndContext(t *testing.T) {
 	var log []string
-	var gotChain []ResolvedCommand
+	var gotChain []Command
 	var gotArgs []string
 	args := []string{"--verbose", "run", "alice", "x", "y", "--count", "3"}
 	h := &testHandlers{log: &log, onRun: func(rtx *Context) {
-		gotChain, gotArgs = rtx.Chain(), rtx.Argv
+		gotChain, gotArgs = rtx.CommandChain(), rtx.Argv
 	}}
 
 	p, _, errb := newTestProgram(h, args)
@@ -722,13 +722,13 @@ func TestRun_exitCodePropagates(t *testing.T) {
 	}
 }
 
-func TestRun_mustGetRoutesToFunnelPanics(t *testing.T) {
+func TestRun_mustGetRoutesToReporterPanics(t *testing.T) {
 	var seen *PanicError
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		panic(&ServiceError{Key: "no-such-service"})
+		panic(&DependencyError{Name: "no-such-service"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+	p.WithReporter(func(_ context.Context, rtx *Context, out Outcome) {
 		panics := out.Panics
 		seen = panics[0]
 		rtx.Exit(7)
@@ -736,47 +736,47 @@ func TestRun_mustGetRoutesToFunnelPanics(t *testing.T) {
 
 	code, err := p.Run(p.args)
 	if code != 7 {
-		t.Fatalf("run() = %d, want 7 (the funnel's exit code)", code)
+		t.Fatalf("run() = %d, want 7 (the reporter's exit code)", code)
 	}
 
-	if !errors.Is(err, ErrServiceNotFound) {
-		t.Errorf("run returned err = %v, want it to wrap ErrServiceNotFound", err)
+	if !errors.Is(err, ErrDependencyNotFound) {
+		t.Errorf("run returned err = %v, want it to wrap ErrDependencyNotFound", err)
 	}
 
-	if !errors.Is(seen, ErrServiceNotFound) {
-		t.Errorf("funnel got %v, want it to wrap ErrServiceNotFound", seen)
+	if !errors.Is(seen, ErrDependencyNotFound) {
+		t.Errorf("reporter got %v, want it to wrap ErrDependencyNotFound", seen)
 	}
-	var se *ServiceError
-	if !errors.As(seen, &se) || se.Key != "no-such-service" {
-		t.Errorf("funnel error did not carry the key: %v", seen)
+	var se *DependencyError
+	if !errors.As(seen, &se) || se.Name != "no-such-service" {
+		t.Errorf("reporter error did not carry the key: %v", seen)
 	}
 }
 
-func TestRun_defaultFunnelFaultFloorsTo1(t *testing.T) {
+func TestRun_defaultReporterFaultFloorsTo1(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
-		panic(&ServiceError{Key: "missing"})
+		panic(&DependencyError{Name: "missing"})
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
 	if code, _ := p.Run(p.args); code != 1 {
-		t.Errorf("run() = %d, want 1 (the default funnel floors a fault)", code)
+		t.Errorf("run() = %d, want 1 (the default reporter floors a fault)", code)
 	}
 }
 
-func TestRun_defaultFunnelPrintsPanicAndFails(t *testing.T) {
+func TestRun_defaultReporterPrintsPanicAndFails(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		panic("boom")
 	}}
 	p, _, errb := newTestProgram(h, []string{"run"})
 	code, err := p.Run(p.args)
 	if code != 1 {
-		t.Fatalf("run() = %d, want %d (default funnel)", code, 1)
+		t.Fatalf("run() = %d, want %d (default reporter)", code, 1)
 	}
 
 	if err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("run returned err = %v, want it to carry %q", err, "boom")
 	}
 	if !strings.Contains(errb.String(), "boom") {
-		t.Errorf("the default funnel should print the panic, stderr: %s", errb)
+		t.Errorf("the default reporter should print the panic, stderr: %s", errb)
 	}
 }
 
@@ -846,15 +846,15 @@ func TestRun_hardExitInTeardownSkipsRemainingTeardown(t *testing.T) {
 	}
 }
 
-// A hard Exit skips remaining teardown but does NOT bypass the funnel: a panic
-// recovered before the Exit is still handed to the funnel after the (skipped)
+// A hard Exit skips remaining teardown but does NOT bypass the reporter: a panic
+// recovered before the Exit is still handed to the reporter after the (skipped)
 // teardown. Run panics, then the leaf's PostRun hard-Exits — the trailing
-// CascadingPostRuns are skipped, yet the funnel still fires with the panic.
-func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
+// CascadingPostRuns are skipped, yet the reporter still fires with the panic.
+func TestRun_hardExitStillRoutesPendingPanicToReporter(t *testing.T) {
 	var log []string
 	var seen *PanicError
 	p, _, _ := newTestProgram(&panicThenHardExit{log: &log}, []string{"run"})
-	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+	p.WithReporter(func(_ context.Context, _ *Context, out Outcome) {
 		panics := out.Panics
 		seen = panics[0]
 	})
@@ -869,7 +869,7 @@ func TestRun_hardExitStillRoutesPendingPanicToFunnel(t *testing.T) {
 		t.Errorf("hook order:\n got=%v\nwant=%v", log, want)
 	}
 	if seen == nil || seen.Error() != "boom" {
-		t.Errorf("the funnel saw %v, want the recovered panic %q", seen, "boom")
+		t.Errorf("the reporter saw %v, want the recovered panic %q", seen, "boom")
 	}
 	if !errorContains(err, "boom") {
 		t.Errorf("run returned err = %v, want it to carry %q", err, "boom")
@@ -918,15 +918,15 @@ func TestRun_firstNonZeroExitWins(t *testing.T) {
 	}
 }
 
-// A panic runs all begun teardown first, then funnels last.
-func TestRun_panicRunsTeardownThenFunnelLast(t *testing.T) {
+// A panic runs all begun teardown first, then reporters last.
+func TestRun_panicRunsTeardownThenReporterLast(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "Run", do: func(*Context) { panic("boom") }},
 	}}, []string{"run"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+	p.WithReporter(func(_ context.Context, rtx *Context, out Outcome) {
 		panics := out.Panics
-		log = append(log, "funnel:"+panics[0].Error())
+		log = append(log, "reporter:"+panics[0].Error())
 		rtx.Exit(5)
 	})
 	code, _ := p.Run(p.args)
@@ -934,25 +934,25 @@ func TestRun_panicRunsTeardownThenFunnelLast(t *testing.T) {
 		"app.CascadingPreRun", "run.CascadingPreRun",
 		"run.PreRun", "run.Run",
 		"run.PostRun", "run.CascadingPostRun", "app.CascadingPostRun",
-		"funnel:boom",
+		"reporter:boom",
 	}
 	if !reflect.DeepEqual(log, want) {
-		t.Errorf("teardown-then-funnel order:\n got=%v\nwant=%v", log, want)
+		t.Errorf("teardown-then-reporter order:\n got=%v\nwant=%v", log, want)
 	}
 	if code != 5 {
-		t.Errorf("code = %d, want 5 (the funnel's explicit exit)", code)
+		t.Errorf("code = %d, want 5 (the reporter's explicit exit)", code)
 	}
 }
 
 // A panic inside a teardown hook is recovered: the remaining teardown still runs
-// and the funnel fires exactly once.
-func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
+// and the reporter fires exactly once.
+func TestRun_teardownPanicContinuesAndReportersOnce(t *testing.T) {
 	var log []string
 	p, _, _ := newTestProgram(&actProgram{log: &log, actions: map[string]act{
 		"run": {at: "PostRun", do: func(*Context) { panic("teardown-boom") }},
 	}}, []string{"run"})
 	calls := 0
-	p.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) {
+	p.WithReporter(func(_ context.Context, rtx *Context, _ Outcome) {
 		calls++
 		rtx.Exit(1)
 	})
@@ -961,7 +961,7 @@ func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 		t.Errorf("remaining teardown did not run after a teardown panic: %v", log)
 	}
 	if calls != 1 {
-		t.Errorf("funnel called %d times, want 1", calls)
+		t.Errorf("reporter called %d times, want 1", calls)
 	}
 	if code != 1 {
 		t.Errorf("code = %d, want 1", code)
@@ -971,8 +971,8 @@ func TestRun_teardownPanicContinuesAndFunnelsOnce(t *testing.T) {
 // errOutcomeTest is a stand-in error for the Outcome predicate table.
 var errOutcomeTest = errors.New("outcome test")
 
-// TestOutcome_EmptyAndFailed pins the two predicates the runtime and the default funnel key
-// on, so a custom funnel can rely on them meaning exactly what the engine means.
+// TestOutcome_EmptyAndFailed pins the two predicates the runtime and the default reporter key
+// on, so a custom reporter can rely on them meaning exactly what the engine means.
 func TestOutcome_EmptyAndFailed(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -999,10 +999,10 @@ func TestOutcome_EmptyAndFailed(t *testing.T) {
 	}
 }
 
-// TestFunnel_receivesEveryChannelByName is the reason Outcome is a struct: a funnel reads
+// TestReporter_receivesEveryChannelByName is the reason Outcome is a struct: a reporter reads
 // each channel by name, so the two []string channels and the two []error channels cannot be
 // transposed by a call site that gets the order wrong.
-func TestFunnel_receivesEveryChannelByName(t *testing.T) {
+func TestReporter_receivesEveryChannelByName(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordInfo("an info")
 		rtx.RecordSuccess("a success")
@@ -1012,7 +1012,7 @@ func TestFunnel_receivesEveryChannelByName(t *testing.T) {
 	p, _, _ := newTestProgram(h, []string{"run"})
 
 	var got Outcome
-	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) { got = out })
+	p.WithReporter(func(_ context.Context, _ *Context, out Outcome) { got = out })
 	if _, err := p.Run(p.args); err == nil {
 		t.Fatal("run recorded an error, want it returned")
 	}
@@ -1075,14 +1075,14 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 // to NewProgram is shared across runs, so handler state is the author's to protect.
 type concurrentHandlers struct{ seen chan string }
 
-func (c *concurrentHandlers) App() Handlers    { return &concurrentHandler{} }
-func (c *concurrentHandlers) AppRun() Handlers { return &concurrentHandler{seen: c.seen} }
+func (c *concurrentHandlers) App() Handler    { return &concurrentHandler{} }
+func (c *concurrentHandlers) AppRun() Handler { return &concurrentHandler{seen: c.seen} }
 
 type concurrentHandler struct {
-	DefaultCascadingPreRun
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoCascadingPreRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 	seen chan string
 }
 
@@ -1091,7 +1091,7 @@ func (h *concurrentHandler) Run(_ context.Context, rtx *Context) {
 		return
 	}
 	// A service bound once, before any run, must be visible to every run.
-	if v, ok := rtx.Get[string]("shared"); !ok || v != "bound once" {
+	if v, ok := rtx.GetDependency(NewDependency[string]("shared")); !ok || v != "bound once" {
 		h.seen <- "missing shared service"
 		return
 	}
@@ -1117,7 +1117,7 @@ func TestRun_concurrentDispatch(t *testing.T) {
 		WithStdout(&syncWriter{w: new(bytes.Buffer)}).
 		WithStderr(&syncWriter{w: new(bytes.Buffer)}).
 		WithExit(func(int) {})
-	p.Bind("shared", "bound once")
+	p.WithDependency(NewDependency[any]("shared"), any("bound once"))
 
 	// Signal trapping is per-run: every concurrent run would install its own handler and
 	// all of them would observe one signal. A concurrent driver therefore supplies its own
@@ -1161,7 +1161,7 @@ func TestRun_recordsDoNotLeakBetweenRuns(t *testing.T) {
 		rtx.RecordError(errors.New("one error per run"))
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) { got = append(got, out) })
+	p.WithReporter(func(_ context.Context, _ *Context, out Outcome) { got = append(got, out) })
 
 	for range 3 {
 		if _, err := p.Run(p.args); err == nil {
@@ -1170,7 +1170,7 @@ func TestRun_recordsDoNotLeakBetweenRuns(t *testing.T) {
 	}
 
 	if len(got) != 3 {
-		t.Fatalf("funnel fired %d times, want 3", len(got))
+		t.Fatalf("reporter fired %d times, want 3", len(got))
 	}
 	for i, out := range got {
 		if len(out.Errors) != 1 {
@@ -1213,7 +1213,7 @@ func TestExecute_returnsTheRunsFailure(t *testing.T) {
 		t.Errorf("errors.Is(recorded) failed on %v", err)
 	}
 	if code != 1 {
-		t.Errorf("exit code = %d, want the default funnel's error floor of 1", code)
+		t.Errorf("exit code = %d, want the default reporter's error floor of 1", code)
 	}
 }
 
@@ -1450,37 +1450,37 @@ func TestProgram_WithHelp_pageOfTheRunningCommand(t *testing.T) {
 	}
 }
 
-// The funnel is handed everything a run recorded, and Run reports the same thing to its caller.
+// The reporter is handed everything a run recorded, and Run reports the same thing to its caller.
 // These pin where one ends and the other begins.
 
 type ocProgram struct{ do func(*Context) }
 
-func (p ocProgram) App() Handlers    { return ocNoop{} }
-func (p ocProgram) AppRun() Handlers { return ocLeaf{do: p.do} }
+func (p ocProgram) App() Handler    { return ocNoop{} }
+func (p ocProgram) AppRun() Handler { return ocLeaf{do: p.do} }
 
-type ocNoop struct{ DefaultHooks }
+type ocNoop struct{ NoHooks }
 
 func (ocNoop) Run(context.Context, *Context) {}
 
 type ocLeaf struct {
-	DefaultHooks
+	NoHooks
 	do func(*Context)
 }
 
 func (h ocLeaf) Run(_ context.Context, rtx *Context) { h.do(rtx) }
 
-// TestOutcome_funnelCannotRewriteTheRunsError is the C2 rule applied to the last value that
+// TestOutcome_reporterCannotRewriteTheRunsError is the C2 rule applied to the last value that
 // crosses the boundary.
 //
 // Outcome is passed by value, but its slices are headers over shared arrays. Run's error used to
-// be built AFTER the funnel, so a funnel writing out.Errors[0] silently changed what Run
+// be built AFTER the reporter, so a reporter writing out.Errors[0] silently changed what Run
 // returned — while out.Errors = append(…) did not, because append reallocates. Propagating for
 // an index write and vanishing for an append is the worst shape an aliasing bug can take.
-func TestOutcome_funnelCannotRewriteTheRunsError(t *testing.T) {
+func TestOutcome_reporterCannotRewriteTheRunsError(t *testing.T) {
 	recorded := errors.New("the real failure")
 	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) { rtx.RecordError(recorded) }}).
 		WithStdout(io.Discard).WithStderr(io.Discard)
-	p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+	p.WithReporter(func(_ context.Context, _ *Context, out Outcome) {
 		out.Errors[0] = errors.New("REPLACED")
 		out.Errors = append(out.Errors, errors.New("APPENDED"))
 	})
@@ -1490,43 +1490,43 @@ func TestOutcome_funnelCannotRewriteTheRunsError(t *testing.T) {
 		t.Errorf("Run() error = %v, want the error the RUN recorded", err)
 	}
 	if err != nil && strings.Contains(err.Error(), "REPLACED") {
-		t.Error("a funnel rewrote the run's own account of itself")
+		t.Error("a reporter rewrote the run's own account of itself")
 	}
 }
 
-// TestOutcome_funnelStillOwnsTheExitCode is the other half: the funnel remains the final
+// TestOutcome_reporterStillOwnsTheExitCode is the other half: the reporter remains the final
 // authority on the code, which is what Context.Exit is for there.
-func TestOutcome_funnelStillOwnsTheExitCode(t *testing.T) {
+func TestOutcome_reporterStillOwnsTheExitCode(t *testing.T) {
 	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) { rtx.RecordError(errors.New("x")) }}).
 		WithStdout(io.Discard).WithStderr(io.Discard)
-	p.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(42) })
+	p.WithReporter(func(_ context.Context, rtx *Context, _ Outcome) { rtx.Exit(42) })
 
 	code, err := p.Run([]string{"run", "x"})
 	if code != 42 {
-		t.Errorf("exit = %d, want the funnel's 42", code)
+		t.Errorf("exit = %d, want the reporter's 42", code)
 	}
 	if err == nil {
-		t.Error("the run's error vanished when the funnel set a code")
+		t.Error("the run's error vanished when the reporter set a code")
 	}
 }
 
-// TestOutcome_customFunnelOwnsTheExitEntirely pins the documented consequence: a custom funnel
+// TestOutcome_customReporterOwnsTheExitEntirely pins the documented consequence: a custom reporter
 // that sets no code exits 0, even for a run that recorded errors. "Owns the exit entirely"
 // includes owning the failure to claim one.
-func TestOutcome_customFunnelOwnsTheExitEntirely(t *testing.T) {
+func TestOutcome_customReporterOwnsTheExitEntirely(t *testing.T) {
 	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) { rtx.RecordError(errors.New("x")) }}).
 		WithStdout(io.Discard).WithStderr(io.Discard)
-	p.WithFunnel(func(context.Context, *Context, Outcome) {})
+	p.WithReporter(func(context.Context, *Context, Outcome) {})
 
 	if code, _ := p.Run([]string{"run", "x"}); code != 0 {
-		t.Errorf("exit = %d, want 0 — a custom funnel that claims no code gets none", code)
+		t.Errorf("exit = %d, want 0 — a custom reporter that claims no code gets none", code)
 	}
 }
 
-// TestOutcome_defaultFunnelOrderAndStreams pins what the WithFunnel doc promises: the order, the
+// TestOutcome_defaultReporterOrderAndStreams pins what the WithReporter doc promises: the order, the
 // prefixes, and which stream each channel lands on. Separate streams hide the order, so this
 // points both at one writer.
-func TestOutcome_defaultFunnelOrderAndStreams(t *testing.T) {
+func TestOutcome_defaultReporterOrderAndStreams(t *testing.T) {
 	var both strings.Builder
 	p := NewProgram(testDef(), ocProgram{do: func(rtx *Context) {
 		rtx.RecordInfo("INFO")
@@ -1539,17 +1539,17 @@ func TestOutcome_defaultFunnelOrderAndStreams(t *testing.T) {
 	code, _ := p.Run([]string{"run", "x"})
 	want := "INFO\nWarning: WARNING\nError: ERROR\nFatal Error: PANIC\nSUCCESS\n"
 	if both.String() != want {
-		t.Errorf("default funnel emission:\n got %q\nwant %q", both.String(), want)
+		t.Errorf("default reporter emission:\n got %q\nwant %q", both.String(), want)
 	}
 	if code == 0 {
 		t.Error("a recorded error and a panic exited 0")
 	}
 }
 
-// TestOutcome_defaultFunnelFloorIsFlat pins the DELIBERATE design Category documents: rotini
-// labels, the funnel decides, and the default maps every failure to 1 rather than inventing a
+// TestOutcome_defaultReporterFloorIsFlat pins the DELIBERATE design Category documents: rotini
+// labels, the reporter decides, and the default maps every failure to 1 rather than inventing a
 // category→code table nobody asked for.
-func TestOutcome_defaultFunnelFloorIsFlat(t *testing.T) {
+func TestOutcome_defaultReporterFloorIsFlat(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		err  error

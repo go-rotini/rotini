@@ -17,7 +17,7 @@ import (
 // tests, only the scaffolding several test files need in common.
 
 // recHandler records each lifecycle hook it runs, and optionally inspects the
-// context during Run. It satisfies Handlers.
+// context during Run. It satisfies Handler.
 type recHandler struct {
 	name  string
 	log   *[]string
@@ -47,9 +47,9 @@ type testHandlers struct {
 	onRun func(rtx *Context)
 }
 
-func (t *testHandlers) App() Handlers { return &recHandler{name: "app", log: t.log} }
+func (t *testHandlers) App() Handler { return &recHandler{name: "app", log: t.log} }
 
-func (t *testHandlers) AppRun() Handlers {
+func (t *testHandlers) AppRun() Handler {
 	return &recHandler{name: "run", log: t.log, onRun: t.onRun}
 }
 
@@ -124,13 +124,13 @@ type actProgram struct {
 	actions map[string]act
 }
 
-func (p *actProgram) mk(name string) Handlers {
+func (p *actProgram) mk(name string) Handler {
 	return &actHandler{name: name, log: p.log, act: p.actions[name]}
 }
 
-func (p *actProgram) App() Handlers { return p.mk("app") }
+func (p *actProgram) App() Handler { return p.mk("app") }
 
-func (p *actProgram) AppRun() Handlers { return p.mk("run") }
+func (p *actProgram) AppRun() Handler { return p.mk("run") }
 
 func runActs(t *testing.T, args []string, actions map[string]act) (int, []string) {
 	t.Helper()
@@ -141,12 +141,12 @@ func runActs(t *testing.T, args []string, actions map[string]act) (int, []string
 }
 
 // panicThenHardExit is a leaf whose Run panics and whose PostRun then hard-Exits(3),
-// to exercise the panic-funnel-vs-hard-Exit interaction.
+// to exercise the panic-reporter-vs-hard-Exit interaction.
 type panicThenHardExit struct{ log *[]string }
 
-func (p *panicThenHardExit) App() Handlers { return &recHandler{name: "app", log: p.log} }
+func (p *panicThenHardExit) App() Handler { return &recHandler{name: "app", log: p.log} }
 
-func (p *panicThenHardExit) AppRun() Handlers {
+func (p *panicThenHardExit) AppRun() Handler {
 	return &panicThenHardExitLeaf{log: p.log}
 }
 
@@ -247,14 +247,14 @@ type fProg struct {
 	inRoot func(*Context)
 }
 
-func (h fProg) Root() Handlers { return fHooks{cascading: h.inRoot} }
-func (h fProg) Mid() Handlers  { return fHooks{cascading: h.inMid} }
-func (h fProg) Leaf() Handlers { return fHooks{} }
+func (h fProg) Root() Handler { return fHooks{cascading: h.inRoot} }
+func (h fProg) Mid() Handler  { return fHooks{cascading: h.inMid} }
+func (h fProg) Leaf() Handler { return fHooks{} }
 
 type fHooks struct {
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 	cascading func(*Context)
 }
 
@@ -276,9 +276,9 @@ func runF(t *testing.T, argv []string, inMid, inRoot func(*Context)) {
 
 type fLeafProbe struct{ capture func(*Context) }
 
-func (h fLeafProbe) Root() Handlers { return fHooks{} }
-func (h fLeafProbe) Mid() Handlers  { return fHooks{} }
-func (h fLeafProbe) Leaf() Handlers { return fLeafRun(h) }
+func (h fLeafProbe) Root() Handler { return fHooks{} }
+func (h fLeafProbe) Mid() Handler  { return fHooks{} }
+func (h fLeafProbe) Leaf() Handler { return fLeafRun(h) }
 
 type fLeafRun fLeafProbe
 
@@ -294,14 +294,14 @@ func (h fLeafRun) Run(_ context.Context, rtx *Context)      { h.capture(rtx) }
 
 type seamProgram struct{ ran *[]string }
 
-func (p seamProgram) App() Handlers    { return seamHandlers{ran: p.ran} }
-func (p seamProgram) AppRun() Handlers { return seamHandlers{ran: p.ran} }
+func (p seamProgram) App() Handler    { return seamHandlers{ran: p.ran} }
+func (p seamProgram) AppRun() Handler { return seamHandlers{ran: p.ran} }
 
 type seamHandlers struct {
-	DefaultHooks
+	NoHooks
 	ran *[]string
 }
 
 func (h seamHandlers) Run(_ context.Context, rtx *Context) {
-	*h.ran = append(*h.ran, rtx.Frame().Name)
+	*h.ran = append(*h.ran, rtx.Command().Name)
 }

@@ -51,24 +51,24 @@
 //     auto-delegates to the child's generated package.
 //  4. Module composition — a "$ref" to mod://<module>@<version>/<path>, resolved through the
 //     Go module cache and pinned by go.sum, delegating to that module's generated package.
-//  5. Remote command — a sibling binary <program>-<name>, dispatched at run time rather than
-//     composed at codegen; a dispatch failure is a [*RemoteError]. Discovery dispatches an
+//  5. Declared plugin — a sibling binary <program>-<name>, dispatched at run time rather than
+//     composed at codegen; a dispatch failure is a [*PluginError]. Discovery dispatches an
 //     unmatched token to <prefix><token> the same way.
 //
 // A composed child is generated on its own, so its typed inputs start at its own root: its
-// handlers cannot see a parent's cascading flags through them. Hand those across with a [Key]:
-// the child's package declares it, and the parent — which imports the child, never the other
-// way — collects its own inputs in CascadingPreRun and binds them. That is the one place the
-// parent's inputs type describes the running command, and collecting there judges only the
-// parent's own inputs, so a descendant's --help and required inputs are unaffected:
+// handlers cannot see a parent's cascading flags through them. Hand those across as a
+// [Dependency]: the child's package declares it, and the parent — which imports the child,
+// never the other way — collects its own inputs in CascadingPreRun and sets them. That is the
+// one place the parent's inputs type describes the running command, and collecting there judges
+// only the parent's own inputs, so a descendant's --help and required inputs are unaffected:
 //
 //	// package child
-//	var KubeconfigKey = rotini.NewKey[string]("child.kubeconfig")
+//	var Kubeconfig = rotini.NewDependency[string]("child.kubeconfig")
 //
 //	// package parent, in its CascadingPreRun
-//	in, err := rotini.Collect[ParentInputs](rtx)
+//	in, err := rtx.Inputs[ParentInputs]()
 //	if err != nil { rtx.HaltWith(err); return }
-//	child.KubeconfigKey.BindTo(rtx, in.Parent.Flags.Kubeconfig)
+//	rtx.SetDependency(child.Kubeconfig, in.Parent.Flags.Kubeconfig)
 //
 // `rotini validate` follows refs, validates each locally composed spec as its own document and
 // collision-checks the assembled tree, so a duplicate name, a cycle, a missing ref or a mistake
@@ -79,11 +79,11 @@
 // # The runtime
 //
 // The generated entrypoint builds a [Program] with [NewProgram] and calls [Program.Execute]:
-// resolve the invoked command from argv, run its [Handlers] hooks, and exit. Each invocation
-// carries a [Context] — the argv, the resolved chain, the program's streams, and the service
-// registry. Stopping is deliberate ([Context.HaltWith], [Context.Halt], [Context.HaltWithCode],
-// [Context.Exit]), and a recorded error, recovered panic or detected fault is reported once,
-// after teardown, through the outcome funnel.
+// resolve the invoked command from argv, run its [Handler] hooks, and exit. Each invocation
+// carries a [Context] — the argv, the resolved chain, the program's streams, and the program's
+// dependencies. Stopping is deliberate ([Context.HaltWith], [Context.Halt],
+// [Context.HaltWithCode], [Context.Exit]), and a recorded error, recovered panic or detected
+// fault is reported once, after teardown, through the outcome reporter.
 //
 // The runtime's only built-in behaviors, documented as the exceptions they are: a default
 // SIGINT/SIGTERM trap (see [Program.WithoutSignalHandling] and [Program.WithSignals]), the
@@ -122,13 +122,13 @@
 //
 // One rule, because the two directions differ and the difference has bitten:
 //
-//   - A slice rotini RETURNS is a copy. [Context.Chain] and every [Outcome] channel hand back
+//   - A slice rotini RETURNS is a copy. [Context.CommandChain] and every [Outcome] channel hand back
 //     their own, so sorting, reslicing or editing one cannot reach the run. Chain used to be
 //     the live slice with a doc asking callers to treat it as read-only, and a single
 //     assignment through it silently rewrote [Context.CommandPath] for the rest of the invocation.
 //
 //   - A slice you PASS IN is kept, not copied. [Program.WithArgs], [Program.WithSignals] and
-//     the slices inside a [BindMeta] are held by reference, so mutating yours afterwards
+//     the slices inside an [InputSettings] are held by reference, so mutating yours afterwards
 //     changes the program. Copying them defensively would cost every caller for a mistake
 //     almost nobody makes; saying so costs nothing.
 //
@@ -137,7 +137,7 @@
 //
 // # Outcomes
 //
-// A run reports through one funnel ([Program.WithFunnel]), handed all five recorded channels
+// A run reports through one reporter ([Program.WithReporter]), handed all five recorded channels
 // at once as an [Outcome], fired once after the lifecycle settles. A handler does not print —
 // it records, and the runtime reports:
 //
@@ -146,10 +146,10 @@
 //   - [Context.RecordWarning] — non-fatal: a deprecation, a fallback. Never changes the code.
 //   - [Context.RecordError] — the end-user's own failures: a bad input, a domain error.
 //   - Recovered panics and rotini-detected faults. There is no record call: the lifecycle
-//     captures them, and the funnel receives them as its panics slice.
+//     captures them, and the reporter receives them as its panics slice.
 //
 // Recording is non-halting: a handler records any number of times across any hook, then stops
-// independently, or simply returns. The funnel fires only when some channel is non-empty, so a
+// independently, or simply returns. The reporter fires only when some channel is non-empty, so a
 // run that records nothing is a silent success.
 //
 // There are four ways to stop, and which one to reach for is decided by whether something
@@ -157,9 +157,9 @@
 //
 //   - [Context.HaltWith] records an error and stops forward progress as one act, claiming no
 //     code. This is the commonest stop — a hook that has failed — and the one to prefer when a
-//     program centralizes its exit policy in a funnel.
+//     program centralizes its exit policy in a reporter.
 //   - [Context.Halt] stops forward progress with nothing to record and claims NO code, leaving
-//     the verdict to what the run recorded and to the funnel.
+//     the verdict to what the run recorded and to the reporter.
 //   - [Context.HaltWithCode] stops AND claims a code, for when the number is the point: a filter
 //     reporting "no match" as 1, a wrapper passing a child's status through.
 //   - [Context.Exit] stops immediately and skips pending teardown, for when remaining cleanup
@@ -169,90 +169,94 @@
 // stopping lets the next hook collect the same inputs, hit the same validation and record the
 // same error again.
 //
-// The default funnel prints info → warning → error → panic → success, infos and successes to
+// The default reporter prints info → warning → error → panic → success, infos and successes to
 // stdout and the rest to stderr, then applies the exit floor: a recorded error or fault exits
-// 1 unless a handler already set a deliberate code, which it never downgrades. The funnel is
+// 1 unless a handler already set a deliberate code, which it never downgrades. The reporter is
 // the final authority, so a custom one owns the exit entirely. rotini holds no named exit-code
 // constants.
 //
 // Every failure class is errors.Is-able against the [ErrUsage] or [ErrInternal] sentinel, so
-// [CategoryOf] classifies it — except a remote timeout, which is deliberately [CategoryNone] —
+// [CategoryOf] classifies it — except a plugin timeout, which is deliberately [CategoryNone] —
 // and errors.As-able to a typed value with structured fields.
 // rotini's own messages are non-leaky — no recon, decode or OS internals, and no secret values:
 //
 //   - [*ParseError] — the argv channel. [ParseError.Kind] branches it without matching the
 //     message; Token and Candidates are what a [Suggestor] turns into "did you mean".
-//   - [*BindError] — the env, config, stdin and flag-fallback channels, carrying the channel,
+//   - [*InputError] — the env, config, stdin and flag-fallback channels, carrying the channel,
 //     the input and a clean message, with the recon cause reachable via errors.As.
-//   - [*RemoteError] — a plugin dispatch, recorded as an error. A discovered plugin that is
+//   - [*PluginError] — a plugin dispatch, recorded as an error. A discovered plugin that is
 //     missing is a usage error (the user's typo); a declared one that is missing, or a plugin
 //     that cannot start, is internal (an install problem); a timeout is neither.
-//   - [*ServiceError] and [*PanicError] arrive as panics, and so does a [*WiringError] from the
-//     program's own wiring. The one [*WiringError] [Collect] returns — config inputs on a
-//     program built without a [BindMeta] — comes back as an error instead.
+//   - [*DependencyError] and [*PanicError] arrive as panics, and so does a [*WiringError] from the
+//     program's own wiring. The one [*WiringError] [Context.Inputs] returns — config inputs on a
+//     program built without an [InputSettings] — comes back as an error instead.
 //
 // rotini ships no opinions on top: no "did you mean", no help dump on error. A program that
-// wants either writes its own funnel.
+// wants either writes its own reporter.
 //
 // # Sharing dependencies between handlers
 //
-// The store, client or logger every handler needs rides the registry, reached by a typed [Key]
-// so the name and the type cannot drift apart:
+// The store, client or logger every handler needs is a dependency, named by a typed
+// [Dependency] handle so the name and the type cannot drift apart:
 //
 //	// declared once, beside the thing it names
-//	var StoreKey = rotini.NewKey[Store]("store")
+//	var Store = rotini.NewDependency[*store.Store]("tasks.store")
 //
 //	// main.go — the value's type is checked here, where it is supplied
-//	tasks.StoreKey.Provide(cmd.Program, tasks.NewStore()).Execute()
+//	cmd.Program.WithDependency(tasks.Store, store.New()).Execute()
 //
-//	// or, for several at once, without leaving the chain ([Provide] and [Program.With])
+//	// or, for several at once ([WithDependency] and [Program.With])
 //	cmd.Program.
 //		With(
-//			rotini.Provide(tasks.StoreKey, tasks.NewStore()),
-//			rotini.Provide(tasks.ClientKey, tasks.NewClient()),
+//			rotini.WithDependency(tasks.Store, store.New()),
+//			rotini.WithDependency(tasks.Client, client.New()),
 //		).
 //		WithVersion(version).
 //		Execute()
 //
 //	// any handler — no string, no type assertion, no miss check
-//	store := tasks.StoreKey.MustGet(rtx)
+//	s := rtx.MustGetDependency(tasks.Store)
 //
-// For a one-off lookup, rtx.Get[T](key) and rtx.MustGet[T](key) supply the type at the call
-// site. A handler that needs to know which command it is asks the context: [Context.Command] is
-// the resolved leaf, [Context.CommandPath] the canonical invocation ("tasks add"), and
-// [Context.Chain] the full chain with the tokens the user actually typed.
+// [Context.GetDependency] reports a miss instead of routing it to the reporter, and
+// [Context.SetDependency] sets one for the rest of this run only. A handler that needs to know
+// which command it is asks the context: [Context.Command] is the resolved leaf,
+// [Context.CommandPath] the canonical invocation ("tasks add"), and [Context.CommandChain] the
+// full chain with the tokens the user actually typed.
 //
 // # Opt-in services
 //
 // Everything else is a function or type a handler calls when it wants it. None of it needs
-// binding: the registry — [Program.Bind] to provide, [Context.Get] or [Context.MustGet] to
-// consume — holds only the program's own services.
+// registering: the dependencies — [Program.WithDependency] to provide,
+// [Context.GetDependency] or [Context.MustGetDependency] to consume — hold only the program's
+// own.
 //
-// rotini's OWN seams are not in that registry. [Program.WithBindMeta], [Program.WithBinder],
+// rotini's OWN seams are not dependencies. [Program.WithInputSettings], [Program.WithInputReader],
 // [Program.WithParser], [Program.WithVersion] and [Program.WithHelp] supply them;
-// [Context.Parser], [Context.Version] and [Context.Help] read them back. The registry is yours alone, so nothing rotini depends
-// on can be shadowed by a name you chose or a type you got wrong:
+// [Context.Parser], [Context.Version] and [Context.Help] read them back. The dependencies are
+// yours alone, so nothing rotini depends on can be shadowed by a name you chose or a type you
+// got wrong:
 //
-//   - [Collect] is the typical handler's whole input story: every declared channel reconciled
-//     and validated in one line, into the command's generated inputs type.
+//   - [Context.Inputs] is the typical handler's whole input story: every declared channel
+//     reconciled and validated in one line, into the command's generated inputs type.
 //
-//     inputs, err := rotini.Collect[DeployInputs](rtx)
+//     inputs, err := rtx.Inputs[DeployInputs]()
 //
-//     [CollectP] adds the provenance [Report]. Both ride the [BindMeta] the generated
-//     NewProgram supplies via [Program.WithBindMeta].
+//     [Context.InputsWithReport] adds the provenance [InputReport]. Both ride the [InputSettings]
+//     the generated NewProgram supplies via [Program.WithInputSettings].
 //
 //   - [Parser] parses and validates the argv channel alone — GNU/POSIX grammar, typed
-//     coercion, enum and constraint checks — failing with a [*ParseError]. [Binder] is
-//     Collect's engine, for callers who want to hold the meta explicitly. Neither needs
-//     supplying to be used: [Collect] builds its own. [Program.WithParser] replaces only the
-//     parser that [Context.Parser] returns.
+//     coercion, enum and constraint checks — failing with a [*ParseError]. [InputReader] is the
+//     engine behind [Context.Inputs], for callers who want to hold the meta explicitly.
+//     Neither needs supplying to be used: [Context.Inputs] builds its own.
+//     [Program.WithParser] replaces only the parser that [Context.Parser] returns.
 //
 //   - [Deprecations] reports the deprecated aliases and identifiers this invocation actually
-//     used. It is a plain function over the [Context] and needs no service bound.
+//     used. It is a plain function over the [Context] and needs nothing registered.
 //
-//   - The per-channel surface ([ParseArgv], [ParseEnv], [ParseFiles], [ParseStdin],
-//     [Defaults], composed by [OverlayInputs] or [OverlayInputsP]) acquires channels one at a
-//     time, for programs that want custom precedence.
+//   - The per-channel methods ([Context.ArgvInputs], [Context.EnvInputs],
+//     [Context.FileInputs], [Context.StdinInputs], [Context.DefaultInputs], merged by
+//     [MergeInputs] or [MergeInputsWithReport]) acquire channels one at a time, for programs
+//     that want custom precedence.
 //
 //   - [Suggestor] turns a [*ParseError]'s rejected token and candidate vocabulary into "did you
 //     mean" suggestions — [Suggestor.For] does it in one call. Constructing one is the whole of
@@ -272,7 +276,7 @@
 // libraries behind them (golang.org/x/term, os/exec) than a CLI framework should be writing on
 // the side. The one text helper it keeps is the one its own generated pages need:
 //
-//   - [Strip] removes ANSI escape sequences, which is what makes a styled string safe to put
+//   - [StripANSI] removes ANSI escape sequences, which is what makes a styled string safe to put
 //     in a man page, a markdown page or a completion description.
 //
 // # Program shapes
@@ -280,9 +284,9 @@
 // A rotini binary is not always a one-shot command. An interactive loop, a daemon, or a server
 // answering a peer all run the same program in a different shape, resting on [Program.Run]
 // being re-entrant — each dispatch gets a fresh [Context], so nothing leaks between invocations
-// while services bound once up front reach all of them. Run is also safe to call CONCURRENTLY
-// once configuration is done; the handlers value and the program's streams stay shared, so a
-// concurrent host synchronizes those. See [Program.Run].
+// while dependencies registered once up front reach all of them. Run is also safe to call
+// CONCURRENTLY once configuration is done; the handlers value and the program's streams stay
+// shared, so a concurrent host synchronizes those. See [Program.Run].
 //
 // rotini ships no loop of its own. A host calls [Program.RunContext] once per line or request;
 // supplying the context hands signal handling to the host, so it decides what ^C cancels.

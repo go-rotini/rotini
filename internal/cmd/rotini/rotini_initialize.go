@@ -11,21 +11,21 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handlers = (*rotiniInitializeHandlers)(nil)
+var _ rotini.Handler = (*rotiniInitializeHandler)(nil)
 
-type rotiniInitializeHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type rotiniInitializeHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniInitializeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if answerHelp(rtx, func(in RotiniInitializeInputs) bool { return in.RotiniInitialize.Flags.Help }) {
 		return
 	}
 
-	inputs, err := rotini.Collect[RotiniInitializeInputs](rtx)
+	inputs, err := rtx.Inputs[RotiniInitializeInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)
 		return
@@ -34,8 +34,8 @@ func (*rotiniInitializeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	flags := inputs.RotiniInitialize.Flags
 
 	version := rtx.Version()
-	rtx.BindIfAbsent("initialize", codegen.NewProcessor(version).Initialize)
-	initialize := rtx.MustGet[codegen.InitializeFn]("initialize")
+	rtx.SetDependencyIfAbsent(initializeDep, codegen.NewProcessor(version).Initialize)
+	initialize := rtx.MustGetDependency(initializeDep)
 
 	written, err := initialize(args.Name, flags.Format, flags.Force)
 	if err != nil {

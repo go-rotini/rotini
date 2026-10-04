@@ -95,17 +95,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*depCompileHandlers)(nil)
+var _ rotini.Handler = (*depCompileHandler)(nil)
 
-type depCompileHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type depCompileHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*depCompileHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[DepCompileInputs](rtx)
+func (*depCompileHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DepCompileInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.Halt()

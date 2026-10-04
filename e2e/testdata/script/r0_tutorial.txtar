@@ -45,7 +45,7 @@ exec go build ./cmd/todo
 exec ./todo$exe --help
 stdout 'Usage:'
 
-# ── Handlers: write one ──────────────────────────────────────────────────────
+# ── Handlers: write one─────────────────────────────────────────────────────
 # The page shows a handler for a `todo add` command. Declare it, regenerate, and the stub
 # appears at exactly the path the page names.
 cp spec-with-add.yaml cmd/todo/.rotini.spec.yaml
@@ -140,21 +140,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*todoAddHandlers)(nil)
+var _ rotini.Handler = (*todoAddHandler)(nil)
 
-type todoAddHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type todoAddHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	// One line reconciles every declared channel: argv, env, config files, stdin
 	// and defaults, in the documented precedence order.
-	inputs, err := rotini.Collect[TodoAddInputs](rtx)
+	inputs, err := rtx.Inputs[TodoAddInputs]()
 	if err != nil {
-		rtx.HaltWith(err) // record it and stop; the funnel picks the exit code
+		rtx.HaltWith(err) // record it and stop; the reporter picks the exit code
 		return
 	}
 

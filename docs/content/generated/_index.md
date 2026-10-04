@@ -17,10 +17,10 @@ For a spec with a `todo` command and an `add` sub-command, the file holds:
 | each command's flags | a struct — `TodoAddFlags { Priority string; Tag []string }` |
 | each command's arguments | a struct — `TodoAddArguments { Title string }` |
 | its env and config inputs, when it declares any | `TodoAddEnv` and `TodoAddConfig` structs |
-| the command and its parents | `TodoAddInputs`, the type your handler passes to `rotini.Collect` |
+| the command and its parents | `TodoAddInputs`, the type your handler passes to `rtx.Inputs` |
 | the command tree | a `rotini.Definition` the runtime parses against |
-| each command | a method wiring it to your handler type (`todoAddHandlers`) |
-| configuration files and env prefix | `BindMeta`, which tells the runtime where values come from |
+| each command | a method wiring it to your handler type (`todoAddHandler`) |
+| configuration files and env prefix | `InputSettings`, which tells the runtime where values come from |
 | the help feature | `Help(path...)`, the rendered help pages |
 
 It ends with the one thing you do use: `Program`, built by `NewProgram`, which `main.go` runs.
@@ -45,7 +45,7 @@ type TodoAddInputs struct {
 
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
 	return rotini.NewProgram(definition, handlers).
-		WithBindMeta(BindMeta).
+		WithInputSettings(InputSettings).
 		WithHelp(Help)
 }
 
@@ -57,7 +57,7 @@ var Program = NewProgram(&handlers{})
 - **The handler files** — one per command, created the first time a command appears and never
   overwritten. If you remove a command from the spec, its handler file is removed on the next
   `go generate` (`generate` prints what it removed), edits and all; delete the file's
-  `var _ rotini.Handlers` line or list it under the conf's `keep:` to hold on to it.
+  `var _ rotini.Handler` line or list it under the conf's `keep:` to hold on to it.
 - **`main.go`** — created once, never touched again.
 
 ## Names

@@ -119,7 +119,7 @@ all land in the same generated struct.
 ## Handlers
 
 `go generate` creates one handler file per command, once, and never overwrites it — it is
-yours. (It is removed if its command leaves the spec; delete its `var _ rotini.Handlers` line or
+yours. (It is removed if its command leaves the spec; delete its `var _ rotini.Handler` line or
 list it under the conf's `keep:` to hold on to it.) Fill in `Run`:
 
 {{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
@@ -132,21 +132,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*todoAddHandlers)(nil)
+var _ rotini.Handler = (*todoAddHandler)(nil)
 
-type todoAddHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type todoAddHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	// One line reconciles every declared channel: argv, env, config files, stdin
 	// and defaults, in the documented precedence order.
-	inputs, err := rotini.Collect[TodoAddInputs](rtx)
+	inputs, err := rtx.Inputs[TodoAddInputs]()
 	if err != nil {
-		rtx.HaltWith(err) // record it and stop; the funnel picks the exit code
+		rtx.HaltWith(err) // record it and stop; the reporter picks the exit code
 		return
 	}
 
@@ -157,20 +157,20 @@ func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 - **`TodoAddInputs` is generated** from the spec, so the compiler holds the handler to it.
 - **Five hooks run for every command**: `CascadingPreRun` (also for each descendant), `PreRun`,
-  `Run`, `PostRun`, `CascadingPostRun`. The `Default*` embeds are no-ops; declare a method to
+  `Run`, `PostRun`, `CascadingPostRun`. The `No*` embeds are no-ops; declare a method to
   use one.
 - **Write to `rtx.Stdout`**, not `os.Stdout`, so tests and REPLs can capture it.
 - **Record results and errors** (`rtx.RecordSuccess`, `rtx.RecordWarning`, `rtx.HaltWith`)
   rather than printing them — the runtime reports them once, after teardown.
 
-A service the handlers share — a database, an API client — is bound once in `main.go` and read
-in any hook:
+A dependency the handlers share — a database, an API client — is registered once in `main.go`
+and read in any hook:
 
-{{< code title="sharing a service" language="golang" open="true" collapsible="false" copy="true" >}}
-var StoreKey = rotini.NewKey[Store]("todo.store")   // in the cmd package
+{{< code title="sharing a dependency" language="golang" open="true" collapsible="false" copy="true" >}}
+var Store = rotini.NewDependency[*store.Store]("todo.store") // in the cmd package
 
-cmd.StoreKey.Provide(cmd.Program, openStore())       // in main.go
-store := StoreKey.MustGet(rtx)                       // in a handler
+cmd.Program.WithDependency(cmd.Store, openStore())          // in main.go
+s := rtx.MustGetDependency(Store)                            // in a handler
 {{< /code >}}
 
 ## Errors and exit codes
@@ -178,7 +178,7 @@ store := StoreKey.MustGet(rtx)                       // in a handler
 A handler that fails calls `rtx.HaltWith(err)`. By default the runtime prints each recorded
 error to stderr as `Error: …` and exits 1. Every error carries a category —
 `rotini.UsageError(err)` marks one as the user's to fix — so a program that wants distinct exit
-codes installs its own reporting with `Program.WithFunnel` and maps `rotini.CategoryOf(err)` to
+codes installs its own reporting with `Program.WithReporter` and maps `rotini.CategoryOf(err)` to
 a code. Declare `exit_status:` in the spec to document a command's codes in its man and
 markdown pages.
 

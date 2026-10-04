@@ -111,9 +111,9 @@ type Command struct {
 	// - Identity and presentation keys declared alongside the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) WIN over the child's, for that one composed node — the child's own sub-commands keep theirs. A parent tailors the child for its tree without forking it.
 	// - A 'commands:' authored next to the $ref is MERGED onto the child's own subtree: its inline entries get their own stubs, and its $ref entries compose as further children.
 	// - `handler:` on a $ref node points the composed command at a different handler package.
-	// - Handler-coupled keys (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, remote_commands, remote_discovery, passthrough) CANNOT be overlaid: the composed command runs the child's handler, built against the child's own inputs and output, so validation rejects them here. Declare them in the child spec.
+	// - Handler-coupled keys (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough) CANNOT be overlaid: the composed command runs the child's handler, built against the child's own inputs and output, so validation rejects them here. Declare them in the child spec.
 	//
-	// The child's own remote_commands, remote_discovery and passthrough travel with it. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file.
+	// The child's own plugins, plugin_discovery and passthrough travel with it. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file.
 	Ref string `json:"$ref,omitempty"`
 	// Additional names that invoke this command. Command aliases affect dispatch routing; use identifiers on flags for flag aliases. Sub-commands only: the root command is reached by invoking the binary (argv[0] is not a routing token), so rotini validation rejects aliases there.
 	Aliases []string `json:"aliases,omitempty"`
@@ -135,11 +135,11 @@ type Command struct {
 	DisplayName string `json:"display_name,omitempty"`
 	// Environment-variable inputs for this command
 	Env []EnvInput `json:"env,omitempty"`
-	// Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the family's base name), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the binder reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix).
+	// Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the family's base name), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the input reader reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix).
 	EnvPrefix string `json:"env_prefix,omitempty"`
 	// Example command-line invocations, rendered one per line. Ignored when 'help' is set.
 	Examples []string `json:"examples,omitempty"`
-	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code, and the default signal handling, which exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
+	// Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome reporter's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code, and the default signal handling, which exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
 	ExitStatus []ExitStatusEntry `json:"exit_status,omitempty"`
 	// Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 	Filename string `json:"filename,omitempty"`
@@ -153,7 +153,7 @@ type Command struct {
 	Footer string `json:"footer,omitempty"`
 	// Group label for organizing this command under a heading in its parent's generated Commands list. Commands sharing a group are bucketed together; groups appear in the order their first member is declared. Ungrouped commands fall under the default Commands heading. Presentation-only.
 	Group string `json:"group,omitempty"`
-	// Source this command's handlers from an external Go PACKAGE instead of a generated stub (handler delegation). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package.
+	// Source this command's handlers from an external Go PACKAGE instead of a generated stub (handler delegation). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handler' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package.
 	Handler *HandlerSource `json:"handler,omitempty"`
 	// Text rendered above the description block. Ignored when 'help' is set.
 	Header string `json:"header,omitempty"`
@@ -169,16 +169,16 @@ type Command struct {
 	Markdown string `json:"markdown,omitempty"`
 	// Command name used in routing. As the root command (the document itself) this is the binary name and must be set — the root cannot use '$ref'.
 	Name string `json:"name,omitempty"`
-	// This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handlers have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract.
+	// This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handler have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract.
 	Output *Schema `json:"output,omitempty"`
-	// When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no remote commands or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
+	// When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no declared plugins or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
 	Passthrough bool `json:"passthrough,omitempty"`
-	// Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time; a leading ~ and $VAR references are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+	// Auto-expose external '<prefix>*' executables as plugin sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared plugins. Presence enables discovery.
+	PluginDiscovery *PluginDiscovery `json:"plugin_discovery,omitempty"`
+	// Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time; a leading ~ and $VAR references are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
 	PluginPath string `json:"plugin_path,omitempty"`
-	// Co-located remote binaries dispatched as first-class sub-commands of this command.
-	RemoteCommands []RemoteCommandSpec `json:"remote_commands,omitempty"`
-	// Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery.
-	RemoteDiscovery *RemoteDiscovery `json:"remote_discovery,omitempty"`
+	// Declared plugins: separate executables dispatched as first-class sub-commands of this command.
+	Plugins []PluginSpec `json:"plugins,omitempty"`
 	// Document-level (root only): reusable named schema definitions. Referenced elsewhere by name, `$ref: <Name>`, or as a pointer, `$ref: "#/schemas/<Name>"`. Each may carry a `description`, which becomes the generated type's doc comment. Names must be PascalCase Go-exportable identifiers — each becomes a generated Go type in the cmd package (or in the models package, when the conf declares one), which other packages may import.
 	Schemas map[string]Schema `json:"schemas,omitempty"`
 	// Cross-references rendered as a SEE ALSO section in the man page (e.g. related commands or man pages like 'rotini-generate(1)', or URLs). Ignored when 'man' (verbatim) is set.
@@ -187,7 +187,7 @@ type Command struct {
 	Stdin *StdinSpec `json:"stdin,omitempty"`
 	// Short one-liner describing this command. It is shown next to the command in its parent's generated Commands list (so it applies even when a verbatim 'help' string is set), and it is also the NAME line of the man page, the opening line of the markdown page, and the lead of the command's own help page when no 'description' is set.
 	Summary string `json:"summary,omitempty"`
-	// Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
+	// Not supported on a local command and rejected by rotini validation: a timeout is a plugin-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a plugins[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
 	Timeout string `json:"timeout,omitempty"`
 	// Usage-line override. When omitted, rotini derives one from the command's shape. Ignored when 'help' is set.
 	Usage string `json:"usage,omitempty"`
@@ -292,7 +292,7 @@ type FlagInput struct {
 
 // Where a command's handlers come from when they are not a generated stub: a Go package (handler delegation). The package's typed inputs live with it; this spec contributes only the command tree.
 type HandlerSource struct {
-	// Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.Handlers. PascalCase Go-exportable identifier.
+	// Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.Handler. PascalCase Go-exportable identifier.
 	Convention string `json:"convention"`
 	// Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deploycli github.com/acme/clis/deploy/rth'); deduped with other imports. A bare path derives its alias from the last segment. Codegen calls '<alias>.<convention>()'.
 	Import string `json:"import"`
@@ -365,7 +365,7 @@ type InputSchema struct {
 	Placeholder string `json:"placeholder,omitempty"`
 	// When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean — unlike the string-array 'required' on Schema.
 	Required bool `json:"required,omitempty"`
-	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
+	// When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 	Secret bool `json:"secret,omitempty"`
 	// LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style — an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched. Not on env and config INPUTS: an env input's list is split on commas by rotini's configuration reader (TAGS=a,b), and a configuration file writes a list as a list.
 	Separator string `json:"separator,omitempty"`
@@ -387,23 +387,23 @@ type InputSchemaComplete struct {
 	Kind string `json:"kind"`
 }
 
-type RemoteCommandSpec struct {
-	// Additional names that invoke this remote command.
-	Aliases []string `json:"aliases,omitempty"`
-	// Name of the remote command. The dispatched binary is named <program>-<name>, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree <program> is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
-	Name string `json:"name"`
-	// Short one-liner shown next to this remote command in its parent's generated Commands list.
-	Summary string `json:"summary,omitempty"`
-	// Host-side timeout for the remote binary execution. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
-	Timeout string `json:"timeout,omitempty"`
-}
-
-// Auto-expose external '<prefix>*' executables as remote sub-commands (kubectl/git/gh plugin style), alongside any declared remote_commands. Presence enables discovery; a discovered name that collides with a declared command or remote is skipped.
-type RemoteDiscovery struct {
+// Auto-expose external '<prefix>*' executables as plugin sub-commands (kubectl/git/gh plugin style), alongside any declared plugins. Presence enables discovery; a discovered name that collides with a declared command or plugin is skipped.
+type PluginDiscovery struct {
 	// When true, discovered plugins still dispatch but are omitted from completion listings.
 	Hidden bool `json:"hidden,omitempty"`
 	// Executable-name prefix to discover. Default: the host binary name followed by '-' (e.g. 'acme-').
 	Prefix string `json:"prefix,omitempty"`
+}
+
+type PluginSpec struct {
+	// Additional names that invoke this plugin.
+	Aliases []string `json:"aliases,omitempty"`
+	// Name of the declared plugin. The dispatched binary is named <program>-<name>, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree <program> is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
+	Name string `json:"name"`
+	// Short one-liner shown next to this plugin in its parent's generated Commands list.
+	Summary string `json:"summary,omitempty"`
+	// Host-side timeout for running the plugin. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
+	Timeout string `json:"timeout,omitempty"`
 }
 
 // JSON Schema-inspired type definition used for output/response and object property schemas. The 'required' field is a string array of required property names (JSON Schema object semantics). For input schemas where 'required' means 'must be provided', use InputSchema instead.

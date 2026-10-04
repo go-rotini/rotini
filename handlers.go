@@ -2,32 +2,32 @@ package rotini
 
 import "context"
 
-// Handlers is the lifecycle interface every command's handler set implements. The runtime
+// Handler is the lifecycle interface every command's handler set implements. The runtime
 // invokes the hooks in order, sharing one [Context] across the chain. Embed the Default types
 // below to declare only the hooks a command actually uses.
 //
 // # Instance lifetime
 //
 // The runtime asks your ProgramHandlers — the aggregate interface codegen generates, and the
-// value passed to [NewProgram] — for a command's handler ONCE PER FRAME, PER RUN, and
-// the value it gets back serves that frame's hooks for that run. Two consequences are worth
-// knowing before reaching for the registry:
+// value passed to [NewProgram] — for a command's handler ONCE PER COMMAND IN THE CHAIN, PER RUN, and
+// the value it gets back serves that command's hooks for that run. Two consequences are worth
+// knowing before reaching for a dependency:
 //
 //   - A FIELD carries state between one command's own hooks. The leaf's PreRun, Run and PostRun
-//     share one value, and any frame's CascadingPreRun and CascadingPostRun share one value. A
+//     share one value, and any command's CascadingPreRun and CascadingPostRun share one value. A
 //     transaction opened in PreRun and committed in PostRun can simply live in a field: no key,
 //     no lookup, and the compiler checks the type.
-//   - A field CANNOT cross frames. `db`'s hooks and `db migrate`'s hooks are different values,
-//     so state that travels down the chain belongs in the registry — [Key.BindTo] for one run,
-//     [Provide] for every run.
+//   - A field CANNOT cross commands. `db`'s hooks and `db migrate`'s hooks are different values,
+//     so state that travels down the chain is a dependency — [Context.SetDependency] for one
+//     run, [Program.WithDependency] for every run.
 //
 // Where the state goes decides which tool fits:
 //
 //	state flows…                                  use
 //	────────────                                  ───
 //	between one command's own hooks               a field on the handler
-//	between different commands in the chain       Key.BindTo(rtx, v)
-//	across every run of the program               Provide / Program.Bind
+//	between different commands in the chain       rtx.SetDependency(dep, v)
+//	across every run of the program               p.WithDependency(dep, v)
 //
 // # If you supply your own ProgramHandlers
 //
@@ -42,7 +42,7 @@ import "context"
 //
 // So: if you write your own ProgramHandlers and your handlers keep state in fields, return a
 // new value per call.
-type Handlers interface {
+type Handler interface {
 	CascadingPreRun(ctx context.Context, rtx *Context)
 	PreRun(ctx context.Context, rtx *Context)
 	Run(ctx context.Context, rtx *Context)
@@ -50,42 +50,42 @@ type Handlers interface {
 	CascadingPostRun(ctx context.Context, rtx *Context)
 }
 
-// The four Default* types below have empty method bodies, so `go tool cover` reports them at
+// The four No* types below have empty method bodies, so `go tool cover` reports them at
 // 0.0% forever: there are no statements to count. TestDefaultEmbedsAreNoOps executes all four
 // regardless — "does nothing, safely, including with a nil context" is a real contract, since
 // every generated stub embeds them.
 
-// DefaultCascadingPreRun is an embeddable no-op [Handlers.CascadingPreRun]. Embed [DefaultHooks] instead to take
-// all four no-ops at once, which is what a hand-written handler usually wants.
-type DefaultCascadingPreRun struct{}
+// NoCascadingPreRun is an embeddable no-op [Handler.CascadingPreRun]. Embed [NoHooks] instead
+// to take all four no-ops at once, which is what a hand-written handler usually wants.
+type NoCascadingPreRun struct{}
 
 // CascadingPreRun does nothing.
-func (DefaultCascadingPreRun) CascadingPreRun(ctx context.Context, rtx *Context) {}
+func (NoCascadingPreRun) CascadingPreRun(ctx context.Context, rtx *Context) {}
 
-// DefaultPreRun is an embeddable no-op [Handlers.PreRun]. Embed [DefaultHooks] instead to take
+// NoPreRun is an embeddable no-op [Handler.PreRun]. Embed [NoHooks] instead to take
 // all four no-ops at once, which is what a hand-written handler usually wants.
-type DefaultPreRun struct{}
+type NoPreRun struct{}
 
 // PreRun does nothing.
-func (DefaultPreRun) PreRun(ctx context.Context, rtx *Context) {}
+func (NoPreRun) PreRun(ctx context.Context, rtx *Context) {}
 
-// DefaultPostRun is an embeddable no-op [Handlers.PostRun]. Embed [DefaultHooks] instead to take
+// NoPostRun is an embeddable no-op [Handler.PostRun]. Embed [NoHooks] instead to take
 // all four no-ops at once, which is what a hand-written handler usually wants.
-type DefaultPostRun struct{}
+type NoPostRun struct{}
 
 // PostRun does nothing.
-func (DefaultPostRun) PostRun(ctx context.Context, rtx *Context) {}
+func (NoPostRun) PostRun(ctx context.Context, rtx *Context) {}
 
-// DefaultCascadingPostRun is an embeddable no-op [Handlers.CascadingPostRun]. Embed [DefaultHooks] instead to take
-// all four no-ops at once, which is what a hand-written handler usually wants.
-type DefaultCascadingPostRun struct{}
+// NoCascadingPostRun is an embeddable no-op [Handler.CascadingPostRun]. Embed [NoHooks] instead
+// to take all four no-ops at once, which is what a hand-written handler usually wants.
+type NoCascadingPostRun struct{}
 
 // CascadingPostRun does nothing.
-func (DefaultCascadingPostRun) CascadingPostRun(ctx context.Context, rtx *Context) {}
+func (NoCascadingPostRun) CascadingPostRun(ctx context.Context, rtx *Context) {}
 
-// DefaultHooks is the four no-ops above in one embeddable, for a handler written by hand:
+// NoHooks is the four no-ops above in one embeddable, for a handler written by hand:
 //
-//	type handlers struct{ rotini.DefaultHooks }
+//	type handlers struct{ rotini.NoHooks }
 //
 //	func (*handlers) Run(ctx context.Context, rtx *rotini.Context) { … }
 //
@@ -95,21 +95,21 @@ func (DefaultCascadingPostRun) CascadingPostRun(ctx context.Context, rtx *Contex
 //
 // # It does not supply Run, on purpose
 //
-// There is no DefaultRun and DefaultHooks does not invent one. A command whose Run is missing
-// or misspelled therefore fails the `var _ rotini.Handlers` assertion every stub carries, at
+// There is no no-op Run, and NoHooks does not invent one. A command whose Run is missing
+// or misspelled therefore fails the `var _ rotini.Handler` assertion every stub carries, at
 // compile time, by name. That property is why `rotini generate`'s hook audit does not have to
 // check Run at all, and collapsing the embeds must not cost it.
 //
 // # When to reach for it
 //
 // Generated stubs keep the four embeds written out: the stub is where the hook vocabulary is
-// introduced, and four named types show a reader the menu that one name hides. DefaultHooks is
+// introduced, and four named types show a reader the menu that one name hides. NoHooks is
 // for the handler you write yourself — a package behind a spec's `handler: {import,
 // convention}`, shared by several CLIs, where the author already knows the menu and the four
 // lines are noise.
-type DefaultHooks struct {
-	DefaultCascadingPreRun
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+type NoHooks struct {
+	NoCascadingPreRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 }

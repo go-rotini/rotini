@@ -13,7 +13,7 @@ import (
 	"github.com/go-rotini/recon"
 )
 
-// Generated-shape inputs for the binder tests: one command "app" with an argv flag,
+// Generated-shape inputs for the input reader tests: one command "app" with an argv flag,
 // an env channel, and a config channel (recon tags as codegen emits them).
 type tbFlags struct {
 	Verbose bool `rotini:"verbose"`
@@ -51,15 +51,15 @@ func writeConfig(t *testing.T, body string) string {
 	return path
 }
 
-func TestBinder_fillsEnvAndConfig(t *testing.T) {
+func TestInputReader_fillsEnvAndConfig(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: https://api.example\n  token: secret123\n")
 	t.Setenv("REGION", "us-west")
 
 	rtx := NewContextFor(tbDef(), []string{"--verbose"})
-	binder := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	binder := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	var in tbInputs
-	if err := binder.Bind(rtx, &in); err != nil {
+	if err := binder.Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if !in.App.Flags.Verbose {
@@ -76,12 +76,12 @@ func TestBinder_fillsEnvAndConfig(t *testing.T) {
 	}
 }
 
-// TestBinder_customSources pins the BindMeta.Sources seam (ergonomics E1/
+// TestInputReader_customSources pins the InputSettings.Sources seam (ergonomics E1/
 // E3-S4): custom recon sources join the config layer AFTER the declared
 // configuration_files — explicit files beat ambient services — serving both
 // config inputs and flags' config fallbacks, through Bind and the per-channel
 // surface alike.
-func TestBinder_customSources(t *testing.T) {
+func TestInputReader_customSources(t *testing.T) {
 	vault := func() recon.Source {
 		// MapSource takes the NESTED shape a config decoder produces.
 		return recon.NewMapSource("vault", map[string]any{
@@ -95,7 +95,7 @@ func TestBinder_customSources(t *testing.T) {
 	t.Run("sources alone supply config inputs", func(t *testing.T) {
 		rtx := NewContextFor(tbDef(), nil)
 		var in tbInputs
-		err := NewBinder(BindMeta{Sources: []recon.Source{vault()}}).Bind(rtx, &in)
+		err := NewInputReader(InputSettings{Sources: []recon.Source{vault()}}).Read(rtx, &in)
 		if err != nil {
 			t.Fatalf("Bind: %v", err)
 		}
@@ -108,11 +108,11 @@ func TestBinder_customSources(t *testing.T) {
 		cfg := writeConfig(t, "api:\n  endpoint: file-endpoint\n") // no token: vault still supplies it
 		rtx := NewContextFor(tbDef(), nil)
 		var in tbInputs
-		meta := BindMeta{
+		meta := InputSettings{
 			ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}},
 			Sources:     []recon.Source{vault()},
 		}
-		if err := NewBinder(meta).Bind(rtx, &in); err != nil {
+		if err := NewInputReader(meta).Read(rtx, &in); err != nil {
 			t.Fatalf("Bind: %v", err)
 		}
 		if in.App.Config.Endpoint != "file-endpoint" {
@@ -123,12 +123,12 @@ func TestBinder_customSources(t *testing.T) {
 		}
 	})
 
-	t.Run("per-channel surface sees sources via KeyBindMeta", func(t *testing.T) {
+	t.Run("per-channel surface sees sources via InputSettings", func(t *testing.T) {
 		rtx := NewContextFor(tbDef(), nil)
-		rtx.WithBindMeta(BindMeta{Sources: []recon.Source{vault()}})
-		files, err := ParseFiles[tbInputs](rtx)
+		rtx.WithInputSettings(InputSettings{Sources: []recon.Source{vault()}})
+		files, err := rtx.FileInputs[tbInputs]()
 		if err != nil {
-			t.Fatalf("ParseFiles: %v", err)
+			t.Fatalf("FileInputs: %v", err)
 		}
 		if files.Values.App.Config.Token != "vault-token" {
 			t.Errorf("files layer token = %q, want the custom source's value", files.Values.App.Config.Token)
@@ -136,25 +136,25 @@ func TestBinder_customSources(t *testing.T) {
 	})
 }
 
-func TestBinder_requiredConfigMissing(t *testing.T) {
+func TestInputReader_requiredConfigMissing(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: https://api.example\n") // no api.token
 	rtx := NewContextFor(tbDef(), nil)
-	binder := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	binder := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	var in tbInputs
-	if err := binder.Bind(rtx, &in); err == nil {
+	if err := binder.Read(rtx, &in); err == nil {
 		t.Fatal("expected an error for a missing required config value (recon required)")
 	}
 }
 
-func TestBinder_noConfigFilesLeavesConfigZero(t *testing.T) {
+func TestInputReader_noConfigFilesLeavesConfigZero(t *testing.T) {
 	// With no config sources, config fields stay zero; a non-required env still binds.
 	t.Setenv("REGION", "eu-central")
 	rtx := NewContextFor(tbDef(), nil)
-	binder := NewBinder(BindMeta{}) // no config files
+	binder := NewInputReader(InputSettings{}) // no config files
 
 	var s tbNoReqInputs
-	if err := binder.Bind(rtx, &s); err != nil {
+	if err := binder.Read(rtx, &s); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if s.App.Env.Region != "eu-central" {
@@ -167,7 +167,7 @@ func TestBinder_noConfigFilesLeavesConfigZero(t *testing.T) {
 
 // Discovery shapes (spec discover:): a walk-up entry found in an ancestor of
 // the working directory, and an xdg entry under $XDG_CONFIG_HOME/<app>.
-func TestBinder_discoverWalkUp(t *testing.T) {
+func TestInputReader_discoverWalkUp(t *testing.T) {
 	root := t.TempDir()
 	nested := filepath.Join(root, "a", "b")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
@@ -179,12 +179,12 @@ func TestBinder_discoverWalkUp(t *testing.T) {
 	}
 	t.Chdir(nested)
 
-	meta := BindMeta{ConfigFiles: []ConfigFile{{
+	meta := InputSettings{ConfigFiles: []ConfigFile{{
 		Name: "project", Format: "yaml",
 		Discover: &DiscoverDef{Strategy: "walk-up", File: ".app.yaml"},
 	}}}
 	var in tbNoReqInputs
-	if err := NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in); err != nil {
+	if err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Config.Endpoint != "from-walk-up" {
@@ -196,7 +196,7 @@ func TestBinder_discoverWalkUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	var in2 tbNoReqInputs
-	if err := NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in2); err != nil {
+	if err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in2); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in2.App.Config.Endpoint != "from-cwd" {
@@ -204,7 +204,7 @@ func TestBinder_discoverWalkUp(t *testing.T) {
 	}
 }
 
-func TestBinder_discoverXDG(t *testing.T) {
+func TestInputReader_discoverXDG(t *testing.T) {
 	xdg := t.TempDir()
 	appDir := filepath.Join(xdg, "acme")
 	if err := os.MkdirAll(appDir, 0o755); err != nil {
@@ -215,12 +215,12 @@ func TestBinder_discoverXDG(t *testing.T) {
 	}
 	t.Setenv("XDG_CONFIG_HOME", xdg)
 
-	meta := BindMeta{ConfigFiles: []ConfigFile{{
+	meta := InputSettings{ConfigFiles: []ConfigFile{{
 		Name: "user", Format: "yaml",
 		Discover: &DiscoverDef{Strategy: "xdg", App: "acme", File: "config.yaml"},
 	}}}
 	var in tbNoReqInputs
-	if err := NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in); err != nil {
+	if err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Config.Endpoint != "from-xdg" {
@@ -230,7 +230,7 @@ func TestBinder_discoverXDG(t *testing.T) {
 	// An absent discovered file is simply absent — same as a missing fixed path.
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	var in2 tbNoReqInputs
-	if err := NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in2); err != nil {
+	if err := NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in2); err != nil {
 		t.Fatalf("Bind(absent discovered file): %v", err)
 	}
 	if in2.App.Config.Endpoint != "" {
@@ -242,15 +242,15 @@ func TestBinder_discoverXDG(t *testing.T) {
 // document is validated at bind time, before any value is read (fidelity F1).
 const tbCfgSchema = `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","required":["api"],"properties":{"api":{"type":"object","required":["endpoint"],"properties":{"endpoint":{"type":"string"}}}}}`
 
-func TestBinder_configSchemaValidation(t *testing.T) {
-	bind := func(t *testing.T, meta BindMeta) error {
+func TestInputReader_configSchemaValidation(t *testing.T) {
+	bind := func(t *testing.T, meta InputSettings) error {
 		t.Helper()
 		var in tbNoReqInputs
-		return NewBinder(meta).Bind(NewContextFor(tbDef(), nil), &in)
+		return NewInputReader(meta).Read(NewContextFor(tbDef(), nil), &in)
 	}
-	withSchema := func(cf ConfigFile) BindMeta {
+	withSchema := func(cf ConfigFile) InputSettings {
 		cf.Schema = tbCfgSchema
-		return BindMeta{ConfigFiles: []ConfigFile{cf}}
+		return InputSettings{ConfigFiles: []ConfigFile{cf}}
 	}
 
 	t.Run("conforming file passes", func(t *testing.T) {
@@ -308,7 +308,7 @@ func TestBinder_configSchemaValidation(t *testing.T) {
 				}
 			}
 		}
-		if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in); err == nil {
+		if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in); err == nil {
 			t.Error("Bind(pinned, non-conforming file) = nil, want the validation error")
 		}
 	})
@@ -336,18 +336,18 @@ func tbCfgSrcDef(withDefault string) Definition {
 	}
 }
 
-func TestBinder_configSourceTwoPhase(t *testing.T) {
+func TestInputReader_configSourceTwoPhase(t *testing.T) {
 	declared := writeConfig(t, "api:\n  endpoint: from-declared\n")
 	flagged := writeConfig(t, "api:\n  endpoint: from-flag\n")
 	fromEnv := writeConfig(t, "api:\n  endpoint: from-env\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{
+	meta := InputSettings{ConfigFiles: []ConfigFile{{
 		Name: "app", Path: declared, Format: "yaml",
 		PathFrom: &PathFromDef{Flag: "config", Env: "APP_CONFIG"},
 	}}}
 	bind := func(t *testing.T, def Definition, argv []string) tbCfgSrcInputs {
 		t.Helper()
 		var in tbCfgSrcInputs
-		if err := NewBinder(meta).Bind(NewContextFor(def, argv), &in); err != nil {
+		if err := NewInputReader(meta).Read(NewContextFor(def, argv), &in); err != nil {
 			t.Fatalf("Bind: %v", err)
 		}
 		return in
@@ -381,7 +381,7 @@ func TestBinder_configSourceTwoPhase(t *testing.T) {
 	})
 	t.Run("an explicitly-supplied missing file errors", func(t *testing.T) {
 		var in tbCfgSrcInputs
-		err := NewBinder(meta).Bind(NewContextFor(tbCfgSrcDef(""), []string{"--config", "/nonexistent/app.yaml"}), &in)
+		err := NewInputReader(meta).Read(NewContextFor(tbCfgSrcDef(""), []string{"--config", "/nonexistent/app.yaml"}), &in)
 		if err == nil {
 			t.Error("Bind = nil error, want a missing-file error — the user explicitly asked for that file")
 		}
@@ -400,13 +400,13 @@ type tbEnvVarInputs struct {
 	}
 }
 
-func TestBinder_explicitEnvVar(t *testing.T) {
+func TestInputReader_explicitEnvVar(t *testing.T) {
 	t.Setenv("WIDGET_TOKEN", "s3cret")
 	t.Setenv("TOKEN", "wrong-default") // the SNAKE_UPPER default — must be ignored
 
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	var in tbEnvVarInputs
-	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Env.Token != "s3cret" {
@@ -418,7 +418,7 @@ func TestBinder_explicitEnvVar(t *testing.T) {
 	// registry snapshot, $WIDGET_TOKEN used to silently not bind at all.
 	os.Unsetenv("TOKEN")
 	var alone tbEnvVarInputs
-	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &alone); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &alone); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if alone.App.Env.Token != "s3cret" {
@@ -428,10 +428,10 @@ func TestBinder_explicitEnvVar(t *testing.T) {
 
 // Pinned-config shapes (spec file:): an input read from ONE named
 // configuration_files entry, not the merged precedence chain.
-func TestBinder_configFilePinned(t *testing.T) {
+func TestInputReader_configFilePinned(t *testing.T) {
 	system := writeConfig(t, "api:\n  endpoint: from-system\n  token: sys-token\n")
 	user := writeConfig(t, "api:\n  endpoint: from-user\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{
+	meta := InputSettings{ConfigFiles: []ConfigFile{
 		{Name: "system", Path: system, Format: "yaml"}, // higher precedence
 		{Name: "user", Path: user, Format: "yaml"},
 	}}
@@ -447,7 +447,7 @@ func TestBinder_configFilePinned(t *testing.T) {
 		}
 	}
 	var in pinned
-	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
+	if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Config.Endpoint != "from-user" {
@@ -466,7 +466,7 @@ func TestBinder_configFilePinned(t *testing.T) {
 		}
 	}
 	var in2 pinnedReq
-	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in2); err == nil {
+	if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in2); err == nil {
 		t.Error("Bind = nil error, want missing-required — api.token lives in system, not the pinned user file")
 	}
 
@@ -481,7 +481,7 @@ func TestBinder_configFilePinned(t *testing.T) {
 		}
 	}
 	var in3 pinnedBad
-	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in3); err == nil || !strings.Contains(err.Error(), "nope") {
+	if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in3); err == nil || !strings.Contains(err.Error(), "nope") {
 		t.Errorf("Bind(unknown pin) = %v, want an unknown-configuration-file error", err)
 	}
 }
@@ -498,13 +498,13 @@ type tbNestInputs struct {
 	}
 }
 
-func TestBinder_envNesting(t *testing.T) {
+func TestInputReader_envNesting(t *testing.T) {
 	t.Setenv("ACME_HTTP__TIMEOUT", "30")
 	t.Setenv("ACME_HTTP__RETRY__MAX", "9")
 	t.Setenv("ACME_HTTPX", "decoy") // wrong separator boundary — not family
 
 	var in tbNestInputs
-	if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if got := in.App.Env.HTTP["timeout"]; got != "30" {
@@ -519,7 +519,7 @@ func TestBinder_envNesting(t *testing.T) {
 	}
 }
 
-func TestBinder_envNestingRequired(t *testing.T) {
+func TestInputReader_envNestingRequired(t *testing.T) {
 	// No ACME_DB__* variables exist: a required nested family errors via recon.
 	type reqNest struct {
 		App struct {
@@ -531,7 +531,7 @@ func TestBinder_envNestingRequired(t *testing.T) {
 		}
 	}
 	var in reqNest
-	if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in); err == nil {
+	if err := NewInputReader(InputSettings{}).Read(NewContextFor(tbAppDef(), nil), &in); err == nil {
 		t.Error("Bind = nil error, want a missing-required error for the empty variable family")
 	}
 }
@@ -562,12 +562,12 @@ func withPipedStdin(t *testing.T, body string) {
 	go func() { _, _ = w.WriteString(body); _ = w.Close() }()
 }
 
-func TestBinder_decodesStdin(t *testing.T) {
+func TestInputReader_decodesStdin(t *testing.T) {
 	withPipedStdin(t, "kind: Widget\nname: foo\n")
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 
 	var in tbStdinInputs
-	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Stdin == nil {
@@ -578,15 +578,15 @@ func TestBinder_decodesStdin(t *testing.T) {
 	}
 }
 
-// The Binder reads its stdin channel from [Context.Stdin] (which the Program sets from
+// The InputReader reads its stdin channel from [Context.Stdin] (which the Program sets from
 // Program.WithStdin), so a test can supply input via an ordinary reader without touching
 // the process's os.Stdin.
-func TestBinder_decodesStdinFromContextStdin(t *testing.T) {
+func TestInputReader_decodesStdinFromContextStdin(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Stdin = strings.NewReader("kind: Widget\nname: foo\n")
 
 	var in tbStdinInputs
-	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Stdin == nil || in.App.Stdin.Kind != "Widget" || in.App.Stdin.Name != "foo" {
@@ -594,12 +594,12 @@ func TestBinder_decodesStdinFromContextStdin(t *testing.T) {
 	}
 }
 
-func TestBinder_noStdinLeavesNil(t *testing.T) {
+func TestInputReader_noStdinLeavesNil(t *testing.T) {
 	withPipedStdin(t, "") // nothing piped → EOF, no data
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 
 	var in tbStdinInputs
-	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Stdin != nil {
@@ -624,9 +624,9 @@ func tbFbDef() Definition {
 	}
 }
 
-func TestBinder_flagFallbackPrecedence(t *testing.T) {
+func TestInputReader_flagFallbackPrecedence(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  color: red\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	cases := []struct {
 		name string
@@ -645,7 +645,7 @@ func TestBinder_flagFallbackPrecedence(t *testing.T) {
 			}
 			rtx := NewContextFor(tbFbDef(), c.argv)
 			var in tbFbInputs
-			if err := NewBinder(meta).Bind(rtx, &in); err != nil {
+			if err := NewInputReader(meta).Read(rtx, &in); err != nil {
 				t.Fatalf("Bind: %v", err)
 			}
 			if in.App.Flags.Color != c.want {
@@ -658,7 +658,7 @@ func TestBinder_flagFallbackPrecedence(t *testing.T) {
 	t.Run("default kept when no source", func(t *testing.T) {
 		rtx := NewContextFor(tbFbDef(), nil)
 		var in tbFbInputs
-		if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+		if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 			t.Fatalf("Bind: %v", err)
 		}
 		if in.App.Flags.Color != "blue" {
@@ -686,13 +686,13 @@ func tbReqDef() Definition {
 	}
 }
 
-func TestBinder_requiredFlagSatisfiedByConfig(t *testing.T) {
+func TestInputReader_requiredFlagSatisfiedByConfig(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  token: from-config\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbReqDef(), nil) // not on argv
 	var in tbReqInputs
-	if err := NewBinder(meta).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(meta).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v (a required flag should be satisfiable via config)", err)
 	}
 	if in.App.Flags.Token != "from-config" {
@@ -700,13 +700,13 @@ func TestBinder_requiredFlagSatisfiedByConfig(t *testing.T) {
 	}
 }
 
-func TestBinder_requiredFlagSatisfiedByEnv(t *testing.T) {
+func TestInputReader_requiredFlagSatisfiedByEnv(t *testing.T) {
 	t.Setenv("API_TOKEN", "from-env") // SNAKE_UPPER of recon key "api.token"
 
 	// No config files: also exercises the path where env is the only fallback source.
 	rtx := NewContextFor(tbReqDef(), nil)
 	var in tbReqInputs
-	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v (a required flag should be satisfiable via env)", err)
 	}
 	if in.App.Flags.Token != "from-env" {
@@ -714,10 +714,10 @@ func TestBinder_requiredFlagSatisfiedByEnv(t *testing.T) {
 	}
 }
 
-func TestBinder_requiredFlagMissingEverywhere(t *testing.T) {
+func TestInputReader_requiredFlagMissingEverywhere(t *testing.T) {
 	rtx := NewContextFor(tbReqDef(), nil) // no argv, no env, no config
 	var in tbReqInputs
-	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err == nil {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &in); err == nil {
 		t.Fatal("expected a missing-required error when a required fallback flag is in no source")
 	}
 }
@@ -740,13 +740,13 @@ func tbEnumDef() Definition {
 	}
 }
 
-func TestBinder_enumCheckedOnReconciledValue(t *testing.T) {
+func TestInputReader_enumCheckedOnReconciledValue(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  color: teal\n") // teal is not in the enum
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbEnumDef(), nil)
 	var in tbEnumInputs
-	if err := NewBinder(meta).Bind(rtx, &in); err == nil {
+	if err := NewInputReader(meta).Read(rtx, &in); err == nil {
 		t.Fatal("expected an enum error for a config-supplied value outside the declared enum")
 	}
 }
@@ -773,19 +773,19 @@ func tbPortDef() Definition {
 	}
 }
 
-func TestBinder_constraintCheckedOnReconciledValue(t *testing.T) {
+func TestInputReader_constraintCheckedOnReconciledValue(t *testing.T) {
 	cfg := writeConfig(t, "create:\n  port: 70000\n") // above the declared maximum
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbPortDef(), nil)
 	var in tbPortInputs
-	if err := NewBinder(meta).Bind(rtx, &in); err == nil || !strings.Contains(err.Error(), "must be <= 65535") {
+	if err := NewInputReader(meta).Read(rtx, &in); err == nil || !strings.Contains(err.Error(), "must be <= 65535") {
 		t.Fatalf("Bind error = %v, want a max-bound violation for the config-supplied port", err)
 	}
 }
 
 // Channel-constraint shapes carry the validation struct-tags codegen emits on env/
-// config fields (A2d), which the binder enforces over the reconciled value.
+// config fields (A2d), which the input reader enforces over the reconciled value.
 type tbEnvPort struct {
 	App struct {
 		Flags     struct{}
@@ -808,19 +808,19 @@ type tbCfgName struct {
 
 func tbAppDef() Definition { return Definition{Name: "app", Handler: "App"} }
 
-func TestBinder_envConstraintEnforced(t *testing.T) {
+func TestInputReader_envConstraintEnforced(t *testing.T) {
 	t.Setenv("PORT", "70000") // above max
 	var in tbEnvPort
-	err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in)
+	err := NewInputReader(InputSettings{}).Read(NewContextFor(tbAppDef(), nil), &in)
 	if err == nil || !strings.Contains(err.Error(), "<= 65535") {
 		t.Fatalf("Bind err = %v, want a max-bound violation for env PORT", err)
 	}
 }
 
-func TestBinder_envConstraintValid(t *testing.T) {
+func TestInputReader_envConstraintValid(t *testing.T) {
 	t.Setenv("PORT", "8080")
 	var in tbEnvPort
-	if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Env.Port != 8080 {
@@ -828,7 +828,7 @@ func TestBinder_envConstraintValid(t *testing.T) {
 	}
 }
 
-func TestBinder_channelConstraintAbsentSkipped(t *testing.T) {
+func TestInputReader_channelConstraintAbsentSkipped(t *testing.T) {
 	// Genuinely unset (not empty): the field is never sourced, so the constraint is
 	// skipped and the value stays zero — absence is `required`'s job, not the bounds'.
 	if prev, had := os.LookupEnv("PORT"); had {
@@ -836,7 +836,7 @@ func TestBinder_channelConstraintAbsentSkipped(t *testing.T) {
 		t.Cleanup(func() { os.Setenv("PORT", prev) })
 	}
 	var in tbEnvPort
-	if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("absent env value should skip its constraint check: %v", err)
 	}
 	if in.App.Env.Port != 0 {
@@ -844,20 +844,20 @@ func TestBinder_channelConstraintAbsentSkipped(t *testing.T) {
 	}
 }
 
-func TestBinder_configConstraintEnforced(t *testing.T) {
+func TestInputReader_configConstraintEnforced(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  name: TOOLONG\n") // length 7 > maxlen 5 (and not lowercase)
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbCfgName
-	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in); err == nil {
+	if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in); err == nil {
 		t.Fatal("expected a constraint violation for the config value app.name")
 	}
 }
 
-func TestBinder_configConstraintValid(t *testing.T) {
+func TestInputReader_configConstraintValid(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  name: abc\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbCfgName
-	if err := NewBinder(meta).Bind(NewContextFor(tbAppDef(), nil), &in); err != nil {
+	if err := NewInputReader(meta).Read(NewContextFor(tbAppDef(), nil), &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Config.Name != "abc" {
@@ -865,7 +865,7 @@ func TestBinder_configConstraintValid(t *testing.T) {
 	}
 }
 
-// Stdin-validation shape: a payload whose schema (in BindMeta) the binder checks
+// Stdin-validation shape: a payload whose schema (in InputSettings) the input reader checks
 // before binding.
 type tbStdinValPayload struct {
 	Port int `json:"port"`
@@ -879,24 +879,24 @@ type tbStdinValInputs struct{ App tbStdinValCmd }
 
 const tbStdinSchema = `{"type":"object","properties":{"port":{"type":"integer","minimum":1,"maximum":65535}}}`
 
-func tbStdinMeta() BindMeta {
-	return BindMeta{StdinSchemas: map[string]string{"tbStdinValPayload": tbStdinSchema}}
+func tbStdinMeta() InputSettings {
+	return InputSettings{StdinSchemas: map[string]string{"tbStdinValPayload": tbStdinSchema}}
 }
 
-func TestBinder_stdinPayloadRejectedBySchema(t *testing.T) {
+func TestInputReader_stdinPayloadRejectedBySchema(t *testing.T) {
 	withPipedStdin(t, "port: 70000\n") // above the schema maximum
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	var in tbStdinValInputs
-	if err := NewBinder(tbStdinMeta()).Bind(rtx, &in); err == nil {
+	if err := NewInputReader(tbStdinMeta()).Read(rtx, &in); err == nil {
 		t.Fatal("expected the stdin payload to be rejected (port above maximum)")
 	}
 }
 
-func TestBinder_stdinPayloadValid(t *testing.T) {
+func TestInputReader_stdinPayloadValid(t *testing.T) {
 	withPipedStdin(t, "port: 8080\n")
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	var in tbStdinValInputs
-	if err := NewBinder(tbStdinMeta()).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(tbStdinMeta()).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Stdin == nil || in.App.Stdin.Port != 8080 {
@@ -916,11 +916,11 @@ type tbSecretCfg struct {
 	}
 }
 
-func TestBinder_secretChannelValueRedacted(t *testing.T) {
+func TestInputReader_secretChannelValueRedacted(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  token: short\n") // length 5 < minlen 8
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	var in tbSecretCfg
-	err := NewBinder(meta).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	err := NewInputReader(meta).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err == nil {
 		t.Fatal("expected a length-constraint violation")
 	}
@@ -960,15 +960,15 @@ type tbStdinReqInputs struct {
 	App tbStdinReqCommandInputs
 }
 
-// TestBinder_stdinRequired confirms the spec's stdin required: true is honored:
+// TestInputReader_stdinRequired confirms the spec's stdin required: true is honored:
 // empty stdin errors, a piped document binds.
-func TestBinder_stdinRequired(t *testing.T) {
+func TestInputReader_stdinRequired(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App"}
 
 	rtx := NewContextFor(def, nil)
 	rtx.Stdin = strings.NewReader("")
 	var in tbStdinReqInputs
-	err := NewBinder(BindMeta{}).Bind(rtx, &in)
+	err := NewInputReader(InputSettings{}).Read(rtx, &in)
 	if err == nil || !strings.Contains(err.Error(), "required stdin payload is empty") {
 		t.Errorf("Bind(empty required stdin) = %v, want a required-stdin error", err)
 	}
@@ -976,7 +976,7 @@ func TestBinder_stdinRequired(t *testing.T) {
 	rtx2 := NewContextFor(def, nil)
 	rtx2.Stdin = strings.NewReader("kind: demo\n")
 	var in2 tbStdinReqInputs
-	if err := NewBinder(BindMeta{}).Bind(rtx2, &in2); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(rtx2, &in2); err != nil {
 		t.Fatalf("Bind(piped required stdin) = %v", err)
 	}
 	if in2.App.Stdin == nil || in2.App.Stdin.Kind != "demo" {
@@ -1001,11 +1001,11 @@ func TestParseStdinTag(t *testing.T) {
 	}
 }
 
-// TestBinder_chainConfigFiles pins the cascade (D-W3.1): config_files in scope for
+// TestInputReader_chainConfigFiles pins the cascade (D-W3.1): config_files in scope for
 // the invoked chain = the union along it, NEAREST-WINS (deepest command first), with
 // off-branch sources excluded and unscoped (Scope=="") sources always in scope, last.
-func TestBinder_chainConfigFiles(t *testing.T) {
-	b := &Binder{configFiles: []ConfigFile{
+func TestInputReader_chainConfigFiles(t *testing.T) {
+	b := &InputReader{configFiles: []ConfigFile{
 		{Name: "rootA", Scope: "app"},
 		{Name: "rootB", Scope: "app"},
 		{Name: "deploy", Scope: "app/deploy"},
@@ -1013,7 +1013,7 @@ func TestBinder_chainConfigFiles(t *testing.T) {
 		{Name: "sibling", Scope: "app/build"}, // off-branch — excluded
 		{Name: "global", Scope: ""},           // unscoped — always in scope, last
 	}}
-	chain := []ResolvedCommand{{Name: "app"}, {Name: "deploy"}, {Name: "aws"}}
+	chain := []Command{{Name: "app"}, {Name: "deploy"}, {Name: "aws"}}
 	var names []string
 	for _, f := range b.chainConfigFiles(chain) {
 		names = append(names, f.Name)
@@ -1023,10 +1023,10 @@ func TestBinder_chainConfigFiles(t *testing.T) {
 	}
 }
 
-// ── BindError ───────────────────────────────────────────────.
+// ── InputError ───────────────────────────────────────────────.
 
 // beEnv is a minimal env channel: a bool that "junk" cannot coerce into, and a
-// secret int whose bad value must never reach a BindError message.
+// secret int whose bad value must never reach an InputError message.
 type beEnv struct {
 	Loud  bool `rotini:"loud" recon:"loud"`
 	Token int  `rotini:"token" recon:"token,secret"`
@@ -1044,13 +1044,13 @@ func beBind(t *testing.T) error {
 	t.Helper()
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	var in beInputs
-	return NewBinder(BindMeta{}).Bind(rtx, &in)
+	return NewInputReader(InputSettings{}).Read(rtx, &in)
 }
 
-// TestBindError_envCoercion_isCleanUsage is EH4's headline: the famous
+// TestInputError_envCoercion_isCleanUsage is EH4's headline: the famous
 // "recon: coerce …: string → bool" leak becomes a typed, categorized,
-// non-leaky *BindError — while the recon cause stays reachable via errors.As.
-func TestBindError_envCoercion_isCleanUsage(t *testing.T) {
+// non-leaky *InputError — while the recon cause stays reachable via errors.As.
+func TestInputError_envCoercion_isCleanUsage(t *testing.T) {
 	t.Setenv("LOUD", "junk") // not a bool
 	err := beBind(t)
 	if err == nil {
@@ -1058,12 +1058,12 @@ func TestBindError_envCoercion_isCleanUsage(t *testing.T) {
 	}
 
 	// Typed + structured.
-	var be *BindError
+	var be *InputError
 	if !errors.As(err, &be) {
-		t.Fatalf("err is not a *BindError: %T (%v)", err, err)
+		t.Fatalf("err is not an *InputError: %T (%v)", err, err)
 	}
 	if be.Channel != channelEnv || be.Input != "loud" {
-		t.Errorf("BindError = {Channel:%q Input:%q}, want {env loud}", be.Channel, be.Input)
+		t.Errorf("InputError = {Channel:%q Input:%q}, want {env loud}", be.Channel, be.Input)
 	}
 
 	// Categorized as usage (errors.Is AND CategoryOf), not internal.
@@ -1092,9 +1092,9 @@ func TestBindError_envCoercion_isCleanUsage(t *testing.T) {
 	}
 }
 
-// TestBindError_secretNeverLeaks: a coercion failure on a secret-tagged input
+// TestInputError_secretNeverLeaks: a coercion failure on a secret-tagged input
 // must not put the offending value in the message.
-func TestBindError_secretNeverLeaks(t *testing.T) {
+func TestInputError_secretNeverLeaks(t *testing.T) {
 	const secret = "sk_live_not_a_number"
 	t.Setenv("TOKEN", secret) // not an int, and tagged secret
 	err := beBind(t)
@@ -1109,10 +1109,10 @@ func TestBindError_secretNeverLeaks(t *testing.T) {
 	}
 }
 
-// TestBindError_typeContract pins the type's category + unwrap behavior directly,
+// TestInputError_typeContract pins the type's category + unwrap behavior directly,
 // independent of any channel: Error is the clean message, the category sentinel
 // and the cause are both reachable.
-func TestBindError_typeContract(t *testing.T) {
+func TestInputError_typeContract(t *testing.T) {
 	boom := errors.New("low-level cause")
 
 	usage := usageBind(channelConfig, "api.token", "config key \"api.token\" is required", boom)
@@ -1131,82 +1131,82 @@ func TestBindError_typeContract(t *testing.T) {
 	// A nil cause is fine — the sentinel is still reachable.
 	noCause := usageBind(channelStdin, "", "required stdin payload is empty", nil)
 	if !errors.Is(noCause, ErrUsage) {
-		t.Error("a nil-cause usage BindError must still match ErrUsage")
+		t.Error("a nil-cause usage InputError must still match ErrUsage")
 	}
 }
 
-// ── WithBinder as an override ────────────────────────────────────────────────.
+// ── WithInputReader as an override ────────────────────────────────────────────────.
 
-// A WithBinder function replaces the binder Collect would build — and RECEIVES the meta, so
-// an override starts from the generated descriptor instead of having to reproduce it.
+// A WithInputReader function replaces the input reader Inputs would build — and RECEIVES the
+// meta, so an override starts from the generated descriptor instead of having to reproduce it.
 //
-// The shape matters. This used to be a registry key holding a *Binder, which meant the caller
-// had to find BindMeta and pass it themselves; the obvious call, NewBinder(BindMeta{}), turned
-// the configuration-file channel off in silence. Handing the meta to the function makes that
-// mistake unwritable.
-func TestWithBinder_overridesTheDefault(t *testing.T) {
-	custom := NewBinder(BindMeta{EnvPrefix: "SENTINEL"})
+// The shape matters. This used to be a registry key holding an *InputReader, which meant the
+// caller had to find InputSettings and pass it themselves; the obvious call,
+// NewInputReader(InputSettings{}), turned the configuration-file channel off in silence.
+// Handing the meta to the function makes that mistake unwritable.
+func TestWithInputReader_overridesTheDefault(t *testing.T) {
+	custom := NewInputReader(InputSettings{EnvPrefix: "SENTINEL"})
 
-	var got *Binder
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+	var got *InputReader
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = readerFor(rtx) }}
 	p, _, _ := newTestProgram(h, nil)
-	p.WithBinder(func(BindMeta) *Binder { return custom })
+	p.WithInputReader(func(InputSettings) *InputReader { return custom })
 
 	if _, err := p.Run([]string{"run", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if got != custom {
-		t.Errorf("binderFor returned %p, want the supplied %p", got, custom)
+		t.Errorf("readerFor returned %p, want the supplied %p", got, custom)
 	}
 }
 
 // The override receives the program's meta, which is the whole reason for the signature.
-func TestWithBinder_receivesTheProgramsMeta(t *testing.T) {
-	meta := BindMeta{EnvPrefix: "ACME", ConfigFiles: []ConfigFile{{Name: "project", Scope: "app"}}}
+func TestWithInputReader_receivesTheProgramsMeta(t *testing.T) {
+	meta := InputSettings{EnvPrefix: "ACME", ConfigFiles: []ConfigFile{{Name: "project", Scope: "app"}}}
 
-	var seen BindMeta
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { _ = binderFor(rtx) }}
+	var seen InputSettings
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { _ = readerFor(rtx) }}
 	p, _, _ := newTestProgram(h, nil)
-	p.WithBindMeta(meta).WithBinder(func(m BindMeta) *Binder {
+	p.WithInputSettings(meta).WithInputReader(func(m InputSettings) *InputReader {
 		seen = m
-		return NewBinder(m)
+		return NewInputReader(m)
 	})
 
 	if _, err := p.Run([]string{"run", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if seen.EnvPrefix != "ACME" || len(seen.ConfigFiles) != 1 {
-		t.Errorf("the override saw %+v, want the program's BindMeta — an override that cannot see the descriptor silently drops channels", seen)
+		t.Errorf("the override saw %+v, want the program's InputSettings — an override that cannot see the descriptor silently drops channels", seen)
 	}
 }
 
-// With nothing supplied, Collect still works: the default is built from the descriptor, so
-// WithBinder is an override rather than a prerequisite.
-func TestWithBinder_defaultsWhenUnset(t *testing.T) {
-	var got *Binder
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+// With nothing supplied, Inputs still works: the default is built from the descriptor, so
+// WithInputReader is an override rather than a prerequisite.
+func TestWithInputReader_defaultsWhenUnset(t *testing.T) {
+	var got *InputReader
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = readerFor(rtx) }}
 	p, _, _ := newTestProgram(h, nil)
 
 	if _, err := p.Run([]string{"run", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if got == nil {
-		t.Fatal("binderFor returned nil with no binder supplied")
+		t.Fatal("readerFor returned nil with no binder supplied")
 	}
 }
 
-// A function that returns nil falls back rather than handing a nil binder to Collect.
-func TestWithBinder_ignoresANilResult(t *testing.T) {
-	var got *Binder
-	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = binderFor(rtx) }}
+// A function that returns nil falls back rather than handing a nil input reader to Inputs.
+func TestWithInputReader_ignoresANilResult(t *testing.T) {
+	var got *InputReader
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) { got = readerFor(rtx) }}
 	p, _, _ := newTestProgram(h, nil)
-	p.WithBinder(func(BindMeta) *Binder { return nil })
+	p.WithInputReader(func(InputSettings) *InputReader { return nil })
 
 	if _, err := p.Run([]string{"run", "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if got == nil {
-		t.Error("a nil result produced a nil binder instead of the default")
+		t.Error("a nil result produced a nil input reader instead of the default")
 	}
 }
 
@@ -1237,7 +1237,7 @@ type tbTextReqCmd struct {
 }
 type tbTextReqInputs struct{ App tbTextReqCmd }
 
-func TestBinder_stdinText(t *testing.T) {
+func TestInputReader_stdinText(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
@@ -1256,7 +1256,7 @@ func TestBinder_stdinText(t *testing.T) {
 			rtx.Stdin = strings.NewReader(tc.body)
 
 			var in tbTextInputs
-			if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+			if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 				t.Fatalf("Bind: %v", err)
 			}
 			if in.App.Stdin == nil {
@@ -1269,7 +1269,7 @@ func TestBinder_stdinText(t *testing.T) {
 	}
 }
 
-func TestBinder_stdinLines(t *testing.T) {
+func TestInputReader_stdinLines(t *testing.T) {
 	cases := []struct {
 		name string
 		body string
@@ -1289,7 +1289,7 @@ func TestBinder_stdinLines(t *testing.T) {
 			rtx.Stdin = strings.NewReader(tc.body)
 
 			var in tbLinesInputs
-			if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+			if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 				t.Fatalf("Bind: %v", err)
 			}
 			if in.App.Stdin == nil {
@@ -1302,15 +1302,15 @@ func TestBinder_stdinLines(t *testing.T) {
 	}
 }
 
-// TestBinder_rawStdinNilVsEmpty: the payload is a POINTER so a filter can tell "nothing was
+// TestInputReader_rawStdinNilVsEmpty: the payload is a POINTER so a filter can tell "nothing was
 // piped" from "an empty payload was piped" — for a filter that is a real difference, and it is
 // why the field is not a plain string.
-func TestBinder_rawStdinNilVsEmpty(t *testing.T) {
+func TestInputReader_rawStdinNilVsEmpty(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Stdin = strings.NewReader("")
 
 	var in tbTextInputs
-	if err := NewBinder(BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if in.App.Stdin != nil {
@@ -1318,14 +1318,14 @@ func TestBinder_rawStdinNilVsEmpty(t *testing.T) {
 	}
 }
 
-// TestBinder_rawStdinRequired: `required: true` on a raw payload rejects an empty stdin, with
+// TestInputReader_rawStdinRequired: `required: true` on a raw payload rejects an empty stdin, with
 // a usage-class message naming the format rather than a nil the handler dereferences.
-func TestBinder_rawStdinRequired(t *testing.T) {
+func TestInputReader_rawStdinRequired(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Stdin = strings.NewReader("")
 
 	var in tbTextReqInputs
-	err := NewBinder(BindMeta{}).Bind(rtx, &in)
+	err := NewInputReader(InputSettings{}).Read(rtx, &in)
 	if err == nil {
 		t.Fatal("an empty required stdin payload was accepted")
 	}
@@ -1341,18 +1341,18 @@ func TestBinder_rawStdinRequired(t *testing.T) {
 
 // ── the descriptor's absence is now distinguishable (C1 Tier 1) ──────────────.
 
-// NewBinderWithoutDescriptor builds a binder the way a hand-assembled program produces one:
-// no BindMeta was ever supplied, as distinct from an empty one.
-func NewBinderWithoutDescriptor() *Binder {
-	b := NewBinder(BindMeta{})
+// newInputReaderWithoutDescriptor builds a input reader the way a hand-assembled program
+// produces one: no InputSettings was ever supplied, as distinct from an empty one.
+func newInputReaderWithoutDescriptor() *InputReader {
+	b := NewInputReader(InputSettings{})
 	b.described = false
 	return b
 }
 
 // TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor is the one silent failure that
-// survived moving BindMeta off the registry — and the first time it has been detectable.
+// survived moving InputSettings off the registry — and the first time it has been detectable.
 //
-// A command with `config:` inputs resolves them out of the sources in BindMeta. A program
+// A command with `config:` inputs resolves them out of the sources in InputSettings. A program
 // assembled without one (hand-built, rather than through the generated NewProgram) used to
 // fill every configuration value with its zero and say nothing. Now it is a wiring fault,
 // because that is whose mistake it is.
@@ -1369,16 +1369,16 @@ func TestCheckDescribed_faultsWhenConfigInputsHaveNoDescriptor(t *testing.T) {
 
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	var in inputs
-	err := NewBinderWithoutDescriptor().Bind(rtx, &in)
+	err := newInputReaderWithoutDescriptor().Read(rtx, &in)
 
 	if err == nil {
-		t.Fatal("Bind succeeded with config: inputs and no BindMeta — the values would be silently zero")
+		t.Fatal("Bind succeeded with config: inputs and no InputSettings — the values would be silently zero")
 	}
 	var we *WiringError
 	if !errors.As(err, &we) {
 		t.Errorf("error is %T (%v), want a *WiringError — this is the program author's mistake, not the user's", err, err)
 	}
-	if !strings.Contains(err.Error(), "WithBindMeta") {
+	if !strings.Contains(err.Error(), "WithInputSettings") {
 		t.Errorf("error %q does not name the call that fixes it", err)
 	}
 }
@@ -1398,10 +1398,10 @@ func TestCheckDescribed_anEmptyDescriptorIsLegal(t *testing.T) {
 		}
 	}
 
-	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithBindMeta(BindMeta{})
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil).WithInputSettings(InputSettings{})
 	var in inputs
-	if err := binderFor(rtx).Bind(rtx, &in); err != nil {
-		t.Errorf("Bind failed with an explicitly empty BindMeta: %v", err)
+	if err := readerFor(rtx).Read(rtx, &in); err != nil {
+		t.Errorf("Bind failed with an explicitly empty InputSettings: %v", err)
 	}
 }
 
@@ -1422,7 +1422,7 @@ func TestCheckDescribed_noConfigInputsNeedsNoDescriptor(t *testing.T) {
 		Flags: []FlagDef{{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"}},
 	}, []string{"-v"})
 	var in inputs
-	if err := NewBinderWithoutDescriptor().Bind(rtx, &in); err != nil {
+	if err := newInputReaderWithoutDescriptor().Read(rtx, &in); err != nil {
 		t.Errorf("Bind failed for an argv-only command with no descriptor: %v", err)
 	}
 	if !in.App.Flags.Verbose {
@@ -1450,14 +1450,14 @@ func tbFallbackDef(secret bool) Definition {
 
 // A bad env or config value for a flag is the user's error exactly as `--port abc` is. It used
 // to be dropped: `PORT=abc` bound port 0 and the command ran.
-func TestBinder_badFallbackValueIsAUsageError(t *testing.T) {
+func TestInputReader_badFallbackValueIsAUsageError(t *testing.T) {
 	t.Run("env", func(t *testing.T) {
 		t.Setenv("PORT", "abc")
 		var in tbFallbackInputs
-		err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(false), nil), &in)
-		var be *BindError
+		err := NewInputReader(InputSettings{}).Read(NewContextFor(tbFallbackDef(false), nil), &in)
+		var be *InputError
 		if !errors.As(err, &be) || CategoryOf(err) != CategoryUsage {
-			t.Fatalf("err = %v (%T), want a usage *BindError", err, err)
+			t.Fatalf("err = %v (%T), want a usage *InputError", err, err)
 		}
 		for _, want := range []string{"--port", `"abc" is not a valid integer`, "environment variable PORT"} {
 			if !strings.Contains(err.Error(), want) {
@@ -1468,8 +1468,8 @@ func TestBinder_badFallbackValueIsAUsageError(t *testing.T) {
 	t.Run("config", func(t *testing.T) {
 		cfg := writeConfig(t, "port: abc\n")
 		var in tbFallbackInputs
-		err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
-			Bind(NewContextFor(tbFallbackDef(false), nil), &in)
+		err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+			Read(NewContextFor(tbFallbackDef(false), nil), &in)
 		if err == nil || !strings.Contains(err.Error(), `configuration file "app"`) {
 			t.Fatalf("err = %v, want it to name the configuration file", err)
 		}
@@ -1477,7 +1477,7 @@ func TestBinder_badFallbackValueIsAUsageError(t *testing.T) {
 	t.Run("secret", func(t *testing.T) {
 		t.Setenv("PORT", "hunter2")
 		var in tbFallbackInputs
-		err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(true), nil), &in)
+		err := NewInputReader(InputSettings{}).Read(NewContextFor(tbFallbackDef(true), nil), &in)
 		if err == nil || strings.Contains(err.Error(), "hunter2") {
 			t.Fatalf("err = %v, want an error that does not show the secret", err)
 		}
@@ -1485,7 +1485,7 @@ func TestBinder_badFallbackValueIsAUsageError(t *testing.T) {
 	t.Run("good value still binds", func(t *testing.T) {
 		t.Setenv("PORT", "8080")
 		var in tbFallbackInputs
-		if err := NewBinder(BindMeta{}).Bind(NewContextFor(tbFallbackDef(false), nil), &in); err != nil || in.App.Flags.Port != 8080 {
+		if err := NewInputReader(InputSettings{}).Read(NewContextFor(tbFallbackDef(false), nil), &in); err != nil || in.App.Flags.Port != 8080 {
 			t.Fatalf("Port = %d, err = %v; want 8080", in.App.Flags.Port, err)
 		}
 	})
@@ -1510,30 +1510,30 @@ type tbChannelEnumInputs struct {
 
 // An enum on an env or config input was advertised in help and never checked: MODE=bogus bound
 // "bogus". It is now enforced there exactly as on argv.
-func TestBinder_channelEnumEnforced(t *testing.T) {
-	bind := func(t *testing.T, meta BindMeta) (tbChannelEnumInputs, error) {
+func TestInputReader_channelEnumEnforced(t *testing.T) {
+	bind := func(t *testing.T, meta InputSettings) (tbChannelEnumInputs, error) {
 		t.Helper()
 		var in tbChannelEnumInputs
-		err := NewBinder(meta).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+		err := NewInputReader(meta).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 		return in, err
 	}
 	t.Run("env rejects a non-member, naming the variable", func(t *testing.T) {
 		t.Setenv("MODE", "bogus")
-		_, err := bind(t, BindMeta{})
+		_, err := bind(t, InputSettings{})
 		if err == nil || CategoryOf(err) != CategoryUsage || !strings.Contains(err.Error(), `invalid value "bogus" for MODE (one of: fast, slow)`) {
 			t.Fatalf("err = %v, want a usage error naming MODE and its members", err)
 		}
 	})
 	t.Run("env is case-sensitive by default", func(t *testing.T) {
 		t.Setenv("MODE", "FAST")
-		if _, err := bind(t, BindMeta{}); err == nil {
+		if _, err := bind(t, InputSettings{}); err == nil {
 			t.Fatal("MODE=FAST accepted without ignorecase")
 		}
 	})
 	t.Run("ignorecase binds the declared spelling", func(t *testing.T) {
 		t.Setenv("LEVEL", "INFO")
 		t.Setenv("TAGS", "A,b")
-		in, err := bind(t, BindMeta{})
+		in, err := bind(t, InputSettings{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1543,7 +1543,7 @@ func TestBinder_channelEnumEnforced(t *testing.T) {
 	})
 	t.Run("config rejects a non-member", func(t *testing.T) {
 		cfg := writeConfig(t, "tier: bronze\n")
-		_, err := bind(t, BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		_, err := bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 		if err == nil || !strings.Contains(err.Error(), `invalid value "bronze" for tier`) {
 			t.Fatalf("err = %v, want an enum violation for tier", err)
 		}
@@ -1575,25 +1575,25 @@ func tbListDef() Definition {
 // channel: its argv values were re-read through the fallback registry and came back as the
 // single string "[a b]" (or "map[k:v]", which then failed as not key=value), and a config
 // file's YAML list bound the same way.
-func TestBinder_listAndMapFlagsWithAFallback(t *testing.T) {
-	bind := func(t *testing.T, argv []string, meta BindMeta) tbListInputs {
+func TestInputReader_listAndMapFlagsWithAFallback(t *testing.T) {
+	bind := func(t *testing.T, argv []string, meta InputSettings) tbListInputs {
 		t.Helper()
 		var in tbListInputs
-		if err := NewBinder(meta).Bind(NewContextFor(tbListDef(), argv), &in); err != nil {
+		if err := NewInputReader(meta).Read(NewContextFor(tbListDef(), argv), &in); err != nil {
 			t.Fatalf("Bind: %v", err)
 		}
 		return in
 	}
 	t.Run("argv", func(t *testing.T) {
 		t.Setenv("TAGS", "from-env") // argv outranks it
-		in := bind(t, []string{"--tags", "a", "--tags", "b", "--labels", "k=v", "--ports", "1,2"}, BindMeta{})
+		in := bind(t, []string{"--tags", "a", "--tags", "b", "--labels", "k=v", "--ports", "1,2"}, InputSettings{})
 		if !slices.Equal(in.App.Flags.Tags, []string{"a", "b"}) || in.App.Flags.Labels["k"] != "v" || !slices.Equal(in.App.Flags.Ports, []int{1, 2}) {
 			t.Errorf("tags=%q labels=%v ports=%v", in.App.Flags.Tags, in.App.Flags.Labels, in.App.Flags.Ports)
 		}
 	})
 	t.Run("config list and map", func(t *testing.T) {
 		cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v, x: y}\nports: [8080, 9090]\n")
-		in := bind(t, nil, BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		in := bind(t, nil, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 		if !slices.Equal(in.App.Flags.Tags, []string{"a", "b"}) || len(in.App.Flags.Labels) != 2 || in.App.Flags.Labels["x"] != "y" ||
 			!slices.Equal(in.App.Flags.Ports, []int{8080, 9090}) {
 			t.Errorf("tags=%q labels=%v ports=%v", in.App.Flags.Tags, in.App.Flags.Labels, in.App.Flags.Ports)
@@ -1602,7 +1602,7 @@ func TestBinder_listAndMapFlagsWithAFallback(t *testing.T) {
 	t.Run("env splits on the separator only when declared", func(t *testing.T) {
 		t.Setenv("PORTS", "1, 2,3")
 		t.Setenv("TAGS", "a,b") // no separator: one item, as written
-		in := bind(t, nil, BindMeta{})
+		in := bind(t, nil, InputSettings{})
 		if !slices.Equal(in.App.Flags.Ports, []int{1, 2, 3}) || !slices.Equal(in.App.Flags.Tags, []string{"a,b"}) {
 			t.Errorf("ports=%v tags=%q", in.App.Flags.Ports, in.App.Flags.Tags)
 		}
@@ -1625,12 +1625,12 @@ type tbMultiEnvInputs struct {
 
 // `variable: [GH_TOKEN, GITHUB_TOKEN]` generates env:"GH_TOKEN,GITHUB_TOKEN": the first name
 // that is set supplies the value, on a flag's fallback and on an env input alike.
-func TestBinder_severalVariableNames(t *testing.T) {
+func TestInputReader_severalVariableNames(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{{Name: "token", Identifiers: []string{"--token"}, Type: "string"}}}
 	bind := func(t *testing.T) (tbMultiEnvInputs, error) {
 		t.Helper()
 		var in tbMultiEnvInputs
-		err := NewBinder(BindMeta{}).Bind(NewContextFor(def, nil), &in)
+		err := NewInputReader(InputSettings{}).Read(NewContextFor(def, nil), &in)
 		return in, err
 	}
 	t.Run("a later name when the first is unset", func(t *testing.T) {
@@ -1661,12 +1661,12 @@ func TestBinder_severalVariableNames(t *testing.T) {
 
 // An environment variable that is set but empty is unset, for a flag's fallback: the config file
 // and then the default supply the value, rather than "" outranking them and failing to parse.
-func TestBinder_emptyEnvFallsThrough(t *testing.T) {
+func TestInputReader_emptyEnvFallsThrough(t *testing.T) {
 	cfg := writeConfig(t, "port: 9090\n")
 	t.Setenv("PORT", "")
 	var in tbFallbackInputs
-	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
-		Bind(NewContextFor(tbFallbackDef(false), nil), &in)
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Read(NewContextFor(tbFallbackDef(false), nil), &in)
 	if err != nil || in.App.Flags.Port != 9090 {
 		t.Fatalf("Port = %d, err = %v; want the config file's 9090", in.App.Flags.Port, err)
 	}
@@ -1675,7 +1675,7 @@ func TestBinder_emptyEnvFallsThrough(t *testing.T) {
 // An env or config input's bool takes the spellings a flag's does. recon alone accepts only
 // true/false/1/0, so CACHE=yes failed on an env input while working as a flag's fallback.
 // A string input whose value is "yes" is untouched.
-func TestBinder_boolSpellingsOnEnvAndConfig(t *testing.T) {
+func TestInputReader_boolSpellingsOnEnvAndConfig(t *testing.T) {
 	type inputs struct {
 		App struct {
 			Flags     struct{}
@@ -1693,8 +1693,8 @@ func TestBinder_boolSpellingsOnEnvAndConfig(t *testing.T) {
 	t.Setenv("CACHE", "Yes")
 	t.Setenv("ANSWER", "yes")
 	var in inputs
-	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
-		Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1703,14 +1703,14 @@ func TestBinder_boolSpellingsOnEnvAndConfig(t *testing.T) {
 	}
 	t.Setenv("CACHE", "maybe")
 	var bad inputs
-	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
+	if err := NewInputReader(InputSettings{}).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
 		t.Error("CACHE=maybe accepted")
 	}
 }
 
 // A date on an env or config input reads the same way a date flag does: the generated layout
 // tag reaches recon through the source, which alone would demand RFC 3339.
-func TestBinder_channelTimeLayouts(t *testing.T) {
+func TestInputReader_channelTimeLayouts(t *testing.T) {
 	type inputs struct {
 		App struct {
 			Flags     struct{}
@@ -1728,8 +1728,8 @@ func TestBinder_channelTimeLayouts(t *testing.T) {
 	t.Setenv("SINCE", "2026-09-29")
 	t.Setenv("EPOCH", "1759104000")
 	var in inputs
-	err := NewBinder(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
-		Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+	err := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}).
+		Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1739,7 +1739,7 @@ func TestBinder_channelTimeLayouts(t *testing.T) {
 	}
 	t.Setenv("SINCE", "yesterday")
 	var bad inputs
-	if err := NewBinder(BindMeta{}).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
+	if err := NewInputReader(InputSettings{}).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &bad); err == nil {
 		t.Error("SINCE=yesterday accepted")
 	}
 }
@@ -1747,7 +1747,7 @@ func TestBinder_channelTimeLayouts(t *testing.T) {
 // An env or config duration reads days and weeks like a flag does, and a duration or size bound
 // applies on those channels too — recon's own parser stops at hours, and a duration read as a
 // plain integer never met its bound.
-func TestBinder_channelDurationsAndBounds(t *testing.T) {
+func TestInputReader_channelDurationsAndBounds(t *testing.T) {
 	type inputs struct {
 		App struct {
 			Flags     struct{}
@@ -1763,11 +1763,11 @@ func TestBinder_channelDurationsAndBounds(t *testing.T) {
 	bind := func(t *testing.T, cfg string) (inputs, error) {
 		t.Helper()
 		var in inputs
-		meta := BindMeta{}
+		meta := InputSettings{}
 		if cfg != "" {
 			meta.ConfigFiles = []ConfigFile{{Name: "app", Path: writeConfig(t, cfg), Format: "yaml"}}
 		}
-		err := NewBinder(meta).Bind(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
+		err := NewInputReader(meta).Read(NewContextFor(Definition{Name: "app", Handler: "App"}, nil), &in)
 		return in, err
 	}
 	t.Setenv("TTL", "3d")
@@ -1788,7 +1788,7 @@ func TestBinder_channelDurationsAndBounds(t *testing.T) {
 // A parent collecting its own inputs (in CascadingPreRun, say) judges only its own frames: the
 // leaf's required flag is the leaf's handler's business. Judging it here failed `app sub --help`
 // before sub's handler could answer the --help.
-func TestBinder_validatesOnlyTheFramesTheTypeDescribes(t *testing.T) {
+func TestInputReader_validatesOnlyTheFramesTheTypeDescribes(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{{Name: "config", Identifiers: []string{"--config"}, Type: "string"}},
@@ -1810,7 +1810,7 @@ func TestBinder_validatesOnlyTheFramesTheTypeDescribes(t *testing.T) {
 	}
 	rtx := NewContextFor(def, []string{"--config", "c.yaml", "sub", "-h"})
 	rtx.frame = 0 // collecting from the root's own hook
-	if err := NewBinder(BindMeta{}).Bind(rtx, &root); err != nil || root.App.Flags.Config != "c.yaml" {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &root); err != nil || root.App.Flags.Config != "c.yaml" {
 		t.Fatalf("root collect: config=%q err=%v", root.App.Flags.Config, err)
 	}
 	// The leaf's own collect still enforces its required flag.
@@ -1830,13 +1830,13 @@ func TestBinder_validatesOnlyTheFramesTheTypeDescribes(t *testing.T) {
 		}
 	}
 	rtx.frame = 1
-	if err := NewBinder(BindMeta{}).Bind(rtx, &leaf); err == nil || !strings.Contains(err.Error(), "-f") {
+	if err := NewInputReader(InputSettings{}).Read(rtx, &leaf); err == nil || !strings.Contains(err.Error(), "-f") {
 		t.Errorf("leaf collect: err = %v, want the missing -f", err)
 	}
 }
 
 // TestReconBind_unrecognizedCause covers the fallback arm of reconBind: a recon failure that
-// is none of the four typed ones still has to produce a categorized, non-leaky *BindError
+// is none of the four typed ones still has to produce a categorized, non-leaky *InputError
 // naming the channel in plain words ("environment", not "env").
 func TestReconBind_unrecognizedCause(t *testing.T) {
 	cause := errors.New("some unrecognized recon failure")
@@ -1853,9 +1853,9 @@ func TestReconBind_unrecognizedCause(t *testing.T) {
 		t.Run(tc.channel, func(t *testing.T) {
 			err := reconBind(tc.channel, cause)
 
-			var be *BindError
+			var be *InputError
 			if !errors.As(err, &be) {
-				t.Fatalf("reconBind returned %T, want a *BindError", err)
+				t.Fatalf("reconBind returned %T, want an *InputError", err)
 			}
 			if !strings.Contains(be.Msg, tc.want) {
 				t.Errorf("message %q does not name the channel as %q", be.Msg, tc.want)
@@ -1904,9 +1904,9 @@ func TestReconBind_rootPathIsNamedByChannel(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var be *BindError
+			var be *InputError
 			if !errors.As(reconBind(channelStdin, tc.cause), &be) {
-				t.Fatalf("reconBind did not return a *BindError for %T", tc.cause)
+				t.Fatalf("reconBind did not return an *InputError for %T", tc.cause)
 			}
 			if be.Msg != tc.want {
 				t.Errorf("message = %q, want %q", be.Msg, tc.want)

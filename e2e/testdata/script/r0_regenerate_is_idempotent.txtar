@@ -44,19 +44,19 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*demoHandlers)(nil)
+var _ rotini.Handler = (*demoHandler)(nil)
 
-// demoHandlers is what an author's stub looks like once they have replaced the seeded body:
+// demoHandler is what an author's stub looks like once they have replaced the seeded body:
 // the embeds kept, Run rewritten. Regenerating must not touch a byte of it.
-type demoHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type demoHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rotini.Collect[DemoInputs](rtx)
+func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DemoInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)

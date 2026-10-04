@@ -2,85 +2,57 @@ package rotini
 
 import (
 	"bytes"
-	"errors"
-	"fmt"
 	"io"
 	"maps"
 	"os"
-	"reflect"
 	"slices"
 	"strings"
 	"sync"
 )
 
-// ErrServiceNotFound is the sentinel reported when a registry key is unbound, or bound to a
-// value of the wrong type, which [Context.MustGet] cannot hand back either. MustGet panics a
-// [*ServiceError] wrapping it, which the runtime recovers and routes to the funnel.
-var ErrServiceNotFound = errors.New("rotini: service not found")
-
-// ServiceError reports a registry key that was requested but unbound, or bound to the wrong
-// type. It unwraps to [ErrServiceNotFound]; recover the key with errors.As.
-type ServiceError struct {
-	Key string // the registry key that was requested
-
-	// got and want are the bound value's type and the requested one, when the key IS bound —
-	// to the wrong type. Both empty: nothing is bound.
-	got, want string
-}
-
-// Error renders the fault as a single line, saying which of the two it is: an unbound key
-// sends the reader to the binding code, a wrong type to the declaration.
-func (e *ServiceError) Error() string {
-	if e.got != "" {
-		return fmt.Sprintf("rotini: the service under key %q is a %s, not the %s requested", e.Key, e.got, e.want)
-	}
-	return fmt.Sprintf("rotini: no service bound under key %q", e.Key)
-}
-
-// Unwrap exposes both [ErrServiceNotFound] and [ErrInternal], so [CategoryOf] classifies a
-// missing service as [CategoryInternal] — a wiring bug, not the user's fault.
-func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, ErrInternal} }
-
-// Context is rotini's per-invocation context: the service registry, the program's streams, and
-// what the runtime resolved before dispatch — the raw argument vector ([Context.Argv]) and the
-// resolved command chain ([Context.Chain]). One is built per [Program.Run] and passed to every
-// hook, so all hooks share the same bindings and exit state and no records leak between
+// Context is rotini's per-invocation context: the program's dependencies, its streams, and what
+// the runtime resolved before dispatch — the raw argument vector ([Context.Argv]) and the
+// resolved command chain ([Context.CommandChain]). One is built per [Program.Run] and passed to
+// every hook, so all hooks share the same bindings and exit state and no records leak between
 // invocations.
 //
-// The surface groups into six jobs, and nothing outside them is worth hunting for:
+// The surface groups into seven jobs, and nothing outside them is worth hunting for:
 //
 //   - what was typed — the [Context.Argv], [Context.Stdin], [Context.Stdout] and
 //     [Context.Stderr] fields above
-//   - which command — [Context.Frame] is whose hook is running, [Context.Command] is the one
-//     the user invoked, [Context.IsLeaf] says whether they are the same, [Context.CommandPath]
-//     names it, [Context.Chain] is the whole path
-//   - YOUR dependencies — [Context.Bind] and [Context.BindIfAbsent] for a key you name,
-//     [Context.Get] and [Context.MustGet] to read one back, [Context.Value] for the raw entry
+//   - which command — [Context.Command] is the command whose hook is running (its Invoked field
+//     says whether it is the one the user ran), [Context.CommandPath] names it, and
+//     [Context.CommandChain] is every command from the root to the invoked one
+//   - inputs — [Context.Inputs] for the command's validated inputs in one call,
+//     [Context.InputsWithReport] for the same plus where each value came from, and the
+//     per-channel [Context.ArgvInputs], [Context.EnvInputs], [Context.FileInputs],
+//     [Context.StdinInputs] and [Context.DefaultInputs]
+//   - YOUR dependencies — [Context.GetDependency] and [Context.MustGetDependency] to read one,
+//     [Context.SetDependency] and [Context.SetDependencyIfAbsent] to set one for this run
 //   - report what happened — [Context.RecordInfo], [Context.RecordSuccess],
 //     [Context.RecordWarning], [Context.RecordError], and [Context.Failed] to ask
 //   - stop — [Context.HaltWith] to fail, [Context.Halt] to stop, [Context.HaltWithCode] when
 //     the code is the point, [Context.Exit] to skip pending teardown
 //   - rotini's own seams — [Context.Version], [Context.Help] and [Context.Parser] to read, and
 //     for a Context you built yourself rather than one the runtime handed you,
-//     [Context.WithVersion], [Context.WithHelp], [Context.WithParser], [Context.WithBindMeta]
-//     and [Context.WithBinder] to set
+//     [Context.WithVersion], [Context.WithHelp], [Context.WithParser], [Context.WithInputSettings]
+//     and [Context.WithInputReader] to set
 //
-// Inputs are NOT on this list. A handler reads them with [Collect], which takes the Context
-// rather than hanging off it, because parsing is opt-in: a CLI that wants raw argv never calls
-// it and reads [Context.Argv].
+// Parsing is opt-in: nothing is parsed or validated until a handler calls one of the inputs
+// methods. A CLI that wants raw argv never calls them and reads [Context.Argv].
 //
-// The registry is the dependency-injection seam: bind a service with [Context.Bind] and
-// retrieve it with [Context.Get], [Context.MustGet] or the raw [Context.Value]. Bindings last
-// the lifetime of the Context.
+// Dependencies are the dependency-injection seam: a typed [Dependency] handle names each one.
+// Those registered with [Program.WithDependency] are seeded into every run; one set with
+// [Context.SetDependency] lasts the lifetime of this Context.
 //
-// A Context is safe for concurrent registry access — a handler may read it, record outcomes
+// A Context is safe for concurrent access — a handler may read it, record outcomes
 // and reach its seams from goroutines it spawned. Always pass it as a pointer; it must not be
 // copied.
 //
-// Safe is not the same as unchanging. [Context.Frame] tracks the lifecycle's progress, so a
+// Safe is not the same as unchanging. [Context.Command] tracks the lifecycle's progress, so a
 // goroutine that outlives the hook that spawned it reads the step running when it looks rather
-// than the step that started it — see Frame. Everything else a handler reads here is fixed for
-// the run.
+// than the step that started it — see [Context.Command]. Everything else a handler reads here
+// is fixed for the run.
 //
 // A nil *Context is a caller bug, not a state to handle: the runtime always hands a real one
 // to every hook, and [NewContextFor] never returns nil, so the methods a handler reads and
@@ -90,10 +62,10 @@ func (e *ServiceError) Unwrap() []error { return []error{ErrServiceNotFound, Err
 // ([Context.WithVersion] and its siblings) are the exception — on a nil Context they do nothing
 // and return nil.
 //
-// rotini's own entry points that ACCEPT a Context from a caller — [Deprecations], [Collect]
-// and the per-channel functions — still check it: [Collect] and the per-channel functions
-// report a nil one as an error, and Deprecations reports none. The guard belongs at the
-// boundary, not on every method behind it.
+// rotini's own input entry points still check it: the inputs methods ([Context.Inputs] and its
+// per-channel siblings) report a nil Context as an error, and [Deprecations], which accepts a
+// Context from a caller, reports none. The guard belongs at the boundary, not on every method
+// behind it.
 type Context struct {
 	mu sync.RWMutex
 
@@ -103,7 +75,7 @@ type Context struct {
 	// are set before dispatch, never mutated by rotini thereafter, and never nil.
 	//
 	// They are for READING. Assigning one is not supported and does not do what it looks like:
-	// the default funnel reports through the PROGRAM's streams, so a hook that swaps
+	// the default reporter reports through the PROGRAM's streams, so a hook that swaps
 	// rtx.Stdout redirects its own writes and nothing else — the run's errors still go where
 	// they were always going. To redirect a whole invocation, configure the Program
 	// ([Program.WithStdout]) or give the run its own ([Program.RunContext] on a Program built
@@ -115,36 +87,36 @@ type Context struct {
 	// Argv is the raw argument vector for this invocation, with everything after the resolved
 	// command path still present, so a handler can run its own parser instead of
 	// [Parser.Parse]. It is the live slice, not a copy: a handler that mutates it changes what
-	// every later read sees, including the Parser and Binder.
+	// every later read sees, including the Parser and InputReader.
 	//
 	// Argv, not Args: these are the invocation's raw tokens, command names and flags included.
 	// A command's DECLARED positionals are the generated inputs' Arguments field, already
 	// parsed, typed and validated — a different thing that a handler reaches for far more often.
 	Argv []string
 
-	services    map[string]any
-	chain       []ResolvedCommand // resolved command path, root → leaf
-	exitCode    int               // first non-zero wins; the funnel overrides
-	stopped     bool              // an exit was requested: forward progress halts
-	exitNow     bool              // hard Exit: skip remaining teardown too
-	funnelStage bool              // the funnel is executing: Exit overrides, HaltWithCode is a no-op
-	infos       []string          // the five outcome channels, all private: they surface
-	errs        []error           // only as the slices handed to the funnel. faults are
-	warnings    []error           // the lifecycle's to capture, never a handler's to record.
-	successes   []string
-	faults      []*PanicError
+	services      map[string]any
+	chain         []Command // resolved command path, root → leaf
+	exitCode      int       // first non-zero wins; the reporter overrides
+	stopped       bool      // an exit was requested: forward progress halts
+	exitNow       bool      // hard Exit: skip remaining teardown too
+	reporterStage bool      // the reporter is executing: Exit overrides, HaltWithCode is a no-op
+	infos         []string  // the five outcome channels, all private: they surface
+	errs          []error   // only as the slices handed to the reporter. faults are
+	warnings      []error   // the lifecycle's to capture, never a handler's to record.
+	successes     []string
+	faults        []*PanicError
 
 	// frame is the chain index of the command whose hook is currently running, or -1 for
 	// "not inside a hook", which resolves to the leaf. The lifecycle sets it around every
-	// step (see [AtFrame]); it is what lets an inputs struct be anchored on the caller's own
-	// command rather than guessed from its field count. See [Context.Frame].
+	// step (see [AsCommand]); it is what lets an inputs struct be anchored on the caller's own
+	// command rather than guessed from its field count. See [Context.Command].
 	frame int
 
-	// rotini's own seams, seeded from the Program each run — see [Program.WithBindMeta].
+	// rotini's own seams, seeded from the Program each run — see [Program.WithInputSettings].
 	// They are deliberately NOT in services: the registry is the user's namespace, and a
 	// value the runtime depends on must not share a flat keyspace with it.
-	meta     *BindMeta
-	binderFn func(BindMeta) *Binder
+	meta     *InputSettings
+	readerFn func(InputSettings) *InputReader
 	version  string
 	help     HelpFunc
 	parser   *Parser
@@ -152,7 +124,7 @@ type Context struct {
 	// flagStdinMemo is stdin as the flag channel saw it: read once, the first time a `from: [stdin]`
 	// flag's "-" asks for it, and replayed to every later parse of the same run. Parsing argv
 	// resolves that sentinel, and argv is parsed more than once in a run — the generated --help
-	// check, a parent collecting its own inputs, Collect itself — while stdin can be read once.
+	// check, a parent collecting its own inputs, Inputs itself — while stdin can be read once.
 	flagStdinMemo *stdinMemo
 }
 
@@ -218,7 +190,7 @@ func newContext() *Context {
 
 // NewContextFor builds a [Context] with argv resolved against an explicit def — the same
 // context the runtime hands a handler at dispatch. Use it to exercise the [Parser] or the
-// [Collect] family, or a single hook, against a Definition you construct:
+// [Context.Inputs] family, or a single hook, against a Definition you construct:
 //
 //	def := rotini.Definition{Name: "app", Handler: "App", Commands: []rotini.CommandDef{ … }}
 //	rtx := rotini.NewContextFor(def, []string{"build", "x.yaml"})
@@ -229,145 +201,122 @@ func newContext() *Context {
 // the generated NewProgram and run it under a recording exit and captured streams instead; the
 // generated command tree is unexported.
 //
-// A remote token resolves to as much of the chain as precedes it. NewContextFor does not exec
+// A plugin token resolves to as much of the chain as precedes it. NewContextFor does not exec
 // the sibling binary the runtime would.
 func NewContextFor(def Definition, argv []string) *Context {
 	rtx := newContext()
 	chain, _ := resolveChain(def, argv)
+	markInvoked(chain)
 	rtx.Argv = argv
 	rtx.chain = chain
 	return rtx
 }
 
-// Bind associates value with key, overwriting any prior binding, and returns the receiver so
-// calls chain. It is safe for concurrent use.
-func (rtx *Context) Bind(key string, value any) *Context {
-	rtx.mu.Lock()
-	defer rtx.mu.Unlock()
-	if rtx.services == nil {
-		rtx.services = make(map[string]any)
-	}
-	rtx.services[key] = value
-	return rtx
-}
-
-// BindIfAbsent binds value under key only if key is not already bound, atomically. It is the
-// registered-default form of [Context.Bind]: a handler registers the real implementation of a
-// dependency, but a test that bound a double under the same key earlier keeps it. Either way
-// the dependency is resolvable from the registry rather than hidden inline.
+// CommandChain returns every command of this invocation, from the root to the one the user
+// invoked: chain[0] is the root, and the last entry — the only one whose Invoked is set — is
+// the invoked command. The [Parser] and [InputReader] read it to bind inputs against the
+// running command.
 //
-//	rtx.BindIfAbsent("clock", time.Now)
-//	now := rtx.MustGet[func() time.Time]("clock")
+// The slice is a COPY, so reordering, reslicing or replacing an entry is a caller's own
+// business and cannot reach the run — [Context.CommandPath], [Context.Command], the input reader's
+// alignment and configuration-file scoping all read the run's own chain. The outcome channels
+// are copied for the same reason.
 //
-// MustGet matches the bound value's exact type, so a value bound as a plain func is only
-// found under a func type, or an alias of one — not under a named func type.
-func (rtx *Context) BindIfAbsent(key string, value any) *Context {
-	rtx.mu.Lock()
-	defer rtx.mu.Unlock()
-	if rtx.services == nil {
-		rtx.services = make(map[string]any)
-	}
-	if _, ok := rtx.services[key]; !ok {
-		rtx.services[key] = value
-	}
-	return rtx
-}
-
-// Chain returns the resolved command path for this invocation, root → leaf. The [Parser] and
-// [Binder] read it to bind inputs against the command whose handler ran.
-//
-// The slice is a COPY, so reordering, reslicing or replacing a frame is a caller's own
-// business and cannot reach the run — [Context.CommandPath], [Context.Command], the binder's
-// frame alignment and configuration-file scoping all read the run's own chain. The outcome
-// channels are copied for the same reason.
-//
-// The copy is one level deep, which is the boundary that exists to defend. A frame's Flags,
+// The copy is one level deep, which is the boundary that exists to defend. A command's Flags,
 // Arguments and Commands are the [Definition]'s own slices, shared program-wide and read-only
-// across every run by the same convention that lets one Program serve a REPL; Chain neither
-// widens nor narrows that.
-func (rtx *Context) Chain() []ResolvedCommand {
+// across every run by the same convention that lets one Program serve a REPL; CommandChain
+// neither widens nor narrows that.
+func (rtx *Context) CommandChain() []Command {
 	return slices.Clone(rtx.chain)
 }
 
-// Command returns the command this invocation resolved to — the leaf of the chain, whose Run
-// is executing, or the root for a bare root invocation:
-//
-//	rtx.RecordError(fmt.Errorf("%s: %w", rtx.Command().Name, err))
-//
-// [Context.Chain] has the ancestors and the argv token that matched each one.
-func (rtx *Context) Command() ResolvedCommand {
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	if len(rtx.chain) == 0 {
-		return ResolvedCommand{}
+// markInvoked sets Invoked on the last command of chain and clears it everywhere else, so
+// exactly one entry is the invoked command whoever built the chain — the default resolver, a
+// replacement from [Program.WithResolver], or [NewContextFor].
+func markInvoked(chain []Command) {
+	for i := range chain {
+		chain[i].Invoked = i == len(chain)-1
 	}
-	return rtx.chain[len(rtx.chain)-1]
 }
 
-// frameUnset marks a Context that is not inside a lifecycle step. It resolves to the leaf,
-// which is what every non-cascading hook wants and what the API did before frames existed.
+// frameUnset marks a Context that is not inside a lifecycle step. It resolves to the invoked
+// command, which is what every non-cascading hook wants.
 const frameUnset = -1
 
-// Frame returns the command whose hook is currently running.
+// Command returns the command whose hook is running.
 //
-// This is not always [Context.Command], and the difference is the whole point. Command is the
-// command the user INVOKED — the leaf of the chain — and it is the same value in every hook of
-// the run. Frame is the command this particular hook belongs to:
+// In PreRun, Run and PostRun that is the command the user invoked. A cascading hook runs for
+// every command in the chain, and there it is the command the hook belongs to:
 //
-//	$ mig db status        — Command() is the leaf, "status", in every hook below
+//	$ mig db status
 //
-//	hook                                 Frame()
-//	────                                 ───────
-//	mig's CascadingPreRun                mig
-//	db's CascadingPreRun                 db
-//	the leaf's PreRun / Run / PostRun    status
-//	db's CascadingPostRun                db
-//	mig's CascadingPostRun               mig
+//	hook                                 Command()     Command().Invoked
+//	────                                 ─────────     ─────────────────
+//	mig's CascadingPreRun                mig           false
+//	db's CascadingPreRun                 db            false
+//	the leaf's PreRun / Run / PostRun    status        true
+//	db's CascadingPostRun                db            false
+//	mig's CascadingPostRun               mig           false
 //
-// [Collect] anchors an inputs struct on this frame, which is what makes it correct in every
-// hook — including a composed child's cascading hook reading its own flags.
+// Invoked is how a cascading hook tells the command the user ran from an ancestor of it:
 //
-// Outside a lifecycle step — a Context from [NewContextFor], or one reaching a funnel after the
-// run has settled — there is no hook, and Frame reports the leaf.
+//	func (*songsHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+//	    if rtx.Command().Invoked {
+//	        // `musak songs` — this command IS the invocation; print help rather than defer.
+//	        return
+//	    }
+//	    // `musak songs list` — a sub-command is running; set up for it.
+//	}
+//
+// The rest of the chain is [Context.CommandChain]: its first entry is the root and its last is
+// the invoked command. [Context.Inputs], [Context.CommandPath] and [Context.Help] all describe
+// the command Command returns, which is what makes them correct in every hook — including a
+// composed child's cascading hook reading its own flags.
+//
+// Outside a lifecycle step — a Context from [NewContextFor], or one reaching a reporter after the
+// run has settled — there is no hook, and Command reports the invoked command.
 //
 // # It describes the step running NOW, not the one that spawned you
 //
-// The frame moves as the lifecycle advances, so Frame answers for whichever step is running when
-// it is called — not for the hook that happens to be on the stack. A goroutine a hook spawns and
-// does not wait for therefore reads whatever step the run has reached by the time it looks:
+// The running step moves as the lifecycle advances, so Command answers for whichever step is
+// running when it is called — not for the hook that happens to be on the stack. A goroutine a
+// hook spawns and does not wait for therefore reads whatever step the run has reached by the
+// time it looks:
 //
 //	func (*h) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 //	    go func() {
-//	        // The run has moved on. This may report the leaf, not this command.
-//	        log.Println(rtx.Frame().Name)
+//	        // The run has moved on. This may report the invoked command, not this one.
+//	        log.Println(rtx.Command().Name)
 //	    }()
 //	}
 //
-// It is not a data race — the frame is mutex-guarded and every read is consistent — but the
-// ANSWER is timing-dependent, and [Collect] anchors on it, so a goroutine collecting inputs may
-// anchor somewhere its spawning hook did not intend. Capture what you need before spawning:
+// It is not a data race — the step is mutex-guarded and every read is consistent — but the
+// ANSWER is timing-dependent, and [Context.Inputs] anchors on it, so a goroutine collecting
+// inputs may anchor somewhere its spawning hook did not intend. Capture what you need before
+// spawning:
 //
-//	frame := rtx.Frame()                       // or collect the inputs here
-//	go func() { log.Println(frame.Name) }()
+//	cmd := rtx.Command()                       // or collect the inputs here
+//	go func() { log.Println(cmd.Name) }()
 //
-// A goroutine the hook WAITS for, before returning, sees its spawner's frame.
-func (rtx *Context) Frame() ResolvedCommand {
+// A goroutine the hook WAITS for, before returning, sees its spawner's command.
+func (rtx *Context) Command() Command {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	if len(rtx.chain) == 0 {
-		return ResolvedCommand{}
+		return Command{}
 	}
 	return rtx.chain[rtx.frameIndexLocked()]
 }
 
-// frameIndex is the chain index Frame reports. Callers must not hold the lock.
+// frameIndex is the chain index of the command Command reports. Callers must not hold the lock.
 func (rtx *Context) frameIndex() int {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	return rtx.frameIndexLocked()
 }
 
-// frameIndexLocked resolves the unset sentinel to the leaf. The caller holds the lock.
+// frameIndexLocked resolves the unset sentinel to the invoked command. The caller holds the
+// lock.
 func (rtx *Context) frameIndexLocked() int {
 	if rtx.frame < 0 || rtx.frame >= len(rtx.chain) {
 		return max(len(rtx.chain)-1, 0)
@@ -375,8 +324,8 @@ func (rtx *Context) frameIndexLocked() int {
 	return rtx.frame
 }
 
-// setFrame records which frame's hook is running, returning the previous value so [AtFrame] can
-// restore it. Unexported: a handler never sets its own identity.
+// setFrame records which command's hook is running, returning the previous value so
+// [AsCommand] can restore it. Unexported: a handler never sets its own identity.
 func (rtx *Context) setFrame(i int) int {
 	rtx.mu.Lock()
 	defer rtx.mu.Unlock()
@@ -385,66 +334,32 @@ func (rtx *Context) setFrame(i int) int {
 	return prev
 }
 
-// IsLeaf reports whether [Context.Frame] is the command the user invoked — whether this hook
-// belongs to the leaf of the chain, or to one of its ancestors.
-//
-// In PreRun, Run and PostRun it is always true: those hooks only ever run for the leaf. It is a
-// real question in a cascading hook, which runs at every depth:
-//
-//	func (*songsHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-//	    if rtx.IsLeaf() {
-//	        // `musak songs` — this command IS the invocation; print help rather than defer.
-//	        return
-//	    }
-//	    // `musak songs list` — a sub-command is running; set up for it.
-//	}
-//
-// It exists because the obvious spelling does not compile: [ResolvedCommand] holds slices, so
-// rtx.Frame() == rtx.Command() is not a legal comparison, and comparing their Names is unsound
-// when a chain repeats one.
-//
-// Outside a lifecycle step the frame is the leaf, so it reports true.
-func (rtx *Context) IsLeaf() bool {
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	return rtx.frameIndexLocked() == max(len(rtx.chain)-1, 0)
-}
-
-// CommandPath returns the invoked command path, space-joined — "tasks add" for a sub-command,
-// "tasks" for a bare root invocation.
+// CommandPath returns the path of [Context.Command], space-joined from the root — "tasks add"
+// for a sub-command, "tasks" for the root. In a cascading hook running for `tasks add`, the root's
+// hook sees "tasks"; the invoked command's path is the names of [Context.CommandChain].
 //
 // The names are canonical, not the tokens the user typed, so an invocation through an alias
-// reports the real command name and a path is stable to log and aggregate on. Each frame's
-// Matched token in [Context.Chain] is what the user actually typed.
+// reports the real command name and a path is stable to log and aggregate on. Each command's
+// Matched token in [Context.CommandChain] is what the user actually typed.
 //
 // CommandPath, not Path: in this API "path" already means a filesystem location
-// ([RemoteBinaryPath], a command's PluginPath) and a route through an inputs struct
+// ([Command.PluginBinary], a command's PluginPath) and a route through an inputs struct
 // ([FieldPath]). This one is neither.
 func (rtx *Context) CommandPath() string {
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
+	if len(rtx.chain) == 0 {
+		return ""
+	}
 	names := make([]string, 0, len(rtx.chain))
-	for _, c := range rtx.chain {
+	for _, c := range rtx.chain[:rtx.frameIndexLocked()+1] {
 		names = append(names, c.Name)
 	}
 	return strings.Join(names, " ")
 }
 
-// Value returns the service bound under key, or nil if none is bound — the raw accessor,
-// mirroring [context.Context.Value]. It never panics.
-//
-// It is the fallback, not a peer of the typed readers. Reach for a [Key] and its Get/MustGet
-// when the key is known at compile time, which is nearly always; [Context.Get] and
-// [Context.MustGet] when you have the name but want the type checked; and Value only when the
-// key itself is computed and there is no type to assert.
-func (rtx *Context) Value(key string) any {
-	rtx.mu.RLock()
-	defer rtx.mu.RUnlock()
-	return rtx.services[key]
-}
-
 // Halt stops the lifecycle's FORWARD progress without claiming an exit code, leaving the
-// verdict to whatever else the run records and to the funnel. Teardown is unaffected: every
+// verdict to whatever else the run records and to the reporter. Teardown is unaffected: every
 // PostRun and CascadingPostRun whose paired setup hook began still runs, in reverse.
 //
 // Forward progress is the operative word, and it makes Halt load-bearing in two of the five
@@ -471,7 +386,7 @@ func (rtx *Context) Value(key string) any {
 //	}
 //
 // [Context.HaltWithCode] does two jobs at once — claim the code AND stop — so a program that
-// centralizes its exit policy in a funnel would have to write a number it did not mean purely
+// centralizes its exit policy in a reporter would have to write a number it did not mean purely
 // to stop, and explain in a comment that the number was a lie. Worse, the number then reads as
 // redundant: deleting it looks like tidying and silently removes the halt, so the next hook
 // collects the same inputs, hits the same validation and records the same error again. That
@@ -482,16 +397,16 @@ func (rtx *Context) Value(key string) any {
 // redundant. Reach for [Context.HaltWith] to fail, [Context.HaltWithCode] when the code IS the
 // point, and [Context.Exit] when pending teardown must not run.
 //
-// Like HaltWithCode it is a no-op inside the funnel, where the lifecycle has already run.
+// Like HaltWithCode it is a no-op inside the reporter, where the lifecycle has already run.
 func (rtx *Context) Halt() {
-	if rtx.funnelStage {
+	if rtx.reporterStage {
 		return
 	}
 	rtx.stopped = true
 }
 
 // HaltWith records err and stops the lifecycle's forward progress — [Context.RecordError] and
-// [Context.Halt] as one act. It claims no exit code: the funnel decides what the failure costs.
+// [Context.Halt] as one act. It claims no exit code: the reporter decides what the failure costs.
 //
 //	if err := store.Save(task); err != nil {
 //	    rtx.HaltWith(err)
@@ -516,10 +431,10 @@ func (rtx *Context) Halt() {
 // remains a supported choice; HaltWith exists so it is a deliberate one rather than what
 // omission gives you.
 //
-// Inside the funnel it does nothing at all, and does not report that it did nothing. The halt
+// Inside the reporter it does nothing at all, and does not report that it did nothing. The halt
 // is a no-op there, as [Context.Halt]'s is, and the recorded error is dropped: the [Outcome] was
-// snapshotted before the funnel was called, so nothing re-reads the channels afterwards. A
-// funnel that fails while reporting should write to rtx.Stderr and set a code with
+// snapshotted before the reporter was called, so nothing re-reads the channels afterwards. A
+// reporter that fails while reporting should write to rtx.Stderr and set a code with
 // [Context.Exit] — it is the final authority by then, and recording has no one left to tell.
 func (rtx *Context) HaltWith(err error) {
 	rtx.RecordError(err)
@@ -545,10 +460,10 @@ func (rtx *Context) HaltWith(err error) {
 // is the whole distinction and the reason it is spelled like [os.Exit], whose deferred functions
 // do not run either.
 //
-// It is a no-op inside the funnel, where the lifecycle has already run; [Context.Exit] is how
-// the funnel sets the code.
+// It is a no-op inside the reporter, where the lifecycle has already run; [Context.Exit] is how
+// the reporter sets the code.
 func (rtx *Context) HaltWithCode(code int) {
-	if rtx.funnelStage {
+	if rtx.reporterStage {
 		return
 	}
 	rtx.stopped = true
@@ -563,16 +478,16 @@ func (rtx *Context) HaltWithCode(code int) {
 // deliberate stop, not an error.
 //
 // It skips teardown, not fault reporting: a panic recovered before Exit still reaches the
-// funnel, so a handler cannot silently swallow one — though the funnel, as the final
+// reporter, so a handler cannot silently swallow one — though the reporter, as the final
 // authority, may.
 //
-// Inside the funnel, Exit overrides any code the lifecycle set; during the lifecycle it keeps
+// Inside the reporter, Exit overrides any code the lifecycle set; during the lifecycle it keeps
 // first-non-zero-wins.
 func (rtx *Context) Exit(code int) {
 	rtx.stopped = true
 	rtx.exitNow = true
-	if rtx.funnelStage {
-		rtx.exitCode = code // the funnel is the final authority — override any prior code
+	if rtx.reporterStage {
+		rtx.exitCode = code // the reporter is the final authority — override any prior code
 		return
 	}
 	if rtx.exitCode == 0 {
@@ -582,7 +497,7 @@ func (rtx *Context) Exit(code int) {
 
 // RecordInfo records msg as an informational message of this run — neutral output such as
 // progress or context, distinct from a success message only by intent. Like every record call
-// it neither prints nor stops the lifecycle: the funnel receives the infos once the run
+// it neither prints nor stops the lifecycle: the reporter receives the infos once the run
 // settles. An empty msg is ignored.
 func (rtx *Context) RecordInfo(msg string) {
 	if msg == "" {
@@ -600,11 +515,11 @@ func (rtx *Context) copyInfos() []string {
 
 // RecordError records err as one of this run's errors — the end-user's own failures. It
 // neither prints nor stops the lifecycle: a handler accumulates errors across any number of
-// calls and hooks, then chooses how to stop, and the funnel receives them once the run
+// calls and hooks, then chooses how to stop, and the reporter receives them once the run
 // settles either way. A nil err is ignored.
 //
 // Recovered panics and rotini-detected faults are not recorded here; the lifecycle captures
-// them as the funnel's panics slice.
+// them as the reporter's panics slice.
 //
 // Use it on its own when the run should CONTINUE — to collect several problems before anything
 // stops, or to leave the decision to a later hook that gates on [Context.Failed]:
@@ -636,7 +551,7 @@ func (rtx *Context) copyErrors() []error {
 // so secrets stay redacted, but it never raises the exit code. A nil warn is ignored.
 //
 // Why the Record family splits its parameter type, since the names do not say: the two
-// SEVERITY-bearing channels take an error, because a warning or a failure is something a funnel
+// SEVERITY-bearing channels take an error, because a warning or a failure is something a reporter
 // may want to branch on — categorize it with [CategoryOf], match it with errors.As, redact it.
 // [Context.RecordInfo] and [Context.RecordSuccess] take a string, because neither carries
 // severity and there is nothing to inspect. The asymmetry is deliberate, and the compiler tells
@@ -650,10 +565,10 @@ func (rtx *Context) RecordWarning(warn error) {
 	rtx.warnings = append(rtx.warnings, warn)
 }
 
-// RecordSuccess records msg as a success message of this run, for the funnel to present. An
+// RecordSuccess records msg as a success message of this run, for the reporter to present. An
 // empty msg is ignored.
 //
-// The funnel reports after the lifecycle settles, so recorded outcomes appear after anything a
+// The reporter reports after the lifecycle settles, so recorded outcomes appear after anything a
 // handler wrote directly to [Context.Stdout] during Run.
 func (rtx *Context) RecordSuccess(msg string) {
 	if msg == "" {
@@ -707,11 +622,11 @@ func snapshot[T any](rtx *Context, channel func(*Context) []T) []T {
 //	    tx.Commit()
 //	}
 //
-// The [Outcome] a funnel receives answers the same question, but a funnel runs AFTER every
+// The [Outcome] a reporter receives answers the same question, but a reporter runs AFTER every
 // teardown has finished — the right place to report a failure and much too late to undo one.
 //
 // It is deliberately one bit and not the errors themselves. A teardown that could read them
-// would be tempted to print them, and the whole point of the funnel is that a run reports its
+// would be tempted to print them, and the whole point of the reporter is that a run reports its
 // outcome exactly once, in one place, after everything has settled. Faults count: a panic in
 // the bracketed work is a failure, and a rollback is even more clearly right there.
 //
@@ -735,16 +650,6 @@ func (rtx *Context) recordFault(pe *PanicError) {
 	rtx.faults = append(rtx.faults, pe)
 }
 
-// Get returns the service bound under key as T, reporting ok=false when nothing is bound there
-// or the bound value is not a T. It never panics; use [Context.MustGet] to route a miss
-// through the funnel instead of handling it inline, or a typed [Key], which supplies T for you.
-//
-//	store, ok := rtx.Get[Store]("store")
-func (rtx *Context) Get[T any](key string) (T, bool) {
-	v, ok := rtx.Value(key).(T)
-	return v, ok
-}
-
 // ── rotini's own seams, as a standalone Context configures them ─────────────.
 //
 // A dispatched Context is seeded from the Program, so these are for a Context built by
@@ -756,13 +661,13 @@ func (rtx *Context) Get[T any](key string) (T, bool) {
 // and nothing else. The five sit in the same autocomplete list as [Context.Stdout], which is the
 // cost of sharing one vocabulary with the Program, so each one carries the scope itself.
 
-// WithBindMeta supplies the generated descriptor [Collect] reconciles from. See
-// [Program.WithBindMeta].
+// WithInputSettings supplies the generated descriptor [Context.Inputs] reconciles from. See
+// [Program.WithInputSettings].
 //
 // For a Context you built yourself. One handed to a hook is already seeded from the Program,
 // and this is not scoped to the current hook: every later hook of THIS run sees the change. It
 // does not outlive the run — the next invocation is seeded from the Program again.
-func (rtx *Context) WithBindMeta(meta BindMeta) *Context {
+func (rtx *Context) WithInputSettings(meta InputSettings) *Context {
 	if rtx != nil {
 		rtx.mu.Lock()
 		rtx.meta = &meta
@@ -771,15 +676,16 @@ func (rtx *Context) WithBindMeta(meta BindMeta) *Context {
 	return rtx
 }
 
-// WithBinder replaces the binder [Collect] uses, built from the meta. See [Program.WithBinder].
+// WithInputReader replaces the input reader [Context.Inputs] uses, built from the settings. See
+// [Program.WithInputReader].
 //
 // For a Context you built yourself. One handed to a hook is already seeded from the Program,
 // and this is not scoped to the current hook: every later hook of THIS run sees the change. It
 // does not outlive the run — the next invocation is seeded from the Program again.
-func (rtx *Context) WithBinder(fn func(BindMeta) *Binder) *Context {
+func (rtx *Context) WithInputReader(fn func(InputSettings) *InputReader) *Context {
 	if rtx != nil && fn != nil {
 		rtx.mu.Lock()
-		rtx.binderFn = fn
+		rtx.readerFn = fn
 		rtx.mu.Unlock()
 	}
 	return rtx
@@ -829,8 +735,10 @@ func (rtx *Context) WithParser(parser *Parser) *Context {
 
 // ── rotini's own seams, as the handler sees them ────────────────────────────.
 
-// Help is the help page of the command being run, from [Program.WithHelp]: what a generated
-// `--help` prints. It is "" when the program has no pages or none for this command.
+// Help is the help page of [Context.Command] — the command whose hook is running — from
+// [Program.WithHelp]: what a generated `--help` prints. It is "" when the program has no pages
+// or none for this command. In PreRun, Run and PostRun that is the invoked command's page; a
+// cascading hook gets its own command's page.
 //
 // The page is the RUNNING program's, not the one the handler was generated with. A command
 // composed from another spec therefore shows its full path under the parent and the flags the
@@ -842,9 +750,9 @@ func (rtx *Context) Help() string {
 	if help == nil {
 		return ""
 	}
-	chain := rtx.Chain()
+	chain := rtx.CommandChain()
 	path := make([]string, 0, len(chain))
-	for i := 1; i < len(chain); i++ {
+	for i := 1; i <= rtx.frameIndex() && i < len(chain); i++ {
 		path = append(path, chain[i].Name)
 	}
 	page, err := help(path...)
@@ -864,7 +772,7 @@ func (rtx *Context) Version() string {
 
 // Parser is the [Parser] for this run: the one [Program.WithParser] supplied, or the default.
 //
-// It never returns nil. Parsing is not optional — [Collect] uses a parser whether or not the
+// It never returns nil. Parsing is not optional — [Context.Inputs] uses a parser whether or not the
 // entrypoint supplied one — so a handler that wants to parse argv itself should not have to
 // ask whether one exists, nor bind one to make the answer yes.
 func (rtx *Context) Parser() *Parser {
@@ -878,32 +786,14 @@ func (rtx *Context) Parser() *Parser {
 }
 
 // bindMeta is the generated descriptor for this run, and whether the program supplied one.
-func (rtx *Context) bindMeta() (BindMeta, bool) {
+func (rtx *Context) bindMeta() (InputSettings, bool) {
 	if rtx == nil {
-		return BindMeta{}, false
+		return InputSettings{}, false
 	}
 	rtx.mu.RLock()
 	defer rtx.mu.RUnlock()
 	if rtx.meta == nil {
-		return BindMeta{}, false
+		return InputSettings{}, false
 	}
 	return *rtx.meta, true
-}
-
-// MustGet returns the service bound under key as T, or panics with a [*ServiceError] when it
-// is absent or not a T. The panic is intentional: the runtime recovers it inside dispatch and
-// routes it through the funnel, so a handler that cannot run without a service reaches for
-// MustGet rather than handling a miss inline.
-//
-//	store := rtx.MustGet[Store]("store")
-func (rtx *Context) MustGet[T any](key string) T {
-	v, ok := rtx.Get[T](key)
-	if !ok {
-		se := &ServiceError{Key: key}
-		if bound := rtx.Value(key); bound != nil {
-			se.got, se.want = fmt.Sprintf("%T", bound), reflect.TypeFor[T]().String()
-		}
-		panic(se)
-	}
-	return v
 }

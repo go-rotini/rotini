@@ -64,14 +64,14 @@ internal/cmd/helloworld/
 `go generate ./...` creates `internal/cmd/helloworld/helloworld_hello.go`. Replace the line that prints `inputs` with the command's work, and add `"strings"` to its imports:
 
 {{< code title="internal/cmd/helloworld/helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
-func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rotini.ParseArgv[HelloworldHelloInputs](rtx); err == nil && argv.Values.HelloworldHello.Flags.Help {
+func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if argv, err := rtx.ArgvInputs[HelloworldHelloInputs](); err == nil && argv.Values.HelloworldHello.Flags.Help {
 		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 		return
 	}
 
-	inputs, err := rotini.Collect[HelloworldHelloInputs](rtx)
+	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return

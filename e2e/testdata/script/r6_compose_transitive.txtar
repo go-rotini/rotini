@@ -44,17 +44,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*grandHandlers)(nil)
+var _ rotini.Handler = (*grandHandler)(nil)
 
-type grandHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type grandHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*grandHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[GrandInputs](rtx)
+func (*grandHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[GrandInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)
@@ -76,16 +76,16 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*childHandlers)(nil)
+var _ rotini.Handler = (*childHandler)(nil)
 
-type childHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type childHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*childHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*childHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "child ran")
 }
 -- internal/cmd/root/root.go --
@@ -98,17 +98,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*rootHandlers)(nil)
+var _ rotini.Handler = (*rootHandler)(nil)
 
-type rootHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type rootHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*rootHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[RootInputs](rtx)
+func (*rootHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[RootInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)

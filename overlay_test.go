@@ -51,44 +51,44 @@ func ovDef() Definition {
 // ovLayers acquires the four standard layers in conventional precedence order
 // (defaults < files < env < argv), failing the test on any acquisition error.
 // TestCollect pins the one-liner (ergonomics E4): every channel reconciled in
-// one call, equivalent to Binder.Bind AND to CollectP's overlaid layers; the
+// one call, equivalent to InputReader.Read AND to InputsWithReport's overlaid layers; the
 // P variant adds the provenance Report (closing the E2 audit's finding 3 —
 // one-call and where-did-this-come-from compose now).
 func TestCollect(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: from-file\n  token: from-file-token\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "from-env")
 
 	newRtx := func() *Context {
 		rtx := NewContextFor(tbDef(), []string{"--verbose"})
-		rtx.WithBindMeta(meta)
+		rtx.WithInputSettings(meta)
 		return rtx
 	}
 
-	got, err := Collect[tbInputs](newRtx())
+	got, err := newRtx().Inputs[tbInputs]()
 	if err != nil {
-		t.Fatalf("Collect: %v", err)
+		t.Fatalf("Inputs: %v", err)
 	}
 	if !got.App.Flags.Verbose || got.App.Env.Region != "from-env" || got.App.Config.Endpoint != "from-file" {
-		t.Errorf("Collect = %+v, want argv+env+file values reconciled", got.App)
+		t.Errorf("Inputs = %+v, want argv+env+file values reconciled", got.App)
 	}
 
-	// Equivalence 1: Collect == Binder.Bind.
+	// Equivalence 1: Inputs == InputReader.Read.
 	var bound tbInputs
-	if err := NewBinder(meta).Bind(newRtx(), &bound); err != nil {
+	if err := NewInputReader(meta).Read(newRtx(), &bound); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if !reflect.DeepEqual(got, bound) {
-		t.Errorf("Collect != Bind:\n collect=%+v\n bind=%+v", got, bound)
+		t.Errorf("Inputs != Bind:\n collect=%+v\n bind=%+v", got, bound)
 	}
 
-	// Equivalence 2: Collect == CollectP's merged value — plus the Report.
-	merged, report, err := CollectP[tbInputs](newRtx())
+	// Equivalence 2: Inputs == InputsWithReport's merged value — plus the Report.
+	merged, report, err := newRtx().InputsWithReport[tbInputs]()
 	if err != nil {
-		t.Fatalf("CollectP: %v", err)
+		t.Fatalf("InputsWithReport: %v", err)
 	}
 	if !reflect.DeepEqual(got, merged) {
-		t.Errorf("Collect != CollectP:\n collect=%+v\n collectP=%+v", got, merged)
+		t.Errorf("Inputs != InputsWithReport:\n collect=%+v\n collectP=%+v", got, merged)
 	}
 	if win, ok := report.Winner("App.Env.Region"); !ok || win.Layer != "env" || win.Raw != "from-env" {
 		t.Errorf("Winner(Region) = %+v ok=%v, want env/from-env", win, ok)
@@ -99,39 +99,39 @@ func TestCollect(t *testing.T) {
 
 	// Validation parity: a required config value missing errors in BOTH forms.
 	bare := writeConfig(t, "api:\n  endpoint: only\n") // api.token (required) absent
-	bareMeta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: bare, Format: "yaml"}}}
+	bareMeta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: bare, Format: "yaml"}}}
 	rtx := NewContextFor(tbDef(), nil)
-	rtx.WithBindMeta(bareMeta)
-	if _, err := Collect[tbInputs](rtx); err == nil {
-		t.Error("Collect with missing required config = nil error, want loud")
+	rtx.WithInputSettings(bareMeta)
+	if _, err := rtx.Inputs[tbInputs](); err == nil {
+		t.Error("Inputs with missing required config = nil error, want loud")
 	}
 	rtx2 := NewContextFor(tbDef(), nil)
-	rtx2.WithBindMeta(bareMeta)
-	if _, _, err := CollectP[tbInputs](rtx2); err == nil {
-		t.Error("CollectP with missing required config = nil error, want loud")
+	rtx2.WithInputSettings(bareMeta)
+	if _, _, err := rtx2.InputsWithReport[tbInputs](); err == nil {
+		t.Error("InputsWithReport with missing required config = nil error, want loud")
 	}
 }
 
-func ovLayers(t *testing.T, rtx *Context, meta BindMeta) []Layer[ovInputs] {
+func ovLayers(t *testing.T, rtx *Context, meta InputSettings) []InputLayer[ovInputs] {
 	t.Helper()
-	rtx.WithBindMeta(meta) // the channel functions derive their meta from the Context
-	defaults, err := Defaults[ovInputs](rtx)
+	rtx.WithInputSettings(meta) // the channel functions derive their meta from the Context
+	defaults, err := rtx.DefaultInputs[ovInputs]()
 	if err != nil {
 		t.Fatalf("Defaults: %v", err)
 	}
-	files, err := ParseFiles[ovInputs](rtx)
+	files, err := rtx.FileInputs[ovInputs]()
 	if err != nil {
-		t.Fatalf("ParseFiles: %v", err)
+		t.Fatalf("FileInputs: %v", err)
 	}
-	env, err := ParseEnv[ovInputs](rtx)
+	env, err := rtx.EnvInputs[ovInputs]()
 	if err != nil {
-		t.Fatalf("ParseEnv: %v", err)
+		t.Fatalf("EnvInputs: %v", err)
 	}
-	argv, err := ParseArgv[ovInputs](rtx)
+	argv, err := rtx.ArgvInputs[ovInputs]()
 	if err != nil {
-		t.Fatalf("ParseArgv: %v", err)
+		t.Fatalf("ArgvInputs: %v", err)
 	}
-	return []Layer[ovInputs]{defaults, files, env, argv}
+	return []InputLayer[ovInputs]{defaults, files, env, argv}
 }
 
 // PREC-02: each layer beats everything below it, and the Report names the
@@ -139,7 +139,7 @@ func ovLayers(t *testing.T, rtx *Context, meta BindMeta) []Layer[ovInputs] {
 // sources vary.
 func TestOverlay_precedence(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	cases := []struct {
 		name      string
@@ -159,12 +159,12 @@ func TestOverlay_precedence(t *testing.T) {
 			if c.env != "" {
 				t.Setenv("APP_COLOR", c.env)
 			}
-			m := BindMeta{}
+			m := InputSettings{}
 			if c.withFiles {
 				m = meta
 			}
 			rtx := NewContextFor(ovDef(), c.argv)
-			got, rep := OverlayInputsP(ovLayers(t, rtx, m)...)
+			got, rep := MergeInputsWithReport(ovLayers(t, rtx, m)...)
 			if got.App.Flags.Color != c.want {
 				t.Errorf("Color = %q, want %q", got.App.Flags.Color, c.want)
 			}
@@ -183,7 +183,7 @@ func TestOverlay_precedence(t *testing.T) {
 // declared default — and says so in the provenance.
 func TestOverlay_defaultsOnly(t *testing.T) {
 	rtx := NewContextFor(ovDef(), nil)
-	got, rep := OverlayInputsP(ovLayers(t, rtx, BindMeta{})...)
+	got, rep := MergeInputsWithReport(ovLayers(t, rtx, InputSettings{})...)
 
 	if got.App.Flags.Color != "blue" {
 		t.Errorf("Color = %q, want blue (FlagDef default)", got.App.Flags.Color)
@@ -213,11 +213,11 @@ func TestOverlay_defaultsOnly(t *testing.T) {
 // value — disjoint fields from different layers all survive the merge.
 func TestOverlay_skipNotZero(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  retries: 5\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "us-west")
 
 	rtx := NewContextFor(ovDef(), []string{"--out", "report.txt"})
-	got, rep := OverlayInputsP(ovLayers(t, rtx, meta)...)
+	got, rep := MergeInputsWithReport(ovLayers(t, rtx, meta)...)
 
 	if got.App.Flags.Out != "report.txt" { // argv only
 		t.Errorf("Out = %q, want report.txt", got.App.Flags.Out)
@@ -245,21 +245,21 @@ func TestOverlay_skipNotZero(t *testing.T) {
 // Overlaying an empty layer is the identity, and a zero Report validates clean.
 func TestOverlay_identity(t *testing.T) {
 	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
-	layers := ovLayers(t, rtx, BindMeta{})
+	layers := ovLayers(t, rtx, InputSettings{})
 
-	base := OverlayInputs(layers...)
-	withEmpty := OverlayInputs(append(layers, Layer[ovInputs]{Name: "empty"})...)
+	base := MergeInputs(layers...)
+	withEmpty := MergeInputs(append(layers, InputLayer[ovInputs]{Name: "empty"})...)
 	if !reflect.DeepEqual(base, withEmpty) {
 		t.Errorf("appending an empty layer changed the merge:\n base %+v\n with %+v", base, withEmpty)
 	}
 
 	var none ovInputs
-	got, rep := OverlayInputsP[ovInputs]()
+	got, rep := MergeInputsWithReport[ovInputs]()
 	if !reflect.DeepEqual(got, none) {
-		t.Errorf("OverlayInputsP() = %+v, want the zero value", got)
+		t.Errorf("MergeInputsWithReport() = %+v, want the zero value", got)
 	}
 	if err := rep.Validate(); err != nil {
-		t.Errorf("zero-layer Report.Validate = %v, want nil", err)
+		t.Errorf("zero-layer InputReport.Validate = %v, want nil", err)
 	}
 }
 
@@ -267,18 +267,18 @@ func TestOverlay_identity(t *testing.T) {
 // through its Presence — fields it holds but doesn't declare are ignored.
 func TestOverlay_handBuiltLayer(t *testing.T) {
 	rtx := NewContextFor(ovDef(), nil)
-	layers := ovLayers(t, rtx, BindMeta{})
+	layers := ovLayers(t, rtx, InputSettings{})
 
 	var custom ovInputs
 	custom.App.Flags.Color = "teal"
 	custom.App.Flags.Out = "ignored.txt" // present in Values but NOT in Set
-	override := Layer[ovInputs]{
+	override := InputLayer[ovInputs]{
 		Name:   "test-override",
 		Values: custom,
 		Set:    Presence{"App.Flags.Color": {Layer: "test-override", Raw: "teal"}},
 	}
 
-	got, rep := OverlayInputsP(append(layers, override)...)
+	got, rep := MergeInputsWithReport(append(layers, override)...)
 	if got.App.Flags.Color != "teal" {
 		t.Errorf("Color = %q, want teal (hand-built layer)", got.App.Flags.Color)
 	}
@@ -297,11 +297,11 @@ func TestOverlay_handBuiltLayer(t *testing.T) {
 // the winner last; Fields enumerates everything any layer set, sorted.
 func TestOverlay_report(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("APP_COLOR", "teal")
 
 	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
-	_, rep := OverlayInputsP(ovLayers(t, rtx, meta)...)
+	_, rep := MergeInputsWithReport(ovLayers(t, rtx, meta)...)
 
 	hist := rep.History("App.Flags.Color")
 	var layers []string
@@ -337,7 +337,7 @@ func TestOverlay_report(t *testing.T) {
 func TestOverlay_secretRedaction(t *testing.T) {
 	t.Setenv("APP_TOKEN", "env-sk-456") // SNAKE_UPPER of recon key "app.token"
 	rtx := NewContextFor(ovDef(), []string{"--token", "argv-sk-123"})
-	_, rep := OverlayInputsP(ovLayers(t, rtx, BindMeta{})...)
+	_, rep := MergeInputsWithReport(ovLayers(t, rtx, InputSettings{})...)
 
 	for _, p := range rep.History("App.Flags.Token") {
 		if strings.Contains(p.Raw, "sk-") {
@@ -371,22 +371,22 @@ func ovReqDef() Definition {
 }
 
 func TestOverlay_validateRequiredAcrossLayers(t *testing.T) {
-	acquire := func(t *testing.T) (ovReqInputs, Report) {
+	acquire := func(t *testing.T) (ovReqInputs, InputReport) {
 		t.Helper()
 		rtx := NewContextFor(ovReqDef(), nil) // never on argv; no meta to bind
-		defaults, err := Defaults[ovReqInputs](rtx)
+		defaults, err := rtx.DefaultInputs[ovReqInputs]()
 		if err != nil {
 			t.Fatalf("Defaults: %v", err)
 		}
-		env, err := ParseEnv[ovReqInputs](rtx)
+		env, err := rtx.EnvInputs[ovReqInputs]()
 		if err != nil {
-			t.Fatalf("ParseEnv: %v", err)
+			t.Fatalf("EnvInputs: %v", err)
 		}
-		argv, err := ParseArgv[ovReqInputs](rtx)
+		argv, err := rtx.ArgvInputs[ovReqInputs]()
 		if err != nil {
-			t.Fatalf("ParseArgv: %v", err)
+			t.Fatalf("ArgvInputs: %v", err)
 		}
-		return OverlayInputsP(defaults, env, argv)
+		return MergeInputsWithReport(defaults, env, argv)
 	}
 
 	t.Run("satisfied by the env layer", func(t *testing.T) {
@@ -410,13 +410,13 @@ func TestOverlay_validateRequiredAcrossLayers(t *testing.T) {
 }
 
 // An out-of-enum value supplied by a lower layer (here: a config file) is
-// caught by the merged validation, exactly like Binder.Bind's locus.
+// caught by the merged validation, exactly like InputReader.Read's locus.
 func TestOverlay_validateEnumOnFileSuppliedFlag(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: magenta\n") // not in the enum
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(ovDef(), nil)
-	got, rep := OverlayInputsP(ovLayers(t, rtx, meta)...)
+	got, rep := MergeInputsWithReport(ovLayers(t, rtx, meta)...)
 	if got.App.Flags.Color != "magenta" {
 		t.Fatalf("Color = %q, want magenta supplied by the files layer", got.App.Flags.Color)
 	}
@@ -431,15 +431,15 @@ func TestOverlay_stdinLayer(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx.Stdin = strings.NewReader("kind: Widget\nname: foo\n")
 
-	stdin, err := ParseStdin[tbStdinInputs](rtx)
+	stdin, err := rtx.StdinInputs[tbStdinInputs]()
 	if err != nil {
-		t.Fatalf("ParseStdin: %v", err)
+		t.Fatalf("StdinInputs: %v", err)
 	}
 	if win, ok := stdin.Set["App.Stdin"]; !ok || win.Layer != "stdin" || win.Raw != "" {
 		t.Errorf("Set[App.Stdin] = %+v (ok=%v), want stdin layer with empty Raw", win, ok)
 	}
 
-	got := OverlayInputs(stdin)
+	got := MergeInputs(stdin)
 	if got.App.Stdin == nil || got.App.Stdin.Kind != "Widget" || got.App.Stdin.Name != "foo" {
 		t.Errorf("Stdin = %+v, want {Widget foo}", got.App.Stdin)
 	}
@@ -447,20 +447,20 @@ func TestOverlay_stdinLayer(t *testing.T) {
 	// No piped input: nothing decoded, nothing recorded.
 	rtx2 := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	rtx2.Stdin = strings.NewReader("")
-	empty, err := ParseStdin[tbStdinInputs](rtx2)
+	empty, err := rtx2.StdinInputs[tbStdinInputs]()
 	if err != nil {
-		t.Fatalf("ParseStdin(empty): %v", err)
+		t.Fatalf("StdinInputs(empty): %v", err)
 	}
 	if len(empty.Set) != 0 {
 		t.Errorf("empty stdin recorded presence: %v", empty.Set)
 	}
 }
 
-// Binder.Bind and the à-la-carte overlay are two paths over the same
+// InputReader.Read and the à-la-carte overlay are two paths over the same
 // machinery: on identical inputs they must produce identical structs.
 func TestOverlay_bindEquivalence(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  token: cfg-secret\n  retries: 5\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 	t.Setenv("REGION", "eu-central")
 
 	cases := []struct {
@@ -473,12 +473,12 @@ func TestOverlay_bindEquivalence(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var want ovInputs
-			if err := NewBinder(meta).Bind(NewContextFor(ovDef(), c.argv), &want); err != nil {
+			if err := NewInputReader(meta).Read(NewContextFor(ovDef(), c.argv), &want); err != nil {
 				t.Fatalf("Bind: %v", err)
 			}
 
 			rtx := NewContextFor(ovDef(), c.argv)
-			got, rep := OverlayInputsP(ovLayers(t, rtx, meta)...)
+			got, rep := MergeInputsWithReport(ovLayers(t, rtx, meta)...)
 			if err := rep.Validate(); err != nil {
 				t.Fatalf("Validate: %v", err)
 			}
@@ -513,11 +513,12 @@ func ovVarDef() Definition {
 
 func TestOverlay_edgeCases(t *testing.T) {
 	t.Run("nil context is a ParseError", func(t *testing.T) {
-		if _, err := ParseArgv[ovInputs](nil); err == nil {
-			t.Error("ParseArgv(nil context) = nil error, want a ParseError")
+		var rtx *Context
+		if _, err := rtx.ArgvInputs[ovInputs](); err == nil {
+			t.Error("ArgvInputs on a nil context = nil error, want a ParseError")
 		}
-		if _, err := Defaults[ovInputs](nil); err == nil {
-			t.Error("Defaults(nil context) = nil error, want a ParseError")
+		if _, err := rtx.DefaultInputs[ovInputs](); err == nil {
+			t.Error("DefaultInputs on a nil context = nil error, want a ParseError")
 		}
 	})
 
@@ -532,15 +533,15 @@ func TestOverlay_edgeCases(t *testing.T) {
 			}
 		}
 		rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
-		if _, err := ParseEnv[reqEnvInputs](rtx); err == nil {
-			t.Error("ParseEnv with a missing required env input = nil error, want the channel's error")
+		if _, err := rtx.EnvInputs[reqEnvInputs](); err == nil {
+			t.Error("EnvInputs with a missing required env input = nil error, want the channel's error")
 		}
 	})
 
 	t.Run("stale hand-built path copies nothing", func(t *testing.T) {
 		var vals ovInputs
 		vals.App.Flags.Color = "teal"
-		got := OverlayInputs(Layer[ovInputs]{
+		got := MergeInputs(InputLayer[ovInputs]{
 			Name:   "stale",
 			Values: vals,
 			Set:    Presence{"App.Nope.Color": {Layer: "stale"}, "App.Flags.Color.Deeper": {Layer: "stale"}},
@@ -553,9 +554,9 @@ func TestOverlay_edgeCases(t *testing.T) {
 
 	t.Run("variadic argument presence", func(t *testing.T) {
 		rtx := NewContextFor(ovVarDef(), []string{"alpha", "beta", "gamma"})
-		argv, err := ParseArgv[ovVarInputs](rtx)
+		argv, err := rtx.ArgvInputs[ovVarInputs]()
 		if err != nil {
-			t.Fatalf("ParseArgv: %v", err)
+			t.Fatalf("ArgvInputs: %v", err)
 		}
 		if argv.Values.App.Arguments.First != "alpha" || len(argv.Values.App.Arguments.Rest) != 2 {
 			t.Errorf("bound = %+v, want alpha + [beta gamma]", argv.Values.App.Arguments)
@@ -568,7 +569,7 @@ func TestOverlay_edgeCases(t *testing.T) {
 
 // ExampleOverlayInputsP shows the merge and provenance contract with two
 // hand-built layers: order is precedence, and the Report names the winner.
-func ExampleOverlayInputsP() {
+func ExampleMergeInputsWithReport() {
 	type inputs struct {
 		App struct {
 			Flags struct {
@@ -580,51 +581,51 @@ func ExampleOverlayInputsP() {
 	defaults.App.Flags.Color = "blue"
 	env.App.Flags.Color = "teal"
 
-	merged, report := OverlayInputsP(
-		Layer[inputs]{Name: "defaults", Values: defaults, Set: Presence{"App.Flags.Color": {Layer: "defaults", Raw: "blue"}}},
-		Layer[inputs]{Name: "env", Values: env, Set: Presence{"App.Flags.Color": {Layer: "env", Raw: "teal"}}},
+	merged, report := MergeInputsWithReport(
+		InputLayer[inputs]{Name: "defaults", Values: defaults, Set: Presence{"App.Flags.Color": {Layer: "defaults", Raw: "blue"}}},
+		InputLayer[inputs]{Name: "env", Values: env, Set: Presence{"App.Flags.Color": {Layer: "env", Raw: "teal"}}},
 	)
 	win, _ := report.Winner("App.Flags.Color")
 	fmt.Println(merged.App.Flags.Color, "from", win.Layer)
 	// Output: teal from env
 }
 
-// The env and files layers bind a flag's fallback exactly as the Binder does — they share
+// The env and files layers bind a flag's fallback exactly as the InputReader does — they share
 // bindFlagFallback. Each case here was wrong on this path too: a config list bound as the one
 // string "[a b]", an env list ignored its separator, and a bad value was silently dropped.
 func TestOverlay_flagFallbacksMatchTheBinder(t *testing.T) {
 	cfg := writeConfig(t, "tags: [a, b]\nlabels: {k: v}\n")
-	meta := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	meta := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	rtx := NewContextFor(tbListDef(), nil)
-	rtx.WithBindMeta(meta)
-	files, err := ParseFiles[tbListInputs](rtx)
+	rtx.WithInputSettings(meta)
+	files, err := rtx.FileInputs[tbListInputs]()
 	if err != nil {
-		t.Fatalf("ParseFiles: %v", err)
+		t.Fatalf("FileInputs: %v", err)
 	}
 	if f := files.Values.App.Flags; !slices.Equal(f.Tags, []string{"a", "b"}) || f.Labels["k"] != "v" {
 		t.Errorf("files layer: tags=%q labels=%v", f.Tags, f.Labels)
 	}
 
 	t.Setenv("PORTS", "1,2")
-	env, err := ParseEnv[tbListInputs](rtx)
+	env, err := rtx.EnvInputs[tbListInputs]()
 	if err != nil || !slices.Equal(env.Values.App.Flags.Ports, []int{1, 2}) {
 		t.Errorf("env layer: ports=%v err=%v", env.Values.App.Flags.Ports, err)
 	}
 
 	t.Setenv("PORTS", "1,x")
-	if _, err := ParseEnv[tbListInputs](rtx); err == nil || !strings.Contains(err.Error(), "environment variable PORTS") {
+	if _, err := rtx.EnvInputs[tbListInputs](); err == nil || !strings.Contains(err.Error(), "environment variable PORTS") {
 		t.Errorf("env layer with a bad value: err = %v, want it to name PORTS", err)
 	}
 }
 
-// Collect and the per-channel layer functions must agree about which frames a struct describes.
+// Inputs and the per-channel layer functions must agree about which frames a struct describes.
 //
-// They did not, for one release of this work: the anchor moved from the leaf to the caller's own
-// frame everywhere, but the fit check that came with it was added only to Collect and CollectP.
-// ParseArgv, Defaults, ParseEnv and ParseFiles went on accepting a struct that could not describe
-// the running command and returning it zeroed with a nil error — the same silent failure the
-// anchor work existed to remove, left in the corner of the same API.
+// They did not, for one release of this work: the anchor moved from the leaf to the caller's
+// own frame everywhere, but the fit check that came with it was added only to Inputs and
+// InputsWithReport. ArgvInputs, Defaults, EnvInputs and FileInputs went on accepting a struct
+// that could not describe the running command and returning it zeroed with a nil error — the
+// same silent failure the anchor work existed to remove, left in the corner of the same API.
 //
 // These are the tests that would have caught that, so they assert the whole family together
 // rather than one function.
@@ -664,17 +665,17 @@ func acDef() Definition {
 
 type acProg struct{ inRootHook func(*Context) }
 
-func (p acProg) Root() Handlers { return acRootH{probe: p.inRootHook} }
-func (p acProg) Leaf() Handlers { return acNoop{} }
+func (p acProg) Root() Handler { return acRootH{probe: p.inRootHook} }
+func (p acProg) Leaf() Handler { return acNoop{} }
 
-type acNoop struct{ DefaultHooks }
+type acNoop struct{ NoHooks }
 
 func (acNoop) Run(context.Context, *Context) {}
 
 type acRootH struct {
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 	probe func(*Context)
 }
 
@@ -688,15 +689,15 @@ func (h acRootH) CascadingPreRun(_ context.Context, rtx *Context) {
 // acEntryPoints is every public way to acquire inputs, so a new one cannot be added without
 // deciding what it does here.
 func acEntryPoints(rtx *Context) map[string]error {
-	_, ec := Collect[acDeep](rtx)
-	_, _, ep := CollectP[acDeep](rtx)
-	_, ea := ParseArgv[acDeep](rtx)
-	_, ed := Defaults[acDeep](rtx)
-	_, ee := ParseEnv[acDeep](rtx)
-	_, ef := ParseFiles[acDeep](rtx)
+	_, ec := rtx.Inputs[acDeep]()
+	_, _, ep := rtx.InputsWithReport[acDeep]()
+	_, ea := rtx.ArgvInputs[acDeep]()
+	_, ed := rtx.DefaultInputs[acDeep]()
+	_, ee := rtx.EnvInputs[acDeep]()
+	_, ef := rtx.FileInputs[acDeep]()
 	return map[string]error{
-		"Collect": ec, "CollectP": ep, "ParseArgv": ea,
-		"Defaults": ed, "ParseEnv": ee, "ParseFiles": ef,
+		"Inputs": ec, "InputsWithReport": ep, "ArgvInputs": ea,
+		"Defaults": ed, "EnvInputs": ee, "FileInputs": ef,
 	}
 }
 
@@ -729,16 +730,16 @@ func TestAnchor_everyEntryPointAcceptsTheCallersOwnType(t *testing.T) {
 	var errs map[string]error
 	var own bool
 	p := NewProgram(acDef(), acProg{inRootHook: func(rtx *Context) {
-		in, ec := Collect[acOwn](rtx)
+		in, ec := rtx.Inputs[acOwn]()
 		own = in.Root.Flags.Own
-		_, _, ep := CollectP[acOwn](rtx)
-		_, ea := ParseArgv[acOwn](rtx)
-		_, ed := Defaults[acOwn](rtx)
-		_, ee := ParseEnv[acOwn](rtx)
-		_, ef := ParseFiles[acOwn](rtx)
+		_, _, ep := rtx.InputsWithReport[acOwn]()
+		_, ea := rtx.ArgvInputs[acOwn]()
+		_, ed := rtx.DefaultInputs[acOwn]()
+		_, ee := rtx.EnvInputs[acOwn]()
+		_, ef := rtx.FileInputs[acOwn]()
 		errs = map[string]error{
-			"Collect": ec, "CollectP": ep, "ParseArgv": ea,
-			"Defaults": ed, "ParseEnv": ee, "ParseFiles": ef,
+			"Inputs": ec, "InputsWithReport": ep, "ArgvInputs": ea,
+			"Defaults": ed, "EnvInputs": ee, "FileInputs": ef,
 		}
 	}}).WithStdout(io.Discard).WithStderr(io.Discard)
 	p.Run([]string{"--own", "leaf"})
@@ -749,18 +750,18 @@ func TestAnchor_everyEntryPointAcceptsTheCallersOwnType(t *testing.T) {
 		}
 	}
 	if !own {
-		t.Error("Collect did not read the root's own --own from its cascading hook")
+		t.Error("Inputs did not read the root's own --own from its cascading hook")
 	}
 }
 
-// Collect and CollectP are two code paths to one answer: Collect goes through [Binder.Bind],
-// CollectP acquires five layers separately and overlays them. TestCollect pins that they agree
-// for one argv shape. These pin that they agree across the whole precedence matrix — and, which
-// nothing covered, that they FAIL the same way.
+// Inputs and InputsWithReport are two code paths to one answer: Inputs goes through
+// [InputReader.Read], InputsWithReport acquires five layers separately and overlays them.
+// TestCollect pins that they agree for one argv shape. These pin that they agree across the
+// whole precedence matrix — and, which nothing covered, that they FAIL the same way.
 //
-// The failure half matters most. A handler reaches for CollectP when it wants provenance, often
-// after starting with Collect; if the two disagreed on which inputs are legal, that swap would
-// change behaviour while looking like it only added a Report.
+// The failure half matters most. A handler reaches for InputsWithReport when it wants
+// provenance, often after starting with Inputs; if the two disagreed on which inputs are legal,
+// that swap would change behaviour while looking like it only added a Report.
 
 func describeErr(err error) string {
 	if err == nil {
@@ -771,19 +772,19 @@ func describeErr(err error) string {
 
 func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
-	withFiles := BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
+	withFiles := InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}}
 
 	for _, c := range []struct {
 		name string
 		argv []string
 		env  string // APP_COLOR; "" leaves it unset
-		meta BindMeta
+		meta InputSettings
 		want string // merged Color, "" when the case is an error
 	}{
 		{"argv beats everything", []string{"--color", "green"}, "teal", withFiles, "green"},
 		{"env beats files and default", nil, "teal", withFiles, "teal"},
 		{"files beat the default", nil, "", withFiles, "red"},
-		{"the default when nothing supplies", nil, "", BindMeta{}, "blue"},
+		{"the default when nothing supplies", nil, "", InputSettings{}, "blue"},
 		{"an enum violation on argv", []string{"--color", "mauve"}, "", withFiles, ""},
 		{"an enum violation from env", nil, "mauve", withFiles, ""},
 	} {
@@ -793,42 +794,42 @@ func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 			}
 			mk := func() *Context {
 				rtx := NewContextFor(ovDef(), c.argv)
-				rtx.WithBindMeta(c.meta)
+				rtx.WithInputSettings(c.meta)
 				return rtx
 			}
 
-			viaCollect, errCollect := Collect[ovInputs](mk())
-			viaCollectP, _, errCollectP := CollectP[ovInputs](mk())
+			viaCollect, errCollect := mk().Inputs[ovInputs]()
+			viaCollectP, _, errCollectP := mk().InputsWithReport[ovInputs]()
 
-			// The verdict must be identical: swapping Collect for CollectP to gain provenance
+			// The verdict must be identical: swapping Inputs for InputsWithReport to gain provenance
 			// must not change which inputs are legal.
 			if describeErr(errCollect) != describeErr(errCollectP) {
-				t.Errorf("the two paths disagree on failure:\n  Collect  → %s\n  CollectP → %s",
+				t.Errorf("the two paths disagree on failure:\n  Inputs  → %s\n  InputsWithReport → %s",
 					describeErr(errCollect), describeErr(errCollectP))
 			}
 
 			// On SUCCESS the values must be identical too.
 			if errCollect == nil && !reflect.DeepEqual(viaCollect, viaCollectP) {
-				t.Errorf("the two paths disagree on values:\n  Collect  → %+v\n  CollectP → %+v",
+				t.Errorf("the two paths disagree on values:\n  Inputs  → %+v\n  InputsWithReport → %+v",
 					viaCollect.App, viaCollectP.App)
 			}
 
 			// On FAILURE they deliberately differ, and the difference is pinned rather than
-			// left to be rediscovered: Collect stops at the first argv problem, before the env
+			// left to be rediscovered: Inputs stops at the first argv problem, before the env
 			// and config channels are read, so a config-supplied default (Retries, recon
-			// default=3) is absent from its partial value and present in CollectP's.
+			// default=3) is absent from its partial value and present in InputsWithReport's.
 			if errCollect != nil {
 				if viaCollect.App.Config.Retries != 0 {
-					t.Errorf("Collect's partial value gained a config default it should not have read: %d",
+					t.Errorf("Inputs's partial value gained a config default it should not have read: %d",
 						viaCollect.App.Config.Retries)
 				}
 				if viaCollectP.App.Config.Retries != 3 {
-					t.Errorf("CollectP's merged value lost the config default: %d", viaCollectP.App.Config.Retries)
+					t.Errorf("InputsWithReport's merged value lost the config default: %d", viaCollectP.App.Config.Retries)
 				}
 			}
 			if c.want != "" {
 				if errCollect != nil {
-					t.Fatalf("Collect: %v", errCollect)
+					t.Fatalf("Inputs: %v", errCollect)
 				}
 				if got := viaCollect.App.Flags.Color; got != c.want {
 					t.Errorf("Color = %q, want %q", got, c.want)
@@ -845,15 +846,15 @@ func TestCollect_andCollectPAgreeAcrossThePrecedenceMatrix(t *testing.T) {
 func TestCollect_isIdempotent(t *testing.T) {
 	cfg := writeConfig(t, "app:\n  color: red\n")
 	rtx := NewContextFor(ovDef(), []string{"--color", "green"})
-	rtx.WithBindMeta(BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	rtx.WithInputSettings(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 
-	first, err1 := Collect[ovInputs](rtx)
-	second, err2 := Collect[ovInputs](rtx)
+	first, err1 := rtx.Inputs[ovInputs]()
+	second, err2 := rtx.Inputs[ovInputs]()
 	if err1 != nil || err2 != nil {
-		t.Fatalf("Collect: %v / %v", err1, err2)
+		t.Fatalf("Inputs: %v / %v", err1, err2)
 	}
 	if first != second {
-		t.Errorf("Collect is not idempotent on one Context:\n  first  = %+v\n  second = %+v", first.App, second.App)
+		t.Errorf("Inputs is not idempotent on one Context:\n  first  = %+v\n  second = %+v", first.App, second.App)
 	}
 }
 
@@ -879,13 +880,13 @@ func TestReport_validateChecksWhatWasSupplied(t *testing.T) {
 	}
 	type inputs struct{ App cmd }
 
-	argvOnly, err := ParseArgv[inputs](NewContextFor(def, nil))
+	argvOnly, err := NewContextFor(def, nil).ArgvInputs[inputs]()
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// A PRESENCE rule fires on absence: --mode is required and nothing supplied it.
-	merged, rep := OverlayInputsP(argvOnly)
+	merged, rep := MergeInputsWithReport(argvOnly)
 	if e := rep.Validate(); e == nil {
 		t.Error("a required input nobody supplied passed validation")
 	}
@@ -903,11 +904,11 @@ func TestReport_validateChecksWhatWasSupplied(t *testing.T) {
 	}
 
 	// With the defaults layer present the field is supplied, and the enum applies again.
-	defaults, err := Defaults[inputs](NewContextFor(def, nil))
+	defaults, err := NewContextFor(def, nil).DefaultInputs[inputs]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	withDefaults, _ := OverlayInputsP(defaults, argvOnly)
+	withDefaults, _ := MergeInputsWithReport(defaults, argvOnly)
 	if withDefaults.App.Flags.Color != "blue" {
 		t.Errorf("Color with defaults = %q, want the declared default", withDefaults.App.Flags.Color)
 	}
@@ -925,18 +926,18 @@ func TestCollect_isCorrectInACascadingHookAtEveryDepth(t *testing.T) {
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			runF(t, argv, func(rtx *Context) {
-				span, err := Collect[fMidSpan](rtx)
+				span, err := rtx.Inputs[fMidSpan]()
 				if err != nil {
-					t.Errorf("Collect[fMidSpan] (ordinary cli): %v", err)
+					t.Errorf("Inputs[fMidSpan] (ordinary cli): %v", err)
 				} else if !span.Mid.Flags.MidOnly {
-					t.Error("Collect[fMidSpan] (ordinary cli) did not read mid's own --midonly")
+					t.Error("Inputs[fMidSpan] (ordinary cli) did not read mid's own --midonly")
 				}
 
-				own, err := Collect[fMidOwn](rtx)
+				own, err := rtx.Inputs[fMidOwn]()
 				if err != nil {
-					t.Errorf("Collect[fMidOwn] (composed child): %v", err)
+					t.Errorf("Inputs[fMidOwn] (composed child): %v", err)
 				} else if !own.Mid.Flags.MidOnly {
-					t.Error("Collect[fMidOwn] (composed child) did not read mid's own --midonly")
+					t.Error("Inputs[fMidOwn] (composed child) did not read mid's own --midonly")
 				}
 			}, nil)
 		})
@@ -947,7 +948,7 @@ func TestCollect_isCorrectInACascadingHookAtEveryDepth(t *testing.T) {
 // caller's frame must not reach DOWN the chain either.
 func TestCollect_doesNotSeeADescendantsFlag(t *testing.T) {
 	runF(t, []string{"mid", "leaf", "--leafonly"}, func(rtx *Context) {
-		own, err := Collect[fMidOwn](rtx)
+		own, err := rtx.Inputs[fMidOwn]()
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -965,7 +966,7 @@ func TestCollect_doesNotSeeADescendantsFlag(t *testing.T) {
 func TestCollect_rejectsADescendantsType(t *testing.T) {
 	var err error
 	runF(t, []string{"mid", "leaf"}, nil, func(rtx *Context) {
-		_, err = Collect[fLeafSpan](rtx) // 3 fields, but the root is 1 deep
+		_, err = rtx.Inputs[fLeafSpan]() // 3 fields, but the root is 1 deep
 	})
 	if err == nil {
 		t.Fatal("collecting a descendant's 3-field type from the root's hook returned no error")
@@ -982,7 +983,7 @@ func TestCollect_rejectsADescendantsType(t *testing.T) {
 func TestCollect_leafRunIsUnchanged(t *testing.T) {
 	var got fLeafSpan
 	var err error
-	p := NewProgram(fDef(), fLeafProbe{capture: func(rtx *Context) { got, err = Collect[fLeafSpan](rtx) }}).
+	p := NewProgram(fDef(), fLeafProbe{capture: func(rtx *Context) { got, err = rtx.Inputs[fLeafSpan]() }}).
 		WithStdout(io.Discard).WithStderr(io.Discard)
 	if _, e := p.Run([]string{"mid", "--midonly", "leaf", "--leafonly"}); e != nil {
 		t.Fatal(e)
@@ -1001,16 +1002,16 @@ func TestCollect_leafRunIsUnchanged(t *testing.T) {
 func TestProvenance_listRawIsTheSameFromEveryLayer(t *testing.T) {
 	t.Setenv("PORTS", "1,2")
 	rtx := NewContextFor(tbListDef(), []string{"--ports", "1,2"})
-	rtx.WithBindMeta(BindMeta{})
-	argv, err := ParseArgv[tbListInputs](rtx)
+	rtx.WithInputSettings(InputSettings{})
+	argv, err := rtx.ArgvInputs[tbListInputs]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := ParseEnv[tbListInputs](rtx)
+	env, err := rtx.EnvInputs[tbListInputs]()
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, rep := OverlayInputsP(env, argv)
+	_, rep := MergeInputsWithReport(env, argv)
 	hist := rep.History("App.Flags.Ports")
 	if len(hist) != 2 || hist[0].Raw != hist[1].Raw || hist[0].Raw != "1, 2" {
 		t.Errorf("ports history = %+v, want both layers to read %q", hist, "1, 2")

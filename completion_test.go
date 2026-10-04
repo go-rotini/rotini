@@ -33,8 +33,8 @@ func TestComplete_discoversPlugins(t *testing.T) {
 	}
 	def := Definition{
 		Name: "acme", Handler: "App",
-		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}}, // collides with acme-bar
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
+		Commands:        []CommandDef{{Name: "bar", Handler: "AcmeBar"}}, // collides with acme-bar
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
 	got := complete(def, []string{""}, nil, nil)
@@ -52,7 +52,7 @@ func TestComplete_discoversPlugins(t *testing.T) {
 	}
 
 	// Hidden discovery dispatches but lists nothing.
-	def.Discovery.Hidden = true
+	def.PluginDiscovery.Hidden = true
 	if hidden := complete(def, []string{""}, nil, nil); contains(hidden, "foo") {
 		t.Errorf("hidden discovery should not list plugins: %v", hidden)
 	}
@@ -68,16 +68,16 @@ func TestDiscoveredPlugins(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cmd := ResolvedCommand{
+	cmd := Command{
 		Name: "acme",
 		// "bar" collides with discovered acme-bar (declared wins → excluded);
-		// "ext"/"x" remote shadows nothing discovered here.
-		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}},
-		Remotes:   []RemoteDef{{Name: "ext", Aliases: []string{"x"}, Binary: "acme-ext"}},
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
+		// "ext"/"x" plugin shadows nothing discovered here.
+		Commands:        []CommandDef{{Name: "bar", Handler: "AcmeBar"}},
+		Plugins:         []PluginDef{{Name: "ext", Aliases: []string{"x"}, Binary: "acme-ext"}},
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
-	got := DiscoveredPlugins(cmd)
+	got := cmd.DiscoveredPlugins()
 	want := []DiscoveredPlugin{
 		{Name: "foo", Path: filepath.Join(dir, progFile("acme-foo"))},
 		{Name: "zip", Path: filepath.Join(dir, progFile("acme-zip"))},
@@ -93,47 +93,47 @@ func TestDiscoveredPlugins(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", earlier)
-	if got := DiscoveredPlugins(cmd); len(got) == 0 || got[0].Path != filepath.Join(dir, progFile("acme-foo")) {
+	if got := cmd.DiscoveredPlugins(); len(got) == 0 || got[0].Path != filepath.Join(dir, progFile("acme-foo")) {
 		t.Errorf("foo = %v, want the plugin-path copy (searched before PATH)", got)
 	}
-	if path, ok := RemoteBinaryPath(cmd, "foo"); !ok || path != filepath.Join(dir, progFile("acme-foo")) {
-		t.Errorf("RemoteBinaryPath(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
+	if path, ok := cmd.PluginBinary("foo"); !ok || path != filepath.Join(dir, progFile("acme-foo")) {
+		t.Errorf("PluginBinary(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
 	}
 
 	// Hidden discovery → nil (the section is suppressed).
 	hidden := cmd
-	hd := *cmd.Discovery
+	hd := *cmd.PluginDiscovery
 	hd.Hidden = true
-	hidden.Discovery = &hd
-	if got := DiscoveredPlugins(hidden); got != nil {
+	hidden.PluginDiscovery = &hd
+	if got := hidden.DiscoveredPlugins(); got != nil {
 		t.Errorf("hidden discovery should yield nil, got %v", got)
 	}
 
 	// No discovery configured → nil.
-	if got := DiscoveredPlugins(ResolvedCommand{Name: "acme"}); got != nil {
+	if got := (Command{Name: "acme"}).DiscoveredPlugins(); got != nil {
 		t.Errorf("no discovery should yield nil, got %v", got)
 	}
 }
 
-// TestDiscoveryDiagnostics surfaces a misconfigured discovery path as data: an unusable
+// TestPluginDiscoveryErrors surfaces a misconfigured discovery path as data: an unusable
 // author-configured path is reported (with the offending path + cause), a clean path reports
 // nothing, and listing still works (DiscoveredPlugins never errors).
-func TestDiscoveryDiagnostics(t *testing.T) {
+func TestPluginDiscoveryErrors(t *testing.T) {
 	// A path that is not a directory is a real diagnostic.
 	file := filepath.Join(t.TempDir(), "plugins")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	bad := ResolvedCommand{
-		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: file,
+	bad := Command{
+		Name:            "acme",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: file,
 	}
-	problems := DiscoveryDiagnostics(bad)
+	problems := bad.PluginDiscoveryErrors()
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), file) {
-		t.Fatalf("DiscoveryDiagnostics = %v, want exactly one problem naming %s", problems, file)
+		t.Fatalf("PluginDiscoveryErrors = %v, want exactly one problem naming %s", problems, file)
 	}
 	// Listing degrades gracefully: the bad path contributes nothing but never errors.
-	if got := DiscoveredPlugins(bad); got != nil {
+	if got := bad.DiscoveredPlugins(); got != nil {
 		t.Errorf("DiscoveredPlugins with only a bad path = %v, want nil", got)
 	}
 
@@ -141,21 +141,21 @@ func TestDiscoveryDiagnostics(t *testing.T) {
 	// installed. Reporting it made every fresh install look misconfigured.
 	absent := bad
 	absent.PluginPath = filepath.Join(t.TempDir(), "no-such-subdir")
-	if probs := DiscoveryDiagnostics(absent); len(probs) != 0 {
+	if probs := absent.PluginDiscoveryErrors(); len(probs) != 0 {
 		t.Errorf("a missing plugin directory produced diagnostics: %v", probs)
 	}
 
 	// A clean configured path reports no problems.
-	clean := ResolvedCommand{
-		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: t.TempDir(),
+	clean := Command{
+		Name:            "acme",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: t.TempDir(),
 	}
-	if probs := DiscoveryDiagnostics(clean); probs != nil {
+	if probs := clean.PluginDiscoveryErrors(); probs != nil {
 		t.Errorf("clean path produced diagnostics: %v", probs)
 	}
 
 	// No discovery → nil.
-	if probs := DiscoveryDiagnostics(ResolvedCommand{Name: "acme"}); probs != nil {
+	if probs := (Command{Name: "acme"}).PluginDiscoveryErrors(); probs != nil {
 		t.Errorf("no discovery produced diagnostics: %v", probs)
 	}
 }
@@ -164,17 +164,17 @@ func TestDiscoveryDiagnostics(t *testing.T) {
 // misconfiguration, so it must never surface as a diagnostic (only the configured path does).
 func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(t.TempDir(), "missing-path-entry"))
-	cmd := ResolvedCommand{
-		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, // no configured PluginPath
+	cmd := Command{
+		Name:            "acme",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, // no configured PluginPath
 	}
-	if probs := DiscoveryDiagnostics(cmd); probs != nil {
+	if probs := cmd.PluginDiscoveryErrors(); probs != nil {
 		t.Errorf("a bad $PATH entry was reported as a diagnostic: %v", probs)
 	}
 }
 
 // TestDiscoveredPlugins_viaChain proves the documented help-handler seam: a handler
-// reads its command's discovery off rtx.Chain() and gets the runtime plugin list —
+// reads its command's discovery off rtx.CommandChain() and gets the runtime plugin list —
 // the path that closes static help's plugin blind spot (D-REMOTE-HELP).
 func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	dir := t.TempDir()
@@ -185,13 +185,13 @@ func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	}
 	def := Definition{
 		Name: "acme", Handler: "App",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 	rtx := NewContextFor(def, nil) // what the runtime hands a handler
-	chain := rtx.Chain()
-	got := DiscoveredPlugins(chain[len(chain)-1])
+	chain := rtx.CommandChain()
+	got := chain[len(chain)-1].DiscoveredPlugins()
 	if len(got) != 2 || got[0].Name != "bar" || got[1].Name != "foo" {
-		t.Errorf("DiscoveredPlugins via rtx.Chain() = %v, want bar and foo", got)
+		t.Errorf("DiscoveredPlugins via rtx.CommandChain() = %v, want bar and foo", got)
 	}
 }
 
@@ -217,7 +217,7 @@ func completionDef() Definition {
 			},
 			{Name: "test", Handler: "AppTest"},
 		},
-		RemoteCommands: []RemoteDef{{Name: "plugin", Binary: "app-plugin"}},
+		Plugins: []PluginDef{{Name: "plugin", Binary: "app-plugin"}},
 	}
 }
 
@@ -228,9 +228,9 @@ func TestComplete(t *testing.T) {
 		words []string
 		want  []string
 	}{
-		{"all commands + remotes", []string{""}, []string{"b", "build", "plugin", "test"}},
+		{"all commands + plugins", []string{""}, []string{"b", "build", "plugin", "test"}},
 		{"command prefix", []string{"bu"}, []string{"build"}},
-		{"remote prefix", []string{"plu"}, []string{"plugin"}},
+		{"plugin prefix", []string{"plu"}, []string{"plugin"}},
 		{"flag names of chain (declared only, no auto -h)", []string{"build", "-"}, []string{"--mode", "--verbose", "-m", "-v"}},
 		{"flag name prefix", []string{"build", "--m"}, []string{"--mode"}},
 		{"enum value of preceding flag", []string{"build", "--mode", ""}, []string{"debug", "release"}},
@@ -392,14 +392,14 @@ func TestComplete_noAutoHelpFlag(t *testing.T) {
 // FlagValueCompleter opt-in path.
 type dynCompletionHandlers struct{}
 
-func (dynCompletionHandlers) App() Handlers      { return dynStub{} }
-func (dynCompletionHandlers) AppBuild() Handlers { return dynBuildHandler{} }
+func (dynCompletionHandlers) App() Handler      { return dynStub{} }
+func (dynCompletionHandlers) AppBuild() Handler { return dynBuildHandler{} }
 
 type dynStub struct {
-	DefaultCascadingPreRun
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoCascadingPreRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 }
 
 func (dynStub) Run(ctx context.Context, rtx *Context) {}
@@ -467,8 +467,8 @@ func TestComplete_dynamicReceivesContext(t *testing.T) {
 
 type dynCtxHandlers struct{ t *testing.T }
 
-func (dynCtxHandlers) App() Handlers        { return dynStub{} }
-func (h dynCtxHandlers) AppBuild() Handlers { return dynCtxBuild{t: h.t} }
+func (dynCtxHandlers) App() Handler        { return dynStub{} }
+func (h dynCtxHandlers) AppBuild() Handler { return dynCtxBuild{t: h.t} }
 
 type dynCtxBuild struct {
 	dynStub
@@ -476,9 +476,9 @@ type dynCtxBuild struct {
 }
 
 func (h dynCtxBuild) CompleteFlagValue(rtx *Context, flag, partial string) []string {
-	chain := rtx.Chain()
+	chain := rtx.CommandChain()
 	if len(chain) == 0 {
-		h.t.Fatal("rtx.Chain() empty inside completer")
+		h.t.Fatal("rtx.CommandChain() empty inside completer")
 	}
 	leaf := chain[len(chain)-1].Name
 	return []string{partial + "-leaf-" + leaf}
@@ -607,7 +607,7 @@ func (deployArgCompleter) CompleteArgValue(rtx *Context, arg, partial string) []
 	return nil
 }
 
-func (argCompleterHandlers) AppDeploy() Handlers { return deployArgCompleter{} }
+func (argCompleterHandlers) AppDeploy() Handler { return deployArgCompleter{} }
 
 // TestComplete_dynamicArgValue confirms a handler implementing ArgValueCompleter
 // supplies positional candidates (authoritative over the enum), and that a nil
@@ -644,7 +644,7 @@ func TestComplete_descriptions(t *testing.T) {
 				Flags: []FlagDef{{Name: "env", Identifiers: []string{"--env"}, Summary: "target environment", Type: "string", Enum: []string{"dev", "prod"}}}},
 			{Name: "status", Handler: "AppStatus"}, // no summary: bare
 		},
-		RemoteCommands: []RemoteDef{{Name: "scan", Binary: "app-scan", Summary: "scan things"}},
+		Plugins: []PluginDef{{Name: "scan", Binary: "app-scan", Summary: "scan things"}},
 	}
 
 	got := complete(def, []string{""}, nil, nil)
@@ -689,33 +689,33 @@ func TestComplete_stripsStyledSummary(t *testing.T) {
 	}
 }
 
-// TestComplete_remoteOpaque confirms completion goes silent past a remote or
+// TestComplete_pluginOpaque confirms completion goes silent past a plugin or
 // discovered-plugin token — the dispatched binary owns that argument surface.
-func TestComplete_remoteOpaque(t *testing.T) {
+func TestComplete_pluginOpaque(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
-		Commands:       []CommandDef{{Name: "local", Handler: "AppLocal"}},
-		RemoteCommands: []RemoteDef{{Name: "plugin", Binary: "app-plugin"}},
+		Commands: []CommandDef{{Name: "local", Handler: "AppLocal"}},
+		Plugins:  []PluginDef{{Name: "plugin", Binary: "app-plugin"}},
 	}
 	if got := complete(def, []string{"plugin", ""}, nil, nil); got != nil {
-		t.Errorf("complete past a remote token = %v, want nil", got)
+		t.Errorf("complete past a plugin token = %v, want nil", got)
 	}
-	// The remote NAME itself still completes.
+	// The plugin NAME itself still completes.
 	if got := complete(def, []string{"plug"}, nil, nil); !reflect.DeepEqual(got, []string{"plugin"}) {
-		t.Errorf("remote name completion = %v, want [plugin]", got)
+		t.Errorf("plugin name completion = %v, want [plugin]", got)
 	}
 }
 
-// TestComplete_nestedRemote confirms remote commands declared on a sub-command
-// (now carried by CommandDef.Remotes) complete by name at depth, and that
+// TestComplete_nestedPlugin confirms declared plugins declared on a sub-command
+// (now carried by CommandDef.Plugins) complete by name at depth, and that
 // completion goes opaque past them.
-func TestComplete_nestedRemote(t *testing.T) {
+func TestComplete_nestedPlugin(t *testing.T) {
 	def := Definition{
 		Name: "acme", Handler: "Acme",
 		Commands: []CommandDef{{
 			Name: "cluster", Handler: "AcmeCluster",
 			Commands: []CommandDef{{Name: "list", Handler: "AcmeClusterList"}},
-			Remotes:  []RemoteDef{{Name: "scan", Binary: "acme-scan", Aliases: []string{"sc"}}},
+			Plugins:  []PluginDef{{Name: "scan", Binary: "acme-scan", Aliases: []string{"sc"}}},
 		}},
 	}
 	got := complete(def, []string{"cluster", ""}, nil, nil)
@@ -724,7 +724,7 @@ func TestComplete_nestedRemote(t *testing.T) {
 		t.Errorf("complete(cluster) = %v, want %v", got, want)
 	}
 	if got := complete(def, []string{"cluster", "scan", ""}, nil, nil); got != nil {
-		t.Errorf("complete past nested remote = %v, want nil", got)
+		t.Errorf("complete past nested plugin = %v, want nil", got)
 	}
 }
 
@@ -992,15 +992,15 @@ type lenientShow struct{ deployArgCompleter }
 // flags, read at the root's frame, from the line and the environment, with nothing validated.
 func (lenientShow) CompleteArgValue(rtx *Context, arg, partial string) []string {
 	var in lenientRootInputs
-	AtFrame(0, func(_ context.Context, rtx *Context) {
-		env, _ := ParseEnv[lenientRootInputs](rtx)
-		argv, _ := ParseArgv[lenientRootInputs](rtx)
-		in = OverlayInputs(env, argv)
+	AsCommand(0, func(_ context.Context, rtx *Context) {
+		env, _ := rtx.EnvInputs[lenientRootInputs]()
+		argv, _ := rtx.ArgvInputs[lenientRootInputs]()
+		in = MergeInputs(env, argv)
 	})(context.Background(), rtx)
 	return []string{"from-" + in.App.Flags.Store}
 }
 
-func (lenientHandlers) AppShow() Handlers { return lenientShow{} }
+func (lenientHandlers) AppShow() Handler { return lenientShow{} }
 
 // TestComplete_lenientParseOfAnAncestorsFlags proves the documented way a completer reads what
 // the user has said so far: a root flag on the line, else its environment fallback, though the

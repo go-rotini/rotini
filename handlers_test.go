@@ -13,10 +13,10 @@ import (
 
 // onlyRun is the common case: embed all four non-Run defaults, supply only Run.
 type onlyRun struct {
-	DefaultCascadingPreRun
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoCascadingPreRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 	ran bool
 }
 
@@ -26,9 +26,9 @@ func (o *onlyRun) Run(ctx context.Context, rtx *Context) { o.ran = true }
 // the mandatory Run — proving the defaults mix and match and that an explicit hook
 // shadows a default it does not embed.
 type granular struct {
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 	preRan bool
 }
 
@@ -39,13 +39,13 @@ func (g *granular) Run(ctx context.Context, rtx *Context)             {}
 // embedded the defaults but omitted Run would fail to compile here — the guarantee
 // that Run is mandatory.)
 var (
-	_ Handlers = (*onlyRun)(nil)
-	_ Handlers = (*granular)(nil)
+	_ Handler = (*onlyRun)(nil)
+	_ Handler = (*granular)(nil)
 )
 
 func TestDefaultEmbeds_bundleSatisfiesInterfaceAndNoOps(t *testing.T) {
 	h := &onlyRun{}
-	var iface Handlers = h
+	var iface Handler = h
 
 	// The four embedded hooks run as harmless no-ops (nil rtx is fine — they ignore it).
 	iface.CascadingPreRun(context.Background(), nil)
@@ -61,7 +61,7 @@ func TestDefaultEmbeds_bundleSatisfiesInterfaceAndNoOps(t *testing.T) {
 
 func TestDefaultEmbeds_granularAndOverride(t *testing.T) {
 	g := &granular{}
-	var iface Handlers = g
+	var iface Handler = g
 
 	// The explicitly-defined CascadingPreRun is used (not a default — none was embedded).
 	iface.CascadingPreRun(context.Background(), nil)
@@ -77,19 +77,19 @@ func TestDefaultEmbeds_granularAndOverride(t *testing.T) {
 
 func TestDefaultEmbeds_overrideShadowsDefault(t *testing.T) {
 	// Embedding the defaults but defining a hook explicitly: the explicit one wins.
-	var iface Handlers = &overrider{}
+	var iface Handler = &overrider{}
 	iface.PreRun(context.Background(), nil)
 	if !overriderPreRan {
-		t.Error("explicit PreRun did not shadow the embedded DefaultPreRun")
+		t.Error("explicit PreRun did not shadow the embedded NoPreRun")
 	}
 	overriderPreRan = false
 }
 
 type overrider struct {
-	DefaultCascadingPreRun
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoCascadingPreRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 }
 
 var overriderPreRan bool
@@ -97,10 +97,10 @@ var overriderPreRan bool
 func (*overrider) PreRun(ctx context.Context, rtx *Context) { overriderPreRan = true }
 func (*overrider) Run(ctx context.Context, rtx *Context)    {}
 
-// dhHandlers is the shape DefaultHooks exists for: a handler written by hand, behind a spec's
+// dhHandlers is the shape NoHooks exists for: a handler written by hand, behind a spec's
 // `handler: {import, convention}`, with only the hook it actually implements written out.
 type dhHandlers struct {
-	DefaultHooks
+	NoHooks
 	ran *bool
 }
 
@@ -108,11 +108,11 @@ func (h *dhHandlers) Run(_ context.Context, rtx *Context) { *h.ran = true }
 
 type dhProgram struct{ ran *bool }
 
-func (p dhProgram) App() Handlers    { return &dhHandlers{ran: p.ran} }
-func (p dhProgram) AppRun() Handlers { return &dhHandlers{ran: p.ran} }
+func (p dhProgram) App() Handler    { return &dhHandlers{ran: p.ran} }
+func (p dhProgram) AppRun() Handler { return &dhHandlers{ran: p.ran} }
 
 // TestDefaultHooks_satisfiesHandlersWithOnlyRun is the whole point: one embed plus Run, and the
-// promotion through two levels still produces a complete Handlers.
+// promotion through two levels still produces a complete Handler.
 func TestDefaultHooks_satisfiesHandlersWithOnlyRun(t *testing.T) {
 	var ran bool
 	p := NewProgram(testDef(), dhProgram{ran: &ran}).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -127,7 +127,7 @@ func TestDefaultHooks_satisfiesHandlersWithOnlyRun(t *testing.T) {
 // TestDefaultHooks_isTheSameFourNoOps pins that it adds no behaviour of its own — it is an
 // assembly of the existing embeds, not a new kind of hook.
 func TestDefaultHooks_isTheSameFourNoOps(t *testing.T) {
-	var h DefaultHooks
+	var h NoHooks
 	ctx, rtx := context.Background(), newContext()
 	h.CascadingPreRun(ctx, rtx)
 	h.PreRun(ctx, rtx)
@@ -141,7 +141,7 @@ func TestDefaultHooks_isTheSameFourNoOps(t *testing.T) {
 		Errors:    rtx.copyErrors(),
 		Panics:    rtx.copyFaults(),
 	}).Empty() {
-		t.Error("a DefaultHooks hook recorded something")
+		t.Error("a NoHooks hook recorded something")
 	}
 }
 
@@ -160,11 +160,11 @@ func TestDefaultHooks_ownMethodWins(t *testing.T) {
 
 type dhOverride struct{ log *[]string }
 
-func (p dhOverride) App() Handlers    { return &dhOverrideLeaf{log: p.log} }
-func (p dhOverride) AppRun() Handlers { return &dhOverrideLeaf{log: p.log} }
+func (p dhOverride) App() Handler    { return &dhOverrideLeaf{log: p.log} }
+func (p dhOverride) AppRun() Handler { return &dhOverrideLeaf{log: p.log} }
 
 type dhOverrideLeaf struct {
-	DefaultHooks
+	NoHooks
 	log *[]string
 }
 
@@ -175,7 +175,7 @@ func (h *dhOverrideLeaf) Run(context.Context, *Context)    { *h.log = append(*h.
 // the embeds, and it cannot be asserted from inside a passing test binary — a program that does
 // not compile cannot be linked into this one. So it is compiled out of process.
 //
-// Without it, a handler could embed DefaultHooks, forget Run entirely, satisfy Handlers, and do
+// Without it, a handler could embed NoHooks, forget Run entirely, satisfy Handler, and do
 // nothing at runtime. The whole reason `rotini generate`'s hook audit skips Run is that the
 // compiler owns that case.
 func TestDefaultHooks_stillRequiresRunAtCompileTime(t *testing.T) {
@@ -197,10 +197,10 @@ func TestDefaultHooks_stillRequiresRunAtCompileTime(t *testing.T) {
 
 import "github.com/go-rotini/rotini"
 
-// DefaultHooks supplies the four no-ops. Run is NOT among them, so this must not compile.
-type handlers struct{ rotini.DefaultHooks }
+// NoHooks supplies the four no-ops. Run is NOT among them, so this must not compile.
+type handlers struct{ rotini.NoHooks }
 
-var _ rotini.Handlers = (*handlers)(nil)
+var _ rotini.Handler = (*handlers)(nil)
 
 func main() {}
 `)
@@ -210,14 +210,14 @@ func main() {}
 	cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		t.Fatal("a handler embedding DefaultHooks with no Run compiled — the compile-time guarantee is gone")
+		t.Fatal("a handler embedding NoHooks with no Run compiled — the compile-time guarantee is gone")
 	}
 	if !strings.Contains(string(out), "missing method Run") {
 		t.Errorf("compile failed, but not by naming the missing Run:\n%s", out)
 	}
 }
 
-// The instance-lifetime contract documented on [Handlers], pinned.
+// The instance-lifetime contract documented on [Handler], pinned.
 //
 // It is load-bearing rather than incidental: the docs now tell authors that a field is the right
 // home for state flowing between one command's own hooks, and that advice is only true because
@@ -258,8 +258,8 @@ func (h *ltFrame) CascadingPostRun(context.Context, *Context) { h.mark("Cascadin
 // ltFresh is what codegen emits: a new value per call.
 type ltFresh struct{ seen *[]ltSighting }
 
-func (w ltFresh) App() Handlers    { return &ltFrame{name: "app", seen: w.seen} }
-func (w ltFresh) AppRun() Handlers { return &ltFrame{name: "run", seen: w.seen} }
+func (w ltFresh) App() Handler    { return &ltFrame{name: "app", seen: w.seen} }
+func (w ltFresh) AppRun() Handler { return &ltFrame{name: "run", seen: w.seen} }
 
 func find(seen []ltSighting, frame, hook string) *ltSighting {
 	for i := range seen {
@@ -357,8 +357,8 @@ type ltShared struct {
 	leaf *ltFrame
 }
 
-func (w ltShared) App() Handlers    { return w.root }
-func (w ltShared) AppRun() Handlers { return w.leaf }
+func (w ltShared) App() Handler    { return w.root }
+func (w ltShared) AppRun() Handler { return w.leaf }
 
 // TestHandlerLifetime_sharedWiringPersistsAcrossRuns demonstrates the hazard concretely: the
 // runtime uses whatever the wiring method returns, so freshness is the author's to provide.
@@ -412,8 +412,8 @@ func TestHandlerLifetime_generatedWiringIsRaceFreeUnderConcurrentRuns(t *testing
 // -race reports on.
 type ltRecording struct{ record func(ltSighting) }
 
-func (w ltRecording) App() Handlers    { return &ltConcurrent{name: "app", record: w.record} }
-func (w ltRecording) AppRun() Handlers { return &ltConcurrent{name: "run", record: w.record} }
+func (w ltRecording) App() Handler    { return &ltConcurrent{name: "app", record: w.record} }
+func (w ltRecording) AppRun() Handler { return &ltConcurrent{name: "run", record: w.record} }
 
 type ltConcurrent struct {
 	name   string
@@ -433,10 +433,10 @@ func (h *ltConcurrent) CascadingPostRun(context.Context, *Context) {}
 // them, so "does nothing, safely, with a nil context" is a real contract.
 func TestDefaultEmbedsAreNoOps(t *testing.T) {
 	var h struct {
-		DefaultCascadingPreRun
-		DefaultPreRun
-		DefaultPostRun
-		DefaultCascadingPostRun
+		NoCascadingPreRun
+		NoPreRun
+		NoPostRun
+		NoCascadingPostRun
 	}
 	ctx, rtx := context.Background(), newContext()
 	h.CascadingPreRun(ctx, rtx)

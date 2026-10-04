@@ -116,7 +116,7 @@ Config-file SOURCES this command contributes — where config values come from (
 
 `string`
 
-Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the family's base name), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the binder reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix).
+Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the family's base name), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the input reader reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix).
 
 #### `flag_groups`
 
@@ -149,45 +149,45 @@ The composed child is the base, and the parent can adjust it at the point where 
 - Identity and presentation keys declared alongside the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) WIN over the child's, for that one composed node — the child's own sub-commands keep theirs. A parent tailors the child for its tree without forking it.
 - A 'commands:' authored next to the $ref is MERGED onto the child's own subtree: its inline entries get their own stubs, and its $ref entries compose as further children.
 - `handler:` on a $ref node points the composed command at a different handler package.
-- Handler-coupled keys (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, remote_commands, remote_discovery, passthrough) CANNOT be overlaid: the composed command runs the child's handler, built against the child's own inputs and output, so validation rejects them here. Declare them in the child spec.
+- Handler-coupled keys (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough) CANNOT be overlaid: the composed command runs the child's handler, built against the child's own inputs and output, so validation rejects them here. Declare them in the child spec.
 
-The child's own remote_commands, remote_discovery and passthrough travel with it. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file.
+The child's own plugins, plugin_discovery and passthrough travel with it. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file.
 
 #### `handler`
 
 [`HandlerSource`](#handlersource)
 
-Source this command's handlers from an external Go PACKAGE instead of a generated stub (handler delegation). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handlers' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package.
+Source this command's handlers from an external Go PACKAGE instead of a generated stub (handler delegation). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handler' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package.
 
 #### `passthrough`
 
 `boolean`
 
-When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no remote commands or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
+When true, every token after this command's own name binds as a raw positional — no flag parsing, no unknown-flag errors, no '--' needed (the wrapper-CLI case: `mytool exec ls -la` forwards '-la' verbatim, and a literal '--' passes through too). Tokens BEFORE the command (ancestor flags) parse normally. A passthrough command declares no flags, no sub-commands, no declared plugins or discovery, and its last argument must be a variadic '[]string' — the receiver of the raw tokens (validation enforces all of this). Shell completion offers nothing past the boundary, falling back to file completion.
 
-#### `remote_commands`
+#### `plugins`
 
-array of [`RemoteCommandSpec`](#remotecommandspec)
+array of [`PluginSpec`](#pluginspec)
 
-Co-located remote binaries dispatched as first-class sub-commands of this command.
+Declared plugins: separate executables dispatched as first-class sub-commands of this command.
 
-#### `remote_discovery`
+#### `plugin_discovery`
 
-[`RemoteDiscovery`](#remotediscovery)
+[`PluginDiscovery`](#plugindiscovery)
 
-Auto-expose external '<prefix>*' executables as remote sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared remote_commands. Presence enables discovery.
+Auto-expose external '<prefix>*' executables as plugin sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared plugins. Presence enables discovery.
 
 #### `plugin_path`
 
 `string`
 
-Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time; a leading ~ and $VAR references are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'remote_commands' this spec declares and anything 'remote_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared remote could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
+Extra directory to search for this command's plugin binaries, in addition to the host binary's own directory and PATH. Relative to the working directory at run time; a leading ~ and $VAR references are expanded when the program runs, and a directory that does not exist yet is simply empty. On a `$ref` node it overrides the composed child's own. It applies to BOTH kinds of plugin: the 'plugins' this spec declares and anything 'plugin_discovery' finds — they are the same binaries in the same place, so they are configured once here rather than per-mechanism. Without it, a declared plugin could only ever be installed next to the host binary or on PATH, which is the git/kubectl convention and not always the right one for a vendored or bundled plugin. Search order is fixed and the same for both: next to the host binary, then this directory, then PATH — so a plugin shipped beside the binary always wins over one found here, and a failure names the locations it actually searched.
 
 #### `timeout`
 
 `string`
 
-Not supported on a local command and rejected by rotini validation: a timeout is a remote-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a remote_commands[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
+Not supported on a local command and rejected by rotini validation: a timeout is a plugin-only, host-side bound on a dispatched binary, so it has no effect on local execution. Set it on a plugins[] entry's 'timeout' instead. (Recognized here only so validation can give that targeted error rather than a generic 'unknown property'.)
 
 ### Documentation
 
@@ -225,7 +225,7 @@ Example command-line invocations, rendered one per line. Ignored when 'help' is 
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome funnel's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code, and the default signal handling, which exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome reporter's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code, and the default signal handling, which exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
 
 #### `see_also`
 
@@ -281,7 +281,7 @@ Exact, verbatim markdown reference page for this command (the markdown feature's
 
 [`Schema`](#schema)
 
-This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handlers have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract.
+This command's output shape, as a JSON-schema type. rotini generates a typed '<Prefix>Output' Go struct (or a named-type alias when it is a '$ref' to a document-level schema) for the handler to use however it likes — it wires NO flag and triggers NO rendering. Handler have no return type by design, so 'output' is an opt-in building block, never a framework-enforced contract.
 
 #### `schemas`
 
@@ -556,39 +556,39 @@ Go import path of the handler package, in the same 'alias path' form an input ty
 
 `string` · **required**
 
-Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.Handlers. PascalCase Go-exportable identifier.
+Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.Handler. PascalCase Go-exportable identifier.
 
 
-## RemoteCommandSpec
+## PluginSpec
 
 ### `name`
 
 `string` · **required**
 
-Name of the remote command. The dispatched binary is named <program>-<name>, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree <program> is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
+Name of the declared plugin. The dispatched binary is named <program>-<name>, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree <program> is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
 
 ### `aliases`
 
 array of `string`
 
-Additional names that invoke this remote command.
+Additional names that invoke this plugin.
 
 ### `summary`
 
 `string`
 
-Short one-liner shown next to this remote command in its parent's generated Commands list.
+Short one-liner shown next to this plugin in its parent's generated Commands list.
 
 ### `timeout`
 
 `string`
 
-Host-side timeout for the remote binary execution. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
+Host-side timeout for running the plugin. Uses Go duration format (e.g. "10s", "1m30s"). Empty or omitted means no timeout.
 
 
-## RemoteDiscovery
+## PluginDiscovery
 
-Auto-expose external '<prefix>*' executables as remote sub-commands (kubectl/git/gh plugin style), alongside any declared remote_commands. Presence enables discovery; a discovered name that collides with a declared command or remote is skipped.
+Auto-expose external '<prefix>*' executables as plugin sub-commands (kubectl/git/gh plugin style), alongside any declared plugins. Presence enables discovery; a discovered name that collides with a declared command or plugin is skipped.
 
 ### `hidden`
 
@@ -845,7 +845,7 @@ When true, the input must be provided (or stdin must not be empty for stdin inpu
 
 `boolean` · default `false`
 
-When true, this input's value is treated as a secret: redacted in provenance/error output by the default binder. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
+When true, this input's value is treated as a secret: redacted in provenance/error output by the default input reader. It does not prompt: a handler that wants to ask for the value interactively reads it without echo itself (golang.org/x/term's ReadPassword, for one); for non-interactive supply, pair secret with from: [file] (token file) or an env input.
 
 ### `separator`
 

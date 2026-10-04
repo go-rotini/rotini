@@ -13,7 +13,7 @@ import (
 )
 
 // parserTestDef mirrors a root "app" with a sub-command "run", matching the runInputs
-// scopes used by the binder tests.
+// scopes used by the input reader tests.
 func parserTestDef() Definition {
 	return Definition{
 		Name:    "app",
@@ -55,8 +55,8 @@ func TestParse_bindsInputs(t *testing.T) {
 	}
 }
 
-// TestParse_viaRegistryGet exercises the full handler flow: the parser is bound to
-// the registry, retrieved via rtx.Get (ctx.Value style), then used to parse.
+// TestParse_viaRegistryGet exercises the full handler flow: the parser is supplied to the
+// program, retrieved via rtx.Parser(), then used to parse.
 // The parser a handler reaches is the one the program supplied — and Context.Parser never
 // returns nil, so a handler that wants to parse argv itself does not have to ask whether one
 // exists, nor supply one to make the answer yes.
@@ -1296,12 +1296,12 @@ type runInputs struct {
 	Run runCommandInputs
 }
 
-// bindStore runs the reflective binder over a hand-built parsed store, the same
+// bindStore runs the reflective input reader over a hand-built parsed store, the same
 // way [Parse] does after parsing fills it. It isolates coercion/scoping from argv
 // parsing.
 func bindStore[T any](store *parsedInputs) T {
 	var out T
-	chain := make([]ResolvedCommand, len(store.scopes))
+	chain := make([]Command, len(store.scopes))
 	v := reflect.ValueOf(&out).Elem()
 	_ = bindInputs(v, store, chain, frameAnchor(v, chain, frameUnset))
 	return out
@@ -1815,7 +1815,7 @@ func TestInputs_missingFlagKeepsZero(t *testing.T) {
 // ── ParseKind ───────────────────────────────────────────────────.
 
 // TestParseError_kindPerPath drives each parse/validate failure path and asserts
-// the *ParseError carries the right ParseKind — so a funnel can branch on Kind
+// the *ParseError carries the right ParseKind — so a reporter can branch on Kind
 // instead of matching the message. Every kind still classifies as CategoryUsage
 // (even the API-misuse Internal kind is a usage-shaped *ParseError).
 func TestParseError_kindPerPath(t *testing.T) {
@@ -1936,7 +1936,7 @@ func TestParseKind_String(t *testing.T) {
 // ── usage rendering ─────────────────────────────────────────────.
 
 // A parse failure the end user caused carries the usage category, so a single CategoryOf call
-// in a funnel classifies it as theirs; a misuse of the parser API is the author's bug and
+// in a reporter classifies it as theirs; a misuse of the parser API is the author's bug and
 // carries the internal one, as ParseKindInternal's own doc has always said.
 func TestParseError_category(t *testing.T) {
 	var in struct {
@@ -2605,8 +2605,8 @@ func TestParse_measuredBounds(t *testing.T) {
 }
 
 // A `from: [stdin]` flag's "-" survives argv being parsed more than once in a run — the generated
-// --help check (ParseArgv) and a parent collecting its own inputs both parse argv before the leaf's
-// Collect. Each parse used to read stdin afresh, so the first drained it and the leaf failed with
+// --help check (ArgvInputs) and a parent collecting its own inputs both parse argv before the leaf's
+// Inputs. Each parse used to read stdin afresh, so the first drained it and the leaf failed with
 // "stdin is empty".
 func TestParse_stdinSentinelSurvivesReparsing(t *testing.T) {
 	def := Definition{
@@ -2764,7 +2764,7 @@ func TestParse_detachedOptionalValueHint(t *testing.T) {
 
 // TestSecret_coercionFailureIsRedacted is the leak that was there: a secret typed wrong.
 func TestSecret_coercionFailureIsRedacted(t *testing.T) {
-	_, err := Collect[secIntInputs](NewContextFor(secretFlagDef("int"), []string{"--token", secretValue}))
+	_, err := NewContextFor(secretFlagDef("int"), []string{"--token", secretValue}).Inputs[secIntInputs]()
 	mustNotLeak(t, "a secret flag coerced to int", err)
 }
 
@@ -2782,14 +2782,14 @@ func TestSecret_argumentCoercionIsRedacted(t *testing.T) {
 	}
 	type in struct{ App cmd }
 
-	_, err := Collect[in](NewContextFor(def, []string{secretValue}))
+	_, err := NewContextFor(def, []string{secretValue}).Inputs[in]()
 	mustNotLeak(t, "a secret argument coerced to int", err)
 }
 
 // TestSecret_enumViolationIsRedacted covers the path that was already correct, so a later change
 // cannot quietly regress it while fixing something else.
 func TestSecret_enumViolationIsRedacted(t *testing.T) {
-	_, err := Collect[secInputs](NewContextFor(secretFlagDef("string", "alpha", "beta"), []string{"--token", secretValue}))
+	_, err := NewContextFor(secretFlagDef("string", "alpha", "beta"), []string{"--token", secretValue}).Inputs[secInputs]()
 	mustNotLeak(t, "a secret flag failing its enum", err)
 }
 
@@ -2807,7 +2807,7 @@ func TestSecret_nonSecretValuesStillAppear(t *testing.T) {
 	}
 	type in struct{ App c }
 
-	_, err := Collect[in](NewContextFor(def, []string{"--count", "twelve"}))
+	_, err := NewContextFor(def, []string{"--count", "twelve"}).Inputs[in]()
 	if err == nil {
 		t.Fatal("expected a rejection")
 	}
@@ -2839,7 +2839,7 @@ func TestSecret_coerceErrorUnwrapsToItsCause(t *testing.T) {
 // which fails several frames below where the definition lives.
 //
 // A secret given a value of the wrong type therefore printed the value, through the default
-// funnel, to stderr. These walk every way a declared input can reject a value.
+// reporter, to stderr. These walk every way a declared input can reject a value.
 
 const secretValue = "hunter2-DO-NOT-PRINT"
 

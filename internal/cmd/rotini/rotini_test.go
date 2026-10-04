@@ -17,7 +17,7 @@ import (
 // The companion CLI is rotini's own dogfood, and these tests drive it exactly as a
 // user's CLI would be driven: build the generated Program, bind doubles for the
 // codegen entry points (the handlers fetch GenerateFn/ValidateFn/InitializeFn from the
-// registry with BindIfAbsent, so a test's binding wins), and call Run.
+// registry with SetDependencyIfAbsent, so a test's double wins), and call Run.
 //
 // Run is used rather than Execute so nothing calls os.Exit, and a fresh Program per
 // test keeps registry bindings from leaking between them. Run returns (code, err):
@@ -72,15 +72,15 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 			p, out, _ := newTestCLI(t)
 			// Binding doubles that fail the test proves --help short-circuits before
 			// any codegen work is attempted.
-			p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
+			p.WithDependency(generateDep, codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
 				t.Error("--help ran the generate work")
 				return nil
 			}))
-			p.Bind("validate", codegen.ValidateFn(func(string, string, bool, string, func(string, error), func([]error)) error {
+			p.WithDependency(validateDep, codegen.ValidateFn(func(string, string, bool, string, func(string, error), func([]error)) error {
 				t.Error("--help ran the validate work")
 				return nil
 			}))
-			p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+			p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
 				t.Error("--help ran the initialize work")
 				return codegen.Initialized{}, nil
 			}))
@@ -116,7 +116,7 @@ func TestCLI_generateDelegatesItsArguments(t *testing.T) {
 	var gotWatch bool
 
 	p, out, _ := newTestCLI(t)
-	p.Bind("generate", codegen.GenerateFn(func(spec, conf string, watch bool, onGenerate func(string, error), _ func([]error)) error {
+	p.WithDependency(generateDep, codegen.GenerateFn(func(spec, conf string, watch bool, onGenerate func(string, error), _ func([]error)) error {
 		gotSpec, gotConf, gotWatch = spec, conf, watch
 		onGenerate("generated ok", nil)
 		return nil
@@ -145,7 +145,7 @@ func TestCLI_generateDelegatesItsArguments(t *testing.T) {
 // A codegen failure is recorded and exits non-zero, rather than being swallowed.
 func TestCLI_generateFailureIsReported(t *testing.T) {
 	p, _, errb := newTestCLI(t)
-	p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
+	p.WithDependency(generateDep, codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
 		return rotini.UsageError(errBadSpec)
 	}))
 
@@ -164,7 +164,7 @@ func TestCLI_generateFailureIsReported(t *testing.T) {
 func TestCLI_validateDelegatesFailMode(t *testing.T) {
 	var gotSpec, gotConf, gotFail string
 	p, out, _ := newTestCLI(t)
-	p.Bind("validate", codegen.ValidateFn(
+	p.WithDependency(validateDep, codegen.ValidateFn(
 		func(spec, conf string, _ bool, failMode string, onValidate func(string, error), _ func([]error)) error {
 			gotSpec, gotConf, gotFail = spec, conf, failMode
 			onValidate("valid", nil)
@@ -185,7 +185,7 @@ func TestCLI_validateDelegatesFailMode(t *testing.T) {
 // Warnings are surfaced without failing the run — that is what makes them warnings.
 func TestCLI_validateWarningsDoNotFail(t *testing.T) {
 	p, out, errb := newTestCLI(t)
-	p.Bind("validate", codegen.ValidateFn(
+	p.WithDependency(validateDep, codegen.ValidateFn(
 		func(_, _ string, _ bool, _ string, _ func(string, error), onWarnings func([]error)) error {
 			onWarnings([]error{errAdvisory})
 			return nil
@@ -209,7 +209,7 @@ func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	t.Chdir(t.TempDir()) // no go.mod requiring rotini: the runtime warning is due
 
 	p, _, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(name, format string, force bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(name, format string, force bool) (codegen.Initialized, error) {
 		gotName, gotFormat, gotForce = name, format, force
 		return codegen.Initialized{}, nil
 	}))
@@ -237,7 +237,7 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	}
 	t.Chdir(dir)
 	p, out, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
 		return codegen.Initialized{
 			Spec:   "cmd/mycli/.rotini.spec.yaml",
 			Conf:   "cmd/mycli/.rotini.conf.yaml",
@@ -259,7 +259,7 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 // The name argument is required: without it there is nothing to scaffold.
 func TestCLI_initializeRequiresAName(t *testing.T) {
 	p, _, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
 		t.Error("initialize ran without a name")
 		return codegen.Initialized{}, nil
 	}))
@@ -311,9 +311,9 @@ func TestCLI_aliases(t *testing.T) {
 		t.Run(tc.alias, func(t *testing.T) {
 			var ran bool
 			p, _, _ := newTestCLI(t)
-			p.Bind("generate", func(string, string, bool, func(string, error), func([]error)) error { ran = true; return nil })
-			p.Bind("validate", func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
-			p.Bind("initialize", func(string, string, bool) (codegen.Initialized, error) { ran = true; return codegen.Initialized{}, nil })
+			p.WithDependency(generateDep, func(string, string, bool, func(string, error), func([]error)) error { ran = true; return nil })
+			p.WithDependency(validateDep, func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
+			p.WithDependency(initializeDep, func(string, string, bool) (codegen.Initialized, error) { ran = true; return codegen.Initialized{}, nil })
 
 			argv := []string{tc.alias, "x"}
 			if _, err := p.Run(argv); err != nil {
@@ -528,7 +528,7 @@ func TestCLI_bannerNamesTheFilesRead(t *testing.T) {
 	}
 	p, out, _ := newTestCLI(t)
 	var gotSpec, gotConf string
-	p.Bind("validate", codegen.ValidateFn(func(spec, conf string, _ bool, _ string, _ func(string, error), _ func([]error)) error {
+	p.WithDependency(validateDep, codegen.ValidateFn(func(spec, conf string, _ bool, _ string, _ func(string, error), _ func([]error)) error {
 		gotSpec, gotConf = spec, conf
 		return nil
 	}))

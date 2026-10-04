@@ -59,7 +59,7 @@ from.
   marking through to the generated binding, so secret values are handled distinctly
   from ordinary inputs.
 - **Errors do not leak secrets.** The typed error and fault classes
-  (`ParseError`, `BindError`, `RemoteError`, `WiringError`, `ServiceError`,
+  (`ParseError`, `InputError`, `PluginError`, `WiringError`, `DependencyError`,
   `PanicError`, and the `ErrUsage` / `ErrInternal` sentinels) are designed to be
   non-leaky: messages describe the failure without echoing secret input values, and
   internal faults surface as `ErrInternal` rather than spilling internals.

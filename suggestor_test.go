@@ -258,7 +258,7 @@ func TestSuggestorFor_closesTheLoop(t *testing.T) {
 	}
 }
 
-// TestSuggestorFor_wrappedErrorsStillResolve: a funnel sees whatever the run recorded, which is
+// TestSuggestorFor_wrappedErrorsStillResolve: a reporter sees whatever the run recorded, which is
 // rarely the bare *ParseError. errors.As is the whole reason this works through a wrapper.
 func TestSuggestorFor_wrappedErrorsStillResolve(t *testing.T) {
 	inner := &ParseError{Kind: ParseKindUnknownFlag, Token: "--vebose", Candidates: []string{"--verbose"}}
@@ -331,7 +331,7 @@ func TestSuggestor_skipsEmptyAndDuplicateCandidates(t *testing.T) {
 }
 
 // TestSuggestor_nilAndEmptyInputs: a nil Suggestor is a caller that forgot to construct one,
-// and it must not panic inside a funnel that is already reporting a failure.
+// and it must not panic inside a reporter that is already reporting a failure.
 func TestSuggestor_nilAndEmptyInputs(t *testing.T) {
 	var nilSuggestor *Suggestor
 	if got := nilSuggestor.Suggest("instal", cliVocabulary); got != nil {

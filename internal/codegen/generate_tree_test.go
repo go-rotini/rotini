@@ -13,7 +13,7 @@ import (
 //
 // The build step is the load-bearing half. Delegation across packages only type-checks
 // because both generated packages import the SAME github.com/go-rotini/rotini — so
-// childcli.Handlers().Child() satisfies the parent's rotini.Handlers. When the runtime
+// childcli.Handlers().Child() satisfies the parent's rotini.Handler. When the runtime
 // was emitted per-project, each package got its own incompatible rotini.Context and this
 // could not compile.
 func TestGenerateCompose_localRef(t *testing.T) {
@@ -74,7 +74,7 @@ generate:
 	rollup := readEmitted(t, dir, "internal/cmd/parent/zz_parent.go")
 	for _, want := range []string{
 		`childcli "example.com/comp/internal/cmd/child"`, // aliased child import (identAlias)
-		"ParentChild() rotini.Handlers",                  // the composed command joins ProgramHandlers
+		"ParentChild() rotini.Handler",                   // the composed command joins ProgramHandlers
 		"childcli.Handlers().Child()",                    // auto-delegation, no hand wiring
 	} {
 		if !strings.Contains(rollup, want) {

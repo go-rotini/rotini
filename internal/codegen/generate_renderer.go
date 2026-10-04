@@ -303,12 +303,12 @@ func renderMainFile(header, pkg, pkgAlias, extension string) ([]byte, error) {
 
 // templateHandlerData is the per-command handler stub context. The stub is
 // create-once and then the user's, so it is written to be the shape worth copying:
-// the Default* hooks embedded rather than overridden, and Run showing the
-// Collect-then-HaltWith idiom against this command's own generated inputs type.
+// the No* hooks embedded rather than overridden, and Run showing the
+// Inputs-then-HaltWith idiom against this command's own generated inputs type.
 type templateHandlerData struct {
 	Package       string
-	HandlersType  string
-	InputsType    string // the generated inputs type Collect decodes into
+	HandlerType   string
+	InputsType    string // the generated inputs type Inputs decodes into
 	Invocation    string // how a user types the command, e.g. "rotini generate"
 	Prefix        string // this command's frame inside the inputs type, e.g. inputs.RotiniGenerate
 	RuntimeImport string
@@ -318,17 +318,17 @@ type templateHandlerData struct {
 	// `help` taking a variadic path — so the stub starts connected rather than starting with
 	// a TODO that reimplements what codegen just generated. Nothing here is injected at run
 	// time; it is starter code in a create-once file the author owns and may delete.
-	HelpFlag            string // Go field of this command's bool `help` flag; "" when there is none, or the help feature is off
-	HelpFrame           string // inputs frame holding HelpFlag: this command's prefix, or an ancestor's when the flag is inherited
-	HelpFlagName        string // that flag's logical name, for the comment explaining the ordering
-	AnswerBeforeCollect bool   // this command answers help/version from argv, ahead of Collect's validation
-	UsesInputs          bool   // the seeded body reads `inputs`; when false Collect still runs, for its validation
-	VersionFlag         string // Go field of this command's bool `version` flag; "" when there is none
-	Header              string // the target's conf-declared `header:`; "" for none
-	HelpPathArg         string // Go field of the variadic path argument on a command named `help`; "" otherwise
-	VersionOnly         bool   // a command named `version` whose whole job is to print it
-	PrintHelpWhenBare   bool   // a dispatcher root: sub-commands, no own arguments, help feature on
-	NeedsInputs         bool   // the seeded body reads an input, so the stub calls Collect
+	HelpFlag           string // Go field of this command's bool `help` flag; "" when there is none, or the help feature is off
+	HelpFrame          string // inputs frame holding HelpFlag: this command's prefix, or an ancestor's when the flag is inherited
+	HelpFlagName       string // that flag's logical name, for the comment explaining the ordering
+	AnswerBeforeInputs bool   // this command answers help/version from argv, ahead of Inputs's validation
+	UsesInputs         bool   // the seeded body reads `inputs`; when false Inputs still runs, for its validation
+	VersionFlag        string // Go field of this command's bool `version` flag; "" when there is none
+	Header             string // the target's conf-declared `header:`; "" for none
+	HelpPathArg        string // Go field of the variadic path argument on a command named `help`; "" otherwise
+	VersionOnly        bool   // a command named `version` whose whole job is to print it
+	PrintHelpWhenBare  bool   // a dispatcher root: sub-commands, no own arguments, help feature on
+	NeedsInputs        bool   // the seeded body reads an input, so the stub calls Inputs
 }
 
 func renderHandlerStubFile(data templateHandlerData) ([]byte, error) {
@@ -439,7 +439,7 @@ type templateRotiniData struct {
 	ModelAliases  []string                 // model type names re-exported here as aliases; empty unless split
 	Blocks        []templateInputBlock
 	OutputTypes   string // pre-rendered output type declarations; "" when none
-	BindMeta      string // pre-rendered bind metadata; "" when none
+	InputSettings string // pre-rendered bind metadata; "" when none
 	Features      []templateFeature
 	EmbedImport   bool // emit `import _ "embed"` — only when some feature uses //go:embed
 	// PathResolvers is true when some feature emits a path-keyed resolver — help, man or

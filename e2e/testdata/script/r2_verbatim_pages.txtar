@@ -60,16 +60,16 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*vbHandlers)(nil)
+var _ rotini.Handler = (*vbHandler)(nil)
 
-type vbHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type vbHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*vbHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*vbHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	help, _ := Help()
 	man, _ := Man()
 	markdown, _ := Markdown()

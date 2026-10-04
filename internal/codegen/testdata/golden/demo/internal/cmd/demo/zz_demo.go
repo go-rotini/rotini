@@ -6,8 +6,8 @@ import (
 )
 
 type ProgramHandlers interface {
-	Demo() rotini.Handlers
-	DemoBuild() rotini.Handlers
+	Demo() rotini.Handler
+	DemoBuild() rotini.Handler
 }
 
 var definition = rotini.Definition{
@@ -72,8 +72,8 @@ type DemoBuildInputs struct {
 	DemoBuild DemoBuildCommandInputs
 }
 
-// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.
-var BindMeta = rotini.BindMeta{
+// InputSettings is the generated descriptor the default input reader (rotini.InputReader) reads.
+var InputSettings = rotini.InputSettings{
 	EnvPrefix: "DEMO",
 }
 
@@ -81,10 +81,10 @@ var BindMeta = rotini.BindMeta{
 // ProgramHandlers. Construct your program with this so the compiler verifies your handlers
 // satisfy ProgramHandlers; the command tree stays an unexported implementation detail.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	// BindMeta is a DESCRIPTION of this program, like the command tree above it, so it
+	// InputSettings is a DESCRIPTION of this program, like the command tree above it, so it
 	// travels as a typed option rather than as a registry entry — the registry is yours.
 	return rotini.NewProgram(definition, handlers).
-		WithBindMeta(BindMeta)
+		WithInputSettings(InputSettings)
 }
 
 // handlers is the generated ProgramHandlers implementation: each method wires a command to its
@@ -105,10 +105,10 @@ func Handlers() ProgramHandlers {
 	return &handlers{}
 }
 
-func (*handlers) Demo() rotini.Handlers {
-	return &demoHandlers{}
+func (*handlers) Demo() rotini.Handler {
+	return &demoHandler{}
 }
 
-func (*handlers) DemoBuild() rotini.Handlers {
-	return &demoBuildHandlers{}
+func (*handlers) DemoBuild() rotini.Handler {
+	return &demoBuildHandler{}
 }

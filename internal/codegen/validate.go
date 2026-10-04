@@ -346,7 +346,7 @@ func definitionNoun(keywordLocation string) string {
 }
 
 // splitCamel turns a PascalCase schema definition name into lowercase words:
-// "RemoteCommandSpec" -> "remote command spec".
+// "PluginSpec" -> "declared plugin spec".
 func splitCamel(name string) string {
 	var b strings.Builder
 	for i, r := range name {

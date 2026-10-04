@@ -16,7 +16,7 @@ func TestCategoryOf(t *testing.T) {
 		{"plain", errors.New("plain"), CategoryNone},
 		{"usage", UsageError(errors.New("bad input")), CategoryUsage},
 		{"internal", InternalError(errors.New("boom")), CategoryInternal},
-		{"service error is internal", &ServiceError{Key: "parser"}, CategoryInternal},
+		{"service error is internal", &DependencyError{Name: "parser"}, CategoryInternal},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -47,7 +47,7 @@ func TestUsageError_cleanMessageAndMatches(t *testing.T) {
 	}
 }
 
-// The category survives further wrapping (errors.Is walks the chain), so a funnel can
+// The category survives further wrapping (errors.Is walks the chain), so a reporter can
 // classify an error a handler annotated on the way up.
 func TestCategory_survivesWrapping(t *testing.T) {
 	err := fmt.Errorf("while creating widget: %w", UsageError(errors.New("bad id")))
@@ -65,15 +65,15 @@ func TestCategory_nilConstructors(t *testing.T) {
 	}
 }
 
-// ServiceError gains the internal category without losing its existing identity: it still
-// matches ErrServiceNotFound and recovers via errors.As.
-func TestServiceError_backwardCompatible(t *testing.T) {
-	err := error(&ServiceError{Key: "parser"})
-	if !errors.Is(err, ErrServiceNotFound) {
-		t.Error("ServiceError should still match ErrServiceNotFound")
+// DependencyError is internal-category while keeping its own identity: it still
+// matches ErrDependencyNotFound and recovers via errors.As.
+func TestDependencyError_matchesSentinel(t *testing.T) {
+	err := error(&DependencyError{Name: "parser"})
+	if !errors.Is(err, ErrDependencyNotFound) {
+		t.Error("DependencyError should still match ErrDependencyNotFound")
 	}
-	var se *ServiceError
-	if !errors.As(err, &se) || se.Key != "parser" {
+	var se *DependencyError
+	if !errors.As(err, &se) || se.Name != "parser" {
 		t.Errorf("errors.As should still recover the key, got %+v", se)
 	}
 }
@@ -90,7 +90,7 @@ func TestCategory_String(t *testing.T) {
 	}
 }
 
-// TestCategory_severityOrdering pins the ordering CategoryOf's doc tells funnels to rely on when
+// TestCategory_severityOrdering pins the ordering CategoryOf's doc tells reporters to rely on when
 // summarizing a run: a plain comparison must keep the worst category.
 func TestCategory_severityOrdering(t *testing.T) {
 	if !(CategoryNone < CategoryUsage && CategoryUsage < CategoryInternal) {

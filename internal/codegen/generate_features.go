@@ -132,7 +132,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 		paths:    []string{""},
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootRemotes, nil, gp.envPrefix),
+		data:     buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix),
 	}}
 
 	// cascading carries the cascading flags accumulated from a node's ancestors
@@ -150,7 +150,7 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     buildHelpData(invocation, n.help, n.inputs, n.children, n.remotes, cascading, gp.envPrefix),
+				data:     buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix),
 			})
 			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
 			walk(n.children, childChain, childNames, childCascading)
@@ -204,10 +204,10 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 }
 
 // buildHelpData assembles the template context for one command from its help
-// fields, inputs, direct children, and remote sub-commands. Hidden
-// children/inputs are excluded; remotes join the Commands list (they dispatch
+// fields, inputs, direct children, and declared plugins. Hidden
+// children/inputs are excluded; plugins join the Commands list (they dispatch
 // like any sub-command).
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, remotes []RemoteCommandSpec, ancestorCascading []templateDocFlagRow, envPrefix string) templateHelpData {
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, plugins []PluginSpec, ancestorCascading []templateDocFlagRow, envPrefix string) templateHelpData {
 	d := templateHelpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
@@ -240,7 +240,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Deprecated: deprecated,
 		})
 	}
-	for _, r := range remotes {
+	for _, r := range plugins {
 		cmds = append(cmds, templateDocCommandRow{
 			Name:    r.Name,
 			Summary: r.Summary,
@@ -301,15 +301,15 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 	}
 	// After the flag rows exist, not before: grouping reads d.Flags.
 	d.FlagGroups = groupFlags(d.Flags)
-	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(remotes) > 0)
+	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(plugins) > 0)
 	return d
 }
 
 // envVarLabel is the environment variable an env input reads: its explicit
 // schema.variable, else the snake-upper form of its logical name (mirroring the
-// binder's default key→env-var derivation, e.g. "apiKey" → "API_KEY").
+// input reader's default key→env-var derivation, e.g. "apiKey" → "API_KEY").
 func envVarLabel(e EnvInput, envPrefix string) string {
-	// One derivation, shared with the `env:` tag the binder pins — see [envVarFor]. Several
+	// One derivation, shared with the `env:` tag the input reader pins — see [envVarFor]. Several
 	// names read as a list, first preferred.
 	return strings.ReplaceAll(envVarName(e, envPrefix), ",", ", ")
 }
@@ -766,7 +766,7 @@ func stripForFeature(feat docFeature, text string) string {
 	if !feat.strip {
 		return text
 	}
-	return rotini.Strip(text)
+	return rotini.StripANSI(text)
 }
 
 // loadFeatureTemplate reads the feature dir's editable template, seeding it from

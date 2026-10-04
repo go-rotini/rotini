@@ -1,12 +1,12 @@
 # R9 — plugin dispatch, against real sibling binaries.
 #
-# Remote dispatch is "hand argv to another process, pass stdio through, return its exit code",
+# Plugin dispatch is "hand argv to another process, pass stdio through, return its exit code",
 # and a fake process tests none of that. So this builds actual plugins and runs them.
 #
 # The interesting part is not that dispatch works — it is that the SAME symptom, "no binary",
 # is a different party's fault depending on who promised the command existed:
 #
-#   a DECLARED remote appears in help and completion whether or not it is installed, so its
+#   a DECLARED plugin appears in help and completion whether or not it is installed, so its
 #   absence is a broken install — CategoryInternal, the author's or packager's problem;
 #
 #   a DISCOVERED token appears only when its binary does, so a missing one is a typo —
@@ -30,7 +30,7 @@ exec go build -o bin/host-slow$exe ./plugins/slow
 exec go build -o bin/host-extra$exe ./plugins/extra
 exec go build -o bin/host-status$exe ./plugins/shadow
 
-# ── a declared remote ────────────────────────────────────────────────────────
+# ── a declared plugin ────────────────────────────────────────────────────────
 exec bin/host$exe sync alpha beta
 stdout 'host-sync got: alpha beta'
 
@@ -55,8 +55,8 @@ exec bin/host$exe extra one
 stdout 'host-extra got: one'
 
 # ── the plugin path serves BOTH kinds ────────────────────────────────────────
-# host-vendored is a DECLARED remote whose binary lives only in plugin_path — nowhere near
-# the host binary and not on PATH. Before the path was promoted off remote_discovery, this
+# host-vendored is a DECLARED plugin whose binary lives only in plugin_path — nowhere near
+# the host binary and not on PATH. Before the path was promoted off plugin_discovery, this
 # was simply not expressible.
 exec go build -o extra-plugins/host-vendored$exe ./plugins/vendored
 exec bin/host$exe vendored one two
@@ -75,7 +75,7 @@ stdout 'the host.s own status'
 ! stdout 'SHADOWED'
 
 # ── the two missing-binary categories ────────────────────────────────────────
-# Declared but absent: an install problem. The funnel maps CategoryInternal to 70.
+# Declared but absent: an install problem. The reporter maps CategoryInternal to 70.
 wantexit 70 bin/host$exe absent
 stderr 'not found'
 
@@ -85,7 +85,7 @@ stderr 'not found'
 
 # The failure message names the places actually searched, and now BOTH kinds search the same
 # three: next to the binary, the plugin path, then PATH. The message used to claim it had
-# looked in a discovery path it never consulted for a declared remote.
+# looked in a discovery path it never consulted for a declared plugin.
 ! exec bin/host$exe absent
 stderr 'next to the binary'
 stderr 'the plugin path'
@@ -94,7 +94,7 @@ stderr 'next to the binary'
 stderr 'the plugin path'
 
 # ── the timeout ──────────────────────────────────────────────────────────────
-# Found, started, ran long: neither party's fault. CategoryNone, which the host's funnel
+# Found, started, ran long: neither party's fault. CategoryNone, which the host's reporter
 # maps to 75 (EX_TEMPFAIL) because it might work next time.
 wantexit 75 bin/host$exe slow
 stderr 'timed out after 200ms'
@@ -116,14 +116,14 @@ command:
   name: host
   summary: a plugin host
   # ONE directory for this command's plugin binaries, searched for BOTH the declared
-  # remote_commands below and anything remote_discovery finds. It used to live under
-  # remote_discovery, where only discovered plugins could reach it — so an author had no way
-  # to say where a DECLARED remote lived, and the not-found message named a directory that
+  # plugins below and anything plugin_discovery finds. It used to live under
+  # plugin_discovery, where only discovered plugins could reach it — so an author had no way
+  # to say where a DECLARED plugin lived, and the not-found message named a directory that
   # had never been searched for it.
   plugin_path: ./extra-plugins
-  remote_discovery:
+  plugin_discovery:
     prefix: host-
-  remote_commands:
+  plugins:
     - name: sync
       summary: sync via a plugin
     - name: slow
@@ -159,19 +159,19 @@ import (
 )
 
 type base struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type hostHandlers struct{ base }
+type hostHandler struct{ base }
 
-func (*hostHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*hostHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 
-// Funnel maps rotini's categories onto this host's exit codes. A timeout is CategoryNone, so
+// Reporter maps rotini's categories onto this host's exit codes. A timeout is CategoryNone, so
 // it is matched on the typed Kind rather than the category.
-func Funnel(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
+func Reporter(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
 	worst := 0
 	for _, e := range out.Errors {
 		if _, err := rtx.Stderr.Write([]byte("host: " + e.Error() + "\n")); err != nil {
@@ -187,8 +187,8 @@ func Funnel(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
 }
 
 func codeFor(err error) int {
-	var re *rotini.RemoteError
-	if errors.As(err, &re) && re.Kind == rotini.RemoteTimeout {
+	var re *rotini.PluginError
+	if errors.As(err, &re) && re.Kind == rotini.PluginTimeout {
 		return 75
 	}
 	switch rotini.CategoryOf(err) {
@@ -210,9 +210,9 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type hostStatusHandlers struct{ base }
+type hostStatusHandler struct{ base }
 
-func (*hostStatusHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*hostStatusHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "the host's own status")
 }
 -- cmd/host/main.go --
@@ -224,7 +224,7 @@ import (
 
 func main() {
 	host.Program.
-		WithFunnel(host.Funnel).
+		WithReporter(host.Reporter).
 		Execute()
 }
 -- plugins/sync/main.go --

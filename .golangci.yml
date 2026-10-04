@@ -190,7 +190,7 @@ linters:
           - errname
           - forcetypeassert
           - nilnil
-      - path: binder\.go
+      - path: input_reader\.go
         linters:
           - wrapcheck
           - errcheck

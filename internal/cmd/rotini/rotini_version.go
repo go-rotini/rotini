@@ -7,21 +7,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*rotiniVersionHandlers)(nil)
+var _ rotini.Handler = (*rotiniVersionHandler)(nil)
 
-type rotiniVersionHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type rotiniVersionHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*rotiniVersionHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniVersionHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if answerHelp(rtx, func(in RotiniVersionInputs) bool { return in.RotiniVersion.Flags.Help }) {
 		return
 	}
 
-	if _, err := rotini.Collect[RotiniVersionInputs](rtx); err != nil {
+	if _, err := rtx.Inputs[RotiniVersionInputs](); err != nil {
 		haltWithInputError(rtx, err)
 		return
 	}

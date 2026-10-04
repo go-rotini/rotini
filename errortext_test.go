@@ -22,13 +22,13 @@ func TestErrorStrings(t *testing.T) {
 			parts: []string{"deprecated", "flag", "--conf"},
 		},
 		{
-			name:  "ExitCode cancellation cause",
-			err:   ExitCode(3),
+			name:  "ExitCause cancellation cause",
+			err:   ExitCause(3),
 			parts: []string{"canceled", "3"},
 		},
 		{
-			name:  "ServiceError",
-			err:   &ServiceError{Key: "store"},
+			name:  "DependencyError",
+			err:   &DependencyError{Name: "store"},
 			parts: []string{"rotini", "store"},
 		},
 	}
@@ -37,7 +37,7 @@ func TestErrorStrings(t *testing.T) {
 			msg := tc.err.Error()
 			// rotini's name belongs in a message about a mistake in the PROGRAM (a service
 			// never bound), not in one its users read as a result of running it.
-			if tc.name == "ExitCode cancellation cause" && strings.Contains(msg, "rotini") {
+			if tc.name == "ExitCause cancellation cause" && strings.Contains(msg, "rotini") {
 				t.Errorf("%s message %q names the framework to the CLI's users", tc.name, msg)
 			}
 			for _, p := range tc.parts {
@@ -63,7 +63,7 @@ func TestUserFacingErrorsDoNotNameTheFramework(t *testing.T) {
 		"ErrUsage":         ErrUsage,
 		"ErrInternal":      ErrInternal,
 		"wrapped ErrUsage": fmt.Errorf("%w: bad flag", ErrUsage),
-		"ExitCode":         ExitCode(130),
+		"ExitCause":        ExitCause(130),
 	} {
 		if strings.Contains(err.Error(), "rotini") {
 			t.Errorf("%s = %q: names the framework in text the CLI's users read", name, err)

@@ -133,14 +133,14 @@ Enable `completion`, `man` or `markdown` to generate those from the spec too.
 command's work, and add `"strings"` to its imports:
 
 ```go
-func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rotini.ParseArgv[HelloworldHelloInputs](rtx); err == nil && argv.Values.HelloworldHello.Flags.Help {
+func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if argv, err := rtx.ArgvInputs[HelloworldHelloInputs](); err == nil && argv.Values.HelloworldHello.Flags.Help {
 		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 		return
 	}
 
-	inputs, err := rotini.Collect[HelloworldHelloInputs](rtx)
+	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return

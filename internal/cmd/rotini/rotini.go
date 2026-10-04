@@ -41,13 +41,13 @@ func releaseVersion(v string) string {
 	return ""
 }
 
-var _ rotini.Handlers = (*rotiniHandlers)(nil)
+var _ rotini.Handler = (*rotiniHandler)(nil)
 
-type rotiniHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type rotiniHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
 // ResolveVersion picks the version the binary reports, from the two places it can come from.
@@ -69,12 +69,12 @@ func ResolveVersion(ldflagVersion string) string {
 	return ldflagVersion
 }
 
-func (*rotiniHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if answerHelp(rtx, func(in RotiniInputs) bool { return in.Rotini.Flags.Help }) {
 		return
 	}
 
-	inputs, err := rotini.Collect[RotiniInputs](rtx)
+	inputs, err := rtx.Inputs[RotiniInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)
 		return

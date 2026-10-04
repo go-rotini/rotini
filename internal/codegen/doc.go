@@ -41,7 +41,7 @@
 //
 // The last step is the only one that READS the author's code rather than writing rotini's: it
 // reports a method on a handler type whose name is a near-miss of a lifecycle hook, the one way
-// a hook can go wrong that the generated `var _ rotini.Handlers` assertion cannot catch, and a
+// a hook can go wrong that the generated `var _ rotini.Handler` assertion cannot catch, and a
 // handler that acquires another command's generated inputs type.
 //
 // Read program.generate() and you have read, top to bottom, exactly what `rotini generate`

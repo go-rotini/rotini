@@ -27,17 +27,17 @@ const completeCommand = "__complete"
 // rtx carries the resolved chain, the completion words in [Context.Argv], and every service
 // bound on the Program, so a completer can reach a bound API client or the filesystem.
 //
-// The line is half-typed, so a completer cannot [Collect]: required inputs are missing and
+// The line is half-typed, so a completer cannot [Context.Inputs]: required inputs are missing and
 // validation would fail. To read what the user has said so far — a --kubeconfig on the line, or
 // the environment variable that flag falls back to — overlay the lenient layers, which bind
 // without validating. Flags of an ancestor (a root's global flags, say) are read with that
-// ancestor's type at that ancestor's frame:
+// ancestor's type, running as that ancestor:
 //
 //	var in AppInputs
-//	rotini.AtFrame(0, func(_ context.Context, rtx *rotini.Context) {
-//		env, _ := rotini.ParseEnv[AppInputs](rtx)
-//		argv, _ := rotini.ParseArgv[AppInputs](rtx)
-//		in = rotini.OverlayInputs(env, argv) // argv wins, as it would at run time
+//	rotini.AsCommand(0, func(_ context.Context, rtx *rotini.Context) {
+//		env, _ := rtx.EnvInputs[AppInputs]()
+//		argv, _ := rtx.ArgvInputs[AppInputs]()
+//		in = rotini.MergeInputs(env, argv) // argv wins, as it would at run time
 //	})(context.Background(), rtx)
 //
 // It is entirely opt-in, a panic in it is not recovered, and it may be called on every
@@ -63,15 +63,15 @@ type ArgValueCompleter interface {
 // "--" terminator ended flag handling. It mirrors resolveChain so completion predicts exactly
 // what dispatch would do with the same words.
 type completionContext struct {
-	chain           []ResolvedCommand
+	chain           []Command
 	positionals     int
 	afterTerminator bool
-	remote          bool // a remote/plugin token was hit: the rest belongs to the dispatched binary
+	plugin          bool // a plugin token was hit: the rest belongs to the dispatched binary
 }
 
 // complete returns the candidates for the word currently being typed — the last element of
 // words, the rest being context. It completes flag values, flag names, sub-command and
-// remote-command names, and positional values, all filtered by the typed prefix and excluding
+// plugin names, and positional values, all filtered by the typed prefix and excluding
 // hidden inputs. An empty result lets the shell apply its own default.
 func complete(def Definition, words []string, handlers any, rtx *Context) []string {
 	if len(words) == 0 {
@@ -81,8 +81,8 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	context := words[:len(words)-1]
 
 	cc := walkContext(def, context)
-	if cc.remote {
-		return nil // the remote binary owns its own argument surface
+	if cc.plugin {
+		return nil // the plugin binary owns its own argument surface
 	}
 	cur := cc.chain[len(cc.chain)-1]
 	if cur.Passthrough {
@@ -96,7 +96,7 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 		return cands
 	}
 
-	// Until the first positional is consumed the word may also be a sub-command, remote
+	// Until the first positional is consumed the word may also be a sub-command, plugin
 	// command or discovered plugin; afterwards dispatch no longer descends.
 	var names []string
 	if !cc.afterTerminator && cc.positionals == 0 {
@@ -161,8 +161,8 @@ func completeFlagWord(cc completionContext, words []string, partial string, hand
 }
 
 // dispatchableNames lists everything the next positional word could dispatch to: sub-commands
-// and remote commands with their aliases, and the plugins discovery finds.
-func dispatchableNames(cur ResolvedCommand) []string {
+// and declared plugins with their aliases, and the plugins discovery finds.
+func dispatchableNames(cur Command) []string {
 	var names []string
 	for _, c := range cur.Commands {
 		if c.Hidden {
@@ -173,13 +173,13 @@ func dispatchableNames(cur ResolvedCommand) []string {
 			names = append(names, withDescription(a, c.Summary))
 		}
 	}
-	for _, r := range cur.Remotes {
+	for _, r := range cur.Plugins {
 		names = append(names, withDescription(r.Name, r.Summary))
 		for _, a := range r.Aliases {
 			names = append(names, withDescription(a, r.Summary))
 		}
 	}
-	for _, p := range DiscoveredPlugins(cur) {
+	for _, p := range cur.DiscoveredPlugins() {
 		names = append(names, p.Name)
 	}
 	return names
@@ -189,7 +189,7 @@ func dispatchableNames(cur ResolvedCommand) []string {
 // leniently: unknown tokens are positionals, not errors. bash splits "--flag=value" into three
 // words, so the literal "=" token glues such a value back onto its flag.
 func walkContext(def Definition, context []string) completionContext {
-	cc := completionContext{chain: []ResolvedCommand{rootFrame(def)}}
+	cc := completionContext{chain: []Command{rootFrame(def)}}
 	for i := 0; i < len(context); i++ {
 		tok := context[i]
 		if cc.afterTerminator {
@@ -220,8 +220,8 @@ func walkContext(def Definition, context []string) completionContext {
 				cc.chain = append(cc.chain, cmdFrame(child))
 				continue
 			}
-			if _, ok := findRemote(cur, tok); ok || cur.Discovery != nil {
-				cc.remote = true
+			if _, ok := findPlugin(cur, tok); ok || cur.PluginDiscovery != nil {
+				cc.plugin = true
 				return cc
 			}
 		}
@@ -251,7 +251,7 @@ func pendingValueFlag(context []string) (string, bool) {
 
 // flagValueCandidates returns the candidates for one flag's value: the owning handler's dynamic
 // completer when it answers, else a map flag's declared key vocabulary, else the static enum.
-func flagValueCandidates(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner string, fd FlagDef, partial string) []string {
+func flagValueCandidates(handlers any, rtx *Context, chain []Command, words []string, owner string, fd FlagDef, partial string) []string {
 	// An '@' on a from:file flag is a path in progress — offer nothing, so the
 	// shell falls back to its own file completion.
 	if strings.HasPrefix(partial, "@") && slices.Contains(fd.From, "file") {
@@ -306,46 +306,48 @@ type DiscoveredPlugin struct {
 
 // DiscoveredPlugins returns each plugin discovered for cmd — an executable "<prefix>foo" found
 // next to the binary, in the plugin path, or on PATH — deduped and sorted by name, with any
-// name colliding with a declared sub-command, remote command or alias removed. It returns nil
+// name colliding with a declared sub-command, declared plugin or alias removed. It returns nil
 // when cmd has no discovery or discovery is hidden.
 //
 // It is the data feed for surfacing runtime plugins in help or a `plugin list`, which codegen
 // cannot know about. rotini renders nothing itself; a handler formats the result however it
 // likes:
 //
-//	chain := rtx.Chain()
-//	for _, p := range rotini.DiscoveredPlugins(chain[len(chain)-1]) {
+//	chain := rtx.CommandChain()
+//	for _, p := range chain[len(chain)-1].DiscoveredPlugins() {
 //		fmt.Fprintf(out, "  %s\t%s\n", p.Name, p.Path)
 //	}
 //
 // It touches the filesystem on every call and is best-effort: an unreadable directory
-// contributes nothing rather than erroring. See [DiscoveryDiagnostics] to learn whether the
+// contributes nothing rather than erroring. See [Command.PluginDiscoveryErrors] to learn whether the
 // author-configured path itself failed.
-func DiscoveredPlugins(cmd ResolvedCommand) []DiscoveredPlugin {
+func (cmd Command) DiscoveredPlugins() []DiscoveredPlugin {
 	plugins, _ := discoveredFor(cmd)
 	return plugins
 }
 
-// DiscoveryDiagnostics returns the problems encountered while scanning cmd's author-configured
+// PluginDiscoveryErrors returns the problems encountered while scanning cmd's author-configured
 // discovery path — typically that it is unreadable, or not a directory — and nil when there is
-// no discovery, none is configured, discovery is hidden, or the path scanned cleanly. A path that does not exist is
-// not a problem: it is where plugins go once one is installed, and before that it is empty. The
-// incidental locations, next to the binary and the entries of $PATH, are deliberately not
-// reported: a missing $PATH entry is normal, not a misconfiguration.
+// no discovery, none is configured, discovery is hidden, or the path scanned cleanly. A path
+// that does not exist is not a problem: it is where plugins go once one is installed, and
+// before that it is empty. The incidental locations, next to the binary and the entries of
+// $PATH, are deliberately not reported: a missing $PATH entry is normal, not a
+// misconfiguration.
 //
 // It is the data feed for a doctor or completion handler that wants to tell the author their
 // discovery path is wrong; rotini prints no warning itself, which would corrupt completion
 // output. Each error carries the offending path and cause, so a caller can classify with
 // errors.Is(err, fs.ErrPermission).
-func DiscoveryDiagnostics(cmd ResolvedCommand) []error {
+func (cmd Command) PluginDiscoveryErrors() []error {
 	_, problems := discoveredFor(cmd)
 	return problems
 }
 
-// discoveredFor is the shared core of [DiscoveredPlugins] and [DiscoveryDiagnostics]: the
-// collision-filtered plugin tokens plus any problems scanning the configured path.
-func discoveredFor(cmd ResolvedCommand) ([]DiscoveredPlugin, []error) {
-	d := cmd.Discovery
+// discoveredFor is the shared core of [Command.DiscoveredPlugins] and
+// [Command.PluginDiscoveryErrors]: the collision-filtered plugin tokens plus any problems
+// scanning the configured path.
+func discoveredFor(cmd Command) ([]DiscoveredPlugin, []error) {
+	d := cmd.PluginDiscovery
 	if d == nil || d.Hidden {
 		return nil, nil
 	}
@@ -356,7 +358,7 @@ func discoveredFor(cmd ResolvedCommand) ([]DiscoveredPlugin, []error) {
 			declared[a] = true
 		}
 	}
-	for _, r := range cmd.Remotes {
+	for _, r := range cmd.Plugins {
 		declared[r.Name] = true
 		for _, a := range r.Aliases {
 			declared[a] = true
@@ -376,7 +378,7 @@ func discoveredFor(cmd ResolvedCommand) ([]DiscoveredPlugin, []error) {
 // [FlagValueCompleter]. It reports true only when a completer ran and returned a non-nil
 // slice; otherwise the caller falls back to the static enum. handlers is the aggregate handler
 // set, nil in purely structural callers.
-func dynamicFlagValues(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner, flag, partial string) ([]string, bool) {
+func dynamicFlagValues(handlers any, rtx *Context, chain []Command, words []string, owner, flag, partial string) ([]string, bool) {
 	var handlerName string
 	for _, fr := range chain {
 		if fr.Name == owner {
@@ -398,7 +400,7 @@ func dynamicFlagValues(handlers any, rtx *Context, chain []ResolvedCommand, word
 
 // dynamicArgValues is dynamicFlagValues' positional counterpart, asking the chain leaf's
 // handler, since positionals always bind to the leaf.
-func dynamicArgValues(handlers any, rtx *Context, chain []ResolvedCommand, words []string, arg, partial string) ([]string, bool) {
+func dynamicArgValues(handlers any, rtx *Context, chain []Command, words []string, arg, partial string) ([]string, bool) {
 	completer, ok := resolveHandler[ArgValueCompleter](handlers, chain[len(chain)-1].Handler)
 	if !ok {
 		return nil, false
@@ -428,8 +430,9 @@ func resolveHandler[T any](handlers any, handlerName string) (T, bool) {
 
 // seedCompletionContext hands the resolved chain and completion words to the context a dynamic
 // completer receives.
-func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string) {
+func seedCompletionContext(rtx *Context, chain []Command, words []string) {
 	if rtx != nil {
+		markInvoked(chain)
 		rtx.chain = chain
 		rtx.Argv = words
 	}
@@ -440,7 +443,7 @@ func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string
 // deduped and sorted by name. It also returns any errors scanning pluginPath — the
 // author-configured location, where a failure is a real misconfiguration; failures scanning the
 // incidental locations are ignored as normal.
-func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]DiscoveredPlugin, []error) {
+func discoverPlugins(d *PluginDiscoveryDef, pluginPath string) ([]DiscoveredPlugin, []error) {
 	if d.Prefix == "" {
 		return nil, nil
 	}
@@ -532,7 +535,7 @@ func withDescription(name, summary string) string {
 	if i := strings.IndexByte(summary, '\n'); i >= 0 {
 		summary = summary[:i]
 	}
-	summary = Strip(summary)
+	summary = StripANSI(summary)
 	if summary = strings.TrimSpace(summary); summary == "" {
 		return name
 	}
@@ -571,8 +574,8 @@ func completionHintFor(def Definition, words []string) Completion {
 	context := words[:len(words)-1]
 
 	cc := walkContext(def, context)
-	if cc.remote {
-		return Completion{} // the remote binary owns its own argument surface
+	if cc.plugin {
+		return Completion{} // the plugin binary owns its own argument surface
 	}
 	cur := cc.chain[len(cc.chain)-1]
 	if cur.Passthrough || cc.afterTerminator {

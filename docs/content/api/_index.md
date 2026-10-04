@@ -13,26 +13,26 @@ The generated package exports a ready `Program`. `main.go` configures it and cal
 
 {{< code title="cmd/todo/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 func main() {
-	cmd.StoreKey.Provide(cmd.Program, openStore()) // a service your handlers share
 	cmd.Program.
-		WithVersion(version). // what --version prints
-		Execute()             // runs the command, then exits with its code
+		WithDependency(cmd.Store, openStore()). // something your handlers share
+		WithVersion(version).                   // what --version prints
+		Execute()                               // runs the command, then exits with its code
 }
 {{< /code >}}
 
 | Method | Use it to |
 |---|---|
 | `WithVersion(v)` | set what `--version` and `version` print |
-| `Key.Provide(p, v)` / `Bind(key, v)` | give handlers a service (a store, a client) |
+| `WithDependency(dep, v)` | give handlers a dependency (a store, a client) |
 | `WithStdin` / `WithStdout` / `WithStderr` | redirect the program's streams |
-| `WithFunnel(fn)` | replace how outcomes are reported and which exit code is used |
+| `WithReporter(fn)` | replace how outcomes are reported and which exit code is used |
 | `WithoutSignalHandling()` | turn off the default Ctrl-C / SIGTERM handling |
 | `Execute()` | run with `os.Args` and exit |
 | `Run(argv)` | run once and return the exit code instead of exiting — for tests |
 
 ## In a handler
 
-Each command's handler has five hooks, run in this order; embed the `Default*` types for the
+Each command's handler has five hooks, run in this order; embed the `No*` types for the
 ones you don't need:
 
 `CascadingPreRun` → `PreRun` → `Run` → `PostRun` → `CascadingPostRun`
@@ -42,22 +42,22 @@ up what its children need. Every hook receives a `*rotini.Context`:
 
 | | |
 |---|---|
-| `rotini.Collect[T](rtx)` | the command's inputs — argv, env, config files, stdin and defaults — typed and validated |
+| `rtx.Inputs[T]()` | the command's inputs — argv, env, config files, stdin and defaults — typed and validated |
 | `rtx.Stdout` / `rtx.Stderr` / `rtx.Stdin` | the streams; write to these, not `os.Stdout` |
-| `Key.MustGet(rtx)` / `rtx.MustGet[T](key)` | a service bound in `main.go` |
+| `rtx.MustGetDependency(dep)` | a dependency registered in `main.go` |
 | `rtx.RecordSuccess` / `RecordWarning` / `RecordInfo` | report an outcome, printed once after the command finishes |
 | `rtx.HaltWith(err)` | fail: record the error and stop |
 | `rtx.Failed()` | whether anything has failed yet — for a teardown deciding to commit or roll back |
 | `rtx.Help()` / `rtx.Version()` | the command's help page, and the program's version |
 
 {{< code title="internal/cmd/todo/todo_add.go" language="golang" open="true" collapsible="false" copy="true" >}}
-func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[TodoAddInputs](rtx)
+func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[TodoAddInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
-	if err := StoreKey.MustGet(rtx).Add(in.TodoAdd.Arguments.Title); err != nil {
+	if err := rtx.MustGetDependency(Store).Add(in.TodoAdd.Arguments.Title); err != nil {
 		rtx.HaltWith(err)
 		return
 	}
@@ -78,7 +78,7 @@ func (*todoAddHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 ## Errors
 
 By default each recorded error is printed as `Error: …` and the program exits 1. Mark an error
-as the user's to fix with `rotini.UsageError(err)`; `rotini.CategoryOf(err)` tells a funnel which
+as the user's to fix with `rotini.UsageError(err)`; `rotini.CategoryOf(err)` tells a reporter which
 kind it has, so a program can map usage and internal errors to different exit codes.
 
 ## Testing

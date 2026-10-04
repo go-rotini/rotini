@@ -3,18 +3,18 @@ package rotini
 import "errors"
 
 // The error taxonomy: whose fault an error is, and the sentinels every rotini error
-// type unwraps to so a funnel can classify one with a single call.
+// type unwraps to so a reporter can classify one with a single call.
 
-// Category classifies an error by whose fault it is, so a funnel can decide the exit code and
+// Category classifies an error by whose fault it is, so a reporter can decide the exit code and
 // message style from one call to [CategoryOf]. rotini tags its own errors — a missing service
 // is [CategoryInternal], a parse or bind failure [CategoryUsage] — and user code tags its
 // domain errors with [UsageError] or [InternalError].
 //
-// rotini labels; the funnel decides what to do with the label. There are no named exit-code
-// constants and no forced category→code mapping: the default funnel exits 1 for any recorded
-// error or fault, and a program that wants distinct codes maps them in its own funnel.
+// rotini labels; the reporter decides what to do with the label. There are no named exit-code
+// constants and no forced category→code mapping: the default reporter exits 1 for any recorded
+// error or fault, and a program that wants distinct codes maps them in its own reporter.
 //
-// The constants are declared in increasing severity — none < usage < internal — so a funnel
+// The constants are declared in increasing severity — none < usage < internal — so a reporter
 // summarizing several errors can keep the worst with a plain comparison. That ordering is part
 // of the contract; the numbers are not.
 type Category int
@@ -42,7 +42,7 @@ func (c Category) String() string {
 	}
 }
 
-// ErrUsage and ErrInternal are the sentinels the categories match on, so a funnel may branch
+// ErrUsage and ErrInternal are the sentinels the categories match on, so a reporter may branch
 // either way:
 //
 //	if errors.Is(err, rotini.ErrUsage) { /* usage */ }
@@ -56,9 +56,9 @@ var (
 )
 
 // CategoryOf returns the [Category] an error carries, or [CategoryNone] when it matches neither
-// sentinel — the single classification call a funnel makes:
+// sentinel — the single classification call a reporter makes:
 //
-//	cmd.Program.WithFunnel(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//	cmd.Program.WithReporter(func(ctx context.Context, rtx *rotini.Context, out rotini.Outcome) {
 //	    worst := rotini.CategoryNone
 //	    for _, err := range out.Errors {
 //	        fmt.Fprintln(rtx.Stderr, err)
@@ -74,7 +74,7 @@ var (
 //	    }
 //	})
 //
-// Note [Context.Exit] rather than [Context.HaltWithCode]: inside a funnel the lifecycle has
+// Note [Context.Exit] rather than [Context.HaltWithCode]: inside a reporter the lifecycle has
 // already settled, so HaltWithCode is a no-op and Exit is the only way to claim a code.
 //
 // # It answers for ONE error, and usage wins a tie
@@ -84,7 +84,7 @@ var (
 // first, so such a value reports [CategoryUsage].
 //
 // That is the right answer for a single error and a poor summary of a whole run: "the user can
-// fix this" is misleading when a bug is also in the pile. A funnel classifying a run should walk
+// fix this" is misleading when a bug is also in the pile. A reporter classifying a run should walk
 // out.Errors and keep the MOST SEVERE category, as above — the constants are ordered
 // none < usage < internal so that a comparison does it.
 func CategoryOf(err error) Category {

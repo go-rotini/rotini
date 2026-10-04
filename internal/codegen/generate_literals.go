@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Go-literal SOURCE emission: the Definition / BindMeta / *Def builders the generated
+// Go-literal SOURCE emission: the Definition / InputSettings / *Def builders the generated
 // framework file embeds. The typed-input field derivation that feeds these (and the
 // shared eachConstraint enumerator) lives in generate_inputs.go.
 
@@ -46,11 +46,11 @@ func renderDefinition(gp *program) string {
 	if cl := rnodesLiteral(gp.rootName, gp.tree, gp.schemas); cl != "" {
 		b.WriteString("Commands: " + cl + ",\n")
 	}
-	if rl := remoteDefsLiteral(gp.rootName, gp.rootRemotes); rl != "" {
-		b.WriteString("RemoteCommands: " + rl + ",\n")
+	if rl := pluginDefsLiteral(gp.rootName, gp.rootPlugins); rl != "" {
+		b.WriteString("Plugins: " + rl + ",\n")
 	}
 	if dl := discoveryLiteral(gp.rootName, gp.rootDiscovery); dl != "" {
-		b.WriteString("Discovery: " + dl + ",\n")
+		b.WriteString("PluginDiscovery: " + dl + ",\n")
 	}
 	if gp.rootPluginPath != "" {
 		b.WriteString("PluginPath: " + strconv.Quote(gp.rootPluginPath) + ",\n")
@@ -59,17 +59,17 @@ func renderDefinition(gp *program) string {
 	return b.String()
 }
 
-// renderBindMeta renders the `var BindMeta = rotini.BindMeta{…}` descriptor the
-// default binder consumes — the env prefix, config-file sources and stdin schemas.
-func renderBindMeta(gp *program) string {
+// renderInputSettings renders the `var InputSettings = rotini.InputSettings{…}` descriptor the
+// default input reader consumes — the env prefix, config-file sources and stdin schemas.
+func renderInputSettings(gp *program) string {
 	// Emitted UNCONDITIONALLY: an empty descriptor is the
-	// honest zero — handler and main.go code can reference BindMeta uniformly,
-	// and the generated NewProgram binds it under rotini.KeyBindMeta either way.
+	// honest zero — handler and main.go code can reference InputSettings uniformly,
+	// and the generated NewProgram binds it under rotini.InputSettings either way.
 	files := gp.configFiles
 	stdinSchemas := collectStdinSchemas(gp)
 	var b strings.Builder
-	b.WriteString("// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.\n")
-	b.WriteString("var BindMeta = " + rotiniPkgName + ".BindMeta{\n")
+	b.WriteString("// InputSettings is the generated descriptor the default input reader (rotini.InputReader) reads.\n")
+	b.WriteString("var InputSettings = " + rotiniPkgName + ".InputSettings{\n")
 	if gp.envPrefix != "" {
 		b.WriteString("EnvPrefix: " + strconv.Quote(gp.envPrefix) + ",\n")
 	}
@@ -79,7 +79,7 @@ func renderBindMeta(gp *program) string {
 	return b.String()
 }
 
-// renderConfigFiles renders the BindMeta literal's ConfigFiles field — one
+// renderConfigFiles renders the InputSettings literal's ConfigFiles field — one
 // rotini.ConfigFile per declared document-level source. Writes nothing when the
 // CLI declares no configuration_files.
 func renderConfigFiles(b *strings.Builder, gp *program, files []scopedConfigFile) {
@@ -140,7 +140,7 @@ func renderPathFrom(b *strings.Builder, c pathFromClaim) {
 	b.WriteString("}")
 }
 
-// renderStdinSchemas renders the BindMeta literal's StdinSchemas field — the
+// renderStdinSchemas renders the InputSettings literal's StdinSchemas field — the
 // per-command validation schema for a declared stdin payload, keyed by command
 // path and emitted in sorted order so the output is deterministic.
 func renderStdinSchemas(b *strings.Builder, schemas map[string]string) {
@@ -169,10 +169,10 @@ func goRawString(s string) string {
 	return strconv.Quote(s)
 }
 
-// discoveryLiteral renders the *rotini.RemoteDiscoveryDef literal for a command's
+// discoveryLiteral renders the *rotini.PluginDiscoveryDef literal for a command's
 // plugin discovery, or "" when discovery is off. The prefix defaults to "<host>-"
 // (the root binary name) when the spec leaves it unset.
-func discoveryLiteral(host string, d *RemoteDiscovery) string {
+func discoveryLiteral(host string, d *PluginDiscovery) string {
 	if d == nil {
 		return ""
 	}
@@ -181,7 +181,7 @@ func discoveryLiteral(host string, d *RemoteDiscovery) string {
 		prefix = host + "-"
 	}
 	var b strings.Builder
-	b.WriteString("&" + rotiniPkgName + ".RemoteDiscoveryDef{Prefix: " + strconv.Quote(prefix))
+	b.WriteString("&" + rotiniPkgName + ".PluginDiscoveryDef{Prefix: " + strconv.Quote(prefix))
 	if d.Hidden {
 		b.WriteString(", Hidden: true")
 	}
@@ -207,10 +207,10 @@ func sliceLiteral[T any](typeName string, items []T, renderItem func(b *strings.
 	return b.String()
 }
 
-// remoteDefsLiteral renders the []rotini.RemoteDef literal for a command's
-// remote/co-located sub-commands. The expected binary is "<host>-<name>".
-func remoteDefsLiteral(host string, rcs []RemoteCommandSpec) string {
-	return sliceLiteral("RemoteDef", rcs, func(b *strings.Builder, rc RemoteCommandSpec) {
+// pluginDefsLiteral renders the []rotini.PluginDef literal for a command's
+// declared plugins. The expected binary is "<host>-<name>".
+func pluginDefsLiteral(host string, rcs []PluginSpec) string {
+	return sliceLiteral("PluginDef", rcs, func(b *strings.Builder, rc PluginSpec) {
 		b.WriteString("Name: " + strconv.Quote(rc.Name))
 		if rc.Summary != "" {
 			b.WriteString(", Summary: " + strconv.Quote(rc.Summary))
@@ -431,7 +431,7 @@ func flagDependenciesLiteral(in *Inputs) string {
 
 // rnodesLiteral renders the []rotini.CommandDef literal for a resolved command
 // tree (recursing into children), or "" when nodes is empty. host prefixes the
-// remote binary names for any discovery nodes.
+// plugin binary names for any discovery nodes.
 func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string {
 	return sliceLiteral("CommandDef", nodes, func(b *strings.Builder, n rnode) {
 		b.WriteString("Name: " + strconv.Quote(n.name) + ",\n")
@@ -458,15 +458,15 @@ func rnodesLiteral(host string, nodes []rnode, schemas map[string]Schema) string
 		if cl := rnodesLiteral(host, n.children, schemas); cl != "" {
 			b.WriteString("Commands: " + cl + ",\n")
 		}
-		remoteHost := host
-		if n.remoteHost != "" {
-			remoteHost = n.remoteHost
+		pluginHost := host
+		if n.pluginHost != "" {
+			pluginHost = n.pluginHost
 		}
-		if rl := remoteDefsLiteral(remoteHost, n.remotes); rl != "" {
-			b.WriteString("Remotes: " + rl + ",\n")
+		if rl := pluginDefsLiteral(pluginHost, n.plugins); rl != "" {
+			b.WriteString("Plugins: " + rl + ",\n")
 		}
-		if dl := discoveryLiteral(remoteHost, n.discovery); dl != "" {
-			b.WriteString("Discovery: " + dl + ",\n")
+		if dl := discoveryLiteral(pluginHost, n.discovery); dl != "" {
+			b.WriteString("PluginDiscovery: " + dl + ",\n")
 		}
 		if n.pluginPath != "" {
 			b.WriteString("PluginPath: " + strconv.Quote(n.pluginPath) + ",\n")

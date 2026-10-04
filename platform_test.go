@@ -42,7 +42,7 @@ func TestConfigPath_tildeExpansion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			b := NewBinder(BindMeta{})
+			b := NewInputReader(InputSettings{})
 			src, err := b.fileSource(ConfigFile{Name: "cfg", Path: tc.in}, nil)
 			if err != nil {
 				t.Fatalf("fileSource(%q): %v", tc.in, err)

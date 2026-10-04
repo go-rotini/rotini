@@ -84,7 +84,7 @@ func (si scopeInputs) label(fd FlagDef) string {
 	return flagLabel(fd)
 }
 
-// ParseKind classifies a [*ParseError] so a funnel can branch on the failure without matching
+// ParseKind classifies a [*ParseError] so a reporter can branch on the failure without matching
 // the human message. Most kinds are the end-user's to fix; [ParseKindInternal] is a misuse of
 // the parser API itself — surfaced as a [*ParseError] for uniformity, but the author's bug.
 type ParseKind int
@@ -142,8 +142,8 @@ func (k ParseKind) String() string {
 // [CategoryOf] reports [CategoryUsage].
 //
 // That is a label, not an exit code. rotini forces no category→code mapping and the default
-// funnel exits 1 for any failure; a program that wants the common "2 means the command line was
-// wrong" convention maps it in its own funnel. See [Category].
+// reporter exits 1 for any failure; a program that wants the common "2 means the command line was
+// wrong" convention maps it in its own reporter. See [Category].
 //
 //	var pe *rotini.ParseError
 //	if errors.As(err, &pe) {
@@ -209,15 +209,15 @@ func NewParser() *Parser {
 //
 // # It does not check that out describes the running command
 //
-// Parse is the mechanism; [Collect] is the contract. Collect and the per-channel layer functions
-// reject a struct that cannot describe the caller's own command — one covering more commands
-// than the caller is deep — because a handler asking for its own inputs can only have meant one
-// thing. Parse binds what fits and leaves the rest zeroed, which is what lets a caller drive it
-// with a struct spanning a whole tree and reuse it across several argv shapes.
+// Parse is the mechanism; [Context.Inputs] is the contract. Inputs and the per-channel layer
+// functions reject a struct that cannot describe the caller's own command — one covering more
+// commands than the caller is deep — because a handler asking for its own inputs can only have
+// meant one thing. Parse binds what fits and leaves the rest zeroed, which is what lets a
+// caller drive it with a struct spanning a whole tree and reuse it across several argv shapes.
 //
 // That is a deliberate split, not an oversight, and it is the only place in the input surface
 // where a mismatched struct passes quietly. A handler collecting its own inputs should reach for
-// Collect and get the check.
+// Inputs and get the check.
 func (p *Parser) Parse(rtx *Context, out any) error {
 	store, chain, err := p.parseBind(rtx, out)
 	if err != nil {
@@ -234,8 +234,8 @@ func (p *Parser) Parse(rtx *Context, out any) error {
 
 // Deprecation is a deprecated CLI token found in this invocation's argv: the identifier used,
 // the kind of input, and that input's logical name. rotini attaches only the spec's own
-// `deprecated:` message and does nothing else with it. It implements error so it can be returned or printed
-// directly.
+// `deprecated:` message and does nothing else with it. It implements error so it can be
+// returned or printed directly.
 type Deprecation struct {
 	Kind       string // "flag", "argument" or "command"
 	Name       string // the input's logical name (the flag/argument/command name)
@@ -263,16 +263,16 @@ func (d Deprecation) Error() string {
 // It is a function rather than a method on [Parser] because it needs no parser: everything it
 // reports is already on the [Context] — the resolved chain and the argv that produced it. As a
 // method it forced a handler to pull a *Parser out of the registry to obtain a receiver it
-// never used, which in turn made a parser binding look mandatory in every entrypoint. Supply a Parser
-// when you want to override the default or call [Parser.Parse] yourself; deprecation reporting
-// needs neither.
+// never used, which in turn made a parser binding look mandatory in every entrypoint. Supply a
+// Parser when you want to override the default or call [Parser.Parse] yourself; deprecation
+// reporting needs neither.
 func Deprecations(rtx *Context) []Deprecation {
 	if rtx == nil {
 		return nil
 	}
 	argv := rtx.Argv
 	var out []Deprecation
-	chain := rtx.Chain()
+	chain := rtx.CommandChain()
 	store := quietParse(chain, argv)
 	for i, frame := range chain {
 		// A command deprecated as a whole reports however it was invoked; one with only
@@ -324,8 +324,8 @@ func flagDeprecations(fd FlagDef, used []string) []Deprecation {
 // quietParse tokenizes argv against chain the way the parser does, on a copy of the chain with
 // value acquisition off, so asking what argv says never reads a file or stdin. nil when argv
 // does not parse.
-func quietParse(chain []ResolvedCommand, argv []string) *parsedInputs {
-	quiet := make([]ResolvedCommand, len(chain))
+func quietParse(chain []Command, argv []string) *parsedInputs {
+	quiet := make([]Command, len(chain))
 	for i, frame := range chain {
 		flags := make([]FlagDef, len(frame.Flags))
 		for j, fd := range frame.Flags {
@@ -344,7 +344,7 @@ func quietParse(chain []ResolvedCommand, argv []string) *parsedInputs {
 
 // argumentDeprecations reports each deprecated argument of the leaf that argv supplied a value
 // for, by position: supplied is how many positionals argv gave the leaf.
-func argumentDeprecations(leaf ResolvedCommand, supplied int) []Deprecation {
+func argumentDeprecations(leaf Command, supplied int) []Deprecation {
 	var out []Deprecation
 	for i, ad := range leaf.Arguments {
 		if ad.Deprecated != "" && i < supplied {
@@ -355,10 +355,10 @@ func argumentDeprecations(leaf ResolvedCommand, supplied int) []Deprecation {
 }
 
 // parseBind parses argv into a store and binds it into out without validating — that is
-// [validate]'s job. It is the shared front half of [Parser.Parse] and of the [Binder], which
+// [validate]'s job. It is the shared front half of [Parser.Parse] and of the [InputReader], which
 // reconciles env and config fallbacks into the store before validating, so a required input is
 // satisfiable from any source. It returns the store and chain for that deferred pass.
-func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedCommand, error) {
+func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []Command, error) {
 	if p == nil {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil parser"}
 	}
@@ -369,7 +369,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: Parse out argument must be a non-nil pointer to an inputs struct"}
 	}
-	chain := rtx.Chain()
+	chain := rtx.CommandChain()
 	if len(chain) == 0 {
 		return nil, nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}
@@ -387,7 +387,7 @@ func (p *Parser) parseBind(rtx *Context, out any) (*parsedInputs, []ResolvedComm
 // missing its value, is a [*ParseError]. Chain command tokens are consumed, and everything
 // after the leaf command and after "--" is a positional of the leaf. Declared defaults are
 // applied; required and enum checks are [validate]'s job.
-func parseInto(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsedInputs, error) {
+func parseInto(chain []Command, argv []string, stdin io.Reader) (*parsedInputs, error) {
 	store, err := parseArgvTokens(chain, argv, stdin)
 	if err != nil {
 		return nil, err
@@ -410,7 +410,7 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 		if hasInline {
 			return "", i, &ParseError{Kind: ParseKindInvalidValue, Msg: fmt.Sprintf("flag %q counts occurrences and takes no value", name), Flag: name}
 		}
-		return "1", i, nil // each occurrence appends one marker; the binder tallies them
+		return "1", i, nil // each occurrence appends one marker; the input reader tallies them
 	case fdef.Type == "bool":
 		if hasInline {
 			return inline, i, nil
@@ -435,7 +435,7 @@ func flagTokenValue(fdef FlagDef, name, inline string, hasInline bool, argv []st
 // about which word is a flag's value: an optional value is never a separate word, a short
 // cluster's last flag can take the next one, and `--db.host h` takes h. An unknown or malformed
 // flag takes none; the parse reports it.
-func flagTokenWidth(chain []ResolvedCommand, argv []string, i int) int {
+func flagTokenWidth(chain []Command, argv []string, i int) int {
 	extra, err := consumeFlagToken(chain, argv[i], argv, i, func(int, FlagDef, string, string) error { return nil })
 	if err != nil {
 		return 0
@@ -449,7 +449,7 @@ func flagTokenWidth(chain []ResolvedCommand, argv []string, i int) int {
 // A token matching no declared identifier is retried as a POSIX short cluster (-vh → -v -h,
 // -n5 → -n 5). Long flags never cluster, so an unmatched one is an unknown-flag error carrying
 // the chain's vocabulary for a [Suggestor].
-func consumeFlagToken(chain []ResolvedCommand, tok string, argv []string, i int, addFlag func(int, FlagDef, string, string) error) (int, error) {
+func consumeFlagToken(chain []Command, tok string, argv []string, i int, addFlag func(int, FlagDef, string, string) error) (int, error) {
 	name, inline, hasInline := splitFlag(tok)
 
 	fdef, idx, negated, ok := findFlagMatch(chain, name)
@@ -532,7 +532,7 @@ func (p *parsedInputs) recordArgvFlag(idx int, fd FlagDef, value, typed string, 
 
 // recordArg records one positional of the leaf command, split on the separator of the variadic
 // argument it lands in, if that declares one.
-func (p *parsedInputs) recordArg(leaf ResolvedCommand, idx int, value string) error {
+func (p *parsedInputs) recordArg(leaf Command, idx int, value string) error {
 	values := []string{value}
 	if def, ok := variadicAt(leaf.Arguments, len(p.scopes[idx].args)); ok && def.Separator != "" {
 		var err error
@@ -548,7 +548,7 @@ func (p *parsedInputs) recordArg(leaf ResolvedCommand, idx int, value string) er
 // explicitly-set flag in the store's argvSet, the single source of truth for "set on the
 // command line". stdin backs the from:stdin sentinel and is read only when a "-" value on an
 // opted-in flag actually appears.
-func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*parsedInputs, error) {
+func parseArgvTokens(chain []Command, argv []string, stdin io.Reader) (*parsedInputs, error) {
 	store := &parsedInputs{
 		scopes:  make([]scopeInputs, len(chain)),
 		argvSet: make([]map[string]bool, len(chain)),
@@ -620,7 +620,7 @@ func parseArgvTokens(chain []ResolvedCommand, argv []string, stdin io.Reader) (*
 // noteDetached records, the first time it happens, a bare optional-value flag followed by a word
 // that would have been a valid value for it: the word will be a positional, and if that turns out
 // to be one too many, the error says what the user probably meant. See parsedInputs.detached.
-func noteDetached(store *parsedInputs, chain []ResolvedCommand, tok string, argv []string, i int) {
+func noteDetached(store *parsedInputs, chain []Command, tok string, argv []string, i int) {
 	if store.detached != nil || strings.Contains(tok, "=") || i+1 >= len(argv) {
 		return
 	}
@@ -657,7 +657,7 @@ func checkFlagValues(fd FlagDef, label string, vals []string) error {
 
 // strayCommand reports a positional on a command that branches but takes no arguments: a
 // mistyped sub-command. The error carries the sibling vocabulary for a [Suggestor].
-func strayCommand(leaf ResolvedCommand, si scopeInputs, store *parsedInputs) error {
+func strayCommand(leaf Command, si scopeInputs, store *parsedInputs) error {
 	if len(leaf.Commands) == 0 || len(leaf.Arguments) > 0 || len(si.args) == 0 {
 		return nil
 	}
@@ -673,7 +673,7 @@ func strayCommand(leaf ResolvedCommand, si scopeInputs, store *parsedInputs) err
 
 // extraPositionals reports positionals the leaf has no argument for. With no variadic argument
 // to absorb them, extra positionals are a usage error rather than a silent drop.
-func extraPositionals(leaf ResolvedCommand, si scopeInputs, store *parsedInputs) error {
+func extraPositionals(leaf Command, si scopeInputs, store *parsedInputs) error {
 	n := len(leaf.Arguments)
 	if hasVariadicArg(leaf.Arguments) || len(si.args) <= n {
 		return nil
@@ -688,7 +688,7 @@ func extraPositionals(leaf ResolvedCommand, si scopeInputs, store *parsedInputs)
 // validate enforces the declarative constraints on the resolved chain against a parsed store:
 // a stray positional on a branch-only command is a mistyped sub-command, required inputs must
 // be present or defaulted, and any value must fall inside a declared enum.
-func validate(chain []ResolvedCommand, store *parsedInputs) error {
+func validate(chain []Command, store *parsedInputs) error {
 	leaf := chain[len(chain)-1]
 	si := store.scopes[len(chain)-1]
 	leafCovered := store.covers(len(chain) - 1)
@@ -950,7 +950,7 @@ func redactValue(v string, secret bool) string {
 // validateFlagGroups enforces each command's cross-flag presence rules. Set means explicitly
 // provided on argv — a default or fallback does not count — read from the store's argvSet,
 // which unlike a raw argv re-scan also sees flags set inside short clusters.
-func validateFlagGroups(chain []ResolvedCommand, store *parsedInputs) error {
+func validateFlagGroups(chain []Command, store *parsedInputs) error {
 	for i, f := range chain {
 		if !store.covers(i) {
 			continue
@@ -979,7 +979,7 @@ func validateFlagGroups(chain []ResolvedCommand, store *parsedInputs) error {
 // validateFlagDependencies enforces each command's conditional cross-flag requirements: when a
 // dependency's When flag is set on argv, every flag it Requires must be too. Set follows the
 // same explicit-argv convention as flag groups.
-func validateFlagDependencies(chain []ResolvedCommand, store *parsedInputs) error {
+func validateFlagDependencies(chain []Command, store *parsedInputs) error {
 	for i, f := range chain {
 		if !store.covers(i) {
 			continue
@@ -1129,7 +1129,7 @@ func flagDefaults(fd FlagDef) []string {
 
 // applyDefaults fills in declared flag and trailing-argument defaults for inputs
 // the user did not provide, so handlers and required-checks see them.
-func applyDefaults(chain []ResolvedCommand, store *parsedInputs) {
+func applyDefaults(chain []Command, store *parsedInputs) {
 	for i, f := range chain {
 		for _, fd := range f.Flags {
 			seed := flagDefaults(fd)
@@ -1157,7 +1157,7 @@ func applyDefaults(chain []ResolvedCommand, store *parsedInputs) {
 
 // requiredErrors reports any required flags or arguments (across the resolved
 // chain / on the leaf) that were neither provided nor defaulted.
-func requiredErrors(chain []ResolvedCommand, store *parsedInputs) error {
+func requiredErrors(chain []Command, store *parsedInputs) error {
 	var missing []string
 	for i, f := range chain {
 		if !store.covers(i) {
@@ -1273,7 +1273,7 @@ func isShortCluster(name string) bool {
 // the cluster is rejoined with it: -lapp=web is -l "app=web", a label selector, never -l "app"
 // with "=web" dropped. An "=value" directly after the last flag belongs to that flag, a bool
 // included (-Aw=false sets -w false), which is pflag's reading and so what Cobra users type.
-func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value, typed string) error) (int, error) {
+func parseCluster(chain []Command, body, inline string, hasInline bool, argv []string, i int, addFlag func(idx int, fd FlagDef, value, typed string) error) (int, error) {
 	for k := range len(body) {
 		short := "-" + body[k:k+1]
 		fdef, idx, ok := findFlagIndex(chain, short)
@@ -1319,7 +1319,7 @@ func parseCluster(chain []ResolvedCommand, body, inline string, hasInline bool, 
 
 // findFlagIndex searches the chain leaf→root for a flag whose identifiers include name,
 // returning its definition and the owning command's chain index.
-func findFlagIndex(chain []ResolvedCommand, name string) (FlagDef, int, bool) {
+func findFlagIndex(chain []Command, name string) (FlagDef, int, bool) {
 	f, i, _, ok := findFlagMatch(chain, name)
 	return f, i, ok
 }
@@ -1327,7 +1327,7 @@ func findFlagIndex(chain []ResolvedCommand, name string) (FlagDef, int, bool) {
 // findFlagMatch is findFlagIndex plus whether name matched a NEGATED form ("--no-color" for a
 // negatable "--color"). A declared identifier always wins over a negated one, so an author who
 // genuinely declares "--no-cache" keeps it.
-func findFlagMatch(chain []ResolvedCommand, name string) (def FlagDef, idx int, negated, ok bool) {
+func findFlagMatch(chain []Command, name string) (def FlagDef, idx int, negated, ok bool) {
 	for i, v := range slices.Backward(chain) {
 		for _, f := range v.Flags {
 			if slices.Contains(f.Identifiers, name) {
@@ -1363,7 +1363,7 @@ func negatedIdentifiers(f FlagDef) []string {
 
 // childCommandNames is the dispatchable vocabulary of a command's visible children, for a
 // mistyped-command [*ParseError]'s Candidates.
-func childCommandNames(cur ResolvedCommand) []string {
+func childCommandNames(cur Command) []string {
 	var names []string
 	for _, c := range cur.Commands {
 		if c.Hidden {
@@ -1372,7 +1372,7 @@ func childCommandNames(cur ResolvedCommand) []string {
 		names = append(names, c.Name)
 		names = append(names, c.Aliases...)
 	}
-	for _, r := range cur.Remotes {
+	for _, r := range cur.Plugins {
 		names = append(names, r.Name)
 		names = append(names, r.Aliases...)
 	}
@@ -1381,7 +1381,7 @@ func childCommandNames(cur ResolvedCommand) []string {
 
 // chainFlagIdentifiers is the non-hidden flag vocabulary of the whole chain, for an
 // unknown-flag [*ParseError]'s Candidates.
-func chainFlagIdentifiers(chain []ResolvedCommand) []string {
+func chainFlagIdentifiers(chain []Command) []string {
 	var ids []string
 	for _, v := range slices.Backward(chain) {
 		for _, f := range v.Flags {
@@ -1398,7 +1398,7 @@ func chainFlagIdentifiers(chain []ResolvedCommand) []string {
 // root→leaf order. Field i binds to chain[offset+i], where offset ([frameAnchor]) places the last
 // field on the caller's own frame, so each command's inputs come from the right frame however
 // deep it was reached; extra parent frames from a statically-composed subtree simply go unbound.
-func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand, offset int) error {
+func bindInputs(v reflect.Value, p *parsedInputs, chain []Command, offset int) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}
@@ -1428,16 +1428,16 @@ func bindInputs(v reflect.Value, p *parsedInputs, chain []ResolvedCommand, offse
 //
 //	offset = self - n + 1
 //
-// self is [Context.Frame]'s index — the command whose hook is running, which the lifecycle
-// records for every step (see [AtFrame]). For a leaf hook self is the last frame and this
+// self is [Context.Command]'s index — the command whose hook is running, which the lifecycle
+// records for every step (see [AsCommand]). For a leaf hook self is the last frame and this
 // reduces to len(chain) - n.
 //
 // The anchor comes from the caller, never from the struct's SHAPE, because a shorter struct
 // always aligns against something: anchoring at the leaf would hand a cascading hook on a middle
 // frame a descendant's flags, and anchoring at the root would miss a composed child's own
 // frames. Both would return zeros and a nil error. There is deliberately no way to pin the
-// anchor at index 0; a caller who genuinely wants the first n frames has [Context.Chain].
-func frameAnchor(v reflect.Value, chain []ResolvedCommand, self int) int {
+// anchor at index 0; a caller who genuinely wants the first n frames has [Context.CommandChain].
+func frameAnchor(v reflect.Value, chain []Command, self int) int {
 	if v.Kind() != reflect.Struct {
 		return 0
 	}
@@ -1457,7 +1457,7 @@ func frameAnchor(v reflect.Value, chain []ResolvedCommand, self int) int {
 //
 // It is called after argv has been parsed and validated, so a short chain caused by a bad
 // command line reports that instead of this.
-func checkFrameFit(v reflect.Value, chain []ResolvedCommand, self int) error {
+func checkFrameFit(v reflect.Value, chain []Command, self int) error {
 	if v.Kind() != reflect.Struct || len(chain) == 0 {
 		return nil
 	}
@@ -1485,7 +1485,7 @@ func checkFrameFit(v reflect.Value, chain []ResolvedCommand, self int) error {
 // root→child→grand) without knowing which parent tree it was mounted into.
 //
 // The cost is that a SHORTER type always aligns against something. Collecting an ancestor's
-// type from a deeper command — Collect[MigInputs] while `mig db status` runs — would map Mig
+// type from a deeper command — Inputs[MigInputs] while `mig db status` runs — would map Mig
 // onto a frame whose flags it does not describe, and every field would come back zero (or,
 // where the two commands share a flag name, holding the WRONG command's value). There would
 // be no signal at all.
@@ -1496,7 +1496,7 @@ func checkFrameFit(v reflect.Value, chain []ResolvedCommand, self int) error {
 //
 // Only flags are checked. They are named and unordered, so a mismatch is unambiguous;
 // positional arguments carry no names to compare.
-func checkChainAlignment(v reflect.Value, chain []ResolvedCommand, offset int) error {
+func checkChainAlignment(v reflect.Value, chain []Command, offset int) error {
 	for i := range v.NumField() {
 		flags := commandFlags(v.Field(i))
 		if !flags.IsValid() || flags.NumField() == 0 {
@@ -1538,7 +1538,7 @@ func displayTypeName(t reflect.Type) string {
 }
 
 // pathOf renders a resolved chain as the command path the user typed.
-func pathOf(chain []ResolvedCommand) string {
+func pathOf(chain []Command) string {
 	names := make([]string, len(chain))
 	for i, f := range chain {
 		names[i] = f.Name
@@ -1547,7 +1547,7 @@ func pathOf(chain []ResolvedCommand) string {
 }
 
 // bindCommandInputs fills a <Cmd>CommandInputs struct's Flags and Arguments.
-func bindCommandInputs(v reflect.Value, si scopeInputs, frame ResolvedCommand) error {
+func bindCommandInputs(v reflect.Value, si scopeInputs, frame Command) error {
 	if v.Kind() != reflect.Struct {
 		return nil
 	}

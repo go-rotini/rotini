@@ -21,7 +21,7 @@ import (
 type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error
 
 // Generated programs reference the rotini runtime package under this name in
-// rendered literals (the Definition, BindMeta, …); the templates hardcode the
+// rendered literals (the Definition, InputSettings, …); the templates hardcode the
 // matching import.
 const rotiniPkgName = "rotini"
 
@@ -49,7 +49,7 @@ type program struct {
 	auditWarnings []error
 
 	// handlerImports are the Go import paths a spec's `handler:` blocks point at — the
-	// bring-your-own seam, where an author writes a Handlers implementation by hand. The
+	// bring-your-own seam, where an author writes a Handler implementation by hand. The
 	// hook audit reads the ones inside this module; see auditHooks.
 	handlerImports map[string]bool
 
@@ -67,16 +67,16 @@ type program struct {
 	rootDisplay     string // the name rendered pages show: display_name, else rootName
 	rootPascal      string
 	rootInputs      *Inputs
-	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
-	rootHelp        cmdHelp             // root command's flattened help fields
-	rootOutput      *Schema             // root command's output type (nil when unset)
-	rootDiscovery   *RemoteDiscovery    // root command's plugin discovery (nil = off)
-	rootPluginPath  string              // root command's extra plugin directory (both remote kinds)
-	rootPassthrough bool                // root command's passthrough (raw positionals)
-	schemas         map[string]Schema   // document-level named schemas (for output codegen)
-	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
-	envPrefix       string              // document-level env_prefix for DERIVED env-var names
-	adoptedPrefixes map[string]string   // env_prefix → child root name, from composed children (see resolveEnvPrefix)
+	rootPlugins     []PluginSpec       // root-level declared plugins
+	rootHelp        cmdHelp            // root command's flattened help fields
+	rootOutput      *Schema            // root command's output type (nil when unset)
+	rootDiscovery   *PluginDiscovery   // root command's plugin discovery (nil = off)
+	rootPluginPath  string             // root command's extra plugin directory (both kinds of plugin)
+	rootPassthrough bool               // root command's passthrough (raw positionals)
+	schemas         map[string]Schema  // document-level named schemas (for output codegen)
+	configFiles     []scopedConfigFile // per-command config-file sources, tagged with their command path (for the input reader's cascade)
+	envPrefix       string             // document-level env_prefix for DERIVED env-var names
+	adoptedPrefixes map[string]string  // env_prefix → child root name, from composed children (see resolveEnvPrefix)
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -352,7 +352,7 @@ func enabledFeatures(conf *Conf) []confFeature {
 }
 
 // renderCmdFile renders the single generated cli file: the framework (the ProgramHandlers
-// interface, the typed input structs, the Definition, NewProgram, BindMeta) and the rollup
+// interface, the typed input structs, the Definition, NewProgram, InputSettings) and the rollup
 // (the handlers struct, Program, Handlers, and the per-command wiring). It is fully generated
 // and carries a DO NOT EDIT banner; the editable stubs are separate create-once files in the
 // same package.
@@ -391,7 +391,7 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		ModelAliases:  aliases,
 		Blocks:        blocks,
 		OutputTypes:   outputTypes,
-		BindMeta:      renderBindMeta(gp),
+		InputSettings: renderInputSettings(gp),
 		Features:      features,
 		EmbedImport:   anyEmbed(features),
 	})
@@ -615,7 +615,7 @@ func helpFlagFor(gp *program, c genCommand) (field, frame string) {
 func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) templateHandlerData {
 	d := templateHandlerData{
 		Package:       pkg,
-		HandlersType:  c.handler,
+		HandlerType:   c.handler,
 		InputsType:    c.prefix + "Inputs",
 		Invocation:    c.invocation,
 		Prefix:        c.prefix,
@@ -629,9 +629,9 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 
 	// A flag that says "do not run this command" has to be answered before the command's
 	// own inputs are validated, or a command with a required argument can never print its
-	// own help page: Collect reports the missing argument and the handler returns before it
+	// own help page: Inputs reports the missing argument and the handler returns before it
 	// reaches the check. See the template.
-	d.AnswerBeforeCollect = d.HelpFlag != "" || d.VersionFlag != ""
+	d.AnswerBeforeInputs = d.HelpFlag != "" || d.VersionFlag != ""
 	d.HelpFlagName = "help"
 	if d.HelpFlag == "" {
 		d.HelpFlagName = "version"
@@ -649,11 +649,11 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 		d.PrintHelpWhenBare = true
 	}
 
-	// Collect runs whenever the command has something to validate — it is what reports an
+	// Inputs runs whenever the command has something to validate — it is what reports an
 	// unknown flag, and dropping it for a body that only prints a page would swallow that.
 	//
 	// UsesInputs is the narrower question: does the body READ the result? Help and version
-	// are answered from ParseArgv above, so a root that only prints its own page validates
+	// are answered from ArgvInputs above, so a root that only prints its own page validates
 	// and discards, which is why the call binds to `_` rather than to an unused variable.
 	d.NeedsInputs = d.HelpFlag != "" || d.VersionFlag != "" || d.HelpPathArg != "" ||
 		(!d.VersionOnly && !d.PrintHelpWhenBare)

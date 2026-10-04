@@ -48,17 +48,17 @@ import (
 	"` + importPath + `"
 )
 
-type deployHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type deployHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func Deploy() rotini.Handlers { return &deployHandlers{} }
+func Deploy() rotini.Handler { return &deployHandler{} }
 
-func (*deployHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rotini.Collect[` + qualifier + `.CycDeployInputs](rtx)
+func (*deployHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[` + qualifier + `.CycDeployInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		return
@@ -228,7 +228,7 @@ var updateGolden = flag.Bool("update", false, "update generate golden files")
 
 // goldenSpec / goldenConf are a deliberately feature-spanning CLI: root flags +
 // env, a sub-command with an argument + flag, so the emitted cmd file exercises
-// the input-struct, Definition, BindMeta, rollup, and stub paths in one pass. This
+// the input-struct, Definition, InputSettings, rollup, and stub paths in one pass. This
 // is the behavior-preserving safety net for the whole codegen refactor — the emitted
 // bytes must not change across any structural move.
 const goldenSpec = `version: 0.0.0
@@ -564,9 +564,9 @@ func firstLines(s string, n int) string {
 // The obvious place for a registry key shared by three handlers is a file beside them:
 //
 //	// internal/cmd/taskr/keys.go
-//	var StoreKey = rotini.NewKey[*store.Store]("store")
+//	var Store = rotini.NewDependency[*store.Store]("store")
 //
-// The next `go generate` deleted it, silently, and the build failed with `undefined: StoreKey`
+// The next `go generate` deleted it, silently, and the build failed with `undefined: Store`
 // in five files. `keep:` was the documented remedy, and its own description says it is
 // "intended to stay empty in steady state".
 //
@@ -599,8 +599,8 @@ command:
 
 	cmdDir := filepath.Join(dir, "internal", "cmd", "demo")
 	helpers := map[string]string{
-		// The exact case that lost work: a key beside the handlers that use it.
-		"keys.go": "package demo\n\nvar StoreKey = \"store\"\n",
+		// The exact case that lost work: a dependency handle beside the handlers that use it.
+		"deps.go": "package demo\n\nvar Store = \"store\"\n",
 		// A name that LOOKS like a stub for a command that does not exist. Only the
 		// marker decides, so this survives too.
 		"demo_helpers.go": "package demo\n\nfunc helper() string { return \"x\" }\n",
@@ -650,5 +650,28 @@ command:
 	gen(t)
 	if _, err := os.Stat(filepath.Join(cmdDir, "demo_build.go")); err != nil {
 		t.Error("a file whose generated marker was removed should be treated as hand-written")
+	}
+}
+
+// TestStubLooksGenerated_recognizesTheLegacyMarker: stubs written before v1.2.0 assert the
+// interface under its old name, Handlers. They are still rotini's to prune after an upgrade.
+func TestStubLooksGenerated_recognizesTheLegacyMarker(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]bool{
+		"current.go": true,
+		"legacy.go":  true,
+		"mine.go":    false,
+	}
+	writeTestFile(t, dir, "current.go", "package demo\n\nvar _ rotini.Handler = (*demoBuildHandler)(nil)\n")
+	writeTestFile(t, dir, "legacy.go", "package demo\n\nvar _ rotini.Handlers = (*demoBuildHandlers)(nil)\n")
+	writeTestFile(t, dir, "mine.go", "package demo\n\nfunc helper() {}\n")
+	for name, want := range cases {
+		got, err := stubLooksGenerated(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if got != want {
+			t.Errorf("stubLooksGenerated(%s) = %v, want %v", name, got, want)
+		}
 	}
 }

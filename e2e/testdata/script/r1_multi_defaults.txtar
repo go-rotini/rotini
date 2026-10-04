@@ -108,15 +108,15 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type dflHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type dflHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*dflHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[DflInputs](rtx)
+func (*dflHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[DflInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.Halt()

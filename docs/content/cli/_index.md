@@ -48,7 +48,7 @@ Use "rotini help <command>" for more information about a command.
 
 Scaffolds a new CLI: writes the seed spec and conf under `cmd/<name>/`, then runs the same `generate` every later pass runs — producing the entrypoint, the framework file, copies of rotini's JSON Schemas for your editor, and three handler stubs — the root, `help` and `version` — already wired so the new CLI answers `--help` and `--version` on its first build. The `name` argument becomes the root command name and the expected binary name.
 
-The entrypoint is **create-once**: it carries your build metadata, so it is never overwritten. `--force` replaces an existing spec and conf with the seed, and nothing else: init never deletes a file. Handlers for commands the seed does not have stay until your next `generate`, which removes them and says so.
+The entrypoint is **create-once**: it carries your build metadata, so it is never overwritten. `--force` replaces an existing spec and conf with the seed, and nothing else: init never deletes a file. Handler for commands the seed does not have stay until your next `generate`, which removes them and says so.
 
 On success `init` reports the way `generate` and `validate` do: the spec and conf it wrote, then the time and how long it took.
 

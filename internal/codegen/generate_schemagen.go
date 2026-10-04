@@ -193,9 +193,9 @@ type pathFromClaim struct {
 	env  string
 }
 
-// collectStdinSchemas builds the per-command stdin validation schemas for BindMeta: each own
+// collectStdinSchemas builds the per-command stdin validation schemas for InputSettings: each own
 // command declaring a stdin payload maps its "<Prefix>Stdin" type name to a self-contained
-// JSON Schema the binder validates the decoded payload against.
+// JSON Schema the input reader validates the decoded payload against.
 func collectStdinSchemas(gp *program) map[string]string {
 	out := map[string]string{}
 	add := func(prefix string, in *Inputs) {

@@ -11,8 +11,8 @@ import (
 //
 // Two of the three ways are already loud, and these tests pin that division of labour rather
 // than re-testing the compiler: a hook that is MISSING and a hook whose SIGNATURE drifted both
-// break the `var _ rotini.Handlers` assertion every stub carries. A hook whose NAME is
-// misspelled does not — the embedded Default* still satisfies the interface — and that is what
+// break the `var _ rotini.Handler` assertion every stub carries. A hook whose NAME is
+// misspelled does not — the embedded No* still satisfies the interface — and that is what
 // the audit is for.
 
 // hookAuditFixture generates a two-command project in a temp module and returns a function that
@@ -56,11 +56,11 @@ func appendToStub(t *testing.T, cmdDir, file, decls string) {
 }
 
 // TestHookAudit_reportsAMisspelledHook is the finding itself: the method compiles, satisfies
-// Handlers, and never runs. The notice has to carry enough to act on without opening the file.
+// Handler, and never runs. The notice has to carry enough to act on without opening the file.
 func TestHookAudit_reportsAMisspelledHook(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	appendToStub(t, cmdDir, "demo_build.go", `
-func (*demoBuildHandlers) Prerun(ctx context.Context, rtx *rotini.Context) {}
+func (*demoBuildHandler) Prerun(ctx context.Context, rtx *rotini.Context) {}
 `)
 	notices := gen(t)
 	if len(notices) != 1 {
@@ -70,9 +70,9 @@ func (*demoBuildHandlers) Prerun(ctx context.Context, rtx *rotini.Context) {}
 	for _, want := range []string{
 		"internal/cmd/demo/demo_build.go:", // where
 		`method "Prerun"`,                  // what they wrote
-		"demoBuildHandlers",                // on which type
+		"demoBuildHandler",                 // on which type
 		"will never run",                   // the consequence
-		"rotini.DefaultPreRun",             // what runs instead
+		"rotini.NoPreRun",                  // what runs instead
 		`did you mean "PreRun"?`,           // the fix
 	} {
 		if !strings.Contains(got, want) {
@@ -88,18 +88,18 @@ func TestHookAudit_isQuietOnCorrectCode(t *testing.T) {
 	appendToStub(t, cmdDir, "demo_build.go", `
 // The four hooks spelled correctly, with the embeds still in place — a method at depth 0
 // wins over a promoted one, so this is the normal way to implement a hook.
-func (*demoBuildHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context)  {}
-func (*demoBuildHandlers) PreRun(ctx context.Context, rtx *rotini.Context)           {}
-func (*demoBuildHandlers) PostRun(ctx context.Context, rtx *rotini.Context)          {}
-func (*demoBuildHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {}
+func (*demoBuildHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context)  {}
+func (*demoBuildHandler) PreRun(ctx context.Context, rtx *rotini.Context)           {}
+func (*demoBuildHandler) PostRun(ctx context.Context, rtx *rotini.Context)          {}
+func (*demoBuildHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {}
 
 // Ordinary helpers on the same type. Prepare and Rerun are the near-miss bait: "Rerun" is
 // within an edit distance of 2 of "Run", which is why Run is not an audited target.
-func (*demoBuildHandlers) Prepare() error      { return nil }
-func (*demoBuildHandlers) Rerun() error        { return nil }
-func (*demoBuildHandlers) Row() string         { return "" }
-func (*demoBuildHandlers) render() string      { return "" }
-func (*demoBuildHandlers) loadConfig() error   { return nil }
+func (*demoBuildHandler) Prepare() error      { return nil }
+func (*demoBuildHandler) Rerun() error        { return nil }
+func (*demoBuildHandler) Row() string         { return "" }
+func (*demoBuildHandler) render() string      { return "" }
+func (*demoBuildHandler) loadConfig() error   { return nil }
 `)
 	if notices := gen(t); len(notices) != 0 {
 		t.Errorf("correct code reported %v, want silence", notices)
@@ -107,7 +107,7 @@ func (*demoBuildHandlers) loadConfig() error   { return nil }
 }
 
 // TestHookAudit_ignoresNonHandlerTypes keeps the audit scoped to types that actually implement
-// Handlers, found through the assertion. A helper type in the same package is not a handler,
+// Handler, found through the assertion. A helper type in the same package is not a handler,
 // and a method on it is none of the audit's business.
 func TestHookAudit_ignoresNonHandlerTypes(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
@@ -135,7 +135,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-func (*demoBuildHandlers) PostRunn(ctx context.Context, rtx *rotini.Context) {}
+func (*demoBuildHandler) PostRunn(ctx context.Context, rtx *rotini.Context) {}
 `)
 	notices := gen(t)
 	if len(notices) != 1 || !strings.Contains(notices[0].Error(), "lifecycle.go") {
@@ -150,7 +150,7 @@ func (*demoBuildHandlers) PostRunn(ctx context.Context, rtx *rotini.Context) {}
 // step exists to catch.
 func TestHookAudit_neverFailsTheGenerate(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
-	writeTestFile(t, cmdDir, "broken.go", "package demo\n\nfunc (*demoBuildHandlers) Prerun( {\n")
+	writeTestFile(t, cmdDir, "broken.go", "package demo\n\nfunc (*demoBuildHandler) Prerun( {\n")
 	if notices := gen(t); len(notices) != 0 {
 		t.Errorf("an unparseable file reported %v, want it skipped", notices)
 	}
@@ -165,8 +165,8 @@ func TestHookAudit_neverFailsTheGenerate(t *testing.T) {
 func TestHookAudit_reportsEveryOffenderInOrder(t *testing.T) {
 	cmdDir, gen := hookAuditFixture(t)
 	appendToStub(t, cmdDir, "demo_build.go", `
-func (*demoBuildHandlers) CascadingPreRunn(ctx context.Context, rtx *rotini.Context) {}
-func (*demoBuildHandlers) postRun(ctx context.Context, rtx *rotini.Context)          {}
+func (*demoBuildHandler) CascadingPreRunn(ctx context.Context, rtx *rotini.Context) {}
+func (*demoBuildHandler) postRun(ctx context.Context, rtx *rotini.Context)          {}
 `)
 	writeTestFile(t, cmdDir, "a_more.go", `package demo
 
@@ -176,7 +176,7 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-func (*demoBuildHandlers) PreRunn(ctx context.Context, rtx *rotini.Context) {}
+func (*demoBuildHandler) PreRunn(ctx context.Context, rtx *rotini.Context) {}
 `)
 	notices := gen(t)
 	if len(notices) != 3 {
@@ -205,26 +205,26 @@ import (
 	rt "github.com/go-rotini/rotini"
 )
 
-var _ rt.Handlers = aliasedHandlers{}
+var _ rt.Handler = aliasedHandler{}
 
-type aliasedHandlers struct {
-	rt.DefaultCascadingPreRun
-	rt.DefaultPreRun
-	rt.DefaultPostRun
-	rt.DefaultCascadingPostRun
+type aliasedHandler struct {
+	rt.NoCascadingPreRun
+	rt.NoPreRun
+	rt.NoPostRun
+	rt.NoCascadingPostRun
 }
 
-func (aliasedHandlers) Run(ctx context.Context, rtx *rt.Context) {}
+func (aliasedHandler) Run(ctx context.Context, rtx *rt.Context) {}
 
-func (aliasedHandlers) PostRunn(ctx context.Context, rtx *rt.Context) {}
+func (aliasedHandler) PostRunn(ctx context.Context, rtx *rt.Context) {}
 `)
 	notices := gen(t)
-	if len(notices) != 1 || !strings.Contains(notices[0].Error(), "aliasedHandlers") {
-		t.Errorf("notices = %v, want one naming aliasedHandlers — an aliased import must not disable the audit", notices)
+	if len(notices) != 1 || !strings.Contains(notices[0].Error(), "aliasedHandler") {
+		t.Errorf("notices = %v, want one naming aliasedHandler — an aliased import must not disable the audit", notices)
 	}
 }
 
-// A `handler: {import, convention}` package is the bring-your-own seam: one Handlers
+// A `handler: {import, convention}` package is the bring-your-own seam: one Handler
 // implementation, written by hand, shared by several CLIs. It is where a misspelled hook is
 // least likely to be noticed — nobody regenerates it, and it has no stub to compare against —
 // and for a while it was the one place the audit did not look.
@@ -261,7 +261,7 @@ func handlerPkgFixture(t *testing.T, handlerBody string) (pkgDir string, gen fun
 	return filepath.Join(dir, "handlers", "check"), gen
 }
 
-// handlerPkg is the real shape: no `var _ rotini.Handlers` assertion, because the convention
+// handlerPkg is the real shape: no `var _ rotini.Handler` assertion, because the convention
 // function's return type already proves the type implements it.
 func handlerPkg(extra string) string {
 	return `package check
@@ -273,10 +273,10 @@ import (
 )
 
 // Check is the convention the spec's handler: block names.
-func Check() rotini.Handlers { return &handlers{} }
+func Check() rotini.Handler { return &handlers{} }
 
 type handlers struct {
-	rotini.DefaultHooks
+	rotini.NoHooks
 }
 
 func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {}
@@ -302,7 +302,7 @@ func (*handlers) CascadingPrerun(ctx context.Context, rtx *rotini.Context) {}
 }
 
 // TestHookAudit_findsHandlerTypesWithoutAnAssertion pins the mechanism that makes the above
-// possible: a type is a handler if a function RETURNS it as rotini.Handlers, not only if an
+// possible: a type is a handler if a function RETURNS it as rotini.Handler, not only if an
 // assertion names it. Without this the audit walks the package and finds nothing to check.
 func TestHookAudit_findsHandlerTypesWithoutAnAssertion(t *testing.T) {
 	dir, gen := handlerPkgFixture(t, handlerPkg(""))
@@ -313,7 +313,7 @@ func TestHookAudit_findsHandlerTypesWithoutAnAssertion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(body), "var _ rotini.Handlers") {
+	if strings.Contains(string(body), "var _ rotini.Handler") {
 		t.Fatal("fixture no longer demonstrates the case: it carries an assertion")
 	}
 }
@@ -410,13 +410,13 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*demoBuildHandlers)(nil)
+var _ rotini.Handler = (*demoBuildHandler)(nil)
 
-type demoBuildHandlers struct {
-	rotini.DefaultHooks
+type demoBuildHandler struct {
+	rotini.NoHooks
 }
 
-func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*demoBuildHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	` + collect + `
 }
 `
@@ -424,28 +424,28 @@ func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 // TestInputsAudit_reportsAnotherCommandsType is the residue, closed.
 func TestInputsAudit_reportsAnotherCommandsType(t *testing.T) {
-	gen := inputsAuditFixture(t, buildStub(`in, err := rotini.Collect[DemoInputs](rtx)
+	gen := inputsAuditFixture(t, buildStub(`in, err := rtx.Inputs[DemoInputs]()
 	_, _ = in, err`))
 	notices := gen(t)
 	if len(notices) != 1 {
 		t.Fatalf("notices = %v, want one", notices)
 	}
 	got := notices[0].Error()
-	for _, want := range []string{"demo_build.go:", "Collect", "demoBuildHandlers", "DemoInputs", "DemoBuildInputs"} {
+	for _, want := range []string{"demo_build.go:", "Inputs", "demoBuildHandler", "DemoInputs", "DemoBuildInputs"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("notice is missing %q:\n%s", want, got)
 		}
 	}
 }
 
-// TestInputsAudit_coversEveryAcquirer: Collect is not the only way in. The per-channel functions
-// take the same type argument and land on the same frame.
+// TestInputsAudit_coversEveryAcquirer: rtx.Inputs is not the only way in. The per-channel
+// methods take the same type argument and land on the same frame.
 func TestInputsAudit_coversEveryAcquirer(t *testing.T) {
-	for _, fn := range []string{"Collect", "CollectP", "Defaults", "ParseArgv", "ParseEnv", "ParseFiles", "ParseStdin"} {
+	for _, fn := range []string{"Inputs", "InputsWithReport", "DefaultInputs", "ArgvInputs", "EnvInputs", "FileInputs", "StdinInputs"} {
 		t.Run(fn, func(t *testing.T) {
-			call := "v, err := rotini." + fn + "[DemoInputs](rtx)\n\t_, _ = v, err"
-			if fn == "CollectP" {
-				call = "v, r, err := rotini.CollectP[DemoInputs](rtx)\n\t_, _, _ = v, r, err"
+			call := "v, err := rtx." + fn + "[DemoInputs]()\n\t_, _ = v, err"
+			if fn == "InputsWithReport" {
+				call = "v, r, err := rtx.InputsWithReport[DemoInputs]()\n\t_, _, _ = v, r, err"
 			}
 			gen := inputsAuditFixture(t, buildStub(call))
 			if notices := gen(t); len(notices) != 1 {
@@ -458,7 +458,7 @@ func TestInputsAudit_coversEveryAcquirer(t *testing.T) {
 // TestInputsAudit_isQuietOnTheOwnType guards against the check becoming noise: the generated
 // stub already collects its own type, and every example must stay silent.
 func TestInputsAudit_isQuietOnTheOwnType(t *testing.T) {
-	gen := inputsAuditFixture(t, buildStub(`in, err := rotini.Collect[DemoBuildInputs](rtx)
+	gen := inputsAuditFixture(t, buildStub(`in, err := rtx.Inputs[DemoBuildInputs]()
 	_, _ = in, err`))
 	if notices := gen(t); len(notices) != 0 {
 		t.Errorf("a handler collecting its own type reported %v", notices)
@@ -477,10 +477,10 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*demoBuildHandlers)(nil)
+var _ rotini.Handler = (*demoBuildHandler)(nil)
 
-type demoBuildHandlers struct {
-	rotini.DefaultHooks
+type demoBuildHandler struct {
+	rotini.NoHooks
 }
 
 // Own is this handler's own view of the command line, as a shared handler declares.
@@ -491,8 +491,8 @@ type Own struct {
 	}
 }
 
-func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[Own](rtx)
+func (*demoBuildHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[Own]()
 	_, _ = in, err
 }
 `)

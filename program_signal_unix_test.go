@@ -46,7 +46,7 @@ func (h sigRec) Run(ctx context.Context, _ *Context) {
 
 type sigAgg struct{ h sigRec }
 
-func (a sigAgg) Main() Handlers { return a.h }
+func (a sigAgg) Main() Handler { return a.h }
 
 func newSigProgram(h sigRec) *Program {
 	p := NewProgram(Definition{Name: "app", Handler: "Main"}, sigAgg{h})

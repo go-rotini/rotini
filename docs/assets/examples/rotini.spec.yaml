@@ -28,10 +28,10 @@ command:
       summary: the deploy failed
   env_prefix: DEPLOY
   plugin_path: ~/.deploy/plugins
-  remote_discovery:
+  plugin_discovery:
     prefix: deploy-
     hidden: false
-  remote_commands:
+  plugins:
     - name: audit
       summary: run the audit plugin
       aliases: [au]

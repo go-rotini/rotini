@@ -49,7 +49,7 @@ The generator prunes handler files in the cmd package that no longer correspond 
 in the spec. That is how renaming or deleting a command cleans up after itself.
 
 **Only files rotini wrote are candidates.** A generated handler file carries a marker —
-`var _ rotini.Handlers = (*xHandlers)(nil)` — and that marker is what makes it prunable. It
+`var _ rotini.Handler = (*xHandlers)(nil)` — and that marker is what makes it prunable. It
 survives your edits, so an edited handler file is still pruned when its command goes. A helper
 you put beside your handlers is never touched, whatever it is named. To keep a handler file
 whose command is gone, delete its marker line or list it under `keep:`. Every prune is
@@ -110,8 +110,8 @@ a deprecation cycle. Each one is mechanical; the compiler finds every call site.
 | `Parser.Deprecations(rtx)` | `rotini.Deprecations(rtx)` | it never used its receiver, so it forced a `*Parser` out of the registry — which in turn made `Bind(KeyParser, …)` look mandatory in every entrypoint. The seeded `main.go` no longer binds a parser; bind one only to override the default or to call `Parser.Parse` yourself |
 | `Program.WithPanicForward(bool)` | `Program.WithTeardownOnPanic(bool)` | it names whether **teardown** runs, not where the panic goes. "Forward" read as forwarding the panic onward, which is what `WithPanicRecover(false)` actually does — a name that had to be unlearned from its own doc, on an option people reach for mid-crash |
 | `Context.RecordErr(err)` | `Context.RecordError(err)` | it matches its siblings `RecordWarning`, `RecordInfo` and `RecordSuccess` |
-| the per-outcome setters `WithOnSuccessFn` · `WithOnWarningFn` · `WithOnErrorFn` · `WithOnPanicFn` | one `Program.WithFunnel(FunnelFunc)`, which receives every outcome in one `Outcome` | one function owns the whole report and the exit code, so the order and the exit policy live in one place |
-| the six `Key*` constants — `KeyVersion` `KeyParser` `KeyBinder` `KeyBindMeta` `KeyStyler` `KeySuggestor` | `Program.WithVersion` · `WithParser` · `WithBinder` · `WithBindMeta`, read back with `Context.Version()` · `Parser()`. The styler is gone; a `Suggestor` is a plain value from `rotini.NewSuggestor()` that a program uses in its own funnel | rotini's internals shared one flat, unreserved string namespace with your own services, and every read discarded its comma-ok — so a colliding name or a wrong type silently produced a zero value. Binding a `Binder` built from an empty `BindMeta`, the obvious way to write it, switched the configuration-file channel off without a word. The registry is now yours alone |
+| the per-outcome setters `WithOnSuccessFn` · `WithOnWarningFn` · `WithOnErrorFn` · `WithOnPanicFn` | one `Program.WithReporter(Reporter)`, which receives every outcome in one `Outcome` | one function owns the whole report and the exit code, so the order and the exit policy live in one place |
+| the six `Key*` constants — `KeyVersion` `KeyParser` `KeyBinder` `KeyBindMeta` `KeyStyler` `KeySuggestor` | `Program.WithVersion` · `WithParser` · `WithBinder` · `WithBindMeta`, read back with `Context.Version()` · `Parser()`. The styler is gone; a `Suggestor` is a plain value from `rotini.NewSuggestor()` that a program uses in its own reporter | rotini's internals shared one flat, unreserved string namespace with your own services, and every read discarded its comma-ok — so a colliding name or a wrong type silently produced a zero value. Binding a `Binder` built from an empty `BindMeta`, the obvious way to write it, switched the configuration-file channel off without a word. The registry is now yours alone |
 
 `WithBinder` takes `func(BindMeta) *Binder` rather than a `*Binder`: an override **receives**
 the generated descriptor instead of having to reproduce it, which makes the silent-drop

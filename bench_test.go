@@ -10,22 +10,22 @@ import (
 // one invocation. `make test-bench` reports them; they exist so a change that makes
 // one of these materially worse is visible rather than discovered later.
 
-// Strip runs over every generated man, markdown and completion page at build time, and over
+// StripANSI runs over every generated man, markdown and completion page at build time, and over
 // any text a program routes through it at run time. Text that was never styled must cost
 // nothing at all.
-func BenchmarkStrip_unstyled(b *testing.B) {
+func BenchmarkStripANSI_unstyled(b *testing.B) {
 	const s = "nothing to strip in this string at all"
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = Strip(s)
+		_ = StripANSI(s)
 	}
 }
 
-func BenchmarkStrip_styled(b *testing.B) {
+func BenchmarkStripANSI_styled(b *testing.B) {
 	const s = "\x1b[1msome\x1b[0m \x1b[38;5;203mstyled\x1b[0m text here"
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = Strip(s)
+		_ = StripANSI(s)
 	}
 }
 
@@ -77,7 +77,7 @@ func BenchmarkParser_parse(b *testing.B) {
 	}
 }
 
-func mustResolve(b *testing.B, def Definition, argv []string) []ResolvedCommand {
+func mustResolve(b *testing.B, def Definition, argv []string) []Command {
 	b.Helper()
 	res, err := DefaultResolver(def, argv)
 	if err != nil {

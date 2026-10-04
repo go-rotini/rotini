@@ -15,7 +15,7 @@ import (
 // beside a missing argument or a bad value: the user asked NOT to run the command, and should
 // not be told off for not supplying what running it would need.
 func answerHelp[T any](rtx *rotini.Context, help func(T) bool) bool {
-	argv, err := rotini.ParseArgv[T](rtx)
+	argv, err := rtx.ArgvInputs[T]()
 	if err != nil || !help(argv.Values) {
 		return false
 	}
@@ -111,7 +111,7 @@ func printWarnings(rtx *rotini.Context) func([]error) {
 }
 
 // haltWithProblems records each problem in err as its own outcome and stops the run. The
-// pipeline joins its findings into one error, and a funnel printing "Error: %s" would mark
+// pipeline joins its findings into one error, and a reporter printing "Error: %s" would mark
 // only the first line of it, so `grep '^Error:'` would find one problem in three.
 func haltWithProblems(rtx *rotini.Context, err error) {
 	problems := flatten(err)

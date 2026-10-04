@@ -95,7 +95,7 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 	for _, def := range []string{
 		"Command", "FlagInput", "ArgumentInput", "EnvInput", "ConfigInput", "InputSchema",
 		"BaseSchema", "Schema", "StdinSpec", "FlagGroup", "FlagDependency",
-		"RemoteCommandSpec", "RemoteDiscovery", "HandlerSource", "HelpHeadings",
+		"PluginSpec", "PluginDiscovery", "HandlerSource", "HelpHeadings",
 		"ExitStatusEntry", "ConfigurationFile", "ConfigurationFileDiscover",
 	} {
 		if !strings.Contains(page, "## "+def+"\n") {
@@ -107,7 +107,7 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 	// finishing pass — the ones most likely to be added without documenting.
 	for _, key := range []string{
 		"name", "$ref", "flags", "arguments", "env", "config", "config_files", "stdin",
-		"flag_groups", "flag_dependencies", "passthrough", "handler", "remote_commands",
+		"flag_groups", "flag_dependencies", "passthrough", "handler", "plugins",
 		"variable", "negatable", "complete", "group", "dotted_keys", "from", "config_source",
 		"nesting", "placeholder", "secret", "required", "default", "enum", "pattern",
 	} {
@@ -213,7 +213,7 @@ var commandKeyGroups = []struct {
 }{
 	{"Identity and visibility", []string{"name", "aliases", "hidden", "deprecated", "deprecated_identifiers"}},
 	{"Inputs", []string{"flags", "arguments", "env", "config", "stdin", "config_files", "env_prefix", "flag_groups", "flag_dependencies"}},
-	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "remote_commands", "remote_discovery", "plugin_path", "timeout"}},
+	{"Sub-commands and composition", []string{"commands", "$ref", "handler", "passthrough", "plugins", "plugin_discovery", "plugin_path", "timeout"}},
 	{"Documentation", []string{"summary", "description", "usage", "display_name", "examples", "exit_status", "see_also", "group", "header", "footer", "headings", "help", "man", "markdown"}},
 	{"Output and shared types", []string{"output", "schemas"}},
 	{"Generated code", []string{"filename"}},

@@ -75,7 +75,7 @@ const defaultMinScore = 0.75
 //
 //	var suggestor = rotini.NewSuggestor()
 //
-//	func funnel(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
+//	func reporter(_ context.Context, rtx *rotini.Context, out rotini.Outcome) {
 //		for _, err := range out.Errors {
 //			fmt.Fprintf(rtx.Stderr, "Error: %s\n", err)
 //			if hits := suggestor.For(err); len(hits) > 0 {

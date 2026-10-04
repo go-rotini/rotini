@@ -26,7 +26,7 @@ var updateSurface = flag.Bool("update-surface", false, "update the exported API 
 //
 // It covers exported funcs, types, consts, vars, methods, STRUCT FIELDS and INTERFACE
 // METHODS. The last two matter as much as the rest and were missing at first: codegen emits
-// composite literals against Definition, FlagDef, ArgDef and BindMeta, so removing a field is
+// composite literals against Definition, FlagDef, ArgDef and InputSettings, so removing a field is
 // a bigger break than removing a function — it fails in every generated file in every project
 // at once, rather than at one call site.
 //
@@ -139,8 +139,8 @@ func exportedSpecs(decl *ast.GenDecl) []string {
 // exportedMembers renders a type's exported STRUCT FIELDS and INTERFACE METHODS.
 //
 // They belong in the freeze because they are load-bearing API, not implementation: codegen
-// writes composite literals against Definition, FlagDef, ArgDef and BindMeta, every handler
-// implements Handlers, and a custom funnel reads Outcome by field name. Renaming or removing
+// writes composite literals against Definition, FlagDef, ArgDef and InputSettings, every handler
+// implements Handler, and a custom reporter reads Outcome by field name. Renaming or removing
 // one of those breaks every generated file in every project — a bigger break than deleting a
 // function, and until now the snapshot could not see it.
 //
@@ -210,7 +210,7 @@ func receiverName(recv *ast.FieldList) string {
 	if star, ok := expr.(*ast.StarExpr); ok {
 		expr = star.X
 	}
-	if idx, ok := expr.(*ast.IndexExpr); ok { // generic receiver, e.g. Layer[T]
+	if idx, ok := expr.(*ast.IndexExpr); ok { // generic receiver, e.g. InputLayer[T]
 		expr = idx.X
 	}
 	if id, ok := expr.(*ast.Ident); ok {

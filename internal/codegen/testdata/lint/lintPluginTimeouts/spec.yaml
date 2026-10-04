@@ -1,9 +1,9 @@
 # The schema's pattern catches a malformed duration, so the only way to reach this rule
 # is a value that is well-FORMED but will not parse — here, one that overflows int64.
-# Codegen would otherwise drop it silently, leaving the remote unbounded.
+# Codegen would otherwise drop it silently, leaving the plugin unbounded.
 version: 0.0.0
 command:
   name: demo
-  remote_commands:
+  plugins:
     - name: deploy
       timeout: 9999999999999999999h

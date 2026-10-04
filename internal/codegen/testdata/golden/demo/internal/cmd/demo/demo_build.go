@@ -7,17 +7,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*demoBuildHandlers)(nil)
+var _ rotini.Handler = (*demoBuildHandler)(nil)
 
-type demoBuildHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type demoBuildHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*demoBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rotini.Collect[DemoBuildInputs](rtx)
+func (*demoBuildHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[DemoBuildInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return

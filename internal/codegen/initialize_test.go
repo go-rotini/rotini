@@ -84,7 +84,7 @@ func initDemo(t *testing.T) string {
 func TestInitialize_forceNeverDeletes(t *testing.T) {
 	dir := initDemo(t)
 	handler := filepath.Join(dir, "internal", "cmd", "demo", "demo_extra.go")
-	writeTestFile(t, filepath.Dir(handler), "demo_extra.go", "package demo\n\n"+stubMarker+"*demoExtraHandlers)(nil)\n\n// edited by hand\n")
+	writeTestFile(t, filepath.Dir(handler), "demo_extra.go", "package demo\n\n"+stubMarker+"*demoExtraHandler)(nil)\n\n// edited by hand\n")
 
 	if _, err := NewProcessor("0.0.0").Initialize("demo", "", true); err != nil {
 		t.Fatalf("Initialize --force: %v", err)

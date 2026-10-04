@@ -16,15 +16,15 @@ import (
 func TestGet_typed(t *testing.T) {
 	rtx := newContext()
 	buf := &bytes.Buffer{}
-	rtx.Bind("buf", buf)
+	rtx.SetDependency(NewDependency[any]("buf"), any(buf))
 
-	if got, ok := rtx.Get[*bytes.Buffer]("buf"); !ok || got != buf {
+	if got, ok := rtx.GetDependency(NewDependency[*bytes.Buffer]("buf")); !ok || got != buf {
 		t.Fatalf("Get[*bytes.Buffer] = (%v, %v), want the bound buffer", got, ok)
 	}
-	if _, ok := rtx.Get[*bytes.Buffer]("missing"); ok {
+	if _, ok := rtx.GetDependency(NewDependency[*bytes.Buffer]("missing")); ok {
 		t.Error("Get of an unbound key should be ok=false")
 	}
-	if _, ok := rtx.Get[*int]("buf"); ok {
+	if _, ok := rtx.GetDependency(NewDependency[*int]("buf")); ok {
 		t.Error("Get of a wrong-typed binding should be ok=false")
 	}
 }
@@ -33,30 +33,30 @@ func TestBindIfAbsent_keepsExistingElseRegistersDefault(t *testing.T) {
 	rtx := newContext()
 	injected, def := &bytes.Buffer{}, &bytes.Buffer{}
 
-	// A prior binding (e.g. a test's double) is kept — BindIfAbsent no-ops.
-	rtx.Bind("buf", injected)
-	rtx.BindIfAbsent("buf", def)
-	if rtx.MustGet[*bytes.Buffer]("buf") != injected {
-		t.Error("BindIfAbsent must not overwrite an existing binding")
+	// A prior binding (e.g. a test's double) is kept — SetDependencyIfAbsent no-ops.
+	rtx.SetDependency(NewDependency[any]("buf"), any(injected))
+	rtx.SetDependencyIfAbsent(NewDependency[any]("buf"), any(def))
+	if rtx.MustGetDependency(NewDependency[*bytes.Buffer]("buf")) != injected {
+		t.Error("SetDependencyIfAbsent must not overwrite an existing value")
 	}
 
 	// An absent key gets the default registered into the registry.
-	rtx.BindIfAbsent("other", def)
-	if rtx.MustGet[*bytes.Buffer]("other") != def {
-		t.Error("BindIfAbsent should register the default when the key is absent")
+	rtx.SetDependencyIfAbsent(NewDependency[any]("other"), any(def))
+	if rtx.MustGetDependency(NewDependency[*bytes.Buffer]("other")) != def {
+		t.Error("SetDependencyIfAbsent should register the default when none is registered")
 	}
 }
 
 func TestMustGet_returnsBoundService(t *testing.T) {
 	rtx := newContext()
 	buf := &bytes.Buffer{}
-	rtx.Bind("buf", buf)
-	if rtx.MustGet[*bytes.Buffer]("buf") != buf {
+	rtx.SetDependency(NewDependency[any]("buf"), any(buf))
+	if rtx.MustGetDependency(NewDependency[*bytes.Buffer]("buf")) != buf {
 		t.Fatal("MustGet did not return the bound service")
 	}
 }
 
-func TestMustGet_panicsServiceError(t *testing.T) {
+func TestMustGetDependency_panicsDependencyError(t *testing.T) {
 	rtx := newContext() // nothing bound
 
 	defer func() {
@@ -65,21 +65,21 @@ func TestMustGet_panicsServiceError(t *testing.T) {
 		if !ok {
 			t.Fatalf("MustGet panicked with %v (%T), want an error", r, r)
 		}
-		if !errors.Is(err, ErrServiceNotFound) {
-			t.Errorf("panic = %v, want it to wrap ErrServiceNotFound", err)
+		if !errors.Is(err, ErrDependencyNotFound) {
+			t.Errorf("panic = %v, want it to wrap ErrDependencyNotFound", err)
 		}
-		var se *ServiceError
-		if !errors.As(err, &se) || se.Key != "missing" {
+		var se *DependencyError
+		if !errors.As(err, &se) || se.Name != "missing" {
 			t.Errorf("panic did not carry the key: %v", err)
 		}
 	}()
 
-	_ = rtx.MustGet[*bytes.Buffer]("missing") // panics → recovered above
+	_ = rtx.MustGetDependency(NewDependency[*bytes.Buffer]("missing")) // panics → recovered above
 }
 
 func TestMustGet_panicsOnWrongType(t *testing.T) {
 	rtx := newContext()
-	rtx.Bind("buf", &bytes.Buffer{})
+	rtx.SetDependency(NewDependency[any]("buf"), any(&bytes.Buffer{}))
 
 	defer func() {
 		if r := recover(); r == nil {
@@ -87,7 +87,7 @@ func TestMustGet_panicsOnWrongType(t *testing.T) {
 		}
 	}()
 
-	_ = rtx.MustGet[*int]("buf") // bound, but not an *int → panics
+	_ = rtx.MustGetDependency(NewDependency[*int]("buf")) // bound, but not an *int → panics
 }
 
 // The registry is the DI seam shared by every hook, and concurrent tooling (tickers,
@@ -108,16 +108,16 @@ func TestContext_concurrentRegistry(t *testing.T) {
 			defer wg.Done()
 			key := fmt.Sprintf("svc-%d", w%keys)
 			for range iters {
-				rtx.Bind(key, w)
-				_ = rtx.Value(key)
-				_, _ = rtx.Get[int](key)
+				rtx.SetDependency(NewDependency[any](key), any(w))
+				_ = rtx.dependency(key)
+				_, _ = rtx.GetDependency(NewDependency[int](key))
 			}
 		}(w)
 	}
 	wg.Wait()
 
 	for k := range keys {
-		if rtx.Value(fmt.Sprintf("svc-%d", k)) == nil {
+		if rtx.dependency(fmt.Sprintf("svc-%d", k)) == nil {
 			t.Errorf("key svc-%d unbound after concurrent access", k)
 		}
 	}
@@ -249,39 +249,39 @@ func TestContext_Panics_api(t *testing.T) {
 	}
 }
 
-// TestRun_recordedErrorsFireFunnel pins the firing contract and the locked edges, with
-// a CUSTOM funnel: it fires iff ≥1 channel recorded something (edge 1); record-without-exit
-// still fires it (edge 2); a custom funnel OWNS the exit code — the error floor is the
-// DEFAULT funnel's, so a custom funnel that sets no code exits 0 (edge 3); and the
+// TestRun_recordedErrorsFireReporter pins the firing contract and the locked edges, with
+// a CUSTOM reporter: it fires iff ≥1 channel recorded something (edge 1); record-without-exit
+// still fires it (edge 2); a custom reporter OWNS the exit code — the error floor is the
+// DEFAULT reporter's, so a custom reporter that sets no code exits 0 (edge 3); and the
 // HaltWithCode/Exit choice still governs teardown.
-func TestRun_recordedErrorsFireFunnel(t *testing.T) {
+func TestRun_recordedErrorsFireReporter(t *testing.T) {
 	errA := UsageError(errors.New("bad flag")) // carries ErrUsage through the join
 	errB := errors.New("also bad")
 
-	exec := func(onRun func(rtx *Context)) (log []string, code int, funneled error, drained []error, fired bool) {
+	exec := func(onRun func(rtx *Context)) (log []string, code int, reported error, drained []error, fired bool) {
 		h := &testHandlers{log: &log, onRun: onRun}
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithFunnel(func(_ context.Context, _ *Context, out Outcome) {
+		p.WithReporter(func(_ context.Context, _ *Context, out Outcome) {
 			errs := out.Errors
-			fired, funneled, drained = true, errors.Join(errs...), errs
+			fired, reported, drained = true, errors.Join(errs...), errs
 		})
 		code, _ = p.Run(p.args)
 		return
 	}
 
 	t.Run("record + HaltWithCode: fires, teardown runs, join keeps tags", func(t *testing.T) {
-		log, code, funneled, drained, fired := exec(func(rtx *Context) {
+		log, code, reported, drained, fired := exec(func(rtx *Context) {
 			rtx.RecordError(errA)
 			rtx.RecordError(errB)
 			rtx.HaltWithCode(1)
 		})
 		if !fired {
-			t.Fatal("the funnel did not fire on recorded errors")
+			t.Fatal("the reporter did not fire on recorded errors")
 		}
 		if len(drained) != 2 {
 			t.Errorf("rtx.copyErrors() drained %d, want 2", len(drained))
 		}
-		if !errors.Is(funneled, ErrUsage) {
+		if !errors.Is(reported, ErrUsage) {
 			t.Error("joined err lost errA's ErrUsage tag")
 		}
 		if code != 1 {
@@ -298,7 +298,7 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 			rtx.Exit(5)
 		})
 		if !fired {
-			t.Fatal("the funnel did not fire")
+			t.Fatal("the reporter did not fire")
 		}
 		if code != 5 {
 			t.Errorf("code = %d, want 5", code)
@@ -308,15 +308,15 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 		}
 	})
 
-	t.Run("record without exit + custom funnel: fires, code stays 0 (custom funnel owns it — edges 2,3)", func(t *testing.T) {
+	t.Run("record without exit + custom reporter: fires, code stays 0 (custom reporter owns it — edges 2,3)", func(t *testing.T) {
 		log, code, _, _, fired := exec(func(rtx *Context) {
-			rtx.RecordError(errB) // no HaltWithCode/Exit; the custom funnel (in exec) sets no code either
+			rtx.RecordError(errB) // no HaltWithCode/Exit; the custom reporter (in exec) sets no code either
 		})
 		if !fired {
-			t.Fatal("the funnel did not fire on record-without-exit (edge 2)")
+			t.Fatal("the reporter did not fire on record-without-exit (edge 2)")
 		}
 		if code != 0 {
-			t.Errorf("code = %d, want 0 — the error floor is the DEFAULT funnel's; a custom funnel that sets no code exits 0 (edge 3)", code)
+			t.Errorf("code = %d, want 0 — the error floor is the DEFAULT reporter's; a custom reporter that sets no code exits 0 (edge 3)", code)
 		}
 		if !contains(log, "run.PostRun") {
 			t.Errorf("teardown should run when no exit was called: %v", log)
@@ -328,7 +328,7 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 			rtx.HaltWithCode(0) // clean success
 		})
 		if fired {
-			t.Error("the funnel fired with no recorded errors (edge 1 violated)")
+			t.Error("the reporter fired with no recorded errors (edge 1 violated)")
 		}
 		if code != 0 {
 			t.Errorf("code = %d, want 0", code)
@@ -336,15 +336,15 @@ func TestRun_recordedErrorsFireFunnel(t *testing.T) {
 	})
 }
 
-// TestRun_defaultFunnelPrintsErrors is the end-to-end golden: with no custom funnel,
+// TestRun_defaultReporterPrintsErrors is the end-to-end golden: with no custom reporter,
 // the default prints one program-name-prefixed line per recorded error to
 // stderr and exits 1 (rotini holds no exit-code constants — any error is 1).
-func TestRun_defaultFunnelPrintsErrors(t *testing.T) {
+func TestRun_defaultReporterPrintsErrors(t *testing.T) {
 	cases := []struct {
 		name   string
 		record []error
 		want   int
-		stderr string // exact stderr (the format golden): the default funnel labels each line "Error:"
+		stderr string // exact stderr (the format golden): the default reporter labels each line "Error:"
 	}{
 		{"usage", []error{UsageError(errors.New("bad flag"))}, 1, "Error: bad flag\n"},
 		{"internal", []error{InternalError(errors.New("broken wiring"))}, 1, "Error: broken wiring\n"},
@@ -359,7 +359,7 @@ func TestRun_defaultFunnelPrintsErrors(t *testing.T) {
 					rtx.RecordError(e)
 				}
 			}}
-			p, _, errb := newTestProgram(h, []string{"run"}) // no WithFunnel → default
+			p, _, errb := newTestProgram(h, []string{"run"}) // no WithReporter → default
 			code, _ := p.Run(p.args)
 			if code != tc.want {
 				t.Errorf("code = %d, want %d", code, tc.want)
@@ -375,7 +375,7 @@ func TestRun_defaultFunnelPrintsErrors(t *testing.T) {
 //
 // A PostRun that owns a transaction has to choose commit or rollback, and before Failed there
 // was no way to ask: Context had five Record* methods and no reader, while the Outcome that
-// answers the question reaches the funnel only after every teardown has already run. A program
+// answers the question reaches the reporter only after every teardown has already run. A program
 // had to keep its own parallel "did we fail" flag, which a panic would not set.
 func TestContext_Failed(t *testing.T) {
 	t.Parallel()
@@ -410,7 +410,7 @@ func TestContext_Failed(t *testing.T) {
 // TestContext_Halt covers stopping the lifecycle without claiming an exit code.
 //
 // Before Halt, HaltWithCode was the only way to stop, and it does two jobs at once. A program
-// whose funnel owns exit codes therefore wrote a meaningless number purely to halt — and
+// whose reporter owns exit codes therefore wrote a meaningless number purely to halt — and
 // because the number then looked redundant, deleting it read as tidying while silently
 // removing the halt. That is how one bad flag came to be reported three times in
 // example-lifecycle, with a fourth misleading error from a hook whose setup had been skipped.
@@ -425,7 +425,7 @@ func TestContext_Halt(t *testing.T) {
 			t.Error("Halt did not stop forward progress")
 		}
 		if rtx.exitCode != 0 {
-			t.Errorf("Halt claimed exit code %d; the verdict is the funnel's", rtx.exitCode)
+			t.Errorf("Halt claimed exit code %d; the verdict is the reporter's", rtx.exitCode)
 		}
 		if rtx.exitNow {
 			t.Error("Halt skipped teardown; that is Exit's job")
@@ -461,13 +461,13 @@ func TestContext_Halt(t *testing.T) {
 			t.Error("Halt discarded the recorded failure")
 		}
 		if rtx.exitCode != 0 {
-			t.Errorf("Halt pre-empted the funnel with %d", rtx.exitCode)
+			t.Errorf("Halt pre-empted the reporter with %d", rtx.exitCode)
 		}
 	})
 
-	t.Run("no-op in the funnel", func(t *testing.T) {
+	t.Run("no-op in the reporter", func(t *testing.T) {
 		t.Parallel()
-		rtx := &Context{funnelStage: true}
+		rtx := &Context{reporterStage: true}
 		rtx.Halt()
 		if rtx.stopped {
 			t.Error("Halt stopped a lifecycle that had already finished")
@@ -512,7 +512,7 @@ func TestContext_seamAccessorsAreRaceFree(t *testing.T) {
 //
 //	Path() before="app run"   after mutating what Chain() returned="app HIJACKED"
 //
-// and with it Command(), the binder's leaf anchoring and configuration-file scoping, silently,
+// and with it Command(), the input reader's leaf anchoring and configuration-file scoping, silently,
 // for the rest of the run. Every other internal slice the Context hands out is copied; this
 // was the one that was not.
 func TestContext_chainIsACopy(t *testing.T) {
@@ -528,7 +528,7 @@ func TestContext_chainIsACopy(t *testing.T) {
 	}
 
 	// Every mutation a handler could plausibly make to the slice it was handed.
-	got := rtx.Chain()
+	got := rtx.CommandChain()
 	got[1].Name = "HIJACKED"
 	got[0], got[1] = got[1], got[0]
 	got = got[:1]
@@ -540,8 +540,8 @@ func TestContext_chainIsACopy(t *testing.T) {
 	if rtx.Command().Name != "run" {
 		t.Errorf("Command().Name = %q, want run", rtx.Command().Name)
 	}
-	if len(rtx.Chain()) != 2 {
-		t.Errorf("Chain() length = %d, want 2 — reslicing the copy must not shorten the run's own", len(rtx.Chain()))
+	if len(rtx.CommandChain()) != 2 {
+		t.Errorf("Chain() length = %d, want 2 — reslicing the copy must not shorten the run's own", len(rtx.CommandChain()))
 	}
 }
 
@@ -552,7 +552,7 @@ func TestContext_chainCopiesAreIndependent(t *testing.T) {
 		Commands: []CommandDef{{Name: "run", Handler: "AppRun"}},
 	}, []string{"run"})
 
-	a, b := rtx.Chain(), rtx.Chain()
+	a, b := rtx.CommandChain(), rtx.CommandChain()
 	a[0].Name = "changed"
 	if b[0].Name == "changed" {
 		t.Error("two Chain() results share backing storage")
@@ -562,20 +562,20 @@ func TestContext_chainCopiesAreIndependent(t *testing.T) {
 // TestContext_nilReceiverPanicsAtTheCall pins S3: every exported method dereferences, the
 // same rule Program follows.
 //
-// Half of them used to tolerate a nil receiver and half did not, so rtx.Chain() answered while
-// rtx.CommandPath() panicked — three views of the same data, two behaviours. Tolerating it is the
-// worse of the two: a nil that reports "nothing recorded" or "no chain" hides the mistake and
-// surfaces it later, at a call that was not wrong.
+// Half of them used to tolerate a nil receiver and half did not, so rtx.CommandChain() answered
+// while rtx.CommandPath() panicked — three views of the same data, two behaviours. Tolerating
+// it is the worse of the two: a nil that reports "nothing recorded" or "no chain" hides the
+// mistake and surfaces it later, at a call that was not wrong.
 //
 // rotini's own entry points that ACCEPT a Context from a caller still check it; the guard
 // belongs at that boundary, not on every method behind it — see
 // TestContext_boundaryStillRejectsNil.
 func TestContext_nilReceiverPanicsAtTheCall(t *testing.T) {
 	for name, call := range map[string]func(*Context){
-		"Chain":         func(rtx *Context) { _ = rtx.Chain() },
+		"Chain":         func(rtx *Context) { _ = rtx.CommandChain() },
 		"Command":       func(rtx *Context) { _ = rtx.Command() },
 		"Path":          func(rtx *Context) { _ = rtx.CommandPath() },
-		"Value":         func(rtx *Context) { _ = rtx.Value("k") },
+		"Value":         func(rtx *Context) { _ = rtx.dependency("k") },
 		"Failed":        func(rtx *Context) { _ = rtx.Failed() },
 		"Halt":          func(rtx *Context) { rtx.Halt() },
 		"HaltWithCode":  func(rtx *Context) { rtx.HaltWithCode(1) },
@@ -631,9 +631,9 @@ func TestContext_argsStayLiveButChainDoesNot(t *testing.T) {
 		t.Error("Args is not the live slice; a handler running its own parser depends on it")
 	}
 
-	c := rtx.Chain()
+	c := rtx.CommandChain()
 	c[0].Name = "mutated"
-	if rtx.Chain()[0].Name == "mutated" {
+	if rtx.CommandChain()[0].Name == "mutated" {
 		t.Error("Chain handed back live storage")
 	}
 }
@@ -752,7 +752,7 @@ func TestHaltWith_isCorrectInEveryHook(t *testing.T) {
 				t.Errorf("HaltWith in %s exited 0", hook)
 			}
 			if got := errb.String(); !strings.Contains(got, "failed in "+hook) {
-				t.Errorf("HaltWith in %s did not reach the funnel; stderr = %q", hook, got)
+				t.Errorf("HaltWith in %s did not reach the reporter; stderr = %q", hook, got)
 			}
 		})
 	}
@@ -796,15 +796,15 @@ func TestRecordError_aloneStillContinues(t *testing.T) {
 	}
 }
 
-// TestHaltWith_inTheFunnelDoesNotReenter: Halt is documented as a no-op inside the funnel, where
-// the lifecycle has already run. HaltWith inherits that, so a funnel that fails while reporting
+// TestHaltWith_inTheReporterDoesNotReenter: Halt is documented as a no-op inside the reporter, where
+// the lifecycle has already run. HaltWith inherits that, so a reporter that fails while reporting
 // cannot stall the settle it is part of.
-func TestHaltWith_inTheFunnelDoesNotReenter(t *testing.T) {
+func TestHaltWith_inTheReporterDoesNotReenter(t *testing.T) {
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(errors.New("original"))
 	}}
 	p, _, _ := newTestProgram(h, []string{"run", "x"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, _ Outcome) {
+	p.WithReporter(func(_ context.Context, rtx *Context, _ Outcome) {
 		rtx.HaltWith(errors.New("while reporting"))
 	})
 
@@ -813,7 +813,7 @@ func TestHaltWith_inTheFunnelDoesNotReenter(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("HaltWith inside the funnel did not return")
+		t.Fatal("HaltWith inside the reporter did not return")
 	}
 }
 
@@ -827,9 +827,9 @@ func TestHaltWith_inTheFunnelDoesNotReenter(t *testing.T) {
 // running when it looks.
 
 type fgHandlers struct {
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 	cascading func(*Context)
 }
 
@@ -841,7 +841,7 @@ func (h fgHandlers) CascadingPreRun(_ context.Context, rtx *Context) {
 }
 
 type fgLeaf struct {
-	DefaultHooks
+	NoHooks
 	onRun func(*Context)
 }
 
@@ -856,8 +856,8 @@ type fgProg struct {
 	onRun     func(*Context)
 }
 
-func (p fgProg) App() Handlers    { return fgHandlers{cascading: p.cascading} }
-func (p fgProg) AppRun() Handlers { return fgLeaf{onRun: p.onRun} }
+func (p fgProg) App() Handler    { return fgHandlers{cascading: p.cascading} }
+func (p fgProg) AppRun() Handler { return fgLeaf{onRun: p.onRun} }
 
 // TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame is the supported shape: fan out, wait,
 // return. Everything the goroutines read is the frame their spawner was in.
@@ -873,7 +873,7 @@ func TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame(t *testing.T) {
 				defer wg.Done()
 				mu.Lock()
 				defer mu.Unlock()
-				seen = append(seen, rtx.Frame().Name)
+				seen = append(seen, rtx.Command().Name)
 			}()
 		}
 		wg.Wait() // the hook does not return until they are done
@@ -887,7 +887,7 @@ func TestFrame_goroutineTheHookWaitsForSeesTheSpawnersFrame(t *testing.T) {
 	}
 	for _, got := range seen {
 		if got != "app" {
-			t.Errorf("a waited-for goroutine read Frame() = %q, want its spawner's %q", got, "app")
+			t.Errorf("a waited-for goroutine read Command() = %q, want its spawner's %q", got, "app")
 		}
 	}
 }
@@ -903,15 +903,15 @@ func TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan struct{})
 	var detached, captured string
-	var capturedFrame ResolvedCommand
+	var capturedFrame Command
 
 	p := NewProgram(testDef(), fgProg{
 		cascading: func(rtx *Context) {
-			capturedFrame = rtx.Frame() // the remedy: read it while the hook still owns the frame
+			capturedFrame = rtx.Command() // the remedy: read it while the hook still owns the frame
 			go func() {
 				defer close(done)
 				<-release // resume only after the spawning hook has returned
-				detached = rtx.Frame().Name
+				detached = rtx.Command().Name
 				captured = capturedFrame.Name
 			}()
 		},
@@ -927,7 +927,7 @@ func TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep(t *testing.T) {
 
 	// The run has moved on to the leaf by the time the detached goroutine looks.
 	if detached != "run" {
-		t.Errorf("a detached goroutine read Frame() = %q; the documented behaviour is the current step, %q", detached, "run")
+		t.Errorf("a detached goroutine read Command() = %q; the documented behaviour is the current step, %q", detached, "run")
 	}
 	// The captured value is stable, which is what the doc tells authors to rely on.
 	if captured != "app" {
@@ -935,37 +935,45 @@ func TestFrame_goroutineThatOutlivesItsHookSeesTheCurrentStep(t *testing.T) {
 	}
 }
 
-// TestFrame_reportsTheHooksOwnCommand is the information that did not exist before: Command is
-// the leaf in every hook, Frame is the command this hook belongs to.
-func TestFrame_reportsTheHooksOwnCommand(t *testing.T) {
-	var rootSaw, midSaw, cmdSaw string
+// TestCommand_reportsTheHooksOwnCommand: in a cascading hook, Command is the command the hook
+// belongs to, and the invoked command is the last entry of CommandChain.
+func TestCommand_reportsTheHooksOwnCommand(t *testing.T) {
+	var rootSaw, midSaw, invokedSaw string
 	runF(t, []string{"mid", "leaf"},
-		func(rtx *Context) { midSaw, cmdSaw = rtx.Frame().Name, rtx.Command().Name },
-		func(rtx *Context) { rootSaw = rtx.Frame().Name },
+		func(rtx *Context) {
+			midSaw = rtx.Command().Name
+			chain := rtx.CommandChain()
+			invokedSaw = chain[len(chain)-1].Name
+		},
+		func(rtx *Context) { rootSaw = rtx.Command().Name },
 	)
 	if rootSaw != "root" || midSaw != "mid" {
-		t.Errorf("Frame() = root:%q mid:%q, want root/mid", rootSaw, midSaw)
+		t.Errorf("Command() = root:%q mid:%q, want root/mid", rootSaw, midSaw)
 	}
-	if cmdSaw != "leaf" {
-		t.Errorf("Command() in mid's cascading hook = %q, want the leaf %q", cmdSaw, "leaf")
+	if invokedSaw != "leaf" {
+		t.Errorf("the chain's last command in mid's cascading hook = %q, want the leaf %q", invokedSaw, "leaf")
 	}
 }
 
-// TestFrame_outsideAHookIsTheLeaf covers a Context from NewContextFor, where no hook is running.
-func TestFrame_outsideAHookIsTheLeaf(t *testing.T) {
+// TestCommand_outsideAHookIsTheInvokedCommand covers a Context from NewContextFor, where no hook
+// is running.
+func TestCommand_outsideAHookIsTheInvokedCommand(t *testing.T) {
 	rtx := NewContextFor(fDef(), []string{"mid", "leaf"})
-	if got := rtx.Frame().Name; got != "leaf" {
-		t.Errorf("Frame() outside a hook = %q, want the leaf %q", got, "leaf")
+	if got := rtx.Command().Name; got != "leaf" {
+		t.Errorf("Command() outside a hook = %q, want the leaf %q", got, "leaf")
 	}
-	if _, err := Collect[fLeafSpan](rtx); err != nil {
+	if !rtx.Command().Invoked {
+		t.Error("Command() outside a hook is the invoked command, but Invoked = false")
+	}
+	if _, err := rtx.Inputs[fLeafSpan](); err != nil {
 		t.Errorf("the leaf's own type must collect from a hookless Context: %v", err)
 	}
 }
 
-// TestIsLeaf answers the question the frame surface could not express: a cascading hook runs at
-// every depth, so "is this invocation about ME, or am I an ancestor of it?" is real — and
-// rtx.Frame() == rtx.Command() does not compile, because ResolvedCommand holds slices.
-func TestIsLeaf(t *testing.T) {
+// TestInvoked answers the question a cascading hook has: it runs at every depth, so "is this
+// invocation about ME, or am I an ancestor of it?" is real. Invoked is set by position, so it is
+// right even when a name repeats in the chain.
+func TestInvoked(t *testing.T) {
 	for _, tc := range []struct {
 		argv     []string
 		wantMid  bool
@@ -977,54 +985,141 @@ func TestIsLeaf(t *testing.T) {
 		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
 			var midSaw, rootSaw bool
 			runF(t, tc.argv,
-				func(rtx *Context) { midSaw = rtx.IsLeaf() },
-				func(rtx *Context) { rootSaw = rtx.IsLeaf() },
+				func(rtx *Context) { midSaw = rtx.Command().Invoked },
+				func(rtx *Context) { rootSaw = rtx.Command().Invoked },
 			)
 			if midSaw != tc.wantMid {
-				t.Errorf("mid's cascading hook: IsLeaf() = %v, want %v", midSaw, tc.wantMid)
+				t.Errorf("mid's cascading hook: Invoked = %v, want %v", midSaw, tc.wantMid)
 			}
 			if rootSaw != tc.wantRoot {
-				t.Errorf("root's cascading hook: IsLeaf() = %v, want %v", rootSaw, tc.wantRoot)
+				t.Errorf("root's cascading hook: Invoked = %v, want %v", rootSaw, tc.wantRoot)
 			}
 		})
 	}
 }
 
-// TestIsLeaf_isAlwaysTrueInANonCascadingHook: PreRun, Run and PostRun only ever run for the
-// leaf, so the answer there is not interesting — but it must not be wrong.
-func TestIsLeaf_isAlwaysTrueInANonCascadingHook(t *testing.T) {
+// TestInvoked_isTrueInANonCascadingHook: PreRun, Run and PostRun only ever run for the invoked
+// command, so the answer there is not interesting — but it must not be wrong.
+func TestInvoked_isTrueInANonCascadingHook(t *testing.T) {
 	var inRun bool
-	p := NewProgram(fDef(), fLeafProbe{capture: func(rtx *Context) { inRun = rtx.IsLeaf() }}).
+	p := NewProgram(fDef(), fLeafProbe{capture: func(rtx *Context) { inRun = rtx.Command().Invoked }}).
 		WithStdout(io.Discard).WithStderr(io.Discard)
 	if _, err := p.Run([]string{"mid", "leaf"}); err != nil {
 		t.Fatal(err)
 	}
 	if !inRun {
-		t.Error("the leaf's Run reported IsLeaf() = false")
+		t.Error("the leaf's Run reported Invoked = false")
 	}
 }
 
-// TestIsLeaf_outsideAHook: a Context from NewContextFor has no running hook, so the frame is the
-// leaf and the answer is true.
-func TestIsLeaf_outsideAHook(t *testing.T) {
-	if !NewContextFor(fDef(), []string{"mid", "leaf"}).IsLeaf() {
-		t.Error("a hookless Context reported IsLeaf() = false")
+// TestInvoked_isExactlyTheLastCommand: one entry of the chain is the invoked command, and it is
+// the last — including when a name repeats at two depths.
+func TestInvoked_isExactlyTheLastCommand(t *testing.T) {
+	def := Definition{
+		Name: "app", Handler: "App",
+		Commands: []CommandDef{{
+			Name: "app", Handler: "AppApp",
+			Commands: []CommandDef{{Name: "app", Handler: "AppAppApp"}},
+		}},
+	}
+	chain := NewContextFor(def, []string{"app", "app"}).CommandChain()
+	if len(chain) != 3 {
+		t.Fatalf("chain = %d commands, want 3", len(chain))
+	}
+	for i, c := range chain {
+		if want := i == len(chain)-1; c.Invoked != want {
+			t.Errorf("chain[%d].Invoked = %v, want %v", i, c.Invoked, want)
+		}
 	}
 }
 
-// TestServiceError_saysWhichMissItIs: MustGet fails two ways — nothing bound, or something of
-// another type bound — and they send the reader to different code. The message used to say "no
-// service bound" for both, which is false for the second.
-func TestServiceError_saysWhichMissItIs(t *testing.T) {
-	miss := func(rtx *Context) (msg string) {
-		defer func() { msg = recover().(*ServiceError).Error() }()
-		rtx.MustGet[int]("n")
-		return ""
+// TestCommandPathAndHelp_followTheRunningCommand: CommandPath and Help describe the same command
+// Command does, so the three always agree — in a cascading hook that is the hook's own command.
+func TestCommandPathAndHelp_followTheRunningCommand(t *testing.T) {
+	var midPath, rootPath, midHelp, rootHelp string
+	h := fProg{
+		inMid:  func(rtx *Context) { midPath, midHelp = rtx.CommandPath(), rtx.Help() },
+		inRoot: func(rtx *Context) { rootPath, rootHelp = rtx.CommandPath(), rtx.Help() },
 	}
-	if got := miss(newContext()); got != `rotini: no service bound under key "n"` {
-		t.Errorf("unbound: %q", got)
+	help := func(path ...string) (string, error) { return "page:" + strings.Join(path, "/"), nil }
+	p := NewProgram(fDef(), h).WithHelp(help).WithStdout(io.Discard).WithStderr(io.Discard)
+	if _, err := p.Run([]string{"mid", "leaf"}); err != nil {
+		t.Fatal(err)
 	}
-	if got := miss(newContext().Bind("n", "seven")); got != `rotini: the service under key "n" is a string, not the int requested` {
-		t.Errorf("wrong type: %q", got)
+	if rootPath != "root" || midPath != "root mid" {
+		t.Errorf("CommandPath() = root:%q mid:%q, want %q and %q", rootPath, midPath, "root", "root mid")
+	}
+	if rootHelp != "page:" || midHelp != "page:mid" {
+		t.Errorf("Help() = root:%q mid:%q, want %q and %q", rootHelp, midHelp, "page:", "page:mid")
 	}
 }
+
+// Command and Path answer "which command am I?" — the question every handler that
+// logs, audits, or builds an error message asks.
+func TestContext_commandAndPath(t *testing.T) {
+	var cmd Command
+	var path string
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		cmd, path = rtx.Command(), rtx.CommandPath()
+	}}
+	p, _, _ := newTestProgram(h, nil)
+	p.Run([]string{"run", "x"})
+
+	if cmd.Name != "run" {
+		t.Errorf("Command().Name = %q, want run", cmd.Name)
+	}
+	if path != "app run" {
+		t.Errorf("Path() = %q, want %q", path, "app run")
+	}
+}
+
+// An alias reports the CANONICAL name, so a path is stable to log and compare on.
+func TestContext_pathIsCanonicalNotTyped(t *testing.T) {
+	var path string
+	var matched string
+	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
+		path = rtx.CommandPath()
+		matched = rtx.Command().Matched
+	}}
+	p, _, _ := newTestProgram(h, nil)
+	p.Run([]string{"r", "x"}) // "r" is an alias of "run"
+
+	if path != "app run" {
+		t.Errorf("Path() via alias = %q, want the canonical %q", path, "app run")
+	}
+	if matched != "r" {
+		t.Errorf("Matched = %q, want the typed token %q", matched, "r")
+	}
+}
+
+// A bare root invocation still has a command and a path — the root is a command like
+// any other, not a special case the caller has to handle.
+func TestContext_commandAtRoot(t *testing.T) {
+	var cmd Command
+	var path string
+
+	p := NewProgram(
+		Definition{Name: "app", Handler: "Main"},
+		rootOnlyHandlers{capture: func(rtx *Context) { cmd, path = rtx.Command(), rtx.CommandPath() }},
+	).WithStdout(io.Discard).WithStderr(io.Discard)
+
+	if _, err := p.Run(nil); err != nil {
+		t.Fatal(err)
+	}
+	if cmd.Name != "app" || path != "app" {
+		t.Errorf("root Command/Path = %q/%q, want app/app", cmd.Name, path)
+	}
+}
+
+// rootOnlyHandlers is a one-command handler set, for asserting on the root frame.
+type rootOnlyHandlers struct{ capture func(*Context) }
+
+func (h rootOnlyHandlers) Main() Handler { return rootOnlyRun(h) }
+
+type rootOnlyRun rootOnlyHandlers
+
+func (rootOnlyRun) CascadingPreRun(context.Context, *Context)  {}
+func (rootOnlyRun) PreRun(context.Context, *Context)           {}
+func (rootOnlyRun) PostRun(context.Context, *Context)          {}
+func (rootOnlyRun) CascadingPostRun(context.Context, *Context) {}
+func (h rootOnlyRun) Run(_ context.Context, rtx *Context)      { h.capture(rtx) }

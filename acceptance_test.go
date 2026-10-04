@@ -88,8 +88,8 @@ func acmeRun(t *testing.T, stdin string, args ...string) (stdout, stderr string,
 // ARG-04: a missing required positional is a usage error, with the message on stderr and
 // NOTHING executed.
 //
-// Exit 1 is the DEFAULT FUNNEL's flat floor, not a category mapping: rotini labels the error
-// CategoryUsage and leaves the code to the funnel (see Category). A program wanting the common
+// Exit 1 is the DEFAULT REPORTER's flat floor, not a category mapping: rotini labels the error
+// CategoryUsage and leaves the code to the reporter (see Category). A program wanting the common
 // "2 means the command line was wrong" convention maps it itself.
 func TestAcceptance_ARG_04_missingRequired(t *testing.T) {
 	stdout, stderr, code := acmeRun(t, "", "widget", "get")

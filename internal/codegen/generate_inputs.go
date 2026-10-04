@@ -13,9 +13,9 @@ import (
 // inputsFields returns the fields of a command's <Prefix>Inputs struct: one per ancestor plus
 // the command itself, in root→leaf order, each named after the command's PascalCase prefix.
 //
-// There is deliberately no struct tag naming the command. The binder maps fields to chain frames
-// by POSITION, counting back from the frame whose hook is running, so field names are labels for
-// a reader and never matched against anything.
+// There is deliberately no struct tag naming the command. The input reader maps fields to chain
+// frames by POSITION, counting back from the frame whose hook is running, so field names are
+// labels for a reader and never matched against anything.
 //
 // Tagging them was considered as a way to make that mapping checkable — a field could then be
 // verified against the frame it landed on, closing the last case where a mismatched inputs type
@@ -37,7 +37,7 @@ func inputsFields(rootPascal, path string) []fieldDef {
 
 // flagFields returns the <Prefix>Flags struct fields for a command's inputs: the
 // argv flags. The env/config channels are their own structs (envFields/configFields);
-// a flag with an env/config *fallback* still lives here and is reconciled by the binder.
+// a flag with an env/config *fallback* still lives here and is reconciled by the input reader.
 func flagFields(in *Inputs, envPrefix string) []fieldDef {
 	if in == nil {
 		return nil
@@ -80,7 +80,7 @@ func flagReconKey(name string, schema *InputSchema) string {
 
 // envFields returns the <Prefix>Env struct fields: one per pure environment input. The recon
 // key is the input name, and the variable is always written into the field's `env:` tag (see
-// envVarFor), so the binder never re-derives it.
+// envVarFor), so the input reader never re-derives it.
 func envFields(in *Inputs, envPrefix string) []fieldDef {
 	if in == nil {
 		return nil
@@ -112,7 +112,7 @@ func envFields(in *Inputs, envPrefix string) []fieldDef {
 }
 
 // constraintTags renders an input's numeric/string/array constraints as space-separated
-// validation struct-tags (e.g. `min:"1" max:"65535" pattern:"^x$"`) for the binder to
+// validation struct-tags (e.g. `min:"1" max:"65535" pattern:"^x$"`) for the input reader to
 // enforce, or "" when none are set. Mirrors the FlagDef/ArgDef constraints the parser enforces
 // for argv, but carried on the env/config field itself since channels have no Definition.
 //
@@ -182,7 +182,7 @@ func eachConstraint(schema *InputSchema, visit func(tag, field, tagVal, litVal s
 // declares none and the caller derives one (envVarFor).
 //
 // Several names (`variable: [GH_TOKEN, GITHUB_TOKEN]`) ride in the one tag comma-joined; the
-// binder reads the first that is set.
+// input reader reads the first that is set.
 func envVarOf(schema *InputSchema) string {
 	return strings.Join(variables(schema), ",")
 }
@@ -283,7 +283,7 @@ func rawStdinFormat(format string) bool { return format == "text" || format == "
 
 // stdinFormatExpr returns the value of a command's `stdin:"<format>[,required]"`
 // struct tag: the decode format (defaulting to json), with ",required" appended
-// when the spec marks the payload required — the binder then rejects an empty
+// when the spec marks the payload required — the input reader then rejects an empty
 // stdin instead of leaving the payload nil. "" when no stdin.
 func stdinFormatExpr(in *Inputs) string {
 	if in == nil || in.Stdin == nil || in.Stdin.Schema == nil {
@@ -424,7 +424,7 @@ var rotiniTypeAliases = []string{
 
 // toTemplateFields converts resolved fieldDefs to renderer input fields,
 // assembling each field's complete struct-tag literal from its parts. A fieldDef
-// with no rotini tag (the <Prefix>Inputs fields, which the binder maps by
+// with no rotini tag (the <Prefix>Inputs fields, which the input reader maps by
 // position) yields a field with no tag at all.
 func toTemplateFields(fs []fieldDef) []templateInputField {
 	out := make([]templateInputField, 0, len(fs))
@@ -491,16 +491,16 @@ func envVarName(e EnvInput, envPrefix string) string {
 // place that derivation happens.
 //
 // It used to happen in three: this function's old body, [envVarLabel] for the help page, and
-// recon's own SnakeUpperTransform inside the binder. They disagreed, and a reader had no way
+// recon's own SnakeUpperTransform inside the input reader. They disagreed, and a reader had no way
 // to tell. An input named "base_url" under env_prefix MUSAK was PRINTED in help as
 // MUSAK_BASE_URL and BOUND from nothing at all, because recon's inverse projection splits on
 // every underscore and so read MUSAK_BASE_URL back as the two-segment path base/url, which
 // never met the one-segment key. "apiKey" had the same disagreement the other way: help said
-// API_KEY, the binder read APIKEY.
+// API_KEY, the input reader read APIKEY.
 //
 // The cure is not a fourth spelling. It is emitting the name this function returns into the
-// generated field's `env:` tag, so the binder PINS it — exempt from any prefix, both
-// directions — instead of re-deriving it. Help and the binder then read one fact.
+// generated field's `env:` tag, so the input reader PINS it — exempt from any prefix, both
+// directions — instead of re-deriving it. Help and the input reader then read one fact.
 func envVarFor(key, envPrefix string) string {
 	derived := snakeUpper(strings.ReplaceAll(key, ".", "_"))
 	if envPrefix != "" {

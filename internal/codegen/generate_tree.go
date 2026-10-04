@@ -43,18 +43,18 @@ type rnode struct {
 	prefix                string // ProgramHandlers method (the dispatch Handler), e.g. "MycliparentMyclichild1"
 	aliases               []string
 	inputs                *Inputs
-	help                  cmdHelp             // flattened help fields; for a composed root, from the child spec
-	output                *Schema             // command's output type (own commands only; nil for composed)
-	discovery             *RemoteDiscovery    // command's plugin discovery (nil = off)
-	hidden                bool                // omit from the parent's generated Commands list
-	group                 string              // group label that buckets this command in the parent's Commands list
-	deprecated            string              // deprecation note for the parent's Commands list (help annotation)
-	deprecatedIdentifiers []string            // deprecated aliases of this command (runtime Deprecations)
-	passthrough           bool                // every token after this command is a raw positional
-	composed              bool                // grafted from a $ref'd child (its types live in the child's cmd)
-	remotes               []RemoteCommandSpec // co-located remote sub-commands declared on this command
-	remoteHost            string              // program name remote binaries are named after ("" = this program's)
-	pluginPath            string              // extra directory searched for BOTH this command's remote kinds
+	help                  cmdHelp          // flattened help fields; for a composed root, from the child spec
+	output                *Schema          // command's output type (own commands only; nil for composed)
+	discovery             *PluginDiscovery // command's plugin discovery (nil = off)
+	hidden                bool             // omit from the parent's generated Commands list
+	group                 string           // group label that buckets this command in the parent's Commands list
+	deprecated            string           // deprecation note for the parent's Commands list (help annotation)
+	deprecatedIdentifiers []string         // deprecated aliases of this command (runtime Deprecations)
+	passthrough           bool             // every token after this command is a raw positional
+	composed              bool             // grafted from a $ref'd child (its types live in the child's cmd)
+	plugins               []PluginSpec     // plugins declared on this command
+	pluginHost            string           // program name plugin binaries are named after ("" = this program's)
+	pluginPath            string           // extra directory searched for BOTH this command's kinds of plugin
 	children              []rnode
 }
 
@@ -84,14 +84,14 @@ type composeCtx struct {
 	childPascal string // root method name the subtree delegates under (child's name, or the handler convention)
 	alias       string // import alias of the handler package (composed child cli, or a passthrough package)
 	passthrough bool   // delegate via alias.method() (passthrough) instead of alias.Handlers().method()
-	// remoteHost is the program name the subtree's plugin binaries are named after: the
+	// pluginHost is the program name the subtree's plugin binaries are named after: the
 	// composed spec's own root name, so a plugin serves `child cmd` and `parent child cmd`
 	// alike. "" outside a composed subtree (the program's own name).
-	remoteHost string
+	pluginHost string
 }
 
 // scopedConfigFile is one config_files entry with the command path that declared it, which the
-// binder needs to load only the files along the invoked chain.
+// input reader needs to load only the files along the invoked chain.
 type scopedConfigFile struct {
 	ConfigurationFile
 
@@ -99,7 +99,7 @@ type scopedConfigFile struct {
 }
 
 // allScopedConfigFiles gathers every command's config_files across the tree, tagging each with
-// its command path: the binder needs the scope to load only what the invoked chain declares.
+// its command path: the input reader needs the scope to load only what the invoked chain declares.
 func allScopedConfigFiles(spec *Spec) []scopedConfigFile {
 	var out []scopedConfigFile
 	walkCommands(spec, func(c *Command, path string) {
@@ -146,10 +146,10 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 		rootDisplay:     cmp.Or(root.DisplayName, root.Name),
 		rootPascal:      toPascalCase(root.Name),
 		rootInputs:      root.inputs(),
-		rootRemotes:     root.RemoteCommands,
+		rootPlugins:     root.Plugins,
 		rootHelp:        commandHelp(root),
 		rootOutput:      root.Output,
-		rootDiscovery:   root.RemoteDiscovery,
+		rootDiscovery:   root.PluginDiscovery,
 		rootPluginPath:  root.PluginPath,
 		rootPassthrough: root.Passthrough,
 		schemas:         spec.Command.Schemas,
@@ -160,7 +160,7 @@ func resolveTreeWith(spec *Spec, specPath, moduleName, envPrefix string) (*progr
 	gp.root = genCommand{
 		prefix:         gp.rootPascal,
 		invocation:     gp.rootName,
-		handler:        lowerFirst(gp.rootPascal) + "Handlers",
+		handler:        lowerFirst(gp.rootPascal) + "Handler",
 		filename:       commandStubFilename(root.Name, "", root.Filename),
 		dashedFilename: dashedStubFilename(root.Name, "", root.Filename),
 		inputFields:    gp.inputFieldsOf(root.inputs()),
@@ -232,7 +232,7 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			gc := genCommand{
 				prefix:         prefix,
 				invocation:     gp.rootName + " " + strings.ReplaceAll(path, "_", " "),
-				handler:        lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handlers",
+				handler:        lowerFirst(gp.rootPascal) + toPascalCase(path) + "Handler",
 				filename:       commandStubFilename(gp.rootName, path, c.Filename),
 				dashedFilename: dashedStubFilename(gp.rootName, path, c.Filename),
 				inputFields:    gp.inputFieldsOf(c.inputs()),
@@ -266,15 +266,15 @@ func (gp *program) walk(cmds []Command, parentPath, base, moduleName string, see
 			inputs:                c.inputs(),
 			help:                  commandHelp(c),
 			output:                c.Output,
-			discovery:             c.RemoteDiscovery,
+			discovery:             c.PluginDiscovery,
 			hidden:                c.Hidden,
 			group:                 c.Group,
 			deprecated:            c.Deprecated,
 			deprecatedIdentifiers: c.DeprecatedIdentifiers,
 			passthrough:           c.Passthrough,
 			composed:              ctx.composed,
-			remotes:               c.RemoteCommands,
-			remoteHost:            ctx.remoteHost,
+			plugins:               c.Plugins,
+			pluginHost:            ctx.pluginHost,
 			pluginPath:            c.PluginPath,
 			children:              children,
 		})
@@ -425,7 +425,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 	}
 	prefix := gp.rootPascal + toPascalCase(composeRootPath)
 
-	// A composed child's BindMeta travels WITH its command tree. Without this the umbrella's
+	// A composed child's InputSettings travels WITH its command tree. Without this the umbrella's
 	// descriptor is built from its own document alone, so a child's config_files and
 	// env_prefix are silently dropped: `child cmd` reads the configuration file and
 	// `parent child cmd` — the same handler, the same generated package — does not.
@@ -436,7 +436,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		inputFields: gp.inputFieldsOf(childRoot.inputs()),
 	})
 
-	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, remoteHost: childRoot.Name}
+	ctx := composeCtx{composed: true, rootPath: composeRootPath, childPascal: delegateRoot, alias: alias, passthrough: passthrough, pluginHost: childRoot.Name}
 	children, err := gp.walk(childRoot.Commands, composeRootPath, rr.childBase, moduleName, seen, ctx)
 	if err != nil {
 		return rnode{}, err
@@ -457,16 +457,16 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 		}
 	}
 	// The composed node is the child's root, so it carries what the child's root dispatches —
-	// its remote commands, plugin discovery and passthrough — named as the child names them.
+	// its declared plugins, plugin discovery and passthrough — named as the child names them.
 	// Building it from the presentation keys alone once dropped all of these: the child's own
 	// binary ran its plugins and `parent child <plugin>` was "takes no arguments".
 	return rnode{
 		name: graftName, prefix: prefix, aliases: merged.Aliases, inputs: childRoot.inputs(),
 		help: commandHelp(merged), hidden: merged.Hidden, group: merged.Group,
 		deprecated: merged.Deprecated, deprecatedIdentifiers: merged.DeprecatedIdentifiers,
-		passthrough: childRoot.Passthrough, remotes: childRoot.RemoteCommands,
-		discovery: childRoot.RemoteDiscovery, pluginPath: merged.PluginPath,
-		remoteHost: childRoot.Name, composed: true, children: children,
+		passthrough: childRoot.Passthrough, plugins: childRoot.Plugins,
+		discovery: childRoot.PluginDiscovery, pluginPath: merged.PluginPath,
+		pluginHost: childRoot.Name, composed: true, children: children,
 	}, nil
 }
 
@@ -475,7 +475,7 @@ func (gp *program) composeRef(c Command, parentPath, base, moduleName string, se
 // env inputs are named under.
 //
 // Config sources carry a Scope — the slash-joined command path they are declared on — and the
-// binder matches that against the invoked chain to cascade nearest-wins. A child declares its
+// input reader matches that against the invoked chain to cascade nearest-wins. A child declares its
 // own as "musak-songs", but under the umbrella that command is reached as "musak/songs", so
 // the child's root segment is swapped for the path the graft actually occupies. An overlay
 // rename is exactly why this cannot be a straight copy.
@@ -542,7 +542,7 @@ func (gp *program) composeNestedRef(c Command, parentPath, base, moduleName stri
 	synth.Commands = gc.Commands // overlayCommand left Commands == gc's; siblings merge below
 	// The grandchild's plugins are named after the grandchild, as its own binary names them.
 	gcCtx := ctx
-	gcCtx.remoteHost = gc.Name
+	gcCtx.pluginHost = gc.Name
 	nodes, err := gp.walk([]Command{synth}, parentPath, rr.childBase, moduleName, seen, gcCtx)
 	if err != nil {
 		return nil, err
@@ -649,7 +649,7 @@ func checkCollisions(nodes []rnode) error {
 
 // fieldDef is one generated struct field: a Go identifier, its type, and its
 // `rotini` struct-tag content — a flag/argument logical name (empty for the
-// per-command fields of an <Cmd>Inputs struct, which the binder maps by position).
+// per-command fields of an <Cmd>Inputs struct, which the input reader maps by position).
 type fieldDef struct {
 	Field   string
 	GoType  string
@@ -661,7 +661,7 @@ type fieldDef struct {
 	CfgFile string // a config input's pinned source file (schema.file): the value is read from that configuration_files entry ONLY
 	Comment string // trailing line-comment on the generated field ("" for none) — e.g. the TextUnmarshaler contract nudge on explicitly-imported argv types
 	// Constraint is the space-separated validation struct-tags for an env/config field
-	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), which the binder enforces over the
+	// (e.g. `min:"1" max:"65535" pattern:"^x$"`), which the input reader enforces over the
 	// reconciled value; "" when the input declares no numeric/string/array constraints.
 	Constraint string
 }
@@ -703,7 +703,7 @@ type genCommand struct {
 
 	prefix     string // PascalCase type prefix, e.g. "RotiniGenerate"
 	invocation string // how a user types it, e.g. "rotini generate"
-	handler    string // unexported handler struct name, e.g. "rotiniGenerateHandlers"
+	handler    string // unexported handler struct name, e.g. "rotiniGenerateHandler"
 	filename   string // handler stub file name, e.g. "rotini_generate.go"
 	// dashedFilename is the stub's pre-underscore name ("app_get-thing.go"), "" when it has
 	// none; a stub already seeded under it stays the command's stub (see stubFileFor).

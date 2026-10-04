@@ -16,13 +16,13 @@ import (
 var ansiSequences = regexp.MustCompile(`\x1b\[[0-9;:?]*[\x20-\x2f]*[\x40-\x7e]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)`)
 
 // esc begins every ANSI escape sequence, so text without one cannot match ansiSequences and
-// Strip returns it untouched — a zero-allocation path for text that was never styled.
+// StripANSI returns it untouched — a zero-allocation path for text that was never styled.
 const esc = '\x1b'
 
-// Strip removes every ANSI escape sequence from text, SGR styling and OSC alike, leaving the
+// StripANSI removes every ANSI escape sequence from text, SGR styling and OSC alike, leaving the
 // characters a terminal would display. It is what a program applies when a consumer asked for
 // no styling, and what codegen applies to man and markdown pages.
-func Strip(text string) string {
+func StripANSI(text string) string {
 	if !strings.ContainsRune(text, esc) {
 		return text
 	}

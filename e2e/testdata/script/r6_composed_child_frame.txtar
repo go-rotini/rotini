@@ -13,7 +13,7 @@
 # Both returned zeros and a nil error, and the alignment guard could not fire because every
 # frame declares --help. So the hook whose job was to act on --loud silently saw false.
 #
-# Collect now anchors on rtx.Frame() — the command whose hook is running — so the same call the
+# Inputs now anchors on rtx.Command() — the command whose hook is running — so the same call the
 # child uses standalone is correct once composed, at any depth.
 
 gomodinit example.com/frames
@@ -127,28 +127,28 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*kidHandlers)(nil)
+var _ rotini.Handler = (*kidHandler)(nil)
 
-type kidHandlers struct {
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type kidHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
 // CascadingPreRun runs for every invocation under this child, at whatever depth the child was
 // mounted. KidInputs has one field — the child's own command — because a composed child cannot
-// know its parent. Collect anchors it on rtx.Frame(), which is this command in this hook.
-func (*kidHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[KidInputs](rtx)
+// know its parent. Inputs anchors it on rtx.Command(), which is this command in this hook.
+func (*kidHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[KidInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
-	fmt.Fprintf(rtx.Stdout, "kid cascading: loud=%v shared=%v (frame=%s, leaf=%s)\n",
-		in.Kid.Flags.Loud, in.Kid.Flags.Shared, rtx.Frame().Name, rtx.Command().Name)
+	fmt.Fprintf(rtx.Stdout, "kid cascading: loud=%v shared=%v (command=%s, invoked=%v)\n",
+		in.Kid.Flags.Loud, in.Kid.Flags.Shared, rtx.Command().Name, rtx.Command().Invoked)
 }
 
-func (*kidHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*kidHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/kid/kid_work.go --
 package kid
 
@@ -159,15 +159,15 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*kidWorkHandlers)(nil)
+var _ rotini.Handler = (*kidWorkHandler)(nil)
 
-type kidWorkHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type kidWorkHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*kidWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*kidWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "work ran")
 }

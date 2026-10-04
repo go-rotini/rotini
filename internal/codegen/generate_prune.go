@@ -98,7 +98,11 @@ func pruneGoDir(dir string, protected map[string]bool, onPrune func(string)) err
 // stubMarker is the line every generated handler stub is written with (see
 // templates/handler.go.tmpl). Its presence is what identifies a file as one rotini created,
 // and an author who deletes the line has said the file is theirs.
-const stubMarker = "var _ rotini.Handlers = ("
+const stubMarker = "var _ rotini.Handler = ("
+
+// legacyStubMarker is the same line as stubs written before v1.2.0 carry it, when the interface
+// was named Handlers. Recognizing it keeps those stubs prunable after an upgrade.
+const legacyStubMarker = "var _ rotini.Handlers = ("
 
 // stubLooksGenerated reports whether path is a handler stub rotini wrote. A file that cannot
 // be read is treated as NOT generated: the safe answer when deleting is "leave it".
@@ -110,7 +114,7 @@ func stubLooksGenerated(path string) (bool, error) {
 		}
 		return false, fmt.Errorf("read %s to decide whether it is a generated stub: %w", path, err)
 	}
-	return strings.Contains(string(body), stubMarker), nil
+	return strings.Contains(string(body), stubMarker) || strings.Contains(string(body), legacyStubMarker), nil
 }
 
 // pruneFeatureOutputs removes each enabled feature's orphaned pages — those for commands no

@@ -23,7 +23,7 @@ stdout 'count=2'
 stdout 'line exited 1'
 stdout 'count=3'
 
-# The failure was reported EXACTLY once, by the funnel, on stderr.
+# The failure was reported EXACTLY once, by the reporter, on stderr.
 stderr 'boom'
 ! stdout 'boom'
 
@@ -77,22 +77,22 @@ import (
 )
 
 type base struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-// Counter is the shared service. It is bound on the PROGRAM, so every line sees the same one.
+// Counter is the shared dependency. It is registered on the PROGRAM, so every line sees the same one.
 type Counter struct{ n atomic.Int64 }
 
 func (c *Counter) Bump() int64 { return c.n.Add(1) }
 
-var CounterKey = rotini.NewKey[*Counter]("loop.counter")
+var CounterDep = rotini.NewDependency[*Counter]("loop.counter")
 
-type loopHandlers struct{ base }
+type loopHandler struct{ base }
 
-func (*loopHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*loopHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/loop/loop_bump.go --
 package loop
 
@@ -103,10 +103,10 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type loopBumpHandlers struct{ base }
+type loopBumpHandler struct{ base }
 
-func (*loopBumpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	fmt.Fprintf(rtx.Stdout, "count=%d\n", CounterKey.MustGet(rtx).Bump())
+func (*loopBumpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fmt.Fprintf(rtx.Stdout, "count=%d\n", rtx.MustGetDependency(CounterDep).Bump())
 }
 -- internal/cmd/loop/loop_explode.go --
 package loop
@@ -118,9 +118,9 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type loopExplodeHandlers struct{ base }
+type loopExplodeHandler struct{ base }
 
-func (*loopExplodeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*loopExplodeHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	rtx.HaltWith(errors.New("boom"))
 }
 -- internal/cmd/loop/loop_block.go --
@@ -135,11 +135,11 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type loopBlockHandlers struct{ base }
+type loopBlockHandler struct{ base }
 
 // Run blocks until its LINE's context is canceled, and interrupts its own process to do it. A
 // user presses ^C; the path through the host's loop is the same either way.
-func (*loopBlockHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*loopBlockHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "blocking: started")
 	go func() {
 		time.Sleep(100 * time.Millisecond)
@@ -174,7 +174,7 @@ import (
 // Context, while the counter bound here reaches every line.
 func main() {
 	p := loop.NewProgram(loop.Handlers()).
-		With(rotini.Provide(loop.CounterKey, &loop.Counter{}))
+		With(rotini.WithDependency(loop.CounterDep, &loop.Counter{}))
 
 	// ^C cancels the running line, never the session. rotini installs no trap of its own for
 	// a supplied context, so this handler is the only one.

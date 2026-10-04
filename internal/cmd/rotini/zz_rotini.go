@@ -9,12 +9,12 @@ import (
 )
 
 type ProgramHandlers interface {
-	Rotini() rotini.Handlers
-	RotiniGenerate() rotini.Handlers
-	RotiniHelp() rotini.Handlers
-	RotiniInitialize() rotini.Handlers
-	RotiniValidate() rotini.Handlers
-	RotiniVersion() rotini.Handlers
+	Rotini() rotini.Handler
+	RotiniGenerate() rotini.Handler
+	RotiniHelp() rotini.Handler
+	RotiniInitialize() rotini.Handler
+	RotiniValidate() rotini.Handler
+	RotiniVersion() rotini.Handler
 }
 
 var definition = rotini.Definition{
@@ -196,17 +196,17 @@ type RotiniVersionInputs struct {
 	RotiniVersion RotiniVersionCommandInputs
 }
 
-// BindMeta is the generated descriptor the default binder (rotini.Binder) consumes.
-var BindMeta = rotini.BindMeta{}
+// InputSettings is the generated descriptor the default input reader (rotini.InputReader) reads.
+var InputSettings = rotini.InputSettings{}
 
 // NewProgram builds the program from the generated command tree and the typed
 // ProgramHandlers. Construct your program with this so the compiler verifies your handlers
 // satisfy ProgramHandlers; the command tree stays an unexported implementation detail.
 func NewProgram(handlers ProgramHandlers) *rotini.Program {
-	// BindMeta is a DESCRIPTION of this program, like the command tree above it, so it
+	// InputSettings is a DESCRIPTION of this program, like the command tree above it, so it
 	// travels as a typed option rather than as a registry entry — the registry is yours.
 	return rotini.NewProgram(definition, handlers).
-		WithBindMeta(BindMeta).
+		WithInputSettings(InputSettings).
 		WithHelp(Help)
 }
 
@@ -228,28 +228,28 @@ func Handlers() ProgramHandlers {
 	return &handlers{}
 }
 
-func (*handlers) Rotini() rotini.Handlers {
-	return &rotiniHandlers{}
+func (*handlers) Rotini() rotini.Handler {
+	return &rotiniHandler{}
 }
 
-func (*handlers) RotiniGenerate() rotini.Handlers {
-	return &rotiniGenerateHandlers{}
+func (*handlers) RotiniGenerate() rotini.Handler {
+	return &rotiniGenerateHandler{}
 }
 
-func (*handlers) RotiniHelp() rotini.Handlers {
-	return &rotiniHelpHandlers{}
+func (*handlers) RotiniHelp() rotini.Handler {
+	return &rotiniHelpHandler{}
 }
 
-func (*handlers) RotiniInitialize() rotini.Handlers {
-	return &rotiniInitializeHandlers{}
+func (*handlers) RotiniInitialize() rotini.Handler {
+	return &rotiniInitializeHandler{}
 }
 
-func (*handlers) RotiniValidate() rotini.Handlers {
-	return &rotiniValidateHandlers{}
+func (*handlers) RotiniValidate() rotini.Handler {
+	return &rotiniValidateHandler{}
 }
 
-func (*handlers) RotiniVersion() rotini.Handlers {
-	return &rotiniVersionHandlers{}
+func (*handlers) RotiniVersion() rotini.Handler {
+	return &rotiniVersionHandler{}
 }
 
 var HelpRotini = "The rotini cli framework companion cli.\n\nFind more information at: https://rotini.dev\n\nUsage:\n  rotini <command> <arguments> [flags]\n        [-v | --version] [-h | --help]\n\nCommands:\n  initialize, init    scaffold a cli program\n  generate, gen       generate a cli program\n  validate, val       validate a spec and conf\n  help                print help\n  version             print version\n\nFlags:\n  -v, --version    print version\n  -h, --help       print help\n\nExamples:\n  rotini init mycli\n  rotini validate .rotini.spec.yaml\n  rotini generate ./path/to/.rotini.spec.json\n\nUse \"rotini help <command>\" for more information about a command."

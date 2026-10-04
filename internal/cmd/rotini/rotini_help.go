@@ -8,21 +8,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*rotiniHelpHandlers)(nil)
+var _ rotini.Handler = (*rotiniHelpHandler)(nil)
 
-type rotiniHelpHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type rotiniHelpHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*rotiniHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if answerHelp(rtx, func(in RotiniHelpInputs) bool { return in.RotiniHelp.Flags.Help }) {
 		return
 	}
 
-	inputs, err := rotini.Collect[RotiniHelpInputs](rtx)
+	inputs, err := rtx.Inputs[RotiniHelpInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)
 		return

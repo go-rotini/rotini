@@ -9,15 +9,15 @@ import (
 )
 
 // The à-la-carte input surface: per-channel acquisition, each returning a sparsely-populated
-// [Layer] over the generated inputs type, and [OverlayInputs], which merges layers where slice
-// order is precedence. [Collect] is the convenience path over the same machinery; these exist
+// [InputLayer] over the generated inputs type, and [MergeInputs], which merges layers where slice
+// order is precedence. [Context.Inputs] is the convenience path over the same machinery; these exist
 // so a handler can acquire, inspect, reorder, or replace any channel individually:
 //
-//	defaults, _ := rotini.Defaults[MycliInputs](rtx)
-//	files, _    := rotini.ParseFiles[MycliInputs](rtx)
-//	env, _      := rotini.ParseEnv[MycliInputs](rtx)
-//	argv, _     := rotini.ParseArgv[MycliInputs](rtx)
-//	inputs, report := rotini.OverlayInputsP(defaults, files, env, argv)
+//	defaults, _ := rtx.DefaultInputs[MycliInputs]()
+//	files, _    := rtx.FileInputs[MycliInputs]()
+//	env, _      := rtx.EnvInputs[MycliInputs]()
+//	argv, _     := rtx.ArgvInputs[MycliInputs]()
+//	inputs, report := rotini.MergeInputsWithReport(defaults, files, env, argv)
 //	if err := report.Validate(); err != nil { /* handler owns it */ }
 
 // FieldPath identifies one leaf field of a generated inputs struct by its dot-joined Go field
@@ -25,23 +25,23 @@ import (
 // it from the same type, so the two can never disagree.
 type FieldPath string
 
-// Provenance records which layer supplied a field's value and the raw text it supplied. Raw is
+// InputSource records which layer supplied a field's value and the raw text it supplied. Raw is
 // pre-redacted for inputs the spec marks secret.
-type Provenance struct {
+type InputSource struct {
 	Layer string // the supplying layer's name: "defaults", "files", "env", "argv", "stdin", or custom
 	Raw   string // the supplied text, a list's values joined with ", " whichever layer supplied it ("" when non-textual, e.g. a decoded stdin document); "[redacted]" for secrets
 }
 
 // Presence maps each field a layer actually supplied to its provenance. It is what makes
 // overlay precedence real: a layer's absent fields are skipped, never copied.
-type Presence map[FieldPath]Provenance
+type Presence map[FieldPath]InputSource
 
-// Layer is one input channel's view of the inputs type T: the values it supplied — everything
+// InputLayer is one input channel's view of the inputs type T: the values it supplied — everything
 // else is T's zero value — and exactly which fields those are. Layers from rotini's channel
-// parsers also carry unexported data that [Report.Validate] uses; a hand-built Layer
+// parsers also carry unexported data that [InputReport.Validate] uses; a hand-built InputLayer
 // participates in overlay and provenance but contributes nothing to validation. A nil or empty
 // Set means the layer supplied nothing: overlaying it leaves every field as it was.
-type Layer[T any] struct {
+type InputLayer[T any] struct {
 	Name   string
 	Values T
 	Set    Presence
@@ -52,75 +52,77 @@ type Layer[T any] struct {
 // layerCore is the channel parsers' validation payload, in the same store shape the Parser
 // validates, so a merged Report reuses the exact validation and error text of [Parser.Parse].
 type layerCore struct {
-	chain       []ResolvedCommand
+	chain       []Command
 	store       *parsedInputs
 	argDefaults map[int]string // the defaults layer's per-index argument defaults (sparse)
 }
 
 // ── the one-liner ────────────────────────────────────────────────────────────.
 
-// Collect is the typical handler's entire input story: every declared channel — argv,
+// Inputs is the typical handler's entire input story: every declared channel — argv,
 // environment, configuration files, the stdin payload, defaults — acquired, reconciled in the
 // standard precedence (defaults < files < env < argv), and validated, in one call:
 //
-//	inputs, err := rotini.Collect[MycliDeployInputs](rtx)
+//	inputs, err := rtx.Inputs[MycliDeployInputs]()
 //
 // The stdin channel is not in that order because it never competes: it fills the leaf command's
 // declared payload field, which no other channel writes. It is overlaid last, and where it sits
 // makes no difference.
 //
 // On failure the returned T holds whatever was filled before the failure, including the value
-// that failed. **It is not a result — check the error and stop.** It is deliberately weaker than
-// [CollectP]'s: Collect stops at the first argv problem, before the environment and
-// configuration channels are read at all, because an argv error is the one worth reporting; so a
-// config-supplied default that CollectP would show is simply absent here. CollectP hands its
-// merged value back on purpose, paired with the Report that explains it.
+// that failed. **It is not a result — check the error and stop.** It is deliberately weaker
+// than [Context.InputsWithReport]'s: Inputs stops at the first argv problem, before the
+// environment and configuration channels are read at all, because an argv error is the one
+// worth reporting; so a config-supplied default that InputsWithReport would show is simply
+// absent here. InputsWithReport hands its merged value back on purpose, paired with the Report
+// that explains it.
 //
 // **A handler collects the type generated for its own command, in any hook.** That is the whole
 // rule. An inputs struct's last field describes the collecting command and the fields before it
-// describe its ancestors, so Collect anchors the struct on [Context.Frame] — the command whose
-// hook is running. A leaf's Run, a cascading hook three frames up, a composed child mounted
-// under someone else's umbrella: same call, correct in each. Anchoring on the running frame,
+// describe its ancestors, so Inputs anchors the struct on [Context.Command] — the command whose
+// hook is running. A leaf's Run, a cascading hook three commands up, a composed child mounted
+// under someone else's umbrella: same call, correct in each. Anchoring on the running command,
 // rather than inferring it from the struct's shape, is what makes the answer independent of how
 // deep this invocation went; a type that cannot sit there is an error, never a silent zero. A
-// caller who wants to read the chain directly has [Context.Chain].
+// caller who wants to read the chain directly has [Context.CommandChain].
 //
-// It is [Binder.Bind] under the hood, so errors are the same data-shaped [*ParseError]s and
-// [*BindError]s. Use [CollectP] when "where did this value come from" matters.
-func Collect[T any](rtx *Context) (T, error) {
+// It is [InputReader.Read] under the hood, so errors are the same data-shaped [*ParseError]s and
+// [*InputError]s. Use [Context.InputsWithReport] when "where did this value come from" matters.
+func (rtx *Context) Inputs[T any]() (T, error) {
 	var t T
-	err := binderFor(rtx).Bind(rtx, &t)
+	err := readerFor(rtx).Read(rtx, &t)
 	return t, err
 }
 
-// CollectP is [Collect] with provenance: the same reconciled, validated inputs plus the
-// [Report] answering Winner and History per field. It overlays the per-channel layers in the
-// standard precedence, producing the same values Collect does at the cost of acquiring each
-// channel separately. A validation failure returns the merged inputs and the report alongside
-// the error, so a funnel can still say which layer supplied the offending value.
-func CollectP[T any](rtx *Context) (T, Report, error) {
+// InputsWithReport is [Context.Inputs] with provenance: the same reconciled, validated inputs
+// plus the [InputReport] answering Winner and History per field. It overlays the per-channel
+// layers in the standard precedence, producing the same values Inputs does at the cost of
+// acquiring each channel separately. A validation failure returns the merged inputs and the
+// report alongside the error, so a reporter can still say which layer supplied the offending
+// value.
+func (rtx *Context) InputsWithReport[T any]() (T, InputReport, error) {
 	var zero T
-	defaults, err := Defaults[T](rtx)
+	defaults, err := rtx.DefaultInputs[T]()
 	if err != nil {
-		return zero, Report{}, err
+		return zero, InputReport{}, err
 	}
-	files, err := ParseFiles[T](rtx)
+	files, err := rtx.FileInputs[T]()
 	if err != nil {
-		return zero, Report{}, err
+		return zero, InputReport{}, err
 	}
-	env, err := ParseEnv[T](rtx)
+	env, err := rtx.EnvInputs[T]()
 	if err != nil {
-		return zero, Report{}, err
+		return zero, InputReport{}, err
 	}
-	argv, err := ParseArgv[T](rtx)
+	argv, err := rtx.ArgvInputs[T]()
 	if err != nil {
-		return zero, Report{}, err
+		return zero, InputReport{}, err
 	}
-	stdin, err := ParseStdin[T](rtx)
+	stdin, err := rtx.StdinInputs[T]()
 	if err != nil {
-		return zero, Report{}, err
+		return zero, InputReport{}, err
 	}
-	merged, report := OverlayInputsP(defaults, files, env, argv, stdin)
+	merged, report := MergeInputsWithReport(defaults, files, env, argv, stdin)
 	// No frame-fit check here: every layer above already ran it through layerAnchor, over the
 	// same type and chain, so a struct that cannot sit on the chain never reaches this point.
 	if err := report.Validate(); err != nil {
@@ -131,67 +133,67 @@ func CollectP[T any](rtx *Context) (T, Report, error) {
 
 // ── channel acquisition ──────────────────────────────────────────────────────.
 
-// ParseArgv parses the command line only — flags and positionals across the resolved chain,
+// ArgvInputs parses the command line only — flags and positionals across the resolved chain,
 // exactly as supplied: no defaults, no fallback, and no required or enum validation. Validate
-// the overlaid result with [Report.Validate], so a required flag satisfied by another layer
+// the overlaid result with [InputReport.Validate], so a required flag satisfied by another layer
 // passes. Parse failures are [*ParseError] values.
-func ParseArgv[T any](rtx *Context) (Layer[T], error) {
+func (rtx *Context) ArgvInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := argvLayer(rtx, reflect.ValueOf(&t).Elem())
-	return Layer[T]{Name: "argv", Values: t, Set: set, core: core}, err
+	return InputLayer[T]{Name: "argv", Values: t, Set: set, core: core}, err
 }
 
-// ParseEnv acquires the environment channel: every Env input, by its explicit variable or the
+// EnvInputs acquires the environment channel: every Env input, by its explicit variable or the
 // SNAKE_UPPER projection of its key, plus the env fallback of any flag that declares a recon
 // key. A missing required input or a constraint violation is this call's error.
-func ParseEnv[T any](rtx *Context) (Layer[T], error) {
+func (rtx *Context) EnvInputs[T any]() (InputLayer[T], error) {
 	var t T
-	set, core, err := envLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
-	return Layer[T]{Name: "env", Values: t, Set: set, core: core}, err
+	set, core, err := envLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
+	return InputLayer[T]{Name: "env", Values: t, Set: set, core: core}, err
 }
 
-// ParseFiles acquires the configuration-files channel: every Config input from the BindMeta
+// FileInputs acquires the configuration-files channel: every Config input from the InputSettings
 // sources, declared order being precedence, plus the config fallback of any flag that declares
 // a recon key. Required and constraint failures are this call's errors.
-func ParseFiles[T any](rtx *Context) (Layer[T], error) {
+func (rtx *Context) FileInputs[T any]() (InputLayer[T], error) {
 	var t T
-	set, core, err := filesLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
-	return Layer[T]{Name: "files", Values: t, Set: set, core: core}, err
+	set, core, err := filesLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
+	return InputLayer[T]{Name: "files", Values: t, Set: set, core: core}, err
 }
 
-// ParseStdin acquires the stdin channel: the leaf command's typed payload, decoded per its
+// StdinInputs acquires the stdin channel: the leaf command's typed payload, decoded per its
 // declared format, schema-validated, and honoring required.
-func ParseStdin[T any](rtx *Context) (Layer[T], error) {
+func (rtx *Context) StdinInputs[T any]() (InputLayer[T], error) {
 	var t T
-	set, core, err := stdinLayer(binderFor(rtx), rtx, reflect.ValueOf(&t).Elem())
-	return Layer[T]{Name: "stdin", Values: t, Set: set, core: core}, err
+	set, core, err := stdinLayer(readerFor(rtx), rtx, reflect.ValueOf(&t).Elem())
+	return InputLayer[T]{Name: "stdin", Values: t, Set: set, core: core}, err
 }
 
-// Defaults synthesizes the spec's declared defaults as an explicit layer — conventionally
+// DefaultInputs synthesizes the spec's declared defaults as an explicit layer — conventionally
 // layer 0, which makes "no input at all" visible and testable. Flag and argument defaults come
 // from the resolved chain; env and config defaults from their recon tags.
-func Defaults[T any](rtx *Context) (Layer[T], error) {
+func (rtx *Context) DefaultInputs[T any]() (InputLayer[T], error) {
 	var t T
 	set, core, err := defaultsLayer(rtx, reflect.ValueOf(&t).Elem())
-	return Layer[T]{Name: "defaults", Values: t, Set: set, core: core}, err
+	return InputLayer[T]{Name: "defaults", Values: t, Set: set, core: core}, err
 }
 
 // ── overlay ──────────────────────────────────────────────────────────────────.
 
-// OverlayInputs merges layers into one inputs value. Slice order is precedence, low → high: a
+// MergeInputs merges layers into one inputs value. Slice order is precedence, low → high: a
 // field set by a later layer wins, a field no layer set stays the zero value, and an unset
 // layer field never clobbers a lower layer's. Overlaying an empty layer is the identity.
-func OverlayInputs[T any](layers ...Layer[T]) T {
-	out, _ := OverlayInputsP(layers...)
+func MergeInputs[T any](layers ...InputLayer[T]) T {
+	out, _ := MergeInputsWithReport(layers...)
 	return out
 }
 
-// OverlayInputsP is [OverlayInputs] plus the merged [Report]: which layer won
+// MergeInputsWithReport is [MergeInputs] plus the merged [InputReport]: which layer won
 // each field, the full per-field history, and Validate over the merged result.
-func OverlayInputsP[T any](layers ...Layer[T]) (T, Report) {
+func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport) {
 	var out T
 	dst := reflect.ValueOf(&out).Elem()
-	rep := Report{set: Presence{}, history: map[FieldPath][]Provenance{}}
+	rep := InputReport{set: Presence{}, history: map[FieldPath][]InputSource{}}
 
 	for _, l := range layers {
 		src := reflect.ValueOf(l.Values)
@@ -236,32 +238,32 @@ func copyFieldByPath(dst, src reflect.Value, path FieldPath) {
 
 // ── the report ───────────────────────────────────────────────────────────────.
 
-// Report is the merged provenance of one overlay: which layer won each field,
-// every layer that set it (low → high), and validation over the merged values. The zero Report
+// InputReport is the merged provenance of one overlay: which layer won each field,
+// every layer that set it (low → high), and validation over the merged values. The zero InputReport
 // is usable: it reports no fields, and its Validate returns nil.
-type Report struct {
+type InputReport struct {
 	set     Presence
-	history map[FieldPath][]Provenance
-	chain   []ResolvedCommand
+	history map[FieldPath][]InputSource
+	chain   []Command
 	store   *parsedInputs
 	argDefs map[int]string
 }
 
 // Winner returns the provenance of the layer that supplied path's final value.
-func (r Report) Winner(path FieldPath) (Provenance, bool) {
+func (r InputReport) Winner(path FieldPath) (InputSource, bool) {
 	p, ok := r.set[path]
 	return p, ok
 }
 
 // History returns every layer that set path, low → high precedence — the last
 // element is the winner.
-func (r Report) History(path FieldPath) []Provenance {
+func (r InputReport) History(path FieldPath) []InputSource {
 	return r.history[path]
 }
 
 // Fields returns every field any layer set, sorted, for stable doctor-style
 // output.
-func (r Report) Fields() []FieldPath {
+func (r InputReport) Fields() []FieldPath {
 	return sortedPaths(r.set)
 }
 
@@ -277,12 +279,12 @@ func (r Report) Fields() []FieldPath {
 //     and its zero value is not measured against its enum or bounds.
 //
 // That distinction is invisible while the defaults layer is present, because a declared default
-// supplies the field. Drop [Defaults] from a custom precedence and an enum-constrained flag can
-// merge as "" — legally, because nothing claimed it — so build custom precedence from all five
-// channels unless leaving one out is the point.
+// supplies the field. Drop [Context.DefaultInputs] from a custom precedence and an
+// enum-constrained flag can merge as "" — legally, because nothing claimed it — so build custom
+// precedence from all five channels unless leaving one out is the point.
 //
 // Hand-built layers contribute values but nothing to validate.
-func (r Report) Validate() error {
+func (r InputReport) Validate() error {
 	if r.chain == nil || r.store == nil {
 		return nil
 	}
@@ -292,7 +294,7 @@ func (r Report) Validate() error {
 // absorb folds one layer's validation core into the report: later layers' flag values replace
 // earlier ones scope by scope, the argv layer contributes positionals and the argv-set record,
 // and the defaults layer contributes its sparse argument defaults.
-func (r *Report) absorb(core *layerCore) {
+func (r *InputReport) absorb(core *layerCore) {
 	if core == nil {
 		return
 	}
@@ -330,7 +332,7 @@ func (r *Report) absorb(core *layerCore) {
 
 // finalize pads the merged positionals from the defaults layer, applying the Parser's gap
 // rule: fill from the first unsupplied index, stopping at the first index without a default.
-func (r *Report) finalize() {
+func (r *InputReport) finalize() {
 	if r.store == nil || r.argDefs == nil || len(r.chain) == 0 {
 		return
 	}
@@ -362,7 +364,7 @@ func (p *parsedInputs) argvSetAt(idx int) map[string]bool {
 //
 // Callers invoke it where they would have computed the anchor, which is after any parse step, so
 // a malformed command line still reports itself before this does.
-func layerAnchor(rtx *Context, v reflect.Value, chain []ResolvedCommand) (int, error) {
+func layerAnchor(rtx *Context, v reflect.Value, chain []Command) (int, error) {
 	self := rtx.frameIndex()
 	if err := checkFrameFit(v, chain, self); err != nil {
 		return 0, err
@@ -398,7 +400,7 @@ func argvLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 				return
 			}
 			fd, _ := findFlagDef(frame.Flags, logical)
-			set[fieldPath(topName, "Flags", fieldName)] = Provenance{
+			set[fieldPath(topName, "Flags", fieldName)] = InputSource{
 				Layer: "argv",
 				Raw:   redactValue(strings.Join(vals, ", "), fd.Secret),
 			}
@@ -444,7 +446,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				return
 			}
 			fd, _ := findFlagDef(frame.Flags, logical)
-			set[fieldPath(topName, "Flags", fieldName)] = Provenance{
+			set[fieldPath(topName, "Flags", fieldName)] = InputSource{
 				Layer: "defaults",
 				Raw:   redactValue(fd.Default, fd.Secret),
 			}
@@ -464,7 +466,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 				if i < len(frame.Arguments) {
 					secret = frame.Arguments[i].Secret
 				}
-				set[fieldPath(topName, "Arguments", fieldName)] = Provenance{
+				set[fieldPath(topName, "Arguments", fieldName)] = InputSource{
 					Layer: "defaults",
 					Raw:   redactValue(d, secret),
 				}
@@ -479,7 +481,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 					return
 				}
 				_ = coerce(f, []string{d})
-				set[fieldPath(topName, channel, fieldName)] = Provenance{
+				set[fieldPath(topName, channel, fieldName)] = InputSource{
 					Layer: "defaults",
 					Raw:   redactValue(d, reconHasSecret(body)),
 				}
@@ -490,7 +492,7 @@ func defaultsLayer(rtx *Context, v reflect.Value) (Presence, *layerCore, error) 
 }
 
 // envLayer acquires the env channel (Env structs + flag env-fallbacks) into v.
-func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
+func envLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return nil, nil, err
@@ -518,8 +520,8 @@ func envLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, e
 
 // filesLayer acquires the config-files channel into v. config_source paths are honored here
 // too: argv and env are re-read best-effort to learn where the files channel should look, and
-// a malformed argv contributes nothing — [ParseArgv] owns reporting it.
-func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
+// a malformed argv contributes nothing — [Context.ArgvInputs] owns reporting it.
+func filesLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return nil, nil, err
@@ -543,7 +545,7 @@ func filesLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 // channelLayer is the shared env/files core: recon-bind each command's channel struct,
 // constraint-check the provided values, fill flag fallbacks, and record presence for
 // everything the channel supplied.
-func channelLayer(v reflect.Value, chain []ResolvedCommand, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs) (Presence, *layerCore, error) {
+func channelLayer(v reflect.Value, chain []Command, anchor int, layerName, structName string, reg, flagReg *recon.Registry, cfg *cfgRegs) (Presence, *layerCore, error) {
 	set := Presence{}
 	store := &parsedInputs{scopes: make([]scopeInputs, len(chain))}
 	var bindErr error
@@ -619,14 +621,14 @@ func recordChannelField(set Presence, tag reflect.StructTag, topName, structName
 
 	// A nested family was filled directly, so it has no single textual value.
 	if nested[key] {
-		set[fieldPath(topName, structName, fieldName)] = Provenance{
+		set[fieldPath(topName, structName, fieldName)] = InputSource{
 			Layer: layerName,
 			Raw:   redactValue("", reconHasSecret(body)),
 		}
 		return
 	}
 	if val, found, err := fieldReg.Get(key); err == nil && found {
-		set[fieldPath(topName, structName, fieldName)] = Provenance{
+		set[fieldPath(topName, structName, fieldName)] = InputSource{
 			Layer: layerName,
 			Raw:   redactValue(val.String(), reconHasSecret(body)),
 		}
@@ -635,7 +637,7 @@ func recordChannelField(set Presence, tag reflect.StructTag, topName, structName
 
 // recordFlagFallbacks fills the flags that declare a recon key and records their provenance
 // and raw text, so a later argv layer can still override them.
-func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []ResolvedCommand, scope int, topName, layerName string, flagReg *recon.Registry) error {
+func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, chain []Command, scope int, topName, layerName string, flagReg *recon.Registry) error {
 	var bindErr error
 	eachTaggedField(ci, "Flags", func(fieldName, logical string, tag reflect.StructTag, f reflect.Value) {
 		if bindErr != nil {
@@ -651,7 +653,7 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 			bindErr = err
 			return
 		}
-		set[fieldPath(topName, "Flags", fieldName)] = Provenance{
+		set[fieldPath(topName, "Flags", fieldName)] = InputSource{
 			Layer: layerName,
 			Raw:   redactValue(strings.Join(vals, ", "), fd.Secret),
 		}
@@ -664,7 +666,7 @@ func recordFlagFallbacks(set Presence, store *parsedInputs, ci reflect.Value, ch
 }
 
 // stdinLayer acquires the stdin channel into v.
-func stdinLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
+func stdinLayer(b *InputReader, rtx *Context, v reflect.Value) (Presence, *layerCore, error) {
 	chain, err := layerChain(rtx)
 	if err != nil {
 		return nil, nil, err
@@ -677,7 +679,7 @@ func stdinLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 		leaf := v.Field(v.NumField() - 1)
 		if leaf.Kind() == reflect.Struct {
 			if sf := leaf.FieldByName("Stdin"); sf.IsValid() && sf.Kind() == reflect.Pointer && !sf.IsNil() {
-				set[fieldPath(v.Type().Field(v.NumField()-1).Name, "Stdin")] = Provenance{Layer: "stdin"}
+				set[fieldPath(v.Type().Field(v.NumField()-1).Name, "Stdin")] = InputSource{Layer: "stdin"}
 			}
 		}
 	}
@@ -688,11 +690,11 @@ func stdinLayer(b *Binder, rtx *Context, v reflect.Value) (Presence, *layerCore,
 
 // layerChain validates the context and returns its resolved chain — the same
 // preconditions Parser.parseBind enforces.
-func layerChain(rtx *Context) ([]ResolvedCommand, error) {
+func layerChain(rtx *Context) ([]Command, error) {
 	if rtx == nil {
 		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: parse on nil context"}
 	}
-	chain := rtx.Chain()
+	chain := rtx.CommandChain()
 	if len(chain) == 0 {
 		return nil, &ParseError{Kind: ParseKindInternal, Msg: "rotini: no command resolved for this context"}
 	}
@@ -702,7 +704,7 @@ func layerChain(rtx *Context) ([]ResolvedCommand, error) {
 // walkCommandStructs visits each per-command CommandInputs field with its Go field name and
 // chain scope index, the struct's first field sitting at chain frame offset (the anchor
 // frameAnchor derives from the collecting command's own frame).
-func walkCommandStructs(v reflect.Value, chain []ResolvedCommand, offset int, visit func(topName string, scope int, ci reflect.Value)) {
+func walkCommandStructs(v reflect.Value, chain []Command, offset int, visit func(topName string, scope int, ci reflect.Value)) {
 	if v.Kind() != reflect.Struct {
 		return
 	}
@@ -738,7 +740,7 @@ func eachTaggedField(ci reflect.Value, structName string, visit func(fieldName, 
 
 // argPresence records presence for the positional fields that received values, mirroring
 // bindArgs' index mapping.
-func argPresence(set Presence, layerName, topName string, ci reflect.Value, frame ResolvedCommand, args []string) {
+func argPresence(set Presence, layerName, topName string, ci reflect.Value, frame Command, args []string) {
 	if len(args) == 0 {
 		return
 	}
@@ -770,7 +772,7 @@ func argPresence(set Presence, layerName, topName string, ci reflect.Value, fram
 		if j < len(frame.Arguments) {
 			secret = frame.Arguments[j].Secret
 		}
-		set[fieldPath(topName, "Arguments", fieldName)] = Provenance{
+		set[fieldPath(topName, "Arguments", fieldName)] = InputSource{
 			Layer: layerName,
 			Raw:   redactValue(strings.Join(vals, ", "), secret),
 		}

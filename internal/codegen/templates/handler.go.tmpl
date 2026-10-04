@@ -7,18 +7,18 @@ import (
 	{{.RuntimeImport}}
 )
 
-var _ rotini.Handlers = (*{{.HandlersType}})(nil)
+var _ rotini.Handler = (*{{.HandlerType}})(nil)
 
-type {{.HandlersType}} struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type {{.HandlerType}} struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
+func (*{{.HandlerType}}) Run(ctx context.Context, rtx *rotini.Context) {
 {{- if and .HelpFlag .VersionFlag}}
-	if argv, err := rotini.ParseArgv[{{.InputsType}}](rtx); err == nil {
+	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil {
 		if argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
 			fmt.Fprintln(rtx.Stdout, rtx.Help())
 			rtx.HaltWithCode(0)
@@ -37,13 +37,13 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 		}
 	}
 {{else if .HelpFlag}}
-	if argv, err := rotini.ParseArgv[{{.InputsType}}](rtx); err == nil && argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
+	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil && argv.Values.{{.HelpFrame}}.Flags.{{.HelpFlag}} {
 		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 		return
 	}
 {{else if .VersionFlag}}
-	if argv, err := rotini.ParseArgv[{{.InputsType}}](rtx); err == nil && argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
+	if argv, err := rtx.ArgvInputs[{{.InputsType}}](); err == nil && argv.Values.{{.Prefix}}.Flags.{{.VersionFlag}} {
 		version := rtx.Version()
 		if version == "" {
 			version = "unknown"
@@ -56,13 +56,13 @@ func (*{{.HandlersType}}) Run(ctx context.Context, rtx *rotini.Context) {
 {{end}}
 {{- if .NeedsInputs}}
 {{- if .UsesInputs}}
-	inputs, err := rotini.Collect[{{.InputsType}}](rtx)
+	inputs, err := rtx.Inputs[{{.InputsType}}]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
 {{else}}
-	if _, err := rotini.Collect[{{.InputsType}}](rtx); err != nil {
+	if _, err := rtx.Inputs[{{.InputsType}}](); err != nil {
 		rtx.HaltWith(err)
 		return
 	}

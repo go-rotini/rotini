@@ -197,16 +197,16 @@ func keysOf(m map[string]string) []string {
 	return out
 }
 
-// ── a composed child's BindMeta ──────────────────────────────────────────────
+// ── a composed child's InputSettings ──────────────────────────────────────────────
 
-// TestCompose_adoptsChildBindMeta covers the two channels composition used to drop.
+// TestCompose_adoptsChildInputSettings covers the two channels composition used to drop.
 //
 // The umbrella's descriptor was built from its OWN document, so a child's config_files and
 // env_prefix stopped existing the moment it was grafted: `child show` read the configuration
 // file and `root kid show` did not, with nothing to notice. The e2e tier proves the resulting
 // BINARY binds; this proves the descriptor it binds from.
-func TestCompose_adoptsChildBindMeta(t *testing.T) {
-	emitted := composeModuleStaged(t, bindMetaTree(`version: 0.0.0
+func TestCompose_adoptsChildInputSettings(t *testing.T) {
+	emitted := composeModuleStaged(t, inputSettingsTree(`version: 0.0.0
 command:
   name: root
   summary: an umbrella declaring no channels of its own
@@ -235,7 +235,7 @@ command:
 // TestCompose_ownEnvPrefixWinsOverAdopted: an umbrella that names a prefix has made a choice,
 // and adopting one from a child behind its back would rename its own variables.
 func TestCompose_ownEnvPrefixWinsOverAdopted(t *testing.T) {
-	emitted := composeModuleStaged(t, bindMetaTree(`version: 0.0.0
+	emitted := composeModuleStaged(t, inputSettingsTree(`version: 0.0.0
 command:
   name: root
   summary: an umbrella with a prefix of its own
@@ -310,9 +310,9 @@ generate:
 	}
 }
 
-// bindMetaTree is a child that declares both channels, plus whichever root spec the caller
+// inputSettingsTree is a child that declares both channels, plus whichever root spec the caller
 // wants composed on top of it.
-func bindMetaTree(rootSpec string) map[string]string {
+func inputSettingsTree(rootSpec string) map[string]string {
 	return map[string]string{
 		"cmd/child/.rotini.spec.yaml": `version: 0.0.0
 command:
@@ -350,7 +350,7 @@ generate:
 
 // ── what a composed child dispatches ────────────────────────────────────────
 
-// A composed child keeps everything its root dispatches — its remote commands, plugin
+// A composed child keeps everything its root dispatches — its declared plugins, plugin
 // discovery, plugin path and passthrough — and its plugin binaries keep the child's name, so
 // one install serves `child deploy` and `root kid deploy` alike. The composed node was once
 // built from its presentation keys alone and dropped all of these: the child's own binary ran
@@ -361,7 +361,7 @@ func TestCompose_keepsWhatTheChildDispatches(t *testing.T) {
 command:
   name: grand
   summary: the grandchild
-  remote_commands:
+  plugins:
     - name: sync
 `,
 		"cmd/grand/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/grand/zz_grand.go\n      package: grand\n",
@@ -370,9 +370,9 @@ command:
   name: child
   summary: the child
   plugin_path: ./child-plugins
-  remote_commands:
+  plugins:
     - name: deploy
-  remote_discovery: {}
+  plugin_discovery: {}
   commands:
     - name: exec
       summary: runs a command
@@ -381,8 +381,8 @@ command:
         - name: argv
           schema: {type: '[]string'}
     - name: tools
-      summary: inline sub-command with its own remote
-      remote_commands:
+      summary: inline sub-command with its own plugin
+      plugins:
         - name: lint
     - $ref: ../grand/.rotini.spec.yaml
 `,
@@ -400,12 +400,12 @@ command:
 	})
 	root := emitted["internal/cmd/root/zz_root.go"]
 	for _, want := range []string{
-		`Binary: "child-deploy"`,                                   // the composed root's remote, named as the child names it
-		`Discovery:  &rotini.RemoteDiscoveryDef{Prefix: "child-"}`, // its discovery, with the child's default prefix
-		`PluginPath: "./parent-plugins"`,                           // plugin_path on the $ref node overlays the child's
-		`Binary: "child-lint"`,                                     // an inline sub-command inside the subtree: the child's name too
-		`Binary: "grand-sync"`,                                     // a transitive child's plugins keep ITS name
-		`Passthrough: true`,                                        // the child's passthrough command still forwards raw
+		`Binary: "child-deploy"`,                      // the composed root's plugin, named as the child names it
+		`rotini.PluginDiscoveryDef{Prefix: "child-"}`, // its discovery, with the child's default prefix
+		`"./parent-plugins"`,                          // plugin_path on the $ref node overlays the child's
+		`Binary: "child-lint"`,                        // an inline sub-command inside the subtree: the child's name too
+		`Binary: "grand-sync"`,                        // a transitive child's plugins keep ITS name
+		`Passthrough: true`,                           // the child's passthrough command still forwards raw
 	} {
 		if !strings.Contains(root, want) {
 			t.Errorf("root definition missing %s:\n%s", want, root)
