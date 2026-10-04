@@ -221,7 +221,7 @@ is set when you generate.
 A rotini program can also be completed by another program, such as the host of a plugin, in
 whatever format that host reads. rotini computes the answer: the candidates, their descriptions,
 your completers' results and the spec's `complete:` hint. A `CompletionFormat` writes that
-answer in the host's protocol. `rotini.CobraCompletion` is the built-in for Cobra-built hosts,
+answer in the host's protocol. `rotini.PluginCompletion` is the built-in for Cobra-built hosts,
 and any other protocol is a function with the same signature.
 
 kubectl completes a plugin by running `kubectl_complete-<plugin>` and reading Cobra's format
@@ -230,14 +230,14 @@ as its own completer when installed under that second name:
 
 {{< code title="cmd/kubectl-ctx/main.go" language="golang" open="true" collapsible="false" copy="true" >}}
 if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
-	code, _ := cmd.Program.Complete(os.Args[1:], rotini.CobraCompletion)
+	code, _ := cmd.Program.Complete(os.Args[1:], rotini.PluginCompletion)
 	os.Exit(code)
 }
 {{< /code >}}
 
 Docker and Flux instead complete a plugin by running the plugin's own hidden `__complete`
 command. For those, set the format that command answers in, in `main.go`:
-`cmd.Program.WithCompletion(rotini.CobraCompletion).Execute()`. Leave it unset for a standalone
+`cmd.Program.WithCompletion(rotini.PluginCompletion).Execute()`. Leave it unset for a standalone
 CLI: rotini's own generated completion scripts expect rotini's format.
 
 Set `display_name: kubectl ctx` on the root of such a plugin's spec, and its help, man and

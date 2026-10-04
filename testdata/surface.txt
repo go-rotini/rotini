@@ -203,7 +203,6 @@ field WiringError.Handler
 field WiringError.Msg
 func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
-func CobraCompletion(w io.Writer, result CompletionResult) error
 func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
 func Deprecations(rtx *Context) []Deprecation
@@ -217,6 +216,7 @@ func NewInputReader(meta InputSettings) *InputReader
 func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewSuggestor() *Suggestor
+func PluginCompletion(w io.Writer, result CompletionResult) error
 func Ptr[T any](v T) *T
 func StripANSI(text string) string
 func UsageError(err error) error

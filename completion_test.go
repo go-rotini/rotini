@@ -846,8 +846,8 @@ func TestCobraCompletion_directives(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := completeIn(t, CobraCompletion, completionHintDef(), nil, tc.words...); got != tc.want {
-				t.Errorf("Complete(%q, CobraCompletion) = %q, want %q", tc.words, got, tc.want)
+			if got := completeIn(t, PluginCompletion, completionHintDef(), nil, tc.words...); got != tc.want {
+				t.Errorf("Complete(%q, PluginCompletion) = %q, want %q", tc.words, got, tc.want)
 			}
 		})
 	}
@@ -874,8 +874,8 @@ func TestCobraCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
 		"--out":    "dist\n:0\n",
 		"--id":     "a1\n:4\n", // none is compatible with candidates: it only suppresses files
 	} {
-		if got := completeIn(t, CobraCompletion, def, nil, words, ""); got != want {
-			t.Errorf("Complete(%s, CobraCompletion) = %q, want %q", words, got, want)
+		if got := completeIn(t, PluginCompletion, def, nil, words, ""); got != want {
+			t.Errorf("Complete(%s, PluginCompletion) = %q, want %q", words, got, want)
 		}
 	}
 }
@@ -884,11 +884,11 @@ func TestCobraCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
 // handler's dynamic completer and a command's description reach every format alike, and rotini's
 // own (nil) format is byte-for-byte what __complete always printed.
 func TestComplete_formatIsTheOnlyDifference(t *testing.T) {
-	if got := completeIn(t, CobraCompletion, dynCompletionDef(), dynCompletionHandlers{}, "build", "--mode", "s"); got != "slow\n:0\n" {
+	if got := completeIn(t, PluginCompletion, dynCompletionDef(), dynCompletionHandlers{}, "build", "--mode", "s"); got != "slow\n:0\n" {
 		t.Errorf("dynamic completer = %q", got)
 	}
 	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "deploy", Handler: "AppDeploy", Summary: "ship it"}}}
-	if got := completeIn(t, CobraCompletion, def, nil, "de"); got != "deploy\tship it\n:0\n" {
+	if got := completeIn(t, PluginCompletion, def, nil, "de"); got != "deploy\tship it\n:0\n" {
 		t.Errorf("Cobra, with a description = %q", got)
 	}
 	if got := completeIn(t, nil, def, nil, "de"); got != "deploy\tship it\n" {
@@ -961,13 +961,13 @@ func TestWithCompletion(t *testing.T) {
 	if got := run(NewProgram(def, nil), "__complete", "op"); got != "open\n" {
 		t.Errorf("default __complete = %q, want rotini's format (no directive without a hint)", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion), "__complete", "op"); got != "open\n:0\n" {
-		t.Errorf("WithCompletion(CobraCompletion) __complete = %q, want Cobra's format", got)
+	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion), "__complete", "op"); got != "open\n:0\n" {
+		t.Errorf("WithCompletion(PluginCompletion) __complete = %q, want Cobra's format", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion), "__complete", "--id", ""); got != ":4\n" {
-		t.Errorf("WithCompletion(CobraCompletion) hint = %q, want NoFileComp", got)
+	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion), "__complete", "--id", ""); got != ":4\n" {
+		t.Errorf("WithCompletion(PluginCompletion) hint = %q, want NoFileComp", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion).WithCompletion(nil), "__complete", "op"); got != "open\n" {
+	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion).WithCompletion(nil), "__complete", "op"); got != "open\n" {
 		t.Errorf("WithCompletion(nil) = %q, want rotini's own restored", got)
 	}
 }

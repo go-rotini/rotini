@@ -662,7 +662,7 @@ type CompletionCandidate struct {
 // CompletionFormat writes a [CompletionResult] to w in one completion protocol — how a host
 // that completes a rotini program expects the answer spelled. rotini computes the answer once;
 // the format only decides the wire shape, so supporting another framework's protocol is a
-// function, not a change to rotini. [CobraCompletion] is the built-in for Cobra-built hosts.
+// function, not a change to rotini. [PluginCompletion] is the built-in for Cobra-built hosts.
 //
 // A format is called once per request and must write only the answer: whatever it writes is
 // what the host parses.
@@ -674,7 +674,7 @@ type CompletionFormat func(w io.Writer, result CompletionResult) error
 // kubectl_complete-<plugin> with only the plugin's words:
 //
 //	if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
-//		code, _ := cmd.Program.Complete(os.Args[1:], rotini.CobraCompletion)
+//		code, _ := cmd.Program.Complete(os.Args[1:], rotini.PluginCompletion)
 //		os.Exit(code)
 //	}
 //
@@ -753,7 +753,7 @@ const (
 	cobraDirectiveFilterDirs    = 16
 )
 
-// CobraCompletion is the [CompletionFormat] Cobra-built hosts read: one candidate per line
+// PluginCompletion is the [CompletionFormat] Cobra-built hosts read: one candidate per line
 // ("value\tdescription" allowed), then a final ":<directive>" line carrying a Cobra
 // ShellCompDirective. kubectl reads it from kubectl_complete-<plugin>, and the Docker and Flux
 // CLIs from the plugin's own __complete (see [Program.WithCompletion]).
@@ -767,7 +767,7 @@ const (
 // written, since Cobra hosts read the last line as the directive unconditionally.
 //
 // Its output is covered by rotini's compatibility promise: it is Cobra's format, not rotini's.
-func CobraCompletion(w io.Writer, result CompletionResult) error {
+func PluginCompletion(w io.Writer, result CompletionResult) error {
 	lines := candidateLines(result.Candidates)
 
 	directive := cobraDirectiveDefault

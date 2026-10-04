@@ -37,7 +37,7 @@ never competes for one.
 Completing a rotini program from outside is covered: `Program.Complete` and
 `Program.WithCompletion` hand a `CompletionFormat` the same `CompletionResult` (candidates,
 descriptions, the spec's hint) that rotini's own completion computes. The built-in
-`CobraCompletion` format's output is covered as behavior: it is Cobra's completion wire format
+`PluginCompletion` format's output is covered as behavior: it is Cobra's completion wire format
 (candidate lines, then `:<ShellCompDirective>`), the one kubectl, Docker and Flux read, and it
 follows Cobra's format, not rotini's. Only rotini's OWN format, the default `__complete` output
 below, is private.

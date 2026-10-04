@@ -286,7 +286,7 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 // (`docker-<name> __complete <name> …`) and the Flux CLI (`flux-<name> __complete …`) both do,
 // in Cobra's format:
 //
-//	cmd.Program.WithCompletion(rotini.CobraCompletion).Execute()
+//	cmd.Program.WithCompletion(rotini.PluginCompletion).Execute()
 //
 // The cost is rotini's own generated completion scripts for this binary: they read rotini's
 // format, and would misread another. A plugin is completed through its host, so it has no use
