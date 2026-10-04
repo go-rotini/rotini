@@ -51,7 +51,7 @@ func readerFor(rtx *Context) *InputReader {
 	if rtx == nil {
 		return NewInputReader(InputSettings{}) // the channel layer reports the nil context as a ParseError
 	}
-	meta, described := rtx.bindMeta()
+	meta, described := rtx.settingsForRun()
 	// A [Program.WithInputReader] function wins. It receives the meta rather than having to find
 	// it, so an override cannot accidentally discard the configuration sources the spec
 	// declared — which is what binding an InputReader under a registry key used to allow.
@@ -802,7 +802,7 @@ func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]st
 // cfgRegs is the config channel's registries for one bind: the merged precedence chain plus
 // lazily-built single-file registries for inputs the spec pins to one file.
 type cfgRegs struct {
-	binder    *InputReader
+	reader    *InputReader
 	files     []ConfigFile // sources in scope for the invoked chain, nearest-wins order
 	overrides map[string]string
 	keys      valueKeys // how config fields' text is read; see spellings
@@ -819,7 +819,7 @@ func (b *InputReader) configRegs(chain []Command, overrides map[string]string, v
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{binder: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}}, nil
+	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
@@ -861,7 +861,7 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		if f.Name != name {
 			continue
 		}
-		src, err := c.binder.fileSource(f, c.overrides)
+		src, err := c.reader.fileSource(f, c.overrides)
 		if err != nil {
 			return nil, err
 		}

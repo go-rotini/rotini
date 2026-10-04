@@ -814,8 +814,8 @@ func (rtx *Context) Parser() *Parser {
 	return p
 }
 
-// bindMeta is the generated descriptor for this run, and whether the program supplied one.
-func (rtx *Context) bindMeta() (InputSettings, bool) {
+// settingsForRun is the generated descriptor for this run, and whether the program supplied one.
+func (rtx *Context) settingsForRun() (InputSettings, bool) {
 	if rtx == nil {
 		return InputSettings{}, false
 	}

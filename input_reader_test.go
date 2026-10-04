@@ -56,10 +56,10 @@ func TestInputReader_fillsEnvAndConfig(t *testing.T) {
 	t.Setenv("REGION", "us-west")
 
 	rtx := NewContextFor(tbDef(), []string{"--verbose"})
-	binder := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	var in tbInputs
-	if err := binder.Read(rtx, &in); err != nil {
+	if err := reader.Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if !in.App.Flags.Verbose {
@@ -139,10 +139,10 @@ func TestInputReader_customSources(t *testing.T) {
 func TestInputReader_requiredConfigMissing(t *testing.T) {
 	cfg := writeConfig(t, "api:\n  endpoint: https://api.example\n") // no api.token
 	rtx := NewContextFor(tbDef(), nil)
-	binder := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+	reader := NewInputReader(InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 
 	var in tbInputs
-	if err := binder.Read(rtx, &in); err == nil {
+	if err := reader.Read(rtx, &in); err == nil {
 		t.Fatal("expected an error for a missing required config value (recon required)")
 	}
 }
@@ -151,10 +151,10 @@ func TestInputReader_noConfigFilesLeavesConfigZero(t *testing.T) {
 	// With no config sources, config fields stay zero; a non-required env still binds.
 	t.Setenv("REGION", "eu-central")
 	rtx := NewContextFor(tbDef(), nil)
-	binder := NewInputReader(InputSettings{}) // no config files
+	reader := NewInputReader(InputSettings{}) // no config files
 
 	var s tbNoReqInputs
-	if err := binder.Read(rtx, &s); err != nil {
+	if err := reader.Read(rtx, &s); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	if s.App.Env.Region != "eu-central" {
@@ -1191,7 +1191,7 @@ func TestWithInputReader_defaultsWhenUnset(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got == nil {
-		t.Fatal("readerFor returned nil with no binder supplied")
+		t.Fatal("readerFor returned nil with no reader supplied")
 	}
 }
 

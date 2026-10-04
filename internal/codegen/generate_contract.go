@@ -403,7 +403,7 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 			continue
 		}
 		req := a.Schema != nil && a.Schema.Required
-		arg := contractArgument{Name: a.Name, Summary: a.Summary, Required: req, Variadic: isVariadicSchema(a.Schema), Deprecated: a.Deprecated, Schema: inputJSONSchema(a.Schema, false)}
+		arg := contractArgument{Name: a.Name, Summary: a.Summary, Required: req, Variadic: isVariadicSchema(a.Schema), Deprecated: a.Deprecated, Schema: inputJSONSchema(a.Schema)}
 		c.Arguments = append(c.Arguments, arg)
 		param(a.Name, a.Summary, arg.Schema, req)
 	}
@@ -412,7 +412,7 @@ func (p *program) contractCommand(n contractNode) contractCommand {
 		cf := contractFlag{
 			Name: f.Name, Identifiers: flagIdentifiers(f), Summary: f.Summary, Required: req,
 			Cascading: f.Cascading && !inherited, Inherited: inherited, Deprecated: f.Deprecated,
-			Schema: inputJSONSchema(f.Schema, false),
+			Schema: inputJSONSchema(f.Schema),
 		}
 		c.Flags = append(c.Flags, cf)
 		param(f.Name, f.Summary, cf.Schema, req)
@@ -454,7 +454,7 @@ func (p *program) contractSources(c *contractCommand, in *Inputs) {
 		c.Env = append(c.Env, contractEnv{
 			Name: e.Name, Variables: strings.Split(envVarName(e, p.envPrefix), ","), Summary: e.Summary,
 			Required: e.Schema != nil && e.Schema.Required, Secret: secret, Deprecated: e.Deprecated,
-			Schema: inputJSONSchema(e.Schema, secret),
+			Schema: inputJSONSchema(e.Schema),
 		})
 	}
 	for _, cfg := range in.Config {
@@ -471,7 +471,7 @@ func (p *program) contractSources(c *contractCommand, in *Inputs) {
 		c.Config = append(c.Config, contractConfig{
 			Name: cfg.Name, Key: key, File: file, Summary: cfg.Summary,
 			Required: cfg.Schema != nil && cfg.Schema.Required, Deprecated: cfg.Deprecated,
-			Schema: inputJSONSchema(cfg.Schema, cfg.Schema != nil && cfg.Schema.Secret),
+			Schema: inputJSONSchema(cfg.Schema),
 		})
 	}
 	if in.Stdin != nil {
@@ -484,8 +484,9 @@ func (p *program) contractSources(c *contractCommand, in *Inputs) {
 }
 
 // inputJSONSchema describes an input's value as standard JSON Schema: its type, constraints,
-// enum and default. A secret's default is left out, as help leaves it out.
-func inputJSONSchema(s *InputSchema, secret bool) any {
+// enum and default. An input marked `secret` keeps its default out of the contract, whichever
+// channel it is read from: the document is meant to be handed to other tools.
+func inputJSONSchema(s *InputSchema) any {
 	base := BaseSchema{}
 	if s != nil {
 		base = s.BaseSchema
@@ -498,7 +499,7 @@ func inputJSONSchema(s *InputSchema, secret bool) any {
 	if s != nil && s.Type == "count" {
 		doc["minimum"] = 0
 	}
-	if s != nil && s.Default != nil && !secret {
+	if s != nil && s.Default != nil && !s.Secret {
 		doc["default"] = s.Default
 	}
 	return standardSchema(doc)

@@ -80,6 +80,10 @@ Both return an internal error, and write nothing, when the value is not the comm
 `<Prefix>Output` type or when a format they don't write has no renderer. Both are the program's
 bugs, not the user's.
 
+**Keep stdout for the output.** A script reading `taskr list -o json` breaks if anything else
+lands on stdout, such as a progress line before the JSON document. Write progress, notes and
+prompts to `rtx.Stderr`.
+
 ## Check it
 
 `Program.WithOutputChecks()` makes every `WriteOutput` and `WriteOutputItem` call check its value

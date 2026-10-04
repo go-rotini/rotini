@@ -98,7 +98,7 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 			{Prefix: "AppGenerate"},
 		},
 		OutputTypes:   "type AppOutput struct{}",
-		InputSettings: "var bindMeta = map[string]string{}",
+		InputSettings: "var inputSettings = map[string]string{}",
 		Features: []templateFeature{
 			{
 				Resolver: "Help", Noun: "help",

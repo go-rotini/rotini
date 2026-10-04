@@ -111,9 +111,9 @@ type dhProgram struct{ ran *bool }
 func (p dhProgram) App() Handler    { return &dhHandlers{ran: p.ran} }
 func (p dhProgram) AppRun() Handler { return &dhHandlers{ran: p.ran} }
 
-// TestDefaultHooks_satisfiesHandlersWithOnlyRun is the whole point: one embed plus Run, and the
+// TestNoHooks_satisfiesHandlerWithOnlyRun is the whole point: one embed plus Run, and the
 // promotion through two levels still produces a complete Handler.
-func TestDefaultHooks_satisfiesHandlersWithOnlyRun(t *testing.T) {
+func TestNoHooks_satisfiesHandlerWithOnlyRun(t *testing.T) {
 	var ran bool
 	p := NewProgram(testDef(), dhProgram{ran: &ran}).WithStdout(io.Discard).WithStderr(io.Discard)
 	if code, err := p.Run([]string{"run", "x"}); err != nil || code != 0 {
@@ -124,9 +124,9 @@ func TestDefaultHooks_satisfiesHandlersWithOnlyRun(t *testing.T) {
 	}
 }
 
-// TestDefaultHooks_isTheSameFourNoOps pins that it adds no behaviour of its own — it is an
+// TestNoHooks_isTheSameFourNoOps pins that it adds no behaviour of its own — it is an
 // assembly of the existing embeds, not a new kind of hook.
-func TestDefaultHooks_isTheSameFourNoOps(t *testing.T) {
+func TestNoHooks_isTheSameFourNoOps(t *testing.T) {
 	var h NoHooks
 	ctx, rtx := context.Background(), newContext()
 	h.CascadingPreRun(ctx, rtx)
@@ -145,9 +145,9 @@ func TestDefaultHooks_isTheSameFourNoOps(t *testing.T) {
 	}
 }
 
-// TestDefaultHooks_ownMethodWins: embedding it must not make implementing a hook any different
+// TestNoHooks_ownMethodWins: embedding it must not make implementing a hook any different
 // from before — a method on the outer type shadows the promoted no-op.
-func TestDefaultHooks_ownMethodWins(t *testing.T) {
+func TestNoHooks_ownMethodWins(t *testing.T) {
 	log := []string{}
 	p := NewProgram(testDef(), dhOverride{log: &log}).WithStdout(io.Discard).WithStderr(io.Discard)
 	if _, err := p.Run([]string{"run", "x"}); err != nil {
@@ -171,14 +171,14 @@ type dhOverrideLeaf struct {
 func (h *dhOverrideLeaf) PreRun(context.Context, *Context) { *h.log = append(*h.log, "PreRun") }
 func (h *dhOverrideLeaf) Run(context.Context, *Context)    { *h.log = append(*h.log, "Run") }
 
-// TestDefaultHooks_stillRequiresRunAtCompileTime is the property that must survive collapsing
+// TestNoHooks_stillRequiresRunAtCompileTime is the property that must survive collapsing
 // the embeds, and it cannot be asserted from inside a passing test binary — a program that does
 // not compile cannot be linked into this one. So it is compiled out of process.
 //
 // Without it, a handler could embed NoHooks, forget Run entirely, satisfy Handler, and do
 // nothing at runtime. The whole reason `rotini generate`'s hook audit skips Run is that the
 // compiler owns that case.
-func TestDefaultHooks_stillRequiresRunAtCompileTime(t *testing.T) {
+func TestNoHooks_stillRequiresRunAtCompileTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles a throwaway package")
 	}

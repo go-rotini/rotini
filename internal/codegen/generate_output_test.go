@@ -238,6 +238,20 @@ func TestContractDocument(t *testing.T) {
 	}
 }
 
+// TestInputJSONSchema_secretDefault: a secret input's default never reaches the contract,
+// whatever its channel; any other input's does.
+func TestInputJSONSchema_secretDefault(t *testing.T) {
+	t.Parallel()
+	secret, _ := json.Marshal(inputJSONSchema(&InputSchema{BaseSchema: BaseSchema{Type: "string"}, Default: "hunter2", Secret: true}))
+	if strings.Contains(string(secret), "hunter2") {
+		t.Errorf("a secret default leaked: %s", secret)
+	}
+	plain, _ := json.Marshal(inputJSONSchema(&InputSchema{BaseSchema: BaseSchema{Type: "int"}, Default: 3}))
+	if string(plain) != `{"default":3,"type":"integer"}` {
+		t.Errorf("plain input = %s", plain)
+	}
+}
+
 func TestStandardSchema(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

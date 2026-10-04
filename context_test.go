@@ -29,7 +29,7 @@ func TestGet_typed(t *testing.T) {
 	}
 }
 
-func TestBindIfAbsent_keepsExistingElseRegistersDefault(t *testing.T) {
+func TestSetDependencyIfAbsent_keepsExistingElseSetsDefault(t *testing.T) {
 	rtx := newContext()
 	injected, def := &bytes.Buffer{}, &bytes.Buffer{}
 
