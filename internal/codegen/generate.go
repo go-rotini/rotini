@@ -610,14 +610,6 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 	}
 	d.VersionFlag = boolFlagField(c, "version")
 
-	// --help and --version are answered from argv before full input validation; otherwise a
-	// command with a required argument could never print its help.
-	d.AnswerBeforeInputs = d.HelpFlag != "" || d.VersionFlag != ""
-	d.HelpFlagName = "help"
-	if d.HelpFlag == "" {
-		d.HelpFlagName = "version"
-	}
-
 	isRoot := c.prefix == gp.root.prefix
 	switch name := commandName(c.invocation); {
 	case name == "help" && !isRoot && helpOn:

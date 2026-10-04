@@ -477,6 +477,40 @@ func TestContext_seamAccessorsAreRaceFree(t *testing.T) {
 	wg.Wait()
 }
 
+// TestContext_stopAndRecordAreRaceFree pins, under -race, that the stop methods, the record
+// methods and the flag-stdin cache can be used from goroutines a hook starts.
+func TestContext_stopAndRecordAreRaceFree(t *testing.T) {
+	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
+	rtx.Stdin = strings.NewReader("payload")
+
+	var wg sync.WaitGroup
+	for i := range 50 {
+		wg.Add(3)
+		go func() {
+			defer wg.Done()
+			rtx.Halt()
+			rtx.HaltWithCode(i + 1)
+			rtx.HaltWith(errors.New("boom"))
+		}()
+		go func() {
+			defer wg.Done()
+			rtx.Exit(i + 1)
+			rtx.RecordWarning(errors.New("careful"))
+			_ = rtx.Failed()
+		}()
+		go func() {
+			defer wg.Done()
+			_ = rtx.flagStdin()
+			_, _ = rtx.stopState()
+			_ = rtx.code()
+		}()
+	}
+	wg.Wait()
+	if stopped, exitNow := rtx.stopState(); !stopped || !exitNow || rtx.code() == 0 {
+		t.Errorf("stopped=%v exitNow=%v code=%d, want all set", stopped, exitNow, rtx.code())
+	}
+}
+
 // TestContext_chainIsACopy pins that modifying the slice CommandChain returns does not affect
 // the run.
 func TestContext_chainIsACopy(t *testing.T) {

@@ -42,10 +42,8 @@ import (
 // Nothing is parsed or validated until a handler calls an inputs method; a handler with its
 // own parser reads [Context.Argv] instead.
 //
-// The record methods, dependency methods, [Context.Failed], [Context.Command] and the seam
-// accessors are safe to call from goroutines a hook starts. The stop methods and the inputs
-// methods are not synchronized and are called from the hook itself. [Context.Command] reflects
-// the step running when it is called (see its doc). A Context must not be copied.
+// A Context is safe for concurrent use by the goroutines a hook starts. [Context.Command]
+// reflects the step running when it is called (see its doc). A Context must not be copied.
 //
 // Methods do not check for a nil receiver, with these exceptions: the With setters do nothing
 // and return nil, the inputs methods return an error, and [Deprecations] returns none.
@@ -118,6 +116,8 @@ func (rtx *Context) flagStdin() io.Reader {
 	if rtx.Stdin == nil {
 		return nil
 	}
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
 	if rtx.flagStdinMemo == nil || rtx.flagStdinMemo.src != rtx.Stdin {
 		rtx.flagStdinMemo = &stdinMemo{src: rtx.Stdin}
 	}
@@ -338,6 +338,8 @@ func (rtx *Context) CommandPath() string {
 // Use [Context.HaltWith] to fail, [Context.HaltWithCode] to stop with a specific code, and
 // [Context.Exit] to stop without teardown. Halt is a no-op inside the reporter.
 func (rtx *Context) Halt() {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
 	if rtx.reporterStage {
 		return
 	}
@@ -376,6 +378,8 @@ func (rtx *Context) HaltWith(err error) {
 //
 // It is a no-op inside the reporter; the reporter sets the code with [Context.Exit].
 func (rtx *Context) HaltWithCode(code int) {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
 	if rtx.reporterStage {
 		return
 	}
@@ -392,6 +396,8 @@ func (rtx *Context) HaltWithCode(code int) {
 // During the lifecycle the first non-zero code wins; inside the reporter, Exit overrides any
 // code already set.
 func (rtx *Context) Exit(code int) {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
 	rtx.stopped = true
 	rtx.exitNow = true
 	if rtx.reporterStage {
@@ -401,6 +407,40 @@ func (rtx *Context) Exit(code int) {
 	if rtx.exitCode == 0 {
 		rtx.exitCode = code
 	}
+}
+
+// stopState reports whether forward progress has stopped and whether [Context.Exit] asked to
+// skip the remaining teardown.
+func (rtx *Context) stopState() (stopped, exitNow bool) {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.stopped, rtx.exitNow
+}
+
+// code returns the exit code set so far.
+func (rtx *Context) code() int {
+	rtx.mu.RLock()
+	defer rtx.mu.RUnlock()
+	return rtx.exitCode
+}
+
+// setReporterStage marks the start or end of the reporter, inside which Exit overrides the code
+// and the halt methods are no-ops.
+func (rtx *Context) setReporterStage(on bool) {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	rtx.reporterStage = on
+}
+
+// applyExitFloor sets the exit code to 1 when the run failed and no code was set, and returns
+// the resulting code. A deliberate non-zero code is never changed.
+func (rtx *Context) applyExitFloor(failed bool) int {
+	rtx.mu.Lock()
+	defer rtx.mu.Unlock()
+	if rtx.exitCode == 0 && failed {
+		rtx.exitCode = 1
+	}
+	return rtx.exitCode
 }
 
 // RecordInfo records msg as an informational message for the reporter. Like every record

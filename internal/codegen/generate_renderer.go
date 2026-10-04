@@ -296,17 +296,15 @@ type templateHandlerData struct {
 
 	// The seeded Run body, derived from the spec and conf (a --help flag with the help
 	// feature on, a --version flag, a `help` command with a variadic path argument).
-	HelpFlag           string // Go field of this command's bool `help` flag; "" when none or the help feature is off
-	HelpFrame          string // inputs frame holding HelpFlag: this command's prefix, or an ancestor's when inherited
-	HelpFlagName       string // logical name of the flag answered first ("help", else "version"); not used by the stub template
-	AnswerBeforeInputs bool   // help/version are answered from argv before Inputs validates; not used by the stub template
-	UsesInputs         bool   // the body reads `inputs`; when false Inputs still runs, for its validation
-	VersionFlag        string // Go field of this command's bool `version` flag; "" when there is none
-	Header             string // the target's conf `header:`; "" for none
-	HelpPathArg        string // Go field of the variadic path argument on a command named `help`; "" otherwise
-	VersionOnly        bool   // a command named `version` whose whole job is to print it
-	PrintHelpWhenBare  bool   // a dispatcher root: sub-commands, no own arguments, help feature on
-	NeedsInputs        bool   // the body calls Inputs (for its result or its validation)
+	HelpFlag          string // Go field of this command's bool `help` flag; "" when none or the help feature is off
+	HelpFrame         string // inputs frame holding HelpFlag: this command's prefix, or an ancestor's when inherited
+	UsesInputs        bool   // the body reads `inputs`; when false Inputs still runs, for its validation
+	VersionFlag       string // Go field of this command's bool `version` flag; "" when there is none
+	Header            string // the target's conf `header:`; "" for none
+	HelpPathArg       string // Go field of the variadic path argument on a command named `help`; "" otherwise
+	VersionOnly       bool   // a command named `version` whose whole job is to print it
+	PrintHelpWhenBare bool   // a dispatcher root: sub-commands, no own arguments, help feature on
+	NeedsInputs       bool   // the body calls Inputs (for its result or its validation)
 }
 
 func renderHandlerStubFile(data templateHandlerData) ([]byte, error) {

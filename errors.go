@@ -1,6 +1,10 @@
 package rotini
 
-import "errors"
+import (
+	"context"
+	"errors"
+	"fmt"
+)
 
 // Category classifies an error by whose fault it is, so a reporter can choose the exit code and
 // message style from one call to [CategoryOf]. rotini tags its own errors (a missing dependency
@@ -119,3 +123,72 @@ type categorized struct {
 
 func (c *categorized) Error() string   { return c.err.Error() }
 func (c *categorized) Unwrap() []error { return []error{c.err, c.sentinel} }
+
+// ExitCause returns a context-cancellation cause that sets the exit code of the run the
+// cancellation halts:
+//
+//	ctx, cancel := context.WithCancelCause(parent)
+//	prog.WithContext(ctx)
+//	cancel(rotini.ExitCause(3)) // exits 3
+//
+// A cancellation without an ExitCause also halts the run, and the exit code is resolved as
+// usual. Cancellation never preempts a running hook, and teardown always runs. See
+// [Program.WithContext].
+func ExitCause(code int) error { return exitCodeError{code: code} }
+
+// exitCodeError carries a process exit code as a context-cancellation cause.
+type exitCodeError struct{ code int }
+
+func (e exitCodeError) Error() string {
+	return fmt.Sprintf("run canceled (exit code %d)", e.code)
+}
+
+// canceledExitCode returns the code carried by a run context's cancellation cause, or 0 when
+// it carries none.
+func canceledExitCode(ctx context.Context) int {
+	if ec, ok := errors.AsType[exitCodeError](context.Cause(ctx)); ok {
+		return ec.code
+	}
+	return 0
+}
+
+// PanicError carries a panic recovered from a lifecycle hook to the reporter: Value is the
+// value passed to panic, Stack the goroutine stack captured at recovery. Error renders Value
+// alone.
+//
+// It also carries faults rotini detects without a panic, such as a [*WiringError] or a
+// resolver failure, with the error as Value and a nil Stack.
+type PanicError struct {
+	Value any
+	Stack []byte
+}
+
+// Error renders the panic value without the stack.
+func (e *PanicError) Error() string { return fmt.Sprintf("%v", e.Value) }
+
+// Unwrap returns the panic value when it is an error, followed by [ErrInternal], so a panic
+// is [CategoryInternal] unless its error value classifies otherwise ([CategoryOf] tests
+// [ErrUsage] first).
+func (e *PanicError) Unwrap() []error {
+	if err, ok := e.Value.(error); ok {
+		return []error{err, ErrInternal}
+	}
+	return []error{ErrInternal}
+}
+
+// WiringError reports that the generated [Definition] and the handler set are out of sync — a
+// resolved command names a handler method that does not exist, or whose return value does not
+// implement [Handler]. It is always [CategoryInternal].
+//
+// Command and Handler are empty when [NewProgram] was given a nil handlers value.
+type WiringError struct {
+	Command string // the command whose handler wiring is broken
+	Handler string // the handler method name the Definition referenced
+	Msg     string // the human-readable failure
+}
+
+// Error renders the mismatch as a single line.
+func (e *WiringError) Error() string { return e.Msg }
+
+// Unwrap reports [ErrInternal]: a wiring mismatch is the author's bug, never the user's.
+func (e *WiringError) Unwrap() error { return ErrInternal }

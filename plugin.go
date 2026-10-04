@@ -271,3 +271,75 @@ func trimExecutableExt(file string, exts []string) (string, bool) {
 	}
 	return file, false
 }
+
+// DiscoveredPlugin is one plugin discovery found: the token it is invoked by and the binary that
+// token runs.
+type DiscoveredPlugin struct {
+	// Name is the token a user types — "foo" for an executable "<prefix>foo".
+	Name string
+	// Path is the executable dispatch would run for Name right now: the first "<prefix>foo"
+	// in search order (next to the binary, then the plugin path, then PATH), so a copy
+	// shadowed by an earlier one is not the one listed.
+	Path string
+}
+
+// DiscoveredPlugins returns each plugin discovered for cmd — an executable "<prefix>foo" found
+// next to the binary, in the plugin path, or on PATH — deduped and sorted by name, with any
+// name colliding with a declared sub-command, declared plugin or alias removed. It returns nil
+// when cmd has no discovery or discovery is hidden. rotini renders nothing; a handler lists
+// the result itself:
+//
+//	chain := rtx.CommandChain()
+//	for _, p := range chain[len(chain)-1].DiscoveredPlugins() {
+//		fmt.Fprintf(out, "  %s\t%s\n", p.Name, p.Path)
+//	}
+//
+// It reads the filesystem on every call and is best-effort: an unreadable directory
+// contributes nothing. [Command.PluginDiscoveryErrors] reports failures of the configured
+// plugin path.
+func (cmd Command) DiscoveredPlugins() []DiscoveredPlugin {
+	plugins, _ := discoveredFor(cmd)
+	return plugins
+}
+
+// PluginDiscoveryErrors returns the problems encountered scanning cmd's configured plugin
+// path — typically that it is unreadable or not a directory — and nil when there is no
+// discovery, no plugin path, discovery is hidden, or the path scanned cleanly. A path that
+// does not exist is not a problem. The directory of the binary and the $PATH entries are not
+// reported. rotini prints no warning itself, since that would corrupt completion output. Each
+// error carries the path and cause, so errors.Is(err, fs.ErrPermission) classifies it.
+func (cmd Command) PluginDiscoveryErrors() []error {
+	_, problems := discoveredFor(cmd)
+	return problems
+}
+
+// discoveredFor is the shared core of [Command.DiscoveredPlugins] and
+// [Command.PluginDiscoveryErrors]: the collision-filtered plugin tokens plus any problems
+// scanning the configured path.
+func discoveredFor(cmd Command) ([]DiscoveredPlugin, []error) {
+	d := cmd.PluginDiscovery
+	if d == nil || d.Hidden {
+		return nil, nil
+	}
+	declared := map[string]bool{}
+	for _, c := range cmd.Commands {
+		declared[c.Name] = true
+		for _, a := range c.Aliases {
+			declared[a] = true
+		}
+	}
+	for _, r := range cmd.Plugins {
+		declared[r.Name] = true
+		for _, a := range r.Aliases {
+			declared[a] = true
+		}
+	}
+	all, problems := discoverPlugins(d, cmd.PluginPath)
+	var out []DiscoveredPlugin
+	for _, plugin := range all {
+		if !declared[plugin.Name] {
+			out = append(out, plugin)
+		}
+	}
+	return out, problems
+}

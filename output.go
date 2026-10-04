@@ -423,3 +423,17 @@ func normalizeJSON(v any) (any, error) {
 	}
 	return out, nil
 }
+
+// WithOutputChecks makes every [Context.WriteOutput] and [Context.WriteOutputItem] call check
+// its value against the command's declared output schema before writing it. A value that does
+// not match is an internal error naming each field at fault, and nothing is written. It is off
+// by default; enable it in tests or debug builds:
+//
+//	p := cmd.NewProgram(cmd.Handlers()).WithOutputChecks()
+//
+// Only output written through WriteOutput and WriteOutputItem is checked. To check captured
+// stdout, use [DecodeOutput].
+func (p *Program) WithOutputChecks() *Program {
+	p.outputChecks = true
+	return p
+}

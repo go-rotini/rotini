@@ -39,34 +39,6 @@ const (
 	signalOn                         // WithSignals(...): always trap
 )
 
-// ExitCause returns a context-cancellation cause that sets the exit code of the run the
-// cancellation halts:
-//
-//	ctx, cancel := context.WithCancelCause(parent)
-//	prog.WithContext(ctx)
-//	cancel(rotini.ExitCause(3)) // exits 3
-//
-// A cancellation without an ExitCause also halts the run, and the exit code is resolved as
-// usual. Cancellation never preempts a running hook, and teardown always runs. See
-// [Program.WithContext].
-func ExitCause(code int) error { return exitCodeError{code: code} }
-
-// exitCodeError carries a process exit code as a context-cancellation cause.
-type exitCodeError struct{ code int }
-
-func (e exitCodeError) Error() string {
-	return fmt.Sprintf("run canceled (exit code %d)", e.code)
-}
-
-// canceledExitCode returns the code carried by a run context's cancellation cause, or 0 when
-// it carries none.
-func canceledExitCode(ctx context.Context) int {
-	if ec, ok := errors.AsType[exitCodeError](context.Cause(ctx)); ok {
-		return ec.code
-	}
-	return 0
-}
-
 // Program is a rotini CLI ready to run: the compiled command tree ([Definition]), the
 // handlers that implement it, and the seams around them. The generated entrypoint builds one
 // with [NewProgram] and calls [Program.Execute]. Every With method returns the receiver, so
@@ -198,20 +170,6 @@ func (p *Program) WithExit(fn func(int)) *Program {
 	return p
 }
 
-// WithOutputChecks makes every [Context.WriteOutput] and [Context.WriteOutputItem] call check
-// its value against the command's declared output schema before writing it. A value that does
-// not match is an internal error naming each field at fault, and nothing is written. It is off
-// by default; enable it in tests or debug builds:
-//
-//	p := cmd.NewProgram(cmd.Handlers()).WithOutputChecks()
-//
-// Only output written through WriteOutput and WriteOutputItem is checked. To check captured
-// stdout, use [DecodeOutput].
-func (p *Program) WithOutputChecks() *Program {
-	p.outputChecks = true
-	return p
-}
-
 // WithTeardownOnPanic controls whether teardown runs when a hook panics. The default, true,
 // halts forward progress and still runs the teardown of every begun setup hook, as deferred
 // calls run during a panic. False skips the remaining teardown, as [Context.Exit] does.
@@ -267,24 +225,6 @@ func (p *Program) WithContext(ctx context.Context) *Program {
 	if ctx != nil {
 		p.ctx = ctx
 	}
-	return p
-}
-
-// WithCompletion sets the [CompletionFormat] the hidden __complete entry answers in, in place
-// of rotini's own. It serves a plugin whose host completes it by calling the plugin's
-// __complete and reading the host's format, as the Docker CLI (`docker-<name> __complete
-// <name> …`) and the Flux CLI (`flux-<name> __complete …`) do with the format
-// [PluginCompletion] writes:
-//
-//	cmd.Program.WithCompletion(rotini.PluginCompletion).Execute()
-//
-// rotini's generated completion scripts read rotini's own format, so a standalone CLI leaves
-// this unset. A host that runs a separately named completer without a __complete word, such
-// as kubectl's kubectl_complete-<name>, is served by calling [Program.Complete] from main.
-//
-// A nil format restores rotini's own.
-func (p *Program) WithCompletion(format CompletionFormat) *Program {
-	p.completion = format
 	return p
 }
 
@@ -420,98 +360,6 @@ func (p *Program) newRunContext() *Context {
 	rtx.outputChecks = p.outputChecks
 	return rtx
 }
-
-// Outcome is everything a run recorded, handed to the [Reporter]. Each slice is in recording
-// order and is a copy. [Context] exposes no other way to read the records.
-type Outcome struct {
-	// Infos are [Context.RecordInfo] messages: neutral output, no bearing on the exit code.
-	Infos []string
-	// Successes are [Context.RecordSuccess] messages.
-	Successes []string
-	// Warnings are [Context.RecordWarning] values: non-fatal, never raising the exit code.
-	Warnings []error
-	// Errors are [Context.RecordError] values.
-	Errors []error
-	// Panics are recovered panics and rotini-detected faults, captured by the runtime; there
-	// is no record call for them.
-	Panics []*PanicError
-}
-
-// Empty reports whether the run recorded nothing. The runtime does not call the reporter for
-// an empty Outcome.
-func (o Outcome) Empty() bool {
-	return len(o.Infos)+len(o.Successes)+len(o.Warnings)+len(o.Errors)+len(o.Panics) == 0
-}
-
-// Failed reports whether the run recorded an error or a panic, the condition for the default
-// reporter's exit floor.
-func (o Outcome) Failed() bool { return len(o.Errors) > 0 || len(o.Panics) > 0 }
-
-// Reporter is the program's outcome reporter. The runtime calls it once per run, after the
-// lifecycle and its teardown finish, when the [Outcome] is not empty.
-//
-// The reporter decides what to print and where, and sets the final exit code: [Context.Exit]
-// inside it overrides the code the lifecycle set, and [Context.HaltWithCode] is a no-op.
-//
-// The error [Program.Run] returns is built before the reporter is called, so modifying the
-// Outcome does not change it. Records made inside the reporter are dropped.
-//
-// A panic inside a reporter is not recovered. A reporter that can fail handles its own
-// failure, for example by writing to rtx.Stderr and setting a code with [Context.Exit].
-type Reporter func(ctx context.Context, rtx *Context, out Outcome)
-
-// WithReporter sets the program's outcome reporter. See [Reporter].
-//
-// The default prints infos, warnings, errors, panics, then successes (infos and successes to
-// stdout, the rest to stderr), and applies an exit floor: a recorded error or panic exits 1
-// unless a handler already set a non-zero code. A custom reporter owns the exit code entirely.
-//
-// A nil fn restores the default reporter.
-func (p *Program) WithReporter(fn Reporter) *Program {
-	p.reporterFn = fn
-	return p
-}
-
-// PanicError carries a panic recovered from a lifecycle hook to the reporter: Value is the
-// value passed to panic, Stack the goroutine stack captured at recovery. Error renders Value
-// alone.
-//
-// It also carries faults rotini detects without a panic, such as a [*WiringError] or a
-// resolver failure, with the error as Value and a nil Stack.
-type PanicError struct {
-	Value any
-	Stack []byte
-}
-
-// Error renders the panic value without the stack.
-func (e *PanicError) Error() string { return fmt.Sprintf("%v", e.Value) }
-
-// Unwrap returns the panic value when it is an error, followed by [ErrInternal], so a panic
-// is [CategoryInternal] unless its error value classifies otherwise ([CategoryOf] tests
-// [ErrUsage] first).
-func (e *PanicError) Unwrap() []error {
-	if err, ok := e.Value.(error); ok {
-		return []error{err, ErrInternal}
-	}
-	return []error{ErrInternal}
-}
-
-// WiringError reports that the generated [Definition] and the handler set are out of sync — a
-// resolved command names a handler method that does not exist, or whose return value does not
-// implement [Handler]. It is always [CategoryInternal].
-//
-// Command and Handler are empty when [NewProgram] was given a nil handlers value.
-type WiringError struct {
-	Command string // the command whose handler wiring is broken
-	Handler string // the handler method name the Definition referenced
-	Msg     string // the human-readable failure
-}
-
-// Error renders the mismatch as a single line.
-func (e *WiringError) Error() string { return e.Msg }
-
-// Unwrap reports [ErrInternal]: a wiring mismatch is the author's bug, never the user's.
-func (e *WiringError) Unwrap() error { return ErrInternal }
 
 // WithResolver overrides the resolve phase: argv to invocation target, plus the argv the
 // parsers later see. A resolver that rewrites tokens should rewrite argv and delegate to
@@ -706,76 +554,6 @@ func internalUnlessTagged(err error) error {
 // asFault wraps a rotini-detected fault for the panics channel, with no stack.
 func asFault(err error) *PanicError { return &PanicError{Value: err} }
 
-// settle is the single run tail every run path ends in: it hands the recorded outcome to the
-// reporter and resolves the exit code.
-//
-// A handler's exit code is already in rtx.exitCode when the reporter runs; the reporter is
-// the final authority, since rtx.Exit overrides it during the reporter stage. The exit floor
-// lives in defaultReporter, so a custom reporter does not inherit it.
-func (p *Program) settle(ctx context.Context, rtx *Context) (int, error) {
-	out := Outcome{
-		Infos:     rtx.copyInfos(),
-		Successes: rtx.copySuccesses(),
-		Warnings:  rtx.copyWarnings(),
-		Errors:    rtx.copyErrors(),
-		Panics:    rtx.copyFaults(),
-	}
-
-	// Build the run's error before the reporter runs: it shares the Outcome's backing arrays,
-	// so a reporter writing to out.Errors[i] must not change what Run returns. rtx.exitCode
-	// is read after the reporter, which is how the reporter controls the code.
-	err := joinOutcome(out.Errors, out.Panics)
-
-	if !out.Empty() {
-		fn := p.reporterFn
-		if fn == nil {
-			fn = p.defaultReporter
-		}
-		rtx.reporterStage = true // rtx.Exit now overrides; rtx.HaltWithCode is a no-op
-		fn(ctx, rtx, out)
-		rtx.reporterStage = false
-	}
-	return rtx.exitCode, err
-}
-
-// joinOutcome is the error a run returns to its caller: every recorded error and captured
-// fault, so errors.Is/As reach them all. It is nil for a clean run.
-func joinOutcome(errs []error, faults []*PanicError) error {
-	if len(errs) == 0 && len(faults) == 0 {
-		return nil
-	}
-	all := make([]error, 0, len(errs)+len(faults))
-	all = append(all, errs...)
-	for _, f := range faults {
-		all = append(all, f)
-	}
-	return errors.Join(all...)
-}
-
-// defaultReporter prints infos, warnings, errors, panics, then successes (infos and successes
-// to stdout, the rest to stderr), then applies the exit floor: an error or fault exits 1
-// unless a handler already set a non-zero code. Panic stacks are not printed.
-func (p *Program) defaultReporter(_ context.Context, rtx *Context, out Outcome) {
-	for _, s := range out.Infos {
-		fmt.Fprintln(p.stdout, s)
-	}
-	for _, w := range out.Warnings {
-		fmt.Fprintf(p.stderr, "Warning: %s\n", w.Error())
-	}
-	for _, e := range out.Errors {
-		fmt.Fprintf(p.stderr, "Error: %s\n", e.Error())
-	}
-	for _, pe := range out.Panics {
-		fmt.Fprintf(p.stderr, "Fatal Error: %v\n", pe)
-	}
-	for _, s := range out.Successes {
-		fmt.Fprintln(p.stdout, s)
-	}
-	if rtx.exitCode == 0 && out.Failed() {
-		rtx.exitCode = 1
-	}
-}
-
 // resolveHandlers obtains each command's [Handler] by calling the handler-set method named by
 // its Handler field. A wiring failure is returned, never panicked.
 func (p *Program) resolveHandlers(chain []Command) ([]Handler, *WiringError) {
@@ -861,10 +639,15 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 	// halt reports whether forward progress should stop, converting a cancellation into
 	// HaltWithCode with the cause's exit code.
 	halt := func() bool {
-		if !rtx.stopped && ctx.Err() != nil {
+		if stopped, _ := rtx.stopState(); !stopped && ctx.Err() != nil {
 			rtx.HaltWithCode(canceledExitCode(ctx))
 		}
-		return rtx.stopped || panicked
+		stopped, _ := rtx.stopState()
+		return stopped || panicked
+	}
+	exitNow := func() bool {
+		_, now := rtx.stopState()
+		return now
 	}
 
 	// Forward. began records how far the plan got, so the unwind covers exactly the begun steps.
@@ -882,7 +665,7 @@ func (p *Program) dispatch(ctx context.Context, chain []Command, rtx *Context) (
 
 	// Unwind. Both guards are re-checked per step, so an Exit or panic from within a teardown
 	// hook stops the rest too.
-	for i := began - 1; i >= 0 && !rtx.exitNow && (p.teardownOnPanic || !panicked); i-- {
+	for i := began - 1; i >= 0 && !exitNow() && (p.teardownOnPanic || !panicked); i-- {
 		if steps[i].Undo != nil {
 			run(steps[i].Undo)
 		}

@@ -8,7 +8,8 @@ import (
 	"strings"
 )
 
-// Command resolution turns argv into the chain of commands it names. It always runs before
+// Command resolution turns argv into the chain of commands it names. [DefaultResolver] is the
+// default, which a program may wrap or replace with [Program.WithResolver]. It always runs before
 // dispatch; parsing a command's declared inputs ([Parser]) is a separate, later step.
 
 // Command is one node on the invoked command path, root → leaf, as resolved for this
@@ -191,4 +192,37 @@ func findChild(f Command, tok string) (CommandDef, bool) {
 		}
 	}
 	return CommandDef{}, false
+}
+
+// Resolution is the outcome of the resolve phase: the invoked command path
+// (root → leaf), or a plugin dispatch that replaces local execution.
+type Resolution struct {
+	// Chain is the resolved command path the run phase dispatches (when
+	// Plugin is nil). It must be non-empty — the root command is always there.
+	Chain []Command
+	// Plugin, when non-nil, short-circuits local dispatch: the runtime execs this binary
+	// instead, stdio passed through and context honored.
+	Plugin *PluginDispatch
+	// Argv is the vector the run phase exposes as [Context.Argv]. A resolver that rewrites
+	// tokens returns the rewritten vector here so parsing agrees with its routing; nil keeps
+	// the original argv.
+	Argv []string
+}
+
+// Resolver is the resolve phase: it matches argv against the [Definition] to decide what this
+// invocation targets. An error is reported as a fault and fails the run. See
+// [DefaultResolver].
+//
+// The Definition is passed by value, but its slices are the program's own and shared by every
+// run. A resolver must treat it as read-only; writing through it changes every later run of the
+// [Program].
+type Resolver func(def Definition, argv []string) (Resolution, error)
+
+// DefaultResolver is rotini's resolve phase, exported for a custom [Resolver] to wrap. It
+// descends sub-commands by name or alias, skips flags and their values, stops at the first
+// positional, and diverts to a plugin dispatch for declared and discovered plugins. It does
+// not validate input and never returns an error.
+func DefaultResolver(def Definition, argv []string) (Resolution, error) {
+	chain, plugin := resolveChain(def, argv)
+	return Resolution{Chain: chain, Plugin: plugin, Argv: argv}, nil
 }

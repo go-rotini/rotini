@@ -190,6 +190,9 @@ linters:
           - errname
           - forcetypeassert
           - nilnil
+      - path: deprecation\.go
+        linters:
+          - errname
       - path: input_reader\.go
         linters:
           - wrapcheck
@@ -197,7 +200,7 @@ linters:
           - gosec
           - unparam
           - prealloc
-      - path: overlay\.go
+      - path: inputs\.go
         linters:
           - errcheck
       - path: definition\.go
