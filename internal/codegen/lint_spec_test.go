@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -165,48 +164,38 @@ func TestLintSchemaTypes_qualifiedNeedsImport(t *testing.T) {
 	}
 }
 
-// TestDocumentedLintCountsMatchTheRegistry keeps the numbers in the prose true.
+// TestDocsQuoteNoLintRuleCount keeps rule counts out of the prose.
 //
 // "29 lint rules" was written into README.md, the home page, the CLI page and the
 // specification page, and stayed there while four rules were added — four separate claims,
-// all wrong, none checkable. A count in prose is a fact about the code, so the code checks it.
+// all wrong. A count was then checked against the registry, but it still had to be edited by
+// hand every time a rule was added, which is churn for a number no reader needs. The docs now
+// say "rotini's lint rules", and this test keeps a count from coming back.
 //
 // It scans EVERY published document rather than a list someone has to remember to extend,
 // because the list is the thing that went stale the first time.
-func TestDocumentedLintCountsMatchTheRegistry(t *testing.T) {
+func TestDocsQuoteNoLintRuleCount(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Normalized before matching — emphasis stripped, whitespace collapsed — so the pattern
-	// does not depend on where someone put the asterisks or the line break: a guard that only
-	// catches the phrasing you thought of lets a stale claim through.
-	countRe := regexp.MustCompile(`(\d+) (?:rotini )?(?:spec )?lint rules`)
+	// does not depend on where someone put the asterisks or the line break.
+	countRe := regexp.MustCompile(`\b\d+ (?:rotini )?(?:spec |conf )?lint rules|plus \d+ for the conf`)
 	normalize := func(body []byte) string {
 		return strings.Join(strings.Fields(strings.ReplaceAll(string(body), "*", "")), " ")
 	}
 
-	checked := 0
 	for _, path := range publishedMarkdown(t, root) {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Errorf("read %s: %v", path, err)
 			continue
 		}
-		for _, m := range countRe.FindAllStringSubmatch(normalize(body), -1) {
-			got, err := strconv.Atoi(m[1])
-			if err != nil {
-				continue
-			}
-			checked++
-			if got != len(specLints) {
-				rel, _ := filepath.Rel(root, path)
-				t.Errorf("%s says %d lint rules; the registry has %d", rel, got, len(specLints))
-			}
+		for _, m := range countRe.FindAllString(normalize(body), -1) {
+			rel, _ := filepath.Rel(root, path)
+			t.Errorf("%s quotes a lint-rule count (%q); say \"rotini's lint rules\" instead", rel, m)
 		}
-	}
-	if checked == 0 {
-		t.Error("no document quotes a lint-rule count — if that is deliberate, delete this test")
 	}
 }
 
@@ -596,5 +585,30 @@ func TestLocateNearest_fallsBackToAncestor(t *testing.T) {
 	}
 	if _, _, ok := locateNearest(locate, "/generate/features/0"); ok {
 		t.Error("an unplaceable pointer with no placeable ancestor must report no position")
+	}
+}
+
+// TestDocGoNamesEveryInputType keeps doc.go's "Input values" section in step with what a spec
+// may write. The section once listed fewer types than the schema accepted, so a reader of the
+// package docs could not learn that `date`, `existingfile` or `count` existed. Every name
+// knownTypeNames accepts — Go's predeclared types and rotini's own — must appear there.
+func TestDocGoNamesEveryInputType(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "doc.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(body)
+	start := strings.Index(doc, "// # Input values")
+	if start < 0 {
+		t.Fatal(`doc.go has no "# Input values" section`)
+	}
+	section := doc[start:]
+	if end := strings.Index(section[1:], "\n// # "); end >= 0 {
+		section = section[:end+1]
+	}
+	for _, name := range knownTypeNames() {
+		if !regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(section) {
+			t.Errorf("doc.go's Input values section does not name the type %q, which a spec may write", name)
+		}
 	}
 }

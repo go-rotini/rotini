@@ -3,6 +3,7 @@ package rotini
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -376,4 +377,79 @@ func TestOptimalStringAlignment_transpositionCostsOne(t *testing.T) {
 	if got := optimalStringAlignment("abc", "abc"); got != 0 {
 		t.Errorf("distance to itself = %d, want 0", got)
 	}
+}
+
+// FuzzSuggest checks the ranking's contract for any token, candidate list and setting:
+//
+//   - nothing panics, and the same input gives the same output in the same order
+//   - at most maxResults results (when maxResults caps them), each one of the candidates,
+//     each unique after case folding, each scoring at least the minimum, best first
+//   - a token exactly equal to a candidate was not mistyped, so it yields nothing
+//   - otherwise a candidate equal to the token apart from case ranks first
+//
+// The candidates arrive as one string split on commas, which lets the corpus carry lists.
+func FuzzSuggest(f *testing.F) {
+	for _, seed := range []struct {
+		token, candidates string
+		max               int
+		min               float64
+	}{
+		{"stauts", "status,start,stats", 3, 0.7},
+		{"satus", "status,setup", 0, 0.7},
+		{"--verbos", "--verbose,--version,--output", 2, 0.5},
+		{"VERSION", "version,verify", 3, 0.7},
+		{"version", "version,verify", 3, 0.7},
+		{"", "a,b", 3, 0.7},
+		{"x", "", 3, 0.7},
+		{"ünïcödé", "unicode,ünïcödé2,ünicöde", 3, 0.3},
+		{"日本", "日本語,中国", 1, 0},
+		{"aa", "aa,AA,aA", 5, 1},
+		{"abc", ",,abc ,ABC,acb,bac", 0, 0},
+	} {
+		f.Add(seed.token, seed.candidates, seed.max, seed.min)
+	}
+	f.Fuzz(func(t *testing.T, token, list string, maxResults int, minScore float64) {
+		candidates := strings.Split(list, ",")
+		s := NewSuggestor().WithMaxResults(maxResults).WithMinScore(minScore)
+		got := s.Suggest(token, candidates)
+
+		if again := s.Suggest(token, candidates); !slices.Equal(got, again) {
+			t.Fatalf("not deterministic: %q then %q", got, again)
+		}
+		if slices.Contains(candidates, token) && got != nil {
+			t.Fatalf("token %q is a candidate, so nothing was mistyped; got %q", token, got)
+		}
+		if s.maxResults > 0 && len(got) > s.maxResults {
+			t.Fatalf("%d results, want at most %d", len(got), s.maxResults)
+		}
+		seen := map[string]bool{}
+		prev := 2.0
+		for _, r := range got {
+			if !slices.Contains(candidates, r) {
+				t.Fatalf("result %q is not a candidate", r)
+			}
+			if seen[fold(r)] {
+				t.Fatalf("result %q repeats another after case folding", r)
+			}
+			seen[fold(r)] = true
+			score := nearness(fold(token), fold(r))
+			if score < s.minScore {
+				t.Fatalf("result %q scores %v, below the minimum %v", r, score, s.minScore)
+			}
+			if score > prev {
+				t.Fatalf("results are not best first: %q (%v) follows a lower score (%v)", r, score, prev)
+			}
+			prev = score
+		}
+		if fold(token) != "" && !slices.Contains(candidates, token) {
+			for _, c := range candidates {
+				if fold(c) == fold(token) {
+					if len(got) == 0 || fold(got[0]) != fold(token) {
+						t.Fatalf("%q matches the token %q apart from case but does not rank first: %q", c, token, got)
+					}
+					break
+				}
+			}
+		}
+	})
 }

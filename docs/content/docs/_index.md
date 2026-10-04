@@ -51,8 +51,8 @@ go generate ./...
 go build ./cmd/todo
 {{< /code >}}
 
-`validate` checks the spec against its JSON Schema and 43 lint rules and reports each problem
-with a `file:line:col`. `generate` runs the same checks first, so `validate` is mostly for CI.
+`validate` checks the spec against its JSON Schema and rotini's lint rules and reports each
+problem with a `file:line:col`. `generate` runs the same checks first, so `validate` is mostly for CI.
 
 ## Commands, flags and arguments
 
@@ -156,12 +156,20 @@ func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
 {{< /code >}}
 
 - **`TodoAddInputs` is generated** from the spec, so the compiler holds the handler to it.
-- **Five hooks run for every command**: `CascadingPreRun` (also for each descendant), `PreRun`,
-  `Run`, `PostRun`, `CascadingPostRun`. The `No*` embeds are no-ops; declare a method to
-  use one.
+- **Five hooks, in this order:** `CascadingPreRun` runs for every command on the path from the
+  root to the invoked command, root first. `PreRun`, `Run` and `PostRun` run only for the
+  invoked command. `CascadingPostRun` runs for every command on the path again, invoked command
+  first. Teardown (`PostRun` and `CascadingPostRun`) runs even after a halt or panic, for exactly
+  the hooks whose setup ran. The `No*` embeds are no-ops; declare a method to use one.
 - **Write to `rtx.Stdout`**, not `os.Stdout`, so tests and REPLs can capture it.
 - **Record results and errors** (`rtx.RecordSuccess`, `rtx.RecordWarning`, `rtx.HaltWith`)
   rather than printing them — the runtime reports them once, after teardown.
+
+The runtime only works out which command was invoked. Flags and arguments are parsed and
+validated when a handler calls `rtx.Inputs[T]()` (or the per-channel `rtx.ArgvInputs`,
+`EnvInputs`, `FileInputs` and `StdinInputs` methods). The generated handler stubs call it first
+thing. A handler that never calls it gets the raw `rtx.Argv` and no validation, which is useful
+when you want to bring your own parser and a trap if you delete the call by accident.
 
 A dependency the handlers share — a database, an API client — is registered once in `main.go`
 and read in any hook:

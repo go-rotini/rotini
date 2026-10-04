@@ -113,7 +113,7 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini validate
 
-Checks a spec + conf without generating anything — the right thing to run in CI and in a pre-commit hook. It applies the JSON Schema *and* rotini's 43 spec lint rules (plus 8 for the conf), reporting each problem with a `file:line:col`.
+Checks a spec + conf without generating anything — the right thing to run in CI and in a pre-commit hook. It applies the JSON Schema *and* rotini's lint rules for the spec and the conf, reporting each problem with a `file:line:col`.
 
 It finds the spec and conf the same way `generate` does. `--fail fast` stops at the first problem; `collect` reports every problem at once, and is the default unless the conf's `validate.fail` says otherwise. `--watch` re-validates on every change to the spec or conf.
 

@@ -85,6 +85,13 @@
 // [Context.HaltWithCode], [Context.Exit]), and a recorded error, recovered panic or detected
 // fault is reported once, after teardown, through the outcome reporter.
 //
+// The runtime only works out which command was invoked. Flags and arguments are parsed and
+// validated when a handler calls [Context.Inputs] (or the per-channel [Context.ArgvInputs],
+// [Context.EnvInputs], [Context.FileInputs] and [Context.StdinInputs]). The generated handler
+// stubs call it first thing. A handler that never calls it gets the raw [Context.Argv] and no
+// validation — useful when you bring your own parser, and a trap if the call is deleted by
+// accident.
+//
 // The runtime's only built-in behaviors, documented as the exceptions they are: a default
 // SIGINT/SIGTERM trap (see [Program.WithoutSignalHandling] and [Program.WithSignals]), the
 // hidden __complete entry the generated shell scripts call, and os.Exit as the default exit
@@ -96,11 +103,21 @@
 // input reads — argv, a flag's environment and configuration fallbacks, and env and config
 // inputs:
 //
-//   - Scalars parse into the generated field's type: the int, uint and float families; bool
-//     as true/false, yes/no, on/off, y/n, t/f or 1/0 in any case; durations with Go's units plus
-//     d and w (7d, 2w3d); and the value types url, email, timezone, mac, ip, cidr, hostport,
-//     bytesize ([ByteSize]: 512Mi, 10MB), hexbytes ([HexBytes]) and base64bytes ([Base64Bytes]).
-//     Any other type parses through its own encoding.TextUnmarshaler.
+//   - Scalars parse into the generated field's type: string; bool (also boolean) as
+//     true/false, yes/no, on/off, y/n, t/f or 1/0 in any case; the integers int, int8, int16,
+//     int32, int64 and rune (also integer); the unsigned integers uint, uint8, uint16, uint32,
+//     uint64 and byte; the floats float32 and float64 (also number); and any, which holds the
+//     raw text. complex64, complex128 and uintptr have no parser and are refused.
+//   - Value types parse a kind of value: duration with Go's units plus d and w (7d, 2w3d);
+//     time and datetime (RFC 3339) and date (2026-09-29), each taking `layout:` for another
+//     format; url, email, timezone, mac, ip, cidr and hostport; bytesize ([ByteSize]: 512Mi,
+//     10MB), hexbytes ([HexBytes]) and base64bytes ([Base64Bytes]).
+//   - Path checks: existingfile and existingdir are plain strings, checked when parsed to exist
+//     and to be that kind of thing.
+//   - Shapes change how a flag is written: count (flags only) counts occurrences (-vvv is 3);
+//     a list ([]T, or array with `items:`) and a map (map[string]T, or map and object) repeat.
+//   - Any other type parses through its own encoding.TextUnmarshaler, with `import:` naming
+//     its package.
 //   - A list or map flag repeats (--tag a --tag b, --label k=v); with `separator:` one value
 //     also splits (--tag a,b), CSV-style, before validation sees the items.
 //   - `implicit_value:` makes a flag's value optional: bare --color takes it, --color=never

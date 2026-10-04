@@ -7,6 +7,14 @@
 #   FuzzValidateConf   the same for the conf
 FUZZ_TARGETS := .:FuzzParse .:FuzzSuggest ./internal/codegen:FuzzValidateSpec ./internal/codegen:FuzzValidateConf
 
+# The version `rotini-build` stamps into the dogfood binary: the checkout's own, from git.
+# v1.2.0 on a tagged commit; v1.2.0-3-gabc1234 between tags, which rotini reads as the last
+# release (1.2.0); a -dirty suffix with uncommitted changes. Outside a git checkout it falls
+# back to 0.0.0, which the spec and conf version guard treats as a dev build and does not judge.
+# A real version matters: a fixed stamp passes the guard for every document up to it, which
+# hides exactly the version problems the guard exists to catch.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo 0.0.0)
+
 # Where `rotini-build` writes the dogfood binary. Honors GOBIN, falling back to
 # the default $(go env GOPATH)/bin, so the target is not tied to one machine.
 GOBIN ?= $(shell go env GOBIN)
@@ -135,7 +143,7 @@ test-race:
 rotini: rotini-build rotini-install
 
 rotini-build:
-	@go build -ldflags "-s -w -X main.version=1.2.3" -o $(GOBIN)/rotini ./cmd/rotini/main.go
+	@go build -ldflags "-s -w -X main.version=$(VERSION)" -o $(GOBIN)/rotini ./cmd/rotini/main.go
 
 rotini-install:
 	@go generate ./...

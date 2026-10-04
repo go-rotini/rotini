@@ -354,6 +354,14 @@ func TestResolveVersion(t *testing.T) {
 		{"an empty build-info version falls back", "1.4.2", "", "1.4.2"},
 		{"a real tag still wins", "0.0.0", "v1.9.4", "1.9.4"},
 		{"a tagged pre-release wins and is trimmed", "0.0.0", "v2.0.0-rc.1", "2.0.0"},
+
+		// What `make rotini-build` stamps: `git describe --tags --always --dirty`. A build
+		// between tags reports the last release, which is what it contains; the go tool's own
+		// build info for such a checkout is a pseudo-version, so the stamp is what counts.
+		{"git describe on a tag", "v1.2.0", "v1.2.1-0.20261003120000-805e610abcde", "1.2.0"},
+		{"git describe between tags", "v1.1.1-3-g805e610", "(devel)", "1.1.1"},
+		{"git describe with uncommitted changes", "v1.1.1-3-g805e610-dirty", "", "1.1.1"},
+		{"git describe with no tags is a bare hash", "805e610", "", "805e610"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

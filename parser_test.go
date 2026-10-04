@@ -3,6 +3,7 @@ package rotini
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2926,5 +2927,97 @@ func TestParse_unknownFlagInAClusterCarriesTheVocabulary(t *testing.T) {
 		if !ok || pe.Kind != ParseKindUnknownFlag || !slices.Contains(pe.Candidates, "-q") {
 			t.Errorf("%v: err = %+v, want an unknown flag carrying the declared identifiers", argv, pe)
 		}
+	}
+}
+
+// overflowInputs has one flag of every narrow numeric width, plus a list and a map whose
+// elements are narrow, so each coercion path is checked.
+type overflowInputs struct {
+	App struct {
+		Flags struct {
+			I8   int8            `rotini:"i8"`
+			I16  int16           `rotini:"i16"`
+			I32  int32           `rotini:"i32"`
+			U8   uint8           `rotini:"u8"`
+			U16  uint16          `rotini:"u16"`
+			U32  uint32          `rotini:"u32"`
+			F32  float32         `rotini:"f32"`
+			List []int8          `rotini:"list"`
+			Map  map[string]int8 `rotini:"map"`
+		}
+		Arguments struct{}
+	}
+}
+
+func overflowDef() Definition {
+	flag := func(name, typ string) FlagDef {
+		return FlagDef{Name: name, Identifiers: []string{"--" + name}, Type: typ}
+	}
+	return Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		flag("i8", "int8"), flag("i16", "int16"), flag("i32", "int32"),
+		flag("u8", "uint8"), flag("u16", "uint16"), flag("u32", "uint32"),
+		flag("f32", "float32"), flag("list", "[]int8"), flag("map", "map[string]int8"),
+	}}
+}
+
+// TestCoerce_narrowNumbersRejectOutOfRange: a number is parsed at 64 bits, so without a range
+// check a value too big for a narrow field wrapped silently — 300 into an int8 was 44, 256 into
+// a uint8 was 0, 1e300 into a float32 was +Inf. Each is now the user's invalid value, naming the
+// range, and every value at a boundary still binds.
+func TestCoerce_narrowNumbersRejectOutOfRange(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string // "" = binds; else a substring of the error
+	}{
+		{[]string{"--i8", "127", "--i8", "-128"}, ""},
+		{[]string{"--i8", "128"}, `"128" is not a valid int8 (out of range: -128 to 127)`},
+		{[]string{"--i8", "-129"}, "out of range: -128 to 127"},
+		{[]string{"--i16", "32768"}, "out of range: -32768 to 32767"},
+		{[]string{"--i32", "2147483648"}, "out of range: -2147483648 to 2147483647"},
+		{[]string{"--u8", "255"}, ""},
+		{[]string{"--u8", "256"}, `"256" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--u16", "65536"}, "out of range: 0 to 65535"},
+		{[]string{"--u32", "4294967296"}, "out of range: 0 to 4294967295"},
+		{[]string{"--f32", "3.4e38"}, ""},
+		{[]string{"--f32", "1e300"}, `"1e300" is not a valid float32 (out of range`},
+		{[]string{"--list", "1", "--list", "300"}, `"300" is not a valid int8`},
+		{[]string{"--map", "a=1", "--map", "b=999"}, `"999" is not a valid int8`},
+	} {
+		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
+			_, err := NewContextFor(overflowDef(), tc.argv).Inputs[overflowInputs]()
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("a value in range was rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+			var pe *ParseError
+			if !errors.As(err, &pe) || pe.Kind != ParseKindInvalidValue {
+				t.Errorf("err = %#v, want a *ParseError of kind InvalidValue", err)
+			}
+			if CategoryOf(err) != CategoryUsage {
+				t.Errorf("category = %v, want usage: the user typed a value that does not fit", CategoryOf(err))
+			}
+		})
+	}
+}
+
+// TestCoerce_narrowNumberBoundsBind pins that the check rejects only what does not fit: the
+// extreme values of each width land exactly.
+func TestCoerce_narrowNumberBoundsBind(t *testing.T) {
+	in, err := NewContextFor(overflowDef(), []string{
+		"--i8", "-128", "--i16", "32767", "--i32", "-2147483648",
+		"--u8", "255", "--u16", "65535", "--u32", "4294967295",
+	}).Inputs[overflowInputs]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := in.App.Flags
+	if f.I8 != math.MinInt8 || f.I16 != math.MaxInt16 || f.I32 != math.MinInt32 ||
+		f.U8 != math.MaxUint8 || f.U16 != math.MaxUint16 || f.U32 != math.MaxUint32 {
+		t.Errorf("bounds bound as %+v", f)
 	}
 }

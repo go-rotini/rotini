@@ -1799,24 +1799,10 @@ func coerce(f reflect.Value, raw []string) error {
 		f.SetBool(b)
 	case reflect.String:
 		f.SetString(last)
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		n, err := strconv.ParseInt(last, 10, 64)
-		if err != nil {
-			return notValid(last, "integer")
-		}
-		f.SetInt(n)
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		n, err := strconv.ParseUint(last, 10, 64)
-		if err != nil {
-			return notValid(last, "non-negative integer")
-		}
-		f.SetUint(n)
-	case reflect.Float32, reflect.Float64:
-		x, err := strconv.ParseFloat(last, 64)
-		if err != nil {
-			return notValid(last, "number")
-		}
-		f.SetFloat(x)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return coerceNumber(f, last)
 	case reflect.Slice:
 		return coerceSlice(f, raw)
 	case reflect.Map:
@@ -1911,6 +1897,59 @@ func coerceMessage(err error, secret bool) string {
 // notValid is the standard "value isn't a <type>" coercion error.
 func notValid(value, typeName string) error {
 	return &coerceError{Value: value, TypeName: typeName}
+}
+
+// coerceNumber fills an integer, unsigned or float field. Each is parsed at 64 bits and then
+// checked against the field's own width, because a value too big for a narrower field would
+// otherwise wrap silently: 300 into an int8 is 44.
+func coerceNumber(f reflect.Value, last string) error {
+	switch f.Kind() {
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		n, err := strconv.ParseUint(last, 10, 64)
+		if err != nil {
+			return notValid(last, "non-negative integer")
+		}
+		if f.OverflowUint(n) {
+			return outOfRange(last, f.Type())
+		}
+		f.SetUint(n)
+	case reflect.Float32, reflect.Float64:
+		x, err := strconv.ParseFloat(last, 64)
+		if err != nil {
+			return notValid(last, "number")
+		}
+		if f.OverflowFloat(x) {
+			return outOfRange(last, f.Type())
+		}
+		f.SetFloat(x)
+	default:
+		n, err := strconv.ParseInt(last, 10, 64)
+		if err != nil {
+			return notValid(last, "integer")
+		}
+		if f.OverflowInt(n) {
+			return outOfRange(last, f.Type())
+		}
+		f.SetInt(n)
+	}
+	return nil
+}
+
+// outOfRange is the error for a number that parsed but does not fit its field's type, naming
+// the range so the user can see what would have fitted: `"300" is not a valid int8 (out of
+// range: -128 to 127)`.
+func outOfRange(value string, t reflect.Type) error {
+	var bounds string
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		bits := t.Bits()
+		bounds = fmt.Sprintf("%d to %d", int64(-1)<<(bits-1), int64(1)<<(bits-1)-1)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		bounds = fmt.Sprintf("0 to %d", uint64(1)<<t.Bits()-1)
+	default: // float32: a float64 field cannot overflow a value ParseFloat(…, 64) accepted
+		bounds = fmt.Sprintf("±%g", math.MaxFloat32)
+	}
+	return &coerceError{Value: value, TypeName: typeLabel(t), Cause: fmt.Errorf("out of range: %s", bounds)}
 }
 
 // coerceMapDotted fills a map[string]any flag from "key=value" pairs whose keys are dotted
