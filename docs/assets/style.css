@@ -197,6 +197,27 @@ pre code {
   color: var(--syn-text);
 }
 
+/* Tables are boxed like code blocks, in the theme's border color, with room between rows. */
+main table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+  margin: 1rem 0;
+}
+
+main th,
+main td {
+  border: 1px solid var(--border);
+  padding: 0.6rem 0.9rem;
+  vertical-align: top;
+  line-height: 1.6;
+}
+
+main th {
+  background: var(--background-alt);
+  color: var(--foreground-light);
+}
+
 ul, ol {
   margin: 0;
   padding: 1rem 0;

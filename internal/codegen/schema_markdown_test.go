@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -73,6 +74,28 @@ func TestSchemaDocsInSync(t *testing.T) {
 		}
 		if got != string(want) {
 			t.Errorf("%s is stale — a schema description changed; re-run with -update-schema-docs", page.path)
+		}
+	}
+}
+
+// TestSchemaDocsHaveNoRawTags pins that no description reaches a page as HTML. The site
+// renders raw HTML, so a placeholder like '<code>' left unescaped opened an element that never
+// closed and broke the page's layout, and '<root>' vanished from the text.
+func TestSchemaDocsHaveNoRawTags(t *testing.T) {
+	codeSpan := regexp.MustCompile("`[^`]*`")
+	tag := regexp.MustCompile(`<[A-Za-z/][^>]*>`)
+	for _, page := range schemaDocPages() {
+		got, err := renderSchemaMarkdown(page, inputChannelTable(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for n, line := range strings.Split(got, "\n") {
+			if strings.HasPrefix(line, "{{<") {
+				continue // a Hugo shortcode
+			}
+			if m := tag.FindString(codeSpan.ReplaceAllString(line, "")); m != "" && !strings.HasPrefix(m, "<!--") {
+				t.Errorf("%s line %d: %q renders as HTML", page.path, n+1, m)
+			}
 		}
 	}
 }
@@ -156,7 +179,7 @@ func renderSchemaMarkdown(page schemaDocPage, channelTable string) (string, erro
 
 	fmt.Fprintf(&b, "# %s\n\n", page.fileName)
 	if doc.Description != "" {
-		fmt.Fprintf(&b, "%s\n\n", doc.Description)
+		fmt.Fprintf(&b, "%s\n\n", prose(doc.Description))
 	}
 	fmt.Fprintf(&b, "{{< code title=\"%s — every key\" language=\"yaml\" file=%q open=\"true\" copy=\"true\" >}}{{< /code >}}\n\n", page.fileName, page.example)
 	fmt.Fprintf(&b, "{{< code title=\"the JSON Schema\" language=\"json\" file=%q open=\"false\" copy=\"true\" >}}{{< /code >}}\n\n", page.schema)
@@ -170,7 +193,7 @@ func renderSchemaMarkdown(page schemaDocPage, channelTable string) (string, erro
 		def := doc.Definitions[name]
 		fmt.Fprintf(&b, "\n## %s\n\n", name)
 		if d := flattenedDescription(def); d != "" {
-			fmt.Fprintf(&b, "%s\n\n", d)
+			fmt.Fprintf(&b, "%s\n\n", prose(d))
 		}
 		if name == "InputSchema" && channelTable != "" {
 			b.WriteString(channelTable)
@@ -338,7 +361,7 @@ func renderKeyList(doc schemaDoc, required, names []string, heading string) stri
 			fmt.Fprintf(&b, "%s\n\n", strings.Join(facts, " · "))
 		}
 		if d := flattenedDescription(p); d != "" {
-			fmt.Fprintf(&b, "%s\n\n", d)
+			fmt.Fprintf(&b, "%s\n\n", prose(d))
 		}
 	}
 	return b.String()
@@ -411,6 +434,23 @@ func flattenedDescription(doc schemaDoc) string {
 		}
 	}
 	return ""
+}
+
+// prose escapes a schema description for the page. Descriptions are plain text written for
+// editors as much as for the site, so a placeholder such as '<page-name>' or a glob such as
+// 'help_*.txt' must reach the reader as written: unescaped, the site (which renders raw HTML)
+// would read '<code>' as an unclosed tag and the rest as unknown tags or emphasis. Text inside
+// backticks is left alone, since a code span already shows its contents literally.
+func prose(s string) string {
+	esc := strings.NewReplacer("<", "&lt;", ">", "&gt;", "*", `\*`)
+	parts := strings.Split(s, "`")
+	for i := range parts {
+		// Even parts are outside code spans; so is the last part after an unmatched backtick.
+		if i%2 == 0 || (i == len(parts)-1 && len(parts)%2 == 0) {
+			parts[i] = esc.Replace(parts[i])
+		}
+	}
+	return strings.Join(parts, "`")
 }
 
 // joinLiterals renders an enum as inline code, comma-separated.

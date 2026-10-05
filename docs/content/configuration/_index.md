@@ -35,7 +35,7 @@ Optional URI identifying the rotini conf schema, for editor tooling only: rotini
 
 [`GenerateConfig`](#generateconfig)
 
-Controls `rotini generate`: the generated packages and features. When omitted entirely, the defaults apply: one generated file under internal/cmd/<root>, and every feature off.
+Controls `rotini generate`: the generated packages and features. When omitted entirely, the defaults apply: one generated file under internal/cmd/&lt;root&gt;, and every feature off.
 
 ### `validate`
 
@@ -97,13 +97,13 @@ Module-root-relative path (no leading slash) ending in '.json' the contract docu
 
 ## Feature
 
-One generated feature, chosen by 'type' (help, completion, man, markdown): an on/off switch ('enabled') plus two independent options. 'embed' chooses how the content is stored: a rendered file in 'embed_dir' loaded with //go:embed, or a string literal in the generated code. 'template' chooses how it is rendered: from an editable template seeded into 'template_dir', or from rotini's built-in one. The directories default to '<cmd-package>/renders' and '<cmd-package>/templates'. With embed on, embed_dir must be inside the cmd package, since //go:embed cannot reach outside it; template_dir may be anywhere. Output files never collide: help pages are 'help_*.txt', man pages '<page-name>.<section>' (taskr-add.1), markdown pages 'markdown_*.md' and completion scripts 'completion_<shell>.txt', and each feature removes only its own files.
+One generated feature, chosen by 'type' (help, completion, man, markdown): an on/off switch ('enabled') plus two independent options. 'embed' chooses how the content is stored: a rendered file in 'embed_dir' loaded with //go:embed, or a string literal in the generated code. 'template' chooses how it is rendered: from an editable template seeded into 'template_dir', or from rotini's built-in one. The directories default to '&lt;cmd-package&gt;/renders' and '&lt;cmd-package&gt;/templates'. With embed on, embed_dir must be inside the cmd package, since //go:embed cannot reach outside it; template_dir may be anywhere. Output files never collide: help pages are 'help_\*.txt', man pages '&lt;page-name&gt;.&lt;section&gt;' (taskr-add.1), markdown pages 'markdown_\*.md' and completion scripts 'completion_&lt;shell&gt;.txt', and each feature removes only its own files.
 
 ### `type`
 
 `string` · **required** · one of `help`, `completion`, `man`, `markdown`
 
-Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion<Shell>' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.
+Which output this entry configures. help, man and markdown are per-command pages, rendered from the command's documentation fields in the spec through the template, or written verbatim when the command sets that page in the spec. Each generates a variable per page and a 'Help', 'Man' or 'Markdown(path ...string) (string, error)' function that returns the page for a command path. completion is different: one script per shell (bash, zsh, fish, powershell), generated from the program name, with no editable template and no verbatim form. It generates a 'Completion&lt;Shell&gt;' variable per shell and a 'Completion(shell string) (string, error)' function; the scripts call the program's hidden '__complete' command.
 
 ### `embed`
 
@@ -115,7 +115,7 @@ How this feature's content is stored in the cmd package. true: the rendered cont
 
 `string`
 
-Directory (relative to the module root) where this feature's rendered files (help_*.txt, <page-name>.<section>, markdown_*.md, completion_<shell>.txt) are written when embed is true, and loaded with //go:embed, so it must be inside the cmd package (//go:embed cannot reach outside it). With embed false no files are written and this is unused; rotini validation warns if you set it then. Defaults to '<cmd-package>/renders'.
+Directory (relative to the module root) where this feature's rendered files (help_\*.txt, &lt;page-name&gt;.&lt;section&gt;, markdown_\*.md, completion_&lt;shell&gt;.txt) are written when embed is true, and loaded with //go:embed, so it must be inside the cmd package (//go:embed cannot reach outside it). With embed false no files are written and this is unused; rotini validation warns if you set it then. Defaults to '&lt;cmd-package&gt;/renders'.
 
 ### `enabled`
 
@@ -139,7 +139,7 @@ Whether the editable template (help.txt.tmpl, man.txt.tmpl or markdown.md.tmpl) 
 
 `string`
 
-Directory (relative to the module root) where this feature's editable template (help.txt.tmpl, man.txt.tmpl or markdown.md.tmpl) is written when template is true. Templates are not embedded, so it may be anywhere. Unused when no template is seeded (template false, or completion, which has none); rotini validation warns if you set it then. Defaults to '<cmd-package>/templates'.
+Directory (relative to the module root) where this feature's editable template (help.txt.tmpl, man.txt.tmpl or markdown.md.tmpl) is written when template is true. Templates are not embedded, so it may be anywhere. Unused when no template is seeded (template false, or completion, which has none); rotini validation warns if you set it then. Defaults to '&lt;cmd-package&gt;/templates'.
 
 
 ## PackageConfig
@@ -162,13 +162,13 @@ There is no 'runtime' target: the rotini runtime is imported from github.com/go-
 
 `string`
 
-Module-root-relative path (no leading slash) ending in '.go' for the file rotini writes for this target. Its parent directory is the package directory. 'cmd' defaults to 'internal/cmd/<root-command>/zz_rotini.go'; 'main' has no default and is written only when 'file' is set.
+Module-root-relative path (no leading slash) ending in '.go' for the file rotini writes for this target. Its parent directory is the package directory. 'cmd' defaults to 'internal/cmd/&lt;root-command&gt;/zz_rotini.go'; 'main' has no default and is written only when 'file' is set.
 
 ### `header`
 
 `string`
 
-Text written at the very top of every Go file this target produces (the generated file, the handler files and the entrypoint), above rotini's own 'Code generated by rotini' line. It is written as is, so write complete comment lines yourself (each starting with '//' or wrapped in /* */); a build constraint needs a blank line after it, as Go requires. Use it for a license or copyright header your repository requires on every .go file, or for a '//go:build' constraint. It is applied to the generated file on every run, and to a file created once (a handler file or the entrypoint) only when that file is first written, so editing the header later does not rewrite a file you already own.
+Text written at the very top of every Go file this target produces (the generated file, the handler files and the entrypoint), above rotini's own 'Code generated by rotini' line. It is written as is, so write complete comment lines yourself (each starting with '//' or wrapped in /\* \*/); a build constraint needs a blank line after it, as Go requires. Use it for a license or copyright header your repository requires on every .go file, or for a '//go:build' constraint. It is applied to the generated file on every run, and to a file created once (a handler file or the entrypoint) only when that file is first written, so editing the header later does not rewrite a file you already own.
 
 ### `keep`
 
@@ -221,7 +221,7 @@ Module-root-relative path (no leading slash) ending in '.json' where the JSON Sc
 
 ## OutputSchemasConfig
 
-A directory of JSON Schemas, one per declared output: '<page-name>.output.json' for a command's `output:` (taskr-list.output.json) and '<page-name>.exit-<code>.output.json' for an `exit_status` entry's `output:`. A schema is standard JSON Schema (draft-07): rotini's type names are written as JSON Schema types, and the spec's named schemas it references are included as definitions. Hidden commands get none. Rewritten on every `generate`; a '*.output.json' file in the directory that no output produces any more is removed.
+A directory of JSON Schemas, one per declared output: '&lt;page-name&gt;.output.json' for a command's `output:` (taskr-list.output.json) and '&lt;page-name&gt;.exit-&lt;code&gt;.output.json' for an `exit_status` entry's `output:`. A schema is standard JSON Schema (draft-07): rotini's type names are written as JSON Schema types, and the spec's named schemas it references are included as definitions. Hidden commands get none. Rewritten on every `generate`; a '\*.output.json' file in the directory that no output produces any more is removed.
 
 ### `dir`
 

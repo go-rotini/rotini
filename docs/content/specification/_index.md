@@ -147,7 +147,7 @@ Sub-commands of this command, declared inline or composed with $ref. On a $ref c
 The spec file whose root command is mounted here as this sub-command. Not valid on the root command. Two forms are accepted:
 
 - A relative path, resolved against this spec file's directory (`$ref: ../db/.rotini.spec.yaml`).
-- `mod://<module>@<version>/<path>`, a spec inside another Go module (`$ref: mod://github.com/acme/db@v1.4.0/cmd/db/.rotini.spec.yaml`). The version is required, and <path> is the spec file's path inside that module. The module is read from the module cache with `go mod download`, so it is verified against go.sum; add it to go.mod first (`go get github.com/acme/db@v1.4.0`). A relative $ref inside that spec resolves within the same module and cannot leave it.
+- `mod://<module>@<version>/<path>`, a spec inside another Go module (`$ref: mod://github.com/acme/db@v1.4.0/cmd/db/.rotini.spec.yaml`). The version is required, and &lt;path&gt; is the spec file's path inside that module. The module is read from the module cache with `go mod download`, so it is verified against go.sum; add it to go.mod first (`go get github.com/acme/db@v1.4.0`). A relative $ref inside that spec resolves within the same module and cannot leave it.
 
 Git and https URLs are not accepted. Either way, the mounted command uses the handlers of the composed spec's own generated package unless `handler:` names another.
 
@@ -168,7 +168,7 @@ Use a handler from another Go package for this command instead of a generated ha
 
 On a '$ref' command it replaces the default: a composed local or mod:// spec normally uses the handlers of its own generated package, and this points the command at a different package. On an inline command, the command's tree and typed inputs are still generated here, but its handler comes from the package and no handler file is written. It applies to this command only: an inline sub-command without its own 'handler:' still gets a generated handler file.
 
-The package must export a constructor '<convention>() rotini.Handler' for each command it serves (the usual five-hook handler; hooks it does not implement default to no-ops), and the generated code calls 'pkg.<Convention>()'. The compiler enforces this, since rotini cannot type-check another package.
+The package must export a constructor '&lt;convention&gt;() rotini.Handler' for each command it serves (the usual five-hook handler; hooks it does not implement default to no-ops), and the generated code calls 'pkg.&lt;Convention&gt;()'. The compiler enforces this, since rotini cannot type-check another package.
 
 #### `passthrough`
 
@@ -186,7 +186,7 @@ Declared plugins: separate executables dispatched as first-class sub-commands of
 
 [`PluginDiscovery`](#plugindiscovery)
 
-Auto-expose external '<prefix>*' executables as plugin sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared plugins. Presence enables discovery.
+Auto-expose external '&lt;prefix&gt;\*' executables as plugin sub-commands of this command (kubectl/git/gh plugin discovery), in addition to any declared plugins. Presence enables discovery.
 
 #### `plugin_path`
 
@@ -292,7 +292,7 @@ Exact, verbatim markdown reference page for this command (the markdown feature's
 
 [`Schema`](#schema)
 
-The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '<Prefix>Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type <Prefix>Output Task', so convert a value with <Prefix>Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
+The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '&lt;Prefix&gt;Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type &lt;Prefix&gt;Output Task', so convert a value with &lt;Prefix&gt;Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
 
 #### `schemas`
 
@@ -306,7 +306,7 @@ Document-level (root only): reusable named schema definitions. Referenced elsewh
 
 `string`
 
-Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('<root>_<path>.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'<GOOS>'/'<GOARCH>' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_<GOOS>.go', '_<GOARCH>.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
+Override the name of this command's generated handler-stub .go file (in the cli package). Defaults to a name derived from the command path ('&lt;root&gt;_&lt;path&gt;.go', every '-' written '_': config_get_contexts.go), reserved-name-escaped so a command named 'test'/'&lt;GOOS&gt;'/'&lt;GOARCH&gt;' does not collide with Go's filename rules. Must end in '.go', must not itself be a name Go reads specially ('_test.go', '_&lt;GOOS&gt;.go', '_&lt;GOARCH&gt;.go'), and must be unique among the commands generated into the same package. Renaming it orphans (and prunes) the previous stub file — move your handler code first.
 
 
 ## FlagInput
@@ -353,7 +353,7 @@ When true, the flag is omitted from generated help (it still parses on the comma
 
 array of `string`
 
-CLI flag identifiers (e.g., '--force', '-f'). When absent, '--<name>' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run).
+CLI flag identifiers (e.g., '--force', '-f'). When absent, '--&lt;name&gt;' is derived from the flag's name, with '_' written as '-' ('dry_run' → --dry-run).
 
 ### `schema`
 
@@ -475,9 +475,9 @@ Short one-liner shown next to this input in the generated Environment/Configurat
 
 How the piped stdin payload is read.
 
-The four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.
+The four document formats (json, yaml, jsonc, toml) decode it into the generated &lt;Prefix&gt;Stdin struct, validated against the declared schema. The default is json.
 
-The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
+The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and neither generates a &lt;Prefix&gt;Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
 
 ### `schema`
 
@@ -516,7 +516,7 @@ File path (supports ~ for home dir). Exactly one of 'path' or 'discover' must be
 
 [`Schema`](#schema)
 
-Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/<Name>". No typed struct is generated from this — typed access to config values is the config: inputs channel.
+Optional load-time validation: the loaded document is validated against this schema at bind time, before any value is read from it — a non-conforming file is a loud error naming the file and the violation (the same gate the stdin channel applies to its payload). The file that actually resolved — fixed path, discovered, or config_source-supplied — is the file validated; an absent file passes vacuously (absence is the per-input required's concern). Document-level named schemas resolve via "$ref": "#/schemas/&lt;Name&gt;". No typed struct is generated from this — typed access to config values is the config: inputs channel.
 
 
 ## FlagGroup
@@ -561,13 +561,13 @@ Where a command's handlers come from when they are not a generated stub: a Go pa
 
 `string` · **required**
 
-Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deployhandlers github.com/acme/clis/deploy/handlers'); identical imports are merged. A bare path takes its alias from the last path segment. The generated code calls '<alias>.<convention>()'.
+Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deployhandlers github.com/acme/clis/deploy/handlers'); identical imports are merged. A bare path takes its alias from the last path segment. The generated code calls '&lt;alias&gt;.&lt;convention&gt;()'.
 
 ### `convention`
 
 `string` · **required**
 
-Function-name prefix the package exports per command: codegen delegates this command to '<alias>.<convention>()' and each sub-command to '<alias>.<convention><SubPath>()', each returning a rotini.Handler. PascalCase Go-exportable identifier.
+Function-name prefix the package exports per command: codegen delegates this command to '&lt;alias&gt;.&lt;convention&gt;()' and each sub-command to '&lt;alias&gt;.&lt;convention&gt;&lt;SubPath&gt;()', each returning a rotini.Handler. PascalCase Go-exportable identifier.
 
 
 ## PluginSpec
@@ -576,7 +576,7 @@ Function-name prefix the package exports per command: codegen delegates this com
 
 `string` · **required**
 
-Name of the declared plugin. The dispatched binary is named <program>-<name>, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree <program> is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
+Name of the declared plugin. The dispatched binary is named &lt;program&gt;-&lt;name&gt;, and is searched for next to the host binary, then in the command's plugin_path, then on PATH. Inside a $ref-composed subtree &lt;program&gt; is the composed spec's own name, so one installed plugin serves both that spec's own binary and a parent that composes it.
 
 ### `aliases`
 
@@ -599,7 +599,7 @@ Host-side timeout for running the plugin. Uses Go duration format (e.g. "10s", "
 
 ## PluginDiscovery
 
-Auto-expose external '<prefix>*' executables as plugin sub-commands (kubectl/git/gh plugin style), alongside any declared plugins. Presence enables discovery; a discovered name that collides with a declared command or plugin is skipped.
+Auto-expose external '&lt;prefix&gt;\*' executables as plugin sub-commands (kubectl/git/gh plugin style), alongside any declared plugins. Presence enables discovery; a discovered name that collides with a declared command or plugin is skipped.
 
 ### `hidden`
 
@@ -856,7 +856,7 @@ Env inputs only, map-typed ('map'/'object' → map[string]any): the separator th
 
 `string`
 
-Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or <angle-bracketed>.
+Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or &lt;angle-bracketed&gt;.
 
 ### `required`
 
@@ -897,7 +897,7 @@ A run-time location strategy for a configuration file, instead of a fixed 'path'
 
 'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
 
-'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead.
+'xdg': search $XDG_CONFIG_HOME/&lt;app&gt;, defaulting to ~/.config/&lt;app&gt;, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/&lt;app&gt; reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead.
 
 ### `file`
 
@@ -909,7 +909,7 @@ The file name to look for in each searched directory (e.g. '.acme.toml', 'config
 
 `string`
 
-The application directory under the XDG config root: the '<app>' in $XDG_CONFIG_HOME/<app>. Required by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.
+The application directory under the XDG config root: the '&lt;app&gt;' in $XDG_CONFIG_HOME/&lt;app&gt;. Required by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.
 
 
 ## BaseSchema
@@ -1009,7 +1009,7 @@ The value must be an integer multiple of this (JSON Schema semantics: the divisi
 
 `boolean` · default `false`
 
-Generate the field as a pointer (*T): nil means the input was not provided, distinguishable from its zero value. Defaults/values coerce through the pointer.
+Generate the field as a pointer (\*T): nil means the input was not provided, distinguishable from its zero value. Defaults/values coerce through the pointer.
 
 ### `pattern`
 
@@ -1040,9 +1040,9 @@ Value types parse a kind of value and generate the matching Go field:
 - 'duration' — time.Duration; Go units plus 'd' days and 'w' weeks (7d, 2w3d)
 - 'time' / 'datetime' — time.Time, RFC 3339 (2026-09-29T14:00:00Z)
 - 'date' — time.Time, a calendar date (2026-09-29, that day's UTC midnight). All three time types take `layout:` for another format, Unix timestamps included
-- 'url' — *url.URL; needs a scheme and host
-- 'email' — mail.Address; 'Name <a@b.c>' or a bare address
-- 'timezone' — *time.Location; an IANA name such as Europe/Berlin
+- 'url' — \*url.URL; needs a scheme and host
+- 'email' — mail.Address; 'Name &lt;a@b.c&gt;' or a bare address
+- 'timezone' — \*time.Location; an IANA name such as Europe/Berlin
 - 'mac' (net.HardwareAddr), 'ip' (netip.Addr), 'cidr' (netip.Prefix), 'hostport' (netip.AddrPort)
 - 'bytesize' — rotini.ByteSize; 512Mi, 10MB, 1.5GiB (an 'i' makes the unit binary)
 - 'hexbytes' — rotini.HexBytes; optional 0x
