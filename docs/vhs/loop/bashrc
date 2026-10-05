@@ -1,0 +1,2 @@
+# The only shell setting rotini-loop.tape's panes load: the demo prompt.
+PS1='\[\e[33m\]$\[\e[0m\] '

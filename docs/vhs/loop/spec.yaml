@@ -1,0 +1,43 @@
+$schema: ./.rotini-schema.spec.json
+version: 1.2.0
+command:
+  name: helloworld
+  summary: say hello
+  description: helloworld greets you from the command line.
+  footer: Use "helloworld help <command>" for more information about a command.
+  flags:
+    - name: help
+      summary: print help
+      identifiers: [-h, --help]
+      schema: { type: bool }
+    - name: version
+      summary: print version
+      identifiers: [-v, --version]
+      schema: { type: bool }
+  commands:
+    - name: hello
+      summary: say hello
+      arguments:
+        - name: name
+          summary: who to greet
+          schema: { type: string, default: world }
+    - name: help
+      summary: print help
+      description: Print help for a command.
+      arguments:
+        - name: command
+          summary: the command path to print help for
+          schema: { type: '[]string' }
+      flags:
+        - name: help
+          summary: print help
+          identifiers: [-h, --help]
+          schema: { type: bool }
+    - name: version
+      summary: print version
+      description: Print the helloworld version.
+      flags:
+        - name: help
+          summary: print help
+          identifiers: [-h, --help]
+          schema: { type: bool }
