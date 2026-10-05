@@ -8,19 +8,12 @@ import (
 	"testing"
 )
 
-// TestInitialize_endToEnd is the guard the `rotini init` breakage slipped past: every
-// other test stops at "the files were written and validate", which a scaffold that
-// cannot COMPILE still passes. This one runs the real initialize into a fresh module
-// and then builds the result, so a bad seed conf, a stale template, a missing require,
-// or a wrong runtime import path fails here rather than in a new user's terminal.
-//
-// It shells out to `go build`, so it is the slowest test in the package — but it covers
-// the one path every single user walks first.
+// TestInitialize_endToEnd runs a real initialize into a fresh module and pins that the
+// scaffold has the expected files and compiles.
 func TestInitialize_endToEnd(t *testing.T) {
 	skipUnlessCompiling(t)
 
-	// The scaffold imports github.com/go-rotini/rotini, which is THIS repo — two levels
-	// up from internal/codegen. Resolve it before chdir'ing into the temp module.
+	// The scaffold imports this repo; resolve its root before chdir'ing into the temp module.
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -34,8 +27,6 @@ func TestInitialize_endToEnd(t *testing.T) {
 		t.Fatalf("Initialize: %v", err)
 	}
 
-	// The scaffold's shape: the seed files, the entrypoint, the editable stub, and the
-	// generated framework file. A missing one means a codegen step silently no-op'd.
 	for _, want := range []string{
 		"cmd/demo/.rotini.spec.yaml",
 		"cmd/demo/.rotini.conf.yaml",
@@ -48,15 +39,13 @@ func TestInitialize_endToEnd(t *testing.T) {
 		}
 	}
 
-	// The runtime is IMPORTED, never emitted — no copy of it may appear in the module.
+	// The runtime is imported, never emitted.
 	for _, gone := range []string{"internal/cmd/demo/rotini", "internal/demo"} {
 		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(gone))); err == nil {
 			t.Errorf("%s exists — the runtime must be imported, not emitted", gone)
 		}
 	}
 
-	// `go mod tidy` resolves the runtime's own requirements (recon/fs/…) from the module
-	// cache; the build is the real assertion.
 	for _, args := range [][]string{{"mod", "tidy"}, {"build", "./..."}} {
 		cmd := exec.Command("go", args...)
 		cmd.Dir = dir
@@ -78,13 +67,12 @@ func initDemo(t *testing.T) string {
 	return dir
 }
 
-// TestInitialize_forceNeverDeletes: `init --force` replaces the spec with the seed, which may
-// have fewer commands than the spec it replaces. Pruning then would delete those commands'
-// handlers — edited ones included — without a word, so init never prunes.
+// TestInitialize_forceNeverDeletes pins that `init --force` does not prune handlers for
+// commands the seed lacks.
 func TestInitialize_forceNeverDeletes(t *testing.T) {
 	dir := initDemo(t)
 	handler := filepath.Join(dir, "internal", "cmd", "demo", "demo_extra.go")
-	writeTestFile(t, filepath.Dir(handler), "demo_extra.go", "package demo\n\n"+stubMarker+"*demoExtraHandlers)(nil)\n\n// edited by hand\n")
+	writeTestFile(t, filepath.Dir(handler), "demo_extra.go", "package demo\n\n"+stubMarker+"*demoExtraHandler)(nil)\n\n// edited by hand\n")
 
 	if _, err := NewProcessor("0.0.0").Initialize("demo", "", true); err != nil {
 		t.Fatalf("Initialize --force: %v", err)
@@ -94,8 +82,8 @@ func TestInitialize_forceNeverDeletes(t *testing.T) {
 	}
 }
 
-// TestGenerate_reportsValidationWarnings: generate runs validate's checks first, so it reports
-// the same warnings — before, it dropped them and printed nothing.
+// TestGenerate_reportsValidationWarnings pins that generate reports validate's warnings as
+// notices.
 func TestGenerate_reportsValidationWarnings(t *testing.T) {
 	dir := initDemo(t)
 	conf := filepath.Join(dir, "cmd", "demo", ".rotini.conf.yaml")
@@ -103,7 +91,7 @@ func TestGenerate_reportsValidationWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// An embed_dir on a feature that is not embedded does nothing, which validate warns about.
+	// embed_dir on a non-embedded feature triggers a validate warning.
 	warned := strings.Replace(string(body), "    - type: help\n      enabled: true\n", "    - type: help\n      enabled: true\n      embed_dir: docs\n", 1)
 	if warned == string(body) {
 		t.Fatal("the seed conf no longer has the help feature this test edits")
@@ -133,8 +121,8 @@ func TestGenerate_reportsValidationWarnings(t *testing.T) {
 	}
 }
 
-// TestGenerate_missingExplicitConfIsAnError: a conf path the user typed must exist. Quietly
-// generating with the defaults instead is how a typo in --config went unnoticed.
+// TestGenerate_missingExplicitConfIsAnError pins that an explicit conf path that does not
+// exist is an error, not a fallback to defaults.
 func TestGenerate_missingExplicitConfIsAnError(t *testing.T) {
 	dir := initDemo(t)
 	spec := filepath.Join(dir, "cmd", "demo", ".rotini.spec.yaml")
@@ -144,8 +132,8 @@ func TestGenerate_missingExplicitConfIsAnError(t *testing.T) {
 	}
 }
 
-// TestGenerate_findsTheConfBesideTheSpec: with no conf given, the one beside the spec is read —
-// not a .rotini.conf.yaml in the working directory, and not the defaults.
+// TestGenerate_findsTheConfBesideTheSpec pins that, with no conf given, the conf beside the
+// spec is used rather than one in the working directory.
 func TestGenerate_findsTheConfBesideTheSpec(t *testing.T) {
 	initDemo(t)
 	spec, conf, err := ResolvePaths(filepath.Join("cmd", "demo", ".rotini.spec.yaml"), "")

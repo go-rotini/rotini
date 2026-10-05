@@ -15,18 +15,17 @@ import (
 )
 
 // Object-valued flags: a flag whose schema is a named object (`$ref: '#/schemas/DB'`) takes a
-// structured value, in whichever of four spellings suits the moment:
+// structured value in any of four spellings:
 //
 //	--db '{"host":"db.internal","port":5432}'    JSON, recognized by its leading {
 //	--db host=db.internal,port=5432,tls=true     key=value pairs, CSV-quoted; dotted keys nest
 //	--db @db.yaml                                a file (with from: [file]), JSON or YAML
 //	--db.host=db.internal --db.port=5432         one field per flag
 //
-// Every spelling decodes to the same JSON-shaped document, which is validated against the
-// named schema — the same schema, and the same validator, a stdin payload of that shape meets —
-// and then bound into the generated struct. For a single object the occurrences MERGE in argv
-// order, so `--db host=a --db port=5` builds one object and a later key wins; for a list of
-// objects (`type: array, items: {$ref: …}`) each occurrence is one element.
+// Every spelling decodes to a JSON-shaped document, is validated against the named schema (the
+// same validator a stdin payload meets), and is bound into the generated struct. For a single
+// object the occurrences merge in argv order, a later key winning; for a list of objects
+// (`type: array, items: {$ref: …}`) each occurrence is one element.
 
 // isObjectFlag reports whether a flag takes a structured value.
 func isObjectFlag(fd FlagDef) bool { return fd.ObjectSchema != "" }
@@ -67,8 +66,7 @@ func bindObjectFlag(f reflect.Value, raw []string, fd FlagDef) error {
 
 // decodeObject turns one occurrence into a JSON-shaped document: JSON when it starts with "{",
 // YAML when it spans lines (the usual shape of an @file), key=value pairs otherwise. Pairs are
-// typed from the target struct's fields, since a command line has no way to say that 5 is a
-// number and not the string "5".
+// typed from the target struct's fields, since argv text carries no type.
 func decodeObject(s string, t reflect.Type) (map[string]any, error) {
 	trimmed := strings.TrimSpace(s)
 	switch {
@@ -99,8 +97,8 @@ func decodeObject(s string, t reflect.Type) (map[string]any, error) {
 	return doc, nil
 }
 
-// decodeDocument decodes JSON or YAML text with recon's codecs, the ones stdin uses, so a value
-// types the same whichever channel it arrived on.
+// decodeDocument decodes JSON or YAML text with recon's codecs, the same ones stdin uses, so a
+// value is typed identically on either channel.
 func decodeDocument(format, text string) (map[string]any, error) {
 	codec, ok := recon.DefaultCodecs().ByName(format)
 	if !ok {
@@ -167,15 +165,11 @@ func typedField(t reflect.Type, path []string, text string) (value any, list boo
 	return text, false, nil
 }
 
-// inferScalar reads key=value text where the schema says nothing about the value — inside a
-// free-form object, or a dotted_keys map — the way the JSON spelling of the same value reads:
-// true and false are booleans, null is null, a JSON number is a number (float64, as
-// encoding/json decodes one into any), and anything else is the text itself.
-//
-// Without it the same patch stored different things by spelling: -p '{"replicas":5}' stored
-// the number 5 while -p replicas=5 stored the string "5", so a handler had to re-infer types
-// that one spelling had already given it. Only the unambiguous JSON scalar forms are inferred;
-// "007", "1_000", "yes" and "0x10" are not JSON and stay text.
+// inferScalar types key=value text the schema says nothing about (inside a free-form object or
+// a dotted_keys map) as its JSON spelling would decode: true and false are booleans, null is
+// nil, a JSON number is a float64, and anything else is the text itself. This keeps
+// `replicas=5` and `{"replicas":5}` equivalent. Only JSON scalar forms are inferred; "007",
+// "1_000", "yes" and "0x10" stay text.
 func inferScalar(text string) any {
 	switch text {
 	case "true":
@@ -327,14 +321,14 @@ func validateObject(doc map[string]any, schema string) error {
 	return errors.New(strings.Join(msgs, "; "))
 }
 
-// patternMessageCache holds each schema document's pattern messages, by schema text: the same
-// few schemas are validated on every run, and the walk need happen once.
+// patternMessageCache holds each schema document's pattern messages, keyed by schema text, so
+// the schema walk happens once per schema.
 var patternMessageCache sync.Map // string → map[string]string
 
 // applyPatternMessages rewrites each pattern failure in err whose property declares a
-// `pattern_message`, so a JSON-Schema-validated value — an object flag, a stdin payload, a
-// configuration file — reports the author's sentence rather than the regex, exactly as an
-// input's own pattern does. Other failures are untouched.
+// `pattern_message`, so a JSON-Schema-validated value (an object flag, a stdin payload, a
+// configuration file) reports the author's message rather than the regex. Other failures are
+// untouched.
 func applyPatternMessages(schema string, err error) {
 	cached, ok := patternMessageCache.Load(schema)
 	if !ok {
@@ -428,7 +422,7 @@ func collectValidation(err error, out *[]string) {
 
 // objectFieldFlag resolves a per-field flag — `--db.host` for an object flag `--db` — to the
 // object flag and the field path it sets, or ok=false.
-func objectFieldFlag(chain []ResolvedCommand, name string) (fd FlagDef, idx int, field string, ok bool) {
+func objectFieldFlag(chain []Command, name string) (fd FlagDef, idx int, field string, ok bool) {
 	if !strings.HasPrefix(name, "--") {
 		return FlagDef{}, 0, "", false
 	}

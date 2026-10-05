@@ -1,13 +1,12 @@
 package codegen
 
-// $ref resolution for spec composition: turning a ref, relative to where the referring spec
-// was loaded from, into a concrete spec plus what composition needs from it. Two source forms:
+// This file resolves $refs for spec composition. Two source forms are supported:
 //
 //   - A local relative path, resolved against the referring spec's directory.
-//   - "mod://<module>@<version>/<path>", a spec inside a module the project depends on, read
-//     from the module cache — reproducibility and integrity are Go's, not rotini's.
+//   - "mod://<module>@<version>/<path>", a spec inside a dependency module, read from the
+//     module cache and verified by go.sum.
 //
-// git:: and raw https:// refs are not supported, since rotini neither fetches nor pins them.
+// git:: and raw https:// refs are refused, since rotini neither fetches nor pins them.
 
 import (
 	"encoding/json"
@@ -21,25 +20,23 @@ import (
 
 const (
 	modScheme   = "mod://"   // module-resolved ref / locator
-	gitScheme   = "git::"    // a git locator — recognized only so it can be refused
-	httpsScheme = "https://" // a raw URL locator — recognized only so it can be refused
+	gitScheme   = "git::"    // recognized only to be refused
+	httpsScheme = "https://" // recognized only to be refused
 )
 
-// isExternalLocator reports whether a locator names an unsupported external source (git:: or a
-// raw https:// URL), which loadRef refuses — as opposed to a local path or a module-resolved
-// (mod://) ref, which ride the filesystem and go.sum respectively.
+// isExternalLocator reports whether a locator names an unsupported external source (git:: or
+// a raw https:// URL), which loadRef refuses.
 func isExternalLocator(locator string) bool {
 	return strings.HasPrefix(locator, gitScheme) || strings.HasPrefix(locator, httpsScheme)
 }
 
-// moduleDirFunc resolves a Go module@version to its extracted directory in the module
-// cache. Overridable in tests; production rides `go mod download` (go.sum-verified).
+// moduleDirFunc resolves a Go module@version to its directory in the module cache. Tests
+// override it.
 var moduleDirFunc = goModDownloadDir
 
-// resolvedRef is a $ref resolved to a concrete spec plus what composition needs: the spec's
-// directory (to discover its conf, and so its import path), the module it belongs to — the
-// consuming module for a local ref, the external one for a mod:// ref — and the base locator
-// for its own relative sub-refs.
+// resolvedRef is a $ref resolved to a concrete spec, plus the spec's directory (to discover
+// its conf and import path), the module it belongs to (the consuming module for a local ref),
+// and the base locator for its own relative refs.
 type resolvedRef struct {
 	spec      *Spec
 	dir       string
@@ -47,10 +44,9 @@ type resolvedRef struct {
 	childBase string
 }
 
-// locateRef computes the canonical locator for a $ref evaluated against a base. Pure
-// string work, no IO — so a caller can cycle-check (the locator is the cycle identity)
-// before loading. A scheme-qualified ref (mod://…) is absolute; a bare ref is relative
-// to the base, which is itself either a local directory or a mod:// subtree.
+// locateRef computes the canonical locator for a $ref evaluated against base, without I/O,
+// so callers can cycle-check on the locator before loading. A mod:// ref is absolute; a bare
+// ref is relative to base, which is a local directory or a mod:// subtree.
 func locateRef(base, ref string) (string, error) {
 	switch {
 	case strings.HasPrefix(ref, modScheme):
@@ -60,12 +56,12 @@ func locateRef(base, ref string) (string, error) {
 		}
 		return modLocator(m, v, sub), nil
 	case isExternalLocator(ref):
-		return ref, nil // git::/https:// is its own locator; loadRef refuses it (rotini neither fetches nor pins external refs)
+		return ref, nil // refused by loadRef
 	case strings.HasPrefix(base, modScheme):
 		return joinModLocator(base, ref)
 	case isExternalLocator(base):
-		return ref, nil // a relative ref beneath an external base is refused at load too
-	default: // local relative path against a local directory
+		return ref, nil // refused by loadRef
+	default:
 		p := filepath.Clean(filepath.Join(base, filepath.FromSlash(ref)))
 		if abs, err := filepath.Abs(p); err == nil {
 			p = filepath.Clean(abs)
@@ -74,10 +70,9 @@ func locateRef(base, ref string) (string, error) {
 	}
 }
 
-// loadRef reads the spec at a locator and resolves the composition metadata.
-// consumingModule is the module the ENTRY spec belongs to (used for local refs, which
-// share the entry's module). Only LOCAL and mod:// refs compose: external git/raw refs
-// are not supported (rotini neither fetches nor pins them).
+// loadRef reads the spec at a locator and resolves its composition metadata.
+// consumingModule is the entry spec's module, which local refs share. External locators
+// are refused.
 func loadRef(locator, consumingModule string) (resolvedRef, error) {
 	switch {
 	case strings.HasPrefix(locator, modScheme):
@@ -151,8 +146,7 @@ func joinModLocator(base, ref string) (string, error) {
 }
 
 // goModDownloadDir resolves a module@version to its cache directory via `go mod download`,
-// which verifies against go.sum, so codegen adds no machinery of its own. An unresolvable
-// module surfaces Go's own error, pointing the author at `go get`.
+// which verifies against go.sum. An unavailable module reports Go's error with a `go get` hint.
 func goModDownloadDir(module, version string) (string, error) {
 	cmd := exec.Command("go", "mod", "download", "-json", module+"@"+version)
 	out, runErr := cmd.Output() // -json writes a JSON object to stdout even on failure

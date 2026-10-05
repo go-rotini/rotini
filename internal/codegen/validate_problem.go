@@ -6,39 +6,31 @@ import (
 	"strings"
 )
 
-// problem is the shared finding currency of both the validate stage (schema/version
-// findings, in validate.go) and the lint stage (the rotini-rule findings, in
-// lint_spec.go / lint_conf.go), plus the helpers that partition and position them.
-
-// severity classifies a validation problem. The zero value is an error (fails
-// validation); a warning is surfaced separately but does NOT fail. The validate
-// command routes the two to the funnel (as its errors and warnings respectively).
+// severity classifies a problem. The zero value is an error, which fails validation; a
+// warning is reported but does not fail.
 type severity int
 
 const (
-	severityError   severity = iota // zero value — fails validation
-	severityWarning                 // advisory — surfaced, never fails
+	severityError severity = iota
+	severityWarning
 )
 
-// problem is a single validation finding: the location of the offending value within
-// the document and a human-readable message, tagged by document kind ("spec"/"conf")
-// and severity (error by default; warning for non-fatal advisories).
+// problem is a single validate- or lint-stage finding: a message about a location in a
+// spec or conf document.
 type problem struct {
-	kind string
+	kind string // "spec" or "conf"
 	loc  string
-	// ptr is the JSON pointer of the thing the problem is about, when the rule knows it.
-	// A schema violation's loc IS a pointer and needs none; a lint rule's loc is a human
-	// label ("command demo/build"), so it carries the pointer here instead and keeps the
-	// label for the message. Either way locateProblems turns it into a file:line:col.
+	// ptr is the JSON pointer of the subject when loc is a human label (lint rules). A
+	// schema violation's loc is itself a pointer. locateProblems resolves either to pos.
 	ptr   string
-	pos   string // "path:line:col" in the original source; "" degrades to loc-only
+	pos   string // "path:line:col" in the source, or just "path" when unplaceable
 	msg   string
-	sev   severity // zero value = error
-	cause error    // optional typed error this problem carries, reachable via errors.As
+	sev   severity
+	cause error // optional typed cause, reachable via errors.As
 }
 
-// splitProblems separates a finding list into fatal errors and non-fatal
-// warnings by each finding's severity. A non-*problem error counts as an error.
+// splitProblems partitions problems into errors and warnings by severity. A non-*problem
+// error counts as an error.
 func splitProblems(problems []error) (errs, warns []error) {
 	for _, e := range problems {
 		var p *problem
@@ -58,18 +50,13 @@ func (e *problem) Error() string {
 	return fmt.Sprintf("%s: %s: %s", e.kind, e.loc, e.msg)
 }
 
-// Unwrap exposes an optional typed cause so a caller's errors.As/Is reaches it
-// through the aggregated validation error.
+// Unwrap returns the optional typed cause.
 func (e *problem) Unwrap() error { return e.cause }
 
-// locateProblems back-fills source positions, so a problem that knows where it came from gains
-// "path:line:col". Two shapes qualify: a schema violation, whose loc IS a JSON pointer, and a
-// lint problem carrying one in ptr beside its human label. A problem with neither passes
-// through untouched, as do all problems when the source format carries no positions.
-//
-// A pointer that no longer resolves (a rule addressing a node the locator cannot find)
-// degrades to a message without a position rather than failing — a lint problem worth
-// reporting is still worth reporting unplaced.
+// locateProblems sets each problem's pos to "path:line:col" by resolving its pointer (ptr,
+// or loc when loc is a pointer) to the pointer's nearest locatable node. A problem that
+// cannot be placed still gets pos = path so the file is named. It does nothing when the
+// source has no locator or path.
 func locateProblems(problems []error, path string, locate sourceLocator) {
 	if locate == nil || path == "" {
 		return
@@ -87,19 +74,13 @@ func locateProblems(problems []error, path string, locate sourceLocator) {
 			p.pos = fmt.Sprintf("%s:%d:%d", path, line, col)
 			continue
 		}
-		// No line:col — the document ROOT has no position of its own, and a rule may
-		// address a node the locator cannot find. Name the file anyway: a problem without
-		// a line is inconvenient, and one without a file name is unusable, especially from
-		// a Makefile or against several documents. `version:` missing from a spec used to
-		// report as "spec: /: missing required property" and name nothing at all.
 		p.pos = path
 	}
 }
 
-// locateNearest resolves ptr, or failing that its nearest ancestor that resolves: a rule may
-// point at a key one format's locator cannot place (a TOML inline table, say), and the node
-// holding it is a better answer than no line at all. The document root is never an answer —
-// it has no position of its own.
+// locateNearest resolves ptr, or else its nearest resolvable ancestor (a locator may be unable
+// to place some keys, such as inside a TOML inline table). The document root is never
+// resolved, as it has no position of its own.
 func locateNearest(locate sourceLocator, ptr string) (line, col int, ok bool) {
 	for ptr != "" && ptr != "/" {
 		if line, col, ok := locate(ptr); ok {

@@ -7,28 +7,25 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/go-rotini/rotini"
 )
 
-// TestLintRegistryCompleteness guards the lint_spec.go / lint_conf.go split: if a rule
-// is accidentally dropped while relocating funcs, the count regresses.
+// TestLintRegistryCompleteness pins the number of registered spec and conf rules so a
+// dropped rule is noticed.
 func TestLintRegistryCompleteness(t *testing.T) {
 	if got := len(specLints); got != 43 {
 		t.Errorf("len(specLints) = %d, want 43 (a rule was dropped or added — update intentionally)", got)
 	}
-	if got := len(confLints); got != 8 {
-		t.Errorf("len(confLints) = %d, want 8", got)
+	if got := len(confLints); got != 9 {
+		t.Errorf("len(confLints) = %d, want 9", got)
 	}
 }
 
-// TestConstraintNumericFamilyMatchesRuntime guards the hand-copied constraintNumericFamily
-// (codegen cannot import the runtime's unexported numericFamily) against silent drift by
-// extracting the runtime's set from its source. The runtime is the module's root package,
-// two levels up from internal/codegen.
+// TestConstraintNumericFamilyMatchesRuntime pins constraintNumericFamily to the runtime's
+// unexported numericFamily, read from the root package's parser.go source.
 func TestConstraintNumericFamilyMatchesRuntime(t *testing.T) {
 	parser, err := os.ReadFile(filepath.Join("..", "..", "parser.go"))
 	if err != nil {
@@ -70,10 +67,7 @@ func specWithFlagType(typ, imp string) *Spec {
 	}
 }
 
-// TestLintSchemaTypes_accepts pins the vocabulary an author may legitimately write.
-// The JSON Schema cannot enum `type` (it spans Go names, JSON Schema names, rotini
-// aliases and imported types), so this rule is the only thing standing between a typo
-// and a gofmt failure over the generated file — which makes false positives expensive.
+// TestLintSchemaTypes_accepts pins the type vocabulary lintSchemaTypes must accept.
 func TestLintSchemaTypes_accepts(t *testing.T) {
 	cases := []struct{ typ, imp string }{
 		{"string", ""}, {"int", ""}, {"bool", ""}, {"float64", ""},
@@ -99,9 +93,7 @@ func TestLintSchemaTypes_accepts(t *testing.T) {
 	}
 }
 
-// TestLintSchemaTypes_rejectsNonTypes covers the defect this rule exists for: a value
-// that is not a Go type reached codegen intact and failed as a raw gofmt parse error
-// over the whole generated file, naming neither the input nor its spec line.
+// TestLintSchemaTypes_rejectsNonTypes pins that values which are not Go types are rejected.
 func TestLintSchemaTypes_rejectsNonTypes(t *testing.T) {
 	for _, typ := range []string{
 		"not-a-type", // parses as an EXPRESSION (two subtractions) but is not a type
@@ -121,8 +113,8 @@ func TestLintSchemaTypes_rejectsNonTypes(t *testing.T) {
 	}
 }
 
-// A lowercase name that is neither a Go builtin nor a rotini alias is a typo — before this rule
-// `strin` generated a `strin` field and failed at `go build`, far from the spec line.
+// TestLintSchemaTypes_rejectsTypos pins that an unknown lowercase type name is rejected with
+// a suggestion.
 func TestLintSchemaTypes_rejectsTypos(t *testing.T) {
 	for typ, suggest := range map[string]string{
 		"strin":             "string",
@@ -142,9 +134,8 @@ func TestLintSchemaTypes_rejectsTypos(t *testing.T) {
 	}
 }
 
-// TestLintSchemaTypes_qualifiedNeedsImport pins the other half: rotini knows the import
-// for its OWN aliases only, so a package-qualified type the author wrote must declare
-// one or the generated file references a package it never imports.
+// TestLintSchemaTypes_qualifiedNeedsImport pins that an author-written qualified type needs
+// an `import`, while rotini aliases resolving to qualified types do not.
 func TestLintSchemaTypes_qualifiedNeedsImport(t *testing.T) {
 	for _, typ := range []string{"time.Duration", "uuid.UUID", "[]uuid.UUID", "*uuid.UUID", "map[string]uuid.UUID"} {
 		problems := lintSchemaTypes(specWithFlagType(typ, ""))
@@ -156,8 +147,6 @@ func TestLintSchemaTypes_qualifiedNeedsImport(t *testing.T) {
 			t.Errorf("problem for %q should point at the missing import, got %q", typ, got)
 		}
 	}
-	// The alias vocabulary resolves to time.* but carries its own import — an author
-	// writing `duration` must NOT be asked for one.
 	for _, alias := range []string{"duration", "time", "date", "datetime"} {
 		if problems := lintSchemaTypes(specWithFlagType(alias, "")); len(problems) != 0 {
 			t.Errorf("alias %q wrongly demanded an import: %v", alias, problems)
@@ -165,54 +154,34 @@ func TestLintSchemaTypes_qualifiedNeedsImport(t *testing.T) {
 	}
 }
 
-// TestDocumentedLintCountsMatchTheRegistry keeps the numbers in the prose true.
-//
-// "29 lint rules" was written into README.md, the home page, the CLI page and the
-// specification page, and stayed there while four rules were added — four separate claims,
-// all wrong, none checkable. A count in prose is a fact about the code, so the code checks it.
-//
-// It scans EVERY published document rather than a list someone has to remember to extend,
-// because the list is the thing that went stale the first time.
-func TestDocumentedLintCountsMatchTheRegistry(t *testing.T) {
+// TestDocsQuoteNoLintRuleCount pins that no published document quotes a lint-rule count,
+// which would go stale as rules are added.
+func TestDocsQuoteNoLintRuleCount(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Normalized before matching — emphasis stripped, whitespace collapsed — so the pattern
-	// does not depend on where someone put the asterisks or the line break: a guard that only
-	// catches the phrasing you thought of lets a stale claim through.
-	countRe := regexp.MustCompile(`(\d+) (?:rotini )?(?:spec )?lint rules`)
+	// Strip emphasis and collapse whitespace so formatting cannot hide a count.
+	countRe := regexp.MustCompile(`\b\d+ (?:rotini )?(?:spec |conf )?lint rules|plus \d+ for the conf`)
 	normalize := func(body []byte) string {
 		return strings.Join(strings.Fields(strings.ReplaceAll(string(body), "*", "")), " ")
 	}
 
-	checked := 0
 	for _, path := range publishedMarkdown(t, root) {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			t.Errorf("read %s: %v", path, err)
 			continue
 		}
-		for _, m := range countRe.FindAllStringSubmatch(normalize(body), -1) {
-			got, err := strconv.Atoi(m[1])
-			if err != nil {
-				continue
-			}
-			checked++
-			if got != len(specLints) {
-				rel, _ := filepath.Rel(root, path)
-				t.Errorf("%s says %d lint rules; the registry has %d", rel, got, len(specLints))
-			}
+		for _, m := range countRe.FindAllString(normalize(body), -1) {
+			rel, _ := filepath.Rel(root, path)
+			t.Errorf("%s quotes a lint-rule count (%q); say \"rotini's lint rules\" instead", rel, m)
 		}
-	}
-	if checked == 0 {
-		t.Error("no document quotes a lint-rule count — if that is deliberate, delete this test")
 	}
 }
 
-// publishedMarkdown lists the documents a reader actually sees: the repository's own top-level
-// markdown and every page of the docs site. Generated pages are skipped — they are rendered
-// from the schemas and cannot drift by hand.
+// publishedMarkdown lists the repository's top-level markdown and every docs-site page,
+// skipping the generated reference pages.
 func publishedMarkdown(t *testing.T, root string) []string {
 	t.Helper()
 	var out []string
@@ -237,17 +206,8 @@ func publishedMarkdown(t *testing.T, root string) []string {
 }
 
 // ── lintDefaultConstraints ───────────────────────────────────────────────────
-//
-// The hole this rule closes let a spec validate, generate, compile, and then fail on EVERY
-// invocation that took the default — with an error naming a flag the user never typed:
-//
-//	schema: { type: string, enum: [fast, slow], default: turbo }
-//	$ mycli
-//	Error: invalid value "turbo" for --mode (one of: fast, slow)
-//
-// Six constraint families were uncaught, six for six. The table below is that measurement,
-// inverted into a guard.
 
+// defaultConstraintSpec decodes a one-flag spec whose flag has the given inline schema.
 func defaultConstraintSpec(t *testing.T, schema string) *Spec {
 	t.Helper()
 	body := "version: 0.0.0\ncommand:\n  name: t\n  summary: s\n  flags:\n" +
@@ -286,8 +246,8 @@ func TestLintDefaultConstraints_rejectsADefaultItsOwnConstraintsForbid(t *testin
 	}
 }
 
-// TestLintDefaultConstraints_acceptsWhatWorks is the false-positive half. A rule that rejects
-// valid specs is worse than the hole it closes, because it blocks a build that would have run.
+// TestLintDefaultConstraints_acceptsWhatWorks pins that defaults satisfying their constraints
+// are accepted.
 func TestLintDefaultConstraints_acceptsWhatWorks(t *testing.T) {
 	for _, schema := range []string{
 		`type: string, enum: [fast, slow], default: fast`,
@@ -304,7 +264,7 @@ func TestLintDefaultConstraints_acceptsWhatWorks(t *testing.T) {
 		`type: int, minimum: 1`,           // constraint, no default
 		`type: string, enum: [a, b]`,      // enum, no default
 		`type: duration, default: 5s`,     // non-numeric, non-enum
-		`type: bool, default: true`,       //
+		`type: bool, default: true`,
 		`type: 'map[string]string', minItems: 1, default: { a: b }`,
 	} {
 		t.Run(schema, func(t *testing.T) {
@@ -315,9 +275,8 @@ func TestLintDefaultConstraints_acceptsWhatWorks(t *testing.T) {
 	}
 }
 
-// TestLintDefaultConstraints_reportsEveryViolation: the schema validator reports all its errors,
-// and this rule must too. Reporting only the first means a spec with three bad defaults takes
-// three round trips to fix.
+// TestLintDefaultConstraints_reportsEveryViolation pins one problem per bad default, not just
+// the first.
 func TestLintDefaultConstraints_reportsEveryViolation(t *testing.T) {
 	spec, err := decodeData[Spec](formatYAML, []byte(
 		"version: 0.0.0\ncommand:\n  name: t\n  summary: s\n  flags:\n"+
@@ -333,17 +292,9 @@ func TestLintDefaultConstraints_reportsEveryViolation(t *testing.T) {
 	}
 }
 
-// TestDefaultConstraintsAgreeWithRuntime is the anti-drift guard, and the reason this rule
-// checks defaultString/defaultList output rather than the raw YAML value.
-//
-// codegen cannot call the runtime's checkNumericBounds / checkStringBounds / checkItemCount —
-// they are unexported — so the checks in defaultViolation are a hand-written mirror, exactly as
-// constraintNumericFamily mirrors numericFamily. A copy that is never compared drifts, so this
-// runs the same defaults through BOTH: the lint rule, and a real parse of a real Definition with
-// NO arguments, which is precisely when a default gets validated.
-//
-// Agreement is the assertion. Where they disagree, one of them is wrong about what a user's CLI
-// will actually do.
+// TestDefaultConstraintsAgreeWithRuntime pins defaultViolation, a hand-written mirror of the
+// runtime's unexported constraint checks, to the runtime: each default must be rejected by the
+// lint exactly when a no-argument parse rejects it.
 func TestDefaultConstraintsAgreeWithRuntime(t *testing.T) {
 	type stringFlags struct {
 		F string `rotini:"f"`
@@ -411,8 +362,7 @@ func TestDefaultConstraintsAgreeWithRuntime(t *testing.T) {
 			fd.Name, fd.Identifiers = "f", []string{"--f"}
 			def := rotini.Definition{Name: "t", Handler: "App", Flags: []rotini.FlagDef{fd}}
 
-			// No argv at all: the default is the only value there is to validate, which is
-			// exactly the failure this rule exists to catch before a user ever sees it.
+			// With no argv, the default is the only value validated.
 			rtx := rotini.NewContextFor(def, nil)
 			runtimeErr := rotini.NewParser().Parse(rtx, c.out())
 			runtimeRejects := runtimeErr != nil
@@ -491,10 +441,9 @@ func TestLintRequiredArgumentOrder(t *testing.T) {
 	}
 }
 
-// TestRequiredArgumentOrderMatchesTheParser pins the claim the rule's message makes: with an
-// optional positional before a required one, a single value lands in the optional one and the run
-// fails. If the parser ever learns to skip an optional positional, this rule becomes wrong and
-// this test says so.
+// TestRequiredArgumentOrderMatchesTheParser pins the parser behavior lintRequiredArgumentOrder
+// relies on: a single value fills the leading optional positional and the required one is
+// reported missing.
 func TestRequiredArgumentOrderMatchesTheParser(t *testing.T) {
 	type args struct {
 		Optional  string `rotini:"optional"`
@@ -517,9 +466,8 @@ func TestRequiredArgumentOrderMatchesTheParser(t *testing.T) {
 	}
 }
 
-// TestLintPatternMessage_needsAPattern: pattern_message only ever replaces a pattern's failure
-// text, so one with no pattern beside it — on an input, its items, a named schema or a property
-// — would never be shown. It is rejected, naming where it sits.
+// TestLintPatternMessage_needsAPattern pins that a pattern_message without a pattern is
+// rejected wherever it sits in a schema tree.
 func TestLintPatternMessage_needsAPattern(t *testing.T) {
 	msg := BaseSchema{Type: "string", PatternMessage: "must be lowercase"}
 	spec := &Spec{Command: Command{
@@ -547,10 +495,8 @@ func TestLintPatternMessage_needsAPattern(t *testing.T) {
 	}
 }
 
-// With no cmd package declared, the cmd package is the default internal/cmd/<root name>, so an
-// embed_dir outside internal/cmd can never be reached by //go:embed — validate says so rather
-// than leaving it to generate. One under internal/cmd passes here; generate, which knows the
-// root name, holds it to the exact directory.
+// TestLintFeatureDirs_defaultCmdPackage pins that, with no cmd package declared, embed_dir
+// must resolve under internal/cmd/<some name>.
 func TestLintFeatureDirs_defaultCmdPackage(t *testing.T) {
 	conf := func(dir string) *Conf {
 		return &Conf{Generate: &GenerateConfig{Features: []Feature{{Type: "help", Enabled: true, Embed: true, EmbedDir: dir}}}}
@@ -568,8 +514,7 @@ func TestLintFeatureDirs_defaultCmdPackage(t *testing.T) {
 	}
 }
 
-// generate writes schema files relative to the module root, so validate rejects one it could
-// not write: absolute, or climbing out with "..".
+// TestLintSchemaFiles pins that schema file paths must be module-root-relative.
 func TestLintSchemaFiles(t *testing.T) {
 	for file, want := range map[string]int{
 		".rotini-schema.spec.json": 0, "cmd/app/.rotini-schema.spec.json": 0,
@@ -582,8 +527,8 @@ func TestLintSchemaFiles(t *testing.T) {
 	}
 }
 
-// A rule may point at a key a format's locator cannot place; the problem then lands on the
-// nearest enclosing node that it can, never on nothing.
+// TestLocateNearest_fallsBackToAncestor pins that an unplaceable pointer resolves to its
+// nearest placeable ancestor.
 func TestLocateNearest_fallsBackToAncestor(t *testing.T) {
 	locate := func(ptr string) (int, int, bool) {
 		if ptr == "/command/flags/2" {
@@ -596,5 +541,28 @@ func TestLocateNearest_fallsBackToAncestor(t *testing.T) {
 	}
 	if _, _, ok := locateNearest(locate, "/generate/features/0"); ok {
 		t.Error("an unplaceable pointer with no placeable ancestor must report no position")
+	}
+}
+
+// TestDocGoNamesEveryInputType pins that doc.go's "Input values" section names every type in
+// knownTypeNames.
+func TestDocGoNamesEveryInputType(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "..", "doc.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(body)
+	start := strings.Index(doc, "// # Input values")
+	if start < 0 {
+		t.Fatal(`doc.go has no "# Input values" section`)
+	}
+	section := doc[start:]
+	if end := strings.Index(section[1:], "\n// # "); end >= 0 {
+		section = section[:end+1]
+	}
+	for _, name := range knownTypeNames() {
+		if !regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `\b`).MatchString(section) {
+			t.Errorf("doc.go's Input values section does not name the type %q, which a spec may write", name)
+		}
 	}
 }

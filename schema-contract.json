@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "rotini contract document",
+  "description": "The contract document `rotini generate` writes when the conf sets generate.contract.file: every visible command of a cli with its inputs, output and exit statuses. Each command maps directly onto a tool definition for an AI agent: `name` and `summary` describe it, `parameters` is the JSON Schema of its arguments and flags, and `output` the JSON Schema of its result. Every embedded schema is standard JSON Schema (draft-07), and a `$ref` in one resolves against this document's `definitions`.",
+  "type": "object",
+  "required": ["format", "name", "commands", "errors"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "rotini-contract/1",
+      "description": "The document's format and its version. A change that would break a reader changes the number."
+    },
+    "name": { "type": "string", "description": "The cli's root command name." },
+    "commands": {
+      "type": "array",
+      "description": "Every visible command, the root first and then depth-first in spec order. A hidden command, and everything beneath it, is left out. A plugin a command declares follows it, with `plugin: true`.",
+      "items": { "$ref": "#/definitions/Command" }
+    },
+    "definitions": {
+      "type": "object",
+      "description": "The spec's named schemas, as JSON Schema, by name.",
+      "additionalProperties": { "$ref": "#/definitions/JSONSchema" }
+    },
+    "errors": {
+      "$ref": "#/definitions/JSONSchema",
+      "description": "The JSON Schema of one line rotini.StructuredReporter writes to stderr: an error, warning, info or success. A program uses that reporter only when its author opts in."
+    }
+  },
+  "definitions": {
+    "JSONSchema": {
+      "type": ["object", "boolean"],
+      "description": "A JSON Schema (draft-07)."
+    },
+    "Command": {
+      "type": "object",
+      "required": ["name", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "description": "The command as typed, the root included: \"taskr list\"." },
+        "path": { "type": "array", "items": { "type": "string" }, "description": "The command names below the root: [\"list\"]. Empty for the root." },
+        "summary": { "type": "string" },
+        "description": { "type": "string" },
+        "aliases": { "type": "array", "items": { "type": "string" } },
+        "deprecated": { "type": "string", "description": "Why the command is deprecated, when it is." },
+        "plugin": { "type": "boolean", "description": "true for a plugin: a separate program the command runs, whose inputs and output this document does not describe." },
+        "arguments": { "type": "array", "items": { "$ref": "#/definitions/Argument" } },
+        "flags": { "type": "array", "items": { "$ref": "#/definitions/Flag" }, "description": "The command's own flags, then the cascading flags it inherits from its ancestors." },
+        "env": { "type": "array", "items": { "$ref": "#/definitions/Env" } },
+        "config": { "type": "array", "items": { "$ref": "#/definitions/Config" } },
+        "stdin": { "$ref": "#/definitions/Stdin" },
+        "parameters": {
+          "$ref": "#/definitions/JSONSchema",
+          "description": "An object schema with one property per argument and flag, by name, each carrying its summary as `description`: the input schema of a tool definition."
+        },
+        "output": { "$ref": "#/definitions/JSONSchema", "description": "The shape of what the command writes to stdout when it succeeds, when it declares one. A command that writes a stream of items declares one item." },
+        "exit_status": { "type": "array", "items": { "$ref": "#/definitions/ExitStatus" } }
+      }
+    },
+    "Argument": {
+      "type": "object",
+      "required": ["name", "schema"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "summary": { "type": "string" },
+        "required": { "type": "boolean" },
+        "variadic": { "type": "boolean", "description": "true when it takes every remaining positional." },
+        "deprecated": { "type": "string" },
+        "schema": { "$ref": "#/definitions/JSONSchema" }
+      }
+    },
+    "Flag": {
+      "type": "object",
+      "required": ["name", "identifiers", "schema"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "identifiers": { "type": "array", "items": { "type": "string" }, "description": "What the user types: [\"-o\", \"--output\"]." },
+        "summary": { "type": "string" },
+        "required": { "type": "boolean" },
+        "cascading": { "type": "boolean", "description": "true when the command declares it and every command beneath it accepts it too." },
+        "inherited": { "type": "boolean", "description": "true when an ancestor declares it as cascading." },
+        "deprecated": { "type": "string" },
+        "schema": { "$ref": "#/definitions/JSONSchema" }
+      }
+    },
+    "Env": {
+      "type": "object",
+      "required": ["name", "variables", "schema"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "variables": { "type": "array", "items": { "type": "string" }, "description": "The environment variables read, the first preferred." },
+        "summary": { "type": "string" },
+        "required": { "type": "boolean" },
+        "secret": { "type": "boolean", "description": "true when the value is a secret; its default is then left out." },
+        "deprecated": { "type": "string" },
+        "schema": { "$ref": "#/definitions/JSONSchema" }
+      }
+    },
+    "Config": {
+      "type": "object",
+      "required": ["name", "key", "schema"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "key": { "type": "string", "description": "The key read from the configuration file." },
+        "file": { "type": "string", "description": "The name of the configuration file it is read from, when one is named." },
+        "summary": { "type": "string" },
+        "required": { "type": "boolean" },
+        "deprecated": { "type": "string" },
+        "schema": { "$ref": "#/definitions/JSONSchema" }
+      }
+    },
+    "Stdin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": { "type": "string" },
+        "schema": { "$ref": "#/definitions/JSONSchema" }
+      }
+    },
+    "ExitStatus": {
+      "type": "object",
+      "required": ["code"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "integer" },
+        "summary": { "type": "string" },
+        "output": { "$ref": "#/definitions/JSONSchema", "description": "What the command still writes to stdout when it exits with this code." }
+      }
+    }
+  }
+}

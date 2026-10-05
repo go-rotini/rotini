@@ -1,12 +1,16 @@
 # Every key the conf accepts, in one valid file. `rotini validate` checks it on every test run.
 $schema: ./.rotini-schema.conf.json
-version: 1.0.0
+version: 1.2.0
 generate:
   schemas:
     spec:
       file: cmd/deploy/.rotini-schema.spec.json
     conf:
       file: cmd/deploy/.rotini-schema.conf.json
+    output:
+      dir: cmd/deploy/schemas/output
+  contract:
+    file: cmd/deploy/cli-contract.json
   packages:
     - type: main
       file: cmd/deploy/main.go
@@ -29,6 +33,7 @@ generate:
       enabled: true
     - type: man
       enabled: false
+      section: 1
     - type: markdown
       enabled: false
 validate:

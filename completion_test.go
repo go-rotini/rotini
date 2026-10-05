@@ -33,8 +33,8 @@ func TestComplete_discoversPlugins(t *testing.T) {
 	}
 	def := Definition{
 		Name: "acme", Handler: "App",
-		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}}, // collides with acme-bar
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
+		Commands:        []CommandDef{{Name: "bar", Handler: "AcmeBar"}}, // collides with acme-bar
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
 	got := complete(def, []string{""}, nil, nil)
@@ -52,15 +52,14 @@ func TestComplete_discoversPlugins(t *testing.T) {
 	}
 
 	// Hidden discovery dispatches but lists nothing.
-	def.Discovery.Hidden = true
+	def.PluginDiscovery.Hidden = true
 	if hidden := complete(def, []string{""}, nil, nil); contains(hidden, "foo") {
 		t.Errorf("hidden discovery should not list plugins: %v", hidden)
 	}
 }
 
-// TestDiscoveredPlugins covers the public data feed a help renderer uses to list
-// runtime plugins: discovered names minus declared collisions, nil for no/hidden
-// discovery, sorted + deduped.
+// TestDiscoveredPlugins pins discovered names minus declared collisions, sorted and deduped,
+// and nil for absent or hidden discovery.
 func TestDiscoveredPlugins(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar", "acme-zip", "unrelated"} {
@@ -68,16 +67,16 @@ func TestDiscoveredPlugins(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cmd := ResolvedCommand{
+	cmd := Command{
 		Name: "acme",
 		// "bar" collides with discovered acme-bar (declared wins → excluded);
-		// "ext"/"x" remote shadows nothing discovered here.
-		Commands:  []CommandDef{{Name: "bar", Handler: "AcmeBar"}},
-		Remotes:   []RemoteDef{{Name: "ext", Aliases: []string{"x"}, Binary: "acme-ext"}},
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
+		// "ext"/"x" plugin shadows nothing discovered here.
+		Commands:        []CommandDef{{Name: "bar", Handler: "AcmeBar"}},
+		Plugins:         []PluginDef{{Name: "ext", Aliases: []string{"x"}, Binary: "acme-ext"}},
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 
-	got := DiscoveredPlugins(cmd)
+	got := cmd.DiscoveredPlugins()
 	want := []DiscoveredPlugin{
 		{Name: "foo", Path: filepath.Join(dir, progFile("acme-foo"))},
 		{Name: "zip", Path: filepath.Join(dir, progFile("acme-zip"))},
@@ -86,96 +85,91 @@ func TestDiscoveredPlugins(t *testing.T) {
 		t.Errorf("DiscoveredPlugins = %v, want %v (bar shadowed by declared command; unrelated unprefixed)", got, want)
 	}
 
-	// The path is the one dispatch would run: a copy earlier in the search order shadows a
-	// later one, so listing the later one would name a binary that never runs.
+	// The path is the one dispatch would run: an earlier copy in search order shadows a later one.
 	earlier := t.TempDir()
 	if err := os.WriteFile(filepath.Join(earlier, progFile("acme-foo")), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", earlier)
-	if got := DiscoveredPlugins(cmd); len(got) == 0 || got[0].Path != filepath.Join(dir, progFile("acme-foo")) {
+	if got := cmd.DiscoveredPlugins(); len(got) == 0 || got[0].Path != filepath.Join(dir, progFile("acme-foo")) {
 		t.Errorf("foo = %v, want the plugin-path copy (searched before PATH)", got)
 	}
-	if path, ok := RemoteBinaryPath(cmd, "foo"); !ok || path != filepath.Join(dir, progFile("acme-foo")) {
-		t.Errorf("RemoteBinaryPath(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
+	if path, ok := cmd.PluginBinary("foo"); !ok || path != filepath.Join(dir, progFile("acme-foo")) {
+		t.Errorf("PluginBinary(foo) = %q, %v — must agree with DiscoveredPlugins", path, ok)
 	}
 
-	// Hidden discovery → nil (the section is suppressed).
+	// Hidden discovery → nil.
 	hidden := cmd
-	hd := *cmd.Discovery
+	hd := *cmd.PluginDiscovery
 	hd.Hidden = true
-	hidden.Discovery = &hd
-	if got := DiscoveredPlugins(hidden); got != nil {
+	hidden.PluginDiscovery = &hd
+	if got := hidden.DiscoveredPlugins(); got != nil {
 		t.Errorf("hidden discovery should yield nil, got %v", got)
 	}
 
 	// No discovery configured → nil.
-	if got := DiscoveredPlugins(ResolvedCommand{Name: "acme"}); got != nil {
+	if got := (Command{Name: "acme"}).DiscoveredPlugins(); got != nil {
 		t.Errorf("no discovery should yield nil, got %v", got)
 	}
 }
 
-// TestDiscoveryDiagnostics surfaces a misconfigured discovery path as data: an unusable
-// author-configured path is reported (with the offending path + cause), a clean path reports
-// nothing, and listing still works (DiscoveredPlugins never errors).
-func TestDiscoveryDiagnostics(t *testing.T) {
+// TestPluginDiscoveryErrors pins that an unusable configured plugin path is reported with its
+// path and cause, a clean or not-yet-existing path reports nothing, and listing still works.
+func TestPluginDiscoveryErrors(t *testing.T) {
 	// A path that is not a directory is a real diagnostic.
 	file := filepath.Join(t.TempDir(), "plugins")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	bad := ResolvedCommand{
-		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: file,
+	bad := Command{
+		Name:            "acme",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: file,
 	}
-	problems := DiscoveryDiagnostics(bad)
+	problems := bad.PluginDiscoveryErrors()
 	if len(problems) != 1 || !strings.Contains(problems[0].Error(), file) {
-		t.Fatalf("DiscoveryDiagnostics = %v, want exactly one problem naming %s", problems, file)
+		t.Fatalf("PluginDiscoveryErrors = %v, want exactly one problem naming %s", problems, file)
 	}
 	// Listing degrades gracefully: the bad path contributes nothing but never errors.
-	if got := DiscoveredPlugins(bad); got != nil {
+	if got := bad.DiscoveredPlugins(); got != nil {
 		t.Errorf("DiscoveredPlugins with only a bad path = %v, want nil", got)
 	}
 
-	// A path that does not exist YET is not a problem: it is where plugins go once one is
-	// installed. Reporting it made every fresh install look misconfigured.
+	// A path that does not exist yet is not a problem.
 	absent := bad
 	absent.PluginPath = filepath.Join(t.TempDir(), "no-such-subdir")
-	if probs := DiscoveryDiagnostics(absent); len(probs) != 0 {
+	if probs := absent.PluginDiscoveryErrors(); len(probs) != 0 {
 		t.Errorf("a missing plugin directory produced diagnostics: %v", probs)
 	}
 
 	// A clean configured path reports no problems.
-	clean := ResolvedCommand{
-		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: t.TempDir(),
+	clean := Command{
+		Name:            "acme",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: t.TempDir(),
 	}
-	if probs := DiscoveryDiagnostics(clean); probs != nil {
+	if probs := clean.PluginDiscoveryErrors(); probs != nil {
 		t.Errorf("clean path produced diagnostics: %v", probs)
 	}
 
 	// No discovery → nil.
-	if probs := DiscoveryDiagnostics(ResolvedCommand{Name: "acme"}); probs != nil {
+	if probs := (Command{Name: "acme"}).PluginDiscoveryErrors(); probs != nil {
 		t.Errorf("no discovery produced diagnostics: %v", probs)
 	}
 }
 
-// Incidental scan locations are not reported: a missing $PATH entry is normal, not a
-// misconfiguration, so it must never surface as a diagnostic (only the configured path does).
+// Incidental scan locations are not reported: a missing $PATH entry is not a diagnostic.
 func TestDiscoveryDiagnostics_pathNoiseSilent(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(t.TempDir(), "missing-path-entry"))
-	cmd := ResolvedCommand{
-		Name:      "acme",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, // no configured PluginPath
+	cmd := Command{
+		Name:            "acme",
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, // no configured PluginPath
 	}
-	if probs := DiscoveryDiagnostics(cmd); probs != nil {
+	if probs := cmd.PluginDiscoveryErrors(); probs != nil {
 		t.Errorf("a bad $PATH entry was reported as a diagnostic: %v", probs)
 	}
 }
 
-// TestDiscoveredPlugins_viaChain proves the documented help-handler seam: a handler
-// reads its command's discovery off rtx.Chain() and gets the runtime plugin list —
-// the path that closes static help's plugin blind spot (D-REMOTE-HELP).
+// TestDiscoveredPlugins_viaChain pins that a handler reads its command's discovered plugins
+// off rtx.CommandChain().
 func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	dir := t.TempDir()
 	for _, n := range []string{"acme-foo", "acme-bar"} {
@@ -185,13 +179,13 @@ func TestDiscoveredPlugins_viaChain(t *testing.T) {
 	}
 	def := Definition{
 		Name: "acme", Handler: "App",
-		Discovery: &RemoteDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
+		PluginDiscovery: &PluginDiscoveryDef{Prefix: "acme-"}, PluginPath: dir,
 	}
 	rtx := NewContextFor(def, nil) // what the runtime hands a handler
-	chain := rtx.Chain()
-	got := DiscoveredPlugins(chain[len(chain)-1])
+	chain := rtx.CommandChain()
+	got := chain[len(chain)-1].DiscoveredPlugins()
 	if len(got) != 2 || got[0].Name != "bar" || got[1].Name != "foo" {
-		t.Errorf("DiscoveredPlugins via rtx.Chain() = %v, want bar and foo", got)
+		t.Errorf("DiscoveredPlugins via rtx.CommandChain() = %v, want bar and foo", got)
 	}
 }
 
@@ -217,7 +211,7 @@ func completionDef() Definition {
 			},
 			{Name: "test", Handler: "AppTest"},
 		},
-		RemoteCommands: []RemoteDef{{Name: "plugin", Binary: "app-plugin"}},
+		Plugins: []PluginDef{{Name: "plugin", Binary: "app-plugin"}},
 	}
 }
 
@@ -228,9 +222,9 @@ func TestComplete(t *testing.T) {
 		words []string
 		want  []string
 	}{
-		{"all commands + remotes", []string{""}, []string{"b", "build", "plugin", "test"}},
+		{"all commands + plugins", []string{""}, []string{"b", "build", "plugin", "test"}},
 		{"command prefix", []string{"bu"}, []string{"build"}},
-		{"remote prefix", []string{"plu"}, []string{"plugin"}},
+		{"plugin prefix", []string{"plu"}, []string{"plugin"}},
 		{"flag names of chain (declared only, no auto -h)", []string{"build", "-"}, []string{"--mode", "--verbose", "-m", "-v"}},
 		{"flag name prefix", []string{"build", "--m"}, []string{"--mode"}},
 		{"enum value of preceding flag", []string{"build", "--mode", ""}, []string{"debug", "release"}},
@@ -293,10 +287,8 @@ func TestComplete_nestedSubcommands(t *testing.T) {
 	}
 }
 
-// BenchmarkComplete budgets the per-keystroke completion path — the generated
-// shell scripts call __complete on every TAB, so this must stay comfortably
-// sub-millisecond. The ceiling exists so future token handling (from:, dotted
-// keys) cannot quietly make typing laggy; `make test-bench` reports it.
+// BenchmarkComplete measures the per-keystroke completion path, which the generated scripts
+// call on every TAB and must stay sub-millisecond; `make test-bench` reports it.
 func BenchmarkComplete(b *testing.B) {
 	def := completionDef()
 	cases := []struct {
@@ -368,9 +360,8 @@ func TestComplete_fromFileFallsBack(t *testing.T) {
 	}
 }
 
-// TestComplete_noAutoHelpFlag pins the ethos: completion never auto-adds -h/--help.
-// They appear only when the CLI declares a help flag (Pillar 1 — no framework-injected
-// flags).
+// TestComplete_noAutoHelpFlag pins that completion offers -h/--help only when the CLI declares
+// a help flag.
 func TestComplete_noAutoHelpFlag(t *testing.T) {
 	// No declared help flag → completion offers none.
 	bare := completionDef()
@@ -392,14 +383,14 @@ func TestComplete_noAutoHelpFlag(t *testing.T) {
 // FlagValueCompleter opt-in path.
 type dynCompletionHandlers struct{}
 
-func (dynCompletionHandlers) App() Handlers      { return dynStub{} }
-func (dynCompletionHandlers) AppBuild() Handlers { return dynBuildHandler{} }
+func (dynCompletionHandlers) App() Handler      { return dynStub{} }
+func (dynCompletionHandlers) AppBuild() Handler { return dynBuildHandler{} }
 
 type dynStub struct {
-	DefaultCascadingPreRun
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoCascadingPreRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 }
 
 func (dynStub) Run(ctx context.Context, rtx *Context) {}
@@ -426,10 +417,9 @@ func dynCompletionDef() Definition {
 	}
 }
 
-// TestComplete_dynamicFlagValue covers the FlagValueCompleter opt-in: a completer's
-// candidates take precedence over the static enum and are prefix-filtered; a flag with
-// no completer (or a nil return) falls back to the enum; and with no handlers bound the
-// behavior is the pure-static enum (backward compatible).
+// TestComplete_dynamicFlagValue pins that a FlagValueCompleter's candidates win over the enum
+// and are prefix-filtered, and that no completer, a nil return, or no handlers falls back to
+// the enum.
 func TestComplete_dynamicFlagValue(t *testing.T) {
 	def := dynCompletionDef()
 	agg := dynCompletionHandlers{}
@@ -454,8 +444,8 @@ func TestComplete_dynamicFlagValue(t *testing.T) {
 	}
 }
 
-// TestComplete_dynamicReceivesContext proves the completer is handed the resolved chain
-// and the completion words via rtx, and can read services bound on the Program.
+// TestComplete_dynamicReceivesContext pins that the completer's rtx carries the resolved
+// chain, the completion words and the Program's dependencies.
 func TestComplete_dynamicReceivesContext(t *testing.T) {
 	def := dynCompletionDef()
 	rtx := newContext()
@@ -467,8 +457,8 @@ func TestComplete_dynamicReceivesContext(t *testing.T) {
 
 type dynCtxHandlers struct{ t *testing.T }
 
-func (dynCtxHandlers) App() Handlers        { return dynStub{} }
-func (h dynCtxHandlers) AppBuild() Handlers { return dynCtxBuild{t: h.t} }
+func (dynCtxHandlers) App() Handler        { return dynStub{} }
+func (h dynCtxHandlers) AppBuild() Handler { return dynCtxBuild{t: h.t} }
 
 type dynCtxBuild struct {
 	dynStub
@@ -476,9 +466,9 @@ type dynCtxBuild struct {
 }
 
 func (h dynCtxBuild) CompleteFlagValue(rtx *Context, flag, partial string) []string {
-	chain := rtx.Chain()
+	chain := rtx.CommandChain()
 	if len(chain) == 0 {
-		h.t.Fatal("rtx.Chain() empty inside completer")
+		h.t.Fatal("rtx.CommandChain() empty inside completer")
 	}
 	leaf := chain[len(chain)-1].Name
 	return []string{partial + "-leaf-" + leaf}
@@ -496,8 +486,7 @@ func TestComplete_runIntercept(t *testing.T) {
 	}
 }
 
-// TestComplete_dynamicViaProgram exercises the full path the shell scripts hit: the
-// __complete intercept threads p.handlers + p.rtx into completion, so a bound handler's
+// TestComplete_dynamicViaProgram pins the __complete path end to end: a handler's
 // FlagValueCompleter drives the candidates printed to stdout.
 func TestComplete_dynamicViaProgram(t *testing.T) {
 	out := &bytes.Buffer{}
@@ -607,7 +596,7 @@ func (deployArgCompleter) CompleteArgValue(rtx *Context, arg, partial string) []
 	return nil
 }
 
-func (argCompleterHandlers) AppDeploy() Handlers { return deployArgCompleter{} }
+func (argCompleterHandlers) AppDeploy() Handler { return deployArgCompleter{} }
 
 // TestComplete_dynamicArgValue confirms a handler implementing ArgValueCompleter
 // supplies positional candidates (authoritative over the enum), and that a nil
@@ -644,7 +633,7 @@ func TestComplete_descriptions(t *testing.T) {
 				Flags: []FlagDef{{Name: "env", Identifiers: []string{"--env"}, Summary: "target environment", Type: "string", Enum: []string{"dev", "prod"}}}},
 			{Name: "status", Handler: "AppStatus"}, // no summary: bare
 		},
-		RemoteCommands: []RemoteDef{{Name: "scan", Binary: "app-scan", Summary: "scan things"}},
+		Plugins: []PluginDef{{Name: "scan", Binary: "app-scan", Summary: "scan things"}},
 	}
 
 	got := complete(def, []string{""}, nil, nil)
@@ -672,9 +661,8 @@ func TestComplete_descriptions(t *testing.T) {
 	}
 }
 
-// TestComplete_stripsStyledSummary pins E6-S2: a summary carrying ANSI (a
-// styled value the author also uses on the help-list surface) reaches the
-// completion wire as PLAIN text — escapes would corrupt the shell's rendering.
+// TestComplete_stripsStyledSummary pins that an ANSI-styled summary reaches the completion
+// wire as plain text.
 func TestComplete_stripsStyledSummary(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -689,33 +677,32 @@ func TestComplete_stripsStyledSummary(t *testing.T) {
 	}
 }
 
-// TestComplete_remoteOpaque confirms completion goes silent past a remote or
+// TestComplete_pluginOpaque confirms completion goes silent past a plugin or
 // discovered-plugin token — the dispatched binary owns that argument surface.
-func TestComplete_remoteOpaque(t *testing.T) {
+func TestComplete_pluginOpaque(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
-		Commands:       []CommandDef{{Name: "local", Handler: "AppLocal"}},
-		RemoteCommands: []RemoteDef{{Name: "plugin", Binary: "app-plugin"}},
+		Commands: []CommandDef{{Name: "local", Handler: "AppLocal"}},
+		Plugins:  []PluginDef{{Name: "plugin", Binary: "app-plugin"}},
 	}
 	if got := complete(def, []string{"plugin", ""}, nil, nil); got != nil {
-		t.Errorf("complete past a remote token = %v, want nil", got)
+		t.Errorf("complete past a plugin token = %v, want nil", got)
 	}
-	// The remote NAME itself still completes.
+	// The plugin NAME itself still completes.
 	if got := complete(def, []string{"plug"}, nil, nil); !reflect.DeepEqual(got, []string{"plugin"}) {
-		t.Errorf("remote name completion = %v, want [plugin]", got)
+		t.Errorf("plugin name completion = %v, want [plugin]", got)
 	}
 }
 
-// TestComplete_nestedRemote confirms remote commands declared on a sub-command
-// (now carried by CommandDef.Remotes) complete by name at depth, and that
-// completion goes opaque past them.
-func TestComplete_nestedRemote(t *testing.T) {
+// TestComplete_nestedPlugin pins that plugins declared on a sub-command complete by name, and
+// that completion goes opaque past them.
+func TestComplete_nestedPlugin(t *testing.T) {
 	def := Definition{
 		Name: "acme", Handler: "Acme",
 		Commands: []CommandDef{{
 			Name: "cluster", Handler: "AcmeCluster",
 			Commands: []CommandDef{{Name: "list", Handler: "AcmeClusterList"}},
-			Remotes:  []RemoteDef{{Name: "scan", Binary: "acme-scan", Aliases: []string{"sc"}}},
+			Plugins:  []PluginDef{{Name: "scan", Binary: "acme-scan", Aliases: []string{"sc"}}},
 		}},
 	}
 	got := complete(def, []string{"cluster", ""}, nil, nil)
@@ -724,7 +711,7 @@ func TestComplete_nestedRemote(t *testing.T) {
 		t.Errorf("complete(cluster) = %v, want %v", got, want)
 	}
 	if got := complete(def, []string{"cluster", "scan", ""}, nil, nil); got != nil {
-		t.Errorf("complete past nested remote = %v, want nil", got)
+		t.Errorf("complete past nested plugin = %v, want nil", got)
 	}
 }
 
@@ -750,9 +737,7 @@ func completionHintDef() Definition {
 	}
 }
 
-// TestCompletionHint covers the declarative hint — the case between a static enum and writing
-// a Go completer, which is "this is a file". It is the commonest value shape there is, and
-// before this key the only way to say it was code.
+// TestCompletionHint pins the directive line each declared complete: hint produces.
 func TestCompletionHint(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -779,9 +764,8 @@ func TestCompletionHint(t *testing.T) {
 	}
 }
 
-// TestCompletionHint_isSeparableFromCandidates: the directive rides the same stream as the
-// candidates, so it has to be unmistakable — a shell script that treated it as a candidate
-// would offer the user a line of punctuation.
+// TestCompletionHint_isSeparableFromCandidates pins that the directive line, which shares the
+// candidates' stream, is distinguishable from every candidate.
 func TestCompletionHint_isSeparableFromCandidates(t *testing.T) {
 	def := completionHintDef()
 	for _, words := range [][]string{{""}, {"--"}, {"--config", ""}, {"open", ""}} {
@@ -796,10 +780,8 @@ func TestCompletionHint_isSeparableFromCandidates(t *testing.T) {
 	}
 }
 
-// TestCompletionHint_noneIsNotTheSameAsEmpty pins the distinction the key exists for: with no
-// hint the shell applies its own default (file completion, in bash and zsh), and "none"
-// suppresses it. Collapsing the two would make an opaque identifier offer the user the
-// contents of the current directory as if they were plausible answers.
+// TestCompletionHint_noneIsNotTheSameAsEmpty pins that no hint leaves the shell's default
+// while "none" emits a directive suppressing it.
 func TestCompletionHint_noneIsNotTheSameAsEmpty(t *testing.T) {
 	def := completionHintDef()
 	none := completionHint(def, []string{"--id", ""})
@@ -828,9 +810,9 @@ func completeIn(t *testing.T, format CompletionFormat, def Definition, handlers 
 	return out.String()
 }
 
-// TestCobraCompletion_directives pins the hint → ShellCompDirective mapping, the part of Cobra's
-// format a Cobra host acts on. The numbers are Cobra's wire values, not rotini's to choose.
-func TestCobraCompletion_directives(t *testing.T) {
+// TestPluginCompletion_directives pins the hint → directive mapping; the numbers are the
+// plugin hosts' wire values.
+func TestPluginCompletion_directives(t *testing.T) {
 	cases := []struct {
 		name  string
 		words []string
@@ -846,18 +828,17 @@ func TestCobraCompletion_directives(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := completeIn(t, CobraCompletion, completionHintDef(), nil, tc.words...); got != tc.want {
-				t.Errorf("Complete(%q, CobraCompletion) = %q, want %q", tc.words, got, tc.want)
+			if got := completeIn(t, PluginCompletion, completionHintDef(), nil, tc.words...); got != tc.want {
+				t.Errorf("Complete(%q, PluginCompletion) = %q, want %q", tc.words, got, tc.want)
 			}
 		})
 	}
 }
 
-// TestCobraCompletion_candidatesWinOverAFilteringHint: Cobra reads FilterFileExt's and
-// FilterDirs' candidates as their ARGUMENTS, so emitting either alongside real candidates would
-// turn "debug" into a file extension. The hint is the fallback; a value that has candidates
-// keeps them.
-func TestCobraCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
+// TestPluginCompletion_candidatesWinOverAFilteringHint pins that real candidates suppress the
+// file-extension (8) and directory (16) directives, whose candidates the hosts read as
+// arguments.
+func TestPluginCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
@@ -874,22 +855,21 @@ func TestCobraCompletion_candidatesWinOverAFilteringHint(t *testing.T) {
 		"--out":    "dist\n:0\n",
 		"--id":     "a1\n:4\n", // none is compatible with candidates: it only suppresses files
 	} {
-		if got := completeIn(t, CobraCompletion, def, nil, words, ""); got != want {
-			t.Errorf("Complete(%s, CobraCompletion) = %q, want %q", words, got, want)
+		if got := completeIn(t, PluginCompletion, def, nil, words, ""); got != want {
+			t.Errorf("Complete(%s, PluginCompletion) = %q, want %q", words, got, want)
 		}
 	}
 }
 
-// TestComplete_formatIsTheOnlyDifference: one answer, computed once, whatever the format — a
-// handler's dynamic completer and a command's description reach every format alike, and rotini's
-// own (nil) format is byte-for-byte what __complete always printed.
+// TestComplete_formatIsTheOnlyDifference pins that every format receives the same answer, and
+// that the nil format matches __complete's output byte for byte.
 func TestComplete_formatIsTheOnlyDifference(t *testing.T) {
-	if got := completeIn(t, CobraCompletion, dynCompletionDef(), dynCompletionHandlers{}, "build", "--mode", "s"); got != "slow\n:0\n" {
+	if got := completeIn(t, PluginCompletion, dynCompletionDef(), dynCompletionHandlers{}, "build", "--mode", "s"); got != "slow\n:0\n" {
 		t.Errorf("dynamic completer = %q", got)
 	}
 	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{{Name: "deploy", Handler: "AppDeploy", Summary: "ship it"}}}
-	if got := completeIn(t, CobraCompletion, def, nil, "de"); got != "deploy\tship it\n:0\n" {
-		t.Errorf("Cobra, with a description = %q", got)
+	if got := completeIn(t, PluginCompletion, def, nil, "de"); got != "deploy\tship it\n:0\n" {
+		t.Errorf("PluginCompletion, with a description = %q", got)
 	}
 	if got := completeIn(t, nil, def, nil, "de"); got != "deploy\tship it\n" {
 		t.Errorf("rotini's own, with a description = %q", got)
@@ -899,12 +879,11 @@ func TestComplete_formatIsTheOnlyDifference(t *testing.T) {
 	}
 }
 
-// TestComplete_customFormat is the point of CompletionFormat: a protocol rotini does not ship is
-// a function. This one is urfave/cli's shape — "value:description", colons in the value escaped
-// — and sees the same candidates and hint the built-ins do.
+// TestComplete_customFormat pins that a custom CompletionFormat (here "value:description",
+// colons escaped) sees the same candidates and hint the built-ins do.
 func TestComplete_customFormat(t *testing.T) {
 	var seen CompletionResult
-	urfave := func(w io.Writer, r CompletionResult) error {
+	colonFormat := func(w io.Writer, r CompletionResult) error {
 		seen = r
 		for _, c := range r.Candidates {
 			line := strings.ReplaceAll(c.Value, ":", `\:`)
@@ -921,17 +900,17 @@ func TestComplete_customFormat(t *testing.T) {
 		{Name: "deploy", Handler: "AppDeploy", Summary: "ship it"},
 		{Name: "db:migrate", Handler: "AppDbMigrate"},
 	}}
-	if got := completeIn(t, urfave, def, nil, ""); got != "db\\:migrate\ndeploy:ship it\n" {
+	if got := completeIn(t, colonFormat, def, nil, ""); got != "db\\:migrate\ndeploy:ship it\n" {
 		t.Errorf("custom format = %q", got)
 	}
 
-	completeIn(t, urfave, completionHintDef(), nil, "--config", "")
+	completeIn(t, colonFormat, completionHintDef(), nil, "--config", "")
 	if seen.Hint.Kind != "file" || !slices.Equal(seen.Hint.Extensions, []string{"yaml", "yml"}) {
 		t.Errorf("the format was not handed the hint: %+v", seen.Hint)
 	}
 }
 
-// TestComplete_formatError: a format that cannot write fails the request with its error.
+// TestComplete_formatError pins that a format's write error fails the request.
 func TestComplete_formatError(t *testing.T) {
 	boom := errors.New("closed pipe")
 	p := NewProgram(completionHintDef(), nil)
@@ -942,10 +921,9 @@ func TestComplete_formatError(t *testing.T) {
 	}
 }
 
-// TestWithCompletion: the setter switches what the hidden __complete entry speaks, and nothing
-// else; nil restores rotini's own. The case that matters is a request with no hint: rotini's
-// format then ends on a candidate, which a Cobra host (Flux takes the last line unconditionally)
-// would swallow as the directive.
+// TestWithCompletion pins that the setter switches the format __complete writes and nil
+// restores rotini's own. With no hint, rotini's format ends on a candidate, which a plugin host
+// would read as the directive.
 func TestWithCompletion(t *testing.T) {
 	run := func(p *Program, argv ...string) string {
 		t.Helper()
@@ -961,13 +939,13 @@ func TestWithCompletion(t *testing.T) {
 	if got := run(NewProgram(def, nil), "__complete", "op"); got != "open\n" {
 		t.Errorf("default __complete = %q, want rotini's format (no directive without a hint)", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion), "__complete", "op"); got != "open\n:0\n" {
-		t.Errorf("WithCompletion(CobraCompletion) __complete = %q, want Cobra's format", got)
+	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion), "__complete", "op"); got != "open\n:0\n" {
+		t.Errorf("WithCompletion(PluginCompletion) __complete = %q, want the plugin hosts' format", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion), "__complete", "--id", ""); got != ":4\n" {
-		t.Errorf("WithCompletion(CobraCompletion) hint = %q, want NoFileComp", got)
+	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion), "__complete", "--id", ""); got != ":4\n" {
+		t.Errorf("WithCompletion(PluginCompletion) hint = %q, want NoFileComp", got)
 	}
-	if got := run(NewProgram(def, nil).WithCompletion(CobraCompletion).WithCompletion(nil), "__complete", "op"); got != "open\n" {
+	if got := run(NewProgram(def, nil).WithCompletion(PluginCompletion).WithCompletion(nil), "__complete", "op"); got != "open\n" {
 		t.Errorf("WithCompletion(nil) = %q, want rotini's own restored", got)
 	}
 }
@@ -988,24 +966,22 @@ type lenientHandlers struct{}
 
 type lenientShow struct{ deployArgCompleter }
 
-// CompleteArgValue is the recipe FlagValueCompleter's doc gives, verbatim in shape: the root's
-// flags, read at the root's frame, from the line and the environment, with nothing validated.
+// CompleteArgValue follows the FlagValueCompleter doc recipe: the root's flags, read as the
+// root command from the line and the environment, with nothing validated.
 func (lenientShow) CompleteArgValue(rtx *Context, arg, partial string) []string {
 	var in lenientRootInputs
-	AtFrame(0, func(_ context.Context, rtx *Context) {
-		env, _ := ParseEnv[lenientRootInputs](rtx)
-		argv, _ := ParseArgv[lenientRootInputs](rtx)
-		in = OverlayInputs(env, argv)
+	AsCommand(0, func(_ context.Context, rtx *Context) {
+		env, _ := rtx.EnvInputs[lenientRootInputs]()
+		argv, _ := rtx.ArgvInputs[lenientRootInputs]()
+		in = MergeInputs(env, argv)
 	})(context.Background(), rtx)
 	return []string{"from-" + in.App.Flags.Store}
 }
 
-func (lenientHandlers) AppShow() Handlers { return lenientShow{} }
+func (lenientHandlers) AppShow() Handler { return lenientShow{} }
 
-// TestComplete_lenientParseOfAnAncestorsFlags proves the documented way a completer reads what
-// the user has said so far: a root flag on the line, else its environment fallback, though the
-// line is half-typed and a required flag is missing. rubectl hand-copied the env lookup instead,
-// and its first attempt missed it and completed nothing.
+// TestComplete_lenientParseOfAnAncestorsFlags pins the documented recipe: a completer reads a
+// root flag from the line, else its environment fallback, though a required flag is missing.
 func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -1024,10 +1000,9 @@ func TestComplete_lenientParseOfAnAncestorsFlags(t *testing.T) {
 	}
 }
 
-// TestComplete_followsTheParsersFlagValueRule: completion walks the line with the parser's rule
-// for which word is a flag's value, so it descends where dispatch will (`--color sub <TAB>`,
-// `-vn 5 sub <TAB>`), and a bare optional-value flag is not waiting for a value — its value must
-// be attached — so the next word completes as a command.
+// TestComplete_followsTheParsersFlagValueRule pins that completion uses the parser's rule for
+// which word is a flag's value (`--color sub <TAB>`, `-vn 5 sub <TAB>`), so a bare
+// optional-value flag does not consume the next word.
 func TestComplete_followsTheParsersFlagValueRule(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App",
 		Flags: []FlagDef{

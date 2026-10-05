@@ -2,12 +2,12 @@
 #
 # `mycli grab --help` used to answer
 #   Error: missing required input: <what>
-# because the seeded stub called Collect — which validates — and returned on its error before
+# because the seeded stub called Inputs — which validates — and returned on its error before
 # it reached the `if inputs.…Flags.Help` branch three lines below. The user asked NOT to run
 # the command and was told off for not supplying what running it would need.
 #
-# The stub now answers help from ParseArgv, which applies no required or enum validation, and
-# does it BEFORE Collect. This script is that ordering, from outside the binary, on a command
+# The stub now answers help from ArgvInputs, which applies no required or enum validation, and
+# does it BEFORE Inputs. This script is that ordering, from outside the binary, on a command
 # that has a required argument — the only shape where the two orders differ.
 
 gomodinit example.com/helped

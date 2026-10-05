@@ -118,15 +118,15 @@ import (
 )
 
 type base struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type ownHandlers struct{ base }
+type ownHandler struct{ base }
 
-func (*ownHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*ownHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, HelpOwn)
 }
 -- internal/cmd/own/own_build.go --
@@ -138,9 +138,9 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type ownBuildHandlers struct{ base }
+type ownBuildHandler struct{ base }
 
-func (*ownBuildHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*ownBuildHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- cmd/own/main.go --
 package main
 

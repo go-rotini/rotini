@@ -74,15 +74,15 @@ import (
 )
 
 type base struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type filterHandlers struct{ base }
+type filterHandler struct{ base }
 
-func (*filterHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*filterHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/filter/filter_upper.go --
 package filter
 
@@ -94,10 +94,10 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type filterUpperHandlers struct{ base }
+type filterUpperHandler struct{ base }
 
-func (*filterUpperHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[FilterUpperInputs](rtx)
+func (*filterUpperHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterUpperInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)
@@ -116,10 +116,10 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type filterCountHandlers struct{ base }
+type filterCountHandler struct{ base }
 
-func (*filterCountHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[FilterCountInputs](rtx)
+func (*filterCountHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[FilterCountInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)

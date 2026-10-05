@@ -135,15 +135,15 @@ import (
 )
 
 type base struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type childHandlers struct{ base }
+type childHandler struct{ base }
 
-func (*childHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*childHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/child/child_make.go --
 package child
 
@@ -154,10 +154,10 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type childMakeHandlers struct{ base }
+type childMakeHandler struct{ base }
 
-func (*childMakeHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[ChildMakeInputs](rtx)
+func (*childMakeHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ChildMakeInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)
@@ -175,15 +175,15 @@ import (
 )
 
 type rbase struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type rootHandlers struct{ rbase }
+type rootHandler struct{ rbase }
 
-func (*rootHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*rootHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/root/root_child_extra.go --
 package root
 
@@ -194,12 +194,12 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type rootChildExtraHandlers struct{ rbase }
+type rootChildExtraHandler struct{ rbase }
 
 // Run reads RootChild.Flags.Target — the COMPOSED command's flag, declared in the child's
 // spec, reached from a handler in the parent's package that imports nothing of the child's.
-func (*rootChildExtraHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[RootChildExtraInputs](rtx)
+func (*rootChildExtraHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[RootChildExtraInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)
@@ -217,10 +217,10 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type rootHelpHandlers struct{ rbase }
+type rootHelpHandler struct{ rbase }
 
-func (*rootHelpHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[RootHelpInputs](rtx)
+func (*rootHelpHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[RootHelpInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)

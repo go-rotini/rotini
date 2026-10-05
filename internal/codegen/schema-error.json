@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "rotini structured report line",
+  "description": "One line rotini.StructuredReporter writes to stderr when the program's own rule says the run is structured: a JSON object holding one error, warning, info or success, in the order the default reporter prints them (info, warning, error, success). A field is present only when rotini knows it. Secrets never appear.",
+  "type": "object",
+  "oneOf": [
+    {
+      "required": ["error"],
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "type": "object",
+          "description": "An error. The run exits with exit_code.",
+          "required": ["message", "category", "exit_code"],
+          "additionalProperties": false,
+          "properties": {
+            "message": { "type": "string", "description": "The message the default reporter would print, without the program name." },
+            "category": { "type": "string", "enum": ["none", "usage", "internal"], "description": "usage: the command line or its inputs were wrong, and the user can fix it. internal: a bug or misconfiguration in the program. none: anything else." },
+            "kind": { "type": "string", "description": "What went wrong, when rotini's typed error says: a parse failure's kind (unknown-flag, invalid-value, missing-required, …) or a plugin failure's (binary-not-found, spawn-failed, timeout)." },
+            "command": { "type": "string", "description": "The command the error happened in, as typed: \"taskr list\"." },
+            "flag": { "type": "string", "description": "The flag involved, by the identifier the user typed." },
+            "token": { "type": "string", "description": "The command-line token or value at fault." },
+            "exit_code": { "type": "integer", "description": "The code the run exits with, decided as the default reporter decides it." }
+          }
+        }
+      }
+    },
+    {
+      "required": ["warning"],
+      "additionalProperties": false,
+      "properties": {
+        "warning": {
+          "type": "object",
+          "description": "A warning. It does not change the exit code.",
+          "required": ["message"],
+          "additionalProperties": false,
+          "properties": {
+            "message": { "type": "string", "description": "The message the default reporter would print, without the program name." },
+            "command": { "type": "string", "description": "The command the warning happened in, as typed." }
+          }
+        }
+      }
+    },
+    {
+      "required": ["info"],
+      "additionalProperties": false,
+      "properties": {
+        "info": {
+          "type": "object",
+          "description": "A message the default reporter would print to stdout before everything else.",
+          "required": ["message"],
+          "additionalProperties": false,
+          "properties": {
+            "message": { "type": "string" },
+            "command": { "type": "string", "description": "The command that recorded it, as typed." }
+          }
+        }
+      }
+    },
+    {
+      "required": ["success"],
+      "additionalProperties": false,
+      "properties": {
+        "success": {
+          "type": "object",
+          "description": "A message the default reporter would print to stdout after everything else.",
+          "required": ["message"],
+          "additionalProperties": false,
+          "properties": {
+            "message": { "type": "string" },
+            "command": { "type": "string", "description": "The command that recorded it, as typed." }
+          }
+        }
+      }
+    }
+  ]
+}

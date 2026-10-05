@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,20 +15,15 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-// The companion CLI is rotini's own dogfood, and these tests drive it exactly as a
-// user's CLI would be driven: build the generated Program, bind doubles for the
-// codegen entry points (the handlers fetch GenerateFn/ValidateFn/InitializeFn from the
-// registry with BindIfAbsent, so a test's binding wins), and call Run.
-//
-// Run is used rather than Execute so nothing calls os.Exit, and a fresh Program per
-// test keeps registry bindings from leaking between them. Run returns (code, err):
-// the error is the run's own recorded failure, so on a failure path a non-nil error
-// is the expected result rather than a broken test.
+// These tests drive the companion cli through its generated Program, binding doubles for the
+// codegen entry points (handlers use SetDependencyIfAbsent, so a test's double wins). Run is
+// used instead of Execute so nothing exits, with a fresh Program per test. Run's error is the
+// run's recorded failure, so on a failure path a non-nil error is expected.
 
 const testVersion = "9.9.9"
 
-// newTestCLI builds an isolated companion-CLI program with captured streams and the version
-// main.go sets. The codegen doubles are bound by the caller.
+// newTestCLI builds an isolated companion cli program with captured streams and a fixed
+// version. The caller binds codegen doubles.
 func newTestCLI(t *testing.T) (*rotini.Program, *bytes.Buffer, *bytes.Buffer) {
 	t.Helper()
 	out, errb := &bytes.Buffer{}, &bytes.Buffer{}
@@ -54,8 +50,8 @@ func TestCLI_version(t *testing.T) {
 	}
 }
 
-// Every command answers --help without doing any work, so a user can always discover
-// a command without running it — even beside a bad value or a missing argument.
+// Every command answers --help without doing any work, even beside a bad value or a missing
+// argument.
 func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 	for _, argv := range [][]string{
 		{"--help"},
@@ -67,20 +63,23 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 		{"initialize", "--format", "xml", "--help"},
 		{"validate", "--fail", "slow", "--help"},
 		{"version", "extra", "--help"},
+		{"completion", "--help"},
+		{"completion", "tcsh", "--help"},
+		{"man", "--help"},
+		{"man", "--dir", "/nonexistent/must-not-be-created", "--help"},
 	} {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			p, out, _ := newTestCLI(t)
-			// Binding doubles that fail the test proves --help short-circuits before
-			// any codegen work is attempted.
-			p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
+			// Doubles that fail the test prove --help short-circuits before codegen work.
+			p.WithDependency(generateDep, codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
 				t.Error("--help ran the generate work")
 				return nil
 			}))
-			p.Bind("validate", codegen.ValidateFn(func(string, string, bool, string, func(string, error), func([]error)) error {
+			p.WithDependency(validateDep, codegen.ValidateFn(func(string, string, bool, string, func(string, error), func([]error)) error {
 				t.Error("--help ran the validate work")
 				return nil
 			}))
-			p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+			p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
 				t.Error("--help ran the initialize work")
 				return codegen.Initialized{}, nil
 			}))
@@ -95,8 +94,7 @@ func TestCLI_helpFlagOnEveryCommand(t *testing.T) {
 	}
 }
 
-// The root command with no arguments prints help and exits NON-zero: nothing was
-// asked for, so the invocation was a mistake.
+// A bare root invocation prints help and exits non-zero.
 func TestCLI_rootWithNoArgs(t *testing.T) {
 	p, out, _ := newTestCLI(t)
 	code, err := p.Run(nil)
@@ -116,7 +114,7 @@ func TestCLI_generateDelegatesItsArguments(t *testing.T) {
 	var gotWatch bool
 
 	p, out, _ := newTestCLI(t)
-	p.Bind("generate", codegen.GenerateFn(func(spec, conf string, watch bool, onGenerate func(string, error), _ func([]error)) error {
+	p.WithDependency(generateDep, codegen.GenerateFn(func(spec, conf string, watch bool, onGenerate func(string, error), _ func([]error)) error {
 		gotSpec, gotConf, gotWatch = spec, conf, watch
 		onGenerate("generated ok", nil)
 		return nil
@@ -132,20 +130,18 @@ func TestCLI_generateDelegatesItsArguments(t *testing.T) {
 	if gotSpec != "my.spec.yaml" || gotConf != "my.conf.yaml" || !gotWatch {
 		t.Errorf("generate got (%q, %q, watch=%v), want the parsed argv", gotSpec, gotConf, gotWatch)
 	}
-	// The progress callback's result reaches the user.
 	if !strings.Contains(out.String(), "generated ok") {
 		t.Errorf("the generate callback's result was not printed:\n%s", out.String())
 	}
-	// The resolved paths are echoed so a failing run says which files it read.
 	if !strings.Contains(out.String(), "my.spec.yaml") || !strings.Contains(out.String(), "my.conf.yaml") {
 		t.Errorf("generate did not echo its inputs:\n%s", out.String())
 	}
 }
 
-// A codegen failure is recorded and exits non-zero, rather than being swallowed.
+// A codegen failure is reported on stderr and exits non-zero.
 func TestCLI_generateFailureIsReported(t *testing.T) {
 	p, _, errb := newTestCLI(t)
-	p.Bind("generate", codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
+	p.WithDependency(generateDep, codegen.GenerateFn(func(string, string, bool, func(string, error), func([]error)) error {
 		return rotini.UsageError(errBadSpec)
 	}))
 
@@ -164,7 +160,7 @@ func TestCLI_generateFailureIsReported(t *testing.T) {
 func TestCLI_validateDelegatesFailMode(t *testing.T) {
 	var gotSpec, gotConf, gotFail string
 	p, out, _ := newTestCLI(t)
-	p.Bind("validate", codegen.ValidateFn(
+	p.WithDependency(validateDep, codegen.ValidateFn(
 		func(spec, conf string, _ bool, failMode string, onValidate func(string, error), _ func([]error)) error {
 			gotSpec, gotConf, gotFail = spec, conf, failMode
 			onValidate("valid", nil)
@@ -182,10 +178,10 @@ func TestCLI_validateDelegatesFailMode(t *testing.T) {
 	}
 }
 
-// Warnings are surfaced without failing the run — that is what makes them warnings.
+// Warnings are printed without failing the run.
 func TestCLI_validateWarningsDoNotFail(t *testing.T) {
 	p, out, errb := newTestCLI(t)
-	p.Bind("validate", codegen.ValidateFn(
+	p.WithDependency(validateDep, codegen.ValidateFn(
 		func(_, _ string, _ bool, _ string, _ func(string, error), onWarnings func([]error)) error {
 			onWarnings([]error{errAdvisory})
 			return nil
@@ -206,10 +202,10 @@ func TestCLI_validateWarningsDoNotFail(t *testing.T) {
 func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	var gotName, gotFormat string
 	var gotForce bool
-	t.Chdir(t.TempDir()) // no go.mod requiring rotini: the runtime warning is due
+	t.Chdir(t.TempDir()) // no go.mod requiring rotini, so the runtime warning is due
 
 	p, _, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(name, format string, force bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(name, format string, force bool) (codegen.Initialized, error) {
 		gotName, gotFormat, gotForce = name, format, force
 		return codegen.Initialized{}, nil
 	}))
@@ -221,15 +217,13 @@ func TestCLI_initializeDelegatesItsArguments(t *testing.T) {
 	if gotName != "mycli" || gotFormat != "json" || !gotForce {
 		t.Errorf("initialize got (%q, %q, force=%v), want the parsed argv", gotName, gotFormat, gotForce)
 	}
-	// The warning is due only because the next `go build` would fail on a missing module.
 	if want := "run `go get github.com/go-rotini/rotini` before building ./cmd/mycli"; !strings.Contains(errb.String(), want) {
 		t.Errorf("stderr = %q, want the runtime warning", errb.String())
 	}
 }
 
-// TestCLI_initializeReportsWhatItWrote: a successful init reports like generate and validate —
-// the spec and conf it wrote, then the timing line — and, with the runtime already in go.mod,
-// has nothing to warn about.
+// TestCLI_initializeReportsWhatItWrote pins init's report (spec, conf, timing line) and the
+// absence of a warning when go.mod already requires the runtime.
 func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/a\n\nrequire github.com/go-rotini/rotini v1.0.0\n"), 0o600); err != nil {
@@ -237,7 +231,7 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	}
 	t.Chdir(dir)
 	p, out, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
 		return codegen.Initialized{
 			Spec:   "cmd/mycli/.rotini.spec.yaml",
 			Conf:   "cmd/mycli/.rotini.conf.yaml",
@@ -256,10 +250,10 @@ func TestCLI_initializeReportsWhatItWrote(t *testing.T) {
 	}
 }
 
-// The name argument is required: without it there is nothing to scaffold.
+// init requires the name argument.
 func TestCLI_initializeRequiresAName(t *testing.T) {
 	p, _, errb := newTestCLI(t)
-	p.Bind("initialize", codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
+	p.WithDependency(initializeDep, codegen.InitializeFn(func(string, string, bool) (codegen.Initialized, error) {
 		t.Error("initialize ran without a name")
 		return codegen.Initialized{}, nil
 	}))
@@ -276,7 +270,7 @@ func TestCLI_initializeRequiresAName(t *testing.T) {
 	}
 }
 
-// An unknown flag is a usage error, reported and non-zero — not a silent no-op.
+// An unknown flag is reported by name and exits non-zero.
 func TestCLI_unknownFlagIsAUsageError(t *testing.T) {
 	p, _, errb := newTestCLI(t)
 	code, err := p.Run([]string{"generate", "--not-a-real-flag"})
@@ -301,7 +295,7 @@ func TestCLI_helpCommandPrintsCommandHelp(t *testing.T) {
 	}
 }
 
-// Aliases are part of the CLI's contract, so they are exercised, not assumed.
+// Each alias reaches its command's handler.
 func TestCLI_aliases(t *testing.T) {
 	for _, tc := range []struct{ alias, service string }{
 		{"gen", "generate"},
@@ -311,9 +305,9 @@ func TestCLI_aliases(t *testing.T) {
 		t.Run(tc.alias, func(t *testing.T) {
 			var ran bool
 			p, _, _ := newTestCLI(t)
-			p.Bind("generate", func(string, string, bool, func(string, error), func([]error)) error { ran = true; return nil })
-			p.Bind("validate", func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
-			p.Bind("initialize", func(string, string, bool) (codegen.Initialized, error) { ran = true; return codegen.Initialized{}, nil })
+			p.WithDependency(generateDep, func(string, string, bool, func(string, error), func([]error)) error { ran = true; return nil })
+			p.WithDependency(validateDep, func(string, string, bool, string, func(string, error), func([]error)) error { ran = true; return nil })
+			p.WithDependency(initializeDep, func(string, string, bool) (codegen.Initialized, error) { ran = true; return codegen.Initialized{}, nil })
 
 			argv := []string{tc.alias, "x"}
 			if _, err := p.Run(argv); err != nil {
@@ -326,10 +320,8 @@ func TestCLI_aliases(t *testing.T) {
 	}
 }
 
-// TestResolveVersion covers the version-resolution rules: a build-info RELEASE version wins
-// over the -ldflags default (the `go install pkg@v1.2.3` path), a pseudo-version or "(devel)"
-// does not count as one, and either way the leading "v" and any pre-release suffix are
-// trimmed to a bare X.Y.Z.
+// TestResolveVersion pins version resolution: a build-info release beats the -ldflags stamp,
+// "(devel)" and pseudo-versions are not releases, and results are trimmed to X.Y.Z.
 func TestResolveVersion(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -344,16 +336,19 @@ func TestResolveVersion(t *testing.T) {
 		{"pre-release suffix is trimmed", "v1.2.3-rc1+meta", "", "1.2.3"},
 		{"an unparseable version passes through", "not-a-version", "", "not-a-version"},
 
-		// A PSEUDO-version is not a release. This is the case the e2e tier caught: a
-		// release pipeline stamps -X main.version=1.4.2, the checkout is untagged so the
-		// go tool records v0.0.0-<timestamp>-<hash>, and the old unanchored matcher read
-		// its leading "v0.0.0" as a release — so the binary reported 0.0.0 and its own
-		// version guard then rejected every correctly-versioned spec in the project.
+		// A pseudo-version is not a release, so the -ldflags stamp wins.
 		{"a pseudo-version is not a release", "1.4.2", "v0.0.0-20260901233311-3ef400c2a629", "1.4.2"},
 		{"a pseudo-version off a tag is not a release", "1.4.2", "v1.3.0-0.20260901233311-3ef400c2a629", "1.4.2"},
 		{"an empty build-info version falls back", "1.4.2", "", "1.4.2"},
 		{"a real tag still wins", "0.0.0", "v1.9.4", "1.9.4"},
 		{"a tagged pre-release wins and is trimmed", "0.0.0", "v2.0.0-rc.1", "2.0.0"},
+
+		// `make rotini-build` stamps `git describe --tags --always --dirty`; a build between
+		// tags reports the last release.
+		{"git describe on a tag", "v1.2.0", "v1.2.1-0.20261003120000-805e610abcde", "1.2.0"},
+		{"git describe between tags", "v1.1.1-3-g805e610", "(devel)", "1.1.1"},
+		{"git describe with uncommitted changes", "v1.1.1-3-g805e610-dirty", "", "1.1.1"},
+		{"git describe with no tags is a bare hash", "805e610", "", "805e610"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -372,8 +367,7 @@ func TestResolveVersion(t *testing.T) {
 	}
 }
 
-// The root command's --version prints the bound version, the same as the version
-// sub-command — two spellings of one question.
+// The root's -v and --version print the bound version, like the version sub-command.
 func TestCLI_rootVersionFlag(t *testing.T) {
 	for _, flag := range []string{"-v", "--version"} {
 		p, out, _ := newTestCLI(t)
@@ -390,7 +384,7 @@ func TestCLI_rootVersionFlag(t *testing.T) {
 	}
 }
 
-// `help` with no argument is the same request as `--help` on the root.
+// `help` with no argument prints the root's help.
 func TestCLI_bareHelpCommand(t *testing.T) {
 	p, out, _ := newTestCLI(t)
 	if _, err := p.Run([]string{"help"}); err != nil {
@@ -401,7 +395,7 @@ func TestCLI_bareHelpCommand(t *testing.T) {
 	}
 }
 
-// An unknown command name is reported rather than silently doing nothing.
+// An unknown help topic is reported or exits non-zero.
 func TestCLI_unknownHelpTopic(t *testing.T) {
 	p, out, errb := newTestCLI(t)
 	code, _ := p.Run([]string{"help", "no-such-command"})
@@ -410,25 +404,15 @@ func TestCLI_unknownHelpTopic(t *testing.T) {
 	}
 }
 
-// ── test sentinels ──────────────────────────────────────────.
-
 // Sentinels the CLI tests inject through the codegen doubles.
 var (
 	errBadSpec  = errors.New("spec is broken")
 	errAdvisory = errors.New("an advisory warning")
 )
 
-// TestCLIPageMatchesGeneratedHelp keeps the docs site's CLI page byte-identical to the help
-// the binary actually prints.
-//
-// That page is a transcript: every block is titled with the command that produced it. A
-// transcript is only worth anything if it is true, and this one had already drifted twice —
-// an alias separator changed from ";" to ", " and `validate --watch` stopped saying
-// "re-generate" — with nothing to notice. Both are invisible in review and both teach a
-// reader something false.
-//
-// The page is checked rather than generated because prose surrounds the blocks. What the test
-// owns is the blocks; what a writer owns is everything between them.
+// TestCLIPageMatchesGeneratedHelp pins each `$ rotini …` code block on the docs site's CLI page
+// to the help the binary prints. The page is checked rather than generated because prose
+// surrounds the blocks.
 func TestCLIPageMatchesGeneratedHelp(t *testing.T) {
 	page := filepath.Join("..", "..", "..", "docs", "content", "cli", "_index.md")
 	body, err := os.ReadFile(page)
@@ -464,9 +448,8 @@ func TestCLIPageMatchesGeneratedHelp(t *testing.T) {
 	}
 }
 
-// TestRequiresRuntime decides whether `rotini init` tells the user to `go get` the runtime: only
-// when the module governing the directory does not already require it. It once printed the step
-// unconditionally, sending users with rotini in go.mod to run a command that changes nothing.
+// TestRequiresRuntime pins requiresRuntime against the nearest go.mod, including from a
+// subdirectory and with no go.mod at all.
 func TestRequiresRuntime(t *testing.T) {
 	root := t.TempDir()
 	write := func(dir, gomod string) string {
@@ -518,8 +501,7 @@ func TestCLI_inputErrorsAreReportedAlike(t *testing.T) {
 	}
 }
 
-// With no conf given and none beside the spec, the banner says the defaults apply rather than
-// naming a file that was never read.
+// With no conf given or found, the banner says the conf defaults apply.
 func TestCLI_bannerNamesTheFilesRead(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
@@ -528,7 +510,7 @@ func TestCLI_bannerNamesTheFilesRead(t *testing.T) {
 	}
 	p, out, _ := newTestCLI(t)
 	var gotSpec, gotConf string
-	p.Bind("validate", codegen.ValidateFn(func(spec, conf string, _ bool, _ string, _ func(string, error), _ func([]error)) error {
+	p.WithDependency(validateDep, codegen.ValidateFn(func(spec, conf string, _ bool, _ string, _ func(string, error), _ func([]error)) error {
 		gotSpec, gotConf = spec, conf
 		return nil
 	}))
@@ -543,9 +525,8 @@ func TestCLI_bannerNamesTheFilesRead(t *testing.T) {
 	}
 }
 
-// The companion opts in to "did you mean" for its own input: a near-miss command, flag, value
-// or help topic names the nearest accepted spelling, and a word that is near nothing gets no
-// guess.
+// A near-miss command, flag, value or help topic names the nearest accepted spelling; a word
+// near nothing gets no guess.
 func TestCLI_suggestsNearestSpelling(t *testing.T) {
 	cases := []struct {
 		argv []string
@@ -578,4 +559,92 @@ func TestCLI_suggestsNearestSpelling(t *testing.T) {
 			}
 		})
 	}
+}
+
+// `rotini completion <shell>` prints each shell's script and rejects an unknown shell as a usage
+// error.
+func TestCLI_completion(t *testing.T) {
+	for shell, want := range map[string]string{
+		"bash":       "-F _rotini_complete rotini",
+		"zsh":        "#compdef rotini",
+		"fish":       "complete -c rotini",
+		"powershell": "Register-ArgumentCompleter",
+	} {
+		p, out, _ := newTestCLI(t)
+		if code, err := p.Run([]string{"completion", shell}); code != 0 || err != nil {
+			t.Fatalf("completion %s = (%d, %v)", shell, code, err)
+		}
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("completion %s lacks %q:\n%s", shell, want, out.String())
+		}
+	}
+
+	p, _, errb := newTestCLI(t)
+	if code, _ := p.Run([]string{"completion", "tcsh"}); code != 1 || !strings.Contains(errb.String(), `"tcsh"`) {
+		t.Errorf("completion tcsh = exit %d, stderr %q; want a usage error naming the shell", code, errb.String())
+	}
+}
+
+// `rotini man [command...]` prints one roff page; with no command it is rotini's own.
+func TestCLI_man(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string
+	}{
+		{[]string{"man"}, `.TH "ROTINI" 1 `},
+		{[]string{"man", "generate"}, `.TH "ROTINI\-GENERATE" 1 `},
+		{[]string{"man", "gen"}, `.TH "ROTINI\-GENERATE" 1 `}, // an alias names the same page
+	} {
+		p, out, _ := newTestCLI(t)
+		if code, err := p.Run(tc.argv); code != 0 || err != nil {
+			t.Fatalf("%q = (%d, %v)", tc.argv, code, err)
+		}
+		if !strings.HasPrefix(out.String(), tc.want) {
+			t.Errorf("%q printed %q…, want a page starting %q", tc.argv, firstLine(out.String()), tc.want)
+		}
+	}
+
+	p, _, errb := newTestCLI(t)
+	if code, _ := p.Run([]string{"man", "genrate"}); code != 1 || !strings.Contains(errb.String(), `did you mean "generate"`) {
+		t.Errorf("man genrate = exit %d, stderr %q; want a usage error with a suggestion", code, errb.String())
+	}
+}
+
+// `rotini man --dir <path>` creates the directory and writes every page as <name>.<section>.
+func TestCLI_manDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "man", "man1")
+	p, out, _ := newTestCLI(t)
+	if code, err := p.Run([]string{"man", "--dir", dir}); code != 0 || err != nil {
+		t.Fatalf("man --dir = (%d, %v)", code, err)
+	}
+	if !strings.Contains(out.String(), "wrote 8 man pages to "+dir) {
+		t.Errorf("stdout = %q, want it to say what it wrote", out.String())
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	want := []string{"rotini-completion.1", "rotini-generate.1", "rotini-help.1", "rotini-initialize.1",
+		"rotini-man.1", "rotini-validate.1", "rotini-version.1", "rotini.1"}
+	if !slices.Equal(names, want) {
+		t.Errorf("wrote %q, want %q", names, want)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, "rotini-man.1"))
+	if page, _ := Man("man"); string(body) != page {
+		t.Error("the file written for rotini man differs from what `rotini man man` prints")
+	}
+
+	p, _, errb := newTestCLI(t)
+	if code, _ := p.Run([]string{"man", "generate", "--dir", dir}); code == 0 || !strings.Contains(errb.String(), "--dir writes every page") {
+		t.Errorf("man generate --dir = exit %d, stderr %q; want a usage error", code, errb.String())
+	}
+}
+
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }

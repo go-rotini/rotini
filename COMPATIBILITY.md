@@ -30,16 +30,16 @@ a function, not a smaller one.
 
 Behavior is covered too, not just shape: the documented precedence order of the four competing
 input channels (defaults < files < env < argv), the lifecycle hook order and its reverse unwind,
-the outcome funnel's contract, and the exit-code floor. The stdin channel is the fifth and is not
+the outcome reporter's contract, and the exit-code floor. The stdin channel is the fifth and is not
 in that order: it fills a command's declared payload field, which no other channel writes, so it
 never competes for one.
 
 Completing a rotini program from outside is covered: `Program.Complete` and
 `Program.WithCompletion` hand a `CompletionFormat` the same `CompletionResult` (candidates,
 descriptions, the spec's hint) that rotini's own completion computes. The built-in
-`CobraCompletion` format's output is covered as behavior: it is Cobra's completion wire format
-(candidate lines, then `:<ShellCompDirective>`), the one kubectl, Docker and Flux read, and it
-follows Cobra's format, not rotini's. Only rotini's OWN format, the default `__complete` output
+`PluginCompletion` format's output is covered as behavior: it is the completion format kubectl,
+Docker and Flux read (candidate lines, then a `:<directive>` line), and it follows those hosts,
+not rotini. Only rotini's OWN format, the default `__complete` output
 below, is private.
 
 ### 2. The spec and conf schema keys
@@ -62,9 +62,9 @@ What your handlers and your `main.go` are written against:
   `<Prefix>Env`, `<Prefix>Config`, `<Prefix>Stdin`, `<Prefix>Output`) and their fields;
 - the names of document-level named schemas, which become exported Go types;
 - the exported package symbols codegen emits: `Program`, `Handlers()`, `ProgramHandlers`,
-  `BindMeta`, the feature vars (`Help<Prefix>`, `Man<Prefix>`, `Markdown<Prefix>`,
+  `InputSettings`, the feature vars (`Help<Prefix>`, `Man<Prefix>`, `Markdown<Prefix>`,
   `Completion<Shell>`) and their resolvers (`Help()`, `Man()`, `Markdown()`, `Completion()`);
-- the `Handlers` interface every handler file implements, and the `Default*` embeddable no-ops.
+- the `Handler` interface every handler file implements, and the `No*` embeddable no-ops.
 
 ### 4. The CLI's own interface
 
@@ -76,7 +76,7 @@ These change in minor and patch releases. If you depend on one, pin the rotini v
 
 | | why |
 |---|---|
-| **The exact text of error and warning messages** | Improving a message is a bug fix. Branch on the typed error (`*ParseError`, `*BindError`, `*RemoteError`, `*WiringError`, `*ServiceError`, `*PanicError`), on `ParseError.Kind`, or on `CategoryOf` — never on a string. |
+| **The exact text of error and warning messages** | Improving a message is a bug fix. Branch on the typed error (`*ParseError`, `*InputError`, `*PluginError`, `*WiringError`, `*DependencyError`, `*PanicError`), on `ParseError.Kind`, or on `CategoryOf` — never on a string. |
 | **The layout of generated help, man and markdown pages** | Column widths, wrapping, spacing and section ordering are presentation, and they improve. If you golden-test your CLI's `--help`, expect to re-record it on a minor upgrade — or take ownership of the layout by turning the feature's `template` knob on, which is exactly what it is for. |
 | **Generated file formatting** | Comment wording, import grouping, blank lines. The *identifiers* are covered (§3); the whitespace around them is not. |
 | **The contents of a newly seeded handler stub** | `rotini init` and the first `generate` write starter code. It is yours from the moment it is written and rotini never overwrites it (it only removes it if its command leaves the spec), so what a *future* rotini would have seeded is not a compatibility surface. |

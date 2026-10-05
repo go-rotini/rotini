@@ -1,9 +1,7 @@
 package codegen
 
-// Reconcile is the first pipeline stage: read and decode the spec and conf into their
-// in-memory shapes. The spec is required; the conf is optional and falls back to the default.
-// Each reconciled value retains its source format and bytes, so a later validation problem can
-// be located back to file:line:col.
+// Reconcile is the first pipeline stage: read and decode the spec (required) and conf
+// (optional, defaulted) and keep a source locator so later problems can be positioned.
 
 import (
 	"fmt"
@@ -13,28 +11,26 @@ import (
 	"strings"
 )
 
-// reconciledSpec is an end-user spec read + decoded, alongside the canonical-JSON
-// instance (the same bytes generation consumes, for schema validation) and a locator
-// from the source format.
+// reconciledSpec is a decoded spec with its canonical JSON instance (for schema validation)
+// and a source locator.
 type reconciledSpec struct {
-	path   string        // resolved spec path
-	spec   *Spec         // decoded spec
-	json   []byte        // the spec as canonical JSON, for schema validation
-	locate sourceLocator // JSON-pointer → source line:col (nil when the format carries no positions)
+	path   string
+	spec   *Spec
+	json   []byte
+	locate sourceLocator // nil when the format carries no positions
 }
 
-// reconciledConf is reconciledSpec for the conf. The conf is OPTIONAL: when no file is
-// found, path is "", conf is the default &Conf{}, and json is nil (nothing to validate).
+// reconciledConf is reconciledSpec for the conf. With no conf file, path is "", conf is the
+// default &Conf{}, and json and locate are nil.
 type reconciledConf struct {
-	path   string        // resolved conf path ("" when none — defaults used)
-	conf   *Conf         // decoded conf, or the default
-	json   []byte        // the conf as canonical JSON (nil when defaulted)
-	locate sourceLocator // JSON-pointer → source line:col (nil when no file / no positions)
+	path   string
+	conf   *Conf
+	json   []byte
+	locate sourceLocator
 }
 
-// reconcileDoc is the shared read tail: it decodes the document at resolved into *T, plus its
-// canonical-JSON instance for schema validation and a source locator. reconcileSpec and
-// reconcileConf differ only in the decoded type and their required-vs-optional path handling.
+// reconcileDoc decodes the document at resolved into *T and returns it with its canonical
+// JSON instance and a source locator.
 func reconcileDoc[T any](resolved string) (doc *T, instance []byte, locate sourceLocator, err error) {
 	format, data, err := readRaw(resolved)
 	if err != nil {
@@ -51,9 +47,8 @@ func reconcileDoc[T any](resolved string) (doc *T, instance []byte, locate sourc
 	return doc, instance, newSourceLocator(format, data), nil
 }
 
-// reconcileSpec reads + decodes the end-user spec at path (or the first .rotini.spec.* in
-// the working directory when path is ""). The spec is REQUIRED: with no path and none
-// discovered it returns errSpecPathRequired.
+// reconcileSpec reads the spec at path, or the first .rotini.spec.* in the working directory
+// when path is "". It returns errSpecPathRequired when none is found.
 func reconcileSpec(path string) (*reconciledSpec, error) {
 	resolved, err := resolveSpecPath(path)
 	if err != nil {
@@ -69,11 +64,9 @@ func reconcileSpec(path string) (*reconciledSpec, error) {
 	return &reconciledSpec{path: resolved, spec: spec, json: instance, locate: locate}, nil
 }
 
-// reconcileConf reads + decodes the end-user conf beside the spec (or at confPath). The
-// conf is OPTIONAL: with no path given and none discovered, it yields the DEFAULT &Conf{}
-// with an empty path. A path that WAS given must exist — discovery only returns files that
-// do, so a missing one is always a path the user typed, and quietly generating with the
-// defaults instead is how a typo in --config went unnoticed.
+// reconcileConf reads the conf at confPath, or the one discovered beside the spec. With none
+// found it returns the default &Conf{} with an empty path. An explicitly given path that does
+// not exist is an error rather than a silent fallback to defaults.
 func reconcileConf(specPath, confPath string) (*reconciledConf, error) {
 	rc := &reconciledConf{conf: &Conf{}}
 
@@ -96,9 +89,9 @@ func reconcileConf(specPath, confPath string) (*reconciledConf, error) {
 	return rc, nil
 }
 
-// normalizer is implemented by a decoded document that needs a canonicalizing pass before any
-// later stage sees it. decodeData calls it, so every path that decodes a spec — the root one and
-// each spec a `$ref` composes in — hands validation, lint and generation the same model.
+// normalizer is implemented by a decoded document that needs a canonicalizing pass.
+// decodeData calls it, so the root spec and every $ref-composed spec reach validation, lint
+// and generation in the same normalized form.
 type normalizer interface{ normalize() }
 
 func (s *Spec) normalize() {
@@ -108,12 +101,10 @@ func (s *Spec) normalize() {
 	normalizeBounds(s)
 }
 
-// normalizeBounds converts a bound written in a measured type's own spelling — `minimum: 1s` on a
-// duration, `maximum: 1Gi` on a bytesize — to a number in that type's unit (nanoseconds,
-// bytes), which is what the generated constraint and every lint rule compare against. The
-// runtime's own parser reads the text, so `1h30m` or `1.5Gi` means here exactly what it means
-// on the command line. A string that does not convert stays a string for
-// lintConstraintApplicability to report.
+// normalizeBounds converts a bound written in a measured type's spelling (`minimum: 1s` on a
+// duration, `maximum: 1Gi` on a bytesize) to a number in that type's unit, parsed by the
+// runtime's parser. A string that does not convert is left for lintConstraintApplicability
+// to report.
 func normalizeBounds(s *Spec) {
 	walkCommands(s, func(c *Command, _ string) {
 		eachInputSchema(c.inputs(), func(_, _ string, schema *InputSchema) {
@@ -128,8 +119,8 @@ func normalizeBounds(s *Spec) {
 					}
 					continue
 				}
-				// A bare number on a duration has no unit — 5 what? It is kept as text so the
-				// lint reports it and asks for 5s, rather than reading it as nanoseconds.
+				// A unitless number on a duration is turned into text so the lint asks for a
+				// unit instead of reading it as nanoseconds.
 				if n := bound(*b); n != nil && elem == "time.Duration" {
 					*b = strconv.FormatFloat(*n, 'g', -1, 64)
 				}
@@ -138,12 +129,10 @@ func normalizeBounds(s *Spec) {
 	})
 }
 
-// inheritScalarRefConstraints gives an input that refers to a named SCALAR schema that schema's
-// constraints — enum, pattern, bounds, lengths — wherever the input leaves them unset. The $ref
-// still names the Go type. Before this, `$ref: Kind` where Kind is {type: string, enum: [...]}
-// generated a Kind field and enforced nothing: the enum lived on the named schema, and only the
-// input's own keys reached the definition. A named OBJECT schema is left alone; its rules are
-// validated as a document (see object-valued flags).
+// inheritScalarRefConstraints copies a named scalar schema's constraints (enum, pattern,
+// bounds, lengths) onto each input, or input items, that $refs it, wherever the input leaves
+// them unset. The $ref still names the Go type. Named object schemas are skipped; their values
+// are validated as documents.
 func inheritScalarRefConstraints(s *Spec) {
 	named := s.Command.Schemas
 	inherit := func(b *BaseSchema) {
@@ -169,11 +158,9 @@ func inheritScalarRefConstraints(s *Spec) {
 	})
 }
 
-// qualifySchemaRefs rewrites every bare schema reference (`$ref: DB`) to its pointer form
-// (`#/schemas/DB`), so everything downstream — codegen, the JSON Schema documents rotini
-// assembles, the lint rules — meets one spelling. The bare name is the one people write; the
-// pointer is what JSON Schema tooling expects. Only a schema block's $ref is touched: a
-// command's $ref names a spec file to compose, and is left alone.
+// qualifySchemaRefs rewrites every bare schema-block reference (`$ref: DB`) to pointer form
+// (`#/schemas/DB`) so downstream stages see one spelling. A command's $ref, which names a
+// spec file, is not a BaseSchema and is left alone.
 func qualifySchemaRefs(v reflect.Value) {
 	switch v.Kind() {
 	case reflect.Pointer, reflect.Interface:
@@ -206,22 +193,16 @@ func qualifySchemaRefs(v reflect.Value) {
 	}
 }
 
-// hoistItemConstraints copies per-value constraints declared on an array input's `items` up onto
-// the input itself, where the runtime already applies them to every element.
+// hoistItemConstraints copies per-value constraints from an array input's `items` onto the
+// input itself, where the runtime applies them to every element, so both spellings are
+// equivalent:
 //
-// Before this, only the array-level spelling did anything:
+//	schema: { type: array, items: { type: string }, enum: [low, high] }
+//	schema: { type: array, items: { type: string, enum: [low, high] } }
 //
-//	schema: { type: array, items: { type: string }, enum: [low, high] }   // enforced
-//	schema: { type: array, items: { type: string, enum: [low, high] } }   // silently ignored
-//
-// The second is where JSON Schema puts an element constraint, and rotini's schema borrows JSON
-// Schema's vocabulary — so the natural spelling was the one that accepted `--level BOGUS`. Both
-// spellings now mean the same thing.
-//
-// An array-level value is never overwritten: when both are set and disagree, lintItemConstraints
-// reports it rather than one silently winning. stdin is exempt — its schema validates the piped
-// document with full JSON Schema semantics, where `items` constraints are already real — and so
-// are the document-level `schemas:` and `output:`, which are not inputs.
+// An array-level value is never overwritten; lintItemConstraints reports a disagreement. Stdin
+// is exempt (its schema has full JSON Schema semantics), as are named schemas and output,
+// which are not inputs.
 func hoistItemConstraints(spec *Spec) {
 	if spec == nil {
 		return
@@ -236,9 +217,8 @@ func hoistItemConstraints(spec *Spec) {
 	})
 }
 
-// fillUnsetConstraints copies src's value constraints — enum, pattern, lengths and bounds — onto
-// dst wherever dst leaves them unset, so what dst declares itself always wins. A pattern_message
-// comes with the pattern it describes, unless dst words the inherited pattern itself.
+// fillUnsetConstraints copies src's enum, pattern, lengths and bounds onto dst wherever dst
+// leaves them unset. An inherited pattern brings its pattern_message unless dst sets one.
 func fillUnsetConstraints(dst, src *BaseSchema) {
 	if len(dst.Enum) == 0 {
 		dst.Enum = src.Enum

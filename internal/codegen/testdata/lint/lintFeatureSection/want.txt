@@ -1,0 +1,1 @@
+conf: .rotini.conf.yaml:13:7: generate.features.help.section: `section` is the man page section and applies only to the man feature; move it to the man entry or remove it

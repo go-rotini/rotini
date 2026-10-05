@@ -186,3 +186,70 @@ command:
             - --help
           schema:
             type: bool
+    - name: completion
+      summary: print a shell completion script
+      description: |-
+        Print the completion script for a shell. Load it once per session, or install it so
+        every new shell has it:
+
+          bash        source <(rotini completion bash)
+                      or save it to ~/.local/share/bash-completion/completions/rotini
+          zsh         rotini completion zsh > "${fpath[1]}/_rotini"
+                      then start a new shell (compinit must be enabled)
+          fish        rotini completion fish > ~/.config/fish/completions/rotini.fish
+          powershell  rotini completion powershell | Out-String | Invoke-Expression
+                      add that line to $PROFILE to load it in every session
+      examples:
+        - rotini completion bash
+        - rotini completion zsh > "${fpath[1]}/_rotini"
+      footer: Use "rotini help <command>" for more information about a command.
+      arguments:
+        - name: shell
+          summary: the shell to print the script for
+          schema:
+            type: string
+            required: true
+            enum:
+              - bash
+              - zsh
+              - fish
+              - powershell
+      flags:
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool
+    - name: man
+      summary: print or install the man pages
+      description: |-
+        Print a command's man page as roff, the markup the man program reads, or write every
+        page into a directory with --dir. With no command, it prints the page for rotini itself.
+
+        The pages are named after the command path, rotini-generate.1, so a directory written
+        with --dir can be added to MANPATH or copied into a man1 directory.
+      examples:
+        - rotini man generate > rotini-generate.1
+        - rotini man --dir ~/.local/share/man/man1
+      footer: Use "rotini help <command>" for more information about a command.
+      arguments:
+        - name: command
+          summary: the command whose page to print (default rotini itself)
+          schema:
+            type: array
+      flags:
+        - name: dir
+          summary: write every page into this directory instead of printing one
+          identifiers:
+            - --dir
+          schema:
+            type: string
+        - name: help
+          summary: print help
+          identifiers:
+            - -h
+            - --help
+          schema:
+            type: bool

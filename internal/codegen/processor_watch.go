@@ -10,14 +10,9 @@ import (
 	"github.com/go-rotini/fs"
 )
 
-// The shared run/watch engine behind Generate and Validate: a single pass, or — in
-// watch mode — re-run the pass on every spec/conf change until interrupted. The
-// per-invocation entry (Processor.run, which resolves paths and builds the timed pass)
-// lives in processor.go; this file is the engine it drives.
-
-// runOrWatch performs a single timed pass, or — when watch is set — re-runs it on every change
-// to the spec or conf until interrupted, routing each pass to onResult. It is the shared engine
-// behind Generate and Validate; confPath must already be resolved.
+// runOrWatch runs pass once, or with watch re-runs it on every spec or conf change until
+// interrupted, sending each result to onResult. confPath must already be resolved. Without
+// watch, a failed pass's error is returned instead of reported.
 func runOrWatch(specPath, confPath string, watch bool, pass func() (string, error), onResult func(result string, err error)) error {
 	if watch {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -32,16 +27,13 @@ func runOrWatch(specPath, confPath string, watch bool, pass func() (string, erro
 	return nil
 }
 
-// watchDebounce coalesces the burst of filesystem events most editors emit when
-// saving a file (write + chmod + the rename of an atomic save).
+// watchDebounce coalesces the burst of filesystem events an editor emits on save.
 const watchDebounce = 200 * time.Millisecond
 
-// watchLoop is the cancelable core of watch mode: it runs pass once, then re-runs it on each
-// change to the spec or conf, handing every pass to onResult, until ctx is done (a clean
-// interrupt → nil). It is split out so tests can drive it with a context rather than a real
-// signal. Only a failure to set up the watchers is returned.
+// watchLoop runs pass once and again on each spec or conf change, sending every result to
+// onResult, until ctx is done. It returns only watcher setup errors; cancellation returns nil.
 func watchLoop(ctx context.Context, specPath, confPath string, pass func() (string, error), onResult func(result string, err error)) error {
-	// Watch the spec always, and the conf only when it exists (conf is optional).
+	// The conf is watched only if it exists.
 	paths := []string{specPath}
 	if confPath != "" {
 		if _, err := os.Stat(confPath); err == nil {
@@ -69,7 +61,7 @@ func watchLoop(ctx context.Context, specPath, confPath string, pass func() (stri
 		go forwardChanges(ctx, events, changed)
 	}
 
-	onResult(pass()) // initial pass
+	onResult(pass())
 
 	for {
 		select {
@@ -81,9 +73,8 @@ func watchLoop(ctx context.Context, specPath, confPath string, pass func() (stri
 	}
 }
 
-// roundDuration trims d to roughly three significant figures so its String()
-// stays compact while still rendering in the unit that fits best — ns, µs, ms,
-// or s, which Duration.String already selects (e.g. 312ns, 45.7µs, 2.79ms, 1.23s).
+// roundDuration rounds d to three significant figures for a compact String() (312ns,
+// 45.7µs, 2.79ms, 1.23s).
 func roundDuration(d time.Duration) time.Duration {
 	if d <= 0 {
 		return d
@@ -95,8 +86,8 @@ func roundDuration(d time.Duration) time.Duration {
 	return d.Round(unit)
 }
 
-// forwardChanges fans one watcher's events into changed, coalescing to at most
-// one pending signal, until events closes or ctx is canceled.
+// forwardChanges forwards one watcher's events into changed, keeping at most one pending
+// signal, until events closes or ctx is canceled.
 func forwardChanges(ctx context.Context, events <-chan fs.WatchEvent, changed chan<- struct{}) {
 	for {
 		select {
@@ -108,7 +99,7 @@ func forwardChanges(ctx context.Context, events <-chan fs.WatchEvent, changed ch
 			}
 			select {
 			case changed <- struct{}{}:
-			default: // a regeneration is already pending; fold this change into it
+			default: // a pass is already pending
 			}
 		}
 	}

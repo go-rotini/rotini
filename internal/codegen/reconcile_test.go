@@ -6,14 +6,7 @@ import (
 	"testing"
 )
 
-// Constraints written on an array input's `items` used to be decoded and then ignored:
-//
-//	schema: { type: array, items: { type: string, enum: [low, high] } }
-//	$ mycli --level BOGUS        # accepted
-//
-// `items` is where JSON Schema puts an element constraint, so the natural spelling was the one
-// that did nothing. hoistItemConstraints makes it mean what the array-level spelling means.
-
+// decodeSpecYAML decodes (and normalizes) a YAML spec body.
 func decodeSpecYAML(t *testing.T, body string) *Spec {
 	t.Helper()
 	spec, err := decodeData[Spec](formatYAML, []byte(body), "test.yaml")
@@ -65,7 +58,8 @@ func TestHoistItemConstraints_everyPerValueConstraintReachesTheList(t *testing.T
 	}
 }
 
-// Every channel that parses list elements from text gets the same treatment — not just flags.
+// TestHoistItemConstraints_appliesToFlagsArgumentsEnvAndConfig pins hoisting on every
+// non-stdin channel.
 func TestHoistItemConstraints_appliesToFlagsArgumentsEnvAndConfig(t *testing.T) {
 	item := "        type: array\n        items: { type: string, enum: [a, b] }\n"
 	spec := decodeSpecYAML(t, itemsSpecHead+
@@ -86,8 +80,7 @@ func TestHoistItemConstraints_appliesToFlagsArgumentsEnvAndConfig(t *testing.T) 
 	}
 }
 
-// The array-level value is never overwritten. When the two disagree, lintItemConstraints says so;
-// hoisting must not quietly pick a winner.
+// TestHoistItemConstraints_neverOverwritesTheList pins that list-level values win over items.
 func TestHoistItemConstraints_neverOverwritesTheList(t *testing.T) {
 	spec := decodeSpecYAML(t, itemsSpecHead+`  flags:
     - name: f
@@ -101,8 +94,8 @@ func TestHoistItemConstraints_neverOverwritesTheList(t *testing.T) {
 	}
 }
 
-// stdin validates a whole document with JSON Schema semantics, where `items` constraints are
-// already real. Hoisting them would change what a nested document means.
+// TestHoistItemConstraints_leavesStdinAlone pins that stdin schemas, which have full JSON
+// Schema semantics, are not hoisted.
 func TestHoistItemConstraints_leavesStdinAlone(t *testing.T) {
 	spec := decodeSpecYAML(t, itemsSpecHead+`  stdin:
     format: json
@@ -115,7 +108,7 @@ func TestHoistItemConstraints_leavesStdinAlone(t *testing.T) {
 	}
 }
 
-// Non-array inputs are untouched even if they carry an `items` (which other rules reject).
+// TestHoistItemConstraints_onlyForLists pins that non-array inputs are not hoisted.
 func TestHoistItemConstraints_onlyForLists(t *testing.T) {
 	spec := decodeSpecYAML(t, itemsSpecHead+`  flags:
     - name: f
@@ -128,8 +121,8 @@ func TestHoistItemConstraints_onlyForLists(t *testing.T) {
 	}
 }
 
-// A spec pulled in by `$ref` is decoded through readSpec, not reconcileSpec. The hook lives in
-// decodeData so neither path can miss it — this is the path that would have.
+// TestHoistItemConstraints_reachesComposedSpecs pins that specs decoded via readSpec (the
+// $ref path) are normalized too.
 func TestHoistItemConstraints_reachesComposedSpecs(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "child.spec.yaml", itemsSpecHead+`  flags:
@@ -147,8 +140,8 @@ func TestHoistItemConstraints_reachesComposedSpecs(t *testing.T) {
 	}
 }
 
-// The hoist feeds every later rule. A default element that breaks an items-level enum is exactly
-// the "fails on every run" case lintDefaultConstraints exists for, and it must now be caught.
+// TestHoistItemConstraints_feedsDefaultValidation pins that a default element violating an
+// items-level enum is caught by lintDefaultConstraints.
 func TestHoistItemConstraints_feedsDefaultValidation(t *testing.T) {
 	spec := decodeSpecYAML(t, itemsSpecHead+`  flags:
     - name: f
@@ -161,8 +154,8 @@ func TestHoistItemConstraints_feedsDefaultValidation(t *testing.T) {
 	}
 }
 
-// A bare schema name is the spelling people write; everything downstream sees the pointer form.
-// A command's $ref — a spec file to compose — is a different key and must survive untouched.
+// TestQualifySchemaRefs pins that bare schema refs become pointers and a command's $ref is
+// untouched.
 func TestQualifySchemaRefs(t *testing.T) {
 	spec := &Spec{Command: Command{
 		Name: "app",
@@ -191,10 +184,8 @@ func TestQualifySchemaRefs(t *testing.T) {
 	}
 }
 
-// A bound written in a measured type's spelling is read in its unit right after decoding —
-// through the runtime's parser, so 1h30m and 1.5Gi mean what they mean on the command line — and
-// a bare number on a duration is kept as text for the lint to reject rather than read as
-// nanoseconds.
+// TestNormalizeBounds pins measured-type bound conversion, and that unitless duration bounds
+// and unparseable text stay text for the lint to reject.
 func TestNormalizeBounds(t *testing.T) {
 	spec := &Spec{Command: Command{Name: "app", Flags: []FlagInput{
 		{Name: "wait", Schema: &InputSchema{BaseSchema: BaseSchema{Type: "duration", Minimum: "1s", Maximum: "1h30m"}}},
@@ -220,9 +211,8 @@ func TestNormalizeBounds(t *testing.T) {
 	}
 }
 
-// An input referring to a named scalar schema takes that schema's constraints where it sets none
-// of its own; before, `$ref: Kind` (a string enum) generated a Kind field and enforced nothing.
-// A named object schema is not flattened, and the input's own keys win.
+// TestInheritScalarRefConstraints pins that an input inherits a named scalar schema's unset
+// constraints, its own keys win, and object schemas are not flattened.
 func TestInheritScalarRefConstraints(t *testing.T) {
 	spec := &Spec{Command: Command{
 		Name: "app",
@@ -254,9 +244,8 @@ func TestInheritScalarRefConstraints(t *testing.T) {
 	}
 }
 
-// TestPatternMessage_travelsWithItsPattern pins how pattern_message is inherited: it comes
-// along with a pattern taken from a named schema or from `items`, and an input that words the
-// inherited pattern itself keeps its own sentence.
+// TestPatternMessage_travelsWithItsPattern pins that pattern_message is inherited with its
+// pattern unless the input sets its own.
 func TestPatternMessage_travelsWithItsPattern(t *testing.T) {
 	spec := &Spec{Command: Command{
 		Name: "app",
@@ -277,9 +266,8 @@ func TestPatternMessage_travelsWithItsPattern(t *testing.T) {
 	}
 }
 
-// TestDefinitionType_namedScalarSchema proves the parser sees a named scalar schema's own type.
-// The Definition used to carry "Kind", which matched no type family, so the pattern, lengths and
-// bounds the input inherited from the schema were never checked at run time.
+// TestDefinitionType_namedScalarSchema pins that a ref to a named scalar schema yields that
+// schema's resolved type, so inherited constraints are checked at run time.
 func TestDefinitionType_namedScalarSchema(t *testing.T) {
 	schemas := map[string]Schema{
 		"Kind": {BaseSchema: BaseSchema{Type: "string", Pattern: "^[a-z]+$"}},

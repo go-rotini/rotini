@@ -6,8 +6,7 @@ import (
 	"testing"
 )
 
-// The locator helpers are pure string work with no IO — the part of $ref resolution
-// that decides IDENTITY (and so cycle detection) before anything is read. They are
+// The locator helpers decide $ref identity, and so cycle detection, without I/O. They are
 // tested directly because the composition paths that call them need a module cache.
 
 func TestParseModLocator(t *testing.T) {
@@ -110,8 +109,7 @@ func TestLocateRef(t *testing.T) {
 	}
 }
 
-// TestLoadRef_refusesExternal pins the stance that rotini neither fetches nor pins
-// external refs: git:: and raw https:// are rejected at load, not silently attempted.
+// TestLoadRef_refusesExternal pins that git:: and raw https:// refs are rejected at load.
 func TestLoadRef_refusesExternal(t *testing.T) {
 	for _, loc := range []string{"git::https://example.com/r@v1/spec.yaml", "https://example.com/spec.yaml"} {
 		if _, err := loadRef(loc, ""); err == nil {
@@ -120,17 +118,9 @@ func TestLoadRef_refusesExternal(t *testing.T) {
 	}
 }
 
-// TestCheckImportableAcrossModules guards the one composition failure that reaches the user as
-// a Go compiler error in a file they did not write.
-//
-// A mod:// child's generated package is imported by the consumer. Under internal/ that import
-// is illegal across module boundaries, and nothing before `go build` says so — validate passes,
-// generate passes, and the build fails with "use of internal package … not allowed" pointing
-// at a generated line.
-//
-// It is not a corner case: rotini's own scaffold writes the cmd package to internal/cmd/<name>,
-// which is the right default for an application and exactly wrong for a spec meant to be
-// composed, so a module author following the defaults publishes a CLI nobody can graft.
+// TestCheckImportableAcrossModules pins that a cross-module child whose generated package sits
+// under internal/ is rejected at generate time with an actionable message, while same-module
+// composition is allowed.
 func TestCheckImportableAcrossModules(t *testing.T) {
 	t.Parallel()
 	const consumer = "example.com/app"
@@ -158,7 +148,7 @@ func TestCheckImportableAcrossModules(t *testing.T) {
 			case !tt.wantRejected && err != nil:
 				t.Errorf("%q was rejected: %v", tt.importPath, err)
 			case tt.wantRejected:
-				// The message has to name the fix, not just the problem.
+				// The message must name the fix.
 				for _, want := range []string{tt.importPath, tt.childModule, "outside internal/"} {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("message does not mention %q:\n%v", want, err)

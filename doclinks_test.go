@@ -8,18 +8,14 @@ import (
 	"testing"
 )
 
-// A doc comment's [Name] is a link, and godoc renders an unresolvable one as literal brackets —
-// silently, forever. That is how a reference to a DELETED type survives: this package carried
-// two links to a [Usage] helper that no longer exists, plus three more pointing at unexported or
-// unqualified names, and nothing noticed.
-//
-// The surface file already lists every exported symbol, so the check is a set membership test.
+// A doc comment's [Name] is a link, and godoc renders an unresolvable one as literal brackets
+// without warning. TestDocLinksResolve checks every link against the package's declarations.
 
 // docLinkRe matches a godoc symbol link: [Name] or [Type.Method], optionally package-qualified.
 var docLinkRe = regexp.MustCompile(`\[((?:\w+\.)?[A-Z]\w*(?:\.\w+)?)\]`)
 
 // illustrativeNames are placeholders a doc comment uses to show a shape rather than to point at
-// a symbol — a generated inputs type, an example service. They are deliberately not real.
+// a symbol, such as a generated inputs type or an example dependency.
 var illustrativeNames = map[string]bool{
 	"DeployInputs": true, "MigInputs": true,
 	"MycliInputs": true, "MycliDeployInputs": true,
@@ -41,9 +37,8 @@ func TestDocLinksResolve(t *testing.T) {
 		for _, f := range ty.Funcs {
 			known[f.Name] = true
 		}
-		// Exported fields are linkable, and so are INTERFACE methods — which go/doc does not
-		// list under the type, because they have no concrete receiver. Missing them would
-		// flag [Handlers.PreRun] as dangling when godoc resolves it perfectly well.
+		// Exported fields and interface methods are linkable; go/doc does not list interface
+		// methods under the type, so they are collected here.
 		if ts, ok := ty.Decl.Specs[0].(*ast.TypeSpec); ok {
 			switch t := ts.Type.(type) {
 			case *ast.StructType:

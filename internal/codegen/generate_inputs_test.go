@@ -13,10 +13,8 @@ import (
 	"testing"
 )
 
-// TestRotiniTypeAliasesMatchTheResolver keeps rotiniTypeAliases and jsonSchemaTypeToGo's switch
-// in step. The list is what lintSchemaTypes uses to tell an alias from a typo, so a name added
-// to the switch but not the list is rejected as a typo, and a name left in the list after its
-// case is removed is accepted and then generates an undefined identifier.
+// TestRotiniTypeAliasesMatchTheResolver pins that rotiniTypeAliases (which lintSchemaTypes uses
+// to tell an alias from a typo) matches the names jsonSchemaTypeToGo's switch resolves.
 func TestRotiniTypeAliasesMatchTheResolver(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "generate_inputs.go", nil, 0)
@@ -60,7 +58,8 @@ func TestRotiniTypeAliasesMatchTheResolver(t *testing.T) {
 	}
 }
 
-// A Go-style list or map spelling resolves the names inside it, and carries their imports.
+// TestJSONSchemaTypeToGo_listAndMapSpellings pins that list and map spellings resolve their
+// element types and imports.
 func TestJSONSchemaTypeToGo_listAndMapSpellings(t *testing.T) {
 	for in, want := range map[string]string{
 		"[]bytesize":              "[]rotini.ByteSize",
@@ -89,7 +88,8 @@ func TestJSONSchemaTypeToGo_listAndMapSpellings(t *testing.T) {
 	}
 }
 
-// Help names a value type the way the spec wrote it — what to type, not how it is stored.
+// TestFlagDisplayType_valueAliases pins that help shows a value type as the spec wrote it,
+// not as its Go type.
 func TestFlagDisplayType_valueAliases(t *testing.T) {
 	for _, tc := range []struct {
 		schema *InputSchema
@@ -111,9 +111,8 @@ func TestFlagDisplayType_valueAliases(t *testing.T) {
 	}
 }
 
-// TestValueTypes_generateCompilingCode is the end-to-end check for the value-type vocabulary:
-// every alias — bare, as a list, and as a map value — generates a field whose type and import
-// compile. A wrong import path or an unresolved `[]alias` fails here as a build error.
+// TestValueTypes_generateCompilingCode pins that every value-type alias, bare, as a list, and
+// as a map value, generates a field whose type and import compile.
 func TestValueTypes_generateCompilingCode(t *testing.T) {
 	skipUnlessCompiling(t)
 	var flags strings.Builder
@@ -144,9 +143,8 @@ func TestValueTypes_generateCompilingCode(t *testing.T) {
 	}
 }
 
-// Every constraint tag must read back through reflect exactly as declared. A pattern was once
-// written raw, and ^\d+$ is an invalid escape to strconv.Unquote — reflect read the tag as
-// absent and the pattern was never enforced on env or config inputs.
+// TestConstraintTags_readBackThroughReflect pins that every constraint tag, including patterns
+// with backslashes and quotes, reads back through reflect exactly as declared.
 func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 	schema := &InputSchema{
 		BaseSchema: BaseSchema{
@@ -181,7 +179,8 @@ func TestConstraintTags_readBackThroughReflect(t *testing.T) {
 	}
 }
 
-// variable: takes one name or a list, and every consumer sees the same ordered names.
+// TestVariables pins that `variable:` accepts one name or a list, and every consumer sees the
+// same ordered names.
 func TestVariables(t *testing.T) {
 	for _, tc := range []struct {
 		v    any
@@ -206,8 +205,8 @@ func TestVariables(t *testing.T) {
 	}
 }
 
-// An optional-value flag reads --x[=<type>] in help and shows what bare means; default_text
-// replaces only the shown default.
+// TestFlagRow_implicitValueAndDefaultText pins that an optional-value flag reads --x[=<type>]
+// in help with its implicit value, and default_text replaces only the shown default.
 func TestFlagRow_implicitValueAndDefaultText(t *testing.T) {
 	row := flagRow(FlagInput{Name: "color", Identifiers: []string{"-c", "--color"},
 		Schema: &InputSchema{BaseSchema: BaseSchema{Type: "string"}, Default: "auto", ImplicitValue: "always"}})
@@ -221,9 +220,9 @@ func TestFlagRow_implicitValueAndDefaultText(t *testing.T) {
 	}
 }
 
-// `description` on an object schema or its properties becomes the Go doc comment on the
-// generated type and field. On an input's own schema it would do nothing — the input has
-// `summary:` — so it is still rejected there.
+// TestSchemaDescriptionsBecomeDocComments pins that `description` on an object schema or its
+// properties becomes the generated type's or field's doc comment, and is still rejected on an
+// input's own schema.
 func TestSchemaDescriptionsBecomeDocComments(t *testing.T) {
 	emitted := composeModuleStaged(t, map[string]string{
 		"cmd/root/.rotini.spec.yaml": `version: 0.0.0

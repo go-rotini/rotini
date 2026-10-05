@@ -17,20 +17,12 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// lintValuesParse holds every value a spec writes FOR an input — a flag's or argument's
-// default, and a flag's implicit_value — to the input's own type, by running it through the
-// runtime's parser.
+// lintValuesParse rejects a flag or argument default, or a flag's implicit_value, that does
+// not parse as the input's type. It runs each value through the runtime's own parser, so the
+// lint and the runtime cannot disagree about what parses.
 //
-// Without it `default: abc` on an int flag, or `default: 5` on a duration (Go durations need a
-// unit), validated clean and generated fine, and then every run that left the flag unset failed
-// with a usage error about a value the user never typed. The runtime is the judge rather than a
-// re-implementation here, so the two cannot disagree about what parses: a new type, a new
-// spelling (yes/no for a bool, 7d for a duration) is accepted here the moment the runtime
-// accepts it.
-//
-// Only the argv channels are checked: env and config defaults are decoded by recon. Types whose
-// Go shape codegen cannot know — an imported type — are left to the first run, as are path
-// types, whose existence is a fact about the machine the program runs on, not this one.
+// Only argv channels are checked; env and config defaults are decoded by recon. Imported types
+// and path types (whose existence depends on the run-time machine) are skipped.
 func lintValuesParse(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -59,9 +51,9 @@ func lintValuesParse(spec *Spec) []error {
 	return problems
 }
 
-// runtimeRejects parses each value into the input's Go type exactly as a run would, returning
-// the runtime's own complaint about the first that fails, or "" when all parse or the type is
-// one this cannot build.
+// runtimeRejects parses each value into the input's Go type as a run would and returns the
+// runtime's complaint about the first failure, or "" when all parse or the type cannot be
+// built here.
 func runtimeRejects(schema *InputSchema, values []string) string {
 	defType := definitionType(schema, nil)
 	if defType == "count" || strings.Contains(defType, "existingfile") || strings.Contains(defType, "existingdir") {
@@ -72,9 +64,7 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 		return ""
 	}
 	fd := rotini.FlagDef{Name: "v", Identifiers: []string{"--v"}, Type: defType, Layout: layoutFor(schema)}
-	// A measured type's bounds are checked here too: the numeric default rule cannot read
-	// "3s", so without this a default outside a duration's bounds would validate clean and fail
-	// every run that took it.
+	// Measured-type bounds are checked here because lintDefaultConstraints cannot read "3s".
 	if measuredTypes[strings.TrimPrefix(getSchemaType(schema), "[]")] {
 		fd.Constraints = rotini.Constraints{
 			Minimum: bound(schema.Minimum), Maximum: bound(schema.Maximum),
@@ -90,9 +80,9 @@ func runtimeRejects(schema *InputSchema, values []string) string {
 	return ""
 }
 
-// parseAsRuntime parses text as the value of the flag fd, into a field of type rt, exactly as a
-// run would — through the runtime's own parser, on a one-flag program whose flag is --v — and
-// returns the field, or the runtime's complaint about the value ("" when it parsed).
+// parseAsRuntime parses text as the value of flag fd into a field of type rt, using the
+// runtime's parser on a synthetic one-flag program (--v). It returns the field, or the
+// runtime's complaint ("" when it parsed).
 func parseAsRuntime(rt reflect.Type, fd rotini.FlagDef, text string) (field reflect.Value, complaint string) {
 	flags := reflect.StructOf([]reflect.StructField{{Name: "V", Type: rt, Tag: `rotini:"v"`}})
 	cmd := reflect.StructOf([]reflect.StructField{
@@ -107,9 +97,9 @@ func parseAsRuntime(rt reflect.Type, fd rotini.FlagDef, text string) (field refl
 	return out.Elem().Field(0).Field(0).Field(0), ""
 }
 
-// runtimeComplaint rephrases the runtime's error about the placeholder flag --v into one about
-// the value: `--v: "abc" is not a valid integer` loses its label, and a bound violation
-// `--v must be >= 1m (got 30s)` becomes `"30s" must be >= 1m`.
+// runtimeComplaint rephrases the runtime's error about the placeholder flag --v as one about
+// the value: `--v: "abc" is not a valid integer` drops its label, and `--v must be >= 1m
+// (got 30s)` becomes `"30s" must be >= 1m`.
 func runtimeComplaint(msg, value string) string {
 	if rest, ok := strings.CutPrefix(msg, "--v: "); ok {
 		return rest
@@ -123,8 +113,8 @@ func runtimeComplaint(msg, value string) string {
 	return msg
 }
 
-// valueTypes are the Go types a spec's type names resolve to whose reflect.Type codegen knows —
-// the builtins and rotini's own vocabulary.
+// valueTypes maps resolved Go type spellings to their reflect.Type for the builtins and
+// rotini's own type vocabulary.
 var valueTypes = map[string]reflect.Type{
 	"time.Time": reflect.TypeFor[time.Time](),
 	"string":    reflect.TypeFor[string](), "bool": reflect.TypeFor[bool](),
@@ -177,15 +167,10 @@ func reflectTypeOf(t string) (reflect.Type, bool) {
 	return nil, false
 }
 
-// lintObjectFlags enforces the contract of an object-valued input — one whose schema is a named
-// object (`$ref: '#/schemas/DB'`) or a list of them.
-//
-// Flags only: a flag's value has a spelling (JSON, key=value, a file, --db.host=…), where a
-// positional has one word and no name to hang fields on. The keys that shape a single scalar
-// value — enum, separator, ignore_case, implicit_value, negatable, dotted_keys and the scalar
-// constraints — have nothing to act on; an object's rules live in its named schema, which is
-// what the value is validated against. And a default is checked against that schema here, so
-// a default that could never validate fails now, not on every run that leaves the flag unset.
+// lintObjectFlags enforces the contract of an object-valued input, one whose schema is a
+// named object (`$ref: '#/schemas/DB'`) or a list of them. Arguments cannot be objects;
+// env and config inputs are decoded by recon and skipped. An object flag rejects scalar-only
+// keys (its rules live in the named schema), and its default is validated against that schema.
 func lintObjectFlags(spec *Spec) []error {
 	var problems []error
 	schemas := spec.Command.Schemas
@@ -287,10 +272,8 @@ func validationSummary(err error) string {
 	return strings.Join(msgs, "; ")
 }
 
-// lintLayout enforces layout's contract: it says how a TIME is written, so it applies to time
-// inputs only, and it must be a layout Go can parse with — the reference time written the way
-// the value is, or unix / unixmilli. The commonest mistake is the notation other languages use,
-// `YYYY-MM-DD`, which Go reads as literal text: every value would fail to parse.
+// lintLayout restricts layout to time inputs and requires a usable Go layout (or unix /
+// unixmilli). It catches notations like `YYYY-MM-DD`, which Go reads as literal text.
 func lintLayout(spec *Spec) []error {
 	var problems []error
 	walkCommandsAt(spec, func(c *Command, path, ptr string) {
@@ -311,9 +294,8 @@ func lintLayout(spec *Spec) []error {
 	return problems
 }
 
-// sampleTime differs from Go's reference time (Mon Jan 2 15:04:05 MST 2006) in every field, so
-// formatting it under a layout changes every reference element the layout contains — and
-// changes nothing when it contains none.
+// sampleTime differs from Go's reference time in every field, so formatting it under a layout
+// with no reference elements returns the layout unchanged.
 var sampleTime = time.Date(2019, time.November, 23, 17, 38, 49, 0, time.UTC)
 
 // layoutProblem reports why a layout cannot parse anything, or "".
@@ -330,12 +312,12 @@ func layoutProblem(layout string) string {
 	return ""
 }
 
-// measuredTypes are the non-numeric types numeric bounds apply to, read in their own unit —
-// a duration in nanoseconds, a bytesize in bytes. The runtime keeps the matching table.
+// measuredTypes are the non-numeric types numeric bounds apply to, in their own unit
+// (nanoseconds, bytes). It mirrors a matching runtime table.
 var measuredTypes = map[string]bool{"time.Duration": true, rotiniPkgName + ".ByteSize": true}
 
-// measuredValue reads text as a measured type's value in its unit, through the runtime's own
-// parser, so a bound written `1h30m` or `1.5Gi` means what the same text means as a value.
+// measuredValue parses text as a measured type's value in its unit using the runtime's
+// parser, so a bound like `1h30m` or `1.5Gi` reads exactly as the same value would.
 func measuredValue(goType, text string) (float64, bool) {
 	rt, ok := valueTypes[goType]
 	if !ok || !measuredTypes[goType] {

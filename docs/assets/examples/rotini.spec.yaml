@@ -1,6 +1,6 @@
 # Every key the spec accepts, in one valid file. `rotini validate` checks it on every test run.
 $schema: ./.rotini-schema.spec.json
-version: 1.0.0
+version: 1.2.0
 command:
   name: deploy
   summary: ship services to environments
@@ -20,18 +20,22 @@ command:
     cascading: "Global Flags:"
     environment: "Environment:"
     configuration: "Configuration:"
+    output: "Output:"
     examples: "Examples:"
   exit_status:
     - code: 0
       summary: success
     - code: 1
       summary: the deploy failed
+    - code: 3
+      summary: some targets failed; stdout lists the ones that shipped
+      output: { type: array, items: { $ref: "#/schemas/Target" } }
   env_prefix: DEPLOY
   plugin_path: ~/.deploy/plugins
-  remote_discovery:
+  plugin_discovery:
     prefix: deploy-
     hidden: false
-  remote_commands:
+  plugins:
     - name: audit
       summary: run the audit plugin
       aliases: [au]

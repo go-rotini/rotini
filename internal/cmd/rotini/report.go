@@ -7,15 +7,14 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-// The handlers share one way of answering --help, announcing their inputs, and reporting what a
-// pass found, so sibling commands never disagree on the shape of their output.
+// Shared helpers for answering --help, announcing resolved inputs and reporting pass results,
+// so every command's output has the same shape.
 
-// answerHelp prints the command's help page and stops the run when argv asks for it. It reads
-// argv alone — no defaults and no required or enum checks — so `--help` is answered even
-// beside a missing argument or a bad value: the user asked NOT to run the command, and should
-// not be told off for not supplying what running it would need.
+// answerHelp prints the command's help page and halts with code 0 when argv sets the help flag.
+// It reads argv alone, without defaults or validation, so --help works beside a missing
+// argument or an invalid value.
 func answerHelp[T any](rtx *rotini.Context, help func(T) bool) bool {
-	argv, err := rotini.ParseArgv[T](rtx)
+	argv, err := rtx.ArgvInputs[T]()
 	if err != nil || !help(argv.Values) {
 		return false
 	}
@@ -24,20 +23,18 @@ func answerHelp[T any](rtx *rotini.Context, help func(T) bool) bool {
 	return true
 }
 
-// suggestor ranks a mistyped command, flag or value against what the companion accepts.
-// rotini the framework suggests nothing on its own; this program opts in, the same way any
-// program built with rotini can.
+// suggestor ranks a mistyped command, flag or value against what the companion cli accepts.
+// The framework suggests nothing by default; this program opts in.
 var suggestor = rotini.NewSuggestor()
 
-// haltWithInputError stops the run on an input error, naming the nearest accepted spelling when
-// one is close: `unknown command "genrate" for "rotini"; did you mean "generate"?`. The hint
-// reads like the ones `rotini validate` gives for a spec.
+// haltWithInputError halts on an input error, naming the nearest accepted spelling when one is
+// close: `unknown command "genrate" for "rotini"; did you mean "generate"?`.
 func haltWithInputError(rtx *rotini.Context, err error) {
 	rtx.HaltWith(withSuggestion(err, suggestor.For(err)))
 }
 
-// withSuggestion appends the nearest of hits to err's message, keeping err itself reachable so
-// its category and [*rotini.ParseError] details survive. No hits leaves err as it is.
+// withSuggestion appends the first of hits to err's message, keeping err unwrappable so its
+// category and [*rotini.ParseError] details survive. With no hits it returns err unchanged.
 func withSuggestion(err error, hits []string) error {
 	if len(hits) == 0 {
 		return err
@@ -53,8 +50,8 @@ type suggestedError struct {
 func (e *suggestedError) Error() string { return fmt.Sprintf("%s; did you mean %q?", e.err, e.hint) }
 func (e *suggestedError) Unwrap() error { return e.err }
 
-// commandNames lists every name and alias the companion's sub-commands answer to, for ranking
-// a `rotini help <topic>` that names no command.
+// commandNames lists every name and alias of the visible sub-commands, for suggesting a match
+// when `rotini help <topic>` names no command.
 func commandNames() []string {
 	var names []string
 	for _, c := range definition.Commands {
@@ -67,9 +64,9 @@ func commandNames() []string {
 	return names
 }
 
-// resolveInputs resolves the spec and conf a generate or validate reads, and prints them, so a
-// failing run says which files it read. A conf that was not given and is not beside the spec is
-// reported as such: the conf defaults apply.
+// resolveInputs resolves and prints the spec and conf paths a generate or validate reads. When
+// no conf is found it prints "conf: none (defaults)". A resolution failure halts with a usage
+// error.
 func resolveInputs(rtx *rotini.Context, specPath, confPath string) (spec, conf string, ok bool) {
 	spec, conf, err := codegen.ResolvePaths(specPath, confPath)
 	if err != nil {
@@ -85,8 +82,8 @@ func resolveInputs(rtx *rotini.Context, specPath, confPath string) (spec, conf s
 	return spec, conf, true
 }
 
-// printResult is a pass's result callback: the timing line on success, each problem on
-// failure. In watch mode it is the only report a pass gets, so it prints as the pass ends.
+// printResult returns a pass's result callback: it prints the result line to stdout on success
+// and each problem to stderr on failure. In watch mode it is the only report a pass gets.
 func printResult(rtx *rotini.Context) func(string, error) {
 	return func(result string, err error) {
 		if err != nil {
@@ -99,9 +96,8 @@ func printResult(rtx *rotini.Context) func(string, error) {
 	}
 }
 
-// printWarnings is a pass's warnings callback. Warnings print as the pass reports them, not
-// after the run: in watch mode the run ends only at ctrl-c, so a warning recorded for the end
-// would arrive late, once per pass.
+// printWarnings returns a pass's warnings callback. Warnings print immediately rather than
+// being recorded for the end of the run, which in watch mode only comes at interrupt.
 func printWarnings(rtx *rotini.Context) func([]error) {
 	return func(warnings []error) {
 		for _, w := range warnings {
@@ -110,9 +106,8 @@ func printWarnings(rtx *rotini.Context) func([]error) {
 	}
 }
 
-// haltWithProblems records each problem in err as its own outcome and stops the run. The
-// pipeline joins its findings into one error, and a funnel printing "Error: %s" would mark
-// only the first line of it, so `grep '^Error:'` would find one problem in three.
+// haltWithProblems records each leaf of a joined err as its own error and halts with the last,
+// so the reporter prints one "Error:" line per problem.
 func haltWithProblems(rtx *rotini.Context, err error) {
 	problems := flatten(err)
 	for _, problem := range problems[:len(problems)-1] {
@@ -121,8 +116,7 @@ func haltWithProblems(rtx *rotini.Context, err error) {
 	rtx.HaltWith(problems[len(problems)-1])
 }
 
-// flatten expands an errors.Join tree into its leaves, so each problem is recorded as its own
-// outcome. A non-joined error is its own only leaf.
+// flatten expands an errors.Join tree into its leaves. A non-joined error is its only leaf.
 func flatten(err error) []error {
 	joined, ok := err.(interface{ Unwrap() []error })
 	if !ok {

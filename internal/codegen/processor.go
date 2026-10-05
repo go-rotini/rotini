@@ -5,31 +5,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/go-rotini/jsonschema"
 )
 
-// Processor is the rotini controller, holding the immutable per-process config: the running
-// binary version, so a spec can be checked to target this rotini, and the compiled embedded
-// JSON Schemas. It exposes Generate, Validate and Initialize, each running the same pipeline:
+// Processor drives rotini's pipeline for Generate, Validate and Initialize:
 //
 //	reconcile (read + decode)  →  validate (version + schema)  →  lint (rotini rules)  →  generate
 //
-// The reconcile stage returns values that flow through the later stages, so the Processor
-// itself stays immutable and one instance safely drives many passes — watch mode re-runs the
-// pipeline on every change.
+// It holds only immutable state (the binary version and compiled schemas); per-pass values
+// flow between stages, so one Processor can drive repeated watch-mode passes.
 type Processor struct {
-	version    string             // running binary version ("X.Y.Z", a leading v tolerated; "" → version check skipped)
-	specSchema *jsonschema.Schema // compiled embedded spec JSON Schema
-	confSchema *jsonschema.Schema // compiled embedded conf JSON Schema
+	version    string // running binary version; "" or unparseable skips the version check
+	specSchema *jsonschema.Schema
+	confSchema *jsonschema.Schema
 }
 
-// NewProcessor returns a Processor tagged with the running binary's version string. It
-// compiles rotini's embedded spec + conf JSON Schemas once (the "valid CLI" contract the
-// validate stage checks the end-user's files against); a compile failure is a rotini
-// packaging bug, never user input, so it panics rather than surfacing a user-facing error.
+// NewProcessor returns a Processor for the given binary version. It panics if the embedded
+// schemas fail to compile, which is a rotini build defect rather than a user error.
 func NewProcessor(version string) *Processor {
 	specSchema, err := loadSpecSchema()
 	if err != nil {
@@ -46,13 +42,11 @@ func NewProcessor(version string) *Processor {
 	}
 }
 
-// Generate runs the generate workflow: reconcile → validate (the gate) → emit the
-// program — once, or on every spec/conf change in watch mode until interrupted (ctrl-c).
-// onGenerate (may be nil) receives a "[HH:MM:SS] <took>" summary and each pass's error;
-// without watch the single pass's error is returned so the caller can treat it as failed.
-// onNotices (may be nil) receives the pass's non-fatal findings — the same validation warnings
-// Validate reports, what it removed (a file deleted without a word is how work gets lost), and
-// what the hook audit noticed in the handler files it did not write.
+// Generate reconciles, validates and emits the program, once or, with watch, on every spec
+// or conf change until interrupted. onGenerate (optional) receives a "[HH:MM:SS] <took>"
+// summary and each pass's error; without watch the pass's error is also returned. onNotices
+// (optional) receives each pass's non-fatal findings: validation warnings, pruned files, and
+// hook-audit warnings about handler files.
 func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error {
 	if onGenerate == nil {
 		onGenerate = func(string, error) {}
@@ -67,10 +61,10 @@ func (p *Processor) Generate(specPath, confPath string, watch bool, onGenerate f
 	return p.run(specPath, confPath, watch, pass, onGenerate, onNotices)
 }
 
-// Validate runs the validate workflow: reconcile → validate + lint, once or on every
-// change (watch). failMode is the --fail override ("fast"/"collect"; "" → the conf's
-// validate.fail). onValidate (may be nil) receives a summary and each pass's error;
-// onWarnings (may be nil) receives every pass's non-fatal warnings.
+// Validate reconciles, validates and lints both documents, once or, with watch, on every
+// change. failMode overrides the conf's validate.fail ("fast" or "collect"; "" uses the conf).
+// onValidate (optional) receives a summary and each pass's error; onWarnings (optional)
+// receives each pass's non-fatal warnings.
 func (p *Processor) Validate(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error {
 	if onValidate == nil {
 		onValidate = func(string, error) {}
@@ -85,11 +79,9 @@ func (p *Processor) Validate(specPath, confPath string, watch bool, failMode str
 	return p.run(specPath, confPath, watch, pass, onValidate, onWarnings)
 }
 
-// Initialize scaffolds a new rotini CLI named name: it writes + validates the seed
-// spec + conf, then runs the standard generate to produce a ready-to-build CLI (see
-// initialize). format selects the serialization; force replaces an existing seed spec and
-// conf. It never deletes a file: handlers for commands the new seed lacks stay until the next
-// generate, which prunes them and says so.
+// Initialize scaffolds a new CLI named name: it writes the seed spec and conf in format,
+// then validates and generates a ready-to-build program. force replaces an existing seed
+// spec and conf. It never deletes files; stale handlers are pruned by the next generate.
 func (p *Processor) Initialize(name, format string, force bool) (Initialized, error) {
 	start := time.Now()
 	specPath, confPath, err := p.initialize(name, format, force)
@@ -103,11 +95,8 @@ func (p *Processor) Initialize(name, format string, force bool) (Initialized, er
 	}, nil
 }
 
-// ─── the staged pipeline ───────────────────────────────────────────────────────.
-
-// reconcile reads + decodes both documents: the spec is REQUIRED (reconcileSpec errors
-// on a missing one), the conf is OPTIONAL (reconcileConf yields the default shape when
-// absent). The conf is resolved beside the (now-known) spec path.
+// reconcile reads and decodes the required spec and the optional conf, resolving the conf
+// beside the spec.
 func (p *Processor) reconcile(specPath, confPath string) (*reconciledSpec, *reconciledConf, error) {
 	rs, err := reconcileSpec(specPath)
 	if err != nil {
@@ -120,17 +109,10 @@ func (p *Processor) reconcile(specPath, confPath string) (*reconciledSpec, *reco
 	return rs, rc, nil
 }
 
-// explainDecodeFailure turns a document that would not decode into the schema validator's
-// account of why, so a mistyped value is reported like every other mistake: every problem at
-// once, each with a file:line:col and a JSON pointer.
-//
-// The Go decode runs first and stops at its first type mismatch, before validation ever sees
-// the document — so without this, `minimum: "five"` produced a raw decoder message with no
-// column and no key path, and a second mistake further down took another round trip to find.
-//
-// The decoder's own error is kept for the one case it is genuinely right about: the schema
-// accepts the document but the Go types reject it. That is a disagreement between rotini's
-// schema and rotini's types — a rotini bug — and it says so.
+// explainDecodeFailure replaces a decode error with the schema validator's positioned
+// problems for the same document, so every mistyped value is reported at once. If the schema
+// accepts the document, the schema and Go types disagree, which is a rotini bug, and the
+// decoder's error is returned saying so.
 func (p *Processor) explainDecodeFailure(kind string, err error) error {
 	var de *decodeError
 	if !errors.As(err, &de) {
@@ -155,17 +137,13 @@ func (p *Processor) explainDecodeFailure(kind string, err error) error {
 	return errors.Join(problems...)
 }
 
-// validateAndLintSpec schema-validates the spec, then — only when it is schema-valid (the lint
-// rules assume a valid shape) — lints it. It returns every problem found.
+// validateAndLintSpec validates and lints the spec and every local spec it composes.
 func (p *Processor) validateAndLintSpec(rs *reconciledSpec) []error {
 	problems := p.validateAndLintOne(rs)
-	// A composed child is part of this program, so it is judged with it. Before, a parent
-	// validated clean over a child holding an unknown key and an unparseable default: the child
-	// was checked for cycles and collisions only, unless someone validated it on its own.
 	return append(problems, p.validateComposedSpecs(rs, map[string]bool{})...)
 }
 
-// validateAndLintOne is the schema gate then the lint rules, for one spec document.
+// validateAndLintOne validates one spec document and, only if it is schema-valid, lints it.
 func (p *Processor) validateAndLintOne(rs *reconciledSpec) []error {
 	if problems := p.validateSpec(rs); len(problems) > 0 {
 		return problems
@@ -173,11 +151,9 @@ func (p *Processor) validateAndLintOne(rs *reconciledSpec) []error {
 	return p.lintSpec(rs)
 }
 
-// validateComposedSpecs validates every LOCAL spec rs composes with `$ref`, transitively, exactly
-// as `rotini validate <child>` would — each problem positioned in the child's own file. A mod://
-// child belongs to another module and was validated by its author; a git::/https:// ref is
-// refused at composition. A spec that does not read at all is left to composition, which
-// reports it where the $ref sits.
+// validateComposedSpecs transitively validates and lints every local spec rs composes via
+// `$ref`, positioning problems in each child's file. mod:// and remote refs are skipped, as is
+// a child that fails to read (composition reports it at the $ref).
 func (p *Processor) validateComposedSpecs(rs *reconciledSpec, seen map[string]bool) []error {
 	if rs == nil || rs.spec == nil {
 		return nil
@@ -232,9 +208,9 @@ func (p *Processor) validateAndLintConf(rc *reconciledConf) []error {
 	return p.lintConf(rc)
 }
 
-// validateDocuments runs the full validate pass over both documents, honoring fast vs
-// collect, returning the pass's non-fatal warnings and a joined fatal error (nil → all
-// valid). In fast mode it stops at the first failing document.
+// validateDocuments validates and lints both documents, then runs cross-document rules if
+// both passed. It returns the warnings and the joined errors; in fast mode it returns the
+// first error only.
 func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, failMode string) (warnings []error, err error) {
 	fast := failFast(failMode, rc)
 
@@ -250,15 +226,22 @@ func (p *Processor) validateDocuments(rs *reconciledSpec, rc *reconciledConf, fa
 		return warnings, confErrs[0]
 	}
 
-	return warnings, errors.Join(append(specErrs, confErrs...)...)
+	var crossErrs []error
+	if len(specErrs) == 0 && len(confErrs) == 0 {
+		var crossWarns []error
+		crossErrs, crossWarns = splitProblems(p.lintAcross(rs, rc))
+		warnings = append(warnings, crossWarns...)
+		if fast && len(crossErrs) > 0 {
+			return warnings, crossErrs[0]
+		}
+	}
+
+	return warnings, errors.Join(slices.Concat(specErrs, confErrs, crossErrs)...)
 }
 
-// validateAndEmit is the gate-then-emit step: validation must pass (the gate — invalid input
-// never reaches codegen), then the conf defaults are applied and the program emitted. prune
-// says whether orphaned stubs are removed; init passes false, since it never deletes a file.
-// It returns the pass's NOTICES: the validation warnings, the orphaned stubs it pruned, which
-// the caller reports rather than deleting them silently, and what the hook audit found in the
-// handler files it did not write.
+// validateAndEmit validates both documents and, only if they pass, applies conf defaults and
+// emits the program. prune controls whether orphaned stubs are removed (init passes false).
+// It returns notices: validation warnings, pruned files, and hook-audit warnings.
 func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prune bool) ([]error, error) {
 	warnings, err := p.validateDocuments(rs, rc, "")
 	if err != nil {
@@ -280,9 +263,8 @@ func (p *Processor) validateAndEmit(rs *reconciledSpec, rc *reconciledConf, prun
 	return notices, err
 }
 
-// failFast reports whether validation stops at the first problem: the --fail override
-// (failMode) wins, else the reconciled conf's validate.fail. Only "fast" enables it —
-// anything else collects every problem (the default).
+// failFast reports whether validation stops at the first problem: failMode if set, else the
+// conf's validate.fail. Only "fast" enables it; the default collects every problem.
 func failFast(failMode string, rc *reconciledConf) bool {
 	mode := failMode
 	if mode == "" && rc != nil && rc.conf != nil && rc.conf.Validate != nil {
@@ -291,11 +273,8 @@ func failFast(failMode string, rc *reconciledConf) bool {
 	return mode == "fast"
 }
 
-// ─── the run/watch engine ──────────────────────────────────────────────────────.
-
-// run resolves the spec and conf paths up front, so watch watches exactly the files read, then
-// drives the shared run/watch engine. Each pass reconciles and processes the files fresh, so
-// edits are picked up, stamped with a summary handed to onResult.
+// run resolves the spec and conf paths once, so watch mode watches exactly the files read,
+// then runs pass once or per change, reporting a timed summary to onResult.
 func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPath, confPath string) (warnings []error, err error), onResult func(result string, err error), onWarnings func([]error)) error {
 	resolvedSpec, err := resolveSpecPath(specPath)
 	if err != nil {
@@ -309,8 +288,6 @@ func (p *Processor) run(specPath, confPath string, watch bool, pass func(specPat
 	timed := func() (string, error) {
 		start := time.Now()
 		warnings, err := pass(resolvedSpec, resolvedConf)
-		// Surface warnings on every pass (success or failure), independent of the
-		// pass/fail result onResult carries.
 		if onWarnings != nil && len(warnings) > 0 {
 			onWarnings(warnings)
 		}

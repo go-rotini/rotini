@@ -14,21 +14,15 @@ import (
 	"github.com/go-rotini/jsonschema"
 )
 
-// The validate stage: the version check and JSON Schema validation the Processor runs before
-// lint. The problem machinery is in validate_problem.go, the lint rules in lint_spec.go and
-// lint_conf.go, and the deep composed-$ref check in lint_compose.go.
+// The validate stage: the version check and JSON Schema validation that run before lint.
 
-// ValidateFn is the signature of [Processor.Validate]. A command handler binds it
-// under a registry key and fetches it as an injectable service, so tests substitute a
-// double (see [GenerateFn]).
+// ValidateFn is the signature of [Processor.Validate]. The companion CLI injects it as a
+// dependency so tests can substitute a double (see [GenerateFn]).
 type ValidateFn = func(specPath, confPath string, watch bool, failMode string, onValidate func(result string, err error), onWarnings func(warnings []error)) error
 
-// ─── validate (version + schema) ───────────────────────────────────────────────.
-
-// validateSpec checks that the spec targets this rotini and is schema-valid against the
-// embedded spec schema, validating the canonical-JSON instance so unknown-field rules fire,
-// and returns every problem positioned to source. Linting is lintSpec's job, run only once
-// this passes, since the lint rules assume a schema-valid shape.
+// validateSpec checks the spec's version and validates its canonical JSON against the
+// embedded spec schema, returning every problem positioned in source. Lint runs only after
+// this passes.
 func (p *Processor) validateSpec(rs *reconciledSpec) []error {
 	var problems []error
 	if vp := versionProblem("spec", rs.spec.Version, p.version); vp != nil {
@@ -40,8 +34,7 @@ func (p *Processor) validateSpec(rs *reconciledSpec) []error {
 	return problems
 }
 
-// validateConf is validateSpec for the conf. A defaulted conf (no file) has nothing to
-// validate and returns no problems.
+// validateConf is validateSpec for the conf. A defaulted conf (no file) returns no problems.
 func (p *Processor) validateConf(rc *reconciledConf) []error {
 	if rc.path == "" {
 		return nil
@@ -58,9 +51,8 @@ func (p *Processor) validateConf(rc *reconciledConf) []error {
 // semver is a document's or binary's X.Y.Z, with any -prerelease/+build suffix discarded.
 type semver struct{ major, minor, patch int }
 
-// parseSemver reads a leading X.Y.Z, tolerating a "v" prefix and ignoring anything after the
-// patch number (a "-rc.1" or "+build" suffix). ok is false for anything else — a dev build
-// stamped "dev", an empty string — which the version check treats as "unknown, do not judge".
+// parseSemver reads X.Y.Z, tolerating a "v" prefix and ignoring any -prerelease or +build
+// suffix. ok is false for anything else, such as "dev" or "".
 func parseSemver(v string) (semver, bool) {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
 	if i := strings.IndexAny(v, "-+"); i >= 0 {
@@ -101,20 +93,10 @@ func (v semver) olderThan(w semver) bool {
 	return v.patch < w.patch
 }
 
-// versionProblem reports a document this rotini cannot be trusted to process.
-//
-// A document's `version` is a MINIMUM, not an equality: it says "I use the rotini feature set
-// as of X.Y.Z". Any binary of the same major that is at least that version accepts it, so a
-// patch or minor upgrade never forces an edit to a single spec or conf in a fleet. Two cases
-// are still errors, because in both the binary genuinely cannot be relied on:
-//
-//   - the binary is OLDER than the document — the document may use keys it does not know, and
-//     the schema would reject them with a confusing "unknown property" instead of the truth;
-//   - the majors differ — by definition a different, incompatible feature set.
-//
-// It is skipped whenever either side is unknown: a development build of rotini (no parseable
-// version, or the 0.0.0 an unreleased build reports), or a document that declares none.
-// Judging an unknown is worse than not judging.
+// versionProblem reports a document this rotini cannot process. A document's `version` is a
+// minimum: any binary of the same major at or above it is accepted. It is an error when the
+// majors differ or the binary is older than the document. The check is skipped when either
+// version is unknown (unparseable, absent, or a 0.0.0 development build).
 func versionProblem(kind, docVersion, binaryVersion string) *problem {
 	bin, ok := parseSemver(binaryVersion)
 	if !ok || bin == (semver{}) {
@@ -142,10 +124,9 @@ func versionProblem(kind, docVersion, binaryVersion string) *problem {
 	return nil
 }
 
-// validateInstance validates a document's raw JSON instance — raw, so rules like
-// additionalProperties:false see unknown fields — against the compiled schema, returning one
-// [*problem] per violation. The instance came from the loader's single read, so validation and
-// generation always judge the same bytes.
+// validateInstance validates a document's raw JSON instance against the compiled schema,
+// returning one [*problem] per violation. Validating the raw instance lets
+// additionalProperties:false see unknown fields.
 func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) []error {
 	result, err := schema.Validate(instance)
 	if err != nil {
@@ -167,23 +148,17 @@ func validateInstance(kind string, instance []byte, schema *jsonschema.Schema) [
 	return problems
 }
 
-// humanizeSchemaError renders a schema violation in rotini's vocabulary instead of JSON
-// Schema's, for the two failures whose stock wording says nothing to the person who caused
-// them — and which happen to be the two mistakes everyone makes first:
+// humanizeSchemaError rewrites a schema violation in rotini's vocabulary for the keywords
+// whose stock wording is unhelpful:
 //
-//	/command/summry: schema is false; nothing matches   ->  unknown key "summry" on a command
-//	/command: no anyOf branch matched                   ->  a command needs either "name" or "$ref"
+//	false    /command/summry: schema is false  ->  unknown key "summry" on a command
+//	type     value is not of type array        ->  "aliases" must be of type array
+//	pattern  regex mismatch                    ->  "x" must look like <examples>
+//	anyOf    no anyOf branch matched           ->  a command needs either "name" or "$ref"
 //
-// Everything else the validator says is already plain ("value is not of type array", "missing
-// required property \"version\""), so it passes through untouched. rotini's own lint rules set
-// the bar — they name the command, the input and the rule, and say why it matters — and these
-// two were the only messages in the tool that failed it.
-//
-// Both readings are DERIVED, not hardcoded: the key comes from the instance pointer, the noun
-// from the schema definition the keyword failed in, and the choice from the anyOf branches'
-// own required-property causes. A schema change carries them along. The dispatch is on
-// ve.Keyword, which the validator documents as the stable machine-readable classification —
-// never on its message text.
+// Wording is derived from the instance pointer and the schema itself (definition names,
+// `examples`, `x-hint`, anyOf required causes), never hardcoded, and dispatch is on
+// ve.Keyword rather than message text. Other messages pass through unchanged.
 func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 	switch ve.Keyword {
 	case "false":
@@ -197,9 +172,6 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 		}
 		return fmt.Sprintf("unknown key %q", key)
 	case "type":
-		// "value is not of type array" names the expectation and not the thing — so in
-		// isolation, in a log or an editor's error list, it says which shape was wanted
-		// without saying of what.
 		if key := pointerLeaf(ve.InstanceLocation); key != "" {
 			if want, ok := strings.CutPrefix(ve.Message, "value is not of type "); ok {
 				msg := fmt.Sprintf("%q must be of type %s", key, want)
@@ -210,21 +182,19 @@ func humanizeSchemaError(ve *jsonschema.ValidationError) string {
 			}
 		}
 	case "pattern":
-		// A regex is how the schema checks a value, not how anyone should learn what to write.
-		// Every patterned key in rotini's schemas declares `examples` (a guard keeps it so), and
-		// those are what the reader needs.
+		// Every patterned key in rotini's schemas declares `examples`; quote them instead of
+		// the regex.
 		node := strings.TrimSuffix(ve.KeywordLocation, "/pattern")
 		if ex := schemaExamples(node); len(ex) > 0 {
 			msg := fmt.Sprintf("%s must look like %s", patternSubject(ve.InstanceLocation), quotedOrList(ex))
-			// A key whose likeliest mistake needs more than examples says so in its schema.
 			if hint := schemaHint(node); hint != "" {
 				msg += "; " + hint
 			}
 			return msg
 		}
 	case "anyOf":
-		// Every branch failed. In rotini's schemas an anyOf is a choice between required
-		// keys, so the branches' causes name the choice exactly.
+		// In rotini's schemas an anyOf is a choice between required keys, so the failed
+		// branches' causes name the choices.
 		keys := requiredChoices(ve.Causes)
 		if len(keys) < 2 {
 			break
@@ -250,7 +220,7 @@ func patternSubject(instanceLocation string) string {
 }
 
 // schemaDocuments are rotini's two embedded schemas, parsed once, for reading keywords the
-// validator does not report — the `examples` a pattern failure quotes.
+// validator does not report, such as `examples` and `x-hint`.
 var schemaDocuments = sync.OnceValue(func() []any {
 	var docs []any
 	for _, raw := range [][]byte{schemaSpecFileBytes, schemaConfFileBytes} {
@@ -262,8 +232,8 @@ var schemaDocuments = sync.OnceValue(func() []any {
 	return docs
 })
 
-// schemaHint returns the rotini-specific `x-hint` of the schema node at a keyword location: the
-// explanation a pattern failure adds when examples alone would leave the reader guessing.
+// schemaHint returns the rotini-specific `x-hint` of the schema node at a keyword location,
+// or "".
 func schemaHint(location string) string {
 	if m, ok := schemaNode(location).(map[string]any); ok {
 		if h, ok := m["x-hint"].(string); ok {
@@ -318,8 +288,8 @@ func schemaNode(location string) any {
 	return nil
 }
 
-// pointerLeaf is the last segment of a JSON pointer ("/command/summry" -> "summry"), with
-// pointer escapes undone. "" for the root pointer.
+// pointerLeaf returns the unescaped last segment of a JSON pointer ("/command/summry" ->
+// "summry"), or "" for the root pointer.
 func pointerLeaf(pointer string) string {
 	i := strings.LastIndex(pointer, "/")
 	if i < 0 || i == len(pointer)-1 {
@@ -328,9 +298,8 @@ func pointerLeaf(pointer string) string {
 	return unescapePointer(pointer[i+1:])
 }
 
-// definitionNoun turns a schema keyword location into the English noun for the shape that
-// failed: "#/definitions/Command/anyOf" -> "a command", "#/definitions/FlagInput/..." ->
-// "a flag input". "" when the location names no definition.
+// definitionNoun returns the English noun for the definition a keyword location falls in
+// ("#/definitions/Command/anyOf" -> "a command"), or "" when it names none.
 func definitionNoun(keywordLocation string) string {
 	segs := strings.Split(strings.TrimPrefix(keywordLocation, "#/"), "/")
 	for i, seg := range segs {
@@ -346,7 +315,7 @@ func definitionNoun(keywordLocation string) string {
 }
 
 // splitCamel turns a PascalCase schema definition name into lowercase words:
-// "RemoteCommandSpec" -> "remote command spec".
+// "PluginSpec" -> "plugin spec".
 func splitCamel(name string) string {
 	var b strings.Builder
 	for i, r := range name {
@@ -358,14 +327,14 @@ func splitCamel(name string) string {
 	return b.String()
 }
 
-// requiredChoices collects the property each failed anyOf branch was missing, in branch order
-// and deduped — the choice the author actually has.
+// requiredChoices returns the deduplicated property each failed anyOf branch was missing, in
+// branch order, or nil if any branch failed for another reason.
 func requiredChoices(causes []jsonschema.ValidationError) []string {
 	var keys []string
 	for i := range causes {
 		c := &causes[i]
 		if c.Keyword != "required" {
-			return nil // not a required-key choice; say nothing rather than guess
+			return nil
 		}
 		key := betweenQuotes(c.Message)
 		if key == "" {
@@ -407,23 +376,13 @@ func quotedOrList(keys []string) string {
 	}
 }
 
-// ─── strictness inside schema blocks ──────────────────────────────────────────.
+// Schema blocks cannot be closed with additionalProperties:false in the JSON Schema itself:
+// Schema and InputSchema inherit BaseSchema through allOf, and Draft 7 cannot combine allOf
+// with additionalProperties:false. schemaBlockProblems enforces closed keys in the validate
+// stage instead.
 
-// Every other object in a spec is closed with additionalProperties:false, so a misspelled key
-// is reported with its position. The `schema:` blocks were not, and could not be: Schema and
-// InputSchema inherit BaseSchema through allOf, and JSON Schema Draft 7 cannot combine allOf
-// with additionalProperties:false (each branch would reject the other's keys). The schema's own
-// comment said Go's DisallowUnknownFields enforced it at parse time — nothing ever set that
-// option, so any key at all was silently accepted:
-//
-//	schema: { type: string, uniqueItems: true, totallyMadeUpKey: 42 }   // validated clean
-//
-// schemaBlockProblems closes the gap in the validate stage, where it produces the same
-// positioned "unknown key" message the schema validator produces everywhere else.
-
-// schemaBlockKeySets are the keys each kind of schema block may carry. They are DERIVED from the
-// embedded spec schema — BaseSchema's properties plus each definition's own additions — so the
-// check can never disagree with the schema it enforces.
+// schemaBlockKeySets are the keys each kind of schema block may carry, derived from the
+// embedded spec schema (BaseSchema's properties plus each definition's allOf additions).
 type schemaBlockKeySets struct {
 	input  map[string]bool // InputSchema: flags, arguments, env, config, stdin
 	object map[string]bool // Schema: output, schemas, config_files, properties, items
@@ -460,10 +419,8 @@ var loadSchemaBlockKeys = sync.OnceValues(func() (schemaBlockKeySets, error) {
 	return sets, nil
 })
 
-// jsonSchemaOnlyKeywords are JSON Schema keywords rotini's schema blocks do not implement. They
-// get a sharper message than an ordinary typo, because the author wrote them expecting them to
-// DO something — uniqueItems to deduplicate, format to validate — and silence would have told
-// them it did.
+// jsonSchemaOnlyKeywords are JSON Schema keywords rotini's schema blocks do not implement.
+// An unknown key in this set gets a message saying so rather than a plain typo message.
 var jsonSchemaOnlyKeywords = map[string]bool{
 	"uniqueItems": true, "const": true, "format": true, "contains": true, "minContains": true,
 	"maxContains": true, "additionalProperties": true, "patternProperties": true,
@@ -476,10 +433,10 @@ var jsonSchemaOnlyKeywords = map[string]bool{
 	"contentEncoding": true, "default": true,
 }
 
-// schemaBlockProblems reports every key in a spec's schema blocks that the block's kind does not
-// define, positioned by JSON pointer. It walks every place a schema block can appear — input
-// schemas on each channel, output, the document-level schemas, config file schemas — and
-// recurses through properties and items.
+// schemaBlockProblems reports every key in a spec's schema blocks that the block's kind does
+// not define, positioned by JSON pointer. It visits input schemas on each channel, output and
+// exit-status output, named schemas, and config file schemas, recursing through properties
+// and items.
 func schemaBlockProblems(instance []byte) []error {
 	sets, err := loadSchemaBlockKeys()
 	if err != nil {
@@ -487,7 +444,7 @@ func schemaBlockProblems(instance []byte) []error {
 	}
 	var doc map[string]any
 	if json.Unmarshal(instance, &doc) != nil {
-		return nil // a malformed document is the schema validator's to report
+		return nil // the schema validator reports a malformed document
 	}
 	w := &schemaBlockWalker{sets: sets}
 	w.command(doc["command"], "/command")
@@ -524,6 +481,15 @@ func (w *schemaBlockWalker) command(node any, ptr string) {
 	if out, ok := c["output"]; ok {
 		w.block(out, false, ptr+"/output", "the output schema")
 	}
+	if statuses, ok := c["exit_status"].([]any); ok {
+		for i, s := range statuses {
+			if e, ok := s.(map[string]any); ok {
+				if out, ok := e["output"]; ok {
+					w.block(out, false, fmt.Sprintf("%s/exit_status/%d/output", ptr, i), "an exit status output schema")
+				}
+			}
+		}
+	}
 	if named, ok := c["schemas"].(map[string]any); ok {
 		for _, n := range slices.Sorted(maps.Keys(named)) {
 			w.block(named[n], false, ptr+"/schemas/"+escapePointer(n), "a named schema")
@@ -547,8 +513,8 @@ func (w *schemaBlockWalker) entrySchemas(list any, input bool, ptr, noun string)
 	}
 }
 
-// block checks one schema block's keys, then recurses into its properties and items — which are
-// always object schemas, whatever kind of block contains them.
+// block checks one schema block's keys, then recurses into its properties and items, which
+// are always object schemas regardless of the containing block's kind.
 func (w *schemaBlockWalker) block(node any, input bool, ptr, noun string) {
 	m, ok := node.(map[string]any)
 	if !ok {
@@ -573,8 +539,8 @@ func (w *schemaBlockWalker) block(node any, input bool, ptr, noun string) {
 	}
 }
 
-// unknownSchemaKey renders the message, sharpening it for a JSON Schema keyword the author
-// clearly expected to work.
+// unknownSchemaKey renders the unknown-key message, noting when the key is an unimplemented
+// JSON Schema keyword.
 func unknownSchemaKey(key, noun string) string {
 	msg := fmt.Sprintf("unknown key %q in %s", key, noun)
 	if jsonSchemaOnlyKeywords[key] {

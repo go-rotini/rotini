@@ -27,7 +27,7 @@ stderr 'builtin'
 # `timeout` on a local command: the schema accepts the key ONLY so the error can say where it
 # belongs. A generic "unknown property" would leave the author guessing.
 ! exec rotini validate timeout.spec.yaml --config ok.conf.yaml
-stderr 'remote_commands'
+stderr 'plugins'
 
 # collect mode reports every problem at once; fail-fast stops at the first.
 ! exec rotini validate many.spec.yaml --config ok.conf.yaml --fail collect

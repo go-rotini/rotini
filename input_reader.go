@@ -18,76 +18,72 @@ import (
 	"github.com/go-rotini/recon"
 )
 
-// Binder is the default multi-source input binder: it fills a command's typed inputs from
+// InputReader is the default multi-source input reader. It fills a command's typed inputs from
 // argv (via a default [Parser]) and from the non-argv channels — environment variables,
-// configuration files, and a leaf command's typed stdin payload — reconciled and decoded by
-// recon. It is the engine behind [Collect]; the à-la-carte per-channel surface is in
-// overlay.go.
+// configuration files, and the leaf command's typed stdin payload — reconciled and decoded by
+// recon. It is the engine behind [Context.Inputs]; [Context.ArgvInputs] and its siblings expose
+// the channels individually.
 //
-//	binder := rotini.NewBinder(meta)
+//	reader := rotini.NewInputReader(settings)
 //	var in WidgetCreateInputs
-//	if err := binder.Bind(rtx, &in); err != nil { /* handler owns it */ }
+//	if err := reader.Read(rtx, &in); err != nil { /* handler owns it */ }
 //
-// Env values fill the generated <Prefix>Env struct, config-file values <Prefix>Config. The two
-// channels use independent registries, so an env var never leaks into a config field or the
+// Env values fill the generated <Prefix>Env struct and config-file values <Prefix>Config. The
+// two channels use independent registries, so an env var never leaks into a config field or the
 // reverse. Flags may additionally fall back to env and config.
-type Binder struct {
+type InputReader struct {
 	parser       *Parser
 	configFiles  []ConfigFile
 	stdinSchemas map[string]string // "<Prefix>Stdin" type name → JSON Schema for payload validation
-	envPrefix    string            // BindMeta.EnvPrefix: scopes derived env-var names
-	sources      []recon.Source    // BindMeta.Sources: custom sources, after the declared files
+	envPrefix    string            // InputSettings.EnvPrefix: scopes derived env-var names
+	sources      []recon.Source    // InputSettings.Sources: custom sources, after the declared files
 
-	// described records whether a [BindMeta] was SUPPLIED, as distinct from supplied empty.
-	// A registry entry could never tell those apart — an absent key and a zero value read
-	// identically — which is why "no configuration sources" and "nobody wired the
-	// descriptor" produced the same silent result. See checkDescribed.
+	// described records whether an [InputSettings] was supplied at all, as distinct from
+	// supplied empty; checkDescribed relies on it.
 	described bool
 }
 
-// binderFor builds a Binder from the Context's bound BindMeta, or the zero meta when none is
-// bound, so a CLI with no config files, stdin schemas or env prefix needs no ceremony.
-func binderFor(rtx *Context) *Binder {
+// readerFor builds an InputReader from the Context's bound InputSettings, or from the zero
+// InputSettings when none is bound.
+func readerFor(rtx *Context) *InputReader {
 	if rtx == nil {
-		return NewBinder(BindMeta{}) // the channel layer reports the nil context as a ParseError
+		return NewInputReader(InputSettings{}) // the channel layer reports the nil context as a ParseError
 	}
-	meta, described := rtx.bindMeta()
-	// A [Program.WithBinder] function wins. It receives the meta rather than having to find
-	// it, so an override cannot accidentally discard the configuration sources the spec
-	// declared — which is what binding a Binder under a registry key used to allow.
-	if fn := rtx.binderFn; fn != nil {
+	meta, described := rtx.settingsForRun()
+	// A [Program.WithInputReader] function wins. It receives the settings, so an override cannot
+	// discard the configuration sources the spec declared.
+	if fn := rtx.readerFn; fn != nil {
 		if b := fn(meta); b != nil {
 			b.described = described
 			return b
 		}
 	}
-	b := NewBinder(meta)
+	b := NewInputReader(meta)
 	b.described = described
 	return b
 }
 
-// NewBinder returns the default binder, configured from the generated BindMeta descriptor.
-func NewBinder(meta BindMeta) *Binder {
-	return &Binder{
+// NewInputReader returns the default input reader, configured from the generated
+// [InputSettings].
+func NewInputReader(meta InputSettings) *InputReader {
+	return &InputReader{
 		parser: NewParser(), configFiles: meta.ConfigFiles, stdinSchemas: meta.StdinSchemas,
 		envPrefix: meta.EnvPrefix, sources: meta.Sources, described: true,
 	}
 }
 
-// Bind fills out — a non-nil pointer to the generated inputs struct — from every wired
-// channel. Validation of the argv channel runs once over the fully-reconciled values, so a
-// required flag is satisfiable from env or config and an env- or config-supplied value is
-// still enum-checked.
+// Read fills out, a non-nil pointer to the generated inputs struct, from every channel. Flag and
+// argument validation runs once over the reconciled values, so a required flag is satisfiable
+// from env or config and an env- or config-supplied value is still enum-checked.
 //
-// It returns the first error: a [*ParseError] from the argv channel or a [*BindError] from the
-// others, both categorized and non-leaky, with the recon cause reachable via errors.As — or a
-// [*WiringError] when a command declares config: inputs but the program was built without a
-// [BindMeta].
-func (b *Binder) Bind(rtx *Context, out any) error { return b.bind(rtx, out) }
+// It returns the first error: a [*ParseError] from the argv channel or an [*InputError] from the
+// others, with the recon cause reachable via errors.As, or a [*WiringError] when a command
+// declares config inputs but the program has no [InputSettings].
+func (b *InputReader) Read(rtx *Context, out any) error { return b.bind(rtx, out) }
 
-func (b *Binder) bind(rtx *Context, out any) error {
+func (b *InputReader) bind(rtx *Context, out any) error {
 	if b == nil {
-		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil binder"}
+		return &ParseError{Kind: ParseKindInternal, Msg: "rotini: nil input reader"}
 	}
 	rv := reflect.ValueOf(out)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
@@ -111,9 +107,9 @@ func (b *Binder) bind(rtx *Context, out any) error {
 		return err
 	}
 
-	// 3. Validate the reconciled flags and arguments — the argv channel's single validation
-	//    locus. Argv errors surface before any channel error. Only the frames out describes
-	//    are judged: a parent collecting its own inputs is not the place to demand the leaf's.
+	// 3. Validate the reconciled flags and arguments, once. Argv errors surface before any
+	//    channel error. Only the commands out describes are judged, so a parent collecting its
+	//    own inputs is not held to the leaf's requirements.
 	if anchor >= 0 {
 		store.span = &[2]int{anchor, anchor + v.NumField()}
 	}
@@ -121,8 +117,7 @@ func (b *Binder) bind(rtx *Context, out any) error {
 		return err
 	}
 
-	// The argv diagnostics have had their turn, so a struct that still does not fit the chain
-	// is a genuine mismatch rather than a symptom of a bad command line.
+	// Checked after argv validation so a bad command line reports itself first.
 	if err := checkFrameFit(v, chain, rtx.frameIndex()); err != nil {
 		return err
 	}
@@ -153,13 +148,13 @@ func (b *Binder) bind(rtx *Context, out any) error {
 		return err
 	}
 
-	// 5. stdin → the leaf command's typed payload. Stdin has exactly one consumer.
+	// 5. stdin → the leaf command's typed payload, its only consumer.
 	return b.fillStdin(rtx, v)
 }
 
 // validateStore runs the argv channel's declarative checks over a reconciled store — required,
 // enum and constraints, then flag groups, then flag dependencies — returning the first failure.
-func validateStore(chain []ResolvedCommand, store *parsedInputs) error {
+func validateStore(chain []Command, store *parsedInputs) error {
 	if err := validate(chain, store); err != nil {
 		return err
 	}
@@ -170,10 +165,10 @@ func validateStore(chain []ResolvedCommand, store *parsedInputs) error {
 }
 
 // fillStdin decodes piped stdin into the leaf command's Stdin payload field, per its
-// `stdin:"<format>[,required]"` tag. Stdin is a single stream, so only the leaf consumes it;
-// with nothing piped the field stays nil unless the payload was declared required. The decoded
-// payload is validated against the command's stdin schema before binding.
-func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
+// `stdin:"<format>[,required]"` tag, validating a decoded document against the command's stdin
+// schema before binding. With nothing piped the field stays nil, or a required payload is a
+// usage error.
+func (b *InputReader) fillStdin(rtx *Context, v reflect.Value) error {
 	if v.Kind() != reflect.Struct || v.NumField() == 0 {
 		return nil
 	}
@@ -207,8 +202,7 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 		return nil // nothing piped → leave Stdin nil
 	}
 
-	// A RAW format binds the payload itself — the grep/jq/fmt family, whose stdin is not a
-	// document and has no shape to decode into.
+	// A raw format binds the payload itself rather than decoding a document.
 	if isRawStdinFormat(format) {
 		return bindRawStdin(sf, format, data)
 	}
@@ -222,7 +216,6 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 		return usageBind(channelStdin, "", fmt.Sprintf("could not decode stdin as %s", format), err)
 	}
 
-	// Validate against the command's stdin schema, when one was generated, before binding.
 	if js := b.stdinSchemas[sf.Type().Elem().Name()]; js != "" {
 		validator, err := recon.NewJSONSchemaValidator([]byte(js))
 		if err != nil {
@@ -251,31 +244,18 @@ func (b *Binder) fillStdin(rtx *Context, v reflect.Value) error {
 // isRawStdinFormat reports whether format binds stdin directly instead of decoding it.
 func isRawStdinFormat(format string) bool { return format == "text" || format == "lines" }
 
-// trimAcquiredPayload is THE rule for trimming bytes rotini read on the user's behalf — the
-// stdin channel and the argv value sentinels (`--flag @file`, `--flag -`) alike: one trailing
-// line ending, and nothing else.
-//
-// It is one function because the two paths had two rules. The channel trimmed a single
-// trailing newline while the sentinels used strings.TrimSpace, so the same bytes read two
-// declared ways produced two values — `txt upper < pad.txt` kept "  hello  " and
-// `txt hash --input - < pad.txt` hashed "hello". The sentinel's rule also silently dropped
-// the trailing newline of any file `@`-read, which for a hashing or signing tool is wrong
-// output rather than a wrong-looking one.
-//
-// One trailing line ending is the part that is unambiguously an artifact of how the value was
-// DELIVERED — an editor's final newline, a shell heredoc's — rather than part of the value.
-// Leading and interior whitespace is content. A value that genuinely needs its trailing
-// whitespace is not a string flag; that is what the stdin channel's document formats are for.
+// trimAcquiredPayload is the single trimming rule for bytes rotini reads on the user's behalf,
+// shared by the stdin channel and the argv value sentinels (`--flag @file`, `--flag -`) so the
+// same bytes yield the same value on either path. It removes one trailing line ending (an
+// artifact of delivery, such as an editor's final newline) and nothing else: leading and
+// interior whitespace is content.
 func trimAcquiredPayload(s string) string {
 	return strings.TrimSuffix(strings.TrimSuffix(s, "\n"), "\r")
 }
 
 // bindRawStdin sets a raw stdin field from the piped bytes: the whole payload as one string
-// for "text", or its newline-separated lines for "lines".
-//
-// The payload is trimmed of its trailing newline only — leading and interior whitespace is
-// content, and a filter that had it stripped could not do its job. A final newline adds no
-// empty element, since a payload ending in one is two lines, not three.
+// for "text", or its newline-separated lines for "lines". Only the trailing line ending is
+// trimmed (see trimAcquiredPayload), so a final newline adds no empty element.
 func bindRawStdin(sf reflect.Value, format string, data []byte) error {
 	payload := trimAcquiredPayload(string(data))
 
@@ -334,7 +314,7 @@ func readStdin(r io.Reader) ([]byte, error) {
 // config files. A flag present in no source keeps what the Parser bound, and argv-only flags
 // are untouched. Each reconciled value is written back into store so the deferred validate
 // pass sees it as present.
-func (b *Binder) reconcileFlags(v reflect.Value, chain []ResolvedCommand, argv []string, store *parsedInputs, overrides map[string]string, anchor int) error {
+func (b *InputReader) reconcileFlags(v reflect.Value, chain []Command, argv []string, store *parsedInputs, overrides map[string]string, anchor int) error {
 	if v.Kind() != reflect.Struct || !hasReconFlags(v) {
 		return nil // no fallback flags → nothing to reconcile (env included)
 	}
@@ -398,7 +378,7 @@ const osEnvSourceName = "osenv"
 
 // reconcileFlag binds one fallback flag, at chain frame idx, from the registry: argv > env >
 // config. A flag the user set on the command line is left as the Parser bound it.
-func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructField, chain []ResolvedCommand, store *parsedInputs, idx int) error {
+func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructField, chain []Command, store *parsedInputs, idx int) error {
 	key := reconKey(sf.Tag.Get("recon"))
 	if key == "" {
 		return nil
@@ -408,9 +388,8 @@ func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructFi
 	if idx < len(chain) {
 		def, _ = findFlagDef(chain[idx].Flags, name)
 	}
-	// Argv outranks every fallback, and the Parser already bound and recorded it. Re-reading
-	// it through the registry is how a list flag's argv values came back as the one string
-	// "[a b]".
+	// Argv outranks every fallback and the Parser already bound it; re-reading it through the
+	// registry would collapse a list flag's values into one string.
 	if store != nil && idx < len(store.argvSet) && store.argvSet[idx][name] {
 		return nil
 	}
@@ -423,12 +402,11 @@ func reconcileFlag(reg *recon.Registry, field reflect.Value, sf reflect.StructFi
 }
 
 // bindFlagFallback reads one flag's fallback from reg and binds it into field, returning the
-// argv-shaped values it bound — nil when no source supplies one. The Binder and the overlay's
-// env and files layers share it, so a fallback means one thing on both paths: a list binds
-// item by item, a map from its leaves, a string splits on the flag's separator, a
-// case-insensitive enum binds its declared spelling, and a value the type cannot hold is an
-// error naming where it came from.
-func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []ResolvedCommand, idx int) ([]string, error) {
+// argv-shaped values it bound, or nil when no source supplies one. The InputReader and the
+// overlay's env and files layers share it: a list binds item by item, a map from its leaves, a
+// string splits on the flag's separator, a case-insensitive enum binds its declared spelling,
+// and a value the type cannot hold is an error naming where it came from.
+func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.StructTag, key string, def FlagDef, chain []Command, idx int) ([]string, error) {
 	name := tag.Get("rotini")
 	val, found, err := reg.Get(key)
 	if err != nil {
@@ -463,8 +441,7 @@ func bindFlagFallback(reg *recon.Registry, field reflect.Value, tag reflect.Stru
 	if def.IgnoreCase {
 		vals = canonicalEnum(def.Enum, vals)
 	}
-	// A fallback value the flag's type cannot hold is the user's error exactly as a bad argv
-	// value is; ignoring it would leave `PORT=abc` binding port 0.
+	// A fallback value the flag's type cannot hold is a user error, as a bad argv value is.
 	if err := coerceFlagValues(field, def, vals); err != nil {
 		return nil, fallbackCoerceError(chain, idx, name, fallbackOrigin(source, tag.Get("env")), err)
 	}
@@ -499,7 +476,7 @@ func mapLeaves(reg *recon.Registry, key string) (entries []string, source string
 // fallbackValues renders a flag's reconciled fallback as the argv-shaped strings the Parser
 // would have produced: a list's items one by one, a map's entries as key=value (nested maps as
 // dotted keys), and anything else as one string, split on the flag's separator when it has
-// one. Value.String alone renders a list as "[a b]", which then bound as a single item.
+// one.
 func fallbackValues(val recon.Value, sep string) ([]string, error) {
 	if items, err := val.AsSlice(); err == nil {
 		out := make([]string, len(items))
@@ -521,8 +498,7 @@ func fallbackValues(val recon.Value, sep string) ([]string, error) {
 		sort.Strings(out)
 		return out, nil
 	}
-	// Value.String stringifies any kind; the strict AsString returns "" for non-strings,
-	// silently dropping a numeric or bool flag's fallback.
+	// Value.String, not AsString: AsString returns "" for a numeric or bool value.
 	return splitValue(val.String(), sep)
 }
 
@@ -592,7 +568,7 @@ func fallbackOrigin(source, envVar string) string {
 // fallbackCoerceError reports a flag's env or config fallback value that its type cannot hold,
 // naming the flag the way argv errors do and the source the value came from, since the user
 // did not type it and would otherwise look for it on the command line.
-func fallbackCoerceError(chain []ResolvedCommand, idx int, name, source string, err error) error {
+func fallbackCoerceError(chain []Command, idx int, name, source string, err error) error {
 	label, secret := name, false
 	if idx >= 0 && idx < len(chain) {
 		label = labelForFlag(chain[idx].Flags, name)
@@ -623,7 +599,7 @@ func recordFlag(store *parsedInputs, idx int, name string, values []string) {
 }
 
 // hasReconFlags reports whether any command has an env/config fallback flag to reconcile.
-// When false, the binder skips building a registry entirely.
+// When false, the input reader skips building a registry entirely.
 func hasReconFlags(v reflect.Value) bool {
 	for _, field := range v.Fields() {
 		flags := commandFlags(field)
@@ -642,7 +618,7 @@ func hasReconFlags(v reflect.Value) bool {
 
 // flagOverrides maps the canonical key of every fallback flag explicitly set on argv to its
 // value — the highest-precedence reconciliation layer.
-func flagOverrides(v reflect.Value, chain []ResolvedCommand, argv []string, offset int) map[string]any {
+func flagOverrides(v reflect.Value, chain []Command, argv []string, offset int) map[string]any {
 	m := map[string]any{}
 	if offset < 0 || offset+v.NumField() > len(chain) {
 		return m
@@ -721,7 +697,7 @@ func findFlagDef(defs []FlagDef, name string) (FlagDef, bool) {
 }
 
 // flagWasSet reports whether any of a flag's identifiers appears as a flag token in argv.
-// Clustered short flags are not detected — a documented edge.
+// Clustered short flags are not detected.
 func flagWasSet(argv, identifiers []string) bool {
 	for _, tok := range argv {
 		if tok == "--" {
@@ -741,27 +717,17 @@ func flagWasSet(argv, identifiers []string) bool {
 	return false
 }
 
-// checkDescribed refuses to fill a configuration channel for a program that never said where
-// configuration lives.
-//
-// A command whose inputs struct carries a Config sub-struct declared `config:` inputs in its
-// spec. Those resolve out of the sources in [BindMeta], which the generated NewProgram
-// supplies — so reaching here with no descriptor at all means the program was assembled
-// without it, and every configuration value would come back as its zero with nothing said.
-// That is a wiring mistake by whoever built the program, not something an end user can cause
-// or correct, so it is reported as one.
-//
-// Supplying an EMPTY descriptor is a different statement and stays legal: it says "this
-// program has no configuration sources", which is a choice. Telling the two apart is only
-// possible because the descriptor travels as a typed option rather than as a registry entry,
-// where absent and zero are the same value.
-func (b *Binder) checkDescribed(v reflect.Value) error {
+// checkDescribed returns a [*WiringError] when the inputs struct has a Config channel but the
+// program was built without any [InputSettings], which would otherwise leave every
+// configuration value silently zero. An empty InputSettings is legal: it declares that the
+// program has no configuration sources.
+func (b *InputReader) checkDescribed(v reflect.Value) error {
 	if b.described || !hasConfigChannel(v) {
 		return nil
 	}
 	return &WiringError{Msg: "this command declares config: inputs, but the program " +
-		"was built without a BindMeta; call Program.WithBindMeta (the generated NewProgram " +
-		"does) so the binder knows where configuration lives"}
+		"was built without InputSettings; call Program.WithInputSettings (the generated NewProgram " +
+		"does) so the input reader knows where configuration lives"}
 }
 
 // hasConfigChannel reports whether any command frame in the inputs struct declares a
@@ -783,7 +749,7 @@ func hasConfigChannel(v reflect.Value) bool {
 
 // configRegistry builds a recon registry over the config_files, first (highest
 // precedence) to last as declared. overrides carries any config_source-supplied paths.
-func (b *Binder) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys) (*recon.Registry, error) {
+func (b *InputReader) configRegistry(files []ConfigFile, overrides map[string]string, keys valueKeys) (*recon.Registry, error) {
 	srcs, err := b.fileSources(files, overrides)
 	if err != nil {
 		return nil, err
@@ -801,7 +767,7 @@ func (b *Binder) configRegistry(files []ConfigFile, overrides map[string]string,
 // cfgRegs is the config channel's registries for one bind: the merged precedence chain plus
 // lazily-built single-file registries for inputs the spec pins to one file.
 type cfgRegs struct {
-	binder    *Binder
+	reader    *InputReader
 	files     []ConfigFile // sources in scope for the invoked chain, nearest-wins order
 	overrides map[string]string
 	keys      valueKeys // how config fields' text is read; see spellings
@@ -811,21 +777,21 @@ type cfgRegs struct {
 
 // configRegs builds the merged config registry and the lazy per-file cache over the sources in
 // scope for chain.
-func (b *Binder) configRegs(chain []ResolvedCommand, overrides map[string]string, v reflect.Value) (*cfgRegs, error) {
+func (b *InputReader) configRegs(chain []Command, overrides map[string]string, v reflect.Value) (*cfgRegs, error) {
 	files := b.chainConfigFiles(chain)
 	keys := channelValueKeys(v, "Config")
 	merged, err := b.configRegistry(files, overrides, keys)
 	if err != nil {
 		return nil, err
 	}
-	return &cfgRegs{binder: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}}, nil
+	return &cfgRegs{reader: b, files: files, overrides: overrides, keys: keys, merged: merged, perFile: map[string]*recon.Registry{}}, nil
 }
 
 // chainConfigFiles returns the config_files in scope for the resolved chain, ordered
 // nearest-wins: the invoked command's sources first, then each ancestor up to the root, each
 // command's own declared order preserved. Off-branch sources are excluded; an unscoped source
 // is always in scope and appended last.
-func (b *Binder) chainConfigFiles(chain []ResolvedCommand) []ConfigFile {
+func (b *InputReader) chainConfigFiles(chain []Command) []ConfigFile {
 	paths := make([]string, len(chain))
 	for i := range chain {
 		if i == 0 {
@@ -860,7 +826,7 @@ func (c *cfgRegs) For(name string) (*recon.Registry, error) {
 		if f.Name != name {
 			continue
 		}
-		src, err := c.binder.fileSource(f, c.overrides)
+		src, err := c.reader.fileSource(f, c.overrides)
 		if err != nil {
 			return nil, err
 		}
@@ -916,11 +882,10 @@ func bindPinnedConfig(cs reflect.Value, regs *cfgRegs) error {
 
 // fileSources builds one recon file source per config_files entry, in declared
 // precedence order. Missing files are tolerated and ~ is expanded. A Discover strategy
-// resolves its search directories now, first directory containing the file winning. A path
-// supplied through config_source is not optional: the user asked for that exact file, so a
-// missing one errors. Custom BindMeta.Sources follow the declared files — explicit files beat
-// ambient services.
-func (b *Binder) fileSources(files []ConfigFile, overrides map[string]string) ([]recon.Source, error) {
+// resolves its search directories now, the first directory containing the file winning. A path
+// supplied through config_source is not optional, so a missing one is an error. Custom
+// InputSettings.Sources follow the declared files and so rank below them.
+func (b *InputReader) fileSources(files []ConfigFile, overrides map[string]string) ([]recon.Source, error) {
 	srcs := make([]recon.Source, 0, len(files)+len(b.sources))
 	for _, f := range files {
 		src, err := b.fileSource(f, overrides)
@@ -932,10 +897,9 @@ func (b *Binder) fileSources(files []ConfigFile, overrides map[string]string) ([
 	return append(srcs, b.sources...), nil
 }
 
-// namedSource renames a recon source to its config_files logical name. Source names
-// must be unique, but two entries may legitimately share a basename — a walk-up project file
-// and a home file both called ".app.yaml". The binder reads once at parse time, so the
-// wrapper's loss of live-watch capability costs nothing.
+// namedSource renames a recon source to its config_files logical name, since recon source
+// names must be unique and two entries may share a basename. The wrapper drops live-watch
+// support, which the input reader does not use.
 type namedSource struct {
 	recon.Source
 
@@ -945,7 +909,7 @@ type namedSource struct {
 func (s namedSource) Name() string { return s.name }
 
 // fileSource builds the recon source for one config_files entry.
-func (b *Binder) fileSource(f ConfigFile, overrides map[string]string) (recon.Source, error) {
+func (b *InputReader) fileSource(f ConfigFile, overrides map[string]string) (recon.Source, error) {
 	opts := []recon.FileOption{recon.WithPathExpansion(true)}
 	if f.Format != "" {
 		opts = append(opts, recon.WithFileFormat(f.Format))
@@ -1020,7 +984,7 @@ func validateConfigFile(f ConfigFile, src recon.Source) error {
 // pathOverrides resolves each ConfigFile's config_source inputs to the path they supply: the
 // flag explicitly set on argv, then the env variable, then the flag's default. An entry none
 // of them supplies keeps its own path or discover strategy.
-func (b *Binder) pathOverrides(chain []ResolvedCommand, store *parsedInputs) map[string]string {
+func (b *InputReader) pathOverrides(chain []Command, store *parsedInputs) map[string]string {
 	out := map[string]string{}
 	for _, f := range b.chainConfigFiles(chain) {
 		pf := f.PathFrom
@@ -1042,7 +1006,7 @@ func (b *Binder) pathOverrides(chain []ResolvedCommand, store *parsedInputs) map
 
 // storeFlagValue finds a flag's parsed value across the chain, split by whether it was set on
 // argv or filled by its default. The last value wins for a repeated flag.
-func storeFlagValue(chain []ResolvedCommand, store *parsedInputs, name string) (explicit, defaulted string) {
+func storeFlagValue(chain []Command, store *parsedInputs, name string) (explicit, defaulted string) {
 	if name == "" || store == nil {
 		return "", ""
 	}
@@ -1104,12 +1068,10 @@ func envSources(v reflect.Value, envPrefix string) []recon.Source {
 	return []recon.Source{spellings{Source: recon.NewOSEnvSource(opts...), keys: channelValueKeys(v, "Env")}}
 }
 
-// spellings gives env and config inputs the value spellings flags accept, which recon's own
-// decode does not: a duration takes days and weeks (7d); a bool field takes yes/no, on/off, y/n
-// (see parseBool), where recon alone takes only true/false/1/0; and a time field with a layout
-// (`type: date`, `layout:`) parses under it rather than as RFC 3339. Without it CACHE=yes would
-// be "expected bool" on an env input while working as a flag's fallback. Only those fields' keys
-// are touched: a string input whose value happens to be "yes" keeps it.
+// spellings gives env and config inputs the value spellings flags accept and recon's decode
+// does not: days and weeks in a duration (7d), yes/no, on/off and y/n for a bool (see
+// parseBool), and a declared layout for a time field instead of RFC 3339. Only the keys of
+// those typed fields are rewritten; a string input whose value is "yes" keeps it.
 type spellings struct {
 	recon.Source
 
@@ -1135,16 +1097,14 @@ func (s spellings) Get(path recon.Path) (recon.Value, bool, error) {
 			return recon.NewValue(b), true, nil
 		}
 	}
-	// A duration reads with the days and weeks flags accept (7d, 2w3d); recon's own parser
-	// stops at hours, so TTL=3d was "expected time.Duration" on an env input.
 	if s.keys.durations[key] {
 		if d, perr := parseDuration(strings.TrimSpace(v.String())); perr == nil {
 			return recon.NewValue(d), true, nil
 		}
 	}
 	if layout := s.keys.layouts[key]; layout != "" {
-		// A value that does not parse goes through as the text it is: recon then refuses it as
-		// a time, as a usage error naming the input. (An error from Get would be swallowed.)
+		// An unparseable value passes through as text so recon reports it as a usage error
+		// naming the input; an error returned from Get would be swallowed.
 		if t, perr := parseTimeLayout(v.String(), layout); perr == nil {
 			return recon.NewValue(t), true, nil
 		}
@@ -1187,14 +1147,9 @@ func channelValueKeys(v reflect.Value, structName string) valueKeys {
 }
 
 // flagEnvSource is the env source flag fallbacks read: the SNAKE_UPPER projection of each
-// recon key, scoped under env_prefix when one is declared — with any flag that named its own
-// variable (schema `variable:`) pinned to that exact name instead.
-//
-// An explicitly named variable is EXEMPT from env_prefix, the same rule env inputs follow: it
-// is already exact, and prefixing it would silently make it a different variable. Without
-// this, a flag's env fallback could only be the derived SNAKE_UPPER of its config `key:`, so
-// binding --token to GITHUB_TOKEN meant inventing a config key named github.token — two
-// unrelated namespaces conflated to name one variable.
+// recon key, scoped under env_prefix when one is declared, except that a flag naming its own
+// variable (schema `variable:`) reads that exact name. As with env inputs, an explicitly named
+// variable is exempt from env_prefix.
 func flagEnvSource(v reflect.Value, envPrefix string) recon.Source {
 	opts := []recon.EnvOption{recon.WithEnvVars(flagExplicitEnv(v))}
 	if envPrefix != "" {
@@ -1204,9 +1159,7 @@ func flagEnvSource(v reflect.Value, envPrefix string) recon.Source {
 }
 
 // setEnvOnly reports an environment variable that is set but EMPTY as absent, so a flag's
-// fallback falls through to its configuration file and default — the convention CLIs follow,
-// and the one [firstSetEnv] already applies when choosing between names. Without it an empty
-// APP_PORT outranked the config file's port and then failed to parse as an integer.
+// fallback falls through to its configuration file and default, matching [firstSetEnv].
 type setEnvOnly struct{ recon.Source }
 
 func (s setEnvOnly) Get(path recon.Path) (recon.Value, bool, error) {
@@ -1532,8 +1485,8 @@ func channelConstraints(tag reflect.StructTag) (Constraints, bool) {
 
 // channelGoType maps a channel field's Go type to the type string checkConstraints expects.
 func channelGoType(t reflect.Type) string {
-	// Measured types are named first: a duration or a size is an int64 underneath, and read as
-	// a plain integer its text ("5m", "1Gi") would not parse and its bounds would never apply.
+	// Measured types first: a duration or size is an int64 underneath, but its text ("5m",
+	// "1Gi") does not parse as a plain integer.
 	switch t {
 	case durationType:
 		return "time.Duration"
@@ -1570,8 +1523,8 @@ func channelValues(val recon.Value, typ string) []string {
 	return []string{channelString(val)}
 }
 
-// channelString is a reconciled value as text. A duration arrives already decoded, so it is
-// written back the way a user writes one — TTL=8d is reported as "got 8d", not "got 192h0m0s".
+// channelString renders a reconciled value as text, writing a decoded duration back in user
+// form ("8d", not "192h0m0s").
 func channelString(val recon.Value) string {
 	if d, ok := val.Any().(time.Duration); ok {
 		return formatDuration(d)
@@ -1579,9 +1532,9 @@ func channelString(val recon.Value) string {
 	return val.String()
 }
 
-// ── BindError ───────────────────────────────────────────────.
+// ── InputError ───────────────────────────────────────────────.
 
-// The non-argv input channels a [*BindError] can report on.
+// The non-argv input channels an [*InputError] can report on.
 const (
 	channelEnv    = "env"
 	channelConfig = "config"
@@ -1589,24 +1542,23 @@ const (
 	channelFlag   = "flag"
 )
 
-// BindError reports a failure acquiring or decoding one of a command's non-argv input
-// channels — environment variables, configuration files, a typed stdin payload, or a flag's
-// env/config fallback. It is the bind channels' answer to the argv channel's [*ParseError]: a
-// typed, categorized, non-leaky error a funnel can branch on.
+// InputError reports a failure acquiring or decoding one of a command's non-argv input
+// channels: environment variables, configuration files, a typed stdin payload, or a flag's
+// env/config fallback. It is the counterpart of the argv channel's [*ParseError].
 //
 // Error names the channel, the input, and what went wrong. The underlying recon, decode or OS
-// Cause stays reachable via errors.As but is deliberately kept out of the message, and the
-// value of an input marked secret is redacted, so a secret cannot leak through one.
+// Cause is reachable via errors.As but kept out of the message, and the value of an input
+// marked secret is redacted.
 //
 // A bad value, a missing required input, or a malformed document the user supplied is
 // [CategoryUsage]; a registry build, schema compile, IO read, or codegen mismatch is
 // [CategoryInternal].
 //
-//	var be *rotini.BindError
+//	var be *rotini.InputError
 //	if errors.As(err, &be) {
 //	    fmt.Fprintf(os.Stderr, "bad %s input %q: %s\n", be.Channel, be.Input, be.Error())
 //	}
-type BindError struct {
+type InputError struct {
 	Channel string // one of "env", "config", "stdin", "flag"
 	Input   string // the offending input key/path, when a single one is known (else "")
 	Msg     string // a clean, non-leaky, rotini-owned message
@@ -1617,11 +1569,11 @@ type BindError struct {
 
 // Error returns Msg: the channel, the input, and what went wrong. A secret input's value is
 // redacted.
-func (e *BindError) Error() string { return e.Msg }
+func (e *InputError) Error() string { return e.Msg }
 
 // Unwrap exposes the Cause and the category sentinel, so errors.Is/As reach both the original
 // recon error and [ErrUsage]/[ErrInternal].
-func (e *BindError) Unwrap() []error {
+func (e *InputError) Unwrap() []error {
 	sentinel := ErrInternal
 	if e.usage {
 		sentinel = ErrUsage
@@ -1632,28 +1584,26 @@ func (e *BindError) Unwrap() []error {
 	return []error{e.Cause, sentinel}
 }
 
-// usageBind builds a [CategoryUsage] *BindError — bad input the end-user can fix.
-func usageBind(channel, input, msg string, cause error) *BindError {
-	return &BindError{Channel: channel, Input: input, Msg: msg, Cause: cause, usage: true}
+// usageBind builds a [CategoryUsage] *InputError: bad input the end user can fix.
+func usageBind(channel, input, msg string, cause error) *InputError {
+	return &InputError{Channel: channel, Input: input, Msg: msg, Cause: cause, usage: true}
 }
 
-// internalBind builds a [CategoryInternal] *BindError — a failure the author must fix.
-func internalBind(channel, input, msg string, cause error) *BindError {
-	return &BindError{Channel: channel, Input: input, Msg: msg, Cause: cause}
+// internalBind builds a [CategoryInternal] *InputError: a failure the author must fix.
+func internalBind(channel, input, msg string, cause error) *InputError {
+	return &InputError{Channel: channel, Input: input, Msg: msg, Cause: cause}
 }
 
-// reconBind converts a recon error for one channel into a clean, categorized [*BindError]. It
+// reconBind converts a recon error for one channel into a clean, categorized [*InputError]. It
 // inspects recon's typed errors to name the offending input and phrase a non-leaky message,
-// keeping the whole error as the Cause. Recognized failures are usage-class, and so is an
-// unrecognized one — a channel value the user supplied could not be used.
+// keeping the whole error as the Cause. Every result is usage-class: a value the user supplied
+// could not be used.
 func reconBind(channel string, err error) error {
 	if err == nil {
 		return nil
 	}
-	// A failure can name a field, or it can be about the payload AS A WHOLE — a document
-	// whose own required property is missing reports an EMPTY path. Naming that `stdin field
-	// ""` is worse than saying nothing: the reader looks for a field called "" and the real
-	// subject, which the detail already names, is buried behind an empty pair of quotes.
+	// An empty path means the failure concerns the payload as a whole; name the channel
+	// rather than a field called "".
 	label := func(path string) string {
 		if path == "" {
 			return channelDesc(channel)

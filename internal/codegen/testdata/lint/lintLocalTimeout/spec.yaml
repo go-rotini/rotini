@@ -1,4 +1,4 @@
-# A timeout is a remote-only, host-side bound; on a local command it is never honored.
+# A timeout is a plugin-only, host-side bound; on a local command it is never honored.
 # The schema accepts the key ONLY so this error can say where it belongs.
 version: 0.0.0
 command:

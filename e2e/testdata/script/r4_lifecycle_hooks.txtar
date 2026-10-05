@@ -9,12 +9,12 @@
 #   1. A cascading hook reading its OWN flags. The anchor for an inputs struct used to be
 #      inferred from its field count against the chain, so a root CASCADING hook — which runs
 #      for every invocation and cannot name the leaf's type — got zeros: --verbose came back
-#      false in the one hook whose job is to act on it. Collect now anchors on rtx.Frame(), the
+#      false in the one hook whose job is to act on it. Inputs now anchors on rtx.Command(), the
 #      command whose hook is running, so the ordinary call is correct here too.
 #
 #   2. Context.Failed. A teardown that owns a transaction has one decision to make and could
 #      not make it: Context had five Record* methods and no reader, while the Outcome that
-#      answers the question reaches the funnel after every teardown has already finished.
+#      answers the question reaches the reporter after every teardown has already finished.
 
 gomodinit example.com/life
 
@@ -128,16 +128,16 @@ func say(rtx *rotini.Context, format string, args ...any) {
 	fmt.Fprintf(rtx.Stdout, format+"\n", args...)
 }
 
-type lifeHandlers struct {
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
+type lifeHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
 }
 
-func (*lifeHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	// Collect anchors the struct on rtx.Frame() — the command whose hook is running, which
+func (*lifeHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	// Inputs anchors the struct on rtx.Command() — the command whose hook is running, which
 	// here is the root rather than the leaf. So a cascading hook reads its OWN flags with the
 	// same call a leaf's Run uses, without naming the leaf's type (which it cannot know).
-	in, err := rotini.Collect[LifeInputs](rtx)
+	in, err := rtx.Inputs[LifeInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)
@@ -146,11 +146,11 @@ func (*lifeHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	say(rtx, "root CascadingPreRun verbose=%t", in.Life.Flags.Verbose)
 }
 
-func (*lifeHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (*lifeHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 	say(rtx, "root CascadingPostRun")
 }
 
-func (*lifeHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*lifeHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/life/life_job.go --
 package life
 
@@ -160,20 +160,20 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type lifeJobHandlers struct {
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
+type lifeJobHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
 }
 
-func (*lifeJobHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*lifeJobHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	say(rtx, "job CascadingPreRun")
 }
 
-func (*lifeJobHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (*lifeJobHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 	say(rtx, "job CascadingPostRun")
 }
 
-func (*lifeJobHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*lifeJobHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/life/life_job_work.go --
 package life
 
@@ -183,18 +183,18 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// lifeJobWorkHandlers brackets its subtree the way a transaction does. A PreRun here would
+// lifeJobWorkHandler brackets its subtree the way a transaction does. A PreRun here would
 // run for `work` alone — never when `run` is the leaf — so the bracket has to be cascading.
-type lifeJobWorkHandlers struct {
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
+type lifeJobWorkHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
 }
 
-func (*lifeJobWorkHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*lifeJobWorkHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	say(rtx, "work CascadingPreRun begin")
 }
 
-func (*lifeJobWorkHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (*lifeJobWorkHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 	// The decision a teardown exists to make, and the only way to make it.
 	if rtx.Failed() {
 		say(rtx, "work CascadingPostRun ROLLBACK")
@@ -203,7 +203,7 @@ func (*lifeJobWorkHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Co
 	say(rtx, "work CascadingPostRun commit")
 }
 
-func (*lifeJobWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*lifeJobWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/life/life_job_work_run.go --
 package life
 
@@ -214,21 +214,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type lifeJobWorkRunHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultCascadingPostRun
+type lifeJobWorkRunHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoCascadingPostRun
 }
 
-func (*lifeJobWorkRunHandlers) PreRun(ctx context.Context, rtx *rotini.Context) {
+func (*lifeJobWorkRunHandler) PreRun(ctx context.Context, rtx *rotini.Context) {
 	say(rtx, "run PreRun")
 }
 
-func (*lifeJobWorkRunHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+func (*lifeJobWorkRunHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
 	say(rtx, "run PostRun")
 }
 
-func (*lifeJobWorkRunHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[LifeJobWorkRunInputs](rtx)
+func (*lifeJobWorkRunHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[LifeJobWorkRunInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)
@@ -241,7 +241,7 @@ func (*lifeJobWorkRunHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	case f.Misaligned:
 		// Deliberately wrong: LifeInputs describes `life`, and the running command is
 		// `life job work run`. This used to bind zeros in silence.
-		if _, err := rotini.Collect[LifeInputs](rtx); err != nil {
+		if _, err := rtx.Inputs[LifeInputs](); err != nil {
 			rtx.RecordError(err)
 			rtx.HaltWithCode(1)
 		}

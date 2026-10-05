@@ -7,21 +7,21 @@ import (
 	"github.com/go-rotini/rotini/internal/codegen"
 )
 
-var _ rotini.Handlers = (*rotiniGenerateHandlers)(nil)
+var _ rotini.Handler = (*rotiniGenerateHandler)(nil)
 
-type rotiniGenerateHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type rotiniGenerateHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*rotiniGenerateHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	if answerHelp(rtx, func(in RotiniGenerateInputs) bool { return in.RotiniGenerate.Flags.Help }) {
 		return
 	}
 
-	inputs, err := rotini.Collect[RotiniGenerateInputs](rtx)
+	inputs, err := rtx.Inputs[RotiniGenerateInputs]()
 	if err != nil {
 		haltWithInputError(rtx, err)
 		return
@@ -35,12 +35,10 @@ func (*rotiniGenerateHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 
 	version := rtx.Version()
-	rtx.BindIfAbsent("generate", codegen.NewProcessor(version).Generate)
-	generate := rtx.MustGet[codegen.GenerateFn]("generate")
+	rtx.SetDependencyIfAbsent(generateDep, codegen.NewProcessor(version).Generate)
+	generate := rtx.MustGetDependency(generateDep)
 
-	// The warnings are validate's, plus what the pass removed — generating is not supposed to
-	// be destructive, so on the rare occasion it is, it says so — and what the handler-hook
-	// audit found in files rotini did not write.
+	// Warnings are validate's, plus each pruned file and the handler audit's findings.
 	if err := generate(spec, conf, flags.Watch, printResult(rtx), printWarnings(rtx)); err != nil {
 		haltWithProblems(rtx, err)
 		return

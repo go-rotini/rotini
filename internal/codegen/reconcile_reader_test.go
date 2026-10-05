@@ -30,10 +30,8 @@ func TestDetectFileFormat(t *testing.T) {
 	}
 }
 
-// TestReadSpec_formatsAndTags reads hand-authored documents in each format
-// to confirm format detection and that the json struct tags ("$schema",
-// "command", "name", "commands") drive decoding across YAML/JSON/JSONC alike.
-// The root command is nested under the "command" key ([Spec.Command]).
+// TestReadSpec_formatsAndTags pins format detection and json-tag-driven decoding across
+// YAML, JSON and JSONC.
 func TestReadSpec_formatsAndTags(t *testing.T) {
 	docs := map[string]string{
 		".yaml": "$schema: https://x/spec.json\ncommand:\n  name: demo\n  commands:\n    - name: sub\n",
@@ -80,9 +78,7 @@ func TestReadFile_errors(t *testing.T) {
 	}
 }
 
-// TestBytesToJSON converts each supported serialization to canonical JSON
-// bytes — the instance form the schema validator consumes (the loaders convert
-// the same read that produced the decoded struct).
+// TestBytesToJSON pins conversion of each supported format to JSON.
 func TestBytesToJSON(t *testing.T) {
 	docs := map[string]string{
 		".yaml":  "name: demo\ncount: 2\n",
@@ -122,10 +118,8 @@ func TestBytesToJSON(t *testing.T) {
 	}
 }
 
-// TestDiscoverFile locks rotini's .rotini.<type>.<ext> discovery naming and the
-// extension precedence (first existing wins). The underlying extension-fallback
-// search lives in go-rotini/fs (tested there); this pins the rotini-specific
-// stem + the spec/conf distinction.
+// TestDiscoverFile pins the .rotini.<type>.<ext> naming, extension precedence, and the
+// spec/conf distinction.
 func TestDiscoverFile(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".rotini.spec.toml"), []byte("x"), 0o600); err != nil {
@@ -167,7 +161,7 @@ func TestResolveSpecPath(t *testing.T) {
 		t.Errorf("resolveSpecPath(cwd fallback) = %q, %v; want %q", got, err, want)
 	}
 
-	// No match resolves to "" (callers treat that as the required-spec error).
+	// No match resolves to "".
 	t.Chdir(t.TempDir())
 	if got, err := resolveSpecPath(""); err != nil || got != "" {
 		t.Errorf("resolveSpecPath(no match) = %q, %v; want empty", got, err)
@@ -242,9 +236,7 @@ func TestFindModule(t *testing.T) {
 	}
 }
 
-// TestSourceLocators covers position resolution for every format that carries
-// positions: a validation problem must be able to name file:line:col, not just the
-// JSON pointer, in JSON/JSONC and TOML as well as YAML.
+// TestSourceLocators pins pointer-to-line:col resolution for YAML, JSON, JSONC and TOML.
 func TestSourceLocators(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -270,9 +262,8 @@ func TestSourceLocators(t *testing.T) {
 	}
 }
 
-// TestSourceLocators_degradeCleanly pins the failure contract: an unparseable
-// document or an unresolvable pointer reports "no position" rather than erroring or
-// returning a bogus one — a problem then renders pointer-only.
+// TestSourceLocators_degradeCleanly pins that an unparseable document or unresolvable
+// pointer reports no position.
 func TestSourceLocators_degradeCleanly(t *testing.T) {
 	for name, locator := range map[string]func([]byte) sourceLocator{"jsonc": jsoncLocator, "toml": tomlLocator} {
 		if _, _, ok := locator([]byte("<<<not a document>>>"))("/command/name"); ok {

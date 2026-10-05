@@ -24,36 +24,33 @@ const completeCommand = "__complete"
 // CompleteFlagValue with the flag's logical name and the word being typed. A nil return falls
 // back to the flag's static enum; a non-nil return, empty included, is authoritative.
 //
-// rtx carries the resolved chain, the completion words in [Context.Argv], and every service
-// bound on the Program, so a completer can reach a bound API client or the filesystem.
+// rtx carries the resolved chain, the completion words in [Context.Argv], and the dependencies
+// registered with [Program.WithDependency].
 //
-// The line is half-typed, so a completer cannot [Collect]: required inputs are missing and
-// validation would fail. To read what the user has said so far — a --kubeconfig on the line, or
-// the environment variable that flag falls back to — overlay the lenient layers, which bind
-// without validating. Flags of an ancestor (a root's global flags, say) are read with that
-// ancestor's type at that ancestor's frame:
+// The line is half-typed, so [Context.Inputs] would fail validation. To read what has been
+// typed so far, merge the lenient per-channel layers, which bind without validating. Flags of
+// an ancestor are read with that ancestor's inputs type, running as that ancestor:
 //
 //	var in AppInputs
-//	rotini.AtFrame(0, func(_ context.Context, rtx *rotini.Context) {
-//		env, _ := rotini.ParseEnv[AppInputs](rtx)
-//		argv, _ := rotini.ParseArgv[AppInputs](rtx)
-//		in = rotini.OverlayInputs(env, argv) // argv wins, as it would at run time
+//	rotini.AsCommand(0, func(_ context.Context, rtx *rotini.Context) {
+//		env, _ := rtx.EnvInputs[AppInputs]()
+//		argv, _ := rtx.ArgvInputs[AppInputs]()
+//		in = rotini.MergeInputs(env, argv) // argv wins, as it would at run time
 //	})(context.Background(), rtx)
 //
-// It is entirely opt-in, a panic in it is not recovered, and it may be called on every
-// keystroke — so it must be read-only and fast.
+// A panic in a completer is not recovered. It may run on every keystroke, so it must be
+// read-only and fast.
 //
-// A candidate may carry a one-line description after a tab, "value\tdescription", the same
-// wire shape command and flag candidates use: zsh, fish and powershell render it beside the
-// value, and bash strips it.
+// A candidate may carry a one-line description after a tab, "value\tdescription": zsh, fish
+// and powershell render it beside the value, and bash strips it.
 type FlagValueCompleter interface {
 	CompleteFlagValue(rtx *Context, flag, partial string) []string
 }
 
 // ArgValueCompleter is the positional-argument counterpart of [FlagValueCompleter]: completion
 // calls CompleteArgValue on the invoked command's handler with the argument's logical name and
-// the word being typed. The same contract applies — a nil return falls back to the static
-// enum, and the optional "value\tdescription" shape is available.
+// the word being typed. The same contract applies: a nil return falls back to the static
+// enum, and a candidate may carry a "value\tdescription" suffix.
 type ArgValueCompleter interface {
 	CompleteArgValue(rtx *Context, arg, partial string) []string
 }
@@ -63,15 +60,15 @@ type ArgValueCompleter interface {
 // "--" terminator ended flag handling. It mirrors resolveChain so completion predicts exactly
 // what dispatch would do with the same words.
 type completionContext struct {
-	chain           []ResolvedCommand
+	chain           []Command
 	positionals     int
 	afterTerminator bool
-	remote          bool // a remote/plugin token was hit: the rest belongs to the dispatched binary
+	plugin          bool // a plugin token was hit: the rest belongs to the dispatched binary
 }
 
 // complete returns the candidates for the word currently being typed — the last element of
 // words, the rest being context. It completes flag values, flag names, sub-command and
-// remote-command names, and positional values, all filtered by the typed prefix and excluding
+// plugin names, and positional values, all filtered by the typed prefix and excluding
 // hidden inputs. An empty result lets the shell apply its own default.
 func complete(def Definition, words []string, handlers any, rtx *Context) []string {
 	if len(words) == 0 {
@@ -81,8 +78,8 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 	context := words[:len(words)-1]
 
 	cc := walkContext(def, context)
-	if cc.remote {
-		return nil // the remote binary owns its own argument surface
+	if cc.plugin {
+		return nil // the plugin binary owns its own argument surface
 	}
 	cur := cc.chain[len(cc.chain)-1]
 	if cur.Passthrough {
@@ -96,7 +93,7 @@ func complete(def Definition, words []string, handlers any, rtx *Context) []stri
 		return cands
 	}
 
-	// Until the first positional is consumed the word may also be a sub-command, remote
+	// Until the first positional is consumed the word may also be a sub-command, plugin
 	// command or discovered plugin; afterwards dispatch no longer descends.
 	var names []string
 	if !cc.afterTerminator && cc.positionals == 0 {
@@ -126,8 +123,8 @@ func completePendingFlagValue(cc completionContext, context, words []string, par
 }
 
 // completeFlagWord handles a word beginning with "-": either a flag name, or a flag's value in
-// the inline "--flag=value" form. Only declared, non-hidden flags are offered — rotini
-// auto-adds none — and the whole chain contributes, since ancestor flags resolve on descendants.
+// the inline "--flag=value" form. Only declared, non-hidden flags are offered, and the whole
+// chain contributes, since ancestor flags resolve on descendants.
 func completeFlagWord(cc completionContext, words []string, partial string, handlers any, rtx *Context) ([]string, bool) {
 	if cc.afterTerminator || !strings.HasPrefix(partial, "-") {
 		return nil, false
@@ -161,8 +158,8 @@ func completeFlagWord(cc completionContext, words []string, partial string, hand
 }
 
 // dispatchableNames lists everything the next positional word could dispatch to: sub-commands
-// and remote commands with their aliases, and the plugins discovery finds.
-func dispatchableNames(cur ResolvedCommand) []string {
+// and declared plugins with their aliases, and the plugins discovery finds.
+func dispatchableNames(cur Command) []string {
 	var names []string
 	for _, c := range cur.Commands {
 		if c.Hidden {
@@ -173,13 +170,13 @@ func dispatchableNames(cur ResolvedCommand) []string {
 			names = append(names, withDescription(a, c.Summary))
 		}
 	}
-	for _, r := range cur.Remotes {
+	for _, r := range cur.Plugins {
 		names = append(names, withDescription(r.Name, r.Summary))
 		for _, a := range r.Aliases {
 			names = append(names, withDescription(a, r.Summary))
 		}
 	}
-	for _, p := range DiscoveredPlugins(cur) {
+	for _, p := range cur.DiscoveredPlugins() {
 		names = append(names, p.Name)
 	}
 	return names
@@ -189,7 +186,7 @@ func dispatchableNames(cur ResolvedCommand) []string {
 // leniently: unknown tokens are positionals, not errors. bash splits "--flag=value" into three
 // words, so the literal "=" token glues such a value back onto its flag.
 func walkContext(def Definition, context []string) completionContext {
-	cc := completionContext{chain: []ResolvedCommand{rootFrame(def)}}
+	cc := completionContext{chain: []Command{rootFrame(def)}}
 	for i := 0; i < len(context); i++ {
 		tok := context[i]
 		if cc.afterTerminator {
@@ -220,8 +217,8 @@ func walkContext(def Definition, context []string) completionContext {
 				cc.chain = append(cc.chain, cmdFrame(child))
 				continue
 			}
-			if _, ok := findRemote(cur, tok); ok || cur.Discovery != nil {
-				cc.remote = true
+			if _, ok := findPlugin(cur, tok); ok || cur.PluginDiscovery != nil {
+				cc.plugin = true
 				return cc
 			}
 		}
@@ -251,7 +248,7 @@ func pendingValueFlag(context []string) (string, bool) {
 
 // flagValueCandidates returns the candidates for one flag's value: the owning handler's dynamic
 // completer when it answers, else a map flag's declared key vocabulary, else the static enum.
-func flagValueCandidates(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner string, fd FlagDef, partial string) []string {
+func flagValueCandidates(handlers any, rtx *Context, chain []Command, words []string, owner string, fd FlagDef, partial string) []string {
 	// An '@' on a from:file flag is a path in progress — offer nothing, so the
 	// shell falls back to its own file completion.
 	if strings.HasPrefix(partial, "@") && slices.Contains(fd.From, "file") {
@@ -293,90 +290,11 @@ func argValueCandidates(handlers any, rtx *Context, cc completionContext, words 
 	return ad.Enum
 }
 
-// DiscoveredPlugin is one plugin discovery found: the token it is invoked by and the binary that
-// token runs.
-type DiscoveredPlugin struct {
-	// Name is the token a user types — "foo" for an executable "<prefix>foo".
-	Name string
-	// Path is the executable dispatch would run for Name right now: the first "<prefix>foo"
-	// in search order (next to the binary, then the plugin path, then PATH), so a copy
-	// shadowed by an earlier one is not the one listed.
-	Path string
-}
-
-// DiscoveredPlugins returns each plugin discovered for cmd — an executable "<prefix>foo" found
-// next to the binary, in the plugin path, or on PATH — deduped and sorted by name, with any
-// name colliding with a declared sub-command, remote command or alias removed. It returns nil
-// when cmd has no discovery or discovery is hidden.
-//
-// It is the data feed for surfacing runtime plugins in help or a `plugin list`, which codegen
-// cannot know about. rotini renders nothing itself; a handler formats the result however it
-// likes:
-//
-//	chain := rtx.Chain()
-//	for _, p := range rotini.DiscoveredPlugins(chain[len(chain)-1]) {
-//		fmt.Fprintf(out, "  %s\t%s\n", p.Name, p.Path)
-//	}
-//
-// It touches the filesystem on every call and is best-effort: an unreadable directory
-// contributes nothing rather than erroring. See [DiscoveryDiagnostics] to learn whether the
-// author-configured path itself failed.
-func DiscoveredPlugins(cmd ResolvedCommand) []DiscoveredPlugin {
-	plugins, _ := discoveredFor(cmd)
-	return plugins
-}
-
-// DiscoveryDiagnostics returns the problems encountered while scanning cmd's author-configured
-// discovery path — typically that it is unreadable, or not a directory — and nil when there is
-// no discovery, none is configured, discovery is hidden, or the path scanned cleanly. A path that does not exist is
-// not a problem: it is where plugins go once one is installed, and before that it is empty. The
-// incidental locations, next to the binary and the entries of $PATH, are deliberately not
-// reported: a missing $PATH entry is normal, not a misconfiguration.
-//
-// It is the data feed for a doctor or completion handler that wants to tell the author their
-// discovery path is wrong; rotini prints no warning itself, which would corrupt completion
-// output. Each error carries the offending path and cause, so a caller can classify with
-// errors.Is(err, fs.ErrPermission).
-func DiscoveryDiagnostics(cmd ResolvedCommand) []error {
-	_, problems := discoveredFor(cmd)
-	return problems
-}
-
-// discoveredFor is the shared core of [DiscoveredPlugins] and [DiscoveryDiagnostics]: the
-// collision-filtered plugin tokens plus any problems scanning the configured path.
-func discoveredFor(cmd ResolvedCommand) ([]DiscoveredPlugin, []error) {
-	d := cmd.Discovery
-	if d == nil || d.Hidden {
-		return nil, nil
-	}
-	declared := map[string]bool{}
-	for _, c := range cmd.Commands {
-		declared[c.Name] = true
-		for _, a := range c.Aliases {
-			declared[a] = true
-		}
-	}
-	for _, r := range cmd.Remotes {
-		declared[r.Name] = true
-		for _, a := range r.Aliases {
-			declared[a] = true
-		}
-	}
-	all, problems := discoverPlugins(d, cmd.PluginPath)
-	var out []DiscoveredPlugin
-	for _, plugin := range all {
-		if !declared[plugin.Name] {
-			out = append(out, plugin)
-		}
-	}
-	return out, problems
-}
-
 // dynamicFlagValues asks the declaring command's handler for candidates, when it implements
 // [FlagValueCompleter]. It reports true only when a completer ran and returned a non-nil
 // slice; otherwise the caller falls back to the static enum. handlers is the aggregate handler
 // set, nil in purely structural callers.
-func dynamicFlagValues(handlers any, rtx *Context, chain []ResolvedCommand, words []string, owner, flag, partial string) ([]string, bool) {
+func dynamicFlagValues(handlers any, rtx *Context, chain []Command, words []string, owner, flag, partial string) ([]string, bool) {
 	var handlerName string
 	for _, fr := range chain {
 		if fr.Name == owner {
@@ -398,7 +316,7 @@ func dynamicFlagValues(handlers any, rtx *Context, chain []ResolvedCommand, word
 
 // dynamicArgValues is dynamicFlagValues' positional counterpart, asking the chain leaf's
 // handler, since positionals always bind to the leaf.
-func dynamicArgValues(handlers any, rtx *Context, chain []ResolvedCommand, words []string, arg, partial string) ([]string, bool) {
+func dynamicArgValues(handlers any, rtx *Context, chain []Command, words []string, arg, partial string) ([]string, bool) {
 	completer, ok := resolveHandler[ArgValueCompleter](handlers, chain[len(chain)-1].Handler)
 	if !ok {
 		return nil, false
@@ -428,8 +346,9 @@ func resolveHandler[T any](handlers any, handlerName string) (T, bool) {
 
 // seedCompletionContext hands the resolved chain and completion words to the context a dynamic
 // completer receives.
-func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string) {
+func seedCompletionContext(rtx *Context, chain []Command, words []string) {
 	if rtx != nil {
+		markInvoked(chain)
 		rtx.chain = chain
 		rtx.Argv = words
 	}
@@ -440,7 +359,7 @@ func seedCompletionContext(rtx *Context, chain []ResolvedCommand, words []string
 // deduped and sorted by name. It also returns any errors scanning pluginPath — the
 // author-configured location, where a failure is a real misconfiguration; failures scanning the
 // incidental locations are ignored as normal.
-func discoverPlugins(d *RemoteDiscoveryDef, pluginPath string) ([]DiscoveredPlugin, []error) {
+func discoverPlugins(d *PluginDiscoveryDef, pluginPath string) ([]DiscoveredPlugin, []error) {
 	if d.Prefix == "" {
 		return nil, nil
 	}
@@ -532,18 +451,17 @@ func withDescription(name, summary string) string {
 	if i := strings.IndexByte(summary, '\n'); i >= 0 {
 		summary = summary[:i]
 	}
-	summary = Strip(summary)
+	summary = StripANSI(summary)
 	if summary = strings.TrimSpace(summary); summary == "" {
 		return name
 	}
 	return name + "\t" + summary
 }
 
-// completionDirectivePrefix marks the directive line in __complete's output. A candidate could
-// in principle start with a colon, so the marker is a word no plausible value begins with.
-//
-// The protocol is private between a generated script and the binary from the same generate
-// pass, which is what makes it safe to extend (see COMPATIBILITY.md).
+// completionDirectivePrefix marks the directive line in __complete's output. It is a word no
+// plausible candidate begins with, since a bare colon could start a value. The protocol is
+// private between a generated script and the binary from the same generate pass, so it may be
+// extended (see COMPATIBILITY.md).
 const completionDirectivePrefix = ":rotini:"
 
 // completionHint returns the directive line for the word being completed, or "" when the input
@@ -554,15 +472,14 @@ const completionDirectivePrefix = ":rotini:"
 //	:rotini:directory       complete directories only
 //	:rotini:none            complete NOTHING — suppress the shell's file fallback
 //
-// It answers the same question complete() does — which input's value is being typed — and is
-// kept separate so the candidate list stays a plain list of strings.
+// It is kept separate from complete so the candidate list stays a plain list of strings.
 func completionHint(def Definition, words []string) string {
 	return directiveFor(completionHintFor(def, words))
 }
 
 // completionHintFor returns the declared hint for the word being completed, or the zero
-// Completion when there is none. It is the wire-neutral half of completionHint, the hint every
-// [CompletionFormat] a binary answers in is handed, rotini's private one included.
+// Completion when there is none. It is the wire-neutral half of completionHint, handed to
+// every [CompletionFormat].
 func completionHintFor(def Definition, words []string) Completion {
 	if len(words) == 0 {
 		return Completion{}
@@ -571,8 +488,8 @@ func completionHintFor(def Definition, words []string) Completion {
 	context := words[:len(words)-1]
 
 	cc := walkContext(def, context)
-	if cc.remote {
-		return Completion{} // the remote binary owns its own argument surface
+	if cc.plugin {
+		return Completion{} // the plugin binary owns its own argument surface
 	}
 	cur := cc.chain[len(cc.chain)-1]
 	if cur.Passthrough || cc.afterTerminator {
@@ -656,30 +573,29 @@ type CompletionCandidate struct {
 	Description string
 }
 
-// CompletionFormat writes a [CompletionResult] to w in one completion protocol — how a host
-// that completes a rotini program expects the answer spelled. rotini computes the answer once;
-// the format only decides the wire shape, so supporting another framework's protocol is a
-// function, not a change to rotini. [CobraCompletion] is the built-in for Cobra-built hosts.
+// CompletionFormat writes a [CompletionResult] to w in one completion protocol, the wire shape
+// a completing host expects. rotini computes the answer; the format only encodes it.
+// [PluginCompletion] is the built-in for the plugin hosts kubectl, Docker and Flux.
 //
-// A format is called once per request and must write only the answer: whatever it writes is
-// what the host parses.
+// A format is called once per request and must write only the answer, since the host parses
+// all of it.
 type CompletionFormat func(w io.Writer, result CompletionResult) error
 
 // Complete answers one shell-completion request in the given format and returns the exit code,
-// the completion counterpart of [Program.Run]. It is how a program is completed from outside
-// when the host does not call the hidden __complete entry — kubectl, for one, runs a separate
-// kubectl_complete-<plugin> with only the plugin's words:
+// the completion counterpart of [Program.Run]. It serves hosts that do not call the hidden
+// __complete entry; kubectl, for example, runs a separate kubectl_complete-<plugin> with only
+// the plugin's words:
 //
 //	if strings.Contains(filepath.Base(os.Args[0]), "_complete-") {
-//		code, _ := cmd.Program.Complete(os.Args[1:], rotini.CobraCompletion)
+//		code, _ := cmd.Program.Complete(os.Args[1:], rotini.PluginCompletion)
 //		os.Exit(code)
 //	}
 //
 // words are the words after the program's own name; the last is the word being completed,
 // empty when the cursor starts a new one, and no words at all completes a new first word. The
-// answer is exactly what __complete computes, written to the program's stdout by format. A nil
-// format answers in rotini's own format, the one __complete uses by default, which is private to
-// rotini's generated scripts.
+// answer is what __complete computes, written to the program's stdout by format. A nil format
+// uses rotini's own format, the __complete default, which is private to rotini's generated
+// scripts.
 //
 // The exit code is 0, or 1 when the format fails to write, with its error.
 func (p *Program) Complete(words []string, format CompletionFormat) (int, error) {
@@ -740,44 +656,60 @@ func writeLines(w io.Writer, lines []string) error {
 	return nil
 }
 
-// Cobra's ShellCompDirective values, as they appear on the wire. They are spelled out rather
-// than imported: Cobra's protocol is the interface, and a rotini binary must not link Cobra to
-// speak it.
+// The directive numbers of the plugin hosts' completion format, as they appear on the wire: a
+// bit set telling the shell what to do once the candidates are shown. The hosts fix the values.
 const (
-	cobraDirectiveDefault       = 0
-	cobraDirectiveNoFileComp    = 4
-	cobraDirectiveFilterFileExt = 8
-	cobraDirectiveFilterDirs    = 16
+	pluginDirectiveDefault       = 0  // fall back to completing file names
+	pluginDirectiveNoFileComp    = 4  // offer no file names
+	pluginDirectiveFilterFileExt = 8  // complete file names with these extensions
+	pluginDirectiveFilterDirs    = 16 // complete directory names only
 )
 
-// CobraCompletion is the [CompletionFormat] Cobra-built hosts read: one candidate per line
-// ("value\tdescription" allowed), then a final ":<directive>" line carrying a Cobra
-// ShellCompDirective. kubectl reads it from kubectl_complete-<plugin>, and the Docker and Flux
-// CLIs from the plugin's own __complete (see [Program.WithCompletion]).
+// PluginCompletion is the [CompletionFormat] the plugin hosts kubectl, Docker and Flux read: one
+// candidate per line ("value\tdescription" allowed), then a final ":<directive>" line, a number
+// telling the shell what to do next. kubectl reads it from kubectl_complete-<plugin>, and the
+// Docker and Flux CLIs from the plugin's own __complete (see [Program.WithCompletion]).
 //
-// The hint maps onto Cobra's directives: kind none to ShellCompDirectiveNoFileComp, kind
-// directory to ShellCompDirectiveFilterDirs, kind file with extensions to
-// ShellCompDirectiveFilterFileExt (the extensions as the candidates, Cobra's convention), and
-// kind file or no hint at all to ShellCompDirectiveDefault, whose fallback is file completion.
-// Cobra reads the candidates of the filtering directives as their arguments, so a file or
-// directory hint applies only when there are no candidates. The directive line is always
-// written, since Cobra hosts read the last line as the directive unconditionally.
-//
-// Its output is covered by rotini's compatibility promise: it is Cobra's format, not rotini's.
-func CobraCompletion(w io.Writer, result CompletionResult) error {
+// The hint maps onto the directives: kind none to 4, offer no file names; kind directory to 16,
+// directory names only; kind file with extensions to 8, file names with those extensions, which
+// the format carries as the candidates; and kind file or no hint at all to 0, whose fallback is
+// file completion. The hosts read the candidates of the filtering directives as their
+// arguments, so a file or directory hint applies only when there are no candidates. The
+// directive line is always written, since the hosts read the last line as the directive
+// unconditionally. The format belongs to the hosts and is covered by rotini's compatibility
+// promise.
+func PluginCompletion(w io.Writer, result CompletionResult) error {
 	lines := candidateLines(result.Candidates)
 
-	directive := cobraDirectiveDefault
+	directive := pluginDirectiveDefault
 	switch hint := result.Hint; {
 	case hint.Kind == "none":
-		directive = cobraDirectiveNoFileComp
+		directive = pluginDirectiveNoFileComp
 	case len(lines) > 0:
 	case hint.Kind == "directory":
-		directive = cobraDirectiveFilterDirs
+		directive = pluginDirectiveFilterDirs
 	case hint.Kind == "file" && len(hint.Extensions) > 0:
-		directive = cobraDirectiveFilterFileExt
+		directive = pluginDirectiveFilterFileExt
 		lines = append(lines, hint.Extensions...)
 	}
 
 	return writeLines(w, append(lines, fmt.Sprintf(":%d", directive)))
+}
+
+// WithCompletion sets the [CompletionFormat] the hidden __complete entry answers in, in place
+// of rotini's own. It serves a plugin whose host completes it by calling the plugin's
+// __complete and reading the host's format, as the Docker CLI (`docker-<name> __complete
+// <name> …`) and the Flux CLI (`flux-<name> __complete …`) do with the format
+// [PluginCompletion] writes:
+//
+//	cmd.Program.WithCompletion(rotini.PluginCompletion).Execute()
+//
+// rotini's generated completion scripts read rotini's own format, so a standalone CLI leaves
+// this unset. A host that runs a separately named completer without a __complete word, such
+// as kubectl's kubectl_complete-<name>, is served by calling [Program.Complete] from main.
+//
+// A nil format restores rotini's own.
+func (p *Program) WithCompletion(format CompletionFormat) *Program {
+	p.completion = format
+	return p
 }

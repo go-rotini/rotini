@@ -1,65 +1,88 @@
-{{- /* rotini man-page template (default — edit freely; the man flavor is yours,
-       e.g. plain/roff/mdoc). Renders the SAME per-command doc-data as help (see
-       helpData) in a plain man-style layout. COLUMNS use a single tab (rotini
-       aligns each contiguous tabbed block via tabwriter). After rendering, rotini
-       trims trailing whitespace, collapses blank-line runs, and drops the trailing
-       newline — so you don't fight template whitespace for clean output.
+{{- /* rotini man page template (default — edit freely). It renders the SAME per-command
+       doc-data as help into a roff man page, the markup the `man` program reads: lines
+       starting with "." are requests (.TH header, .SH section, .TP tagged paragraph,
+       .nf/.fi no-fill, .RS/.RE indent), and \fB…\fR / \fI…\fR are bold / italic.
 
-       DATA (see helpData): .Header .Summary .Description .Footer .Invocation
-         .Usage/.UsageDerived .CommandGroups[] .Arguments[] .Flags[] .Environment[]
-         .Configuration[] .Cascading[] .Examples[] .ExitStatus[] .SeeAlso[]
-       HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
-                indent, repeat, default, contains, hasPrefix, hasSuffix, first, last. */ -}}
-{{- with .Header}}{{.}}
+       Text from the spec must be escaped before it reaches the page, or a summary starting
+       with "." or holding a "\" would be read as markup. Use:
+         roff       one line of text (line breaks become spaces)
+         roffBlock  paragraphs: lines escaped, blank lines become .PP breaks
+         roffLines  lines kept as written, for inside .nf … .fi
+         roffArg    one quoted argument of a request such as .TH or .SH
 
-{{end -}}
-NAME
-{{if .Summary}}{{indent 4 (printf "%s - %s" .Invocation .Summary)}}{{else}}{{indent 4 .Invocation}}{{end}}
+       After rendering, rotini drops blank lines (in roff they are stray space, not
+       paragraph breaks) and trailing whitespace, and ends the page with a newline.
 
-{{$usage := .Usage}}{{if not $usage}}{{$usage = .UsageDerived}}{{end -}}
-{{- with $usage}}SYNOPSIS
-{{indent 4 .}}
-
+       DATA (see helpData): .PageName .Section .Source .Date .RelatedPages .Summary
+         .Description .Invocation .Usage/.UsageDerived .CommandGroups[] .Arguments[]
+         .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Output .ExitStatus[]
+         .Examples[] .SeeAlso[]   (.Output is nil when the command declares no output)
+       HELPERS: roff, roffBlock, roffLines, roffArg, join, upper, lower, title, trim,
+                trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
+                hasPrefix, hasSuffix, first, last. */ -}}
+{{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}{{end -}}
+{{- define "flag"}}.TP
+{{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Summary}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
 {{end -}}
-{{- with .Description}}DESCRIPTION
-{{indent 4 .}}
-
-{{end -}}
-{{- range .CommandGroups}}{{if .Title}}{{upper .Title}}{{else}}COMMANDS{{end}}
-{{range .Commands}}    {{.Name}}{{with .Aliases}}, {{join . ", "}}{{end}}	{{.Summary}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+.TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} "User Commands"
+.SH NAME
+{{roff .PageName}}{{with .Summary}} \- {{roff .}}{{end}}
+.SH SYNOPSIS
+{{if .Usage}}.nf
+{{roffLines .Usage}}
+.fi
+{{else}}\fB{{roff .Invocation}}\fR {{roff (trimPrefix .Invocation .UsageDerived)}}
 {{end}}
-{{end -}}
-{{- with .Arguments}}ARGUMENTS
-{{range .}}    {{if .Required}}<{{.Name}}{{if .Variadic}}...{{end}}>{{else}}[{{.Name}}{{if .Variadic}}...{{end}}]{{end}}	{{.Summary}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{with .Description}}.SH DESCRIPTION
+{{roffBlock .}}
 {{end}}
-{{end -}}
-{{- range .FlagGroups}}{{if .Title}}{{upper .Title}}{{else}}OPTIONS{{end}}
-{{range .Flags}}    {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{range .CommandGroups}}.SH {{roffArg (upper (default "Commands" .Title))}}
+{{range .Commands}}.TP
+\fB{{roff .Name}}\fR{{range .Aliases}}, \fB{{roff .}}\fR{{end}}
+{{roff .Summary}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
+{{end}}{{end}}
+{{with .Arguments}}.SH ARGUMENTS
+{{range .}}.TP
+\fI{{if .Required}}<{{roff .Name}}{{if .Variadic}}...{{end}}>{{else}}[{{roff .Name}}{{if .Variadic}}...{{end}}]{{end}}\fR
+{{roff .Summary}}{{with .Default}} (default {{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}
+{{end}}{{end}}
+{{range .FlagGroups}}.SH {{roffArg (upper (default "Options" .Title))}}
+{{range .Flags}}{{template "flag" .}}{{end}}{{end}}
+{{with .Cascading}}.SH "GLOBAL OPTIONS"
+{{range .}}{{template "flag" .}}{{end}}{{end}}
+{{with .Environment}}.SH ENVIRONMENT
+{{range .}}.TP
+\fB{{roff .Var}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Summary}}{{template "notes" .}}
+{{end}}{{end}}
+{{with .Configuration}}.SH CONFIGURATION
+{{range .}}.TP
+\fB{{roff .Name}}\fR{{with .Location}} ({{roff .}}){{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Summary}}{{template "notes" .}}
+{{end}}{{end}}
+{{with .Output}}.SH OUTPUT
+{{with .Description}}{{roffBlock .}}
+.PP
+{{end}}Writes \fB{{roff .Type}}\fR to standard output.
+{{range .Fields}}.TP
+\fB{{roff .Name}}\fR{{with .Type}} \fI{{roff .}}\fR{{end}}
+{{roff .Description}}{{if .Required}} (required){{end}}
+{{end}}{{end}}
+{{with .ExitStatus}}.SH "EXIT STATUS"
+{{range .}}.TP
+\fB{{.Code}}\fR
+{{roff .Summary}}{{with .Output}} (writes \fB{{roff .}}\fR to standard output){{end}}
+{{end}}{{end}}
+{{with .Examples}}.SH EXAMPLES
+.RS 4
+.nf
+{{range $i, $e := .}}{{if $i}}
+.sp
+{{end}}{{roffLines $e}}
+{{end}}.fi
+.RE
 {{end}}
-{{end -}}
-{{- with .Environment}}ENVIRONMENT
-{{range .}}    {{.Var}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{if or .RelatedPages .SeeAlso}}.SH "SEE ALSO"
+{{$first := true}}{{range .RelatedPages}}{{if not $first}}, {{end}}{{$first = false}}\fB{{roff .}}\fR({{$.Section}}){{end}}{{range .SeeAlso}}{{if not $first}}, {{end}}{{$first = false}}{{roff .}}{{end}}
 {{end}}
-{{end -}}
-{{- with .Configuration}}CONFIGURATION FILES
-{{range .}}    {{.Name}}{{with .Location}} ({{.}}){{end}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
-{{end}}
-{{end -}}
-{{- with .Cascading}}GLOBAL OPTIONS
-{{range .}}    {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
-{{end}}
-{{end -}}
-{{- with .Examples}}EXAMPLES
-{{range .}}    {{.}}
-{{end}}
-{{end -}}
-{{- with .ExitStatus}}EXIT STATUS
-{{range .}}    {{.Code}}	{{.Summary}}
-{{end}}
-{{end -}}
-{{- with .SeeAlso}}SEE ALSO
-{{indent 4 (join . ", ")}}
-
-{{end -}}
-{{- with .Footer}}{{.}}
-{{end -}}

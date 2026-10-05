@@ -12,21 +12,17 @@ import (
 	"github.com/go-rotini/jsonschema"
 )
 
-// Spec-Schema → Go-source codegen: the output-type and stdin/validation schema
-// declarations the generator embeds (run after the command tree is resolved).
+// This file converts spec schemas to Go type declarations and to self-contained JSON
+// Schemas for runtime validation.
 
-// outputRootSentinel is the throwaway root type GenerateGo always emits for the
-// assembled output-types document; it carries no data and is stripped, leaving
-// only the document-level named schemas and the per-command <Prefix>Output types.
+// outputRootSentinel is the placeholder root type GenerateGo requires; it is stripped from
+// the output.
 const outputRootSentinel = "rotiniGeneratedOutputsRoot"
 
-// buildOutputTypes generates the Go type declarations for a program's output types and named
-// schemas as a formatted source fragment ready to inject into the framework file, or "" when
-// the program declares neither.
-//
-// Every document-level schema becomes a named type, and every own command declaring `output`
-// gets a "<Prefix>Output" type. Generation reuses jsonschema.GenerateGo, the same engine
-// behind the spec and conf types, so refs, nesting, arrays and allOf embedding all work.
+// buildOutputTypes generates Go type declarations for the program's named schemas and its
+// own commands' "<Prefix>Output" and "<Prefix>Stdin" types (see collectOutputDefs), or ""
+// when there are none. It uses jsonschema.GenerateGo, the engine behind the spec and conf
+// types.
 func buildOutputTypes(gp *program, pkg string) (string, error) {
 	defs := collectOutputDefs(gp)
 	if len(defs) == 0 {
@@ -53,14 +49,12 @@ func buildOutputTypes(gp *program, pkg string) (string, error) {
 	return initialismIdents(stripGenerated(string(src), outputRootSentinel), fixed)
 }
 
-// initialismIdents gives the generated types' Go names the initialism casing the rest of the
-// generated file has: a property "apiVersion" becomes the field APIVersion, not ApiVersion.
-// The JSON tags keep the property's own spelling, so nothing about the wire format changes.
+// initialismIdents applies initialism casing to generated field and nested type names
+// ("apiVersion" → APIVersion, not ApiVersion); JSON tags are unchanged.
 //
-// It renames by position rather than by text, so a field and a type that share a name are each
-// renamed as what they are. fixed holds the top-level type names: those are the spec's schema
-// names, or rotini's own "<Prefix>Output", and are referenced from elsewhere in the program
-// exactly as written. A rename that would collide with a name already declared is skipped.
+// Renames are applied by AST position, so a field and a type sharing a name are handled
+// independently. Names in fixed (top-level types referenced elsewhere as written) are never
+// renamed, and a rename that would collide with an existing name is skipped.
 func initialismIdents(src string, fixed map[string]bool) (string, error) {
 	const pkgClause = "package p\n\n"
 	fset := token.NewFileSet()
@@ -68,7 +62,7 @@ func initialismIdents(src string, fixed map[string]bool) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("parse generated types: %w", err)
 	}
-	// Which names are types, and which idents are field names (and in which struct).
+	// Index declared type names and each field ident's enclosing struct.
 	types := map[string]bool{}
 	fieldOf := map[*ast.Ident]*ast.StructType{}
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -127,9 +121,8 @@ func initialismIdents(src string, fixed map[string]bool) (string, error) {
 	return strings.TrimPrefix(out, pkgClause), nil
 }
 
-// outputTypeNames lists the top-level type names buildOutputTypes declares, sorted so
-// the generated aliases are deterministic. It reads the same definition set the
-// generator does, so the two cannot disagree about what exists.
+// outputTypeNames lists the top-level type names buildOutputTypes declares, sorted. It reads
+// the same definitions, so the two cannot disagree.
 func outputTypeNames(gp *program) []string {
 	defs := collectOutputDefs(gp)
 	out := make([]string, 0, len(defs))
@@ -140,10 +133,8 @@ func outputTypeNames(gp *program) []string {
 	return out
 }
 
-// eachOwnNode visits every non-composed command node in the resolved tree
-// depth-first (pre-order), skipping composed subtrees entirely — their output and
-// stdin types live in the child's cmd. Shared by the output- and stdin-type
-// collectors.
+// eachOwnNode visits every non-composed node in the resolved tree in pre-order, skipping
+// composed subtrees, whose types live in the child's package.
 func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
 	for i := range nodes {
 		if nodes[i].composed {
@@ -154,10 +145,10 @@ func eachOwnNode(nodes []rnode, visit func(n *rnode)) {
 	}
 }
 
-// collectOutputDefs assembles the JSON-schema `definitions` for the output-types
-// document: each document-level named schema, plus one "<Prefix>Output" per
-// command that declares an output. Refs are rewritten from the spec's
-// "#/schemas/" space to the document's "#/definitions/" space.
+// collectOutputDefs assembles the JSON Schema `definitions` for buildOutputTypes: each named
+// schema, plus "<Prefix>Output" for each own command declaring an output and "<Prefix>Stdin"
+// for each declaring a decoded (non-raw) stdin payload. "#/schemas/" refs become
+// "#/definitions/".
 func collectOutputDefs(gp *program) map[string]any {
 	defs := map[string]any{}
 	for name, sch := range gp.schemas {
@@ -168,9 +159,8 @@ func collectOutputDefs(gp *program) map[string]any {
 			defs[prefix+"Output"] = schemaToDoc(*out)
 		}
 	}
-	// A command's stdin payload type "<Prefix>Stdin" comes from the schema-shape of
-	// its stdin InputSchema (only the BaseSchema part — required/default/etc. are
-	// input metadata, not JSON-schema type structure).
+	// Only the stdin schema's BaseSchema is type structure; required, default, etc. are
+	// input metadata.
 	addStdin := func(prefix string, in *Inputs) {
 		if in != nil && in.Stdin != nil && in.Stdin.Schema != nil && !rawStdinFormat(in.Stdin.Format) {
 			defs[prefix+"Stdin"] = schemaToDoc(Schema{BaseSchema: in.Stdin.Schema.BaseSchema})
@@ -185,17 +175,16 @@ func collectOutputDefs(gp *program) map[string]any {
 	return defs
 }
 
-// pathFromClaim accumulates the config_source inputs claiming one
-// configuration_files entry: a flag's logical name and/or an env input's
-// variable.
+// pathFromClaim holds the config_source inputs claiming one configuration_files entry: a
+// flag's logical name and/or an env input's variable.
 type pathFromClaim struct {
 	flag string
 	env  string
 }
 
-// collectStdinSchemas builds the per-command stdin validation schemas for BindMeta: each own
-// command declaring a stdin payload maps its "<Prefix>Stdin" type name to a self-contained
-// JSON Schema the binder validates the decoded payload against.
+// collectStdinSchemas maps each own command's "<Prefix>Stdin" name to the self-contained JSON
+// Schema the input reader validates its stdin payload against, or returns nil when none
+// declare stdin.
 func collectStdinSchemas(gp *program) map[string]string {
 	out := map[string]string{}
 	add := func(prefix string, in *Inputs) {
@@ -215,9 +204,9 @@ func collectStdinSchemas(gp *program) map[string]string {
 	return out
 }
 
-// validationSchema renders a self-contained JSON Schema for load-time document validation,
-// shared by the stdin payload and configuration_files entries: the declared shape plus the
-// document's named schemas as definitions, so any "#/schemas/X" refs resolve.
+// validationSchema renders a self-contained JSON Schema for runtime validation of stdin
+// payloads, config files, and object flags: the declared shape plus the document's named
+// schemas as definitions, so "#/schemas/X" refs resolve. It returns "" on failure.
 func validationSchema(schema Schema, docSchemas map[string]Schema) string {
 	body, ok := schemaToDoc(schema).(map[string]any)
 	if !ok {
@@ -253,8 +242,8 @@ func schemaToDoc(s Schema) any {
 	return v
 }
 
-// rewriteSchemaRefs deep-walks v, rewriting every {"$ref": "#/schemas/X"} to
-// "#/definitions/X" so the assembled document (which uses `definitions`) resolves.
+// rewriteSchemaRefs recursively rewrites every {"$ref": "#/schemas/X"} in v to
+// "#/definitions/X".
 func rewriteSchemaRefs(v any) {
 	switch t := v.(type) {
 	case map[string]any:
@@ -274,12 +263,10 @@ func rewriteSchemaRefs(v any) {
 	}
 }
 
-// stripGenerated reduces a generated Go file to its type declarations: it drops
-// the leading "// Code generated …" banner and the "package …" clause, then
-// removes the throwaway sentinel root type. The result is gofmt-clean type decls
-// the framework template injects and the whole file is re-formatted.
+// stripGenerated reduces a generated Go file to its type declarations, dropping the
+// "// Code generated" banner, the package clause, and the sentinel root type.
 func stripGenerated(src, sentinel string) string {
-	// Header banner, package clause, then the body are blank-line separated.
+	// Banner, package clause, and body are separated by blank lines.
 	if parts := strings.SplitN(src, "\n\n", 3); len(parts) == 3 {
 		src = parts[2]
 	}

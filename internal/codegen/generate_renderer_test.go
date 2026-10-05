@@ -22,12 +22,10 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 	if _, err := renderMainFile("", "example.com/app/internal/cmd/app", "cli", "yaml"); err != nil {
 		t.Errorf("main: %v", err)
 	}
-	// Every seeded body the template can emit has to render AND compile-format. The
-	// plain stub is the default; the rest are what stubBody selects when the spec and
-	// conf already declare what the body needs.
+	// Every body stubBody can select must render and gofmt.
 	base := templateHandlerData{
 		Package:       "cli",
-		HandlersType:  "appSubHandlers",
+		HandlerType:   "appSubHandler",
 		InputsType:    "AppSubInputs",
 		Invocation:    "app sub",
 		Prefix:        "AppSub",
@@ -56,7 +54,6 @@ func TestSmokeRenderMainAndHandlerFiles(t *testing.T) {
 	}
 	for name, mutate := range bodies {
 		t.Run(name, func(t *testing.T) {
-			// renderGoFile gofmts, so a body that does not parse fails here.
 			if _, err := renderHandlerStubFile(mutate(base)); err != nil {
 				t.Errorf("handler stub: %v", err)
 			}
@@ -72,7 +69,7 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 		ChildImports:  []templateHandlersImport{{Alias: "childcli", Path: "example.com/child/cli"}},
 		Methods:       []string{"App", "AppGenerate"},
 		RollupMethods: []templateHandlersMethod{
-			{Method: "App", HandlerType: "appHandlers"},
+			{Method: "App", HandlerType: "appHandler"},
 			{Method: "AppChild", Composed: true, DelegateAlias: "childcli", DelegateMethod: "Child"},
 		},
 		Definition: "var definition = rotini.Definition{}",
@@ -97,8 +94,8 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 			},
 			{Prefix: "AppGenerate"},
 		},
-		OutputTypes: "type AppOutput struct{}",
-		BindMeta:    "var bindMeta = map[string]string{}",
+		OutputTypes:   "type AppOutput struct{}",
+		InputSettings: "var inputSettings = map[string]string{}",
 		Features: []templateFeature{
 			{
 				Resolver: "Help", Noun: "help",
@@ -118,9 +115,8 @@ func TestSmokeRenderRotiniFile(t *testing.T) {
 	if !strings.Contains(string(out), "\"time\"\n\n\tchildcli \"example.com/child/cli\"") {
 		t.Error("imports should be grouped std then third-party")
 	}
-	// The rollup is folded into the cli file: the handlers struct + its per-command
-	// wiring (own commands return a local stub; composed commands delegate).
-	if !strings.Contains(string(out), "return &appHandlers{}") {
+	// Own commands return a local handler; composed commands delegate to the child.
+	if !strings.Contains(string(out), "return &appHandler{}") {
 		t.Error("rollup wiring for an own command is missing from the generated cli file")
 	}
 	if !strings.Contains(string(out), "childcli.Handlers().Child()") {
@@ -167,8 +163,7 @@ func smokeDocData() templateHelpData {
 	}
 }
 
-// renderDocSmoke drives the live doc-render path (parse + render) over an embedded
-// template, the same path features.go uses in production.
+// renderDocSmoke parses an embedded doc template and renders it through renderDocText.
 func renderDocSmoke(t *testing.T, name, text string, data templateHelpData) string {
 	t.Helper()
 	tmpl, err := parseDocTemplate(name, text)
@@ -217,9 +212,8 @@ func TestSmokeConvertJSONC(t *testing.T) {
 	t.Logf("jsonc:\n%s", out)
 }
 
-// TestTemplateFuncMapHelpers executes a template exercising every helper —
-// including the branchy ones (default/first/last with and without content) —
-// so the documented allowlist is proven to behave, not just to exist.
+// TestTemplateFuncMapHelpers pins the output of every non-roff template helper, including both
+// branches of default, first and last.
 func TestTemplateFuncMapHelpers(t *testing.T) {
 	const text = `{{join .List ","}}
 {{upper "ab"}} {{lower "AB"}} {{title "foo-bar baz"}}
@@ -249,7 +243,6 @@ func TestRenderTemplate_errors(t *testing.T) {
 	if _, err := renderTemplate("broken", "{{", nil); err == nil {
 		t.Error("renderTemplate(unparsable) = nil, want a parse error")
 	}
-	// Execution failure: referencing a field the data type does not have.
 	if _, err := renderTemplate("exec", "{{.Nope}}", struct{}{}); err == nil {
 		t.Error("renderTemplate(bad field) = nil, want an execute error")
 	}
@@ -312,13 +305,13 @@ func TestInputFieldTag(t *testing.T) {
 	}
 }
 
-// TestSanitizeDocData_copies confirms sanitization never mutates the caller's
-// slices — render passes must stay pure functions of their input.
+// TestSanitizeDocData_copies pins that sanitizeDocData cleans row text without mutating the
+// caller's slices, and leaves examples untouched.
 func TestSanitizeDocData_copies(t *testing.T) {
 	in := templateHelpData{
 		Flags:    []templateDocFlagRow{{Summary: "a\tb"}},
 		SeeAlso:  []string{"x\ty"},
-		Examples: []string{"kept\tintact"}, // examples are block-ish: untouched
+		Examples: []string{"kept\tintact"},
 	}
 	out := sanitizeDocData(in)
 	if in.Flags[0].Summary != "a\tb" || in.SeeAlso[0] != "x\ty" {
@@ -332,14 +325,8 @@ func TestSanitizeDocData_copies(t *testing.T) {
 	}
 }
 
-// TestTemplateFailure covers the error an author of an EDITABLE template reads.
-//
-// `template: true` seeds help.txt.tmpl / man.txt.tmpl / markdown.md.tmpl for customisation, so
-// these are the only template errors a rotini USER ever sees — every other template in the
-// package is rotini's own and its errors are rotini's bugs. text/template's stock wording names
-// the file three times, says "template:" twice, and ends by naming `codegen.templateHelpData`,
-// an internal Go type the author cannot look up. It also withholds the one useful reply: the
-// available fields are listed in the template's own header comment.
+// TestTemplateFailure pins the rewritten execution errors an editable-template author sees:
+// position kept, restatement and internal type names dropped, and a pointer to the field list.
 func TestTemplateFailure(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -370,7 +357,7 @@ func TestTemplateFailure(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("got  %q\nwant %q", got, tt.want)
 			}
-			// The bar from E-23: no Go internals in a message an author reads.
+			// No Go internals may leak into the message.
 			for _, leak := range []string{"codegen.", "in type ", "template: template:"} {
 				if strings.Contains(got, leak) {
 					t.Errorf("leaks %q: %s", leak, got)
@@ -380,8 +367,8 @@ func TestTemplateFailure(t *testing.T) {
 	}
 }
 
-// The seeded spec is the first rotini document anyone reads, so it is written the way every doc
-// and example writes one: inline identifier lists and inline one-key schemas.
+// The seeded spec uses the documented style: inline identifier lists and inline one-key
+// schemas.
 func TestSeedSpecUsesTheDocumentedStyle(t *testing.T) {
 	out, err := renderSpecFile("1.0.0", "app", formatYAML)
 	if err != nil {
@@ -400,9 +387,8 @@ func TestSeedSpecUsesTheDocumentedStyle(t *testing.T) {
 	}
 }
 
-// TestHelpPage_groupedFlagSummaryStaysOnItsRow renders a real help page: a flag summary holding a
-// tab or a newline must not break the page's columns. The sanitizer cleaned the flat Flags list,
-// but the templates render flags from their GROUPS, which kept the raw text.
+// TestHelpPage_groupedFlagSummaryStaysOnItsRow pins that a flag summary holding a tab or newline
+// stays on its row, since templates render flags from FlagGroups.
 func TestHelpPage_groupedFlagSummaryStaysOnItsRow(t *testing.T) {
 	t.Parallel()
 	tmpl, err := parseDocTemplate("help", templateHelp)

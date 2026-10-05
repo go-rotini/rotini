@@ -10,19 +10,8 @@ import (
 	"github.com/go-rotini/jsonschema"
 )
 
-// TestHumanizeSchemaError covers the translation of JSON Schema's vocabulary into rotini's.
-//
-// rotini's lint rules set the bar for a validation message: they name the command, the input
-// and the rule, and say why it matters. Two schema-level failures did not come close, and they
-// are the two mistakes everyone makes first — a typo'd key and a command with no name:
-//
-//	/command/summry: schema is false; nothing matches
-//	/command: no anyOf branch matched
-//
-// Neither tells the person who caused it anything. Both readings below are DERIVED — the key
-// from the instance pointer, the noun from the failing schema definition, the choice from the
-// anyOf branches' own causes — so a schema change carries them along rather than stranding a
-// hardcoded string.
+// TestHumanizeSchemaError pins the rewriting of JSON Schema messages into rotini's
+// vocabulary, derived from the instance pointer, schema definition and anyOf causes.
 func TestHumanizeSchemaError(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -79,7 +68,7 @@ func TestHumanizeSchemaError(t *testing.T) {
 					{Keyword: "type", Message: "value is not of type string"},
 				},
 			},
-			want: "no anyOf branch matched", // saying nothing beats guessing
+			want: "no anyOf branch matched",
 		},
 		{
 			name: "a type mismatch names the key, not just the expectation",
@@ -126,11 +115,10 @@ func TestHumanizeSchemaError(t *testing.T) {
 	}
 }
 
-// TestSchemaMessagesAreNotJargon is the standing bar, applied to whatever the validator
-// actually produces for the documents below rather than to a hand-built error.
+// TestSchemaMessagesAreNotJargon pins that real validator output for common mistakes uses no
+// JSON Schema jargon and quotes what is wrong.
 func TestSchemaMessagesAreNotJargon(t *testing.T) {
-	// Not parallel: validateSpecText uses t.Chdir, which cannot run alongside t.Parallel.
-	// Phrases that describe the validator's internals rather than the author's mistake.
+	// Not parallel: validateSpecText uses t.Chdir.
 	jargon := []string{"schema is false", "anyOf", "allOf", "oneOf", "nothing matches", "branch matched"}
 
 	docs := map[string]string{
@@ -150,7 +138,6 @@ func TestSchemaMessagesAreNotJargon(t *testing.T) {
 						t.Errorf("message speaks JSON Schema rather than rotini: %q (contains %q)", msg, j)
 					}
 				}
-				// The bar the lint rules set: name the thing that is wrong.
 				if !strings.Contains(msg, `"`) {
 					t.Errorf("message names nothing in quotes: %q", msg)
 				}
@@ -159,9 +146,8 @@ func TestSchemaMessagesAreNotJargon(t *testing.T) {
 	}
 }
 
-// validateSpecText runs the real validate stage over a spec document and returns every problem
-// it reported, so the bar above is applied to what the tool actually says rather than to a
-// hand-built error.
+// validateSpecText runs the real validate stage over a spec document and returns each
+// reported problem line.
 func validateSpecText(t *testing.T, spec string) []string {
 	t.Helper()
 	mod := t.TempDir()
@@ -183,7 +169,8 @@ func validateSpecText(t *testing.T, spec string) []string {
 	return msgs
 }
 
-// A failed pattern quotes the key's examples, never the regex.
+// TestHumanizeSchemaError_patternQuotesExamples pins that a pattern failure quotes the key's
+// examples (and x-hint), never the regex.
 func TestHumanizeSchemaError_patternQuotesExamples(t *testing.T) {
 	for _, tc := range []struct {
 		err  jsonschema.ValidationError
@@ -205,8 +192,8 @@ func TestHumanizeSchemaError_patternQuotesExamples(t *testing.T) {
 	}
 }
 
-// Every patterned key in both schemas declares examples, and every example passes its own
-// pattern — so a pattern failure always has something true to show.
+// TestSchemaPatternsHaveMatchingExamples pins that every patterned schema key declares
+// examples that match its pattern.
 func TestSchemaPatternsHaveMatchingExamples(t *testing.T) {
 	for name, raw := range map[string][]byte{"spec": schemaSpecFileBytes, "conf": schemaConfFileBytes} {
 		var doc any
@@ -242,7 +229,7 @@ func TestSchemaPatternsHaveMatchingExamples(t *testing.T) {
 	}
 }
 
-// The noun's article follows the noun: "an argument input", "a flag input".
+// TestHumanizeSchemaError_article pins "a"/"an" selection for definition nouns.
 func TestHumanizeSchemaError_article(t *testing.T) {
 	for loc, want := range map[string]string{
 		"#/definitions/ArgumentInput/additionalProperties": `unknown key "x" on an argument input`,
@@ -256,8 +243,8 @@ func TestHumanizeSchemaError_article(t *testing.T) {
 	}
 }
 
-// `required` is a list on an object schema and a boolean on an input; the type error for either
-// mix-up says which form belongs where, from the key's own x-hint.
+// TestHumanizeSchemaError_typeHint pins that a type error appends the key's x-hint, using the
+// two forms of `required` as the case.
 func TestHumanizeSchemaError_typeHint(t *testing.T) {
 	for loc, want := range map[string]string{
 		"#/definitions/InputSchema/allOf/1/properties/required/type": `"required" must be of type boolean; on an input, required is true or false; a list of property names (required: [host]) belongs on an object schema under schemas`,

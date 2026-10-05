@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// Composition is rotini's biggest architectural bet and was the least-covered part of the
-// codebase: composeNestedRef — the transitive parent → child → grandchild $ref — sat at 0.0%.
-// The e2e tier proves the composed BINARY dispatches to every level; this proves the composer
-// itself, in-process, where it is cheap to assert the shape of what it emitted.
+// These tests exercise the composer in-process, asserting the shape of what it emits. The e2e
+// tier covers dispatch of the built binary.
 
 // transitiveTree is a three-level tree: root composes child, child composes grand.
 func transitiveTree() map[string]string {
@@ -65,9 +63,8 @@ generate:
 	}
 }
 
-// TestCompose_transitiveRef covers composeNestedRef: the grandchild is grafted into the root's
-// tree, and every composed node delegates back to the DIRECT child's package rather than
-// having its types or stubs re-emitted at the root.
+// TestCompose_transitiveRef pins composeNestedRef: the grandchild is grafted into the root's
+// tree and delegates through the direct child's package, with no types or stubs at the root.
 func TestCompose_transitiveRef(t *testing.T) {
 	emitted := composeModuleStaged(t, transitiveTree())
 
@@ -83,15 +80,13 @@ func TestCompose_transitiveRef(t *testing.T) {
 		}
 	}
 
-	// 2. The parent's overlay summary won over the child's own. This is the overlay model:
-	//    a parent tailors a composed child for its tree without forking it.
+	// 2. The parent's overlay summary wins over the child's own.
 	if !strings.Contains(root, "as the parent describes it") {
 		t.Error("the parent's overlay summary did not win over the child's own")
 	}
 
-	// 3. The grandchild delegates to the DIRECT child's package. A transitive ref must not
-	//    make the root import the grandchild: the child already composed it and exposes a
-	//    handler method for it, so the root goes through the child.
+	// 3. The grandchild delegates through the direct child's package; the root does not
+	//    import the grandchild.
 	if !strings.Contains(root, "internal/cmd/child") {
 		t.Error("root does not import the direct child's package")
 	}
@@ -99,8 +94,7 @@ func TestCompose_transitiveRef(t *testing.T) {
 		t.Error("root imports the grandchild directly — a transitive ref should delegate through the child")
 	}
 
-	// 4. No stub and no input types are emitted at the root for a composed node: they live
-	//    with the command they belong to.
+	// 4. No stub or input types are emitted at the root for a composed node.
 	if _, ok := emitted["internal/cmd/root/root_child.go"]; ok {
 		t.Error("a stub was seeded at the root for a composed command")
 	}
@@ -108,14 +102,14 @@ func TestCompose_transitiveRef(t *testing.T) {
 		t.Error("composed commands' input types were re-emitted at the root")
 	}
 
-	// 5. The root's own stub IS seeded — it is an own command, not a composed one.
+	// 5. The root's own stub is seeded.
 	if _, ok := emitted["internal/cmd/root/root.go"]; !ok {
 		t.Errorf("the root's own handler stub was not seeded; got %v", keysOf(emitted))
 	}
 }
 
-// TestCompose_cycleIsRejected: a ref that reaches back to a spec already on the stack is a
-// cycle, caught at generate time rather than as an infinite recursion.
+// TestCompose_cycleIsRejected pins that a $ref back to a spec already being composed is
+// reported as a cycle.
 func TestCompose_cycleIsRejected(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/compose\n\ngo 1.26\n")
@@ -161,9 +155,8 @@ func stageOrder(files map[string]string) []string {
 	return out
 }
 
-// composeModuleStaged generates each composed spec in dependency order (grandchild, child,
-// root), which is the order a real project's `go generate ./...` produces, then returns
-// everything emitted.
+// composeModuleStaged generates each supplied spec in dependency order (grandchild, child,
+// root) and returns everything emitted.
 func composeModuleStaged(t *testing.T, files map[string]string) map[string]string {
 	t.Helper()
 	dir := t.TempDir()
@@ -197,16 +190,12 @@ func keysOf(m map[string]string) []string {
 	return out
 }
 
-// ── a composed child's BindMeta ──────────────────────────────────────────────
+// ── a composed child's InputSettings ──────────────────────────────────────────────
 
-// TestCompose_adoptsChildBindMeta covers the two channels composition used to drop.
-//
-// The umbrella's descriptor was built from its OWN document, so a child's config_files and
-// env_prefix stopped existing the moment it was grafted: `child show` read the configuration
-// file and `root kid show` did not, with nothing to notice. The e2e tier proves the resulting
-// BINARY binds; this proves the descriptor it binds from.
-func TestCompose_adoptsChildBindMeta(t *testing.T) {
-	emitted := composeModuleStaged(t, bindMetaTree(`version: 0.0.0
+// TestCompose_adoptsChildInputSettings pins that a composed child's env_prefix is adopted and
+// its config_files are re-scoped to the graft's path in the parent's InputSettings.
+func TestCompose_adoptsChildInputSettings(t *testing.T) {
+	emitted := composeModuleStaged(t, inputSettingsTree(`version: 0.0.0
 command:
   name: root
   summary: an umbrella declaring no channels of its own
@@ -217,25 +206,24 @@ command:
 
 	root := emitted["internal/cmd/root/zz_root.go"]
 
-	// The child's prefix, adopted: the umbrella declares none.
+	// The umbrella declares no prefix, so the child's is adopted.
 	if !strings.Contains(root, `EnvPrefix: "APP"`) {
 		t.Errorf("the composed child's env_prefix was not adopted:\n%s", root)
 	}
 
-	// The child's source, RE-SCOPED to where the graft sits. "kid" is the overlay name, not
-	// the child's own root name, which is why this cannot be a straight copy.
+	// The child's source is re-scoped to the graft's path, using the overlay name "kid".
 	if !strings.Contains(root, `Scope: "root/kid"`) {
 		t.Errorf("the composed child's config source was not re-scoped to root/kid:\n%s", root)
 	}
 	if strings.Contains(root, `Scope: "child"`) {
-		t.Error("the child's own scope survived the graft; the binder matches Scope against the INVOKED chain")
+		t.Error("the child's own scope survived the graft; the input reader matches Scope against the invoked chain")
 	}
 }
 
-// TestCompose_ownEnvPrefixWinsOverAdopted: an umbrella that names a prefix has made a choice,
-// and adopting one from a child behind its back would rename its own variables.
+// TestCompose_ownEnvPrefixWinsOverAdopted pins that an umbrella's own env_prefix is kept over a
+// child's.
 func TestCompose_ownEnvPrefixWinsOverAdopted(t *testing.T) {
-	emitted := composeModuleStaged(t, bindMetaTree(`version: 0.0.0
+	emitted := composeModuleStaged(t, inputSettingsTree(`version: 0.0.0
 command:
   name: root
   summary: an umbrella with a prefix of its own
@@ -251,8 +239,8 @@ command:
 	}
 }
 
-// TestCompose_conflictingEnvPrefixesAreReported: two children, two prefixes, one descriptor.
-// Picking a winner would silently rename the loser's variables, so the author is asked.
+// TestCompose_conflictingEnvPrefixesAreReported pins that children with different env_prefix
+// values are an error.
 func TestCompose_conflictingEnvPrefixesAreReported(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, dir, "go.mod", "module example.com/compose\n\ngo 1.26\n")
@@ -302,7 +290,7 @@ generate:
 	if err == nil {
 		t.Fatal("two children with different env_prefix values generated successfully, want an error")
 	}
-	// The message has to name both prefixes and say what to do, or it is a riddle.
+	// The message must name both prefixes and the fix.
 	for _, want := range []string{"ONE", "TWO", "env_prefix", "root"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err, want)
@@ -310,9 +298,9 @@ generate:
 	}
 }
 
-// bindMetaTree is a child that declares both channels, plus whichever root spec the caller
+// inputSettingsTree is a child that declares both channels, plus whichever root spec the caller
 // wants composed on top of it.
-func bindMetaTree(rootSpec string) map[string]string {
+func inputSettingsTree(rootSpec string) map[string]string {
 	return map[string]string{
 		"cmd/child/.rotini.spec.yaml": `version: 0.0.0
 command:
@@ -350,18 +338,15 @@ generate:
 
 // ── what a composed child dispatches ────────────────────────────────────────
 
-// A composed child keeps everything its root dispatches — its remote commands, plugin
-// discovery, plugin path and passthrough — and its plugin binaries keep the child's name, so
-// one install serves `child deploy` and `root kid deploy` alike. The composed node was once
-// built from its presentation keys alone and dropped all of these: the child's own binary ran
-// its plugins, and through the parent the same command answered "takes no arguments".
+// TestCompose_keepsWhatTheChildDispatches pins that a composed child keeps its root's plugins,
+// plugin discovery, plugin path, and passthrough, with plugin binaries named after the child.
 func TestCompose_keepsWhatTheChildDispatches(t *testing.T) {
 	emitted := composeModuleStaged(t, map[string]string{
 		"cmd/grand/.rotini.spec.yaml": `version: 0.0.0
 command:
   name: grand
   summary: the grandchild
-  remote_commands:
+  plugins:
     - name: sync
 `,
 		"cmd/grand/.rotini.conf.yaml": "version: 0.0.0\ngenerate:\n  packages:\n    - type: cmd\n      file: internal/cmd/grand/zz_grand.go\n      package: grand\n",
@@ -370,9 +355,9 @@ command:
   name: child
   summary: the child
   plugin_path: ./child-plugins
-  remote_commands:
+  plugins:
     - name: deploy
-  remote_discovery: {}
+  plugin_discovery: {}
   commands:
     - name: exec
       summary: runs a command
@@ -381,8 +366,8 @@ command:
         - name: argv
           schema: {type: '[]string'}
     - name: tools
-      summary: inline sub-command with its own remote
-      remote_commands:
+      summary: inline sub-command with its own plugin
+      plugins:
         - name: lint
     - $ref: ../grand/.rotini.spec.yaml
 `,
@@ -400,12 +385,12 @@ command:
 	})
 	root := emitted["internal/cmd/root/zz_root.go"]
 	for _, want := range []string{
-		`Binary: "child-deploy"`,                                   // the composed root's remote, named as the child names it
-		`Discovery:  &rotini.RemoteDiscoveryDef{Prefix: "child-"}`, // its discovery, with the child's default prefix
-		`PluginPath: "./parent-plugins"`,                           // plugin_path on the $ref node overlays the child's
-		`Binary: "child-lint"`,                                     // an inline sub-command inside the subtree: the child's name too
-		`Binary: "grand-sync"`,                                     // a transitive child's plugins keep ITS name
-		`Passthrough: true`,                                        // the child's passthrough command still forwards raw
+		`Binary: "child-deploy"`,                      // the composed root's plugin, named as the child names it
+		`rotini.PluginDiscoveryDef{Prefix: "child-"}`, // its discovery, with the child's default prefix
+		`"./parent-plugins"`,                          // plugin_path on the $ref node overlays the child's
+		`Binary: "child-lint"`,                        // an inline sub-command inside the subtree: the child's name too
+		`Binary: "grand-sync"`,                        // a transitive child's plugins keep ITS name
+		`Passthrough: true`,                           // the child's passthrough command still forwards raw
 	} {
 		if !strings.Contains(root, want) {
 			t.Errorf("root definition missing %s:\n%s", want, root)
@@ -416,7 +401,8 @@ command:
 	}
 }
 
-// A child whose ROOT is passthrough (a wrapper CLI) still forwards raw tokens once composed.
+// TestCompose_passthroughRootSurvives pins that a child whose root is passthrough keeps
+// Passthrough once composed.
 func TestCompose_passthroughRootSurvives(t *testing.T) {
 	emitted := composeModuleStaged(t, map[string]string{
 		"cmd/child/.rotini.spec.yaml": `version: 0.0.0
@@ -437,9 +423,8 @@ command:
 	}
 }
 
-// A composed child is judged with its parent: `validate root` reports a child's problems — and
-// a grandchild's — positioned in their own files, exactly as validating each alone would. It
-// used to pass clean over a child with an unknown key.
+// TestCompose_validatesComposedSpecs pins that validating a parent reports problems in composed
+// children and grandchildren, positioned in their own files.
 func TestCompose_validatesComposedSpecs(t *testing.T) {
 	dir := t.TempDir()
 	for path, body := range map[string]string{

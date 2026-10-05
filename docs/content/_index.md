@@ -8,40 +8,71 @@ title: "rotini"
 
 <p class="hero_beats">Validate. Generate. Ship.</p>
 
-<p class="hero_sub">Rotini is a spec-driven CLI package for Go, with a codegen tool and a runtime library. You declare your commands, flags and arguments in a spec file (YAML, JSON, JSONC or TOML). Rotini validates it and generates the typed Go, the command tree and a handler stub per command. You write each command's handler, and the runtime parses and validates input before calling it. The loop is: edit the spec, generate, provide/update handler implementations, build.</p>
+<p class="hero_sub">Rotini is a spec-driven codegen package for building CLI programs in Go. You describe your commands, flags and arguments in a spec file (YAML, JSON, JSONC or TOML). Rotini checks the spec and generates the typed Go code, the command tree and a handler file for each command. You write what each command does, and the runtime parses and validates the user's input before your code reads it. The loop is: edit the spec, generate, implement the handlers, build.</p>
+
+---
+
+## Features
+
+| Feature | What you get |
+|:---|:---|
+| **Commands** | Sub-commands to any depth, with aliases, help groups and hidden commands. |
+| **Flags and arguments** | Short and long flags with GNU-style parsing (`-abc`, `--name=value`, `--no-x`), repeatable flags, and optional and variadic arguments. |
+| **Typed values** | Strings, numbers, booleans, lists and maps, plus value types such as `duration`, `date`, `url`, `ip`, `bytesize` and `existingfile`. |
+| **Validation** | Required values, defaults, enums, patterns, bounds and lengths, plus flags that are mutually exclusive, required together, one-of or at-least-one, and flags that require others. A bad value is a usage error naming the flag the user typed. |
+| **Environment variables** | Any flag can fall back to an environment variable, named from a prefix or set exactly. |
+| **Config files** | Values from YAML, JSON, JSONC, TOML or dotenv files at a fixed path or discovered in the XDG config directory or by walking up from the working directory. The command line always wins. |
+| **Stdin** | A typed payload piped on stdin, as a JSON, YAML, JSONC or TOML document, as text, or as lines. |
+| **Secrets** | Inputs marked secret are redacted from errors and from the record of where each value came from. |
+| **Help** | `--help` and `help <command>` pages with usage, examples and see-also links, under headings you can rename, or a page you write yourself. |
+| **Version** | `--version` and a `version` command, stamped at build time. |
+| **Shell completion** | Scripts for bash, zsh, fish and PowerShell, with completion hints for values such as files and directories. |
+| **Man and markdown pages** | Roff man pages and markdown reference pages, ready to install or publish. |
+| **Structured output** | A JSON Schema for each command's output and a contract document describing the whole CLI, for scripts and agents. |
+| **Errors and exit codes** | Consistent `Error:` messages and a non-zero exit code. Every error carries a usage or internal category you can map to your own exit codes, and errors can be reported as JSON for scripts. |
+| **Deprecation** | Deprecated commands, aliases and flags keep working and are marked in help. Each use is reported to your code, which decides whether to warn. |
+| **Interrupts and panics** | Ctrl+C and SIGTERM stop the program cleanly, running its teardown, and a second Ctrl+C exits at once. A panic is reported as an error rather than a stack trace. |
+| **Suggestions** | "Did you mean" suggestions for a mistyped command or flag, opt-in. |
+| **Plugins** | Run separate `<app>-<name>` programs as sub-commands, declared or discovered. A rotini program can also be a plugin for kubectl, Docker or Flux, completing and showing help the way the host does. |
+| **Wrapper commands** | A command that forwards everything after its name untouched to another program. |
+| **Composed CLIs** | Mount one CLI inside another as a sub-command, from the same module or another, while it still builds and ships on its own. |
 
 ---
 
 ## Quick start
 
-Requires Go 1.27 or later.
+Requires Go 1.27 or later. This builds `helloworld`, a program with one command, `hello`.
 
-### 1. Initialize
+### 1. Set up the program
+
+Create a Go module and add the rotini tool to it. `rotini init` sets up a program that builds and
+runs as it is, and `go mod tidy` records rotini as a direct dependency, since its code imports it:
 
 {{< code title="terminal" language="bash" open="true" collapsible="false" copy="true" >}}
 mkdir helloworld
 cd helloworld
 go mod init github.com/me/helloworld
-
 go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
-go get github.com/go-rotini/rotini@latest
 go tool rotini init helloworld
+go mod tidy
 {{< /code >}}
 
 {{< code title="what init writes" language="text" open="true" collapsible="false" copy="false" >}}
 cmd/helloworld/
-  .rotini.spec.yaml        the spec — what the CLI accepts
-  .rotini.conf.yaml        the conf — where generated code goes
-  .rotini-schema.*.json    schemas for editor completion
+  .rotini.spec.yaml        the spec: what the CLI accepts
+  .rotini.conf.yaml        the conf: what is generated, and where
+  .rotini-schema.*.json    JSON Schemas, for editor completion
   main.go                  the entrypoint
 internal/cmd/helloworld/
-  zz_rotini.go             generated on every `go generate` — don't edit
-  helloworld*.go           one handler file per command — yours to edit
+  zz_rotini.go             generated on every run; do not edit
+  helloworld*.go           one handler file per command; yours to edit
 {{< /code >}}
 
-### 2. Add a command to the spec
+### 2. Declare a command
 
-{{< code title="cmd/helloworld/.rotini.spec.yaml — under commands:" language="yaml" open="true" collapsible="false" copy="true" >}}
+Add a `hello` command, with an optional argument and a flag, under `commands:` in the spec:
+
+{{< code title="cmd/helloworld/.rotini.spec.yaml" language="yaml" open="true" collapsible="false" copy="true" >}}
     - name: hello
       summary: say hello
       arguments:
@@ -53,31 +84,29 @@ internal/cmd/helloworld/
           summary: greet in capitals
           identifiers: [-s, --shout]
           schema: { type: bool }
-        - name: help
-          summary: print help
-          identifiers: [-h, --help]
-          schema: { type: bool }
 {{< /code >}}
 
-### 3. Generate, and fill in the handler
+### 3. Generate, then implement the handler
 
-`go generate ./...` creates `internal/cmd/helloworld/helloworld_hello.go`. Replace the line that prints `inputs` with the command's work, and add `"strings"` to its imports:
+`go generate ./...` writes `internal/cmd/helloworld/helloworld_hello.go`. Its `Run` method already
+answers `--help` and reads the typed, validated inputs. Replace the line that prints them with the
+greeting code, and add `"strings"` to the imports:
 
 {{< code title="internal/cmd/helloworld/helloworld_hello.go" language="go" open="true" collapsible="false" copy="true" >}}
-func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	if argv, err := rotini.ParseArgv[HelloworldHelloInputs](rtx); err == nil && argv.Values.HelloworldHello.Flags.Help {
+func (*helloworldHelloHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	if argv, err := rtx.ArgvInputs[HelloworldHelloInputs](); err == nil && argv.Values.Helloworld.Flags.Help {
 		fmt.Fprintln(rtx.Stdout, rtx.Help())
 		rtx.HaltWithCode(0)
 		return
 	}
 
-	inputs, err := rotini.Collect[HelloworldHelloInputs](rtx)
+	inputs, err := rtx.Inputs[HelloworldHelloInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
 
-	greeting := "hello, " + inputs.HelloworldHello.Arguments.Name
+	greeting := "Hello, " + inputs.HelloworldHello.Arguments.Name + "!"
 	if inputs.HelloworldHello.Flags.Shout {
 		greeting = strings.ToUpper(greeting)
 	}
@@ -87,22 +116,24 @@ func (*helloworldHelloHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 
 ### 4. Build and run
 
-{{< code title="terminal" language="bash" open="true" collapsible="false" copy="true" >}}
-go generate ./...
-go build ./cmd/...
-
-./helloworld hello --shout rotini   # HELLO, ROTINI
-./helloworld --help
+{{< code title="terminal" language="console" open="true" collapsible="false" copy="false" >}}
+$ go build ./cmd/helloworld
+$ ./helloworld hello
+Hello, world!
+$ ./helloworld hello rotini --shout
+HELLO, ROTINI!
 {{< /code >}}
 
-Change the spec, `go generate ./...`, fill in any new handler, build — that's the whole loop.
+From here, every change follows the same loop: change the spec, run `go generate ./...`, implement
+any new handler, and build.
 
 ---
 
 ## Next
 
-- [README.md](/docs) — using rotini in depth: inputs, handlers, errors, testing, composition
-- [.rotini.spec.yaml](/specification) — every spec key
-- [.rotini.conf.yaml](/configuration) — every conf key
-- [api.go](/api) — what you call from `main.go` and your handlers
-- [cli](/cli) — the `rotini` command
+- [README.md](/docs): the guide to using rotini, from install to testing
+- [.rotini.spec.yaml](/specification): every spec key
+- [.rotini.conf.yaml](/configuration): every conf key
+- [zz_rotini.go](/generated): what `rotini generate` writes, and which files are yours
+- [api.go](/api): what you call from `main.go` and your handlers
+- [cli](/cli): the `rotini` companion CLI

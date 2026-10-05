@@ -115,15 +115,15 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type appHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[AppInputs](rtx)
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AppInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return

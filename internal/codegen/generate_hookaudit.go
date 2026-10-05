@@ -12,46 +12,28 @@ import (
 	"strings"
 )
 
-// Generate-time audit of the handler files rotini does not own.
+// Generate-time audit of the author's handler code.
 //
-// A handler embeds the Default* no-ops and overrides the hooks it wants. If an override's
-// NAME is wrong, the embedded no-op keeps satisfying Handlers and the author's method becomes
-// dead code: it compiles, `go vet` is clean, and staticcheck's unused is deliberately
-// conservative about exported methods, so nothing reports it. The stub's
-// `var _ rotini.Handlers` assertion catches a missing hook and a drifted signature, but it
-// cannot catch this one — the embed still supplies a valid method, so the interface holds.
+// A handler embeds the No* no-ops and overrides the hooks it wants. A misspelled override is
+// dead code: the embedded no-op still satisfies Handler, so the `var _ rotini.Handler`
+// assertion holds and neither the compiler nor vet reports it. The audit reports such methods
+// as warnings with a file:line, since an unused method is legal Go.
 //
-// This is the remaining gap, and it is reported where every other "you wrote something that
-// will not do what you meant" problem in rotini is: at generate time, with a file:line, as a
-// warning rather than an error, because an unused method is legal Go.
-//
-// The same pass makes a second check that also needs the author's code: a handler that
-// acquires a DIFFERENT command's generated inputs type (see wrongInputsTypes), which compiles
-// and then fails, or binds the wrong command, only when it runs.
+// The same pass also reports a handler that acquires a different command's generated inputs
+// type (see wrongInputsTypes), which compiles but reads the wrong shape at run time.
 
-// auditedHooks are the hook names a near-miss is measured against.
-//
-// Run is deliberately ABSENT. There is no DefaultRun, so a misspelled Run leaves the type
-// without one and the assertion fails to compile — the mistake is already loud. Only the four
-// hooks with an embeddable no-op can be typo'd silently, and leaving Run out also keeps the
-// audit away from a three-letter target, where an edit distance of 2 would match ordinary
-// helper names.
+// auditedHooks are the hook names a near-miss is measured against. Run is excluded: it has no
+// no-op, so a misspelled Run already fails the assertion, and a three-letter target would match
+// ordinary helper names within edit distance 2.
 var auditedHooks = []string{"CascadingPreRun", "PreRun", "PostRun", "CascadingPostRun"}
 
-// auditHooks reports methods on a handler type whose names are near-misses of a lifecycle hook,
-// and calls that acquire another command's inputs type.
-// It is the last generate step: by then every stub this pass created exists and every orphan is
-// gone, so the audit sees exactly the files the author will build.
+// auditHooks records warnings for near-miss hook names on handler types and for calls that
+// acquire another command's inputs type. It runs last in a generate pass, so it sees the final
+// set of stubs.
 //
-// It covers the cmd package AND every package a spec's `handler:` block points at that lives in
-// this module — the bring-your-own seam, where a Handlers implementation is written by hand and
-// shared by several CLIs, and therefore the place a misspelled hook is LEAST likely to be noticed.
-// A handler package outside this module is skipped deliberately: that is a dependency's source,
-// and linting someone else's package is not this tool's business.
-//
-// It is BEST-EFFORT and never fails the pass for a package it cannot read. These are the
-// author's files, possibly mid-edit; a file that will not parse is skipped, because the compiler
-// is about to say so in better detail than this audit could.
+// It covers the cmd package and every in-module package named by a spec's `handler:` block;
+// handler packages in other modules are skipped. It is best-effort: unreadable directories and
+// files that do not parse are skipped, leaving the compiler to report them.
 func (p *program) auditHooks() error {
 	dirs, err := p.auditDirs()
 	if err != nil {
@@ -63,7 +45,7 @@ func (p *program) auditHooks() error {
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
-			continue // a directory that is not there is nothing to audit
+			continue
 		}
 		for _, e := range entries {
 			name := e.Name()
@@ -105,12 +87,8 @@ func (p *program) noteHandlerImport(importPath string) {
 	p.handlerImports[importPath] = true
 }
 
-// auditDirs is the cmd package plus each in-module handler package, deduped and ordered so a
-// pass is reproducible.
-//
-// The module check is what makes resolving an import path to a directory possible at all: a path
-// under this module's own path maps to a directory beneath its root by string surgery, with no
-// build list and no module cache to consult. Anything else is another module's code.
+// auditDirs returns the cmd package directory plus each in-module handler package directory,
+// deduplicated and sorted.
 func (p *program) auditDirs() ([]string, error) {
 	seen := map[string]bool{}
 	var dirs []string
@@ -121,8 +99,7 @@ func (p *program) auditDirs() ([]string, error) {
 		}
 	}
 
-	// The cmd directory must exist by now — the stubs were just written — so unlike a handler
-	// package, a failure to read it is a real filesystem problem and is surfaced.
+	// Unlike a handler package, a cmd directory that exists but cannot be read is an error.
 	if _, err := os.Stat(p.layout.cmdDir); err != nil {
 		if !os.IsNotExist(err) {
 			return nil, fmt.Errorf("read %s to audit its handler hooks: %w", p.layout.cmdDir, err)
@@ -140,8 +117,8 @@ func (p *program) auditDirs() ([]string, error) {
 	return dirs, nil
 }
 
-// inModuleDir maps a Go import path to a directory inside m, reporting false when the path
-// belongs to another module.
+// inModuleDir maps a Go import path under m's path to its directory beneath m's root,
+// reporting false when the path belongs to another module.
 func inModuleDir(importPath string, m module) (string, bool) {
 	if m.path == "" || m.root == "" {
 		return "", false
@@ -156,23 +133,16 @@ func inModuleDir(importPath string, m module) (string, bool) {
 	return "", false
 }
 
-// handlerTypeNames collects the type names this package declares that implement rotini.Handlers,
-// found two ways:
+// handlerTypeNames collects the declared type names that implement rotini.Handler, found two
+// ways:
 //
-//  1. The `var _ rotini.Handlers = (*T)(nil)` assertion every generated stub carries, which is
-//     also what identifies a stub for pruning (see stubMarker).
-//  2. Any function RETURNING rotini.Handlers, through the types its body names.
+//  1. The `var _ rotini.Handler = (*T)(nil)` assertion every generated stub carries.
+//  2. The types named in the return statements of any function returning rotini.Handler, as a
+//     hand-written handler package does (`func Health() rotini.Handler { return &handlers{} }`)
+//     without an assertion.
 //
-// The second is what reaches a hand-written handler package. The `handler: {import, convention}`
-// seam is a package exporting `func Health() rotini.Handlers { return &handlers{} }` — the
-// convention function's return type is the proof it implements the interface, so such a package
-// has no reason to write the assertion as well, and the real ones do not. Finding types only
-// through the assertion would have audited every generated stub and none of the files the seam
-// exists for.
-//
-// Matching on the interface NAME rather than the qualified selector keeps this working when the
-// runtime is imported under an alias. Value forms are read loosely — (*T)(nil), T{} and &T{} all
-// name T — so a hand-rewritten assertion, and a constructor with a few branches, are covered.
+// The interface is matched by name, not qualifier, so an aliased import still matches. Value
+// forms are read loosely: (*T)(nil), T{} and &T{} all name T.
 func handlerTypeNames(files map[string]*ast.File) map[string]bool {
 	declared := declaredTypeNames(files)
 	found := map[string]bool{}
@@ -198,8 +168,8 @@ func handlerTypeNames(files map[string]*ast.File) map[string]bool {
 	return found
 }
 
-// declaredTypeNames is every type name the package declares, so the two scans below can tell a
-// local type from an imported identifier that happens to appear in the same expression.
+// declaredTypeNames returns every type name declared in files, so the handler scans can tell a
+// local type from an imported identifier.
 func declaredTypeNames(files map[string]*ast.File) map[string]bool {
 	declared := map[string]bool{}
 	for _, f := range files {
@@ -218,25 +188,24 @@ func declaredTypeNames(files map[string]*ast.File) map[string]bool {
 	return declared
 }
 
-// collectAssertedTypes reads `var _ rotini.Handlers = (*T)(nil)` — the generated stub's form.
+// collectAssertedTypes reads the generated stub's `var _ rotini.Handler = (*T)(nil)`.
 func collectAssertedTypes(gd *ast.GenDecl, collect func(ast.Node)) {
 	if gd.Tok != token.VAR {
 		return
 	}
 	for _, sp := range gd.Specs {
 		vs, ok := sp.(*ast.ValueSpec)
-		if !ok || !assertsHandlers(vs.Type) || len(vs.Values) == 0 {
+		if !ok || !assertsHandler(vs.Type) || len(vs.Values) == 0 {
 			continue
 		}
 		collect(vs.Values[0])
 	}
 }
 
-// collectConstructedTypes reads `func Check() rotini.Handlers { return &handlers{} }` — the
-// hand-written handler package's form, where the return type is the proof and no assertion is
-// written.
+// collectConstructedTypes reads the return statements of a function such as
+// `func Check() rotini.Handler { return &handlers{} }`.
 func collectConstructedTypes(fd *ast.FuncDecl, collect func(ast.Node)) {
-	if !returnsHandlers(fd) || fd.Body == nil {
+	if !returnsHandler(fd) || fd.Body == nil {
 		return
 	}
 	for _, st := range fd.Body.List {
@@ -250,37 +219,34 @@ func collectConstructedTypes(fd *ast.FuncDecl, collect func(ast.Node)) {
 	}
 }
 
-// returnsHandlers reports whether fn's signature returns the Handlers interface — the proof a
-// hand-written handler package gives that its type implements it, in place of an assertion.
-func returnsHandlers(fn *ast.FuncDecl) bool {
+// returnsHandler reports whether fn's signature returns the Handler interface.
+func returnsHandler(fn *ast.FuncDecl) bool {
 	if fn.Type == nil || fn.Type.Results == nil {
 		return false
 	}
 	for _, r := range fn.Type.Results.List {
-		if assertsHandlers(r.Type) {
+		if assertsHandler(r.Type) {
 			return true
 		}
 	}
 	return false
 }
 
-// assertsHandlers reports whether a var's declared type is the Handlers interface, under any
-// package qualifier (rotini.Handlers, rt.Handlers) or none (a dot import).
-func assertsHandlers(t ast.Expr) bool {
+// assertsHandler reports whether t names the Handler interface, under any
+// package qualifier (rotini.Handler, rt.Handler) or none (a dot import).
+func assertsHandler(t ast.Expr) bool {
 	switch v := t.(type) {
 	case *ast.SelectorExpr:
-		return v.Sel != nil && v.Sel.Name == "Handlers"
+		return v.Sel != nil && v.Sel.Name == "Handler"
 	case *ast.Ident:
-		return v.Name == "Handlers"
+		return v.Name == "Handler"
 	}
 	return false
 }
 
 // nearMissHooks returns one warning per method on a handler type whose name is within an edit
-// distance of 2 of a hook name without being one. The threshold and the phrasing are
-// closestName's and didYouMean's, shared with the spec lint rules that suggest a typo fix.
-//
-// Warnings are sorted by file then line so a pass is reproducible.
+// distance of 2 of a hook name without being one, sorted by file then line. The threshold and
+// phrasing come from closestName and didYouMean, shared with the spec lint rules.
 func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes map[string]bool, moduleRoot string) []error {
 	hook := map[string]bool{"Run": true}
 	for _, h := range auditedHooks {
@@ -301,7 +267,7 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 			}
 			name := fd.Name.Name
 			if hook[name] {
-				continue // the real thing
+				continue
 			}
 			match := closestName(name, auditedHooks)
 			if match == "" {
@@ -309,7 +275,7 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 			}
 			at := findingAt(fset, fd.Name.Pos(), moduleRoot)
 			at.msg = didYouMean(fmt.Sprintf(
-				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run; rotini.Default%s is what supplies %s",
+				"%s:%d: method %q on %s is not a lifecycle hook, so it will never run; rotini.No%s is what supplies %s",
 				at.file, at.line, name, recv, match, match,
 			), name, auditedHooks)
 			found = append(found, at)
@@ -319,7 +285,7 @@ func nearMissHooks(fset *token.FileSet, files map[string]*ast.File, handlerTypes
 	return sortedWarnings(found)
 }
 
-// receiverTypeName is the bare type name of a method receiver: T, *T, or a generic T[…].
+// receiverTypeName returns the bare type name of a method receiver: T, *T, or a generic T[…].
 func receiverTypeName(t ast.Expr) string {
 	switch v := t.(type) {
 	case *ast.StarExpr:
@@ -336,26 +302,20 @@ func receiverTypeName(t ast.Expr) string {
 
 // ─── the inputs-type audit ──────────────────────────────────────────────────.
 
-// collectFuncs are the generic entry points that acquire a command's own declared inputs. Each
-// takes the inputs type as its type argument, which is what the audit reads.
-var collectFuncs = map[string]bool{
-	"Collect": true, "CollectP": true,
-	"Defaults": true, "ParseArgv": true, "ParseEnv": true, "ParseFiles": true, "ParseStdin": true,
+// inputsMethods are the generic Context methods that acquire a command's own declared inputs.
+// Each takes the inputs type as its type argument, which is what the audit reads.
+var inputsMethods = map[string]bool{
+	"Inputs": true, "InputsWithReport": true,
+	"DefaultInputs": true, "ArgvInputs": true, "EnvInputs": true, "FileInputs": true, "StdinInputs": true,
 }
 
-// inputsTypeExpectations maps each generated handler type to the inputs type its command owns,
-// alongside the set of every inputs type this package generates.
+// inputsTypeExpectations maps each generated handler type to its command's inputs type, and
+// returns the set of every generated inputs type.
 //
-// The pair is the whole check. An inputs struct binds to the frame whose hook is running, so a
-// handler can only mean its OWN command's type; collecting an ancestor's is a silent wrong
-// answer whenever the two commands share a flag name, which cascading flags guarantee. The
-// runtime cannot tell them apart — it sees a struct that fits — but codegen can, because it
+// An inputs struct binds to the frame whose hook is running, so a handler should only acquire
+// its own command's type. Acquiring another (an ancestor's, say) reads silently wrong values
+// when the commands share a flag name. The runtime cannot detect this; codegen can, because it
 // knows which command each stub implements.
-//
-// That is why this is a generate-time check and not a runtime one. The runtime approach needs a
-// frame to carry a grafted command's origin identity, which nothing does: a composed child is
-// renamed by the umbrella that mounts it. Here the question never crosses a package, so renaming
-// and composition simply do not arise.
 func (p *program) inputsTypeExpectations() (expected map[string]string, known map[string]bool) {
 	expected, known = map[string]string{}, map[string]bool{}
 	note := func(c genCommand) {
@@ -373,11 +333,9 @@ func (p *program) inputsTypeExpectations() (expected map[string]string, known ma
 	return expected, known
 }
 
-// wrongInputsTypes reports each call that acquires a DIFFERENT generated command's inputs type
-// than the handler it sits in owns.
-//
-// An unrecognized type argument is ignored on purpose: a hand-written handler package declares
-// its own struct (see the `handler:` seam), and that is a supported shape, not a mistake.
+// wrongInputsTypes reports each call in a handler method that acquires another generated
+// command's inputs type. Type arguments that are not generated inputs types are ignored, since a
+// hand-written handler package may declare its own struct.
 func wrongInputsTypes(fset *token.FileSet, files map[string]*ast.File, expected map[string]string, known map[string]bool, moduleRoot string) []error {
 	var found []auditFinding
 
@@ -398,7 +356,7 @@ func wrongInputsTypes(fset *token.FileSet, files map[string]*ast.File, expected 
 					return true
 				}
 				fn, arg, ok := genericCallTypeArg(call)
-				if !ok || !collectFuncs[fn] || arg == want || !known[arg] {
+				if !ok || !inputsMethods[fn] || arg == want || !known[arg] {
 					return true
 				}
 				at := findingAt(fset, call.Pos(), moduleRoot)
@@ -423,8 +381,7 @@ type auditFinding struct {
 	msg  string
 }
 
-// findingAt places a finding at pos, naming the file relative to the module root so the
-// message reads the way the author's editor shows the path.
+// findingAt places a finding at pos, with the file relative to the module root.
 func findingAt(fset *token.FileSet, pos token.Pos, moduleRoot string) auditFinding {
 	p := fset.Position(pos)
 	rel := p.Filename
@@ -434,8 +391,7 @@ func findingAt(fset *token.FileSet, pos token.Pos, moduleRoot string) auditFindi
 	return auditFinding{file: rel, line: p.Line}
 }
 
-// sortedWarnings orders findings by file then line, so a report reads top to bottom and is
-// stable across runs, and returns them as warnings.
+// sortedWarnings returns findings as warnings, sorted by file then line.
 func sortedWarnings(found []auditFinding) []error {
 	sort.Slice(found, func(i, j int) bool {
 		if found[i].file != found[j].file {
@@ -450,8 +406,8 @@ func sortedWarnings(found []auditFinding) []error {
 	return out
 }
 
-// genericCallTypeArg reads `pkg.Fn[Type](…)` — or `Fn[Type](…)` — returning the function name
-// and the single type argument's name.
+// genericCallTypeArg reads `x.Fn[Type](…)` or `Fn[Type](…)`, returning the function name and
+// the single type argument's name.
 func genericCallTypeArg(call *ast.CallExpr) (fn, arg string, ok bool) {
 	idx, isIndex := call.Fun.(*ast.IndexExpr)
 	if !isIndex {

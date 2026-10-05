@@ -45,9 +45,8 @@ func TestLifecycle_explicitDefaultsAreIdentity(t *testing.T) {
 	}
 }
 
-// A resolver alias: rewrite the token, delegate to the default, and return its
-// resolution — routing AND parsing then agree, because Resolution.Argv carries
-// the rewritten vector into rtx.Argv.
+// A resolver alias that rewrites the token and delegates to the default: Resolution.Argv
+// carries the rewritten vector into rtx.Argv, so routing and parsing agree.
 func TestWithResolver_alias(t *testing.T) {
 	var log []string
 	var gotArgs []string
@@ -75,9 +74,8 @@ func TestWithResolver_alias(t *testing.T) {
 	}
 }
 
-// A resolver error is a wiring-class failure: routed through the funnel,
-// exit floored to 1, no hooks run, and pre-classified CategoryInternal —
-// unless the resolver tagged its own category, which must survive.
+// A resolver error runs no hooks, exits 1, and is CategoryInternal unless the resolver
+// tagged its own category.
 func TestWithResolver_error(t *testing.T) {
 	var log []string
 	p, _, errb := newTestProgram(&testHandlers{log: &log}, []string{"run"})
@@ -85,13 +83,12 @@ func TestWithResolver_error(t *testing.T) {
 		return Resolution{}, errors.New("routing table on fire")
 	})
 	code, err := p.Run(p.args)
-	// A resolver error is a resolution-phase fault routed to the funnel as a panic; the default
-	// exits 1 (the returned err still carries the internal category).
+	// Reported as a panic; the default exits 1 and the returned err is internal.
 	if code != 1 || err == nil {
 		t.Errorf("run() = (%d, %v), want (1, the resolver error)", code, err)
 	}
 	if !strings.Contains(errb.String(), "routing table on fire") {
-		t.Errorf("stderr = %q, want the resolver error via the funnel", errb)
+		t.Errorf("stderr = %q, want the resolver error via the reporter", errb)
 	}
 	if len(log) != 0 {
 		t.Errorf("hooks ran despite a resolver failure: %v", log)
@@ -111,17 +108,14 @@ func TestWithResolver_error(t *testing.T) {
 	}
 }
 
-// The pre-classified diagnostics make the documented one-switch funnel work:
-// a custom funnel maps CategoryInternal to 70 with no taxonomy
-// re-derivation of its own.
-func TestWithFunnel_categorySwitch(t *testing.T) {
-	// A custom funnel maps CategoryInternal → 70 in one switch over the
-	// recorded errors, with no taxonomy re-derivation of its own.
+// A custom reporter can map categories to exit codes with one switch over CategoryOf.
+func TestWithReporter_categorySwitch(t *testing.T) {
+	// Map CategoryInternal → 70.
 	h := &testHandlers{log: new([]string), onRun: func(rtx *Context) {
 		rtx.RecordError(InternalError(errors.New("boom")))
 	}}
 	p, _, _ := newTestProgram(h, []string{"run"})
-	p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+	p.WithReporter(func(_ context.Context, rtx *Context, out Outcome) {
 		errs := out.Errors
 		switch CategoryOf(errors.Join(errs...)) {
 		case CategoryUsage:
@@ -137,8 +131,8 @@ func TestWithFunnel_categorySwitch(t *testing.T) {
 	}
 }
 
-// EH6: a Definition↔handlers mismatch is a typed, As-able *WiringError naming
-// the command and method, and always CategoryInternal.
+// A Definition/handlers mismatch is a *WiringError naming the command and method, always
+// CategoryInternal.
 func TestRun_wiringError(t *testing.T) {
 	p, _, _ := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.def = Definition{Name: "app", Handler: "Nope"} // no such handler method
@@ -155,11 +149,11 @@ func TestRun_wiringError(t *testing.T) {
 	}
 }
 
-// An empty chain is a resolver bug, reported loudly — never a silent no-op.
+// An empty chain from a resolver is reported as a fault.
 func TestWithResolver_emptyChain(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: &[]string{}}, nil)
 	p.WithResolver(func(Definition, []string) (Resolution, error) { return Resolution{}, nil })
-	// An empty chain is a resolver fault → the funnel's panics; the default exits 1.
+	// Reported as a panic; the default exits 1.
 	if code, err := p.Run(p.args); code != 1 || err == nil {
 		t.Errorf("run() = (%d, %v), want (1, an empty-chain error)", code, err)
 	}
@@ -168,20 +162,20 @@ func TestWithResolver_emptyChain(t *testing.T) {
 	}
 }
 
-// A custom resolution may divert to a remote dispatch, exactly like a declared
-// remote command; a missing binary follows the normal remote error path.
-func TestWithResolver_customRemote(t *testing.T) {
+// A custom resolution may divert to a plugin dispatch; a missing binary follows the normal
+// plugin error path.
+func TestWithResolver_customPlugin(t *testing.T) {
 	p, _, errb := newTestProgram(&testHandlers{log: &[]string{}}, []string{"anything"})
 	p.WithResolver(func(Definition, []string) (Resolution, error) {
-		return Resolution{Remote: &RemoteDispatch{Def: RemoteDef{Name: "ghost", Binary: "rotini-test-no-such-binary"}}}, nil
+		return Resolution{Plugin: &PluginDispatch{Def: PluginDef{Name: "ghost", Binary: "rotini-test-no-such-binary"}}}, nil
 	})
-	// Not flagged Discovered → a declared remote → a missing binary is recorded
-	// as an error → the funnel's errors; the default exits 1.
+	// Not Discovered, so a declared plugin: the missing binary is recorded as an error and
+	// the default exits 1.
 	if code, _ := p.Run(p.args); code != 1 {
-		t.Errorf("run() = %d, want 1 for an unresolvable remote binary", code)
+		t.Errorf("run() = %d, want 1 for an unresolvable plugin binary", code)
 	}
 	if errb.Len() == 0 {
-		t.Error("stderr empty, want the remote resolution error")
+		t.Error("stderr empty, want the plugin resolution error")
 	}
 }
 
@@ -190,7 +184,7 @@ func TestWithResolver_customRemote(t *testing.T) {
 // The engine's contract holds around the custom plan: PostRun still pairs with
 // PreRun, and unwind still covers exactly the begun steps.
 func TestWithLifecycle_reversedTeardown(t *testing.T) {
-	reversed := func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
+	reversed := func(chain []Command, hs []Handler) []LifecycleStep {
 		steps := DefaultLifecycle(chain, hs)
 		for i, j := 0, len(hs)-1; i < j; i, j = i+1, j-1 {
 			steps[i].Undo, steps[j].Undo = steps[j].Undo, steps[i].Undo
@@ -212,12 +206,11 @@ func TestWithLifecycle_reversedTeardown(t *testing.T) {
 	}
 }
 
-// haltHandlers panics in the leaf's PreRun, to prove the engine's balanced
-// unwind holds for a custom plan too.
+// haltHandlers panics in the leaf's PreRun, to show the unwind holds for a custom plan.
 type haltHandlers struct{ log *[]string }
 
-func (t *haltHandlers) App() Handlers { return &recHandler{name: "app", log: t.log} }
-func (t *haltHandlers) AppRun() Handlers {
+func (t *haltHandlers) App() Handler { return &recHandler{name: "app", log: t.log} }
+func (t *haltHandlers) AppRun() Handler {
 	return &panicPreRunHandler{recHandler{name: "run", log: t.log}}
 }
 
@@ -234,7 +227,7 @@ func TestWithLifecycle_customPlanKeepsUnwindContract(t *testing.T) {
 	p.WithLifecycle(DefaultLifecycle) // explicitly seamed; the engine owns halting/unwind
 	code, err := p.Run(p.args)
 	if code != 1 || err == nil {
-		t.Fatalf("run() = (%d, %v), want (1, the panic via the funnel)", code, err)
+		t.Fatalf("run() = (%d, %v), want (1, the panic via the reporter)", code, err)
 	}
 	want := []string{
 		"app.CascadingPreRun", "run.CascadingPreRun",
@@ -246,7 +239,7 @@ func TestWithLifecycle_customPlanKeepsUnwindContract(t *testing.T) {
 		t.Errorf("unwind after a PreRun panic:\n got=%v\nwant=%v", log, want)
 	}
 	if !strings.Contains(errb.String(), "setup failed") {
-		t.Errorf("stderr = %q, want the funneled panic, after teardown", errb)
+		t.Errorf("stderr = %q, want the reported panic, after teardown", errb)
 	}
 }
 
@@ -257,8 +250,8 @@ type panicValueHandlers struct {
 	val any
 }
 
-func (t *panicValueHandlers) App() Handlers { return &recHandler{name: "app", log: t.log} }
-func (t *panicValueHandlers) AppRun() Handlers {
+func (t *panicValueHandlers) App() Handler { return &recHandler{name: "app", log: t.log} }
+func (t *panicValueHandlers) AppRun() Handler {
 	return &panicRunHandler{recHandler{name: "run", log: t.log}, t.val}
 }
 
@@ -269,23 +262,21 @@ type panicRunHandler struct {
 
 func (h *panicRunHandler) Run(context.Context, *Context) { panic(h.val) }
 
-// A recovered panic reaches the funnel as a *PanicError in its panics slice: the
-// recovery-point stack rides along, Error() stays the panicked value alone (the
-// default funnel's one-line output is pinned by the unwind test above), and a
-// panicked error value keeps its sentinels and category tags through Unwrap.
+// A recovered panic reaches the reporter as a *PanicError carrying the stack; Error() is the
+// panic value alone, and a panicked error keeps its sentinels and category through Unwrap.
 func TestPanicError(t *testing.T) {
-	// capture runs argv against handlers and returns the *PanicError the funnel was handed.
+	// capture runs argv against handlers and returns the *PanicError the reporter was handed.
 	capture := func(t *testing.T, h any) error {
 		t.Helper()
 		var got error
 		p, _, _ := newTestProgram(h, []string{"run"})
-		p.WithFunnel(func(_ context.Context, rtx *Context, out Outcome) {
+		p.WithReporter(func(_ context.Context, rtx *Context, out Outcome) {
 			panics := out.Panics
 			got = panics[0]
 			rtx.Exit(1)
 		})
 		if code, _ := p.Run(p.args); code != 1 {
-			t.Fatalf("run() = %d, want the funnel's exit 1", code)
+			t.Fatalf("run() = %d, want the reporter's exit 1", code)
 		}
 		return got
 	}
@@ -295,7 +286,7 @@ func TestPanicError(t *testing.T) {
 		got := capture(t, &haltHandlers{log: &log})
 		var pe *PanicError
 		if !errors.As(got, &pe) {
-			t.Fatalf("funneled %T, want a *PanicError", got)
+			t.Fatalf("reported %T, want a *PanicError", got)
 		}
 		if pe.Error() != "setup failed" {
 			t.Errorf("Error() = %q, want the panicked message verbatim", pe.Error())
@@ -321,14 +312,12 @@ func TestPanicError(t *testing.T) {
 		got := capture(t, &panicValueHandlers{log: &log, val: 42})
 		var pe *PanicError
 		if !errors.As(got, &pe) {
-			t.Fatalf("funneled %T, want a *PanicError", got)
+			t.Fatalf("reported %T, want a *PanicError", got)
 		}
 		if pe.Error() != "42" {
 			t.Errorf("Error() = %q, want \"42\"", pe.Error())
 		}
-		// A panic value that is not an error used to unwrap to nothing, which left a CRASH
-		// reporting CategoryNone — below usage in the severity ordering a funnel compares on.
-		// ErrInternal is the floor: a recovered panic is the author's bug whatever was thrown.
+		// A non-error panic value still unwraps to ErrInternal.
 		if !errors.Is(got, ErrInternal) {
 			t.Error("a panicked non-error value does not reach ErrInternal")
 		}
@@ -353,8 +342,8 @@ func (h exHook) CascadingPostRun(context.Context, *Context) {
 	fmt.Println(h.name + ".CascadingPostRun")
 }
 
-func (exHandlers) App() Handlers       { return exHook{name: "app"} }
-func (exHandlers) AppStatus() Handlers { return exHook{name: "status"} }
+func (exHandlers) App() Handler       { return exHook{name: "app"} }
+func (exHandlers) AppStatus() Handler { return exHook{name: "status"} }
 
 // exampleDef is a root with one "status" sub-command.
 func exampleDef() Definition {
@@ -364,10 +353,9 @@ func exampleDef() Definition {
 	}
 }
 
-// A resolver that teaches the program a routing alias: "st" rewrites to
-// "status" and delegates to [DefaultResolver], so routing and (later) parsing
-// agree on the rewritten argv. Declare real aliases in the spec when you also
-// want completion; a resolver alias is routing-only.
+// A resolver that adds a routing alias: "st" rewrites to "status" and delegates to
+// [DefaultResolver], so routing and parsing agree on the rewritten argv. A resolver alias is
+// not completed; declare aliases in the spec for that.
 func ExampleProgram_WithResolver() {
 	NewProgram(exampleDef(), exHandlers{}).
 		WithArgs([]string{"st"}).
@@ -389,15 +377,13 @@ func ExampleProgram_WithResolver() {
 	// app.CascadingPostRun
 }
 
-// A lifecycle that reverses teardown order: wrapping [DefaultLifecycle] and
-// swapping the cascading pairs makes CascadingPostRun unwind root→leaf. Only
-// the plan changes — halting, balanced unwind, and the panic funnel stay
-// rotini's.
+// A lifecycle that wraps [DefaultLifecycle] and swaps the cascading pairs, so
+// CascadingPostRun unwinds root→leaf. Halting, unwind and panic handling are unchanged.
 func ExampleProgram_WithLifecycle() {
 	NewProgram(exampleDef(), exHandlers{}).
 		WithArgs([]string{"status"}).
 		WithExit(func(int) {}).
-		WithLifecycle(func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
+		WithLifecycle(func(chain []Command, hs []Handler) []LifecycleStep {
 			steps := DefaultLifecycle(chain, hs)
 			for i, j := 0, len(hs)-1; i < j; i, j = i+1, j-1 {
 				steps[i].Undo, steps[j].Undo = steps[j].Undo, steps[i].Undo
@@ -415,19 +401,15 @@ func ExampleProgram_WithLifecycle() {
 	// status.CascadingPostRun
 }
 
-// TestAtFrame_customLifecycleFallsBackToTheLeaf is where the risk of this change is concentrated.
-//
-// A custom Lifecycle that wraps DefaultLifecycle inherits frame labelling. One that builds steps
-// from scratch does not label them, and an unlabeled hook must report the LEAF — the behaviour
-// the whole API had before frames existed — rather than the root, which would silently change
-// what every existing custom lifecycle collects.
-func TestAtFrame_customLifecycleFallsBackToTheLeaf(t *testing.T) {
+// TestAsCommand_customLifecycleFallsBackToTheLeaf: a hand-built plan without AsCommand reports
+// the invoked command in every hook; with AsCommand, the hook's own command.
+func TestAsCommand_customLifecycleFallsBackToTheLeaf(t *testing.T) {
 	var unlabeled, labeled string
 
-	// Steps built by hand, with no AtFrame: the root's cascading hook must see the leaf.
-	bare := func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
+	// Steps built by hand, with no AsCommand: the root's cascading hook must see the leaf.
+	bare := func(chain []Command, hs []Handler) []LifecycleStep {
 		return []LifecycleStep{
-			{Name: "bare", Do: func(_ context.Context, rtx *Context) { unlabeled = rtx.Frame().Name }},
+			{Name: "bare", Do: func(_ context.Context, rtx *Context) { unlabeled = rtx.Command().Name }},
 		}
 	}
 	p := NewProgram(fDef(), fProg{}).WithLifecycle(bare).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -435,13 +417,13 @@ func TestAtFrame_customLifecycleFallsBackToTheLeaf(t *testing.T) {
 		t.Fatal(err)
 	}
 	if unlabeled != "leaf" {
-		t.Errorf("an unlabeled step saw Frame() = %q, want the leaf %q", unlabeled, "leaf")
+		t.Errorf("an unlabeled step saw Command() = %q, want the leaf %q", unlabeled, "leaf")
 	}
 
-	// The same plan with AtFrame applied opts in explicitly.
-	opted := func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
+	// The same plan with AsCommand applied opts in explicitly.
+	opted := func(chain []Command, hs []Handler) []LifecycleStep {
 		return []LifecycleStep{
-			{Name: "opted", Do: AtFrame(0, func(_ context.Context, rtx *Context) { labeled = rtx.Frame().Name })},
+			{Name: "opted", Do: AsCommand(0, func(_ context.Context, rtx *Context) { labeled = rtx.Command().Name })},
 		}
 	}
 	p2 := NewProgram(fDef(), fProg{}).WithLifecycle(opted).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -449,18 +431,18 @@ func TestAtFrame_customLifecycleFallsBackToTheLeaf(t *testing.T) {
 		t.Fatal(err)
 	}
 	if labeled != "root" {
-		t.Errorf("AtFrame(0) saw Frame() = %q, want %q", labeled, "root")
+		t.Errorf("AsCommand(0) saw Command() = %q, want %q", labeled, "root")
 	}
 }
 
-// TestAtFrame_restoresThePreviousFrame: a hook that drives another hook must not leave the
-// Context describing the wrong command.
-func TestAtFrame_restoresThePreviousFrame(t *testing.T) {
+// TestAsCommand_restoresThePreviousFrame: a nested AsCommand restores the outer command on
+// return.
+func TestAsCommand_restoresThePreviousFrame(t *testing.T) {
 	var outer, inner, after string
 	runF(t, []string{"mid", "leaf"}, func(rtx *Context) {
-		outer = rtx.Frame().Name
-		AtFrame(0, func(_ context.Context, r *Context) { inner = r.Frame().Name })(context.Background(), rtx)
-		after = rtx.Frame().Name
+		outer = rtx.Command().Name
+		AsCommand(0, func(_ context.Context, r *Context) { inner = r.Command().Name })(context.Background(), rtx)
+		after = rtx.Command().Name
 	}, nil)
 
 	if outer != "mid" || inner != "root" || after != "mid" {
@@ -468,13 +450,11 @@ func TestAtFrame_restoresThePreviousFrame(t *testing.T) {
 	}
 }
 
-// TestLifecycle_nilDoIsATeardownOnlyStep: nil Undo was documented and safe; nil Do was a nil
-// dereference reported as "invalid memory address", which is an opaque diagnostic for a plain
-// wiring mistake — and it ruled out a legitimate shape, a teardown that pairs with no setup.
+// TestLifecycle_nilDoIsATeardownOnlyStep: a step with a nil Do still runs its Undo.
 func TestLifecycle_nilDoIsATeardownOnlyStep(t *testing.T) {
 	var order []string
 	p := NewProgram(testDef(), seamProgram{ran: new([]string)}).
-		WithLifecycle(func(chain []ResolvedCommand, hs []Handlers) []LifecycleStep {
+		WithLifecycle(func(chain []Command, hs []Handler) []LifecycleStep {
 			return []LifecycleStep{
 				{Name: "teardown-only", Undo: func(context.Context, *Context) {
 					order = append(order, "undo")
@@ -494,11 +474,11 @@ func TestLifecycle_nilDoIsATeardownOnlyStep(t *testing.T) {
 	}
 }
 
-// TestLifecycle_emptyPlanIsACleanNoOp.
+// TestLifecycle_emptyPlanIsACleanNoOp: a plan with no steps runs nothing and exits 0.
 func TestLifecycle_emptyPlanIsACleanNoOp(t *testing.T) {
 	var ran []string
 	p := NewProgram(testDef(), seamProgram{ran: &ran}).
-		WithLifecycle(func([]ResolvedCommand, []Handlers) []LifecycleStep { return nil }).
+		WithLifecycle(func([]Command, []Handler) []LifecycleStep { return nil }).
 		WithStdout(io.Discard).WithStderr(io.Discard)
 
 	if code, err := p.Run([]string{"run", "x"}); code != 0 || err != nil {

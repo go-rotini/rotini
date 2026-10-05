@@ -49,7 +49,7 @@ The generator prunes handler files in the cmd package that no longer correspond 
 in the spec. That is how renaming or deleting a command cleans up after itself.
 
 **Only files rotini wrote are candidates.** A generated handler file carries a marker —
-`var _ rotini.Handlers = (*xHandlers)(nil)` — and that marker is what makes it prunable. It
+`var _ rotini.Handler = (*xHandlers)(nil)` — and that marker is what makes it prunable. It
 survives your edits, so an edited handler file is still pruned when its command goes. A helper
 you put beside your handlers is never touched, whatever it is named. To keep a handler file
 whose command is gone, delete its marker line or list it under `keep:`. Every prune is
@@ -100,36 +100,6 @@ sequence:
 Raising `version:` in your spec and conf is the last step, not the first: it declares the
 minimum rotini your documents need, so raise it once you actually use something new.
 
-## Pre-v1 API changes
-
-Before v1.0 the surface was still being shaped, and a rename landed as a rename rather than as
-a deprecation cycle. Each one is mechanical; the compiler finds every call site.
-
-| Was | Is | Why |
-|---|---|---|
-| `Parser.Deprecations(rtx)` | `rotini.Deprecations(rtx)` | it never used its receiver, so it forced a `*Parser` out of the registry — which in turn made `Bind(KeyParser, …)` look mandatory in every entrypoint. The seeded `main.go` no longer binds a parser; bind one only to override the default or to call `Parser.Parse` yourself |
-| `Program.WithPanicForward(bool)` | `Program.WithTeardownOnPanic(bool)` | it names whether **teardown** runs, not where the panic goes. "Forward" read as forwarding the panic onward, which is what `WithPanicRecover(false)` actually does — a name that had to be unlearned from its own doc, on an option people reach for mid-crash |
-| `Context.RecordErr(err)` | `Context.RecordError(err)` | it matches its siblings `RecordWarning`, `RecordInfo` and `RecordSuccess` |
-| the per-outcome setters `WithOnSuccessFn` · `WithOnWarningFn` · `WithOnErrorFn` · `WithOnPanicFn` | one `Program.WithFunnel(FunnelFunc)`, which receives every outcome in one `Outcome` | one function owns the whole report and the exit code, so the order and the exit policy live in one place |
-| the six `Key*` constants — `KeyVersion` `KeyParser` `KeyBinder` `KeyBindMeta` `KeyStyler` `KeySuggestor` | `Program.WithVersion` · `WithParser` · `WithBinder` · `WithBindMeta`, read back with `Context.Version()` · `Parser()`. The styler is gone; a `Suggestor` is a plain value from `rotini.NewSuggestor()` that a program uses in its own funnel | rotini's internals shared one flat, unreserved string namespace with your own services, and every read discarded its comma-ok — so a colliding name or a wrong type silently produced a zero value. Binding a `Binder` built from an empty `BindMeta`, the obvious way to write it, switched the configuration-file channel off without a word. The registry is now yours alone |
-
-`WithBinder` takes `func(BindMeta) *Binder` rather than a `*Binder`: an override **receives**
-the generated descriptor instead of having to reproduce it, which makes the silent-drop
-mistake unwritable.
-
-A **composed `mod://` child must be regenerated too** — its generated `NewProgram` calls
-`WithBindMeta` now. Regenerate the published module and bump the `$ref`.
-
-Also **added**, so nothing breaks: `rotini.Provide(key, value)` returning a `rotini.Option`,
-and `Program.With(opts ...Option)`, which let several type-checked binds sit in one chain.
-`Key.Provide` is unchanged and still the better call for a single service.
-
-A **new wiring fault**: a command with `config:` inputs bound by a program that never called
-`WithBindMeta` is now reported instead of silently filling every configuration value with its
-zero. Supplying an *empty* `BindMeta` stays legal — "this program has no configuration
-sources" is a choice, and telling it apart from "nobody wired the descriptor" is only possible
-now that the descriptor is a typed option rather than a registry entry.
-
 ## Upgrading a composed tree
 
 A spec that composes others (`$ref`) has more than one document to keep in step:
@@ -139,7 +109,7 @@ A spec that composes others (`$ref`) has more than one document to keep in step:
 - **`mod://` `$ref`** — the child comes from the module cache, pinned by `go.sum`. Upgrading
   rotini does not move it. Bump the child module separately, then regenerate; its own
   `version:` guard fires if it needs a newer rotini than you have.
-- **`remote_commands` / `remote_discovery`** — sibling binaries are dispatched at run time, not
+- **`plugins` / `plugin_discovery`** — plugin binaries are dispatched at run time, not
   composed. Nothing to regenerate; rebuild each binary on its own schedule.
 
 ## Downgrading

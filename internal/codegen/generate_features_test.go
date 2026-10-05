@@ -10,12 +10,9 @@ import (
 	"testing"
 )
 
-// featureSpec is the feature-and-channel-rich counterpart to goldenSpec: where that one
-// is a byte-stability net over a minimal CLI, this one turns EVERY derived output on and
-// declares every input channel, so the help/man/markdown/completion renderers and the
-// schema/BindMeta emitters actually run. Kept functional (assert on what was emitted)
-// rather than byte-golden — a snapshot of four rendered doc formats would churn on any
-// wording change without catching more.
+// featureSpec declares every input channel and is generated with every feature on, so the doc
+// renderers and InputSettings emitters run. Tests assert on emitted content rather than golden
+// bytes.
 const featureSpec = `version: 0.0.0
 command:
   name: acme
@@ -112,8 +109,7 @@ command:
       hidden: true
 `
 
-// featureConfInline turns all four features on in INLINE mode (embed: false): content is
-// a string literal in the generated .go and no render files are written.
+// featureConfInline turns all four features on in inline mode (embed: false).
 const featureConfInline = `version: 0.0.0
 generate:
   packages:
@@ -134,9 +130,7 @@ generate:
       enabled: true
 `
 
-// featureConfEmbed turns the same features on in EMBED mode with editable templates
-// seeded, exercising the other two sourcing quadrants: rendered files under embed_dir
-// sourced via //go:embed, and the seeded *.tmpl the doc pages render from.
+// featureConfEmbed turns all four features on in embed mode with editable templates seeded.
 const featureConfEmbed = `version: 0.0.0
 generate:
   packages:
@@ -164,9 +158,8 @@ generate:
       template: true
 `
 
-// emitFeatureModule writes the feature-rich spec plus conf into a temp module wired to
-// THIS repo (the scaffold imports github.com/go-rotini/rotini), runs generate, and
-// returns the module dir with every emitted path (module-relative, slash-separated).
+// emitFeatureModule generates featureSpec with conf in a temp module wired to this repo and
+// returns the module dir and every emitted path (module-relative, slash-separated).
 func emitFeatureModule(t *testing.T, conf string) (dir string, files []string) {
 	t.Helper()
 	return emitModule(t, featureSpec, conf)
@@ -220,10 +213,9 @@ func readEmitted(t *testing.T, dir, rel string) string {
 	return string(b)
 }
 
-// TestGenerateFeatures_inline covers the default sourcing quadrant: every feature on,
-// content inlined as string literals, no files written beside the .go. It also pins the
-// RENDERED help contents, which is where most of the doc pipeline (headings, grouping,
-// usage derivation, flag rows, cascading flags, env/config sections) actually runs.
+// TestGenerateFeatures_inline pins inline mode (content as string literals, no render files)
+// and the rendered help contents: headings, grouping, usage, flag rows, cascading flags and
+// env/config sections.
 func TestGenerateFeatures_inline(t *testing.T) {
 	skipUnlessCompiling(t)
 	dir, files := emitFeatureModule(t, featureConfInline)
@@ -249,14 +241,10 @@ func TestGenerateFeatures_inline(t *testing.T) {
 		t.Error("inline mode emitted a //go:embed directive")
 	}
 
-	// The rendered root help: custom headings, the derived usage, declared inputs, and
-	// the doc-fields — the output of buildHelpData and everything it calls.
 	help := gen[strings.Index(gen, "HelpAcme "):]
 	for _, want := range []string{
-		// A heading override is rendered VERBATIM — the defaults carry the trailing
-		// ":" so an author can restyle or drop it (resolveHeadings). So the flags
-		// override appears bare, and only ungrouped commands use the commands
-		// heading at all: a grouped command renders under its group title.
+		// Heading overrides render verbatim, without the default's colon; a grouped
+		// command renders under its group title instead of the commands heading.
 		"Subcommands", // headings.commands override, for the ungrouped `status`
 		"core:",       // deploy's group title wins over the commands heading
 		"Options",     // headings.flags override
@@ -278,13 +266,11 @@ func TestGenerateFeatures_inline(t *testing.T) {
 	if strings.Contains(root, "hidden helper") {
 		t.Error("root help lists the hidden command")
 	}
-	// The override is verbatim: rotini adds no colon of its own, so the overridden
-	// heading must NOT gain the one the default carries.
 	if strings.Contains(root, "Options:") {
 		t.Error(`heading override rendered as "Options:" — an override is verbatim, the template adds nothing`)
 	}
 
-	// A hidden command still gets its handler stub — hidden is a HELP concern only.
+	// A hidden command still gets its handler stub; hidden affects docs only.
 	for _, want := range []string{"internal/cmd/acme/acme_deploy.go", "internal/cmd/acme/acme_secret.go"} {
 		if !slicesContains(files, want) {
 			t.Errorf("missing handler stub %s", want)
@@ -294,9 +280,8 @@ func TestGenerateFeatures_inline(t *testing.T) {
 	buildEmitted(t, dir)
 }
 
-// TestGenerateFeatures_embed covers the other two sourcing quadrants at once: rendered
-// output files under embed_dir sourced via //go:embed, and the editable *.tmpl seeded
-// into template_dir that the doc pages then render from.
+// TestGenerateFeatures_embed pins embed mode with seeded templates: page files under embed_dir
+// loaded via //go:embed, and editable *.tmpl files in template_dir.
 func TestGenerateFeatures_embed(t *testing.T) {
 	skipUnlessCompiling(t)
 	dir, files := emitFeatureModule(t, featureConfEmbed)
@@ -304,7 +289,8 @@ func TestGenerateFeatures_embed(t *testing.T) {
 	for _, want := range []string{
 		"internal/cmd/acme/renders/help_acme.txt",
 		"internal/cmd/acme/renders/help_acme_deploy.txt",
-		"internal/cmd/acme/renders/man_acme.txt",
+		"internal/cmd/acme/renders/acme.1",
+		"internal/cmd/acme/renders/acme-deploy.1",
 		"internal/cmd/acme/renders/markdown_acme.md",
 		"internal/cmd/acme/renders/completion_bash.txt",
 		"internal/cmd/acme/renders/completion_zsh.txt",
@@ -318,7 +304,6 @@ func TestGenerateFeatures_embed(t *testing.T) {
 			t.Errorf("embed mode did not write %s (emitted: %v)", want, files)
 		}
 	}
-	// completion has no editable template — seeding one would be a silent lie.
 	if slicesContains(files, "internal/cmd/acme/templates/completion.txt.tmpl") {
 		t.Error("seeded a completion template; completion has none")
 	}
@@ -327,7 +312,6 @@ func TestGenerateFeatures_embed(t *testing.T) {
 	if !strings.Contains(gen, "go:embed") {
 		t.Error("embed mode emitted no //go:embed directive")
 	}
-	// The completion script drives the binary's hidden protocol entry.
 	if bash := readEmitted(t, dir, "internal/cmd/acme/renders/completion_bash.txt"); !strings.Contains(bash, "__complete") {
 		t.Error("bash completion script does not call the __complete entry")
 	}
@@ -335,9 +319,7 @@ func TestGenerateFeatures_embed(t *testing.T) {
 	buildEmitted(t, dir)
 }
 
-// buildEmitted compiles the generated module. Rendering valid-looking text is not
-// enough: the feature vars, //go:embed directives and resolvers must be valid Go that
-// references files actually written.
+// buildEmitted runs `go mod tidy` and `go build ./...` in the generated module.
 func buildEmitted(t *testing.T, dir string) {
 	t.Helper()
 	if testing.Short() {
@@ -356,19 +338,14 @@ func slicesContains(list []string, want string) bool {
 	return slices.Contains(list, want)
 }
 
-// readEmittedIfExists reads an emitted file, returning the error when it is absent —
-// for asserting that codegen did NOT write something.
+// readEmittedIfExists reads an emitted file, returning the read error when it is absent.
 func readEmittedIfExists(dir, rel string) (string, error) {
 	b, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
 	return string(b), err
 }
 
-// TestFlagGroups covers the `group:` key on a flag — the presentational bucketing that turns a
-// command with twenty flags from one undifferentiated wall into a page someone reads.
-//
-// The properties that matter are the ones a reader would notice: groups appear in
-// first-declared order, ungrouped flags keep the default heading, and a command that declares
-// no groups renders exactly what it rendered before the key existed.
+// TestFlagGroups pins flag `group:` bucketing: first-declared order, an untitled bucket for
+// ungrouped flags, one bucket when no groups are declared, and none for no flags.
 func TestFlagGroups(t *testing.T) {
 	rows := []templateDocFlagRow{
 		{Identifiers: []string{"--verbose"}},
@@ -382,8 +359,6 @@ func TestFlagGroups(t *testing.T) {
 	if len(groups) != 3 {
 		t.Fatalf("got %d buckets, want 3 (ungrouped, TLS, Output)", len(groups))
 	}
-	// First-declared order, and the ungrouped bucket is titled "" so each template heads
-	// it with its own default.
 	want := []struct {
 		title string
 		flags []string
@@ -405,7 +380,6 @@ func TestFlagGroups(t *testing.T) {
 		}
 	}
 
-	// No groups declared → one bucket, in declaration order: identical to the old output.
 	plain := groupFlags([]templateDocFlagRow{
 		{Identifiers: []string{"--a"}}, {Identifiers: []string{"--b"}},
 	})
@@ -418,14 +392,8 @@ func TestFlagGroups(t *testing.T) {
 	}
 }
 
-// TestFeatureCombinations_compile: every subset of the four features has to produce a module
-// that COMPILES. The golden tests cover one combination, which is how a program with only the
-// completion feature on ended up importing "strings" and never using it — the generated file
-// did not build, and no test in the repo turned that feature on alone.
-//
-// The imports the generated file needs depend on WHICH features are on, not merely on whether
-// any are: help, man and markdown emit a path-keyed resolver that uses strings.Join, and
-// completion — keyed by shell — does not.
+// TestFeatureCombinations_compile pins that every subset of the four features generates a
+// module that compiles; the generated imports depend on which features are on.
 func TestFeatureCombinations_compile(t *testing.T) {
 	skipUnlessCompiling(t)
 	const spec = `version: 0.0.0
@@ -439,7 +407,7 @@ command:
 `
 	all := []string{"help", "completion", "man", "markdown"}
 
-	// Every non-empty subset, plus the empty one: 16 in total.
+	// All 16 subsets, including the empty one.
 	for mask := range 1 << len(all) {
 		var on []string
 		for i, name := range all {
@@ -487,19 +455,9 @@ generate:
 	}
 }
 
-// TestHelpPage_fallsBackToSummary pins the prose a command's own help page leads with.
-//
-// A command that declares only a `summary:` used to render a page with no prose at all — the
-// summary appeared in its PARENT's command list and nowhere on its own page, so `cli help sub`
-// answered every question about a command except what it does. man carries the summary in its
-// NAME line and markdown renders it outright, so help was the only one dropping it.
-//
-// Both directions matter: the fallback must not displace a real description.
-// TestDisplayName pins what display_name changes and what it leaves alone. A kubectl plugin is
-// the binary kubectl-acme, but the user types `kubectl acme`, and its pages should say so —
-// Cobra's CommandDisplayNameAnnotation, as a spec key. The pages it rewrites are the derived
-// ones; the file names, the completion script's target and anything written verbatim keep the
-// real name or the author's words.
+// TestDisplayName pins what display_name changes: derived pages show it (`kubectl acme` for the
+// binary kubectl-acme), while file names, the completion target and verbatim pages keep the
+// real name or the author's text.
 func TestDisplayName(t *testing.T) {
 	const spec = `version: 0.0.0
 command:
@@ -520,7 +478,9 @@ command:
 	for _, c := range []struct{ file, want string }{
 		{"help_kubectl-acme.txt", "  kubectl acme <command>"},
 		{"help_kubectl-acme_deploy.txt", "  kubectl acme deploy [target]"},
-		{"man_kubectl-acme_deploy.txt", "kubectl acme deploy - deploy a thing"},
+		{"kubectl-acme-deploy.1", `.TH "KUBECTL\-ACME\-DEPLOY" 1 "" "kubectl acme" "User Commands"`},
+		{"kubectl-acme-deploy.1", `kubectl\-acme\-deploy \- deploy a thing`},
+		{"kubectl-acme-deploy.1", `\fBkubectl acme deploy\fR [target]`},
 		{"markdown_kubectl-acme_deploy.md", "# kubectl acme deploy"},
 	} {
 		if page := read(c.file); !strings.Contains(page, c.want) {
@@ -540,6 +500,8 @@ command:
 	}
 }
 
+// TestHelpPage_fallsBackToSummary pins that a help page with no description leads with the
+// summary, and that a description, when present, is not displaced.
 func TestHelpPage_fallsBackToSummary(t *testing.T) {
 	t.Parallel()
 	tmpl, err := parseDocTemplate("help", templateHelp)
@@ -588,11 +550,9 @@ func TestHelpPage_fallsBackToSummary(t *testing.T) {
 	}
 }
 
-// TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames pins where a deprecation shows. With
-// deprecated_identifiers, the run warns only when one of THOSE spellings is used — so help used
-// to contradict it, marking the whole command `(deprecated: …)` and listing the deprecated alias
-// beside it as though it were current. The row now drops the deprecated names
-// and the marker; without the list, the message still deprecates the whole command or flag.
+// TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames pins that a help row omits names
+// listed in deprecated_identifiers and drops the marker, while a plain deprecation (or every
+// name deprecated) keeps the names and the marker.
 func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 	t.Parallel()
 	children := []rnode{
@@ -620,7 +580,7 @@ func TestHelpRows_deprecatedIdentifiersDeprecateOnlyThoseNames(t *testing.T) {
 	}{
 		{FlagInput{Name: "output", Identifiers: []string{"-o", "--output", "--format"}, DeprecatedIdentifiers: []string{"--format"}, Deprecated: "use --output"}, "-o,--output", ""},
 		{FlagInput{Name: "store", Identifiers: []string{"--store"}, Deprecated: "use a context"}, "--store", "use a context"},
-		// Every spelling deprecated is the whole flag deprecated: listed, and marked.
+		// Every spelling deprecated: listed and marked.
 		{FlagInput{Name: "x", Identifiers: []string{"--x"}, DeprecatedIdentifiers: []string{"--x"}, Deprecated: "gone soon"}, "--x", "gone soon"},
 	} {
 		row := flagRow(tt.f)

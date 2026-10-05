@@ -160,29 +160,29 @@ func TestObjectFlag_errors(t *testing.T) {
 // A flag's env and config fallbacks feed the same decoding: JSON in a variable, a nested block
 // or a list of mappings in a configuration file.
 func TestObjectFlag_fallbacks(t *testing.T) {
-	bind := func(t *testing.T, meta BindMeta) objInputs {
+	bind := func(t *testing.T, meta InputSettings) objInputs {
 		t.Helper()
 		var in objInputs
-		if err := NewBinder(meta).Bind(NewContextFor(objDef(), nil), &in); err != nil {
+		if err := NewInputReader(meta).Read(NewContextFor(objDef(), nil), &in); err != nil {
 			t.Fatalf("Bind: %v", err)
 		}
 		return in
 	}
 	t.Run("env JSON", func(t *testing.T) {
 		t.Setenv("DB", `{"host":"env","port":3}`)
-		if got := bind(t, BindMeta{}).App.Flags.DB; got.Host != "env" || got.Port != 3 {
+		if got := bind(t, InputSettings{}).App.Flags.DB; got.Host != "env" || got.Port != 3 {
 			t.Errorf("DB = %+v", got)
 		}
 	})
 	t.Run("env key=value", func(t *testing.T) {
 		t.Setenv("DB", "host=env,port=4")
-		if got := bind(t, BindMeta{}).App.Flags.DB; got.Host != "env" || got.Port != 4 {
+		if got := bind(t, InputSettings{}).App.Flags.DB; got.Host != "env" || got.Port != 4 {
 			t.Errorf("DB = %+v", got)
 		}
 	})
 	t.Run("config block and list", func(t *testing.T) {
 		cfg := writeConfig(t, "db:\n  host: cfg, with comma\n  port: 7\n  pool:\n    max: 2\nmount:\n  - src: a\n  - src: b\n    readonly: true\n")
-		in := bind(t, BindMeta{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
+		in := bind(t, InputSettings{ConfigFiles: []ConfigFile{{Name: "app", Path: cfg, Format: "yaml"}}})
 		if got := in.App.Flags.DB; got.Host != "cfg, with comma" || got.Port != 7 || got.Pool.Max != 2 {
 			t.Errorf("DB = %+v", got)
 		}
@@ -193,7 +193,7 @@ func TestObjectFlag_fallbacks(t *testing.T) {
 	t.Run("a bad env value names the variable", func(t *testing.T) {
 		t.Setenv("DB", "port=0")
 		var in objInputs
-		err := NewBinder(BindMeta{}).Bind(NewContextFor(objDef(), nil), &in)
+		err := NewInputReader(InputSettings{}).Read(NewContextFor(objDef(), nil), &in)
 		if err == nil || !strings.Contains(err.Error(), "environment variable DB") {
 			t.Errorf("err = %v", err)
 		}
@@ -239,9 +239,8 @@ func TestSplitPairs(t *testing.T) {
 	}
 }
 
-// TestInferScalar pins what a value means where the schema says nothing about it: exactly what
-// the JSON spelling of the same value means, and nothing looser. The same patch used to store
-// the number 5 when written as JSON and the text "5" when written as key=value.
+// TestInferScalar pins that an untyped key=value value means exactly what its JSON spelling
+// means, and nothing looser.
 func TestInferScalar(t *testing.T) {
 	for text, want := range map[string]any{
 		"true": true, "false": false, "null": nil,
@@ -256,8 +255,8 @@ func TestInferScalar(t *testing.T) {
 	}
 }
 
-// TestObjectFlag_freeFormValuesTypeLikeJSON proves one meaning per value across an object flag's
-// spellings: inside a free-form map, key=value and JSON agree.
+// TestObjectFlag_freeFormValuesTypeLikeJSON pins that key=value and JSON spellings type a
+// free-form map's values identically.
 func TestObjectFlag_freeFormValuesTypeLikeJSON(t *testing.T) {
 	type patch struct {
 		Spec map[string]any `json:"spec"`
@@ -275,9 +274,8 @@ func TestObjectFlag_freeFormValuesTypeLikeJSON(t *testing.T) {
 	}
 }
 
-// TestObjectFlag_uint8FieldFromPairs: every integer width takes key=value. uint8 alone fell
-// through to text — the signed branch listed int8, the unsigned one skipped uint8 — and the
-// value then failed to decode into the field.
+// TestObjectFlag_uint8FieldFromPairs pins that every integer width, uint8 included, takes a
+// key=value value.
 func TestObjectFlag_uint8FieldFromPairs(t *testing.T) {
 	type pool struct {
 		Level uint8 `json:"level"`

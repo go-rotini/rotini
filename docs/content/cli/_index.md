@@ -4,15 +4,28 @@ title: "cli"
 
 # CLI
 
-The `rotini` companion CLI is itself built with rotini: its spec lives at `cmd/rotini/.rotini.spec.yaml`, and everything below is its own generated help output.
+The `rotini` companion CLI sets up, generates and validates rotini programs. It is itself built
+with rotini: its spec lives at `cmd/rotini/.rotini.spec.yaml`, and each help page below is its
+own generated output.
 
-{{< code title="go get -tool" language="text" open="true" collapsible="false" copy="true" >}}
+Add it to your module as a tool, so everyone working on the project runs the same version:
+
+{{< code title="terminal" language="sh" open="true" collapsible="false" copy="true" >}}
 go get -tool github.com/go-rotini/rotini/cmd/rotini@latest
 {{< /code >}}
 
-Invoke it with `go tool rotini <command>`, or install it globally and call `rotini` directly.
+Then run it with `go tool rotini <command>`. To call `rotini` directly instead, install it with
+`go install github.com/go-rotini/rotini/cmd/rotini@latest`.
 
-A mistyped command, flag or value names the nearest one it accepts — `unknown command "genrate" for "rotini"; did you mean "generate"?`. That is the tool's own choice, made with rotini's `Suggestor`; a CLI built with rotini suggests nothing unless its author opts in the same way.
+A mistyped command, flag or value names the nearest one the tool accepts:
+
+{{< code title="terminal" language="text" open="true" collapsible="false" copy="false" >}}
+$ go tool rotini genrate
+Error: unknown command "genrate" for "rotini"; did you mean "generate"?
+{{< /code >}}
+
+The companion CLI opts into these suggestions with rotini's `Suggestor`. A CLI you build with
+rotini suggests nothing unless you opt in the same way.
 
 ## rotini
 
@@ -31,6 +44,8 @@ Commands:
   validate, val       validate a spec and conf
   help                print help
   version             print version
+  completion          print a shell completion script
+  man                 print or install the man pages
 
 Flags:
   -v, --version    print version
@@ -46,19 +61,30 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini initialize
 
-Scaffolds a new CLI: writes the seed spec and conf under `cmd/<name>/`, then runs the same `generate` every later pass runs — producing the entrypoint, the framework file, copies of rotini's JSON Schemas for your editor, and three handler stubs — the root, `help` and `version` — already wired so the new CLI answers `--help` and `--version` on its first build. The `name` argument becomes the root command name and the expected binary name.
+Sets up a new CLI. It writes a starter spec and conf under `cmd/<name>/`, then runs the same
+`generate` every later run does. That writes the entrypoint (`main.go`), the generated code
+(`zz_rotini.go`), copies of rotini's JSON Schemas for your editor, and three handlers (the root,
+`help` and `version`) already wired so the new CLI answers `--help` and `--version` on its first
+build. The `name` argument becomes the root command's name and the expected binary name.
 
-The entrypoint is **create-once**: it carries your build metadata, so it is never overwritten. `--force` replaces an existing spec and conf with the seed, and nothing else: init never deletes a file. Handlers for commands the seed does not have stay until your next `generate`, which removes them and says so.
+`main.go` is created once and never overwritten, since it carries your build metadata. `--force`
+replaces an existing spec and conf with the starter ones and nothing else: `init` never deletes a
+file. Handlers for commands the starter spec does not have stay until your next `generate`, which
+removes them and says so.
 
-On success `init` reports the way `generate` and `validate` do: the spec and conf it wrote, then the time and how long it took.
+On success `init` reports the way `generate` and `validate` do: the spec and conf it wrote, then
+the time and how long it took. In a module that does not yet require the rotini package, it also
+warns, since the first build would fail without it:
 
 {{< code title="rotini init mycli — output" language="text" open="true" collapsible="false" copy="false" >}}
 spec: cmd/mycli/.rotini.spec.yaml
 conf: cmd/mycli/.rotini.conf.yaml
-[14:02:11] 21.4ms
+[14:02:11] 5.05ms
+Warning: go.mod does not require github.com/go-rotini/rotini yet; run `go get github.com/go-rotini/rotini` before building ./cmd/mycli
 {{< /code >}}
 
-The one thing it warns about is a `go.mod` that does not yet require the rotini runtime, since the first build would fail without it.
+A module that added the tool with `go get -tool` already requires the package, so this warning
+does not appear there.
 
 {{< code title="$ rotini help initialize" language="text" open="true" collapsible="false" copy="false" >}}
 Scaffold a new rotini cli — write the spec + conf, then run the first generate (entrypoint, wired handler stubs, codegen) so it is ready to build.
@@ -84,11 +110,19 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini generate
 
-Compiles a spec + conf into Go: the command tree as a `Definition` literal, the typed input structs, the table that maps each command to its handler, any enabled feature outputs, and one editable stub per new command. Generated files that no longer map to a command are pruned.
+Turns a spec and conf into Go code: the command tree, the typed inputs for each command, the table
+that maps each command to its handler, the outputs of any features the conf turns on (help, man
+pages and so on), and a handler file for each new command. A handler file whose command has left
+the spec is removed. See [generated code](/generated) for what each file holds and which ones
+are yours.
 
-With no arguments, `generate` reads the `.rotini.spec.*` in the working directory and the `.rotini.conf.*` beside the spec; with no conf there, the conf defaults apply. It prints the two paths it read first. A `--config` path that does not exist is an error. It runs the same checks as `validate` first and prints the same warnings.
+With no arguments, `generate` reads the `.rotini.spec.*` in the working directory and the
+`.rotini.conf.*` beside it; with no conf there, the conf defaults apply. It prints the two paths
+it read first. A `--config` path that does not exist is an error. It runs the same checks as
+`validate` first and prints the same warnings.
 
-`--watch` keeps running and regenerates on every change to the spec or conf — leave it open in a terminal while you edit.
+`--watch` keeps running and regenerates whenever the spec or conf changes. Leave it open in a
+terminal while you edit.
 
 {{< code title="$ rotini help generate" language="text" open="true" collapsible="false" copy="false" >}}
 Generate a cli program from a rotini spec file and its conf.
@@ -113,9 +147,13 @@ Use "rotini help <command>" for more information about a command.
 
 ## rotini validate
 
-Checks a spec + conf without generating anything — the right thing to run in CI and in a pre-commit hook. It applies the JSON Schema *and* rotini's 43 spec lint rules (plus 8 for the conf), reporting each problem with a `file:line:col`.
+Checks a spec and conf without generating anything, which makes it the command to run in CI and
+in a pre-commit hook. It applies the JSON Schemas and rotini's lint rules to both files and
+reports each problem with a `file:line:col`.
 
-It finds the spec and conf the same way `generate` does. `--fail fast` stops at the first problem; `collect` reports every problem at once, and is the default unless the conf's `validate.fail` says otherwise. `--watch` re-validates on every change to the spec or conf.
+It finds the spec and conf the same way `generate` does. `--fail fast` stops at the first
+problem; `--fail collect` reports every problem at once, and is the default unless the conf's
+`validate.fail` says otherwise. `--watch` validates again whenever the spec or conf changes.
 
 {{< code title="$ rotini help validate" language="text" open="true" collapsible="false" copy="false" >}}
 Validate a rotini spec file and its conf for correctness.
@@ -163,11 +201,81 @@ Examples:
 Use "rotini help <command>" for more information about a command.
 {{< /code >}}
 
+## rotini completion
+
+Prints the shell completion script for bash, zsh, fish or PowerShell. It is the companion's own
+generated `Completion(shell)`: the same function any rotini CLI gets with the `completion`
+feature on.
+
+{{< code title="$ rotini help completion" language="text" open="true" collapsible="false" copy="false" >}}
+Print the completion script for a shell. Load it once per session, or install it so
+every new shell has it:
+
+  bash        source <(rotini completion bash)
+              or save it to ~/.local/share/bash-completion/completions/rotini
+  zsh         rotini completion zsh > "${fpath[1]}/_rotini"
+              then start a new shell (compinit must be enabled)
+  fish        rotini completion fish > ~/.config/fish/completions/rotini.fish
+  powershell  rotini completion powershell | Out-String | Invoke-Expression
+              add that line to $PROFILE to load it in every session
+
+Usage:
+  rotini completion <shell> [flags]
+
+Arguments:
+  <shell>    the shell to print the script for [bash|zsh|fish|powershell]
+
+Flags:
+  -h, --help    print help
+
+Examples:
+  rotini completion bash
+  rotini completion zsh > "${fpath[1]}/_rotini"
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
+## rotini man
+
+Prints a command's man page, or with `--dir` writes every page into a directory, named
+`rotini.1`, `rotini-generate.1` and so on. It is built on the companion's own generated `Man`,
+`ManPages()` and `ManSection`, the functions any rotini CLI gets with the `man` feature on, so
+its `--dir` is a working example of shipping every page of your own CLI.
+
+{{< code title="$ rotini help man" language="text" open="true" collapsible="false" copy="false" >}}
+Print a command's man page as roff, the markup the man program reads, or write every
+page into a directory with --dir. With no command, it prints the page for rotini itself.
+
+The pages are named after the command path, rotini-generate.1, so a directory written
+with --dir can be added to MANPATH or copied into a man1 directory.
+
+Usage:
+  rotini man [command...] [flags]
+
+Arguments:
+  [command...]    the command whose page to print (default rotini itself)
+
+Flags:
+  --dir string    write every page into this directory instead of printing one
+  -h, --help      print help
+
+Examples:
+  rotini man generate > rotini-generate.1
+  rotini man --dir ~/.local/share/man/man1
+
+Use "rotini help <command>" for more information about a command.
+{{< /code >}}
+
 ## rotini version
 
-Prints the tool version. This is the version compared against the `version:` key in your spec and conf, so generated code never diverges quietly from the definition it came from.
+Prints the tool's version. `generate` and `validate` compare it with the `version:` key in your
+spec and conf.
 
-The comparison is a **minimum**, not an equality: your documents declare the feature set they were written against, and any rotini of the same major at or beyond it accepts them. Taking a patch or minor release never requires editing a spec. Two cases are errors — a rotini *older* than your documents, which may not know the keys they use, and a different major. See [COMPATIBILITY.md](https://github.com/go-rotini/rotini/blob/main/COMPATIBILITY.md).
+That key is a minimum, not an exact match: it names the rotini your files were written for, and
+any rotini of the same major version at or beyond it accepts them, so a patch or minor upgrade
+never requires editing your spec. Two cases are errors: a rotini older than your files, which may
+not know keys they use, and a different major version. See
+[COMPATIBILITY.md](https://github.com/go-rotini/rotini/blob/main/COMPATIBILITY.md).
 
 {{< alert type="info" title="WHERE THE VERSION COMES FROM:" >}}
 When rotini is installed through the module graph — `go get -tool`, then `go tool rotini` — the version is the one in your `go.mod`, read from the binary's build info. That is what makes the tool version and your `require` line the same fact. A build from source may stamp one in with `-ldflags "-X main.version=…"`, which applies only when build info carries no release version (a development build, or a pseudo-version); a real module version always wins.

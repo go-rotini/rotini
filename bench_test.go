@@ -6,26 +6,24 @@ import (
 	"testing"
 )
 
-// Benchmarks for the paths a CLI runs on every invocation, or runs many times within
-// one invocation. `make test-bench` reports them; they exist so a change that makes
-// one of these materially worse is visible rather than discovered later.
+// Benchmarks for the paths a CLI runs on every invocation, or many times within one.
+// `make test-bench` reports them.
 
-// Strip runs over every generated man, markdown and completion page at build time, and over
-// any text a program routes through it at run time. Text that was never styled must cost
-// nothing at all.
-func BenchmarkStrip_unstyled(b *testing.B) {
+// StripANSI runs over every generated man, markdown and completion page; unstyled text should
+// cost nothing.
+func BenchmarkStripANSI_unstyled(b *testing.B) {
 	const s = "nothing to strip in this string at all"
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = Strip(s)
+		_ = StripANSI(s)
 	}
 }
 
-func BenchmarkStrip_styled(b *testing.B) {
+func BenchmarkStripANSI_styled(b *testing.B) {
 	const s = "\x1b[1msome\x1b[0m \x1b[38;5;203mstyled\x1b[0m text here"
 	b.ReportAllocs()
 	for b.Loop() {
-		_ = Strip(s)
+		_ = StripANSI(s)
 	}
 }
 
@@ -43,8 +41,7 @@ func BenchmarkProgram_dispatch(b *testing.B) {
 	}
 }
 
-// Argv parsing is the other per-invocation cost, and the one that grows with the
-// number of declared inputs.
+// Argv parsing is the other per-invocation cost; it grows with the number of declared inputs.
 func BenchmarkParser_parse(b *testing.B) {
 	h := &testHandlers{log: new([]string)}
 	p := NewProgram(testDef(), h).WithStdout(io.Discard).WithStderr(io.Discard)
@@ -77,7 +74,7 @@ func BenchmarkParser_parse(b *testing.B) {
 	}
 }
 
-func mustResolve(b *testing.B, def Definition, argv []string) []ResolvedCommand {
+func mustResolve(b *testing.B, def Definition, argv []string) []Command {
 	b.Helper()
 	res, err := DefaultResolver(def, argv)
 	if err != nil {
@@ -86,10 +83,8 @@ func mustResolve(b *testing.B, def Definition, argv []string) []ResolvedCommand 
 	return res.Chain
 }
 
-// Run vs RunContext isolates the cost of rotini's signal trap: Run with no supplied
-// context installs (and tears down) a signal handler and its goroutine per call,
-// which is right for Execute — once per process — and pure overhead for a host that
-// dispatches in a loop. RunContext supplies a context, so no trap is installed.
+// Run vs RunContext isolates the cost of the signal trap: Run with no supplied context
+// installs and removes a signal handler and its goroutine per call; RunContext installs none.
 func BenchmarkProgram_runVariants(b *testing.B) {
 	h := &testHandlers{log: new([]string)}
 	p := NewProgram(testDef(), h).WithStdout(io.Discard).WithStderr(io.Discard)

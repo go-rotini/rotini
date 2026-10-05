@@ -15,7 +15,7 @@
          .Invocation     full command path, e.g. "rotini generate"
          .Usage          spec declarative (may be empty)
          .UsageDerived   spec computed (always set)
-         .Headings.{Usage,Commands,Arguments,Flags,Environment,Configuration,Cascading,Examples}
+         .Headings.{Usage,Commands,Arguments,Flags,Environment,Configuration,Cascading,Output,Examples}
                        resolved heading text, colon included (override is verbatim)
          .CommandGroups[] {.Title .Commands[]} — Title "" = default heading
          .Arguments[]     {.Name .Summary .Required .Variadic .Default .Enum .Deprecated}
@@ -23,6 +23,8 @@
          .Environment[]   {.Var .Summary .Type .Required .Default .Enum .Deprecated}
          .Configuration[] {.Name .Location .Summary .Type .Required .Default .Enum .Deprecated}
          .Cascading[]     same shape as .Flags — cascading flags inherited from ancestors
+         .Output          {.Description .Type .Fields[]}, nil when
+                          the command declares no output; .Fields[] {.Name .Type .Description .Required}
          .Examples[]      strings
        HELPERS: join, upper, lower, title, trim, trimPrefix, trimSuffix, replace,
                 indent, repeat, default, contains, hasPrefix, hasSuffix, first, last.
@@ -65,6 +67,12 @@
 {{end -}}
 {{- with .Cascading}}{{$.Headings.Cascading}}
 {{range .}}  {{join .Identifiers ", "}}{{with .Type}} {{.}}{{end}}	{{.Summary}}{{if .Required}} (required){{end}}{{with .Default}} (default {{.}}){{end}}{{with .Implicit}} (implicit: {{.}}){{end}}{{with .Enum}} [{{join . "|"}}]{{end}}{{with .Deprecated}} (deprecated: {{.}}){{end}}
+{{end}}
+{{end -}}
+{{- with .Output}}{{$.Headings.Output}}
+{{with .Description}}  {{.}}
+{{end}}  {{.Type}}
+{{range .Fields}}    {{.Name}}{{with .Type}} {{.}}{{end}}	{{.Description}}{{if .Required}} (required){{end}}
 {{end}}
 {{end -}}
 {{- with .Examples}}{{$.Headings.Examples}}

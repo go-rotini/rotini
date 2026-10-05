@@ -1,0 +1,354 @@
+# R10 — structured output: a command declares what it writes, and rtx.WriteOutput writes it.
+#
+# it. json, yaml and toml are written by rotini, a human format by the handler's renderer.
+
+gomodinit example.com/taskr
+
+exec rotini generate cmd/taskr/.rotini.spec.yaml --config cmd/taskr/.rotini.conf.yaml
+exec go mod tidy
+exec go build -o taskr$exe ./cmd/taskr
+
+# json, the default: indented.
+exec ./taskr$exe list
+cmp stdout list.json
+
+# yaml and toml, by rotini; table, by the handler's renderer.
+exec ./taskr$exe list -o yaml
+stdout '^tasks:'
+stdout '- id: 1'
+exec ./taskr$exe list --output toml
+stdout '^\[\[tasks\]\]'
+exec ./taskr$exe list -o table
+cmp stdout list.table
+
+# A stream: one compact json value per line, or one yaml document per item.
+exec ./taskr$exe watch
+cmp stdout watch.json
+exec ./taskr$exe watch -o yaml
+stdout -count=2 '^---$'
+
+# Writing a value of the wrong type is the program's bug, and nothing is written.
+! exec ./taskr$exe wrong
+! stdout .
+stderr 'taskr wrong: the output written is a main.notAList|taskr wrong: the output written is a taskr.notAList'
+
+# A value off its contract is written as is, unless checks are on.
+exec ./taskr$exe bad
+stdout '"status": "doing"'
+env TASKR_CHECKS=1
+! exec ./taskr$exe bad
+! stdout .
+stderr 'taskr bad: output does not match its contract: output.tasks\[0\].status'
+env TASKR_CHECKS=
+
+# StructuredReporter: with a machine format, a failure is one JSON line on stderr and stdout
+# stays empty; with a human format, it is the default text.
+env TASKR_STRUCTURED=1
+! exec ./taskr$exe list -o json --bogus
+! stdout .
+stderr '^\{"error":\{"category":"usage","command":"taskr list","exit_code":2,"flag":"--bogus","kind":"unknown-flag","message":".*","token":"--bogus"\}\}$'
+! exec ./taskr$exe list -o table --bogus
+stderr '^Error: '
+env TASKR_STRUCTURED=
+
+# The per-output JSON Schemas and the contract document.
+exists schemas/output/taskr-list.output.json
+exists schemas/output/taskr-watch.output.json
+exists schemas/output/taskr-bad.output.json
+grep '"format": "rotini-contract/1"' cli-contract.json
+grep '"\$ref": "#/definitions/TaskList"' cli-contract.json
+! grep 'format_flag' cli-contract.json
+
+# The pages say what each command writes.
+exec ./taskr$exe list --help
+stdout 'Output:'
+stdout 'Every task, oldest first\.'
+stdout '^  TaskList$'
+! stdout 'chosen with'
+
+# DecodeOutput reads captured stdout back, checked against the contract.
+exec go test ./internal/cmd/taskr
+
+-- list.json --
+{
+  "tasks": [
+    {
+      "id": 1,
+      "status": "done",
+      "title": "write the spec"
+    },
+    {
+      "id": 2,
+      "status": "open",
+      "title": "ship it"
+    }
+  ]
+}
+-- list.table --
+ID  STATUS  TITLE
+1   done    write the spec
+2   open    ship it
+-- watch.json --
+{"id":1,"status":"done","title":"write the spec"}
+{"id":2,"status":"open","title":"ship it"}
+-- cmd/taskr/.rotini.spec.yaml --
+version: 0.0.0
+command:
+  name: taskr
+  summary: track tasks
+  flags:
+    - name: help
+      identifiers: [-h, --help]
+      cascading: true
+      schema: {type: bool}
+    - name: output
+      summary: how to write the result
+      identifiers: [-o, --output]
+      cascading: true
+      schema: {type: string, default: json, enum: [json, yaml, toml, table]}
+  schemas:
+    Task:
+      type: object
+      required: [id, title, status]
+      properties:
+        id: {type: integer, description: the task's number}
+        title: {type: string}
+        status: {type: string, enum: [open, done]}
+    TaskList:
+      type: object
+      description: Every task, oldest first.
+      required: [tasks]
+      properties:
+        tasks: {type: array, items: {$ref: "#/schemas/Task"}}
+  commands:
+    - name: list
+      summary: list the tasks
+      output: {$ref: "#/schemas/TaskList"}
+    - name: watch
+      summary: write each task as it is read
+      output: {$ref: "#/schemas/Task"}
+    - name: wrong
+      summary: write the wrong type
+      output: {$ref: "#/schemas/TaskList"}
+    - name: bad
+      summary: write a task list off its contract
+      output: {$ref: "#/schemas/TaskList"}
+-- cmd/taskr/.rotini.conf.yaml --
+version: 0.0.0
+generate:
+  schemas:
+    output:
+      dir: schemas/output
+  contract:
+    file: cli-contract.json
+  packages:
+    - type: main
+      file: cmd/taskr/main.go
+    - type: cmd
+      file: internal/cmd/taskr/zz_taskr.go
+      package: taskr
+  features:
+    - type: help
+      enabled: true
+-- internal/cmd/taskr/taskr.go --
+package taskr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type base struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
+type taskrHandler struct{ base }
+
+func (*taskrHandler) Run(ctx context.Context, rtx *rotini.Context) {}
+
+var tasks = []Task{
+	{ID: 1, Title: "write the spec", Status: "done"},
+	{ID: 2, Title: "ship it", Status: "open"},
+}
+
+// inputs collects a handler's own inputs.
+func inputs[T any](rtx *rotini.Context) (T, bool) {
+	in, err := rtx.Inputs[T]()
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.HaltWithCode(2)
+		return in, false
+	}
+	return in, true
+}
+
+func fail(rtx *rotini.Context, err error) {
+	if err != nil {
+		rtx.RecordError(err)
+		rtx.HaltWithCode(1)
+	}
+}
+-- internal/cmd/taskr/taskr_list.go --
+package taskr
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrListHandler struct{ base }
+
+func (*taskrListHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, ok := inputs[TaskrListInputs](rtx)
+	if !ok {
+		return
+	}
+	if in.Taskr.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		return
+	}
+	fail(rtx, rtx.WriteOutput(TaskrListOutput{Tasks: tasks}, in.Taskr.Flags.Output, renderTable))
+}
+
+func renderTable(w io.Writer, _ string, v TaskrListOutput) error {
+	fmt.Fprintf(w, "ID  STATUS  TITLE\n")
+	for _, t := range v.Tasks {
+		fmt.Fprintf(w, "%-3d %-7s %s\n", t.ID, t.Status, t.Title)
+	}
+	return nil
+}
+-- internal/cmd/taskr/taskr_watch.go --
+package taskr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrWatchHandler struct{ base }
+
+func (*taskrWatchHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, ok := inputs[TaskrWatchInputs](rtx)
+	if !ok {
+		return
+	}
+	for _, t := range tasks {
+		if err := rtx.WriteOutputItem(TaskrWatchOutput(t), in.Taskr.Flags.Output, nil); err != nil {
+			fail(rtx, err)
+			return
+		}
+	}
+}
+-- internal/cmd/taskr/taskr_wrong.go --
+package taskr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrWrongHandler struct{ base }
+
+type notAList struct{ N int }
+
+func (*taskrWrongHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	fail(rtx, rtx.WriteOutput(notAList{N: 1}, "json", nil))
+}
+-- internal/cmd/taskr/taskr_bad.go --
+package taskr
+
+import (
+	"context"
+
+	"github.com/go-rotini/rotini"
+)
+
+type taskrBadHandler struct{ base }
+
+func (*taskrBadHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	bad := TaskrBadOutput{Tasks: []Task{{ID: 3, Title: "argue", Status: "doing"}}}
+	fail(rtx, rtx.WriteOutput(bad, "", nil))
+}
+-- internal/cmd/taskr/output_test.go --
+package taskr
+
+import (
+	"bytes"
+	"testing"
+
+	"github.com/go-rotini/rotini"
+)
+
+func TestListOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	p := NewProgram(Handlers()).WithStdout(&stdout)
+	if code, err := p.Run([]string{"list", "-o", "yaml"}); code != 0 {
+		t.Fatalf("exit %d: %v", code, err)
+	}
+	list, err := rotini.DecodeOutput[TaskrListOutput](p, stdout.Bytes(), "yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Tasks) != 2 || list.Tasks[1].Title != "ship it" {
+		t.Fatalf("decoded %+v", list)
+	}
+	if _, err := rotini.DecodeOutput[TaskrListOutput](p, []byte(`{"tasks":[{"id":1}]}`), "json"); err == nil {
+		t.Fatal("an output off its contract decoded without complaint")
+	}
+}
+
+func TestWatchOutput(t *testing.T) {
+	var stdout bytes.Buffer
+	p := NewProgram(Handlers()).WithStdout(&stdout)
+	if code, err := p.Run([]string{"watch"}); code != 0 {
+		t.Fatalf("exit %d: %v", code, err)
+	}
+	items, err := rotini.DecodeOutput[[]TaskrWatchOutput](p, stdout.Bytes(), "json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("decoded %+v", items)
+	}
+}
+-- cmd/taskr/main.go --
+package main
+
+import (
+	"os"
+
+	"github.com/go-rotini/rotini"
+
+	taskr "example.com/taskr/internal/cmd/taskr"
+)
+
+func main() {
+	p := taskr.Program
+	if os.Getenv("TASKR_CHECKS") == "1" {
+		p = p.WithOutputChecks()
+	}
+	if os.Getenv("TASKR_STRUCTURED") == "1" {
+		p = p.WithReporter(rotini.StructuredReporter(wantsJSON))
+	}
+	p.Execute()
+}
+
+// wantsJSON is this program's own rule: the run is structured when -o json was typed. It reads
+// argv, since the run may have failed in parsing.
+func wantsJSON(rtx *rotini.Context) bool {
+	for i, a := range rtx.Argv {
+		if a == "--output=json" || ((a == "-o" || a == "--output") && i+1 < len(rtx.Argv) && rtx.Argv[i+1] == "json") {
+			return true
+		}
+	}
+	return false
+}

@@ -3,6 +3,7 @@ package rotini
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,7 +14,7 @@ import (
 )
 
 // parserTestDef mirrors a root "app" with a sub-command "run", matching the runInputs
-// scopes used by the binder tests.
+// scopes used by the input reader tests.
 func parserTestDef() Definition {
 	return Definition{
 		Name:    "app",
@@ -55,11 +56,8 @@ func TestParse_bindsInputs(t *testing.T) {
 	}
 }
 
-// TestParse_viaRegistryGet exercises the full handler flow: the parser is bound to
-// the registry, retrieved via rtx.Get (ctx.Value style), then used to parse.
-// The parser a handler reaches is the one the program supplied — and Context.Parser never
-// returns nil, so a handler that wants to parse argv itself does not have to ask whether one
-// exists, nor supply one to make the answer yes.
+// TestParse_viaContextParser pins that rtx.Parser returns the supplied parser and that it
+// parses; Context.Parser never returns nil.
 func TestParse_viaContextParser(t *testing.T) {
 	rtx := NewContextFor(parserTestDef(), []string{"run", "alice"})
 	supplied := NewParser()
@@ -121,10 +119,8 @@ func TestParse_flagNeedsValue(t *testing.T) {
 }
 
 func TestParse_unknownCommand(t *testing.T) {
-	// "ru" is a stray positional on a branch-only root: a mistyped sub-command.
-	// The error is data, not presentation: no baked-in suggestion text — the
-	// structured fields carry the token and the sibling vocabulary so a handler
-	// composes its own response (typically with a [Suggestor]).
+	// "ru" is a stray positional on a branch-only root: a mistyped sub-command. The error
+	// carries no suggestion text, only the token and the sibling vocabulary.
 	rtx := NewContextFor(parserTestDef(), []string{"ru"})
 	var in runInputs
 	err := NewParser().Parse(rtx, &in)
@@ -144,8 +140,6 @@ func TestParse_unknownCommand(t *testing.T) {
 	if !slices.Contains(pe.Candidates, "run") {
 		t.Errorf("ParseError.Candidates = %v, want to contain \"run\"", pe.Candidates)
 	}
-	// (The ParseError → Suggestor integration is exercised in the Suggestor tests; here we
-	// only pin that the parser populates Token/Candidates.)
 }
 
 func TestParse_missingRequired(t *testing.T) {
@@ -199,10 +193,9 @@ func TestParse_defaultsApplied(t *testing.T) {
 
 // FuzzParse drives the full argv grammar (descent, long/short/inline/cluster
 // flags, the -- terminator, negative numbers, repeats, typed coercion across
-// every vocabulary type) with arbitrary token streams. Errors are expected and
-// fine — a panic is the only failure. The fuzzed definitions deliberately
-// declare no from: modes, so the fuzzer cannot make the parser read arbitrary
-// files; the stdin reader is pinned.
+// every vocabulary type) with arbitrary token streams; only a panic fails. The
+// fuzzed definitions declare no from: modes, so the parser never reads arbitrary
+// files, and the stdin reader is pinned.
 func FuzzParse(f *testing.F) {
 	for _, seed := range []string{
 		"run alice x y --count 3",
@@ -260,17 +253,14 @@ func TestParse_numericConstraints(t *testing.T) {
 	}
 }
 
-// TestParse_constraintsWidenedTypes pins the R1 fix: bounds enforce across
-// The R2-S7 constraint set: presence-carrying bounds make minimum: 0 a real,
-// enforced bound (the F4 zero-sentinel rejection is reversed), and the
-// exclusive bounds + multipleOf land with it — per-element on repeatables,
-// like every numeric constraint.
+// TestParse_constraintsExclusiveAndZero pins that a zero bound is enforced and that exclusive
+// bounds and multipleOf apply, per element on repeatable inputs.
 func TestParse_constraintsExclusiveAndZero(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
 		Flags: []FlagDef{
 			{Name: "delta", Identifiers: []string{"--delta"}, Type: "int",
-				Minimum: Ptr(0.0)}, // the once-rejected zero bound
+				Minimum: Ptr(0.0)}, // a zero bound
 			{Name: "rate", Identifiers: []string{"--rate"}, Type: "float64",
 				ExclusiveMinimum: Ptr(0.0), ExclusiveMaximum: Ptr(1.0)},
 			{Name: "step", Identifiers: []string{"--step"}, Type: "int",
@@ -318,9 +308,8 @@ func TestParse_constraintsExclusiveAndZero(t *testing.T) {
 	}
 }
 
-// the full numeric family (the old allowlist was int|float64 only — uint,
-// int64, float32 bounds were silently ignored), and per-value constraints
-// apply to a repeatable input's ELEMENTS.
+// TestParse_constraintsWidenedTypes pins that bounds apply across the full numeric family and
+// that per-value constraints apply to each element of a repeatable input.
 func TestParse_constraintsWidenedTypes(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -437,11 +426,8 @@ func TestParse_variadicArgItemCount(t *testing.T) {
 	}
 }
 
-// TestParse_doubleDashTerminator pins FLAG-07 through Parser.Parse (resolveChain's
-// handling has its own test): everything after "--" is positional — even tokens
-// that look like flags — and bare "-" is an ordinary positional value anywhere
-// (its stdin-sentinel *meaning* belongs to the handler; the grammar just passes
-// it through).
+// TestParse_doubleDashTerminator pins that everything after "--" is positional, even
+// flag-shaped tokens, and that bare "-" is an ordinary positional value anywhere.
 func TestParse_doubleDashTerminator(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -711,46 +697,6 @@ func TestParser_deprecations(t *testing.T) {
 	}
 }
 
-// TestDeprecations_needsNoParserBound is the point of making Deprecations a function.
-//
-// It used to be a method, so a handler had to pull a *Parser out of the registry to get a
-// receiver it never used. That made `Bind(KeyParser, NewParser())` look mandatory in every
-// entrypoint — and a user who removed the line, reasonably, since nothing else read it,
-// SILENTLY lost deprecation reporting: the conventional `Get`+ok guard simply skipped the
-// loop. Nothing failed and nothing said so.
-//
-// The chain here is resolved with no services bound at all.
-func TestDeprecations_needsNoParserBound(t *testing.T) {
-	def := Definition{
-		Name: "app", Handler: "App",
-		Commands: []CommandDef{{
-			Name: "compile", Handler: "AppCompile",
-			Aliases:               []string{"build"},
-			DeprecatedIdentifiers: []string{"build"},
-		}},
-	}
-
-	rtx := NewContextFor(def, []string{"build"})
-	if len(rtx.services) != 0 {
-		t.Fatal("something is bound; this test is meaningless unless the registry is empty")
-	}
-
-	deps := Deprecations(rtx)
-	if len(deps) != 1 {
-		t.Fatalf("Deprecations = %v, want the one deprecated alias", deps)
-	}
-	if deps[0].Kind != "command" || deps[0].Identifier != "build" || deps[0].Name != "compile" {
-		t.Errorf("Deprecations = %+v, want command compile via \"build\"", deps[0])
-	}
-}
-
-// TestDeprecations_nilContext keeps the defensive path covered now that the receiver is gone.
-func TestDeprecations_nilContext(t *testing.T) {
-	if got := Deprecations(nil); got != nil {
-		t.Errorf("Deprecations(nil) = %v, want nil", got)
-	}
-}
-
 func TestParse_coercionErrors(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -882,9 +828,8 @@ func TestParse_flagDependencies(t *testing.T) {
 	}
 }
 
-// TestParse_clusteredShortFlags covers POSIX short-flag grouping in every shape:
-// joined booleans, separate flags, an attached value, a next-token value, and
-// mixes — they should all "just work".
+// TestParse_clusteredShortFlags covers POSIX short-flag grouping: joined booleans,
+// separate flags, an attached value, a next-token value, and mixes.
 func TestParse_clusteredShortFlags(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -933,10 +878,9 @@ func TestParse_clusteredShortFlags(t *testing.T) {
 	}
 }
 
-// TestParse_clusterValueContainingEquals pins pflag's reading of a short cluster whose tail
-// holds an "=": the attached text is the value, "=" and all. -lapp=web is kubectl's label
-// selector `app=web`; it once parsed as `app`, with "=web" dropped and no error. And an "=value"
-// right after the cluster's last flag is that flag's, a bool included.
+// TestParse_clusterValueContainingEquals pins that a short cluster's attached value keeps its
+// "=" (-lapp=web is `app=web`), and that an "=value" right after the cluster's last flag
+// belongs to that flag, a bool included.
 func TestParse_clusterValueContainingEquals(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -983,8 +927,8 @@ func TestParse_clusterValueContainingEquals(t *testing.T) {
 		}
 	}
 
-	// Still errors: a bool cluster's "=value" is the LAST flag's, so one aimed past a value
-	// flag or at a count is rejected, never silently dropped.
+	// A bool cluster's "=value" belongs to the last flag, so an invalid bool value or one
+	// aimed at a count is rejected.
 	for _, argv := range [][]string{{"-Aw=maybe"}, {"-Av=3"}} {
 		var got inputs
 		if err := NewParser().Parse(NewContextFor(def, argv), &got); err == nil {
@@ -1085,10 +1029,8 @@ func TestParse_multiCharShortVsCluster(t *testing.T) {
 	}
 }
 
-// TestParse_repeatedNameOnPath is the collision case: "app cmd1 cmd1" is a legal
-// tree where a command name repeats on a single path. Each cmd1 declares its own
-// flag; positional (not name-based) scoping must keep them in separate frames so
-// the middle command's flag and the leaf's never merge.
+// TestParse_repeatedNameOnPath pins that "app cmd1 cmd1", a command name repeated on one
+// path, keeps each cmd1's flags in its own frame (scoping is by position, not name).
 func TestParse_repeatedNameOnPath(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -1134,11 +1076,9 @@ func TestParse_repeatedNameOnPath(t *testing.T) {
 	}
 }
 
-// TestParse_sameLeafNameDifferentPaths covers the other shape from the original
-// question: a tree with BOTH "app cmd1 cmd1" and "app cmd2 cmd1" — two distinct
-// leaf commands that happen to share the name "cmd1". Each invocation must resolve
-// down its own branch and bind that branch's flags only; the other branch's leaf
-// flag must not be accepted.
+// TestParse_sameLeafNameDifferentPaths covers a tree with both "app cmd1 cmd1" and
+// "app cmd2 cmd1": each invocation resolves down its own branch and binds only that
+// branch's flags.
 func TestParse_sameLeafNameDifferentPaths(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -1226,10 +1166,9 @@ type appFlags struct {
 	Verbose bool `rotini:"verbose"`
 }
 
-// TestParse_rejectsTooManyPositionals pins command-level argument-count validation:
-// with no variadic argument to absorb them, extra positionals are a usage error rather
-// than silently dropped — both for a command that declares fewer args and for one that
-// declares none.
+// TestParse_rejectsTooManyPositionals pins that extra positionals with no variadic argument
+// to absorb them are a usage error, for a command declaring fewer arguments and one declaring
+// none.
 func TestParse_rejectsTooManyPositionals(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -1296,12 +1235,11 @@ type runInputs struct {
 	Run runCommandInputs
 }
 
-// bindStore runs the reflective binder over a hand-built parsed store, the same
-// way [Parse] does after parsing fills it. It isolates coercion/scoping from argv
-// parsing.
+// bindStore binds a hand-built parsed store as [Parser.Parse] does after parsing,
+// isolating coercion and scoping from argv parsing.
 func bindStore[T any](store *parsedInputs) T {
 	var out T
-	chain := make([]ResolvedCommand, len(store.scopes))
+	chain := make([]Command, len(store.scopes))
 	v := reflect.ValueOf(&out).Elem()
 	_ = bindInputs(v, store, chain, frameAnchor(v, chain, frameUnset))
 	return out
@@ -1353,8 +1291,8 @@ func TestInputs_bindsAllScopesAndTypes(t *testing.T) {
 }
 
 // Typed-slice shapes: array flags/arguments whose items: declares a non-string
-// element type (W4-S1) — generated as []int / []time.Duration / named-string
-// slices, each element coerced individually.
+// element type, generated as []int / []time.Duration / named-string slices, each
+// element coerced individually.
 type tsFlags struct {
 	Ports  []int           `rotini:"ports"`
 	Waits  []time.Duration `rotini:"waits"`
@@ -1416,20 +1354,16 @@ func TestParse_typedSlices(t *testing.T) {
 	}
 }
 
-// ── the type conformance matrix (W4-S4) ─────────────────────────────────────
+// ── the type conformance matrix ─────────────────────────────────────────────
 //
-// One regression wall for "spec types to Go types is solid": every type in the
-// spec vocabulary, exercised through argv text → coerce → generated field. The
-// spec-alias half (boolean→bool, array+items→[]T, …) is pinned by the internal
-// package's TestJSONSchemaTypeToGo/TestGetSchemaType_arrayItems; this is the
-// runtime half over the resulting FlagDef.Type + field. Channel boundaries:
-// argv accepts every type below; env/config are scalar-only (recon coerces
-// them — binder_test pins int/string/secret/constraints; repeatable
-// arrays/maps have no env/config form); stdin is a document decode, not a
-// per-value coercion (binder_test pins yaml/json + schema validation).
+// Every type in the spec vocabulary, exercised through argv text → coerce →
+// generated field. The spec-alias half (boolean→bool, array+items→[]T, …) is
+// pinned by the codegen package's TestJSONSchemaTypeToGo and
+// TestGetSchemaType_arrayItems. Env and config are scalar-only and stdin is a
+// document decode; input_reader_test.go covers those channels.
 
-// upperString is the matrix's custom TextUnmarshaler: parse = uppercase,
-// rejecting "bad" — proving the contract's parse+validate hook both ways.
+// upperString is the matrix's custom TextUnmarshaler: it uppercases its input and
+// rejects "bad".
 type upperString string
 
 func (u *upperString) UnmarshalText(text []byte) error {
@@ -1624,8 +1558,8 @@ func TestParse_fromFile(t *testing.T) {
 		t.Errorf("inline Token = %q, want the file's contents", in2.App.Flags.Token)
 	}
 
-	// An unreadable file is a usage error naming the flag and the path, in rotini's words —
-	// never a silent literal, and never the OS's own error text ("open …: permission denied").
+	// An unreadable file is a usage error naming the flag and the path in rotini's words,
+	// never the OS error text.
 	var in3 fromInputs
 	err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token", "@/nonexistent/nope"}), &in3)
 	if err == nil || err.Error() != `--token: no such file: "/nonexistent/nope"` {
@@ -1644,8 +1578,7 @@ func TestParse_fromFile(t *testing.T) {
 		}
 	}
 
-	// STDIN-04 conformance: a plain path (no '@') stays literal even on a
-	// from:-enabled flag — the handler opens it itself.
+	// A plain path (no '@') stays literal even on a from:-enabled flag.
 	var inPath fromInputs
 	if err := NewParser().Parse(NewContextFor(fromDef(), []string{"--token", tokenFile}), &inPath); err != nil {
 		t.Fatalf("Parse(plain path): %v", err)
@@ -1675,8 +1608,7 @@ func TestParse_fromStdin(t *testing.T) {
 		t.Errorf("Payload = %q, want the trimmed piped text", in.App.Flags.Payload)
 	}
 
-	// Giving "-" demands a pipe: empty stdin is a usage error (the required-
-	// stdin error path).
+	// Giving "-" demands a pipe: empty stdin is a usage error.
 	rtx2 := NewContextFor(fromDef(), []string{"-f", "-"})
 	rtx2.Stdin = strings.NewReader("")
 	var in2 fromInputs
@@ -1771,8 +1703,7 @@ func TestParse_dottedKeys(t *testing.T) {
 }
 
 func TestCoerce_unsupportedTypeIsLoud(t *testing.T) {
-	// A type coerce has no rule for must error (the TextUnmarshaler contract),
-	// never silently zero the field.
+	// A type coerce has no rule for errors rather than zeroing the field.
 	var s struct{ X struct{ A int } }
 	err := coerce(reflect.ValueOf(&s.X).Elem(), []string{"v"})
 	if err == nil || !strings.Contains(err.Error(), "encoding.TextUnmarshaler") {
@@ -1786,11 +1717,9 @@ func TestCoerce_unsupportedTypeIsLoud(t *testing.T) {
 	}
 }
 
-// A composed child's input type describes only its own root→leaf path, so it has
-// fewer fields than the full resolved chain when reached under a parent. Binding
-// is leaf-aligned: the struct's fields map to the trailing chain frames, and any
-// extra parent frame is left unbound. (This is also what makes repeated names on a
-// path — e.g. "app run run" — safe: position, not name, is the key.)
+// A composed child's input type has fewer fields than the full resolved chain under a
+// parent. Binding is leaf-aligned: the fields map to the trailing chain frames, and any
+// extra parent frame is left unbound.
 func TestInputs_bindsLeafAlignedUnderComposition(t *testing.T) {
 	in := bindStore[runInputs](&parsedInputs{scopes: []scopeInputs{
 		{flags: map[string][]string{"verbose": {"ignored"}}},              // parent frame (chain[0]) — unbound
@@ -1814,10 +1743,8 @@ func TestInputs_missingFlagKeepsZero(t *testing.T) {
 
 // ── ParseKind ───────────────────────────────────────────────────.
 
-// TestParseError_kindPerPath drives each parse/validate failure path and asserts
-// the *ParseError carries the right ParseKind — so a funnel can branch on Kind
-// instead of matching the message. Every kind still classifies as CategoryUsage
-// (even the API-misuse Internal kind is a usage-shaped *ParseError).
+// TestParseError_kindPerPath drives each user-input failure path and pins the
+// ParseKind it carries and that it classifies as CategoryUsage.
 func TestParseError_kindPerPath(t *testing.T) {
 	min1 := Ptr(1.0)
 	cases := []struct {
@@ -1901,7 +1828,6 @@ func TestParseError_kindPerPath(t *testing.T) {
 			if pe.Kind != tc.want {
 				t.Errorf("Kind = %s, want %s (msg: %q)", pe.Kind, tc.want, pe.Msg)
 			}
-			// Every parse failure is usage-categorized regardless of kind.
 			if CategoryOf(err) != CategoryUsage {
 				t.Errorf("CategoryOf = %v, want usage", CategoryOf(err))
 			}
@@ -1909,8 +1835,8 @@ func TestParseError_kindPerPath(t *testing.T) {
 	}
 }
 
-// TestParseError_internalKind: a parser API misuse (a non-pointer out) is the
-// Internal kind — still a usage-shaped *ParseError.
+// TestParseError_internalKind pins that a parser API misuse (a non-pointer out) is a
+// *ParseError of ParseKindInternal.
 func TestParseError_internalKind(t *testing.T) {
 	rtx := NewContextFor(Definition{Name: "app", Handler: "App"}, nil)
 	err := NewParser().Parse(rtx, 42) // not a pointer
@@ -1933,11 +1859,10 @@ func TestParseKind_String(t *testing.T) {
 	}
 }
 
-// ── usage rendering ─────────────────────────────────────────────.
+// ── categories ──────────────────────────────────────────────────.
 
-// A parse failure the end user caused carries the usage category, so a single CategoryOf call
-// in a funnel classifies it as theirs; a misuse of the parser API is the author's bug and
-// carries the internal one, as ParseKindInternal's own doc has always said.
+// TestParseError_category pins that a user-caused parse failure is CategoryUsage and a parser
+// API misuse is CategoryInternal.
 func TestParseError_category(t *testing.T) {
 	var in struct {
 		App struct {
@@ -1956,9 +1881,8 @@ func TestParseError_category(t *testing.T) {
 	}
 }
 
-// negatableDef is a command with one negatable bool flag defaulting to on, plus a genuinely
-// declared --no-cache on a DIFFERENT flag, so the precedence between a declared identifier
-// and a derived negated one is exercised rather than assumed.
+// negatableDef is a command with two negatable bool flags: --color (with -c), defaulting to
+// on, and --verify, defaulting to off.
 func negatableDef() Definition {
 	return Definition{
 		Name: "app", Handler: "App",
@@ -1979,9 +1903,8 @@ type negatableInputs struct {
 	}
 }
 
-// TestParse_negatableBool covers the direction a plain bool cannot express: turning something
-// off for one run when a default, a config file or an environment variable already turned it
-// on. Without it, an author can only ever say "on".
+// TestParse_negatableBool pins the --no-<flag> form: it sets false, last occurrence wins, it
+// takes no value, and short flags get no negated form.
 func TestParse_negatableBool(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -1999,9 +1922,8 @@ func TestParse_negatableBool(t *testing.T) {
 		{name: "negated then positive: last wins", argv: []string{"--no-color", "--color"}, color: true},
 		{name: "the short form has no negated spelling", argv: []string{"-c"}, color: true},
 		{
-			// Short flags have no negated spelling, so "-no-c" is read as a POSIX
-			// cluster (-n -o -c) and fails on the first unknown letter. The point is
-			// that rotini does not invent one, not which token the cluster blames.
+			// "-no-c" is read as a POSIX cluster (-n -o -c) and fails on the first
+			// unknown letter; which letter is blamed does not matter.
 			name:    "a negated short form is not invented",
 			argv:    []string{"-no-c"},
 			wantErr: "unknown flag",
@@ -2043,9 +1965,8 @@ func TestParse_negatableBool(t *testing.T) {
 	}
 }
 
-// TestParse_declaredIdentifierBeatsNegatedForm: an author who genuinely declares --no-cache
-// keeps it, even when another flag's negatable would derive the same token. Silently shadowing
-// a declared identifier is the one outcome that must not happen.
+// TestParse_declaredIdentifierBeatsNegatedForm pins that a declared --no-cache wins over the
+// same token derived from another flag's negatable form.
 func TestParse_declaredIdentifierBeatsNegatedForm(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -2072,8 +1993,8 @@ func TestParse_declaredIdentifierBeatsNegatedForm(t *testing.T) {
 	}
 }
 
-// TestParse_negatedFormIsSuggestable: the negated spelling joins the flag vocabulary a
-// ParseError carries, so a Suggestor can offer it for a near miss.
+// TestParse_negatedFormIsSuggestable pins that negated spellings are in a ParseError's
+// Candidates.
 func TestParse_negatedFormIsSuggestable(t *testing.T) {
 	var in negatableInputs
 	rtx := NewContextFor(negatableDef(), []string{"--no-colour"})
@@ -2092,8 +2013,7 @@ func TestParse_negatedFormIsSuggestable(t *testing.T) {
 }
 
 // TestParse_pathTypes covers existingfile / existingdir: a value that is not there, or is the
-// wrong kind of thing, is a usage error at PARSE time naming the flag the user typed —
-// instead of an *os.PathError surfacing three layers into a handler, naming only a path.
+// wrong kind, is a usage error at parse time naming the flag the user typed.
 func TestParse_pathTypes(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "real.txt")
@@ -2145,11 +2065,9 @@ func TestParse_pathTypes(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
 			}
-			// It is the user's mistake, so it classifies as usage — not internal.
 			if CategoryOf(err) != CategoryUsage {
 				t.Errorf("category = %v, want CategoryUsage", CategoryOf(err))
 			}
-			// The message names the flag, so the user knows which one to fix.
 			var pe *ParseError
 			if !errors.As(err, &pe) || !strings.Contains(pe.Msg, "--") {
 				t.Errorf("message %q does not name the flag", err)
@@ -2158,9 +2076,8 @@ func TestParse_pathTypes(t *testing.T) {
 	}
 }
 
-// TestParse_pathTypeKeepsStringBounds: a path is still a string, so its declared pattern and
-// length bounds apply. Skipping them would silently ignore a declared constraint, which is
-// the single failure mode rotini's validation exists to prevent.
+// TestParse_pathTypeKeepsStringBounds pins that a path type's declared pattern and length
+// bounds apply.
 func TestParse_pathTypeKeepsStringBounds(t *testing.T) {
 	dir := t.TempDir()
 	yaml := filepath.Join(dir, "conf.yaml")
@@ -2202,15 +2119,8 @@ func TestParse_pathTypeKeepsStringBounds(t *testing.T) {
 	}
 }
 
-// TestParse_multiValueDefaults covers the capability a repeatable input did not have: a
-// default with more than one value in it.
-//
-// A default is carried as argv occurrences, and FlagDef.Default is ONE string — so before
-// Defaults, `default: [a, b]` had no representation. It stringified into a single mangled
-// element (`"[a b c]"`, Go's %v), which is why lintDefaultScalar rejected it outright and told
-// the author to seed the value in the handler instead. That advice worked and pushed a
-// declared default back into hand-written Go, which is the thing declaring inputs exists to
-// avoid.
+// TestParse_multiValueDefaults pins list defaults (FlagDef.Defaults) on repeatable inputs: each
+// element is one occurrence, and a supplied value replaces rather than merges.
 func TestParse_multiValueDefaults(t *testing.T) {
 	t.Parallel()
 	def := Definition{
@@ -2262,8 +2172,7 @@ func TestParse_multiValueDefaults(t *testing.T) {
 		if err := NewParser().Parse(rtx, &in); err != nil {
 			t.Fatal(err)
 		}
-		// Merging would make the default impossible to opt out of, which is the whole
-		// reason a default is a fallback rather than a seed.
+		// A supplied value replaces the default; merging would make it impossible to opt out.
 		if !slices.Equal(in.App.Flags.Tag, []string{"mine"}) {
 			t.Errorf("Tag = %q, want [mine] — a default must not merge with a supplied value", in.App.Flags.Tag)
 		}
@@ -2287,9 +2196,7 @@ func TestParse_multiValueDefaults(t *testing.T) {
 
 	t.Run("a scalar Default wins over Defaults", func(t *testing.T) {
 		t.Parallel()
-		// The spec cannot produce both — a default is a scalar or a list, never both —
-		// but a hand-built Definition can, so the precedence is pinned rather than left
-		// to map order.
+		// Only a hand-built Definition can set both.
 		both := FlagDef{Name: "x", Default: "scalar", Defaults: []string{"a", "b"}}
 		if got := flagDefaults(both); !slices.Equal(got, []string{"scalar"}) {
 			t.Errorf("flagDefaults = %q, want [scalar]", got)
@@ -2450,7 +2357,7 @@ func TestParse_implicitValue(t *testing.T) {
 }
 
 // `type: date` generates Layout "2006-01-02": a calendar date parses on a flag, a list flag and
-// an argument, where before only a full RFC 3339 timestamp did.
+// an argument.
 func TestParse_dateLayout(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -2480,9 +2387,9 @@ func TestParse_dateLayout(t *testing.T) {
 	}
 }
 
-// An error about a value names the flag as the user typed it — long, short, or inside a short
-// cluster — on every path a value is checked; with nothing typed (a missing required flag) the
-// long identifier names it, since --due says more than -d.
+// An error about a value names the flag as the user typed it (long, short, or inside a short
+// cluster) on every path a value is checked; with nothing typed (a missing required flag) the
+// long identifier names it.
 func TestParse_errorsNameTheTypedIdentifier(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -2526,44 +2433,6 @@ func TestParse_errorsNameTheTypedIdentifier(t *testing.T) {
 	}
 }
 
-// A `deprecated:` message reaches the runtime: using a deprecated command (by any name), flag
-// (by any identifier) or argument reports a Deprecation carrying it — where before the message
-// reached the help page only, and a handler could not tell the input was deprecated at all.
-// Deprecated identifiers alone still report, without a message.
-func TestDeprecations_carryTheMessage(t *testing.T) {
-	def := Definition{
-		Name: "app", Handler: "App",
-		Commands: []CommandDef{{
-			Name: "build", Aliases: []string{"b", "mk"}, Handler: "AppBuild", Deprecated: "use app make",
-			DeprecatedIdentifiers: []string{"mk"},
-			Flags: []FlagDef{
-				{Name: "conf", Identifiers: []string{"-c", "--conf"}, Type: "string", Deprecated: "use --config"},
-				{Name: "out", Identifiers: []string{"-o", "--out", "--output"}, Type: "string", DeprecatedIdentifiers: []string{"--out"}},
-			},
-			Arguments: []ArgDef{{Name: "target", Type: "string"}, {Name: "legacy", Type: "string", Deprecated: "no longer read"}},
-		}},
-	}
-	got := Deprecations(NewContextFor(def, []string{"mk", "-c", "x", "--out", "y", "t1", "t2"}))
-	want := []Deprecation{
-		{Kind: "command", Name: "build", Identifier: "mk", Message: "use app make"},
-		{Kind: "flag", Name: "conf", Identifier: "-c", Message: "use --config"},
-		{Kind: "flag", Name: "out", Identifier: "--out"},
-		{Kind: "argument", Name: "legacy", Identifier: "<legacy>", Message: "no longer read"},
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("Deprecations =\n %+v\nwant\n %+v", got, want)
-	}
-	if got := got[1].Error(); got != `flag "-c" is deprecated: use --config` {
-		t.Errorf("Error() = %q", got)
-	}
-	// When some spellings are listed as deprecated, only those are: the command reached by its
-	// name or a live alias, and --output (the flag's live spelling), report nothing — they are
-	// what the message tells the user to move to. The unused argument is not reported either.
-	if got := Deprecations(NewContextFor(def, []string{"b", "--output", "y", "t1"})); len(got) != 0 {
-		t.Errorf("got %+v, want nothing: only the listed spellings are deprecated", got)
-	}
-}
-
 // Bounds on a duration or size apply in the type's own unit, element-wise for a list, and the
 // message prints the bound the way the type is written.
 func TestParse_measuredBounds(t *testing.T) {
@@ -2604,10 +2473,8 @@ func TestParse_measuredBounds(t *testing.T) {
 	}
 }
 
-// A `from: [stdin]` flag's "-" survives argv being parsed more than once in a run — the generated
-// --help check (ParseArgv) and a parent collecting its own inputs both parse argv before the leaf's
-// Collect. Each parse used to read stdin afresh, so the first drained it and the leaf failed with
-// "stdin is empty".
+// A `from: [stdin]` flag's "-" resolves to the same payload when argv is parsed more than once
+// in a run (the generated --help check and a parent reading its own inputs both parse first).
 func TestParse_stdinSentinelSurvivesReparsing(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -2637,10 +2504,8 @@ func TestParse_stdinSentinelSurvivesReparsing(t *testing.T) {
 	}
 }
 
-// Collecting an ancestor's inputs type from a descendant's handler is an error, even when the
-// two happen to share a flag. Every command shares `help`, so the old check ("they share some
-// flag") passed, and the root's type bound onto the leaf: fallbacks filled its fields by key while
-// argv values were lost — a silently wrong answer instead of a loud one.
+// Reading an ancestor's inputs type from a descendant's handler is an error, even when the two
+// share a flag such as help.
 func TestParse_ancestorTypeFromDescendantIsAnError(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -2667,30 +2532,8 @@ func TestParse_ancestorTypeFromDescendantIsAnError(t *testing.T) {
 	}
 }
 
-// A token counts against the flag the parser bound it to. The root deprecates --store; a
-// sub-command declares its own --store. `app set --store x` used the sub-command's, and was
-// reported as the root's deprecated one because the report matched raw argv tokens against every
-// command's flags.
-func TestDeprecations_attributeTokensToTheBoundFlag(t *testing.T) {
-	def := Definition{
-		Name: "app", Handler: "App",
-		Flags: []FlagDef{{Name: "store", Identifiers: []string{"--store"}, Type: "string", Deprecated: "use a context"}},
-		Commands: []CommandDef{{
-			Name: "set", Handler: "AppSet",
-			Flags: []FlagDef{{Name: "store", Identifiers: []string{"--store"}, Type: "string"}},
-		}},
-	}
-	if got := Deprecations(NewContextFor(def, []string{"set", "--store", "x"})); len(got) != 0 {
-		t.Errorf("the sub-command's own --store was reported: %+v", got)
-	}
-	got := Deprecations(NewContextFor(def, []string{"--store", "x", "set"}))
-	if len(got) != 1 || got[0].Name != "store" || got[0].Message != "use a context" {
-		t.Errorf("the root's --store: %+v", got)
-	}
-}
-
 // A flag typed before a sub-command's name belongs to an ancestor: only the commands reached so
-// far are eligible, as in every CLI with sub-commands.
+// far are eligible.
 func TestParse_flagsBindByPosition(t *testing.T) {
 	def := Definition{
 		Name: "app", Handler: "App",
@@ -2727,10 +2570,8 @@ func TestParse_flagsBindByPosition(t *testing.T) {
 	}
 }
 
-// TestParse_detachedOptionalValueHint pins the hint for the likeliest mistake with an
-// optional-value flag: writing its value detached. `--dry-run server` leaves server as a
-// positional by the documented rule (the value must be attached), and the error used to be only
-// `"apply" takes no arguments (got 1)` — true, and no help at all.
+// TestParse_detachedOptionalValueHint pins the hint an extra-positional error carries when an
+// optional-value flag's valid value was written detached (`--dry-run server`).
 func TestParse_detachedOptionalValueHint(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Commands: []CommandDef{
 		{Name: "apply", Handler: "AppApply", Flags: []FlagDef{
@@ -2762,14 +2603,13 @@ func TestParse_detachedOptionalValueHint(t *testing.T) {
 	}
 }
 
-// TestSecret_coercionFailureIsRedacted is the leak that was there: a secret typed wrong.
+// TestSecret_coercionFailureIsRedacted pins that a secret flag's coercion error omits the value.
 func TestSecret_coercionFailureIsRedacted(t *testing.T) {
-	_, err := Collect[secIntInputs](NewContextFor(secretFlagDef("int"), []string{"--token", secretValue}))
+	_, err := NewContextFor(secretFlagDef("int"), []string{"--token", secretValue}).Inputs[secIntInputs]()
 	mustNotLeak(t, "a secret flag coerced to int", err)
 }
 
-// TestSecret_argumentCoercionIsRedacted: positionals take the same path, and bindArgs had no
-// access to the ArgDefs at all until this was fixed.
+// TestSecret_argumentCoercionIsRedacted pins the same redaction for a secret positional.
 func TestSecret_argumentCoercionIsRedacted(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App",
 		Arguments: []ArgDef{{Name: "tok", Type: "int", Secret: true}}}
@@ -2782,19 +2622,17 @@ func TestSecret_argumentCoercionIsRedacted(t *testing.T) {
 	}
 	type in struct{ App cmd }
 
-	_, err := Collect[in](NewContextFor(def, []string{secretValue}))
+	_, err := NewContextFor(def, []string{secretValue}).Inputs[in]()
 	mustNotLeak(t, "a secret argument coerced to int", err)
 }
 
-// TestSecret_enumViolationIsRedacted covers the path that was already correct, so a later change
-// cannot quietly regress it while fixing something else.
+// TestSecret_enumViolationIsRedacted pins redaction on the enum-violation path.
 func TestSecret_enumViolationIsRedacted(t *testing.T) {
-	_, err := Collect[secInputs](NewContextFor(secretFlagDef("string", "alpha", "beta"), []string{"--token", secretValue}))
+	_, err := NewContextFor(secretFlagDef("string", "alpha", "beta"), []string{"--token", secretValue}).Inputs[secInputs]()
 	mustNotLeak(t, "a secret flag failing its enum", err)
 }
 
-// TestSecret_nonSecretValuesStillAppear is the other half: redaction must not swallow the
-// information an ordinary user needs to fix their command line.
+// TestSecret_nonSecretValuesStillAppear pins that a non-secret value still appears in its error.
 func TestSecret_nonSecretValuesStillAppear(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App",
 		Flags: []FlagDef{{Name: "count", Identifiers: []string{"--count"}, Type: "int"}}}
@@ -2807,7 +2645,7 @@ func TestSecret_nonSecretValuesStillAppear(t *testing.T) {
 	}
 	type in struct{ App c }
 
-	_, err := Collect[in](NewContextFor(def, []string{"--count", "twelve"}))
+	_, err := NewContextFor(def, []string{"--count", "twelve"}).Inputs[in]()
 	if err == nil {
 		t.Fatal("expected a rejection")
 	}
@@ -2816,8 +2654,8 @@ func TestSecret_nonSecretValuesStillAppear(t *testing.T) {
 	}
 }
 
-// TestSecret_coerceErrorUnwrapsToItsCause keeps the typed error honest: wrapping the decoder's
-// error was how the TextUnmarshaler path reported detail, and that must survive.
+// TestSecret_coerceErrorUnwrapsToItsCause pins that coerceError unwraps to and renders its
+// cause, and that its redacted rendering hides the value.
 func TestSecret_coerceErrorUnwrapsToItsCause(t *testing.T) {
 	cause := errors.New("underlying decoder said no")
 	ce := &coerceError{Value: "x", TypeName: "widget", Cause: cause}
@@ -2833,13 +2671,7 @@ func TestSecret_coerceErrorUnwrapsToItsCause(t *testing.T) {
 	}
 }
 
-// redactValue's own doc promises that "a secret flag/argument's value never appears in usage or
-// validation errors". It was true for the paths that already had the input's definition in
-// scope — enum violations, constraint violations, map-pair errors — and false for COERCION,
-// which fails several frames below where the definition lives.
-//
-// A secret given a value of the wrong type therefore printed the value, through the default
-// funnel, to stderr. These walk every way a declared input can reject a value.
+// Fixtures for the secret-redaction tests: a secret value must never appear in any rejection.
 
 const secretValue = "hunter2-DO-NOT-PRINT"
 
@@ -2878,10 +2710,8 @@ func mustNotLeak(t *testing.T, what string, err error) {
 	}
 }
 
-// TestParse_authorMistakesAreInternal: a field whose TYPE cannot hold what the Definition
-// declares fails for every value, so it is the program author's bug, reported as rotini's and
-// categorized internal. It used to read as the end user's invalid value, and a map with
-// non-string keys was silently left empty.
+// TestParse_authorMistakesAreInternal pins that a field whose type cannot hold what the
+// Definition declares is reported as a ParseKindInternal error, categorized internal.
 func TestParse_authorMistakesAreInternal(t *testing.T) {
 	type opaque struct{}
 	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
@@ -2906,9 +2736,8 @@ func TestParse_authorMistakesAreInternal(t *testing.T) {
 	}
 }
 
-// TestParse_unknownFlagInAClusterCarriesTheVocabulary: an unknown flag carries the declared
-// identifiers for a Suggestor wherever it is found — including inside a short cluster (-vx),
-// which used to report it with none.
+// TestParse_unknownFlagInAClusterCarriesTheVocabulary pins that an unknown flag carries the
+// declared identifiers as Candidates, including inside a short cluster (-vx).
 func TestParse_unknownFlagInAClusterCarriesTheVocabulary(t *testing.T) {
 	def := Definition{Name: "app", Handler: "App", Flags: []FlagDef{
 		{Name: "verbose", Identifiers: []string{"-v"}, Type: "bool"},
@@ -2925,6 +2754,147 @@ func TestParse_unknownFlagInAClusterCarriesTheVocabulary(t *testing.T) {
 		pe, ok := errors.AsType[*ParseError](err)
 		if !ok || pe.Kind != ParseKindUnknownFlag || !slices.Contains(pe.Candidates, "-q") {
 			t.Errorf("%v: err = %+v, want an unknown flag carrying the declared identifiers", argv, pe)
+		}
+	}
+}
+
+// overflowInputs has one flag of every narrow numeric width, plus a list and a map whose
+// elements are narrow, so each coercion path is checked.
+type overflowInputs struct {
+	App struct {
+		Flags struct {
+			I8   int8            `rotini:"i8"`
+			I16  int16           `rotini:"i16"`
+			I32  int32           `rotini:"i32"`
+			U8   uint8           `rotini:"u8"`
+			U16  uint16          `rotini:"u16"`
+			U32  uint32          `rotini:"u32"`
+			F32  float32         `rotini:"f32"`
+			List []int8          `rotini:"list"`
+			Map  map[string]int8 `rotini:"map"`
+		}
+		Arguments struct{}
+	}
+}
+
+func overflowDef() Definition {
+	flag := func(name, typ string) FlagDef {
+		return FlagDef{Name: name, Identifiers: []string{"--" + name}, Type: typ}
+	}
+	return Definition{Name: "app", Handler: "App", Flags: []FlagDef{
+		flag("i8", "int8"), flag("i16", "int16"), flag("i32", "int32"),
+		flag("u8", "uint8"), flag("u16", "uint16"), flag("u32", "uint32"),
+		flag("f32", "float32"), flag("list", "[]int8"), flag("map", "map[string]int8"),
+	}}
+}
+
+// TestCoerce_narrowNumbersRejectOutOfRange pins that a value too big for a narrow numeric
+// field (scalar, list or map element) is a usage error naming the range, not a wrapped value.
+func TestCoerce_narrowNumbersRejectOutOfRange(t *testing.T) {
+	for _, tc := range []struct {
+		argv []string
+		want string // "" = binds; else a substring of the error
+	}{
+		{[]string{"--i8", "127", "--i8", "-128"}, ""},
+		{[]string{"--i8", "128"}, `"128" is not a valid int8 (out of range: -128 to 127)`},
+		{[]string{"--i8", "-129"}, "out of range: -128 to 127"},
+		{[]string{"--i16", "32768"}, "out of range: -32768 to 32767"},
+		{[]string{"--i32", "2147483648"}, "out of range: -2147483648 to 2147483647"},
+		{[]string{"--u8", "255"}, ""},
+		{[]string{"--u8", "256"}, `"256" is not a valid uint8 (out of range: 0 to 255)`},
+		{[]string{"--u16", "65536"}, "out of range: 0 to 65535"},
+		{[]string{"--u32", "4294967296"}, "out of range: 0 to 4294967295"},
+		{[]string{"--f32", "3.4e38"}, ""},
+		{[]string{"--f32", "1e300"}, `"1e300" is not a valid float32 (out of range`},
+		{[]string{"--list", "1", "--list", "300"}, `"300" is not a valid int8`},
+		{[]string{"--map", "a=1", "--map", "b=999"}, `"999" is not a valid int8`},
+	} {
+		t.Run(strings.Join(tc.argv, " "), func(t *testing.T) {
+			_, err := NewContextFor(overflowDef(), tc.argv).Inputs[overflowInputs]()
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("a value in range was rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
+			}
+			var pe *ParseError
+			if !errors.As(err, &pe) || pe.Kind != ParseKindInvalidValue {
+				t.Errorf("err = %#v, want a *ParseError of kind InvalidValue", err)
+			}
+			if CategoryOf(err) != CategoryUsage {
+				t.Errorf("category = %v, want usage: the user typed a value that does not fit", CategoryOf(err))
+			}
+		})
+	}
+}
+
+// TestCoerce_narrowNumberBoundsBind pins that the check rejects only what does not fit: the
+// extreme values of each width land exactly.
+func TestCoerce_narrowNumberBoundsBind(t *testing.T) {
+	in, err := NewContextFor(overflowDef(), []string{
+		"--i8", "-128", "--i16", "32767", "--i32", "-2147483648",
+		"--u8", "255", "--u16", "65535", "--u32", "4294967295",
+	}).Inputs[overflowInputs]()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := in.App.Flags
+	if f.I8 != math.MinInt8 || f.I16 != math.MaxInt16 || f.I32 != math.MinInt32 ||
+		f.U8 != math.MaxUint8 || f.U16 != math.MaxUint16 || f.U32 != math.MaxUint32 {
+		t.Errorf("bounds bound as %+v", f)
+	}
+}
+
+// cascadeInputs is a root with a `--region` flag and a `--name` flag, and a `deploy` sub-command
+// with its own `--name`.
+type cascadeInputs struct {
+	App struct {
+		Flags struct {
+			Region string `rotini:"region"`
+			Name   string `rotini:"name"`
+		}
+		Arguments struct{}
+	}
+	AppDeploy struct {
+		Flags struct {
+			Name string `rotini:"name"`
+		}
+		Arguments struct{}
+	}
+}
+
+func cascadeDef() Definition {
+	return Definition{
+		Name: "app", Handler: "App",
+		Flags: []FlagDef{
+			{Name: "region", Identifiers: []string{"--region"}, Type: "string"},
+			{Name: "name", Identifiers: []string{"--name"}, Type: "string"},
+		},
+		Commands: []CommandDef{{
+			Name: "deploy", Handler: "AppDeploy",
+			Flags: []FlagDef{{Name: "name", Identifiers: []string{"--name"}, Type: "string"}},
+		}},
+	}
+}
+
+// TestParse_cascadingIsHelpOnly pins that a flag works anywhere after the name of the command
+// declaring it, so a parent and a child can both declare --name, and that the invoked command's
+// inputs carry every ancestor's flags. The `cascading` spec key affects generated help only.
+func TestParse_cascadingIsHelpOnly(t *testing.T) {
+	for _, argv := range [][]string{
+		{"--region", "eu", "--name", "parent", "deploy", "--name", "child"},
+		{"--name", "parent", "deploy", "--region", "eu", "--name", "child"}, // after the sub-command's name
+	} {
+		in, err := NewContextFor(cascadeDef(), argv).Inputs[cascadeInputs]()
+		if err != nil {
+			t.Fatalf("%q: %v", argv, err)
+		}
+		if in.App.Flags.Region != "eu" || in.App.Flags.Name != "parent" || in.AppDeploy.Flags.Name != "child" {
+			t.Errorf("%q bound %+v / %+v, want region=eu, the parent's name=parent and the child's name=child",
+				argv, in.App.Flags, in.AppDeploy.Flags)
 		}
 	}
 }

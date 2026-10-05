@@ -91,29 +91,29 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*haltHandlers)(nil)
+var _ rotini.Handler = (*haltHandler)(nil)
 
-// modeKey carries the root's decision to the leaf, so the leaf does not re-read argv.
-var modeKey = rotini.NewKey[string]("mode")
+// modeDep carries the root's decision to the leaf, so the leaf does not re-read argv.
+var modeDep = rotini.NewDependency[string]("mode")
 
-type haltHandlers struct {
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
+type haltHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
 }
 
 // CascadingPreRun is the hook where Halt decides something: it runs before the leaf's PreRun
 // and Run, so refusing here is what prevents the work.
 //
-// Collect works here as it does anywhere: it anchors HaltInputs on rtx.Frame(), the command
+// Inputs works here as it does anywhere: it anchors HaltInputs on rtx.Command(), the command
 // whose hook is running, which in a cascading hook is this command rather than the leaf.
-func (*haltHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	inputs, err := rotini.Collect[HaltInputs](rtx)
+func (*haltHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	inputs, err := rtx.Inputs[HaltInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
 	}
 	mode := inputs.Halt.Flags.Mode
-	modeKey.BindTo(rtx, mode)
+	rtx.SetDependency(modeDep, mode)
 
 	refused := errors.New("setup refused to continue")
 
@@ -135,11 +135,11 @@ func (*haltHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	}
 }
 
-func (*haltHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (*haltHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "teardown")
 }
 
-func (*haltHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*haltHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "root ran")
 }
 -- work.go.txt --
@@ -152,21 +152,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*haltWorkHandlers)(nil)
+var _ rotini.Handler = (*haltWorkHandler)(nil)
 
-type haltWorkHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type haltWorkHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
 // Run is the work a failed setup hook must prevent. Reaching this line at all is the
 // observable difference between recording and halting.
-func (*haltWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*haltWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "WORK RAN")
 
-	if mode, _ := modeKey.Get(rtx); mode == "halt-in-run" {
+	if mode, _ := rtx.GetDependency(modeDep); mode == "halt-in-run" {
 		// Inert. Run is the last forward step, so there is nothing left to stop — the
 		// teardown that follows is not forward progress and Halt does not touch it.
 		rtx.Halt()

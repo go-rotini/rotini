@@ -1,4 +1,4 @@
-# R6c — a composed child's BindMeta travels with its command tree.
+# R6c — a composed child's InputSettings travels with its command tree.
 #
 # Composition's whole claim is that `parent child cmd` runs what `child cmd` runs. It held for
 # argv and broke, silently, for two channels: a child's `config_files` and its `env_prefix`
@@ -153,17 +153,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*childShowHandlers)(nil)
+var _ rotini.Handler = (*childShowHandler)(nil)
 
-type childShowHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type childShowHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*childShowHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[ChildShowInputs](rtx)
+func (*childShowHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ChildShowInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.Halt()

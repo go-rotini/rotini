@@ -86,7 +86,7 @@ this module so they are not published with it.
 - Keep PRs focused on a single change.
 - Include tests that cover the change. Both happy paths and error paths are
   expected — parse/bind/validation failures and the typed error classes
-  (`ParseError`, `BindError`, `RemoteError`, `WiringError`, `ServiceError`,
+  (`ParseError`, `InputError`, `PluginError`, `WiringError`, `DependencyError`,
   `PanicError`) all have observable, asserted behavior.
 - When you change codegen, include the regenerated golden fixtures in the PR.
 - Reference any relevant issues.

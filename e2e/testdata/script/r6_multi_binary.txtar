@@ -198,7 +198,7 @@ generate:
 // through the parent as well.
 //
 // It names none of the generated inputs types — there is one per CLI and they differ — and
-// declares the shape it needs instead. The binder matches structurally, counting frames back
+// declares the shape it needs instead. The input reader matches structurally, counting frames back
 // from the leaf, so the same struct describes the command at every depth.
 package status
 
@@ -209,34 +209,34 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-// ComponentKey carries the identity each child binds for itself. A command NAME is not stable
+// ComponentDep carries the identity each child sets for itself. A command NAME is not stable
 // under composition — the parent renames both children — so a handler keying on the name would
 // give two answers for one component.
-var ComponentKey = rotini.NewKey[string]("multi.component")
+var ComponentDep = rotini.NewDependency[string]("multi.component")
 
 type Inputs struct {
 	Host   struct{ Flags, Arguments struct{} }
 	Status struct{ Flags, Arguments struct{} }
 }
 
-func Status() rotini.Handlers { return &handlers{} }
+func Status() rotini.Handler { return &handlers{} }
 
 type handlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
 func (*handlers) Run(ctx context.Context, rtx *rotini.Context) {
-	if _, err := rotini.Collect[Inputs](rtx); err != nil {
+	if _, err := rtx.Inputs[Inputs](); err != nil {
 		rtx.RecordError(err)
 		rtx.Halt()
 		return
 	}
-	name, _ := ComponentKey.Get(rtx)
+	name, _ := rtx.GetDependency(ComponentDep)
 	if name == "" {
-		name = rtx.Chain()[0].Name
+		name = rtx.CommandChain()[0].Name
 	}
 	fmt.Fprintf(rtx.Stdout, "status: %s\n", name)
 }
@@ -253,20 +253,20 @@ import (
 )
 
 type base struct {
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type myAlphaHandlers struct{ base }
+type myAlphaHandler struct{ base }
 
 // CascadingPreRun binds this CLI's identity for everything beneath it, including the shared
 // handler. It runs whether this is the root of its own binary or a frame inside the parent.
-func (*myAlphaHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	status.ComponentKey.BindTo(rtx, "alpha")
+func (*myAlphaHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	rtx.SetDependency(status.ComponentDep, "alpha")
 }
 
-func (*myAlphaHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*myAlphaHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, HelpMyAlpha)
 }
 -- internal/cmd/alpha/my-alpha_work.go --
@@ -279,12 +279,12 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type myAlphaWorkHandlers struct{ base }
+type myAlphaWorkHandler struct{ base }
 
-func (*myAlphaWorkHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {}
+func (*myAlphaWorkHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {}
 
-func (*myAlphaWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[MyAlphaWorkInputs](rtx)
+func (*myAlphaWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[MyAlphaWorkInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.Halt()
@@ -309,18 +309,18 @@ import (
 )
 
 type base struct {
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type myBetaHandlers struct{ base }
+type myBetaHandler struct{ base }
 
-func (*myBetaHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
-	status.ComponentKey.BindTo(rtx, "beta")
+func (*myBetaHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+	rtx.SetDependency(status.ComponentDep, "beta")
 }
 
-func (*myBetaHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*myBetaHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, HelpMyBeta)
 }
 -- internal/cmd/beta/my-beta_work.go --
@@ -333,12 +333,12 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type myBetaWorkHandlers struct{ base }
+type myBetaWorkHandler struct{ base }
 
-func (*myBetaWorkHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {}
+func (*myBetaWorkHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {}
 
-func (*myBetaWorkHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[MyBetaWorkInputs](rtx)
+func (*myBetaWorkHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[MyBetaWorkInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.Halt()
@@ -356,14 +356,14 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type parentHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type parentHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*parentHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*parentHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, HelpParent)
 }
 -- cmd/parent/main.go --

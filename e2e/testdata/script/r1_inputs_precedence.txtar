@@ -65,14 +65,14 @@ stdout 'token=from-argv'
 
 # A DERIVED variable name must be the one help prints, and it must actually bind.
 #
-# It did not. Help rendered env_prefix + SNAKE_UPPER(name) while the binder let recon derive
+# It did not. Help rendered env_prefix + SNAKE_UPPER(name) while the input reader let recon derive
 # the name at bind time from the recon key — and recon's inverse projection splits on EVERY
 # underscore, so APP_BASE_URL was read back as the two-segment path base/url and never met the
 # one-segment input base_url. The variable help told you to set did nothing, silently. The
-# same disagreement hit camelCase the other way: help said APP_API_KEY, the binder read
+# same disagreement hit camelCase the other way: help said APP_API_KEY, the input reader read
 # APP_APIKEY.
 #
-# Codegen now emits the exact name into the field's `env:` tag, so the binder PINS it in both
+# Codegen now emits the exact name into the field's `env:` tag, so the input reader PINS it in both
 # directions instead of re-deriving it. These four cases are the ones that were broken.
 env GITHUB_TOKEN=
 env APP_GITHUB_TOKEN=
@@ -231,17 +231,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*appHandlers)(nil)
+var _ rotini.Handler = (*appHandler)(nil)
 
-type appHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type appHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[AppInputs](rtx)
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[AppInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)

@@ -70,10 +70,10 @@ func definition() rotini.Definition {
 
 // base embeds the no-op hooks; commands implement Run.
 type base struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
 type noop struct{ base }
@@ -113,7 +113,7 @@ type ingestHandler struct{ base }
 
 func (ingestHandler) Run(_ context.Context, rtx *rotini.Context) {
 	var in ingestInputs
-	if err := rotini.NewBinder(rotini.BindMeta{}).Bind(rtx, &in); err != nil {
+	if err := rotini.NewInputReader(rotini.InputSettings{}).Read(rtx, &in); err != nil {
 		fail(rtx, err)
 		return
 	}
@@ -133,12 +133,12 @@ func (sleepHandler) Run(ctx context.Context, rtx *rotini.Context) {
 
 type handlers struct{}
 
-func (handlers) Acme() rotini.Handlers          { return noop{} }
-func (handlers) AcmeWidget() rotini.Handlers    { return noop{} }
-func (handlers) AcmeWidgetGet() rotini.Handlers { return getHandler{} }
-func (handlers) AcmeApply() rotini.Handlers     { return applyHandler{} }
-func (handlers) AcmeIngest() rotini.Handlers    { return ingestHandler{} }
-func (handlers) AcmeSleep() rotini.Handlers     { return sleepHandler{} }
+func (handlers) Acme() rotini.Handler          { return noop{} }
+func (handlers) AcmeWidget() rotini.Handler    { return noop{} }
+func (handlers) AcmeWidgetGet() rotini.Handler { return getHandler{} }
+func (handlers) AcmeApply() rotini.Handler     { return applyHandler{} }
+func (handlers) AcmeIngest() rotini.Handler    { return ingestHandler{} }
+func (handlers) AcmeSleep() rotini.Handler     { return sleepHandler{} }
 
 func main() {
 	rotini.NewProgram(definition(), handlers{}).Execute()

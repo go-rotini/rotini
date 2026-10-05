@@ -10,15 +10,12 @@ import (
 	"testing"
 )
 
-// This file is the in-process tier of the input conformance suite: the input
-// matrix, encoded as code. `make test-conformance` runs it.
-//
-// TestConformance_matrixComplete below holds the canonical ID list; that list,
-// plus each case's own comment, IS the matrix definition — there is no separate
-// prose document to keep in sync. Every ID appears exactly once across the whole
-// suite: most here, and the handful only a real process can witness (exit codes,
-// auto-detected pipes, the no-pipe sentinel) in the acceptance tier
-// (acceptance_test.go). TestConformance_matrixComplete enforces that split.
+// This file is the in-process tier of the input conformance suite; `make
+// test-conformance` runs it. TestConformance_matrixComplete holds the canonical
+// ID list, which with each case's comment is the matrix definition. Every ID
+// appears exactly once: here, or in the acceptance tier (acceptance_test.go)
+// for cases only a real process can observe (exit codes, auto-detected pipes,
+// the no-pipe sentinel).
 
 // ── the acme fixture ─────────────────────────────────────────────────────────
 //
@@ -197,12 +194,12 @@ func acmeDef() Definition {
 	}
 }
 
-// acmeMeta is the fixture's BindMeta over a case directory: a main config
+// acmeMeta is the fixture's InputSettings over a case directory: a main config
 // (path suppliable via --config / $ACME_CONFIG — CFG-01, ENV-03), a walk-up
 // project config (CFG-03), and an xdg user config (CFG-02), in that
 // precedence order.
-func acmeMeta(dir string) BindMeta {
-	return BindMeta{ConfigFiles: []ConfigFile{
+func acmeMeta(dir string) InputSettings {
+	return InputSettings{ConfigFiles: []ConfigFile{
 		{Name: "main", Path: filepath.Join(dir, "acme.yaml"), Format: "yaml",
 			PathFrom: &PathFromDef{Flag: "config", Env: "ACME_CONFIG"}},
 		{Name: "project", Format: "yaml",
@@ -227,15 +224,15 @@ type inputCase struct {
 	env   map[string]string // applied via t.Setenv
 	stdin string            // the piped payload ("" → an empty reader)
 	files map[string]string // path (relative to the case dir) → contents
-	check func(t *testing.T, rtx *Context, meta BindMeta)
+	check func(t *testing.T, rtx *Context, meta InputSettings)
 }
 
 // bindAs is the case-body idiom: bind the fixture invocation into T via the
-// default Binder and fail the case on error.
-func bindAs[T any](t *testing.T, rtx *Context, meta BindMeta) T {
+// default InputReader and fail the case on error.
+func bindAs[T any](t *testing.T, rtx *Context, meta InputSettings) T {
 	t.Helper()
 	var in T
-	if err := NewBinder(meta).Bind(rtx, &in); err != nil {
+	if err := NewInputReader(meta).Read(rtx, &in); err != nil {
 		t.Fatalf("Bind: %v", err)
 	}
 	return in
@@ -287,28 +284,28 @@ func conformanceCases() []inputCase {
 	return []inputCase{
 		// ── ARG — positional arguments ──
 		{id: "ARG-01", args: []string{"widget", "get", "my-widget"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acGetInputs](t, rtx, meta); in.Get.Arguments.Name != "my-widget" {
 					t.Errorf("name = %q, want my-widget", in.Get.Arguments.Name)
 				}
 			}},
 		{id: "ARG-02", args: []string{"widget", "delete", "w1", "w2", "w3"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acDeleteInputs](t, rtx, meta)
 				if want := []string{"w1", "w2", "w3"}; !reflect.DeepEqual(in.Delete.Arguments.Names, want) {
 					t.Errorf("names = %v, want %v", in.Delete.Arguments.Names, want)
 				}
 			}},
 		{id: "ARG-03", args: []string{"deploy"},
-			check: func(t *testing.T, rtx *Context, _ BindMeta) {
+			check: func(t *testing.T, rtx *Context, _ InputSettings) {
 				// The sub-command token routes: the resolved chain is the input.
-				names := chainNames(rtx.Chain())
+				names := chainNames(rtx.CommandChain())
 				if want := []string{"acme", "deploy"}; !reflect.DeepEqual(names, want) {
 					t.Errorf("chain = %v, want %v", names, want)
 				}
 			}},
 		{id: "ARG-05", args: []string{"import", "./data/widgets.csv"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// The path binds verbatim — relative to the user's CWD, never
 				// rewritten; opening it is the handler's job.
 				if in := bindAs[acImportInputs](t, rtx, meta); in.Import.Arguments.Path != "./data/widgets.csv" {
@@ -316,20 +313,20 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "ARG-06", args: []string{"widget", "get", "héllo wörld — ünïcode"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acGetInputs](t, rtx, meta); in.Get.Arguments.Name != "héllo wörld — ünïcode" {
 					t.Errorf("name = %q, want the unicode token intact", in.Get.Arguments.Name)
 				}
 			}},
 		{id: "ARG-07", args: []string{"run", "--", "--weird-name"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acRunInputs](t, rtx, meta)
 				if want := []string{"--weird-name"}; !reflect.DeepEqual(in.Run.Arguments.Script, want) {
 					t.Errorf("script = %v, want the dash-prefixed positional %v", in.Run.Arguments.Script, want)
 				}
 			}},
 		{id: "ARG-08", args: []string{"run", "-5", "-0.5"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acRunInputs](t, rtx, meta)
 				if want := []string{"-5", "-0.5"}; !reflect.DeepEqual(in.Run.Arguments.Script, want) {
 					t.Errorf("script = %v, want negative numbers as positionals %v", in.Run.Arguments.Script, want)
@@ -337,7 +334,7 @@ func conformanceCases() []inputCase {
 			}},
 
 		{id: "ARG-09", args: []string{"--verbose", "wrap", "--dry-run", "-x", "--", "literal", "-"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// Passthrough: ancestor flags BEFORE the command parse normally;
 				// everything after it — flag-shaped tokens, "--", bare "-" — is a
 				// raw positional, verbatim and in order.
@@ -353,31 +350,31 @@ func conformanceCases() []inputCase {
 
 		// ── FLAG — flags / options ──
 		{id: "FLAG-01", args: []string{"deploy", "--dry-run"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acDeployInputs](t, rtx, meta); !in.Deploy.Flags.DryRun {
 					t.Error("dry-run = false, want presence = true")
 				}
 			}},
 		{id: "FLAG-02", args: []string{"deploy", "--env", "staging"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Env != "staging" {
 					t.Errorf("env = %q, want staging", in.Deploy.Flags.Env)
 				}
 			}},
 		{id: "FLAG-03", args: []string{"deploy", "--env=staging"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Env != "staging" {
 					t.Errorf("env = %q, want staging (equals form ≡ space form)", in.Deploy.Flags.Env)
 				}
 			}},
 		{id: "FLAG-04", args: []string{"deploy", "-e", "prod"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Env != "prod" {
 					t.Errorf("env = %q, want prod via the short alias", in.Deploy.Flags.Env)
 				}
 			}},
 		{id: "FLAG-05", args: []string{"deploy", "--label", "tier=web", "--label", "app=acme"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acDeployInputs](t, rtx, meta)
 				want := map[string]string{"tier": "web", "app": "acme"}
 				if !reflect.DeepEqual(in.Deploy.Flags.Labels, want) {
@@ -386,13 +383,13 @@ func conformanceCases() []inputCase {
 			}},
 		{id: "FLAG-06", args: []string{"widget", "create", "--spec", "@widget.json"},
 			files: map[string]string{"work/widget.json": `{"kind":"Widget"}` + "\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acCreateInputs](t, rtx, meta); in.Create.Flags.Spec != `{"kind":"Widget"}` {
 					t.Errorf("spec = %q, want the file's trimmed contents", in.Create.Flags.Spec)
 				}
 			}},
 		{id: "FLAG-07", args: []string{"run", "--", "--verbose", "./script.sh"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acRunInputs](t, rtx, meta)
 				if want := []string{"--verbose", "./script.sh"}; !reflect.DeepEqual(in.Run.Arguments.Script, want) {
 					t.Errorf("script = %v, want %v", in.Run.Arguments.Script, want)
@@ -402,14 +399,14 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "FLAG-08", args: []string{"deploy", "--frobnicate"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				var in acDeployInputs
-				err := NewBinder(meta).Bind(rtx, &in)
+				err := NewInputReader(meta).Read(rtx, &in)
 				if err == nil || !strings.Contains(err.Error(), "--frobnicate") {
 					t.Fatalf("err = %v, want an error naming the unknown flag", err)
 				}
 				if CategoryOf(err) != CategoryUsage {
-					t.Errorf("CategoryOf = %v, want usage (the funnel convention maps it to exit %d)", CategoryOf(err), 1)
+					t.Errorf("CategoryOf = %v, want usage (the reporter convention maps it to exit %d)", CategoryOf(err), 1)
 				}
 				var pe *ParseError
 				if !errors.As(err, &pe) || len(pe.Candidates) == 0 {
@@ -417,14 +414,14 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "FLAG-09", args: []string{"deploy", "-vd"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acDeployInputs](t, rtx, meta)
 				if !in.Acme.Flags.Verbose || !in.Deploy.Flags.DryRun {
 					t.Errorf("cluster -vd: verbose=%v dry-run=%v, want both true", in.Acme.Flags.Verbose, in.Deploy.Flags.DryRun)
 				}
 			}},
 		{id: "FLAG-10", args: []string{"deploy", "--env="},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// An explicit empty value is present-and-empty; absence falls
 				// to the default. Both halves asserted here.
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Env != "" {
@@ -436,7 +433,7 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "FLAG-11", args: []string{"deploy", "--env", "a", "--env", "b"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// Pinned: a repeated scalar flag is last-wins, not an error.
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Env != "b" {
 					t.Errorf("env = %q, want b (last occurrence wins)", in.Deploy.Flags.Env)
@@ -446,7 +443,7 @@ func conformanceCases() []inputCase {
 		// ── STDIN — standard input ──
 		{id: "STDIN-01", args: []string{"widget", "apply", "-f", "-"},
 			stdin: "apiVersion: acme/v1\nkind: Widget\n",
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acApplyInputs](t, rtx, meta)
 				if want := "apiVersion: acme/v1\nkind: Widget"; in.Apply.Flags.File != want {
 					t.Errorf("file = %q, want the piped document (trimmed)", in.Apply.Flags.File)
@@ -454,7 +451,7 @@ func conformanceCases() []inputCase {
 			}},
 		{id: "STDIN-03", args: []string{"widget", "apply", "-f", "-"},
 			stdin: "apiVersion: acme/v1\nkind: Widget\nmetadata: { name: demo }\n",
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// A heredoc IS stdin by the time it reaches the process; the
 				// multi-line document arrives intact.
 				in := bindAs[acApplyInputs](t, rtx, meta)
@@ -463,7 +460,7 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "STDIN-04", args: []string{"widget", "apply", "-f", "/dev/fd/63"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// Process substitution hands the program a PATH — it binds
 				// verbatim like any path value (the handler opens it).
 				if in := bindAs[acApplyInputs](t, rtx, meta); in.Apply.Flags.File != "/dev/fd/63" {
@@ -471,17 +468,17 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "STDIN-05", args: []string{"widget", "apply", "-f", "-"}, stdin: "",
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				var in acApplyInputs
-				err := NewBinder(meta).Bind(rtx, &in)
+				err := NewInputReader(meta).Read(rtx, &in)
 				if err == nil || !strings.Contains(err.Error(), "stdin is empty") {
 					t.Errorf("err = %v, want the explicit empty-input error, never a silent no-op", err)
 				}
 			}},
 		{id: "STDIN-06", args: []string{"ingest"}, stdin: "{{{{ not a document \x00",
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				var in acIngestInputs
-				err := NewBinder(meta).Bind(rtx, &in)
+				err := NewInputReader(meta).Read(rtx, &in)
 				if err == nil || !strings.Contains(err.Error(), "decode") {
 					t.Errorf("err = %v, want a loud decode error for a malformed payload", err)
 				}
@@ -489,7 +486,7 @@ func conformanceCases() []inputCase {
 
 		// ── ENV — environment variables ──
 		{id: "ENV-01", args: []string{"login"}, env: map[string]string{"ACME_TOKEN": "sk_live_xxx"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// Bound from the environment, never from argv. (Never echoed
 				// is SEC-03's sweep.)
 				if in := bindAs[acLoginInputs](t, rtx, meta); in.Login.Flags.Token != "sk_live_xxx" {
@@ -497,7 +494,7 @@ func conformanceCases() []inputCase {
 				}
 			}},
 		{id: "ENV-02", args: []string{"deploy"}, env: map[string]string{"ACME_ENV": "prod"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Env != "prod" {
 					t.Errorf("env = %q, want prod from $ACME_ENV (no --env given)", in.Deploy.Flags.Env)
 				}
@@ -505,7 +502,7 @@ func conformanceCases() []inputCase {
 		{id: "ENV-03", args: []string{"deploy"},
 			env:   map[string]string{"ACME_CONFIG": "../alt/alt.yaml"},
 			files: map[string]string{"alt/alt.yaml": "acme:\n  output: from-env-named\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// $ACME_CONFIG names the active config file (two-phase: the
 				// env var is read before the file channel opens anything).
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-env-named" {
@@ -514,27 +511,27 @@ func conformanceCases() []inputCase {
 			}},
 		{id: "ENV-04", args: []string{"deploy"},
 			env: map[string]string{"ACME_HTTP__TIMEOUT": "30s"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acDeployInputs](t, rtx, meta)
 				if got := in.Deploy.Env.HTTP["timeout"]; got != "30s" {
 					t.Errorf("http[timeout] = %#v, want %q via the __ convention", got, "30s")
 				}
 			}},
 		{id: "ENV-05", args: []string{"deploy"}, env: map[string]string{"ACME_REGION": ""},
-			check: func(t *testing.T, rtx *Context, _ BindMeta) {
+			check: func(t *testing.T, rtx *Context, _ InputSettings) {
 				// Presence semantics: an empty-string variable IS set; an
 				// unset one is not. The env layer's Presence distinguishes them.
-				layer, err := ParseEnv[acDeployInputs](rtx)
+				layer, err := rtx.EnvInputs[acDeployInputs]()
 				if err != nil {
-					t.Fatalf("ParseEnv: %v", err)
+					t.Fatalf("EnvInputs: %v", err)
 				}
 				if _, ok := layer.Set["Deploy.Env.Region"]; !ok {
 					t.Error("empty $ACME_REGION not recorded as present — empty must differ from unset")
 				}
 				os.Unsetenv("ACME_REGION")
-				layer2, err := ParseEnv[acDeployInputs](NewContextFor(acmeDef(), rtx.Argv))
+				layer2, err := NewContextFor(acmeDef(), rtx.Argv).EnvInputs[acDeployInputs]()
 				if err != nil {
-					t.Fatalf("ParseEnv(unset): %v", err)
+					t.Fatalf("EnvInputs(unset): %v", err)
 				}
 				if _, ok := layer2.Set["Deploy.Env.Region"]; ok {
 					t.Error("unset $ACME_REGION recorded as present")
@@ -549,7 +546,7 @@ func conformanceCases() []inputCase {
 				"ACME_OUTPUT": "from-prefixed-env", // a flag's env fallback, prefixed
 				"PLAIN_OTHER": "exempt-value",      // explicit variable: exempt from the prefix
 			},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// env_prefix scopes every DERIVED env name under PREFIX_; explicit
 				// variable: names stay exact.
 				meta.EnvPrefix = "ACME"
@@ -582,9 +579,8 @@ func conformanceCases() []inputCase {
 				}
 			}},
 
-		// ── CFG — config files ──
 		{id: "FLAG-12", args: []string{"--loud", "-ll", "deploy"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// A count flag tallies occurrences across long, short, and
 				// clustered forms — no value is ever consumed.
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Acme.Flags.Loud != 3 {
@@ -593,7 +589,7 @@ func conformanceCases() []inputCase {
 				// The value form is a parse error: there is no value to give.
 				rtx2 := NewContextFor(acmeDef(), []string{"--loud=2", "deploy"})
 				var in acDeployInputs
-				if err := NewBinder(meta).Bind(rtx2, &in); err == nil || !strings.Contains(err.Error(), "takes no value") {
+				if err := NewInputReader(meta).Read(rtx2, &in); err == nil || !strings.Contains(err.Error(), "takes no value") {
 					t.Errorf("Bind(--loud=2) = %v, want the counts-occurrences parse error", err)
 				}
 				// Unset stays the zero tally.
@@ -602,22 +598,23 @@ func conformanceCases() []inputCase {
 				}
 			}},
 
+		// ── CFG — config files ──
 		{id: "CFG-01", args: []string{"--config", "../explicit.yaml", "deploy"},
 			files: map[string]string{"explicit.yaml": "acme:\n  output: from-explicit\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-explicit" {
 					t.Errorf("output = %q, want exactly the --config file's value", in.Deploy.Flags.Output)
 				}
 				// The other half: an explicitly named file that is missing errors.
 				rtx2 := NewContextFor(acmeDef(), []string{"--config", "../no-such.yaml", "deploy"})
 				var in acDeployInputs
-				if err := NewBinder(meta).Bind(rtx2, &in); err == nil {
+				if err := NewInputReader(meta).Read(rtx2, &in); err == nil {
 					t.Error("missing --config file bound silently, want a loud error")
 				}
 			}},
 		{id: "CFG-02", args: []string{"deploy"},
 			files: map[string]string{"xdg/acme/config.yaml": "acme:\n  output: from-xdg\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-xdg" {
 					t.Errorf("output = %q, want the discovered xdg value (absence elsewhere is OK)", in.Deploy.Flags.Output)
 				}
@@ -627,27 +624,27 @@ func conformanceCases() []inputCase {
 				".acme.yaml":           "acme:\n  output: from-project\n", // one walk-up level above the cwd
 				"xdg/acme/config.yaml": "acme:\n  output: from-user\n",
 			},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-project" {
 					t.Errorf("output = %q, want from-project — project-local wins over user-global", in.Deploy.Flags.Output)
 				}
 			}},
 		{id: "CFG-04", args: []string{"--config", "../broken.yaml", "deploy"},
 			files: map[string]string{"broken.yaml": ":: definitely [ not yaml\n  - ::\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				var in acDeployInputs
-				err := NewBinder(meta).Bind(rtx, &in)
+				err := NewInputReader(meta).Read(rtx, &in)
 				if err == nil {
 					t.Fatal("malformed config bound silently, want a parse error")
 				}
 				if !strings.Contains(err.Error(), "broken.yaml") {
 					t.Errorf("err = %v, want the offending file named", err)
 				}
-				// EH4: a malformed file the user supplied is a typed, usage-class
-				// *BindError that never leaks recon's parser text.
-				var be *BindError
+				// A malformed user-supplied file is a usage-class *InputError
+				// that does not leak recon's parser text.
+				var be *InputError
 				if !errors.As(err, &be) || be.Channel != "config" {
-					t.Errorf("err = %v, want a config *BindError", err)
+					t.Errorf("err = %v, want a config *InputError", err)
 				}
 				if CategoryOf(err) != CategoryUsage {
 					t.Errorf("CategoryOf = %v, want usage for a malformed config file", CategoryOf(err))
@@ -661,7 +658,7 @@ func conformanceCases() []inputCase {
 				"acme.yaml":  "acme:\n  output: from-main\n",
 				".acme.yaml": "acme:\n  output: from-project\n",
 			},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// Two files declare the same key: declared order is precedence
 				// within the file layer — main is declared first and wins.
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Output != "from-main" {
@@ -670,7 +667,7 @@ func conformanceCases() []inputCase {
 			}},
 		{id: "CFG-06", args: []string{"deploy"},
 			files: map[string]string{"acme.yaml": "acme:\n  output: secret-perms\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if runtime.GOOS == "windows" {
 					t.Skip("0o000 permission bits don't deny the owner on windows")
 				}
@@ -681,19 +678,19 @@ func conformanceCases() []inputCase {
 					t.Fatal(err)
 				}
 				var in acDeployInputs
-				if err := NewBinder(meta).Bind(rtx, &in); err == nil {
+				if err := NewInputReader(meta).Read(rtx, &in); err == nil {
 					t.Error("unreadable config bound silently, want a loud permission error")
 				}
 			}},
 
 		{id: "CFG-07", args: []string{"deploy"},
 			files: map[string]string{"acme.yaml": "acme:\n  output: json\n"}, // no acme.env — violates the schema below
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// A configuration_files entry's schema: gates the loaded
 				// document at bind time, before any value is read.
 				meta.ConfigFiles[0].Schema = `{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","required":["acme"],"properties":{"acme":{"type":"object","required":["env"]}}}`
 				var in acDeployInputs
-				err := NewBinder(meta).Bind(rtx, &in)
+				err := NewInputReader(meta).Read(rtx, &in)
 				if err == nil || !strings.Contains(err.Error(), "acme.yaml") {
 					t.Errorf("Bind = %v, want a schema violation naming the file", err)
 				}
@@ -712,7 +709,7 @@ func conformanceCases() []inputCase {
 				"app.jsonc": "{\n  // jsonc: comments and trailing commas decode\n  \"acme\": {\"output\": \"from-jsonc\"},\n}\n",
 				"app.env":   "ACME_GREETING=hello-from-dotenv\n",
 			},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// The format enum's jsonc/dotenv members ride the same declared-
 				// format passthrough as yaml/json/toml. jsonc keeps dotted keys,
 				// so the ordinary flag fallback reads it…
@@ -742,7 +739,7 @@ func conformanceCases() []inputCase {
 
 		{id: "SEC-01", args: []string{"login", "--token", "@token.txt"},
 			files: map[string]string{"work/token.txt": "sk_live_from_file\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				if in := bindAs[acLoginInputs](t, rtx, meta); in.Login.Flags.Token != "sk_live_from_file" {
 					t.Errorf("token = %q, want the trimmed file contents (argv carries only the @path)", in.Login.Flags.Token)
 				}
@@ -750,9 +747,9 @@ func conformanceCases() []inputCase {
 		{id: "SEC-02",
 			skip: "DECIDED out of scope (W5-F6, option a): rotini ships no interactive prompt — " +
 				"the secret: schema docs point handlers at rtx.Stdin + any prompt library.",
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {}},
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {}},
 		{id: "SEC-03", args: []string{"login"}, env: map[string]string{"ACME_TOKEN": "sk_live_leakme"},
-			check: func(t *testing.T, rtx *Context, _ BindMeta) {
+			check: func(t *testing.T, rtx *Context, _ InputSettings) {
 				// The redaction sweep: the secret's text must appear in NO
 				// error or provenance path, across channels.
 				secretDef := Definition{
@@ -779,9 +776,9 @@ func conformanceCases() []inputCase {
 					t.Errorf("enum error should carry the redaction marker: %v", err)
 				}
 				// Provenance redacts too (env-supplied secret).
-				layer, perr := ParseEnv[acLoginInputs](rtx)
+				layer, perr := rtx.EnvInputs[acLoginInputs]()
 				if perr != nil {
-					t.Fatalf("ParseEnv: %v", perr)
+					t.Fatalf("EnvInputs: %v", perr)
 				}
 				for path, prov := range layer.Set {
 					if strings.Contains(prov.Raw, "sk_live_leakme") {
@@ -792,7 +789,7 @@ func conformanceCases() []inputCase {
 
 		// ── PREC — defaults & precedence (the overlay) ──
 		{id: "PREC-01", args: []string{"deploy"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acDeployInputs](t, rtx, meta)
 				if in.Deploy.Flags.Output != "table" || in.Deploy.Flags.Env != "dev" {
 					t.Errorf("defaults: output=%q env=%q, want table/dev with no input at all", in.Deploy.Flags.Output, in.Deploy.Flags.Env)
@@ -801,7 +798,7 @@ func conformanceCases() []inputCase {
 		{id: "PREC-02", args: []string{"deploy", "--env=prod"},
 			env:   map[string]string{"ACME_ENV": "staging"},
 			files: map[string]string{"acme.yaml": "acme:\n  env: test\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				// default < config < env < flag, dropped one layer at a time.
 				if in := bindAs[acDeployInputs](t, rtx, meta); in.Deploy.Flags.Env != "prod" {
 					t.Errorf("env = %q, want prod (the flag wins)", in.Deploy.Flags.Env)
@@ -813,14 +810,14 @@ func conformanceCases() []inputCase {
 				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), []string{"deploy"}), meta); in.Deploy.Flags.Env != "test" {
 					t.Errorf("env = %q, want test (the file wins over the default)", in.Deploy.Flags.Env)
 				}
-				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), []string{"deploy"}), BindMeta{}); in.Deploy.Flags.Env != "dev" {
+				if in := bindAs[acDeployInputs](t, NewContextFor(acmeDef(), []string{"deploy"}), InputSettings{}); in.Deploy.Flags.Env != "dev" {
 					t.Errorf("env = %q, want the default dev", in.Deploy.Flags.Env)
 				}
 			}},
 		{id: "PREC-03", args: []string{"deploy"},
 			env:   map[string]string{"ACME_ENV": "staging"},
 			files: map[string]string{"acme.yaml": "acme:\n  output: json\n"},
-			check: func(t *testing.T, rtx *Context, meta BindMeta) {
+			check: func(t *testing.T, rtx *Context, meta InputSettings) {
 				in := bindAs[acDeployInputs](t, rtx, meta)
 				if in.Deploy.Flags.Env != "staging" || in.Deploy.Flags.Output != "json" {
 					t.Errorf("env=%q output=%q, want staging/json — unset layers are skipped, not zeroed", in.Deploy.Flags.Env, in.Deploy.Flags.Output)
@@ -829,15 +826,15 @@ func conformanceCases() []inputCase {
 		{id: "PREC-04", args: []string{"deploy", "--env=prod"},
 			env:   map[string]string{"ACME_ENV": "staging"},
 			files: map[string]string{"acme.yaml": "acme:\n  env: test\n"},
-			check: func(t *testing.T, rtx *Context, _ BindMeta) {
+			check: func(t *testing.T, rtx *Context, _ InputSettings) {
 				// Provenance: the Report knows WHICH layer won, and the full
 				// history beneath it.
-				rtx.WithBindMeta(acmeMeta(filepath.Dir(mustGetwd(t))))
-				defaults, _ := Defaults[acDeployInputs](rtx)
-				files, _ := ParseFiles[acDeployInputs](rtx)
-				env, _ := ParseEnv[acDeployInputs](rtx)
-				argv, _ := ParseArgv[acDeployInputs](rtx)
-				_, rep := OverlayInputsP(defaults, files, env, argv)
+				rtx.WithInputSettings(acmeMeta(filepath.Dir(mustGetwd(t))))
+				defaults, _ := rtx.DefaultInputs[acDeployInputs]()
+				files, _ := rtx.FileInputs[acDeployInputs]()
+				env, _ := rtx.EnvInputs[acDeployInputs]()
+				argv, _ := rtx.ArgvInputs[acDeployInputs]()
+				_, rep := MergeInputsWithReport(defaults, files, env, argv)
 				win, ok := rep.Winner("Deploy.Flags.Env")
 				if !ok || win.Layer != "argv" || win.Raw != "prod" {
 					t.Errorf("Winner = %+v (ok=%v), want argv/prod", win, ok)

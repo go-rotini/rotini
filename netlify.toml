@@ -17,3 +17,14 @@
 
 [context.branch-deploy]
   command = "hugo --gc --minify --buildDrafts --baseURL $DEPLOY_PRIME_URL"
+
+# The output and plugins pages are now sections of the docs guide; keep their old links working.
+[[redirects]]
+  from = "/output/*"
+  to = "/docs/#structured-output"
+  status = 301
+
+[[redirects]]
+  from = "/plugins/*"
+  to = "/docs/#plugins"
+  status = 301

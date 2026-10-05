@@ -9,43 +9,46 @@ import (
 	"strconv"
 	"strings"
 	"text/template"
+	"time"
 	"unicode"
 
 	"github.com/go-rotini/rotini"
 )
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Doc features — help / man / completion page generation.
-// ─────────────────────────────────────────────────────────────────────────────.
+// Doc features: help, man, markdown and completion page generation.
 
-// helpTemplateName / manTemplateName are the editable, seed-once doc templates
-// living in the feature dir (the only user-owned files there). Pruning always
-// keeps them.
+// The editable doc templates, seeded once into a feature's template_dir when `template: true`.
 const (
 	helpTemplateName     = "help.txt.tmpl"
 	manTemplateName      = "man.txt.tmpl"
 	markdownTemplateName = "markdown.md.tmpl"
 )
 
-// docFeature describes one doc-rendered codegen feature. All share the doc-data pipeline and
-// differ only in file suffix, embed-var and resolver names, the editable template, and which
-// per-command verbatim spec string escapes the render.
+// docFeature describes one generated doc feature. The features share the doc-data pipeline and
+// differ in file naming, embed-var and resolver names, template, and which verbatim spec string
+// replaces the rendered page.
 //
-// Enabled features default to one shared embed dir, so their output files must be
-// distinguishable by name alone: filePrefix is feature-unique and pruning considers only files
-// matching both it and ext, so features sharing a dir can never prune each other's files.
+// Features default to one shared embed_dir, so their files must be distinguishable by name:
+// each owns a distinct file pattern (see featureOutput.owns), and pruning only touches owned
+// files.
 type docFeature struct {
 	name       string               // feature key, e.g. "help"
-	noun       string               // word used in the resolver doc comment / error, e.g. "help"
+	noun       string               // word used in the resolver doc comment and error, e.g. "help"
 	varPrefix  string               // embed-var prefix, e.g. "Help" → HelpRotiniGenerate
 	resolver   string               // resolver func name, e.g. "Help"
 	ext        string               // output file suffix, e.g. ".txt"
 	filePrefix string               // feature-unique output file prefix, e.g. "help_"
-	tmplFile   string               // editable template file name in the feature dir ("" = none)
-	embedded   string               // embedded default template text, from generate_renderer.go ("" = none)
-	verbatim   func(cmdHelp) string // the per-command verbatim escape for this feature (nil = none)
+	tmplFile   string               // editable template file name ("" = none)
+	embedded   string               // built-in default template text ("" = none)
+	verbatim   func(cmdHelp) string // the per-command verbatim page for this feature (nil = none)
 	perShell   bool                 // completion: keyed by shell name, not command path
-	strip      bool                 // strip spec-authored ANSI from the output (man/markdown — never help)
+	strip      bool                 // strip spec-authored ANSI from the output (man, markdown)
+	// manPages names files <page-name>.<section> (taskr-add.1) instead of
+	// <filePrefix><path><ext>, and renders pages as roff through renderManText.
+	manPages bool
+	// pagesFunc names the generated function listing every visible command's page
+	// (ManPages, MarkdownPages); "" for none.
+	pagesFunc string
 }
 
 var (
@@ -53,47 +56,49 @@ var (
 		name: "help", noun: "help", varPrefix: "Help", resolver: "Help",
 		ext: ".txt", filePrefix: "help_", tmplFile: helpTemplateName, embedded: templateHelp,
 		verbatim: func(h cmdHelp) string { return h.Help },
-		// help is the TERMINAL surface — spec-authored styling is kept.
+		// Help is a terminal surface, so spec-authored styling is kept.
 	}
 	manFeatureDesc = docFeature{
 		name: "man", noun: "man", varPrefix: "Man", resolver: "Man",
-		ext: ".txt", filePrefix: "man_", tmplFile: manTemplateName, embedded: templateMan,
-		verbatim: func(h cmdHelp) string { return h.Man },
-		strip:    true, // a roff/plain man page carries no legitimate SGR
+		tmplFile: manTemplateName, embedded: templateMan,
+		verbatim:  func(h cmdHelp) string { return h.Man },
+		strip:     true, // a roff man page carries no legitimate SGR
+		manPages:  true,
+		pagesFunc: "ManPages",
 	}
 	markdownFeatureDesc = docFeature{
 		name: "markdown", noun: "markdown", varPrefix: "Markdown", resolver: "Markdown",
 		ext: ".md", filePrefix: "markdown_", tmplFile: markdownTemplateName, embedded: templateMarkdown,
-		verbatim: func(h cmdHelp) string { return h.Markdown },
-		strip:    true, // a markdown file carries no legitimate SGR
+		verbatim:  func(h cmdHelp) string { return h.Markdown },
+		strip:     true, // a markdown file carries no legitimate SGR
+		pagesFunc: "MarkdownPages",
 	}
-	// completionFeatureDesc is the group's exception: keyed by shell, no doc-data,
-	// no template, no verbatim. Scripts come from completionScript at codegen.
+	// completionFeatureDesc is keyed by shell, with no doc-data, template or verbatim page.
+	// Scripts come from completionScript.
 	completionFeatureDesc = docFeature{
 		name: "completion", noun: "completion", varPrefix: "Completion", resolver: "Completion",
 		ext: ".txt", filePrefix: "completion_", perShell: true,
 	}
 )
 
-// completionShells are the shells rotini generates completion scripts for, in a
-// deterministic order (matches completionScript's supported set).
+// completionShells are the shells completionScript supports, in generation order.
 var completionShells = []string{"bash", "zsh", "fish", "powershell"}
 
-// helpNode is one command's help wiring: the embed var and resolver identity plus what is
-// needed to produce its .txt, either verbatim from the command's `help` string or rendered
-// from data through the template.
+// helpNode is one command's page for one feature: its embed var and resolver identity plus the
+// verbatim page or the data to render it from.
 type helpNode struct {
-	prefix   string           // PascalCase command prefix; the embed var is "Help"+prefix
-	file     string           // .txt file name within the help dir
+	prefix   string           // PascalCase command prefix; the embed var is varPrefix+prefix
+	file     string           // output file name within the embed_dir
 	paths    []string         // resolver case values (name/alias permutations); root = [""]
 	name     string           // the command's invocation name, e.g. "rotini generate"
-	verbatim string           // command.help — the exact page; "" means render from data
+	verbatim string           // the feature's verbatim spec page; "" means render from data
 	data     templateHelpData // rendering inputs (used when verbatim == "")
+	path     []string         // the canonical command path below the root; nil for the root
+	listed   bool             // in ManPages/MarkdownPages: neither it nor an ancestor is hidden
 }
 
-// cmdHelp bundles a command's resolved help-presentation fields, which live
-// directly on the spec's command (and root). Help, when non-empty, is the exact
-// verbatim page; otherwise the page is rendered from the structured fields.
+// cmdHelp bundles a command's doc fields. A non-empty Help, Man or Markdown is that feature's
+// exact page; otherwise the page renders from the structured fields.
 type cmdHelp struct {
 	Summary     string
 	Description string
@@ -109,7 +114,7 @@ type cmdHelp struct {
 	Markdown    string            // verbatim markdown reference page (command.markdown)
 }
 
-// commandHelp gathers the flattened doc-fields off a command (root or sub).
+// commandHelp gathers the doc fields of a command.
 func commandHelp(c Command) cmdHelp {
 	return cmdHelp{
 		Summary: c.Summary, Description: c.Description, Usage: c.Usage,
@@ -119,26 +124,53 @@ func commandHelp(c Command) cmdHelp {
 	}
 }
 
-// flattenFeature produces a node per command for one doc feature across the resolved tree, the
-// root first and then every sub-command in tree order. Each node carries its verbatim page,
-// when the spec set one, and its built doc-data for when it did not.
-//
-// What a page SHOWS is the display name (`kubectl ctx use`); what it is stored as stays the
-// root's real name (man_kubectl-ctx_use.txt), since a file name with spaces in it helps no one.
+// flattenFeature returns one node per command for a doc feature, root first, then every
+// sub-command in tree order. Pages show the display name (`kubectl ctx use`); files use the
+// root's real name (help_kubectl-ctx_use.txt, kubectl-ctx-use.1).
 func flattenFeature(gp *program, feat docFeature) []helpNode {
+	section := manSection(gp.conf)
+	date := manDate()
+	file := func(names []string) string {
+		if feat.manPages {
+			return manPageName(gp.rootName, names) + "." + section
+		}
+		if len(names) == 0 {
+			return feat.filePrefix + gp.rootName + feat.ext
+		}
+		return feat.filePrefix + gp.rootName + "_" + strings.Join(names, "_") + feat.ext
+	}
+	// withPage fills the output doc and man page fields: the page's name, section, source and
+	// date, and its cross-references (the parent's page, then each visible child's).
+	withPage := func(d templateHelpData, names []string, children []rnode, output *Schema) templateHelpData {
+		d.Output = outputDoc(output, gp.schemas)
+		d.PageName = manPageName(gp.rootName, names)
+		d.Section = section
+		d.Source = gp.rootDisplay
+		d.Date = date
+		if len(names) > 0 {
+			d.RelatedPages = append(d.RelatedPages, manPageName(gp.rootName, names[:len(names)-1]))
+		}
+		for _, c := range children {
+			if !c.hidden {
+				d.RelatedPages = append(d.RelatedPages, manPageName(gp.rootName, append(slices.Clone(names), c.name)))
+			}
+		}
+		return d
+	}
+
 	out := []helpNode{{
 		prefix:   gp.rootPascal,
-		file:     feat.filePrefix + gp.rootName + feat.ext,
+		file:     file(nil),
 		paths:    []string{""},
 		name:     gp.rootDisplay,
 		verbatim: feat.verbatim(gp.rootHelp),
-		data:     buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootRemotes, nil, gp.envPrefix),
+		data:     withPage(buildHelpData(gp.rootDisplay, gp.rootHelp, gp.rootInputs, gp.tree, gp.rootPlugins, nil, gp.envPrefix), nil, gp.tree, gp.rootOutput),
+		listed:   true,
 	}}
 
-	// cascading carries the cascading flags accumulated from a node's ancestors
-	// (the root's own cascading flags seed the root's children, and so on down).
-	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow)
-	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow) {
+	// cascading accumulates the cascading flags of a node's ancestors.
+	var walk func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool)
+	walk = func(nodes []rnode, identChain [][]string, names []string, cascading []templateDocFlagRow, listed bool) {
 		for _, n := range nodes {
 			seg := append([]string{n.name}, n.aliases...)
 			childChain := append(append([][]string{}, identChain...), seg)
@@ -146,24 +178,69 @@ func flattenFeature(gp *program, feat docFeature) []helpNode {
 			invocation := gp.rootDisplay + " " + strings.Join(childNames, " ")
 			out = append(out, helpNode{
 				prefix:   n.prefix,
-				file:     feat.filePrefix + gp.rootName + "_" + strings.Join(childNames, "_") + feat.ext,
+				file:     file(childNames),
 				paths:    permute(childChain),
 				name:     invocation,
 				verbatim: feat.verbatim(n.help),
-				data:     buildHelpData(invocation, n.help, n.inputs, n.children, n.remotes, cascading, gp.envPrefix),
+				data:     withPage(buildHelpData(invocation, n.help, n.inputs, n.children, n.plugins, cascading, gp.envPrefix), childNames, n.children, n.output),
+				path:     childNames,
+				listed:   listed && !n.hidden,
 			})
 			childCascading := append(append([]templateDocFlagRow{}, cascading...), cascadingFlagsOf(n.inputs)...)
-			walk(n.children, childChain, childNames, childCascading)
+			walk(n.children, childChain, childNames, childCascading, listed && !n.hidden)
 		}
 	}
-	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs))
+	walk(gp.tree, nil, nil, cascadingFlagsOf(gp.rootInputs), true)
 	return out
 }
 
-// completionNodes produces one node per supported shell for the completion
-// feature: keyed by shell name (the resolver case), file
-// completion_<shell>.txt, embed var Completion<Shell>. No doc-data or
-// verbatim — the script comes from completionContents (completionScript per shell).
+// manPageName returns a command's man page name: the root's name and the command path joined
+// with "-", lowercased (taskr, taskr-add, kubectl-ctx-use). It is used for the .TH header, the
+// file and cross-references; display_name does not affect it.
+func manPageName(root string, path []string) string {
+	return strings.ToLower(strings.Join(append([]string{root}, path...), "-"))
+}
+
+// manSection returns the man feature's conf section, or "1" when unset.
+func manSection(conf *Conf) string {
+	if conf != nil && conf.Generate != nil {
+		if f := conf.Generate.featureOf("man"); f != nil && f.Section != 0 {
+			return strconv.Itoa(f.Section)
+		}
+	}
+	return "1"
+}
+
+// manDate returns the man page header date: the UTC day SOURCE_DATE_EPOCH names, or "" when it
+// is unset or invalid. The generation date is never used, so regeneration stays byte-stable.
+func manDate() string {
+	secs, err := strconv.ParseInt(strings.TrimSpace(os.Getenv("SOURCE_DATE_EPOCH")), 10, 64)
+	if err != nil {
+		return ""
+	}
+	return time.Unix(secs, 0).UTC().Format("2006-01-02")
+}
+
+// manPageCollisions reports each command whose man page name repeats an earlier one's, as
+// happens with a "-" in a command name (`notes tag-remove` and `notes tag remove`) or with
+// lowercasing (`Add` and `add`). One page would overwrite the other.
+func manPageCollisions(nodes []helpNode) []error {
+	first := map[string]string{}
+	var problems []error
+	for _, n := range nodes {
+		page := n.data.PageName
+		if prev, ok := first[page]; ok {
+			problems = append(problems, fmt.Errorf("commands %q and %q both have the man page name %q; rename one of them", prev, n.name, page))
+			continue
+		}
+		first[page] = n.name
+	}
+	return problems
+}
+
+// completionNodes returns one completion node per supported shell, keyed by shell name, with
+// file completion_<shell>.txt and embed var Completion<Shell>. Scripts come from
+// completionContents.
 func completionNodes() []helpNode {
 	out := make([]helpNode, 0, len(completionShells))
 	for _, sh := range completionShells {
@@ -177,12 +254,10 @@ func completionNodes() []helpNode {
 	return out
 }
 
-// resolveHeadings applies the section-heading defaults, overriding with any set
-// in the spec.
+// resolveHeadings returns the default section headings, overridden by any set in the spec.
 func resolveHeadings(h cmdHelp) templateDocHeadings {
-	// Defaults carry the trailing ":" so an override is rendered verbatim — a spec
-	// author can drop or restyle the colon (the template adds nothing).
-	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:"}
+	// Defaults carry the trailing ":" so an override renders verbatim, colon or not.
+	hd := templateDocHeadings{Usage: "Usage:", Commands: "Commands:", Arguments: "Arguments:", Flags: "Flags:", Environment: "Environment:", Configuration: "Configuration:", Cascading: "Global Flags:", Examples: "Examples:", Output: "Output:"}
 	if h.Headings == nil {
 		return hd
 	}
@@ -200,14 +275,14 @@ func resolveHeadings(h cmdHelp) templateDocHeadings {
 	override(&hd.Configuration, o.Configuration)
 	override(&hd.Cascading, o.Cascading)
 	override(&hd.Examples, o.Examples)
+	override(&hd.Output, o.Output)
 	return hd
 }
 
-// buildHelpData assembles the template context for one command from its help
-// fields, inputs, direct children, and remote sub-commands. Hidden
-// children/inputs are excluded; remotes join the Commands list (they dispatch
-// like any sub-command).
-func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, remotes []RemoteCommandSpec, ancestorCascading []templateDocFlagRow, envPrefix string) templateHelpData {
+// buildHelpData assembles the template data for one command from its doc fields, inputs,
+// direct children and plugins. Hidden children and inputs are excluded; plugins are listed
+// with the commands.
+func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnode, plugins []PluginSpec, ancestorCascading []templateDocFlagRow, envPrefix string) templateHelpData {
 	d := templateHelpData{
 		Invocation:  invocation,
 		Headings:    resolveHeadings(h),
@@ -221,15 +296,15 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 		SeeAlso:     h.SeeAlso,
 	}
 	for _, e := range h.ExitStatus {
-		d.ExitStatus = append(d.ExitStatus, templateDocExitRow(e))
+		d.ExitStatus = append(d.ExitStatus, templateDocExitRow{Code: e.Code, Summary: e.Summary, Output: shapeTypeName(e.Output)})
 	}
 	var cmds []templateDocCommandRow
 	for _, c := range children {
 		if c.hidden {
 			continue
 		}
-		// The command's own name is always current (deprecated_identifiers names aliases only),
-		// so it goes through with them and comes back off the front.
+		// The command name is never deprecated (deprecated_identifiers names aliases only); it
+		// rides at the front and is sliced off.
 		names, deprecated := undeprecated(append([]string{c.name}, c.aliases...), c.deprecatedIdentifiers, c.deprecated)
 		aliases := names[1:]
 		cmds = append(cmds, templateDocCommandRow{
@@ -240,7 +315,7 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			Deprecated: deprecated,
 		})
 	}
-	for _, r := range remotes {
+	for _, r := range plugins {
 		cmds = append(cmds, templateDocCommandRow{
 			Name:    r.Name,
 			Summary: r.Summary,
@@ -299,24 +374,20 @@ func buildHelpData(invocation string, h cmdHelp, inputs *Inputs, children []rnod
 			})
 		}
 	}
-	// After the flag rows exist, not before: grouping reads d.Flags.
 	d.FlagGroups = groupFlags(d.Flags)
-	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(remotes) > 0)
+	d.UsageDerived = deriveUsage(invocation, inputs, hasVisibleChildren(children) || len(plugins) > 0)
 	return d
 }
 
-// envVarLabel is the environment variable an env input reads: its explicit
-// schema.variable, else the snake-upper form of its logical name (mirroring the
-// binder's default key→env-var derivation, e.g. "apiKey" → "API_KEY").
+// envVarLabel returns the environment variable(s) an env input reads, for display: the names
+// envVarName produces (the same ones the generated `env:` tag pins), comma-separated with a
+// space, first preferred.
 func envVarLabel(e EnvInput, envPrefix string) string {
-	// One derivation, shared with the `env:` tag the binder pins — see [envVarFor]. Several
-	// names read as a list, first preferred.
 	return strings.ReplaceAll(envVarName(e, envPrefix), ",", ", ")
 }
 
-// configLocation is where a config input is read from, for display: "<file>.<key>"
-// when a source file is named, the bare key when an explicit key differs from the
-// logical name, or "" when the input reads from its own name (nothing to add).
+// configLocation returns where a config input is read from, for display: "<file>.<key>" when a
+// source file is named, the explicit key when one is set, else "".
 func configLocation(c ConfigInput) string {
 	if c.Schema == nil {
 		return ""
@@ -335,9 +406,8 @@ func configLocation(c ConfigInput) string {
 	}
 }
 
-// groupCommands buckets command rows by Group, preserving the order in which each group first
-// appears. Ungrouped rows form a bucket with an empty Title, which each template heads with
-// its own default, so a spec that declares no groups renders one bucket of every command.
+// groupCommands buckets command rows by Group in first-appearance order. Ungrouped rows form a
+// bucket with an empty Title, which templates head with their default heading.
 func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
 	var groups []templateDocCommandGroup
 	for title, members := range groupByTitle(rows, func(r templateDocCommandRow) string { return r.Group }) {
@@ -346,10 +416,7 @@ func groupCommands(rows []templateDocCommandRow) []templateDocCommandGroup {
 	return groups
 }
 
-// groupFlags buckets flag rows by Group, the same way groupCommands buckets commands:
-// first-appearance order, and an ungrouped bucket with an empty Title that the template heads
-// with its default Flags heading. A command declaring no flag groups therefore renders exactly
-// one bucket — identical output to before the key existed.
+// groupFlags buckets flag rows by Group the same way groupCommands buckets commands.
 func groupFlags(rows []templateDocFlagRow) []templateDocFlagGroup {
 	var groups []templateDocFlagGroup
 	for title, members := range groupByTitle(rows, func(r templateDocFlagRow) string { return r.Group }) {
@@ -384,8 +451,8 @@ func groupByTitle[T any](rows []T, group func(T) string) iter.Seq2[string, []T] 
 	}
 }
 
-// snakeUpper converts a logical name to the conventional SCREAMING_SNAKE_CASE env-var
-// form: word boundaries are '-'/'_'/' ' and lower→upper case transitions.
+// snakeUpper converts a logical name to SCREAMING_SNAKE_CASE. Word boundaries are '-', '_',
+// ' ' and a lower-to-upper (or digit-to-upper) transition.
 func snakeUpper(name string) string {
 	var b strings.Builder
 	var prev rune
@@ -404,12 +471,10 @@ func snakeUpper(name string) string {
 	return b.String()
 }
 
-// undeprecated is what a help row shows of the names a command or flag answers to. With
-// deprecated_identifiers, the deprecation belongs to THOSE spellings, not to the command or
-// flag: the run warns only when one of them is used. So the row leaves them out — they still
-// work, and still warn — and carries no deprecation marker, since what it lists is current.
-// Only when every name is deprecated does the row list them all and keep the marker. Without
-// deprecated_identifiers, the message deprecates the whole thing and is shown as is.
+// undeprecated returns the names a help row shows for a command or flag, and its deprecation
+// message. With deprecated_identifiers, those spellings are omitted and the row has no marker,
+// since the deprecation applies only to them; if every name is deprecated, all are listed with
+// the message. Without deprecated_identifiers, names and message pass through unchanged.
 func undeprecated(names, deprecatedIDs []string, message string) ([]string, string) {
 	if len(deprecatedIDs) == 0 {
 		return names, message
@@ -426,8 +491,7 @@ func undeprecated(names, deprecatedIDs []string, message string) ([]string, stri
 	return kept, ""
 }
 
-// flagRow builds the help-row for a single flag (shared by a command's own Flags
-// section and the Cascading section it contributes to its descendants).
+// flagRow builds the help row for a flag, used by both the Flags and Cascading sections.
 func flagRow(f FlagInput) templateDocFlagRow {
 	ids, deprecated := undeprecated(flagIdentifiers(f), f.DeprecatedIdentifiers, f.Deprecated)
 	row := templateDocFlagRow{
@@ -440,8 +504,8 @@ func flagRow(f FlagInput) templateDocFlagRow {
 		Enum:        enumOf(f.Schema),
 		Deprecated:  deprecated,
 	}
-	// An optional value is written attached, so the row says so: `-c, --color[=when]`, with the
-	// value token moved inside the brackets on the last identifier.
+	// An implicit value must be attached, so the value token moves into brackets on the last
+	// identifier: `-c, --color[=when]`.
 	if f.Schema != nil && f.Schema.ImplicitValue != nil {
 		row.Implicit = defaultString(f.Schema.ImplicitValue)
 		if n := len(row.Identifiers); n > 0 && row.Type != "" {
@@ -452,9 +516,8 @@ func flagRow(f FlagInput) templateDocFlagRow {
 	return row
 }
 
-// cascadingFlagsOf returns the help-rows for a command's own flags marked
-// cascading: true (and not hidden) — the flags it advertises on its descendants'
-// pages. Order follows declaration order, matching the Flags section.
+// cascadingFlagsOf returns help rows for a command's visible cascading flags, in declaration
+// order, for its descendants' pages.
 func cascadingFlagsOf(inputs *Inputs) []templateDocFlagRow {
 	if inputs == nil {
 		return nil
@@ -469,9 +532,9 @@ func cascadingFlagsOf(inputs *Inputs) []templateDocFlagRow {
 	return rows
 }
 
-// deriveUsage builds the default usage line: invocation, a <command> slot when
-// the node has visible children, each visible argument decorated, then [flags]
-// when the node has visible flags.
+// deriveUsage builds the default usage line: the invocation, a <command> slot when there are
+// visible children, each visible argument (<required> or [optional], "..." when variadic), then
+// [flags] when there are visible flags.
 func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 	var b strings.Builder
 	b.WriteString(invocation)
@@ -485,7 +548,7 @@ func deriveUsage(invocation string, inputs *Inputs, hasChildren bool) string {
 			}
 			name := a.Name
 			if a.Schema != nil && a.Schema.Placeholder != "" {
-				name = a.Schema.Placeholder // the <>/[]/… decoration still applies
+				name = a.Schema.Placeholder
 			}
 			if isVariadicSchema(a.Schema) {
 				name += "..."
@@ -507,13 +570,13 @@ func isVariadicSchema(schema *InputSchema) bool {
 	return strings.HasPrefix(getSchemaType(schema), "[]")
 }
 
-// flagDisplayType returns the value token shown after a flag's identifiers in
-// help/man: the declared placeholder when set, else the resolved type; "" for
-// bool flags (which take no value).
+// flagDisplayType returns the value token shown after a flag's identifiers in docs: the
+// placeholder when set, else the display type name; "" for bool and count flags, which take no
+// value.
 func flagDisplayType(schema *InputSchema) string {
 	t := getSchemaType(schema)
 	if t == "bool" || (schema != nil && schema.Type == "count") {
-		return "" // presence flags take no value token
+		return ""
 	}
 	if schema != nil && schema.Placeholder != "" {
 		return schema.Placeholder
@@ -530,18 +593,17 @@ func flagDisplayType(schema *InputSchema) string {
 	return t
 }
 
-// valueTypeAliases are the rotini type names that name a KIND of value — a duration, a URL, a
-// size — rather than a Go shape. Help shows them as the spec wrote them: `--timeout duration`
-// tells the user what to type, where `--timeout time.Duration` tells them how the program
-// stores it.
+// valueTypeAliases are the rotini type names that name a kind of value (a duration, a URL, a
+// size) rather than a Go type. Docs show them as written: `--timeout duration`, not
+// `--timeout time.Duration`.
 var valueTypeAliases = []string{
 	"duration", "time", "datetime", "date",
 	"url", "email", "timezone", "mac", "ip", "cidr", "hostport",
 	"bytesize", "hexbytes", "base64bytes",
 }
 
-// helpTypeName renders a declared type for a help page: value aliases as written, everything
-// else resolved to Go, inside list and map spellings too — `[]bytesize`, `map[string]duration`.
+// helpTypeName renders a declared type for docs: value aliases as written, everything else
+// resolved to Go, recursing into list and map types (`[]bytesize`, `map[string]duration`).
 func helpTypeName(t string) string {
 	if elem, ok := strings.CutPrefix(t, "[]"); ok {
 		return "[]" + helpTypeName(elem)
@@ -555,8 +617,7 @@ func helpTypeName(t string) string {
 	return jsonSchemaTypeToGo(t)
 }
 
-// schemaDefaultString is the default a help page shows: the author's default_text when set,
-// else the default itself.
+// schemaDefaultString returns the default docs show: default_text when set, else the default.
 func schemaDefaultString(schema *InputSchema) string {
 	if schema == nil {
 		return ""
@@ -574,10 +635,8 @@ func enumOf(schema *InputSchema) []string {
 	return schema.Enum
 }
 
-// negatableIdentifiers is how a flag's identifiers read in generated help. A negatable flag
-// renders its long forms as "--[no-]color" — one row for the pair, which is what every CLI that
-// has the feature does and what makes the negated form discoverable at all. Short forms are
-// untouched: they have no negated spelling.
+// negatableIdentifiers returns a flag's identifiers as docs show them. A negatable flag's long
+// forms render as "--[no-]color"; short forms have no negated spelling and are unchanged.
 func negatableIdentifiers(f FlagInput, ids []string) []string {
 	if f.Schema == nil || !f.Schema.Negatable {
 		return ids
@@ -623,9 +682,8 @@ func hasVisibleFlags(inputs *Inputs) bool {
 	return false
 }
 
-// permute returns every space-joined path through the chain of per-segment
-// identifier sets (name + aliases), so the resolver matches an aliased path. An
-// empty chain (the root) yields the single empty path.
+// permute returns every space-joined path through the chain of per-segment identifier sets
+// (name and aliases), so the resolver matches aliased paths. An empty chain yields [""].
 func permute(chain [][]string) []string {
 	out := []string{""}
 	for _, seg := range chain {
@@ -644,25 +702,40 @@ func permute(chain [][]string) []string {
 	return out
 }
 
-// buildFeatureBlock turns a feature's nodes into the embed vars + resolver
-// cases the framework template emits (one resolver per feature).
+// buildFeatureBlock turns a feature's nodes into the template data for its vars, resolver
+// cases and optional pages list. In embed mode each var is a //go:embed path; otherwise it is
+// an inline string literal from contents.
 func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool, contents []string) templateFeature {
 	h := templateFeature{Resolver: feat.resolver, Noun: feat.noun, PerShell: feat.perShell}
+	if feat.manPages && len(nodes) > 0 {
+		h.Section = nodes[0].data.Section
+	}
+	if feat.pagesFunc != "" {
+		h.PagesFunc = feat.pagesFunc
+		for _, hn := range nodes {
+			if !hn.listed {
+				continue
+			}
+			path := "nil"
+			if len(hn.path) > 0 {
+				path = goStringSlice(hn.path)
+			}
+			h.Pages = append(h.Pages, templateFeaturePage{Name: hn.data.PageName, PathLiteral: path, Var: feat.varPrefix + hn.prefix})
+		}
+	}
 	for i, hn := range nodes {
 		name := feat.varPrefix + hn.prefix
 		v := templateFeatureVar{Name: name}
 		if embed {
-			// A "." dir (the feature dir IS the cmd package dir) embeds the bare
-			// file name — "./x" is not a valid //go:embed pattern.
+			// "./x" is not a valid //go:embed pattern, so a "." dir embeds the bare name.
 			embedPath := hn.file
 			if dir != "" && dir != "." {
 				embedPath = dir + "/" + hn.file
 			}
 			v.Embed = embedPath
 		} else {
-			// Inline: the content rides as a Go string literal in the .go — no
-			// file, no //go:embed. strconv.Quote handles backticks (markdown) and
-			// ANSI/ESC bytes (styled help) that a raw-string literal could not.
+			// strconv.Quote, not a raw string: content may hold backticks (markdown) and
+			// ESC bytes (styled help).
 			v.Literal = strconv.Quote(contents[i])
 		}
 		h.Vars = append(h.Vars, v)
@@ -675,10 +748,10 @@ func buildFeatureBlock(nodes []helpNode, dir string, feat docFeature, embed bool
 	return h
 }
 
-// docFeatureContents returns each command's page for one feature, in node order. A verbatim spec
-// string is used byte-exact; otherwise the page renders from the shared doc-data through the
-// feature's template. The template is loaded — seeding the editable default when missing — only
-// when at least one command renders; writing the pages is the caller's.
+// docFeatureContents returns each node's page for one feature, in node order. A verbatim spec
+// page is used as is (ANSI-stripped for strip features); otherwise the page renders through
+// the feature's template. The template is loaded only when some node renders: from template_dir
+// (seeding it when missing) when seedTemplate is set, else from the built-in default.
 func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedTemplate bool) ([]string, error) {
 	renders := false
 	for _, hn := range nodes {
@@ -692,15 +765,11 @@ func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedT
 	if renders {
 		var err error
 		if seedTemplate {
-			// template:true — seed the editable default to disk (when missing) and
-			// render from it, so the author can customize.
 			if err = os.MkdirAll(featDir, 0o755); err != nil {
 				return nil, fmt.Errorf("create %s dir %s: %w", feat.name, featDir, err)
 			}
 			tmpl, err = loadFeatureTemplate(featDir, feat)
 		} else {
-			// template:false — render from rotini's built-in default in memory; no
-			// editable template is written.
 			tmpl, err = parseDocTemplate(feat.tmplFile, feat.embedded)
 		}
 		if err != nil {
@@ -711,14 +780,14 @@ func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedT
 	contents := make([]string, len(nodes))
 	for i, hn := range nodes {
 		if hn.verbatim != "" {
-			// Verbatim: exactly what the spec supplied — byte-for-byte (the author
-			// controls trailing newlines via YAML). A strip feature (man/markdown)
-			// still removes any ANSI: a verbatim page is no more a terminal surface
-			// than a rendered one.
 			contents[i] = stripForFeature(feat, hn.verbatim)
 			continue
 		}
-		rendered, err := renderDocText(tmpl, hn.data)
+		render := renderDocText
+		if feat.manPages {
+			render = renderManText
+		}
+		rendered, err := render(tmpl, hn.data)
 		if err != nil {
 			return nil, fmt.Errorf("render %s for %q: %w", feat.name, hn.name, err)
 		}
@@ -727,8 +796,7 @@ func docFeatureContents(featDir string, nodes []helpNode, feat docFeature, seedT
 	return contents, nil
 }
 
-// completionContents computes each shell's completion script (no template, no
-// ANSI strip — a script is not a styled surface), parallel to nodes.
+// completionContents returns each node's shell completion script, parallel to nodes.
 func completionContents(prog string, nodes []helpNode) ([]string, error) {
 	contents := make([]string, len(nodes))
 	for i, n := range nodes {
@@ -741,9 +809,8 @@ func completionContents(prog string, nodes []helpNode) ([]string, error) {
 	return contents, nil
 }
 
-// writeFeatureOutputs writes each node's precomputed content to its file under
-// featDir — used ONLY in embed mode (//go:embed). Inline features write no
-// output files: their content lives in the generated .go as a string literal.
+// writeFeatureOutputs writes each node's content to its file under featDir. Only embed-mode
+// features write files; inline content lives in the generated Go source.
 func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, feat docFeature) error {
 	if featDir == "" {
 		return fmt.Errorf("generate.features.%s.embed_dir must not be empty", feat.name)
@@ -759,18 +826,17 @@ func writeFeatureOutputs(featDir string, nodes []helpNode, contents []string, fe
 	return nil
 }
 
-// stripForFeature removes spec-authored ANSI styling from a feature's output
-// when the feature is not a terminal surface (man, markdown). Help
-// keeps its styling; this returns text unchanged for non-strip features.
+// stripForFeature removes ANSI styling from text for strip features (man, markdown) and
+// returns it unchanged otherwise.
 func stripForFeature(feat docFeature, text string) string {
 	if !feat.strip {
 		return text
 	}
-	return rotini.Strip(text)
+	return rotini.StripANSI(text)
 }
 
-// loadFeatureTemplate reads the feature dir's editable template, seeding it from
-// the embedded default when missing, and parses it with the shared FuncMap.
+// loadFeatureTemplate reads the editable template in featDir, seeding it from the built-in
+// default when missing, and parses it with the shared FuncMap.
 func loadFeatureTemplate(featDir string, feat docFeature) (*template.Template, error) {
 	path := filepath.Join(featDir, feat.tmplFile)
 	src, err := os.ReadFile(path)

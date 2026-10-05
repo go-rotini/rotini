@@ -1,0 +1,51 @@
+# R2 — the rotini companion cli's own completion and man commands.
+#
+# The companion prints its shell completion scripts and its man pages from its own generated
+# Completion, Man, ManPages and ManSection: the same functions any rotini CLI gets with those
+# features on, so this is also the working example of them.
+
+# ── completion ───────────────────────────────────────────────────────────────
+exec rotini completion bash
+stdout '_rotini_complete rotini'
+exec rotini completion zsh
+stdout '^#compdef rotini'
+exec rotini completion fish
+stdout 'complete -c rotini'
+exec rotini completion powershell
+stdout 'Register-ArgumentCompleter'
+
+# The help says how to install the script, per shell.
+exec rotini completion --help
+stdout 'source <\(rotini completion bash\)'
+stdout '\$PROFILE'
+
+! exec rotini completion tcsh
+stderr 'invalid value "tcsh" for <shell>'
+
+# ── man: one page ────────────────────────────────────────────────────────────
+exec rotini man
+stdout '^\.TH "ROTINI" 1 "" "rotini" "User Commands"$'
+exec rotini man generate
+stdout '^\.TH "ROTINI\\-GENERATE" 1 '
+stdout '^rotini\\-generate \\- generate a cli program$'
+
+! exec rotini man genrate
+stderr 'did you mean "generate"'
+
+# ── man --dir: every page ────────────────────────────────────────────────────
+exec rotini man --dir share/man/man1
+stdout 'wrote 8 man pages to share/man/man1'
+exists share/man/man1/rotini.1
+exists share/man/man1/rotini-generate.1
+exists share/man/man1/rotini-man.1
+exists share/man/man1/rotini-completion.1
+
+# The written pages are what `rotini man <command>` prints, and a man page checker accepts them.
+exec rotini man completion
+cmp stdout share/man/man1/rotini-completion.1
+[exec:mandoc] exec mandoc -Tlint -W error share/man/man1/rotini.1 share/man/man1/rotini-generate.1 share/man/man1/rotini-completion.1 share/man/man1/rotini-man.1
+[exec:mandoc] ! stdout .
+
+! exec rotini man generate --dir elsewhere
+stderr '--dir writes every page'
+! exists elsewhere

@@ -11,13 +11,9 @@ import (
 	"strings"
 )
 
-// Go-source AST surgery for renderGoFile: regroup a gofmt'd import block into the
-// std / third-party convention.
-
-// groupImports rewrites a file's single gofmt'd import block into the two conventional groups,
-// standard library then third-party, separated by a blank line. gofmt sorts imports but never
-// splits them — that is goimports' job — so this restores the idiom without taking on the
-// x/tools dependency. A file whose imports already fall in one group is returned unchanged.
+// groupImports splits a file's parenthesized import block into standard-library and
+// third-party groups separated by a blank line, as goimports would without the x/tools
+// dependency, then gofmts the file. A block with only one kind of import is left as is.
 func groupImports(src []byte) ([]byte, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "", src, parser.ParseComments)
@@ -32,16 +28,13 @@ func groupImports(src []byte) ([]byte, error) {
 		}
 	}
 
-	// Rearrange only when there is a parenthesized block holding both a standard-
-	// library and a third-party group; otherwise the block is already conventional
-	// and gofmt-formatted as-is below.
 	out := src
 	if decl != nil && len(decl.Specs) >= 2 {
 		var std, third []string
 		for _, s := range decl.Specs {
 			is, ok := s.(*ast.ImportSpec)
 			if !ok {
-				continue // an IMPORT decl holds only ImportSpecs
+				continue
 			}
 			spec := is.Path.Value
 			if is.Name != nil {
@@ -85,9 +78,8 @@ func groupImports(src []byte) ([]byte, error) {
 	return formatted, nil
 }
 
-// isThirdPartyImport reports whether a quoted import path is a third-party package —
-// its first path segment contains a "." (e.g. "github.com/..."). Standard-library
-// paths ("fmt", "text/template", "embed") have no dot in the first segment.
+// isThirdPartyImport reports whether a quoted import path is third-party, meaning its first
+// path segment contains a "." (e.g. "github.com/...").
 func isThirdPartyImport(quotedPath string) bool {
 	p := strings.Trim(quotedPath, `"`)
 	if i := strings.IndexByte(p, '/'); i >= 0 {

@@ -7,27 +7,23 @@ import (
 	"strings"
 )
 
-// Emit-time orphan pruning that keeps regeneration idempotent: drop generated files
-// (stubs, feature pages) that no longer correspond to anything in the spec.
+// Orphan pruning keeps regeneration idempotent: generated files (stubs, feature pages) that no
+// longer correspond to anything in the spec are removed. A file rotini did not write is never
+// removed.
 
-// pruneStubs removes handler .go files in the cmd package that no longer correspond to an own
-// command, preserving the generated cli file, the keep list, and any test files. When the
-// entrypoint shares the cmd package, its create-once main.go is protected too.
-//
-// Only files rotini itself could have WRITTEN are candidates — see stubLooksGenerated. A
-// hand-written helper in the same package is never touched, whatever it is called.
+// pruneStubs removes handler stubs in the cmd package that no longer correspond to an own
+// command. The generated file, keep-listed files, test files, a co-located main.go and a
+// co-located models file are protected. Only files stubLooksGenerated accepts are candidates.
 func pruneStubs(gp *program, lay layout, keepList []string, onPrune func(string)) error {
 	protected := map[string]bool{lay.cmdFile: true}
 	if lay.entrypointDir == lay.cmdDir && lay.entrypointFile != "" {
 		protected[lay.entrypointFile] = true
 	}
-	// A models file sharing this directory is generated, not an orphan — without
-	// this it is written and then immediately pruned.
 	if lay.splitModels && lay.modelsDir == lay.cmdDir {
 		protected[lay.modelsFile] = true
 	}
-	// A stub still under its old dashed name is the command's handler too, never an orphan:
-	// pruning it would delete the user's code (see dashedStubFilename).
+	// A stub still under its legacy dashed name is the command's handler (see
+	// dashedStubFilename).
 	for _, c := range gp.ownCommands() {
 		protected[c.filename] = true
 		if c.dashedFilename != "" {
@@ -54,16 +50,10 @@ func pruneEntrypoint(lay layout, keepList []string, onPrune func(string)) error 
 	return pruneGoDir(lay.entrypointDir, protected, onPrune)
 }
 
-// pruneGoDir removes the ORPHANED GENERATED STUBS in dir: non-test .go files that are not
-// protected AND that rotini itself wrote. Sub-directories and *_test.go files are never
-// touched, and neither is anything a human wrote.
-//
-// The "rotini wrote it" test is the point. Pruning used to remove every unprotected .go file,
-// so a helper placed beside the handlers that use it — the obvious home for a shared
-// registry key — was deleted by the next `go generate`, silently, with the build failure as
-// the first sign anything had happened. `keep:` was the only remedy; now it is rarely needed.
-//
-// Every pruned file is reported through onPrune. Removing a file is not a silent operation.
+// pruneGoDir removes the orphaned generated stubs in dir: non-test .go files that are not
+// protected and that stubLooksGenerated identifies as rotini-written. Sub-directories,
+// *_test.go files and hand-written files are never touched. Every removal is reported through
+// onPrune.
 func pruneGoDir(dir string, protected map[string]bool, onPrune func(string)) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -83,7 +73,7 @@ func pruneGoDir(dir string, protected map[string]bool, onPrune func(string)) err
 			return err
 		}
 		if !generated {
-			continue // a hand-written file: not rotini's to remove
+			continue
 		}
 		if err := os.Remove(path); err != nil {
 			return fmt.Errorf("prune %s: %w", name, err)
@@ -95,13 +85,16 @@ func pruneGoDir(dir string, protected map[string]bool, onPrune func(string)) err
 	return nil
 }
 
-// stubMarker is the line every generated handler stub is written with (see
-// templates/handler.go.tmpl). Its presence is what identifies a file as one rotini created,
-// and an author who deletes the line has said the file is theirs.
-const stubMarker = "var _ rotini.Handlers = ("
+// stubMarker is the line every generated handler stub carries (templates/handler.go.tmpl). It
+// identifies a file as rotini-written; deleting the line claims the file for the author.
+const stubMarker = "var _ rotini.Handler = ("
 
-// stubLooksGenerated reports whether path is a handler stub rotini wrote. A file that cannot
-// be read is treated as NOT generated: the safe answer when deleting is "leave it".
+// legacyStubMarker is stubMarker as written before v1.2.0, when the interface was Handlers.
+// Recognizing it keeps those stubs prunable after an upgrade.
+const legacyStubMarker = "var _ rotini.Handlers = ("
+
+// stubLooksGenerated reports whether path is a handler stub rotini wrote. A missing file
+// reports false.
 func stubLooksGenerated(path string) (bool, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -110,23 +103,50 @@ func stubLooksGenerated(path string) (bool, error) {
 		}
 		return false, fmt.Errorf("read %s to decide whether it is a generated stub: %w", path, err)
 	}
-	return strings.Contains(string(body), stubMarker), nil
+	return strings.Contains(string(body), stubMarker) || strings.Contains(string(body), legacyStubMarker), nil
 }
 
-// pruneFeatureOutputs removes each enabled feature's orphaned pages — those for commands no
-// longer in the spec. Only files matching the feature's unique prefix and suffix are
-// candidates, so features sharing one embed dir never prune each other's files. The editable
-// template, test files, keep-listed paths and top-level cmd package files are preserved.
+// owns reports whether a file in the feature's embed_dir is one this feature writes, and so
+// one pruning may remove.
+//
+// Most features own files with their prefix and extension (help_*.txt). The man feature owns
+// <page-name>.<section> files for the root page or its sub-pages with a single-digit section
+// (taskr.1, taskr-add.8), which also catches pages left by a section change, plus the
+// pre-v1.2.0 man_<root>*.txt files.
+func (o featureOutput) owns(name string) bool {
+	if o.desc.manPages {
+		if len(o.nodes) == 0 {
+			return false
+		}
+		root := o.nodes[0].data.PageName
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(lower, "man_"+root) && strings.HasSuffix(lower, ".txt") {
+			return true
+		}
+		base, section, ok := strings.Cut(name, ".")
+		if !ok || len(section) != 1 || section[0] < '1' || section[0] > '9' {
+			return false
+		}
+		return base == root || strings.HasPrefix(base, root+"-")
+	}
+	if !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
+		return false
+	}
+	return o.desc.filePrefix == "" || strings.HasPrefix(name, o.desc.filePrefix)
+}
+
+// pruneFeatureOutputs removes each enabled feature's orphaned pages. Only files the feature
+// owns are candidates, so features sharing an embed_dir never prune each other's files.
+// Keep-listed paths are preserved, and the editable template lives in template_dir, outside
+// the scan.
 func pruneFeatureOutputs(lay layout, keepList []string, outputs []featureOutput) error {
 	keep := make(map[string]bool, len(keepList))
 	for _, k := range keepList {
 		keep[filepath.ToSlash(k)] = true
 	}
 	for _, o := range outputs {
-		// Pruning scans the embed_dir for stale output files. The editable template
-		// lives in template_dir, so it is never a candidate. The current command set's
-		// pages are protected only in embed mode: an inline feature writes none, so any
-		// on disk are stale.
+		// Current pages are protected only in embed mode: an inline feature writes no
+		// pages, so any on disk are stale.
 		protected := map[string]bool{}
 		if o.embed {
 			for _, n := range o.nodes {
@@ -143,16 +163,13 @@ func pruneFeatureOutputs(lay layout, keepList []string, outputs []featureOutput)
 		}
 		for _, e := range entries {
 			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, o.desc.ext) || strings.HasSuffix(name, "_test"+o.desc.ext) {
-				continue
-			}
-			if o.desc.filePrefix != "" && !strings.HasPrefix(name, o.desc.filePrefix) {
+			if e.IsDir() || !o.owns(name) {
 				continue
 			}
 			if protected[name] {
 				continue
 			}
-			// keep entries are package-relative (to the cmd package).
+			// keep entries are relative to the cmd package.
 			rel := name
 			if r, err := filepath.Rel(lay.cmdDir, filepath.Join(o.absEmbedDir, name)); err == nil {
 				rel = filepath.ToSlash(r)

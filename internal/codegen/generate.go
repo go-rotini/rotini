@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -10,73 +11,65 @@ import (
 	"strings"
 )
 
-// This file is the spine of the GENERATE stage: a validated spec + conf resolve into a
-// [program] (resolveProgram), and program.generate() runs the emit steps in order. The
-// step methods (emitSchemas/emitCmdFile/…) live here; the generate_* files
-// are the renderers and writers those steps call.
+// This file drives the generate stage: resolveProgram turns a validated spec and conf
+// into a [program], and program.generate runs the emit steps in order. The other
+// generate_* files hold the renderers and writers those steps call.
 
-// GenerateFn is the signature of [Processor.Generate]. A command handler binds it
-// under a registry key and fetches it as an injectable service, so tests substitute a
-// double.
+// GenerateFn is the signature of [Processor.Generate]. Command handlers fetch it as an
+// injectable service so tests can substitute a double.
 type GenerateFn = func(specPath, confPath string, watch bool, onGenerate func(result string, err error), onNotices func(notices []error)) error
 
-// Generated programs reference the rotini runtime package under this name in
-// rendered literals (the Definition, BindMeta, …); the templates hardcode the
-// matching import.
+// rotiniPkgName is the package name rendered literals use to reference the rotini
+// runtime. The templates hardcode the matching import.
 const rotiniPkgName = "rotini"
 
-// runtimeImport is the import line the generated code carries for the rotini
-// runtime, whose symbols it references under [rotiniPkgName]. The runtime is an
-// ordinary library dependency (`go get github.com/go-rotini/rotini`), not emitted
-// code, so the path is fixed and needs no alias — the package IS `rotini`.
+// runtimeImport is the generated code's import line for the rotini runtime. The
+// package name matches [rotiniPkgName], so no alias is needed.
 const runtimeImport = `"github.com/go-rotini/rotini"`
 
-// program is the CLI fully resolved from a spec and conf and ready to emit: the command tree,
-// the output layout, and the module it is written into. It is the spine of the generate stage
-// — resolveProgram builds it, and its generate method runs the emit steps in order.
+// program is the CLI fully resolved from a spec and conf and ready to emit: the command
+// tree, the output layout, and the module it is written into. resolveProgram builds it;
+// generate runs the emit steps.
 type program struct {
-	// pruned names the orphaned generated stubs this pass removed, surfaced to the caller
-	// as notices. Deleting a file the author can see is not a silent operation.
+	// pruned names the orphaned generated files this pass removed, reported as notices.
 	pruned []string
 
-	// skipPrune leaves orphaned stubs in place. `rotini init` sets it: init never deletes a file.
+	// skipPrune leaves orphaned files in place. `rotini init` sets it: init never deletes a file.
 	skipPrune bool
 
-	// auditWarnings are what auditHooks found in the handler files rotini does not own — a
-	// method that looks like a lifecycle hook but is not one, or a call acquiring another
-	// command's inputs type. Surfaced as notices alongside pruned, never as an error: both
-	// are legal Go.
+	// auditWarnings are auditHooks findings in user-owned handler files: a method that
+	// resembles a lifecycle hook but is not one, or a call acquiring another command's
+	// inputs type. Reported as notices, never errors, since both are legal Go.
 	auditWarnings []error
 
-	// handlerImports are the Go import paths a spec's `handler:` blocks point at — the
-	// bring-your-own seam, where an author writes a Handlers implementation by hand. The
-	// hook audit reads the ones inside this module; see auditHooks.
+	// handlerImports are the import paths named by the spec's `handler:` blocks. auditHooks
+	// reads the ones inside this module.
 	handlerImports map[string]bool
 
-	// inputs — the validated spec + conf and where the spec was read from.
+	// Inputs: the validated spec and conf, and the spec's path.
 	spec     *Spec
 	conf     *Conf
 	specPath string
 
-	// context — where the program lives and where its output goes.
+	// Context: the owning module and the resolved output locations.
 	module module // the Go module the spec belongs to (root dir + import path)
 	layout layout // resolved output locations (the cmd package, the models file, the entrypoint)
 
-	// resolved command tree — spec (+ $ref composition) → the model the renderers consume.
+	// Resolved command tree: the spec, with $ref children composed, as the renderers consume it.
 	rootName        string
 	rootDisplay     string // the name rendered pages show: display_name, else rootName
 	rootPascal      string
 	rootInputs      *Inputs
-	rootRemotes     []RemoteCommandSpec // root-level remote/co-located sub-commands
-	rootHelp        cmdHelp             // root command's flattened help fields
-	rootOutput      *Schema             // root command's output type (nil when unset)
-	rootDiscovery   *RemoteDiscovery    // root command's plugin discovery (nil = off)
-	rootPluginPath  string              // root command's extra plugin directory (both remote kinds)
-	rootPassthrough bool                // root command's passthrough (raw positionals)
-	schemas         map[string]Schema   // document-level named schemas (for output codegen)
-	configFiles     []scopedConfigFile  // per-command config-file sources, tagged with their command path (for the binder's cascade)
-	envPrefix       string              // document-level env_prefix for DERIVED env-var names
-	adoptedPrefixes map[string]string   // env_prefix → child root name, from composed children (see resolveEnvPrefix)
+	rootPlugins     []PluginSpec       // root-level declared plugins
+	rootHelp        cmdHelp            // root command's flattened help fields
+	rootOutput      *Schema            // root command's output type (nil when unset)
+	rootDiscovery   *PluginDiscovery   // root command's plugin discovery (nil = off)
+	rootPluginPath  string             // root command's extra plugin directory (both kinds of plugin)
+	rootPassthrough bool               // root command's passthrough (raw positionals)
+	schemas         map[string]Schema  // document-level named schemas (for output codegen)
+	configFiles     []scopedConfigFile // per-command config-file sources, tagged with their command path (for the input reader's cascade)
+	envPrefix       string             // document-level env_prefix for DERIVED env-var names
+	adoptedPrefixes map[string]string  // env_prefix → child root name, from composed children (see resolveEnvPrefix)
 
 	root         genCommand               // the root command (own)
 	own          []genCommand             // inline sub-commands, sorted by prefix
@@ -84,8 +77,8 @@ type program struct {
 	tree         []rnode                  // full resolved tree (own + grafted), for the Definition
 	childImports []templateHandlersImport // unique child cli imports for the rollup
 
-	// resolved doc/completion features — embedded into the cmd file (featureBlocks) and
-	// written as their own pages (featureOutputs).
+	// Resolved doc/completion features: blocks embedded in the cmd file (featureBlocks) and
+	// per-command pages written to disk (featureOutputs).
 	featureBlocks  []templateFeature
 	featureOutputs []featureOutput
 }
@@ -97,10 +90,9 @@ type module struct {
 	path string // module import path (from go.mod)
 }
 
-// resolveProgram resolves a validated spec + conf into a program ready to emit: it finds
-// the module, resolves the command tree (expanding any $ref children), resolves the
-// output layout, and resolves the enabled doc/completion features — everything the
-// program's generate() steps need.
+// resolveProgram resolves a validated spec and conf into a program ready to emit: it
+// finds the module, resolves the command tree (expanding $ref children), the output
+// layout, and the enabled doc/completion features.
 func resolveProgram(spec *Spec, conf *Conf, specPath string) (*program, error) {
 	root, name, err := findModule()
 	if err != nil {
@@ -119,14 +111,14 @@ func resolveProgram(spec *Spec, conf *Conf, specPath string) (*program, error) {
 	return p, nil
 }
 
-// generate emits the program — the ordered codegen process. Each step is a method below;
-// reading this list top to bottom IS reading what `rotini generate` does.
+// generate runs the emit steps of `rotini generate` in order, stopping at the first error.
 func (p *program) generate() error {
 	steps := []struct {
 		name string
 		do   func() error
 	}{
 		{"emit schemas", p.emitSchemas},
+		{"emit contract", p.emitContract},
 		{"emit models file", p.emitModelsFile},
 		{"emit cmd file", p.emitCmdFile},
 		{"emit feature outputs", p.emitFeatures},
@@ -145,14 +137,13 @@ func (p *program) generate() error {
 
 // ─── the generate steps ─────────────────────────────────────────────────────────.
 
-// emitSchemas writes rotini's embedded JSON Schemas to the project (opt-in via
-// generate.schemas), before codegen so an editor $schema= reference resolves even on a
-// pass that later fails. These files are never pruned.
+// emitSchemas writes rotini's embedded JSON Schemas when generate.schemas is set. It runs
+// first so an editor's $schema reference resolves even if a later step fails.
 func (p *program) emitSchemas() error { return writeSchemas(p.conf, p.module.root) }
 
 // emitModelsFile writes the typed input/output structs to their own package when the
-// conf declares a `models` target. Without one this is a no-op and the types stay in
-// the cmd file, which is the default and the common case.
+// conf declares a `models` target. Otherwise it is a no-op and the types stay in the
+// cmd file.
 func (p *program) emitModelsFile() error {
 	if !p.layout.splitModels {
 		return nil
@@ -175,8 +166,7 @@ func (p *program) emitModelsFile() error {
 	return writeGeneratedFile(filepath.Join(p.layout.modelsDir, p.layout.modelsFile), content)
 }
 
-// emitCmdFile renders + writes the one generated cmd file (framework + rollup + typed
-// inputs + feature embeds), beside the editable handler stubs.
+// emitCmdFile renders and writes the generated cmd file.
 func (p *program) emitCmdFile() error {
 	content, err := renderCmdFile(p, p.layout, p.featureBlocks)
 	if err != nil {
@@ -185,8 +175,8 @@ func (p *program) emitCmdFile() error {
 	return writeGeneratedFile(filepath.Join(p.layout.cmdDir, p.layout.cmdFile), content)
 }
 
-// emitFeatures writes each EMBED-mode feature's per-command pages (help/man/completion);
-// inline features carry their content in the cmd file, so they write nothing here.
+// emitFeatures writes the per-command pages of each embed-mode feature. Inline features
+// carry their content in the cmd file and write nothing here.
 func (p *program) emitFeatures() error {
 	for _, o := range p.featureOutputs {
 		if !o.embed {
@@ -199,19 +189,18 @@ func (p *program) emitFeatures() error {
 	return nil
 }
 
-// emitStubs creates a missing handler stub per command (create-once — the end-user wires
-// them); an existing stub is never overwritten.
+// emitStubs creates each missing handler stub. Existing stubs are never overwritten.
 func (p *program) emitStubs() error { return writeHandlerStubs(p, p.layout) }
 
-// emitEntrypoint writes the binary's main.go when the conf declares an entrypoint
-// (create-once). The spec/conf extension is baked into its //go:generate directive.
+// emitEntrypoint writes the binary's main.go, create-once, when the conf declares an
+// entrypoint.
 func (p *program) emitEntrypoint() error {
 	return writeEntrypoint(p.layout, string(detectFileFormat(p.specPath)))
 }
 
-// prune drops orphaned generated files — stubs and feature pages no longer in the spec —
-// sparing each package's `keep` paths (and test files + editable templates). When the
-// entrypoint shares the cmd directory its keep list folds into that one pass.
+// prune deletes generated stubs and feature pages the spec no longer declares, sparing
+// each package's `keep` paths. When the entrypoint shares the cmd directory, its keep
+// list is merged into the cmd pass.
 func (p *program) prune() error {
 	if p.skipPrune {
 		return nil
@@ -247,6 +236,13 @@ func (p *program) resolveFeatures() error {
 		} else {
 			nodes = flattenFeature(p, f.desc)
 		}
+		if f.desc.manPages {
+			// validate checks a single spec; this also covers commands composed from other
+			// specs, which exist only once the tree is assembled.
+			if problems := manPageCollisions(nodes); len(problems) > 0 {
+				return errors.Join(problems...)
+			}
+		}
 		absEmbedDir := filepath.Join(p.module.root, filepath.FromSlash(f.cfg.EmbedDir))
 		absTemplateDir := filepath.Join(p.module.root, filepath.FromSlash(f.cfg.TemplateDir))
 
@@ -279,11 +275,9 @@ func (p *program) resolveFeatures() error {
 	return nil
 }
 
-// writeSchemas writes rotini's embedded JSON Schemas to the module-root-relative paths
-// declared under generate.schemas, so an editor's `$schema` reference can resolve locally
-// instead of fetching a remote URL. The bytes are written verbatim and left untouched on a
-// no-op pass, keeping mtime stable. These files are never pruned: they are not
-// command-derived, and .json matches no prune set.
+// writeSchemas writes rotini's embedded JSON Schemas verbatim to the module-root-relative
+// paths under generate.schemas, so an editor's `$schema` reference resolves locally. These
+// files are never pruned.
 func writeSchemas(conf *Conf, moduleRoot string) error {
 	if conf.Generate == nil || conf.Generate.Schemas == nil {
 		return nil
@@ -315,8 +309,8 @@ type confFeature struct {
 	cfg  *Feature
 }
 
-// featureOutput is one enabled feature's resolved absolute output dir +
-// per-command nodes, used for writing and pruning its output dir.
+// featureOutput is one enabled feature's resolved output directory and per-command
+// content, used to write and prune that directory.
 type featureOutput struct {
 	desc        docFeature
 	absEmbedDir string // where rendered output files are written (embed mode)
@@ -325,8 +319,8 @@ type featureOutput struct {
 	embed       bool     // true: write contents to files (//go:embed); false: inline in the .go, write no output files
 }
 
-// featureConfigs pairs every doc feature with its conf entry (nil when unset).
-// Requires conf.Generate to be non-nil (guaranteed after applyConfDefaults).
+// featureConfigs pairs every doc feature with its conf entry (nil when unset). It returns
+// nil when conf.Generate is nil.
 func featureConfigs(conf *Conf) []confFeature {
 	g := conf.Generate
 	if g == nil {
@@ -340,7 +334,7 @@ func featureConfigs(conf *Conf) []confFeature {
 	}
 }
 
-// enabledFeatures returns the doc features toggled on, in help→man order.
+// enabledFeatures returns the enabled doc features in help, man, markdown, completion order.
 func enabledFeatures(conf *Conf) []confFeature {
 	var out []confFeature
 	for _, f := range featureConfigs(conf) {
@@ -351,17 +345,15 @@ func enabledFeatures(conf *Conf) []confFeature {
 	return out
 }
 
-// renderCmdFile renders the single generated cli file: the framework (the ProgramHandlers
-// interface, the typed input structs, the Definition, NewProgram, BindMeta) and the rollup
-// (the handlers struct, Program, Handlers, and the per-command wiring). It is fully generated
-// and carries a DO NOT EDIT banner; the editable stubs are separate create-once files in the
-// same package.
+// renderCmdFile renders the generated cmd file: the ProgramHandlers interface, the typed
+// input structs, the Definition, NewProgram, InputSettings, and the rollup (the handlers
+// struct, Program, Handlers, and per-command wiring). Handler stubs are separate
+// create-once files in the same package.
 func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte, error) {
 	blocks, imports := inputBlocks(gp)
 
-	// When a models target moved the typed structs to their own package, this file
-	// carries neither them nor their imports — only aliases re-exporting them, so
-	// handler code in this package reads identically either way.
+	// With a models target the typed structs live in their own package; this file carries
+	// only aliases re-exporting them, so handler code reads the same either way.
 	var modelsImport string
 	var aliases []string
 	outputTypes := ""
@@ -374,6 +366,12 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		if outputTypes, err = buildOutputTypes(gp, lay.cmdPkgName); err != nil {
 			return nil, err
 		}
+	}
+	if declaresOutput(gp) { // the Definition records each output's Go type
+		if imports == nil {
+			imports = map[string]bool{}
+		}
+		imports["reflect"] = true
 	}
 
 	return renderRotiniFile(templateRotiniData{
@@ -391,14 +389,14 @@ func renderCmdFile(gp *program, lay layout, features []templateFeature) ([]byte,
 		ModelAliases:  aliases,
 		Blocks:        blocks,
 		OutputTypes:   outputTypes,
-		BindMeta:      renderBindMeta(gp),
+		InputSettings: renderInputSettings(gp),
 		Features:      features,
 		EmbedImport:   anyEmbed(features),
 	})
 }
 
-// inputBlocks assembles the per-command typed-struct blocks and the set of imports
-// their field types need. Shared by the cmd and models files so the two cannot drift.
+// inputBlocks assembles the per-command typed-struct blocks and the imports their field
+// types need. The cmd and models files share it so they cannot drift.
 func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 	own := gp.ownCommands()
 	blocks := make([]templateInputBlock, 0, len(own))
@@ -425,12 +423,10 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 		c.addImports(imports)
 	}
 
-	// A composed node declares no <Prefix>Inputs of its own — it delegates to the child's
-	// handler, which uses the child package's types. But an own command grafted BENEATH one
-	// (a `commands:` authored beside the `$ref`) names every ancestor in its own
-	// <Prefix>Inputs, so the composed ancestor's <Prefix>CommandInputs has to exist here too.
-	// Emitting it for every composed node would fill the file with types nothing references,
-	// so only the ones actually named are emitted.
+	// A composed node's handler uses the child package's types, so it needs no local
+	// block. But an own command grafted beneath it (`commands:` beside the `$ref`) names
+	// every ancestor in its <Prefix>Inputs, so the composed ancestor's
+	// <Prefix>CommandInputs must exist here. Only composed prefixes actually named are emitted.
 	for _, c := range gp.composed {
 		if !wanted[c.prefix] || emitted[c.prefix] {
 			continue
@@ -442,8 +438,7 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 			Arguments: toTemplateFields(c.args),
 			Env:       toTemplateFields(c.env),
 			Config:    toTemplateFields(c.config),
-			// No InputsFields: nothing collects a composed command's inputs through the
-			// parent — its handler lives in the child package and uses the child's type.
+			// No InputsFields: the composed command's handler reads the child package's type.
 		})
 		c.addImports(imports)
 	}
@@ -452,8 +447,7 @@ func inputBlocks(gp *program) ([]templateInputBlock, map[string]bool) {
 }
 
 // modelAliases lists every type the models package declares, so the cmd package can
-// re-export them. The names mirror the models template exactly: the four per-channel
-// structs the template always emits, plus the two aggregates.
+// re-export them. The names must mirror the models template exactly.
 func modelAliases(gp *program, blocks []templateInputBlock) []string {
 	var out []string
 	for _, b := range blocks {
@@ -465,9 +459,7 @@ func modelAliases(gp *program, blocks []templateInputBlock) []string {
 			out = append(out, b.Prefix+"Config")
 		}
 		out = append(out, b.Prefix+"CommandInputs")
-		// A composed ancestor's block declares no <Prefix>Inputs — nothing collects one
-		// through the parent — so there is nothing to re-export. Emitting the alias anyway
-		// names a type the models package does not define.
+		// A composed ancestor's block declares no <Prefix>Inputs, so there is nothing to alias.
 		if len(b.InputsFields) > 0 {
 			out = append(out, b.Prefix+"Inputs")
 		}
@@ -476,9 +468,8 @@ func modelAliases(gp *program, blocks []templateInputBlock) []string {
 	return out
 }
 
-// anyEmbed reports whether any feature emits a //go:embed-backed var (so the
-// generated file must import the embed package). Inline-only features need no
-// embed import.
+// anyEmbed reports whether any feature emits a //go:embed-backed var, which requires the
+// generated file to import embed.
 func anyEmbed(features []templateFeature) bool {
 	for _, f := range features {
 		for _, v := range f.Vars {
@@ -490,19 +481,15 @@ func anyEmbed(features []templateFeature) bool {
 	return false
 }
 
-// writeHandlerStubs creates a handler stub for the root command and every own sub-command,
-// only when the file does not already exist: stubs are user-editable and never overwritten.
-// Composed commands have no stub here; their handlers live in the child's package.
-//
-// The stub is seeded from what the spec and conf already say (see stubBody), so a command
-// that declares --help, --version, or is the conventional `help` command starts connected to
-// the pages and services codegen just produced instead of starting with a TODO that
-// reimplements them.
+// writeHandlerStubs creates a handler stub for the root and every own sub-command whose
+// stub file does not exist yet; stubs are user-owned and never overwritten. Composed and
+// passthrough commands get no stub, since their handlers live in another package. The
+// body is seeded by stubBody.
 func writeHandlerStubs(gp *program, lay layout) error {
 	helpOn := featureEnabled(gp.conf, "help")
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
-			continue // inline-passthrough: the package owns the handler, no stub seeded
+			continue
 		}
 		path := filepath.Join(lay.cmdDir, stubFileFor(lay.cmdDir, c))
 		if _, err := os.Stat(path); err == nil {
@@ -531,9 +518,9 @@ func helpResolver(features []templateFeature) string {
 	return ""
 }
 
-// hasPathResolver reports whether any enabled feature emits a resolver keyed by COMMAND PATH
-// (help, man, markdown) rather than by shell (completion). Only those use strings.Join, so
-// only those justify importing "strings" into the generated file.
+// hasPathResolver reports whether any enabled feature emits a resolver keyed by command
+// path (help, man, markdown) rather than by shell (completion). Only those require the
+// generated file to import "strings".
 func hasPathResolver(features []templateFeature) bool {
 	for _, f := range features {
 		if !f.PerShell {
@@ -561,9 +548,8 @@ func commandName(invocation string) string {
 	return invocation
 }
 
-// boolFlagField returns the Go field name of this command's bool flag with the given logical
-// name, or "" when it declares none. fieldDef.Tag holds the logical name the spec gave the
-// input — what inputFieldTag later renders as `rotini:"…"`.
+// boolFlagField returns the Go field name of c's bool flag with the given logical name
+// (fieldDef.Tag), or "" when it declares none.
 func boolFlagField(c genCommand, logical string) string {
 	for _, f := range c.flags {
 		if f.GoType == "bool" && f.Tag == logical {
@@ -582,11 +568,10 @@ func variadicStringArgField(c genCommand) string {
 	return c.args[0].Field
 }
 
-// helpFlagFor finds the `help` flag that asks command c for its page: c's own, else the nearest
-// ancestor's. Flags resolve up the command chain, so `app sub --help` sets the root's flag when
-// sub declares none — and a stub that only checked its own frame would run the command instead,
-// typically failing on a required input the user never meant to supply. It returns the flag's
-// Go field and the inputs frame (type prefix) that holds it, or "" and "".
+// helpFlagFor finds the `help` flag that asks command c for its page: c's own, else the
+// nearest ancestor's, since flags resolve up the command chain (`app sub --help` sets the
+// root's flag when sub declares none). It returns the flag's Go field and the inputs frame
+// (type prefix) holding it, or "" and "".
 func helpFlagFor(gp *program, c genCommand) (field, frame string) {
 	if f := boolFlagField(c, "help"); f != "" {
 		return f, c.prefix
@@ -605,17 +590,15 @@ func helpFlagFor(gp *program, c genCommand) (field, frame string) {
 	return "", ""
 }
 
-// stubBody assembles the handler stub's context, deciding which seeded body the command gets.
-//
-// Everything is derived from declarations that already exist; nothing is inferred about what
-// the author meant. A --help flag only wires up when the help feature actually generated a
-// page to print, and the `help`/`version` command bodies are recognized by the conventional
-// name plus the shape that makes the body possible — a variadic path argument, no arguments
-// at all. Anything else gets the TODO stub, unchanged.
+// stubBody assembles the handler stub's template data, choosing the seeded body from the
+// command's declarations. A --help flag is wired only when the help feature is enabled. A
+// non-root `help` command with help enabled prints the page for its variadic path argument;
+// a non-root `version` command with no arguments prints the version; a dispatch-only root
+// prints its help when invoked bare. Every other command gets the default body.
 func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) templateHandlerData {
 	d := templateHandlerData{
 		Package:       pkg,
-		HandlersType:  c.handler,
+		HandlerType:   c.handler,
 		InputsType:    c.prefix + "Inputs",
 		Invocation:    c.invocation,
 		Prefix:        c.prefix,
@@ -627,16 +610,6 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 	}
 	d.VersionFlag = boolFlagField(c, "version")
 
-	// A flag that says "do not run this command" has to be answered before the command's
-	// own inputs are validated, or a command with a required argument can never print its
-	// own help page: Collect reports the missing argument and the handler returns before it
-	// reaches the check. See the template.
-	d.AnswerBeforeCollect = d.HelpFlag != "" || d.VersionFlag != ""
-	d.HelpFlagName = "help"
-	if d.HelpFlag == "" {
-		d.HelpFlagName = "version"
-	}
-
 	isRoot := c.prefix == gp.root.prefix
 	switch name := commandName(c.invocation); {
 	case name == "help" && !isRoot && helpOn:
@@ -644,27 +617,21 @@ func stubBody(gp *program, c genCommand, pkg, cmdHeader string, helpOn bool) tem
 	case name == "version" && !isRoot && len(c.args) == 0:
 		d.VersionOnly = true
 	case isRoot && helpOn && len(c.args) == 0 && len(gp.own)+len(gp.composed) > 0:
-		// A root that only dispatches: bare invocation shows its own help, as every
-		// CLI does, rather than printing an empty inputs struct.
+		// A dispatch-only root shows its help when invoked bare.
 		d.PrintHelpWhenBare = true
 	}
 
-	// Collect runs whenever the command has something to validate — it is what reports an
-	// unknown flag, and dropping it for a body that only prints a page would swallow that.
-	//
-	// UsesInputs is the narrower question: does the body READ the result? Help and version
-	// are answered from ParseArgv above, so a root that only prints its own page validates
-	// and discards, which is why the call binds to `_` rather than to an unused variable.
+	// NeedsInputs: the body calls rtx.Inputs, which also reports unknown flags.
+	// UsesInputs: the body reads the result; otherwise it is discarded to `_`.
 	d.NeedsInputs = d.HelpFlag != "" || d.VersionFlag != "" || d.HelpPathArg != "" ||
 		(!d.VersionOnly && !d.PrintHelpWhenBare)
 	d.UsesInputs = d.HelpPathArg != "" || (!d.VersionOnly && !d.PrintHelpWhenBare)
 	return d
 }
 
-// writeEntrypoint writes the binary's main.go to the conf-declared entrypoint package,
-// create-once: the file binds user-owned build metadata, so an existing main.go is never
-// overwritten. extension is the spec/conf file extension baked into the //go:generate
-// directive so it points at the seeded files.
+// writeEntrypoint writes the binary's main.go to the conf-declared entrypoint package. It
+// is create-once: an existing main.go is never overwritten. extension is the spec/conf
+// file extension used in the //go:generate directive.
 func writeEntrypoint(lay layout, extension string) error {
 	if lay.entrypointDir == "" {
 		return nil
@@ -675,8 +642,7 @@ func writeEntrypoint(lay layout, extension string) error {
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat %s: %w", path, err)
 	}
-	// The generated package is imported aliased as "cmd" so the reference never
-	// collides with the rotini runtime package (also named "rotini").
+	// Alias the generated package as "cmd" so it cannot collide with the rotini runtime.
 	content, err := renderMainFile(lay.mainHeader, lay.cmdImport, "cmd", extension)
 	if err != nil {
 		return err
@@ -684,16 +650,14 @@ func writeEntrypoint(lay layout, extension string) error {
 	return writeGeneratedFile(path, content)
 }
 
-// rollupMethods builds the rollup's per-command wiring (one method each, sorted):
-// own commands return a local handler stub, composed commands delegate to the
-// child's cmd package. renderCmdFile folds these into the generated file's handlers
-// struct — unqualified, since the rollup shares the cmd package with the framework.
+// rollupMethods builds the handlers struct's per-command methods, sorted by name: own
+// commands return their local stub, passthrough and composed commands delegate to
+// another package's handler.
 func rollupMethods(gp *program) []templateHandlersMethod {
 	methods := make([]templateHandlersMethod, 0, 1+len(gp.own)+len(gp.composed))
 	for _, c := range gp.ownCommands() {
 		if c.passthrough {
-			// Inline-command passthrough: own command (types generated
-			// locally) whose handler delegates to a package instead of a stub.
+			// Own command (types generated locally) whose handler lives in another package.
 			methods = append(methods, templateHandlersMethod{
 				Method:         c.prefix,
 				Passthrough:    true,

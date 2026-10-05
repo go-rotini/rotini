@@ -1,6 +1,6 @@
 # R9 — a composed child's plugins, dispatched through the parent.
 #
-# A child spec composed with $ref brings its whole command tree: including the remote
+# A child spec composed with $ref brings its whole command tree: including the declared plugins
 # commands, discovery and plugin path its root declares. The composed node was once rebuilt
 # from its presentation keys alone, so the child's own binary ran `child deploy` while the
 # parent answered `root kid deploy` with "takes no arguments". Plugins keep the CHILD's name
@@ -28,7 +28,7 @@ version: 0.0.0
 command:
   name: child
   summary: a tool with a plugin
-  remote_commands:
+  plugins:
     - name: deploy
       summary: deploy, via a plugin
 -- cmd/child/.rotini.conf.yaml --

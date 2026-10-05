@@ -116,15 +116,15 @@ import (
 )
 
 type base struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type pathsHandlers struct{ base }
+type pathsHandler struct{ base }
 
-func (*pathsHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*pathsHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/paths/paths_scan.go --
 package paths
 
@@ -135,10 +135,10 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type pathsScanHandlers struct{ base }
+type pathsScanHandler struct{ base }
 
-func (*pathsScanHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[PathsScanInputs](rtx)
+func (*pathsScanHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[PathsScanInputs]()
 	if err != nil {
 		rtx.RecordError(err)
 		rtx.HaltWithCode(1)

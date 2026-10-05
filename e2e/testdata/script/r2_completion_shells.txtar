@@ -237,15 +237,15 @@ import (
 )
 
 type base struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-type appHandlers struct{ base }
+type appHandler struct{ base }
 
-func (*appHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*appHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/app/app_deploy.go --
 package app
 
@@ -255,9 +255,9 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type appDeployHandlers struct{ base }
+type appDeployHandler struct{ base }
 
-func (*appDeployHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*appDeployHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- internal/cmd/app/app_status.go --
 package app
 
@@ -267,9 +267,9 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type appStatusHandlers struct{ base }
+type appStatusHandler struct{ base }
 
-func (*appStatusHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*appStatusHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 -- cmd/app/main.go --
 package main
 

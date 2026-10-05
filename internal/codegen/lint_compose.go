@@ -5,33 +5,25 @@ import (
 	"strings"
 )
 
-// This file owns the deep composed-$ref lint check. It runs in the LINT stage (lintSpec
-// appends it), not schema validation.
-
-// lintComposedTree is the deep `$ref` descend: it runs the generator's own composer over the
-// whole tree so `rotini validate` catches what only emerges once refs are followed — collisions
-// across composition boundaries and cyclic or missing refs. (Each local child spec's own
-// version, schema and lint rules are checked by Processor.validateComposedSpecs.)
-// Reusing generate's compose logic is what keeps validate and generate from drifting. It is
-// best-effort: a ref-less spec or a module-less context is skipped.
+// lintComposedTree runs the generator's composer over the whole $ref tree so validate catches
+// what emerges only once refs are followed: collisions across composition boundaries and
+// cyclic or missing refs. Reusing the composer keeps validate and generate in agreement. Each
+// child spec's own checks run in Processor.validateComposedSpecs. It is best-effort: it skips
+// a spec with no refs, an invalid root (lintRootCommand reports it), and a spec outside the
+// current module.
 func lintComposedTree(spec *Spec, specPath string) []error {
 	if !specHasRefs(spec) {
 		return nil
 	}
-	// A root that is not itself valid cannot be composed from, and lintRootCommand has
-	// already said so — in a positioned message. Running the composer anyway would restate
-	// it unpositioned, so the reader sees one cause reported twice.
 	if spec.Command.Name == "" || spec.Command.Ref != "" {
 		return nil
 	}
 	root, name, err := findModule()
 	if err != nil {
-		return nil // no module: a composed CLI can't generate here anyway; not validate's error to raise
+		return nil
 	}
-	// The composer resolves refs + import paths relative to the CWD module; only run it
-	// when the spec actually lives inside that module (else CWD ≠ the spec's project and
-	// the relative refs/imports would be meaningless — leave it to a validate run from
-	// the right place).
+	// The composer resolves refs and import paths relative to the current module, so run it
+	// only when the spec lives inside that module.
 	absSpec, err1 := filepath.Abs(specPath)
 	absRoot, err2 := filepath.Abs(root)
 	if err1 != nil || err2 != nil ||
@@ -39,8 +31,7 @@ func lintComposedTree(spec *Spec, specPath string) []error {
 		return nil
 	}
 	if _, err := resolveTree(spec, specPath, name); err != nil {
-		// The composer reports the tree as a whole, so the problem sits on the root: it is the
-		// document the author ran, and it names the file even when the ref at fault is deeper.
+		// The composer reports on the tree as a whole, so the problem is placed on the root.
 		return []error{&problem{kind: "spec", ptr: rootPointer, loc: "command " + spec.Command.Name, msg: "composition: " + err.Error()}}
 	}
 	return nil

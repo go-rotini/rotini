@@ -15,24 +15,17 @@ var updateSchemas = flag.Bool("update-schemas", false, "rewrite the module-root 
 // publishedSchemas maps each module-root published file to the embedded bytes it must equal.
 func publishedSchemas() map[string][]byte {
 	return map[string][]byte{
-		"schema-spec.json": schemaSpecFileBytes,
-		"schema-conf.json": schemaConfFileBytes,
+		"schema-spec.json":     schemaSpecFileBytes,
+		"schema-conf.json":     schemaConfFileBytes,
+		"schema-contract.json": schemaContractFileBytes,
+		"schema-error.json":    errorSchemaBytes,
 	}
 }
 
-// TestPublishedSchemasInSync keeps the module-root schema copies byte-identical to the
-// embedded ones.
-//
-// The copies exist for ONE reason: a spec's optional `$schema` key points an editor at a
-// released schema, and the only URL that resolves without any publishing infrastructure is
-// the repository itself at a tag —
-//
-//	https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/<tag>/schema-spec.json
-//
-// which serves whatever sits at the module root of that tag. The authoritative files stay
-// under internal/codegen (that is what //go:embed compiles in and what validation judges
-// against); these are published mirrors, and a mirror that has drifted is worse than no
-// mirror at all, because an editor would silently validate against the wrong schema.
+// TestPublishedSchemasInSync pins the module-root schema copies byte-identical to the
+// embedded ones. The copies let a spec's `$schema` point an editor at
+// https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/<tag>/schema-spec.json; the
+// embedded files under internal/codegen remain authoritative.
 func TestPublishedSchemasInSync(t *testing.T) {
 	root := filepath.Join("..", "..")
 	for name, want := range publishedSchemas() {

@@ -29,7 +29,7 @@ stdout 'wait teardown'
 stdout 'root teardown'
 cmp stdout term-order.txt
 
-# A graceful stop records nothing, so the funnel reports nothing.
+# A graceful stop records nothing, so the reporter reports nothing.
 ! stderr .
 
 # ── SIGINT ───────────────────────────────────────────────────────────────────
@@ -79,17 +79,17 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type shutdownHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
+type shutdownHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
 }
 
-func (*shutdownHandlers) Run(ctx context.Context, rtx *rotini.Context) {}
+func (*shutdownHandler) Run(ctx context.Context, rtx *rotini.Context) {}
 
 // CascadingPostRun is the root's teardown. It runs for every command beneath it, including a
 // run a signal cut short.
-func (*shutdownHandlers) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
+func (*shutdownHandler) CascadingPostRun(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "root teardown")
 }
 -- internal/cmd/shutdown/shutdown_wait.go --
@@ -105,16 +105,16 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-type shutdownWaitHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultCascadingPostRun
+type shutdownWaitHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoCascadingPostRun
 }
 
 // Run blocks on the context the runtime hands it, and sends itself the signal that should
 // cancel it. An operator sends it from outside; the path through the trap is the same.
-func (*shutdownWaitHandlers) Run(ctx context.Context, rtx *rotini.Context) {
-	in, err := rotini.Collect[ShutdownWaitInputs](rtx)
+func (*shutdownWaitHandler) Run(ctx context.Context, rtx *rotini.Context) {
+	in, err := rtx.Inputs[ShutdownWaitInputs]()
 	if err != nil {
 		rtx.HaltWith(err)
 		return
@@ -139,7 +139,7 @@ func (*shutdownWaitHandlers) Run(ctx context.Context, rtx *rotini.Context) {
 	}
 }
 
-func (*shutdownWaitHandlers) PostRun(ctx context.Context, rtx *rotini.Context) {
+func (*shutdownWaitHandler) PostRun(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "wait teardown")
 }
 -- cmd/shutdown/main.go --

@@ -16,9 +16,9 @@ const ParseKindTooManyArguments
 const ParseKindUnknownCommand
 const ParseKindUnknownFlag
 const ParseKindUnspecified
-const RemoteBinaryNotFound
-const RemoteSpawnFailed
-const RemoteTimeout
+const PluginNotFound
+const PluginStartFailed
+const PluginTimeout
 field ArgDef.Complete
 field ArgDef.Constraints
 field ArgDef.Default
@@ -33,29 +33,38 @@ field ArgDef.Secret
 field ArgDef.Separator
 field ArgDef.Type
 field ArgDef.Variadic
-field BindError.Cause
-field BindError.Channel
-field BindError.Input
-field BindError.Msg
-field BindMeta.ConfigFiles
-field BindMeta.EnvPrefix
-field BindMeta.Sources
-field BindMeta.StdinSchemas
+field Command.Arguments
+field Command.Commands
+field Command.Deprecated
+field Command.DeprecatedIdentifiers
+field Command.FlagDependencies
+field Command.FlagGroups
+field Command.Flags
+field Command.Handler
+field Command.Invoked
+field Command.Matched
+field Command.Name
+field Command.Output
+field Command.Passthrough
+field Command.PluginDiscovery
+field Command.PluginPath
+field Command.Plugins
 field CommandDef.Aliases
 field CommandDef.Arguments
 field CommandDef.Commands
 field CommandDef.Deprecated
 field CommandDef.DeprecatedIdentifiers
-field CommandDef.Discovery
 field CommandDef.FlagDependencies
 field CommandDef.FlagGroups
 field CommandDef.Flags
 field CommandDef.Handler
 field CommandDef.Hidden
 field CommandDef.Name
+field CommandDef.Output
 field CommandDef.Passthrough
+field CommandDef.PluginDiscovery
 field CommandDef.PluginPath
-field CommandDef.Remotes
+field CommandDef.Plugins
 field CommandDef.Summary
 field Completion.Extensions
 field Completion.Kind
@@ -85,21 +94,19 @@ field Context.Argv
 field Context.Stderr
 field Context.Stdin
 field Context.Stdout
-field DefaultHooks.DefaultCascadingPostRun
-field DefaultHooks.DefaultCascadingPreRun
-field DefaultHooks.DefaultPostRun
-field DefaultHooks.DefaultPreRun
 field Definition.Arguments
 field Definition.Commands
-field Definition.Discovery
 field Definition.FlagDependencies
 field Definition.FlagGroups
 field Definition.Flags
 field Definition.Handler
 field Definition.Name
+field Definition.Output
 field Definition.Passthrough
+field Definition.PluginDiscovery
 field Definition.PluginPath
-field Definition.RemoteCommands
+field Definition.Plugins
+field DependencyError.Name
 field Deprecation.Identifier
 field Deprecation.Kind
 field Deprecation.Message
@@ -136,17 +143,36 @@ field FlagDependency.Requires
 field FlagDependency.When
 field FlagGroup.Flags
 field FlagGroup.Kind
-field Layer.Name
-field Layer.Set
-field Layer.Values
+field InputError.Cause
+field InputError.Channel
+field InputError.Input
+field InputError.Msg
+field InputLayer.Name
+field InputLayer.Set
+field InputLayer.Values
+field InputSettings.ConfigFiles
+field InputSettings.EnvPrefix
+field InputSettings.Sources
+field InputSettings.StdinSchemas
+field InputSource.Layer
+field InputSource.Raw
 field LifecycleStep.Do
 field LifecycleStep.Name
 field LifecycleStep.Undo
+field NoHooks.NoCascadingPostRun
+field NoHooks.NoCascadingPreRun
+field NoHooks.NoPostRun
+field NoHooks.NoPreRun
 field Outcome.Errors
 field Outcome.Infos
 field Outcome.Panics
 field Outcome.Successes
 field Outcome.Warnings
+field OutputDef.Schema
+field OutputDef.Type
+field Page.Content
+field Page.Name
+field Page.Path
 field PanicError.Stack
 field PanicError.Value
 field ParseError.Candidates
@@ -157,134 +183,121 @@ field ParseError.Msg
 field ParseError.Token
 field PathFromDef.Env
 field PathFromDef.Flag
-field Provenance.Layer
-field Provenance.Raw
-field RemoteDef.Aliases
-field RemoteDef.Binary
-field RemoteDef.Name
-field RemoteDef.Summary
-field RemoteDef.Timeout
-field RemoteDiscoveryDef.Hidden
-field RemoteDiscoveryDef.Prefix
-field RemoteDispatch.Args
-field RemoteDispatch.Def
-field RemoteDispatch.Dir
-field RemoteDispatch.Discovered
-field RemoteError.Binary
-field RemoteError.Cause
-field RemoteError.Kind
-field RemoteError.Msg
-field RemoteError.Name
-field RemoteError.Timeout
+field PluginDef.Aliases
+field PluginDef.Binary
+field PluginDef.Name
+field PluginDef.Summary
+field PluginDef.Timeout
+field PluginDiscoveryDef.Hidden
+field PluginDiscoveryDef.Prefix
+field PluginDispatch.Args
+field PluginDispatch.Def
+field PluginDispatch.Dir
+field PluginDispatch.Discovered
+field PluginError.Binary
+field PluginError.Cause
+field PluginError.Kind
+field PluginError.Msg
+field PluginError.Name
+field PluginError.Timeout
 field Resolution.Argv
 field Resolution.Chain
-field Resolution.Remote
-field ResolvedCommand.Arguments
-field ResolvedCommand.Commands
-field ResolvedCommand.Deprecated
-field ResolvedCommand.DeprecatedIdentifiers
-field ResolvedCommand.Discovery
-field ResolvedCommand.FlagDependencies
-field ResolvedCommand.FlagGroups
-field ResolvedCommand.Flags
-field ResolvedCommand.Handler
-field ResolvedCommand.Matched
-field ResolvedCommand.Name
-field ResolvedCommand.Passthrough
-field ResolvedCommand.PluginPath
-field ResolvedCommand.Remotes
-field ServiceError.Key
+field Resolution.Plugin
 field WiringError.Command
 field WiringError.Handler
 field WiringError.Msg
-func AtFrame(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
+func AsCommand(i int, hook func(context.Context, *Context)) func(context.Context, *Context)
 func CategoryOf(err error) Category
-func CobraCompletion(w io.Writer, result CompletionResult) error
-func CollectP[T any](rtx *Context) (T, Report, error)
-func Collect[T any](rtx *Context) (T, error)
-func DefaultLifecycle(chain []ResolvedCommand, handlers []Handlers) []LifecycleStep
+func DecodeOutput[T any](p *Program, data []byte, format string) (T, error)
+func DefaultLifecycle(chain []Command, handlers []Handler) []LifecycleStep
 func DefaultResolver(def Definition, argv []string) (Resolution, error)
-func Defaults[T any](rtx *Context) (Layer[T], error)
 func Deprecations(rtx *Context) []Deprecation
-func DiscoveredPlugins(cmd ResolvedCommand) []DiscoveredPlugin
-func DiscoveryDiagnostics(cmd ResolvedCommand) []error
-func ExitCode(code int) error
+func ExitCause(code int) error
 func InternalError(err error) error
-func NewBinder(meta BindMeta) *Binder
+func MergeInputsWithReport[T any](layers ...InputLayer[T]) (T, InputReport)
+func MergeInputs[T any](layers ...InputLayer[T]) T
 func NewContextFor(def Definition, argv []string) *Context
-func NewKey[T any](name string) Key[T]
+func NewDependency[T any](name string) Dependency[T]
+func NewInputReader(meta InputSettings) *InputReader
 func NewParser() *Parser
 func NewProgram(def Definition, handlers any) *Program
 func NewSuggestor() *Suggestor
-func OverlayInputsP[T any](layers ...Layer[T]) (T, Report)
-func OverlayInputs[T any](layers ...Layer[T]) T
-func ParseArgv[T any](rtx *Context) (Layer[T], error)
-func ParseEnv[T any](rtx *Context) (Layer[T], error)
-func ParseFiles[T any](rtx *Context) (Layer[T], error)
-func ParseStdin[T any](rtx *Context) (Layer[T], error)
-func Provide[T any](k Key[T], value T) Option
+func PluginCompletion(w io.Writer, result CompletionResult) error
 func Ptr[T any](v T) *T
-func RemoteBinaryPath(cmd ResolvedCommand, name string) (string, bool)
-func Strip(text string) string
+func StripANSI(text string) string
+func StructuredReporter(structured func(rtx *Context) bool) Reporter
 func UsageError(err error) error
+func WithDependency[T any](dep Dependency[T], value T) Option
 method ArgValueCompleter.CompleteArgValue
 method Base64Bytes.MarshalText() ([]byte, error)
 method Base64Bytes.String() string
 method Base64Bytes.UnmarshalText(text []byte) error
-method BindError.Error() string
-method BindError.Unwrap() []error
-method Binder.Bind(rtx *Context, out any) error
 method ByteSize.MarshalText() ([]byte, error)
 method ByteSize.String() string
 method ByteSize.UnmarshalText(text []byte) error
 method Category.String() string
-method Context.Bind(key string, value any) *Context
-method Context.BindIfAbsent(key string, value any) *Context
-method Context.Chain() []ResolvedCommand
-method Context.Command() ResolvedCommand
+method Command.DiscoveredPlugins() []DiscoveredPlugin
+method Command.PluginBinary(name string) (string, bool)
+method Command.PluginDiscoveryErrors() []error
+method Context.ArgvInputs[T any]() (InputLayer[T], error)
+method Context.CheckOutput(v any) error
+method Context.Command() Command
+method Context.CommandChain() []Command
 method Context.CommandPath() string
+method Context.DefaultInputs[T any]() (InputLayer[T], error)
+method Context.EnvInputs[T any]() (InputLayer[T], error)
 method Context.Exit(code int)
 method Context.Failed() bool
-method Context.Frame() ResolvedCommand
-method Context.Get[T any](key string) (T, bool)
+method Context.FileInputs[T any]() (InputLayer[T], error)
+method Context.GetDependency[T any](dep Dependency[T]) (T, bool)
 method Context.Halt()
 method Context.HaltWith(err error)
 method Context.HaltWithCode(code int)
 method Context.Help() string
-method Context.IsLeaf() bool
-method Context.MustGet[T any](key string) T
+method Context.InputsWithReport[T any]() (T, InputReport, error)
+method Context.Inputs[T any]() (T, error)
+method Context.MustGetDependency[T any](dep Dependency[T]) T
 method Context.Parser() *Parser
 method Context.RecordError(err error)
 method Context.RecordInfo(msg string)
 method Context.RecordSuccess(msg string)
 method Context.RecordWarning(warn error)
-method Context.Value(key string) any
+method Context.SetDependencyIfAbsent[T any](dep Dependency[T], value T)
+method Context.SetDependency[T any](dep Dependency[T], value T)
+method Context.StdinInputs[T any]() (InputLayer[T], error)
 method Context.Version() string
-method Context.WithBindMeta(meta BindMeta) *Context
-method Context.WithBinder(fn func(BindMeta) *Binder) *Context
 method Context.WithHelp(help HelpFunc) *Context
+method Context.WithInputReader(fn func(InputSettings) *InputReader) *Context
+method Context.WithInputSettings(meta InputSettings) *Context
 method Context.WithParser(parser *Parser) *Context
 method Context.WithVersion(version string) *Context
-method DefaultCascadingPostRun.CascadingPostRun(ctx context.Context, rtx *Context)
-method DefaultCascadingPreRun.CascadingPreRun(ctx context.Context, rtx *Context)
-method DefaultPostRun.PostRun(ctx context.Context, rtx *Context)
-method DefaultPreRun.PreRun(ctx context.Context, rtx *Context)
+method Context.WriteOutputItem[T any](item T, format string, render func(io.Writer, string, T) error) error
+method Context.WriteOutput[T any](v T, format string, render func(io.Writer, string, T) error) error
+method Dependency.Name() string
+method Dependency.String() string
+method DependencyError.Error() string
+method DependencyError.Unwrap() []error
 method Deprecation.Error() string
 method FlagValueCompleter.CompleteFlagValue
-method Handlers.CascadingPostRun
-method Handlers.CascadingPreRun
-method Handlers.PostRun
-method Handlers.PreRun
-method Handlers.Run
+method Handler.CascadingPostRun
+method Handler.CascadingPreRun
+method Handler.PostRun
+method Handler.PreRun
+method Handler.Run
 method HexBytes.MarshalText() ([]byte, error)
 method HexBytes.String() string
 method HexBytes.UnmarshalText(text []byte) error
-method Key.BindTo(rtx *Context, value T)
-method Key.Get(rtx *Context) (T, bool)
-method Key.MustGet(rtx *Context) T
-method Key.Name() string
-method Key.Provide(p *Program, value T) *Program
-method Key.String() string
+method InputError.Error() string
+method InputError.Unwrap() []error
+method InputReader.Read(rtx *Context, out any) error
+method InputReport.Fields() []FieldPath
+method InputReport.History(path FieldPath) []InputSource
+method InputReport.Validate() error
+method InputReport.Winner(path FieldPath) (InputSource, bool)
+method NoCascadingPostRun.CascadingPostRun(ctx context.Context, rtx *Context)
+method NoCascadingPreRun.CascadingPreRun(ctx context.Context, rtx *Context)
+method NoPostRun.PostRun(ctx context.Context, rtx *Context)
+method NoPreRun.PreRun(ctx context.Context, rtx *Context)
 method Outcome.Empty() bool
 method Outcome.Failed() bool
 method PanicError.Error() string
@@ -293,23 +306,27 @@ method ParseError.Error() string
 method ParseError.Unwrap() error
 method ParseKind.String() string
 method Parser.Parse(rtx *Context, out any) error
-method Program.Bind(key string, value any) *Program
+method PluginError.Error() string
+method PluginError.Unwrap() []error
+method PluginErrorKind.String() string
 method Program.Complete(words []string, format CompletionFormat) (int, error)
 method Program.Execute() error
 method Program.Run(argv []string) (int, error)
 method Program.RunContext(ctx context.Context, argv []string) (int, error)
 method Program.With(opts ...Option) *Program
 method Program.WithArgs(args []string) *Program
-method Program.WithBindMeta(meta BindMeta) *Program
-method Program.WithBinder(fn func(BindMeta) *Binder) *Program
 method Program.WithCompletion(format CompletionFormat) *Program
 method Program.WithContext(ctx context.Context) *Program
+method Program.WithDependency[T any](dep Dependency[T], value T) *Program
 method Program.WithExit(fn func(int)) *Program
-method Program.WithFunnel(fn FunnelFunc) *Program
 method Program.WithHelp(help HelpFunc) *Program
+method Program.WithInputReader(fn func(InputSettings) *InputReader) *Program
+method Program.WithInputSettings(meta InputSettings) *Program
 method Program.WithLifecycle(fn Lifecycle) *Program
+method Program.WithOutputChecks() *Program
 method Program.WithPanicRecover(enabled bool) *Program
 method Program.WithParser(parser *Parser) *Program
+method Program.WithReporter(fn Reporter) *Program
 method Program.WithResolver(fn Resolver) *Program
 method Program.WithSignals(sigs ...os.Signal) *Program
 method Program.WithStderr(w io.Writer) *Program
@@ -318,15 +335,6 @@ method Program.WithStdout(w io.Writer) *Program
 method Program.WithTeardownOnPanic(enabled bool) *Program
 method Program.WithVersion(version string) *Program
 method Program.WithoutSignalHandling() *Program
-method RemoteError.Error() string
-method RemoteError.Unwrap() []error
-method RemoteErrorKind.String() string
-method Report.Fields() []FieldPath
-method Report.History(path FieldPath) []Provenance
-method Report.Validate() error
-method Report.Winner(path FieldPath) (Provenance, bool)
-method ServiceError.Error() string
-method ServiceError.Unwrap() []error
 method Suggestor.Closest(input string, candidates []string) (suggestion string, ok bool)
 method Suggestor.For(err error) []string
 method Suggestor.Suggest(input string, candidates []string) []string
@@ -337,11 +345,9 @@ method WiringError.Unwrap() error
 type ArgDef
 type ArgValueCompleter
 type Base64Bytes
-type BindError
-type BindMeta
-type Binder
 type ByteSize
 type Category
+type Command
 type CommandDef
 type Completion
 type CompletionCandidate
@@ -350,12 +356,9 @@ type CompletionResult
 type ConfigFile
 type Constraints
 type Context
-type DefaultCascadingPostRun
-type DefaultCascadingPreRun
-type DefaultHooks
-type DefaultPostRun
-type DefaultPreRun
 type Definition
+type Dependency
+type DependencyError
 type Deprecation
 type DiscoverDef
 type DiscoveredPlugin
@@ -365,36 +368,43 @@ type FlagDependency
 type FlagGroup
 type FlagGroupKind
 type FlagValueCompleter
-type FunnelFunc
-type Handlers
+type Handler
 type HelpFunc
 type HexBytes
-type Key
-type Layer
+type InputError
+type InputLayer
+type InputReader
+type InputReport
+type InputSettings
+type InputSource
 type Lifecycle
 type LifecycleStep
+type NoCascadingPostRun
+type NoCascadingPreRun
+type NoHooks
+type NoPostRun
+type NoPreRun
 type Option
 type Outcome
+type OutputDef
+type Page
 type PanicError
 type ParseError
 type ParseKind
 type Parser
 type PathFromDef
+type PluginDef
+type PluginDiscoveryDef
+type PluginDispatch
+type PluginError
+type PluginErrorKind
 type Presence
 type Program
-type Provenance
-type RemoteDef
-type RemoteDiscoveryDef
-type RemoteDispatch
-type RemoteError
-type RemoteErrorKind
-type Report
+type Reporter
 type Resolution
-type ResolvedCommand
 type Resolver
-type ServiceError
 type Suggestor
 type WiringError
+var ErrDependencyNotFound
 var ErrInternal
-var ErrServiceNotFound
 var ErrUsage

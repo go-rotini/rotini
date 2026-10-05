@@ -1,0 +1,15 @@
+# `section` is the man page section, so it belongs on the man feature only. On man it is
+# accepted; on help it is an error.
+version: 0.0.0
+generate:
+  packages:
+    - type: cmd
+      file: internal/cmd/demo/zz_demo.go
+      package: demo
+  features:
+    - type: man
+      enabled: true
+      section: 8
+    - type: help
+      enabled: true
+      section: 8

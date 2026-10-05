@@ -9,15 +9,11 @@ import (
 	"testing"
 )
 
-// Test fixtures shared across the package's tests: a recording handler set, the
-// command tree they all dispatch against, and the program constructor that wires them
-// to captured streams.
-//
-// This is one of the few test files with no source counterpart by design — it holds no
-// tests, only the scaffolding several test files need in common.
+// Test fixtures shared across the package's tests: a recording handler set, the command tree
+// they dispatch against, and the program constructor that wires them to captured streams.
 
 // recHandler records each lifecycle hook it runs, and optionally inspects the
-// context during Run. It satisfies Handlers.
+// context during Run. It satisfies Handler.
 type recHandler struct {
 	name  string
 	log   *[]string
@@ -47,9 +43,9 @@ type testHandlers struct {
 	onRun func(rtx *Context)
 }
 
-func (t *testHandlers) App() Handlers { return &recHandler{name: "app", log: t.log} }
+func (t *testHandlers) App() Handler { return &recHandler{name: "app", log: t.log} }
 
-func (t *testHandlers) AppRun() Handlers {
+func (t *testHandlers) AppRun() Handler {
 	return &recHandler{name: "run", log: t.log, onRun: t.onRun}
 }
 
@@ -124,13 +120,13 @@ type actProgram struct {
 	actions map[string]act
 }
 
-func (p *actProgram) mk(name string) Handlers {
+func (p *actProgram) mk(name string) Handler {
 	return &actHandler{name: name, log: p.log, act: p.actions[name]}
 }
 
-func (p *actProgram) App() Handlers { return p.mk("app") }
+func (p *actProgram) App() Handler { return p.mk("app") }
 
-func (p *actProgram) AppRun() Handlers { return p.mk("run") }
+func (p *actProgram) AppRun() Handler { return p.mk("run") }
 
 func runActs(t *testing.T, args []string, actions map[string]act) (int, []string) {
 	t.Helper()
@@ -141,12 +137,12 @@ func runActs(t *testing.T, args []string, actions map[string]act) (int, []string
 }
 
 // panicThenHardExit is a leaf whose Run panics and whose PostRun then hard-Exits(3),
-// to exercise the panic-funnel-vs-hard-Exit interaction.
+// to exercise the panic-reporter-vs-hard-Exit interaction.
 type panicThenHardExit struct{ log *[]string }
 
-func (p *panicThenHardExit) App() Handlers { return &recHandler{name: "app", log: p.log} }
+func (p *panicThenHardExit) App() Handler { return &recHandler{name: "app", log: p.log} }
 
-func (p *panicThenHardExit) AppRun() Handlers {
+func (p *panicThenHardExit) AppRun() Handler {
 	return &panicThenHardExitLeaf{log: p.log}
 }
 
@@ -173,14 +169,9 @@ func errorContains(err error, want string) bool {
 	return err != nil && strings.Contains(err.Error(), want)
 }
 
-// An inputs struct is anchored on the command whose hook is running, not guessed from its field
-// count against the chain. These tests are the matrix that motivated the change, asserted the
-// right way round.
-//
-// The tree is root → mid → leaf. Each frame owns a uniquely named flag so attribution is
-// unambiguous, and every frame also declares --help, which every real CLI does and which used to
-// disable the alignment guard entirely — so a misalignment here cannot be reported and would
-// come back as a wrong value instead.
+// Fixtures for anchoring an inputs struct on the command whose hook is running. The tree is
+// root → mid → leaf. Each command owns a uniquely named flag so attribution is unambiguous, and
+// each also declares --help, as real CLIs do.
 
 type fRootFlags struct {
 	RootOnly bool `rotini:"rootonly"`
@@ -208,14 +199,14 @@ type fLeafCmd struct {
 	Arguments struct{}
 }
 
-// fMidSpan is what codegen emits for `mid` in an ORDINARY cli: its whole lineage.
+// fMidSpan is what codegen emits for `mid` in an ordinary CLI: its whole lineage.
 type fMidSpan struct {
 	Root fRootCmd
 	Mid  fMidCmd
 }
 
-// fMidOwn is what codegen emits for a COMPOSED CHILD's root command: one field, because the
-// child cannot know which tree it will be mounted into.
+// fMidOwn is what codegen emits for a composed child's root command: one field, since the
+// child does not know the tree it is mounted into.
 type fMidOwn struct{ Mid fMidCmd }
 
 // fLeafSpan is the leaf's own full-lineage type.
@@ -247,14 +238,14 @@ type fProg struct {
 	inRoot func(*Context)
 }
 
-func (h fProg) Root() Handlers { return fHooks{cascading: h.inRoot} }
-func (h fProg) Mid() Handlers  { return fHooks{cascading: h.inMid} }
-func (h fProg) Leaf() Handlers { return fHooks{} }
+func (h fProg) Root() Handler { return fHooks{cascading: h.inRoot} }
+func (h fProg) Mid() Handler  { return fHooks{cascading: h.inMid} }
+func (h fProg) Leaf() Handler { return fHooks{} }
 
 type fHooks struct {
-	DefaultPreRun
-	DefaultPostRun
-	DefaultCascadingPostRun
+	NoPreRun
+	NoPostRun
+	NoCascadingPostRun
 	cascading func(*Context)
 }
 
@@ -276,9 +267,9 @@ func runF(t *testing.T, argv []string, inMid, inRoot func(*Context)) {
 
 type fLeafProbe struct{ capture func(*Context) }
 
-func (h fLeafProbe) Root() Handlers { return fHooks{} }
-func (h fLeafProbe) Mid() Handlers  { return fHooks{} }
-func (h fLeafProbe) Leaf() Handlers { return fLeafRun(h) }
+func (h fLeafProbe) Root() Handler { return fHooks{} }
+func (h fLeafProbe) Mid() Handler  { return fHooks{} }
+func (h fLeafProbe) Leaf() Handler { return fLeafRun(h) }
 
 type fLeafRun fLeafProbe
 
@@ -288,20 +279,18 @@ func (fLeafRun) PostRun(context.Context, *Context)          {}
 func (fLeafRun) CascadingPostRun(context.Context, *Context) {}
 func (h fLeafRun) Run(_ context.Context, rtx *Context)      { h.capture(rtx) }
 
-// What a custom Resolver or Lifecycle is handed, and what it may do with it. These are the
-// expert seams: nothing else in the API lets a caller replace a phase, so nothing else can
-// corrupt a Program that serves many runs.
+// Fixtures for custom Resolver and Lifecycle tests: what each is handed and may do with it.
 
 type seamProgram struct{ ran *[]string }
 
-func (p seamProgram) App() Handlers    { return seamHandlers{ran: p.ran} }
-func (p seamProgram) AppRun() Handlers { return seamHandlers{ran: p.ran} }
+func (p seamProgram) App() Handler    { return seamHandlers{ran: p.ran} }
+func (p seamProgram) AppRun() Handler { return seamHandlers{ran: p.ran} }
 
 type seamHandlers struct {
-	DefaultHooks
+	NoHooks
 	ran *[]string
 }
 
 func (h seamHandlers) Run(_ context.Context, rtx *Context) {
-	*h.ran = append(*h.ran, rtx.Frame().Name)
+	*h.ran = append(*h.ran, rtx.Command().Name)
 }

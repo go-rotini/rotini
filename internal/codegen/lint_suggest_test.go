@@ -2,9 +2,8 @@ package codegen
 
 import "testing"
 
-// The suggestion helpers are AUTHOR-facing (a typo'd flag or schema name in a spec gets
-// a "did you mean?" at validate time). They are deliberately distinct from the runtime
-// Suggestor, which is end-user-facing and opt-in — see lint_suggest.go.
+// The suggestion helpers give spec authors "did you mean" hints at validate time. They are
+// separate from the runtime's opt-in, end-user-facing Suggestor.
 
 func TestLevenshtein(t *testing.T) {
 	cases := []struct {
@@ -25,7 +24,7 @@ func TestLevenshtein(t *testing.T) {
 			t.Errorf("levenshtein(%q, %q) = %d, want %d", tc.a, tc.b, got, tc.want)
 		}
 	}
-	// Symmetric, as an edit distance must be.
+	// Edit distance is symmetric.
 	if levenshtein("deploy", "delpoy") != levenshtein("delpoy", "deploy") {
 		t.Error("levenshtein is not symmetric")
 	}

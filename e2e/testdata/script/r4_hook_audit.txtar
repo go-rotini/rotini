@@ -1,9 +1,9 @@
 # R4 — a misspelled lifecycle hook is reported at generate time.
 #
-# A handler embeds the Default* no-ops and overrides the hooks it wants. A hook is implemented by
+# A handler embeds the No* no-ops and overrides the hooks it wants. A hook is implemented by
 # declaring a method with the same name, and nothing says to remove the embed it replaces,
 # because there is no reason to: a method at depth 0 wins over a promoted one. That is what makes a misspelled name SILENT. The embed keeps satisfying
-# Handlers, so the `var _ rotini.Handlers` assertion holds, the package compiles, vet is clean,
+# Handler, so the `var _ rotini.Handler` assertion holds, the package compiles, vet is clean,
 # and the author's hook is dead code that never runs.
 #
 # The assertion catches the other two ways a hook goes wrong — a missing one (no method at all)
@@ -27,9 +27,9 @@ exec go vet ./...
 # ── generate says so, with everything needed to act on it ────────────────────
 exec rotini generate cmd/demo/.rotini.spec.yaml --config cmd/demo/.rotini.conf.yaml
 stderr '^Warning: internal/cmd/demo/demo\.go:\d+'
-stderr 'method "CascadingPrerun" on demoHandlers is not a lifecycle hook'
+stderr 'method "CascadingPrerun" on demoHandler is not a lifecycle hook'
 stderr 'will never run'
-stderr 'rotini\.DefaultCascadingPreRun is what supplies CascadingPreRun'
+stderr 'rotini\.NoCascadingPreRun is what supplies CascadingPreRun'
 stderr 'did you mean "CascadingPreRun"\?'
 
 # ── and the warning is true: the hook really does not run ────────────────────
@@ -58,22 +58,22 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*demoHandlers)(nil)
+var _ rotini.Handler = (*demoHandler)(nil)
 
 // The embeds are all present, as the seeded stub wrote them. CascadingPreRun below is
-// misspelled, so DefaultCascadingPreRun is what the runtime will call.
-type demoHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+// misspelled, so NoCascadingPreRun is what the runtime will call.
+type demoHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*demoHandlers) CascadingPrerun(ctx context.Context, rtx *rotini.Context) {
+func (*demoHandler) CascadingPrerun(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "setup")
 }
 
-func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "ran")
 }
 -- fixed-handler.go.txt --
@@ -86,21 +86,21 @@ import (
 	"github.com/go-rotini/rotini"
 )
 
-var _ rotini.Handlers = (*demoHandlers)(nil)
+var _ rotini.Handler = (*demoHandler)(nil)
 
 // The same file with the one letter corrected. The embed stays: it is now shadowed, which is
 // the normal way to implement a hook.
-type demoHandlers struct {
-	rotini.DefaultCascadingPreRun
-	rotini.DefaultPreRun
-	rotini.DefaultPostRun
-	rotini.DefaultCascadingPostRun
+type demoHandler struct {
+	rotini.NoCascadingPreRun
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
 }
 
-func (*demoHandlers) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
+func (*demoHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "setup")
 }
 
-func (*demoHandlers) Run(ctx context.Context, rtx *rotini.Context) {
+func (*demoHandler) Run(ctx context.Context, rtx *rotini.Context) {
 	fmt.Fprintln(rtx.Stdout, "ran")
 }
