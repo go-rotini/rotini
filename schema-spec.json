@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Rotini Spec Schema",
-  "description": "Schema for a Rotini CLI definition spec file. The document wraps a top-level `version` and a single root `command` (the CLI's root command); from there the tree is commands all the way down. `env_prefix` and `schemas` are root-command-level keys valid only on the root command (under `command`), and `$schema` is an optional document-level editor-tooling key.",
+  "description": "The spec describes your CLI: its commands, their inputs and what they write. The document holds a top-level `version` and one root `command` (the program itself), and every sub-command below it has the same shape. `env_prefix` and `schemas` are valid only on the root command, and `$schema` is an optional key for editor tooling.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,12 +11,12 @@
   "properties": {
     "version": {
       "type": "string",
-      "description": "The MINIMUM rotini this spec requires (X.Y.Z) \u2014 the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. Two cases are errors: a rotini OLDER than this (it may not know keys the spec uses) and a different MAJOR (an incompatible feature set). The check is skipped for a development build of rotini, which reports no release version (0.0.0, or none at all). This \u2014 not the optional `$schema` URL \u2014 is the source of the check.",
+      "description": "The minimum rotini version this spec requires (X.Y.Z): the feature set it was written against, not an exact pin. Any rotini of the same major version at or beyond it accepts the document, so a patch or minor upgrade never requires an edit here. Two cases are errors: a rotini older than this, which may not know keys the spec uses, and a different major version. The check is skipped for a development build of rotini, which reports no release version (0.0.0, or none at all). This key, not the optional `$schema` URL, is what the check reads.",
       "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "examples": ["1.0.0"]
     },
     "$schema": {
       "type": "string",
-      "description": "Optional URI identifying the rotini spec schema, for editor tooling ONLY \u2014 rotini itself never fetches it, and the binary-version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json \u2014 note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. This key is what `rotini init` seeds (`$schema: ./.rotini-schema.spec.json`) and works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place."
+      "description": "Optional URI identifying the rotini spec schema, for editor tooling only: rotini never fetches it, and the version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-spec.json \u2014 note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. `rotini init` seeds this key (`$schema: ./.rotini-schema.spec.json`), and it works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place."
     },
     "command": {
       "$ref": "#/definitions/Command",
@@ -44,7 +44,7 @@
         "env_prefix": {
           "type": "string",
           "pattern": "^[A-Z][A-Z0-9_]*[A-Z0-9]$|^[A-Z]$", "examples": ["APP", "MY_TOOL"],
-          "description": "Document-level (root only): prefix for every DERIVED environment-variable name \u2014 the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' \u2192 ACME_HOME), nested env families without 'variable:' (the family's base name), and flags' env fallbacks (key 'server.port' \u2192 ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt \u2014 they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the input reader reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix)."
+          "description": "Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' \u2192 ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' \u2192 ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section; a flag's environment fallback is not listed, so mention the variable in the flag's summary when users need to know it.\n\nIn a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected."
         },
         "schemas": {
           "type": "object",
@@ -63,7 +63,7 @@
         },
         "$ref": {
           "type": "string",
-          "description": "Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command.\n\nThe composed child is the base, and the parent can adjust it at the point where it is mounted:\n\n- Identity and presentation keys declared alongside the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) WIN over the child's, for that one composed node \u2014 the child's own sub-commands keep theirs. A parent tailors the child for its tree without forking it.\n- A 'commands:' authored next to the $ref is MERGED onto the child's own subtree: its inline entries get their own stubs, and its $ref entries compose as further children.\n- `handler:` on a $ref node points the composed command at a different handler package.\n- Handler-coupled keys (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough) CANNOT be overlaid: the composed command runs the child's handler, built against the child's own inputs and output, so validation rejects them here. Declare them in the child spec.\n\nThe child's own plugins, plugin_discovery and passthrough travel with it. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file."
+          "description": "The spec file whose root command is mounted here as this sub-command. Not valid on the root command. Two forms are accepted:\n\n- A relative path, resolved against this spec file's directory (`$ref: ../db/.rotini.spec.yaml`).\n- `mod://<module>@<version>/<path>`, a spec inside another Go module (`$ref: mod://github.com/acme/db@v1.4.0/cmd/db/.rotini.spec.yaml`). The version is required, and <path> is the spec file's path inside that module. The module is read from the module cache with `go mod download`, so it is verified against go.sum; add it to go.mod first (`go get github.com/acme/db@v1.4.0`). A relative $ref inside that spec resolves within the same module and cannot leave it.\n\nGit and https URLs are not accepted. Either way, the mounted command uses the handlers of the composed spec's own generated package unless `handler:` names another.\n\nThe composed spec is the base, and the parent can adjust it where it is mounted:\n\n- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.\n- A 'commands:' list next to the $ref is added to the child's own sub-commands: its inline entries get their own handler files, and its $ref entries are mounted as further children.\n- `handler:` on a $ref command points it at a different handler package.\n- Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.\n\nThe child's own plugins, plugin_discovery and passthrough travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it."
         },
         "aliases": {
           "type": "array",
@@ -102,7 +102,7 @@
         },
         "config_files": {
           "type": "array",
-          "description": "Config-file SOURCES this command contributes \u2014 where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root \u2192 leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded \u2014 off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins, and within one command's list the FIRST declared wins \u2014 so list the more specific file (a project's) before the more general one (the user's). COMPOSITION: a $ref'd child's sources travel with its command tree, re-scoped to the path the graft occupies, so `parent child cmd` reads what `child cmd` reads without the parent re-declaring anything.",
+          "description": "Configuration files this command reads values from, each at a fixed 'path' or found with 'discover'. Files cascade: a command can read from the files declared on it and on every command above it, so a 'config' input here or on any sub-command may pin itself (schema 'file:') to a file declared here or on any ancestor. Only the files along the invoked command's path are loaded; files declared on other branches are never read. File names must be unique along a path (a collision is an error), and declaring the same physical file at two levels is a warning. When two files in scope define the same key, the one declared nearest the invoked command wins, and within one command's list the first declared wins, so list the more specific file (a project's) before the more general one (the user's). In a composed CLI, a `$ref`'d child's files travel with its commands, so `parent child cmd` reads what `child cmd` reads without the parent declaring anything.",
           "items": {
             "$ref": "#/definitions/ConfigurationFile"
           }
@@ -185,7 +185,7 @@
         },
         "output": {
           "$ref": "#/definitions/Schema",
-          "description": "The shape of what this command writes to stdout when it succeeds, as a schema. rotini generates a typed '<Prefix>Output' Go type (a named-type alias when the shape is a '$ref' to a document-level schema), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item."
+          "description": "The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '<Prefix>Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type <Prefix>Output Task', so convert a value with <Prefix>Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item."
         },
         "hidden": {
           "type": "boolean",
@@ -207,7 +207,7 @@
         },
         "commands": {
           "type": "array",
-          "description": "Sub-commands of this command (inline or composed via $ref). On a $ref node these are MERGED additively onto the composed child's own subtree (the overlay model \u2014 see '$ref'); a name/alias collision across the merged set is an error.",
+          "description": "Sub-commands of this command, declared inline or composed with $ref. On a $ref command these are added to the composed child's own sub-commands (see '$ref'); a name or alias that collides across the combined list is an error.",
           "items": {
             "$ref": "#/definitions/Command"
           }
@@ -229,7 +229,7 @@
         },
         "exit_status": {
           "type": "array",
-          "description": "Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome reporter's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code, and the default signal handling, which exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 \u2014 set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.",
+          "description": "Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. This is documentation only, and rotini does not check it: the runtime sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. Ignored when 'man' (verbatim) is set.",
           "items": {
             "$ref": "#/definitions/ExitStatusEntry"
           }
@@ -251,7 +251,7 @@
         },
         "handler": {
           "$ref": "#/definitions/HandlerSource",
-          "description": "Source this command's handlers from an external Go PACKAGE instead of a generated stub (handler delegation). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command \u2014 there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handler' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time \u2014 rotini cannot type-check a foreign package."
+          "description": "Use a handler from another Go package for this command instead of a generated handler file. Valid on any sub-command, not the root.\n\nOn a '$ref' command it replaces the default: a composed local or mod:// spec normally uses the handlers of its own generated package, and this points the command at a different package. On an inline command, the command's tree and typed inputs are still generated here, but its handler comes from the package and no handler file is written. It applies to this command only: an inline sub-command without its own 'handler:' still gets a generated handler file.\n\nThe package must export a constructor '<convention>() rotini.Handler' for each command it serves (the usual five-hook handler; hooks it does not implement default to no-ops), and the generated code calls 'pkg.<Convention>()'. The compiler enforces this, since rotini cannot type-check another package."
         }
       }
     },
@@ -266,7 +266,7 @@
       "properties": {
         "import": {
           "type": "string",
-          "description": "Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deploycli github.com/acme/clis/deploy/rth'); deduped with other imports. A bare path derives its alias from the last segment. Codegen calls '<alias>.<convention>()'.",
+          "description": "Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deployhandlers github.com/acme/clis/deploy/handlers'); identical imports are merged. A bare path takes its alias from the last path segment. The generated code calls '<alias>.<convention>()'.",
           "pattern": "^[^\\s]+( [^\\s]+)?$", "examples": ["example.com/app/handlers", "h example.com/app/handlers"]
         },
         "convention": {
@@ -343,11 +343,11 @@
         "$ref": {
           "type": "string",
           "pattern": "^(#/schemas/)?[A-Z][A-Za-z0-9_]*$", "examples": ["DB", "#/schemas/DB"],
-          "description": "Reference to a named schema in the root command's \"schemas\" map, by its name (`$ref: DB`) or as a JSON pointer (`$ref: '#/schemas/DB'`) \u2014 the two mean the same; the pointer is what JSON Schema tooling reads. Resolved at codegen time. A reference to a named SCALAR schema brings that schema's enum, pattern (and pattern_message), lengths and bounds with it, wherever the input leaves them unset.\n\nOn a FLAG, a named OBJECT schema makes the flag object-valued: its generated field is the schema's struct, and it takes any of:\n\n- JSON \u2014 `--db '{\"host\":\"h\",\"port\":5}'`\n- key=value pairs \u2014 `--db host=h,port=5`; dotted keys nest (`pool.max=9`), a repeated key appends to a list field, and quotes keep a comma (`host=\"a,b\"`)\n- a JSON or YAML file, with `from: [file]` \u2014 `--db @db.yaml`\n- one field per flag \u2014 `--db.host=h --db.port=5`\n\nOccurrences MERGE in argv order, a later key winning. Declared as `type: array, items: {$ref: \u2026}`, the flag is a list of objects and each occurrence is one element (per-field flags do not apply). A flag's environment fallback takes the same spellings (DB='{\"host\":\"h\"}'), and its configuration-file fallback is the object as a mapping (or a list of mappings).\n\nEvery spelling is validated against the named schema \u2014 the same schema, and validator, a stdin payload of that shape meets \u2014 and errors name the flag and the key (`--db: port: value must be >= 1`, `unknown key \"bogus\"`). A `default` is written as a mapping (a list of mappings for a list) and is checked against the schema at validate time; a supplied value replaces it rather than merging. Scalar-shaping keys (enum, separator, ignore_case, implicit_value, negatable, dotted_keys, bounds, pattern) do not apply \u2014 an object's rules live in its schema. Arguments cannot be object-valued."
+          "description": "Reference to a named schema in the root command's \"schemas\" map, by its name (`$ref: DB`) or as a JSON pointer (`$ref: '#/schemas/DB'`). The two mean the same; the pointer is what JSON Schema tooling reads. Resolved when you generate. A reference to a named scalar schema brings that schema's enum, pattern (and pattern_message), lengths and bounds with it, wherever the input leaves them unset.\n\nOn a flag, a named object schema makes the flag object-valued: its generated field is the schema's struct, and it takes any of:\n\n- JSON \u2014 `--db '{\"host\":\"h\",\"port\":5}'`\n- key=value pairs \u2014 `--db host=h,port=5`; dotted keys nest (`pool.max=9`), a repeated key appends to a list field, and quotes keep a comma (`host=\"a,b\"`)\n- a JSON or YAML file, with `from: [file]` \u2014 `--db @db.yaml`\n- one field per flag \u2014 `--db.host=h --db.port=5`\n\nOccurrences merge in the order they appear, a later key winning. Declared as `type: array, items: {$ref: \u2026}`, the flag is a list of objects and each occurrence is one element (per-field flags do not apply). A flag's environment fallback takes the same spellings (DB='{\"host\":\"h\"}'), and its configuration-file fallback is the object as a mapping (or a list of mappings).\n\nEvery spelling is validated against the named schema, with the same validator a stdin payload of that shape meets, and errors name the flag and the key (`--db: port: value must be >= 1`, `unknown key \"bogus\"`). A `default` is written as a mapping (a list of mappings for a list) and is checked against the schema by `rotini validate`; a supplied value replaces it rather than merging. Keys that shape a scalar value (enum, separator, ignore_case, implicit_value, negatable, dotted_keys, bounds, pattern) do not apply: an object's rules live in its schema. Arguments cannot be object-valued."
         },
         "type": {
           "type": "string",
-          "description": "The type used to parse and store the value. Go type names (bool, int, float64, []string, duration, map) and JSON Schema names (boolean, integer, number, array, object) are equivalent. A bool accepts true/false, yes/no, on/off, y/n, t/f and 1/0, in any case, so `--cache=off` and CACHE=yes both work.\n\nValue types parse a kind of value and generate the matching Go field:\n\n- 'duration' \u2014 time.Duration; Go units plus 'd' days and 'w' weeks (7d, 2w3d)\n- 'time' / 'datetime' \u2014 time.Time, RFC 3339 (2026-09-29T14:00:00Z)\n- 'date' \u2014 time.Time, a calendar date (2026-09-29, that day's UTC midnight). All three time types take `layout:` for another format, Unix timestamps included\n- 'url' \u2014 *url.URL; needs a scheme and host\n- 'email' \u2014 mail.Address; 'Name <a@b.c>' or a bare address\n- 'timezone' \u2014 *time.Location; an IANA name such as Europe/Berlin\n- 'mac' (net.HardwareAddr), 'ip' (netip.Addr), 'cidr' (netip.Prefix), 'hostport' (netip.AddrPort)\n- 'bytesize' \u2014 rotini.ByteSize; 512Mi, 10MB, 1.5GiB (an 'i' makes the unit binary)\n- 'hexbytes' \u2014 rotini.HexBytes; optional 0x\n- 'base64bytes' \u2014 rotini.Base64Bytes; standard or URL-safe, padded or not\n- 'existingfile' / 'existingdir' \u2014 a plain string field, checked at parse time to exist and be that kind of thing, so a bad path is a usage error naming the flag the user typed. The check is existence and kind only: expanding '~', cleaning, following symlinks and creating a missing file are the handler's policy\n\nA value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.\n\nShapes that change how a flag is written:\n\n- 'count' (flags only) \u2014 a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv \u2192 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, \u2026) is rejected\n- '[]\u2026' / 'array' \u2014 repeatable (--tag a --tag b \u2192 a slice); 'items' declares the element type ('array' + items int \u2192 []int), defaulting to string\n- a map ('map[string]string', or 'map'/'object' \u2192 map[string]any) \u2014 repeatable too, taking 'key=value' pairs (--label k=v --label a=b; split on the first '='; the value coerced to the element type)\n\nAny other Go type (time.Time, uuid.UUID, your own): set 'import' to the backing package path. It must implement encoding.TextUnmarshaler \u2014 that method is its parser and validator, applied to each element of a list too. rotini refuses a type without it at parse time with a loud error, never a silently zeroed field; validate cannot check it, since that would mean type-checking foreign packages.\n\nA NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'` (or `type: array, items: {$ref: '#/schemas/DB'}` for a list) takes a structured value \u2014 see `$ref`."
+          "description": "The type used to parse and store the value. Go type names (bool, int, float64, []string, duration, map) and JSON Schema names (boolean, integer, number, array, object) are equivalent. A bool accepts true/false, yes/no, on/off, y/n, t/f and 1/0, in any case, so `--cache=off` and CACHE=yes both work.\n\nValue types parse a kind of value and generate the matching Go field:\n\n- 'duration' \u2014 time.Duration; Go units plus 'd' days and 'w' weeks (7d, 2w3d)\n- 'time' / 'datetime' \u2014 time.Time, RFC 3339 (2026-09-29T14:00:00Z)\n- 'date' \u2014 time.Time, a calendar date (2026-09-29, that day's UTC midnight). All three time types take `layout:` for another format, Unix timestamps included\n- 'url' \u2014 *url.URL; needs a scheme and host\n- 'email' \u2014 mail.Address; 'Name <a@b.c>' or a bare address\n- 'timezone' \u2014 *time.Location; an IANA name such as Europe/Berlin\n- 'mac' (net.HardwareAddr), 'ip' (netip.Addr), 'cidr' (netip.Prefix), 'hostport' (netip.AddrPort)\n- 'bytesize' \u2014 rotini.ByteSize; 512Mi, 10MB, 1.5GiB (an 'i' makes the unit binary)\n- 'hexbytes' \u2014 rotini.HexBytes; optional 0x\n- 'base64bytes' \u2014 rotini.Base64Bytes; standard or URL-safe, padded or not\n- 'existingfile' / 'existingdir' \u2014 a plain string field, checked at parse time to exist and be that kind of thing, so a bad path is a usage error naming the flag the user typed. The check is existence and kind only: expanding '~', cleaning, following symlinks and creating a missing file are the handler's policy\n\nA value type works inside Go spellings too ('[]bytesize', 'map[string]duration'), and help shows the name as written ('--limit bytesize'), not the Go type. A lowercase name that is neither a Go builtin nor one of these is rejected as a typo, with a suggestion.\n\nShapes that change how a flag is written:\n\n- 'count' (flags only) \u2014 a presence counter: the flag takes no value, each occurrence increments the generated int field (-vvv \u2192 3, clustering included), an inline value (--verbose=3) is a parse error, and every value-shaped key (default, enum, constraints, from, key, \u2026) is rejected\n- '[]\u2026' / 'array' \u2014 repeatable (--tag a --tag b \u2192 a slice); 'items' declares the element type ('array' + items int \u2192 []int), defaulting to string\n- a map ('map[string]string', or 'map'/'object' \u2192 map[string]any) \u2014 repeatable too, taking 'key=value' pairs (--label k=v --label a=b; split on the first '='; the value coerced to the element type)\n\nAny other Go type (time.Time, uuid.UUID, your own): set 'import' to the backing package path. It must implement encoding.TextUnmarshaler \u2014 that method is its parser and validator, applied to each element of a list too. Rotini refuses a type without it at parse time with a loud error, never a silently zeroed field; validate cannot check it, since that would mean type-checking foreign packages.\n\nA NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'` (or `type: array, items: {$ref: '#/schemas/DB'}` for a list) takes a structured value \u2014 see `$ref`."
         },
         "import": {
           "type": "string",
@@ -361,7 +361,7 @@
         },
         "enum": {
           "type": "array",
-          "description": "Allowed values, validated over the FULLY reconciled value (an env/config-supplied flag value is enum-checked too). At least one member \u2014 an empty list would mean the same as absent.",
+          "description": "Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.",
           "items": {
             "type": "string"
           },
@@ -369,7 +369,7 @@
         },
         "pattern": {
           "type": "string",
-          "description": "Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored \u2014 use ^\u2026$ for a full match. A failure shows the user the regex itself unless `pattern_message:` says it in words."
+          "description": "Regular expression the value must match (string types only; for a list, each element). As in JSON Schema, the pattern matches anywhere in the value unless anchored: use ^\u2026$ for a full match. A failure shows the user the regex itself unless `pattern_message:` says it in words."
         },
         "pattern_message": {
           "type": "string",
@@ -387,7 +387,7 @@
           "pattern": "^([0-9]*\\.?[0-9]+ ?[a-zA-Z\u00b5]+)+$",
           "examples": ["30s", "1h30m", "512Mi"],
           "x-hint": "a string bound is a duration (30s, 1h30m) or a size (512Mi, 10MB), for a duration or bytesize input; any other type takes a number",
-          "description": "Minimum allowed value (inclusive). Numeric-family types (int/uint/float variants and the integer/number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes) \u2014 read by the same parser as the value, and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would be silently ignored. For a repeatable input the bound applies to each ELEMENT. minimum: 0 is a real, enforced bound."
+          "description": "Minimum allowed value (inclusive). Number types (the int, uint and float types and the integer and number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes), read by the same parser as the value and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would have no effect. For a repeatable input the bound applies to each element. minimum: 0 is a real, enforced bound."
         },
         "maximum": {
           "type": [
@@ -463,7 +463,7 @@
         },
         "items": {
           "$ref": "#/definitions/Schema",
-          "description": "Element schema for an array type: 'array' + items int generates []int, items $ref a named-type slice; omitted items default to string elements. Per-value constraints (enum, pattern, minimum/maximum, exclusiveMinimum/exclusiveMaximum, multipleOf, minLength/maxLength) apply to EVERY element and may be written either here, JSON-Schema style, or on the list itself — the two spellings mean the same thing, and declaring the same constraint in both places with different values is an error. minItems/maxItems belong on the list (they count elements) and are rejected here on flags, arguments, env and config. The TextUnmarshaler contract also applies per element (see 'type')."
+          "description": "Element schema for an array type: 'array' + items int generates []int, and items $ref a slice of the named type; with no items, elements are strings. Per-value constraints (enum, pattern, minimum/maximum, exclusiveMinimum/exclusiveMaximum, multipleOf, minLength/maxLength) apply to every element and may be written either here, JSON Schema style, or on the list itself. The two spellings mean the same thing, and declaring the same constraint in both places with different values is an error. minItems/maxItems belong on the list (they count elements) and are rejected here on flags, arguments, env and config. The TextUnmarshaler rule also applies to each element (see 'type')."
         }
       }
     },
@@ -478,7 +478,7 @@
           "properties": {
             "description": {
               "type": "string",
-              "description": "What this shape or property IS, in a sentence. rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema has `summary:` on the input instead."
+              "description": "What this shape or property is, in a sentence. Rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema uses `summary:` on the input instead."
             },
             "required": {
               "type": "array",
@@ -508,19 +508,19 @@
               "description": "When true, the input must be provided (or stdin must not be empty for stdin inputs). Note: this is a boolean \u2014 unlike the string-array 'required' on Schema."
             },
             "default": {
-              "description": "The value an input takes when no channel supplies one. A scalar for a single value; a list for a repeatable input, each element seeded as one occurrence (as if the flag were repeated); a mapping for a map input, seeded as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). It is written the way a user would write the value (a duration as 30s, a date as 2026-09-29 or under `layout:`), and `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that takes it. A supplied value REPLACES the default, never merges with it. `default_text:` changes only how help shows it."
+              "description": "The value an input takes when nothing supplies one. A scalar for a single value; a list for a repeatable input, each element added as one occurrence (as if the flag were repeated); a mapping for a map input, added as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). Write it the way a user would type the value (a duration as 30s, a date as 2026-09-29 or in the input's `layout:`). `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that uses it. A supplied value replaces the default; the two never merge. `default_text:` changes only how help shows it."
             },
             "variable": {
               "type": ["string", "array"],
               "items": {"type": "string", "pattern": "^[A-Z_][A-Z0-9_]*$", "examples": ["GH_TOKEN"]},
               "minItems": 1,
               "uniqueItems": true,
-              "description": "The EXACT environment variable this input reads, instead of the name rotini would derive \u2014 or a LIST of names, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on FLAGS (as a flag's env fallback); rejected on arguments, config inputs and stdin, which have no environment channel.\n\nExempt from `env_prefix` either way: an explicitly named variable is already exact, and prefixing it would silently make it a different variable.\n\nOn a flag it also opts the flag into the fallback chain (argv > env > config > default), keyed by the flag's own name unless `key:` names one \u2014 so `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no config `key:` whose SNAKE_UPPER must happen to match. Because the flag now has a key, a configuration file defining that key supplies it too; declare `key:` to control what that key is.",
+              "description": "The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on flags (as a flag's environment fallback); rejected on arguments, config inputs and stdin, which have no environment variable.\n\nA variable named here is never given the `env_prefix`: it is already exact, and prefixing it would silently make it a different variable.\n\nOn a flag it also turns on the fallback chain (command line, then environment, then config file, then default), keyed by the flag's own name unless `key:` names one. So `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no need for a config `key:` whose UPPER_SNAKE form happens to match. Because the flag now has a key, a configuration file that defines that key supplies it too; declare `key:` to control what that key is.",
               "pattern": "^[A-Z_][A-Z0-9_]*$", "examples": ["GITHUB_TOKEN"]
             },
             "file": {
               "type": "string",
-              "description": "Config inputs only: pins this input to ONE named config_files entry \u2014 the value (and its 'required') is read from that file ONLY, never from the merged precedence chain, so a key present in another file does not satisfy it. Omit to read through the declared precedence order (first file with the key wins).",
+              "description": "Config inputs only: reads this input from one named config_files entry only, never from the other files, so a key present in another file does not satisfy it (or its 'required'). Omit it to read through the declared order, where the first file with the key wins.",
               "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$", "examples": ["appconf"]
             },
             "key": {
@@ -536,14 +536,14 @@
             "ignore_case": {
               "type": "boolean",
               "default": false,
-              "description": "With 'enum' only: match a value against the enum without regard to case, so `--mode FAST` is accepted against [fast, slow]. The value binds as the DECLARED spelling (fast), so a handler compares against one form. Applies on every channel the input reads: argv, a flag's env and config fallbacks, and env and config inputs.",
+              "description": "With 'enum' only: match a value against the enum without regard to case, so `--mode FAST` is accepted against [fast, slow]. The value is stored in its declared spelling (fast), so a handler compares against one form. Applies wherever the input reads a value: the command line, a flag's environment and config fallbacks, and env and config inputs.",
               "$comment": "Enforced by lintIgnoreCase: requires enum."
             },
             "separator": {
               "type": "string",
               "minLength": 1,
               "maxLength": 1,
-              "description": "LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style \u2014 an item in double quotes keeps the separator (`--tags '\"a,b\",c'`), leading spaces are trimmed, and an empty value (`--tags \"\"`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched. Not on env and config INPUTS: an env input's list is split on commas by rotini's configuration reader (TAGS=a,b), and a configuration file writes a list as a list.",
+              "description": "List and map flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style: an item in double quotes keeps the separator (`--tags '\"a,b\",c'`), leading spaces are trimmed, and an empty value (`--tags \"\"`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Without a separator, each occurrence is one value, used as is. Not valid on env and config inputs: an env input's list is always split on commas (TAGS=a,b), and a configuration file writes a list as a list.",
               "$comment": "Enforced by lintSeparator: list/map types on flags and arguments only; not a double quote, a line break, or '=' on a map."
             },
             "implicit_value": {
@@ -552,13 +552,13 @@
                 "number",
                 "boolean"
               ],
-              "description": "FLAGS only: the value a flag takes when it is given WITHOUT one, which makes its value optional \u2014 the `--color[=when]` shape. With `implicit_value: always`, a bare `--color` means always, `--color=never` sets never, and a flag left out takes its `default` as usual. Because the value is optional it must be attached: `--color never` leaves `never` as the next argument, not the flag's value (a short flag attaches too: `-cnever`, `-c=never`). Help shows the flag as `--color[=<type>]` with `(implicit: always)`. For a scalar, non-bool flag \u2014 a bool already works this way, with true \u2014 and the value must satisfy the flag's type, enum and constraints.",
+              "description": "Flags only: the value a flag takes when it is given without one, which makes its value optional (the `--color[=when]` shape). With `implicit_value: always`, a bare `--color` means always, `--color=never` sets never, and a flag left out takes its `default` as usual. Because the value is optional it must be attached: in `--color never`, `never` is the next argument, not the flag's value (a short flag attaches too: `-cnever`, `-c=never`). Help shows the flag as `--color[=<type>]` with `(implicit: always)`. For a scalar flag that is not a bool (a bool already works this way, with true), and the value must satisfy the flag's type, enum and constraints.",
               "$comment": "Enforced by lintImplicitValue (scope) and lintValuesParse (type)."
             },
             "default_text": {
               "type": "string",
               "minLength": 1,
-              "description": "The default as help, man and markdown SHOW it, in place of the value itself. For a default that reads badly verbatim (`default_text: 'the number of CPUs'`, `default_text: '$HOME/.cache/app'`) or that the handler computes when the input is unset, so there is no literal to show. Display only: the value the input takes is still `default`, or nothing."
+              "description": "How help, man and markdown pages show the default, in place of the value itself. Use it for a default that reads badly as written (`default_text: 'the number of CPUs'`, `default_text: '$HOME/.cache/app'`), or one the handler computes when the input is unset, so there is no literal to show. Display only: the value the input takes is still `default`, or nothing."
             },
             "layout": {
               "type": "string",
@@ -568,13 +568,13 @@
                 "Jan 2 2006 15:04",
                 "unix"
               ],
-              "description": "TIME inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout \u2014 the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is (`2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`) \u2014 or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies on every channel the input reads, and a `default` must parse under it.",
+              "description": "Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies wherever the input reads a value, and a `default` must parse under it.",
               "$comment": "Enforced by lintLayout (time types only; a real layout) and lintValuesParse (defaults)."
             },
             "negatable": {
               "type": "boolean",
               "default": false,
-              "description": "BOOL FLAGS only: also accept a `--no-<name>` form for every LONG identifier, which sets the flag false. `--color` with negatable declares `--no-color` too.\n\nIt exists for the direction a plain bool cannot express: turning something OFF for one run when a default, a config file or an environment variable already turned it on. Short identifiers get no negated form \u2014 `-no-c` is not a thing, and inventing `-C` is not rotini's call.\n\nA declared identifier always wins over a derived negated one, so an author who genuinely declares `--no-cache` on another flag keeps it. The negated form takes no value: `--no-color=true` is a parse error rather than a riddle. The generated field is the same single bool either way, and `--[no-]color` is how it renders in help.",
+              "description": "Bool flags only: also accept a `--no-<name>` form for every long identifier, which sets the flag false. `--color` with negatable declares `--no-color` too.\n\nUse it to turn something off for one run when a default, a config file or an environment variable already turned it on, which a plain bool flag cannot do. Short identifiers get no negated form.\n\nA declared identifier always wins over a derived negated one, so a flag you declare as `--no-cache` keeps that name. The negated form takes no value: `--no-color=true` is a parse error. The generated field is the same single bool either way, and help shows it as `--[no-]color`.",
               "$comment": "Enforced by lintNegatable: bool only, never count, and the long identifier is what the negated form derives from."
             },
             "dotted_keys": {
@@ -592,17 +592,17 @@
                   "stdin"
                 ]
               },
-              "description": "Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text.\n\n- 'file' \u2014 a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for the token-file idiom)\n- 'stdin' \u2014 a value of exactly '-' is replaced by the piped stdin (`-f -`); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel, since stdin has one consumer\n- 'value' \u2014 implicit and always allowed; listing it is documentation only. Any value not matching an enabled sentinel stays literal\n\nResolved file or stdin text has one trailing line ending removed (leading and interior whitespace is content), then flows through the normal type, enum and constraint checks \u2014 the flag's value IS the resolved text. On an object-valued flag the resolved text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the command as a whole is the stdin: channel's job.\n\nWithout 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal \u2014 the sentinels apply to argv-supplied values only."
+              "description": "Flag inputs only: where this flag's value may come from, besides the text on the command line.\n\n- 'file' \u2014 a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file)\n- 'stdin' \u2014 a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: input, since stdin can be read only once\n- 'value' \u2014 always allowed; listing it is documentation only. Any value that does not match an enabled marker stays literal\n\nText read from a file or stdin has one trailing line ending removed (leading and interior whitespace is kept), then goes through the normal type, enum and constraint checks: the flag's value is that text. On an object-valued flag the text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the whole command belongs in the command's stdin: input.\n\nWithout 'from', '@' and '-' are ordinary characters. Defaults and environment and config fallbacks are always literal: the markers apply only to values given on the command line."
             },
             "config_source": {
               "type": "string",
-              "description": "Flag and env inputs only: names a config_files entry whose file PATH this input supplies \u2014 the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist \u2014 unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry.",
+              "description": "Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the env input's variable, then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. The input's type must be string. At most one flag and one env input may name the same entry.",
               "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$", "examples": ["appconf"]
             },
             "nesting": {
               "type": "string",
               "minLength": 1,
-              "description": "Env inputs only, map-typed ('map'/'object' \u2192 map[string]any): the separator that aggregates a FAMILY of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the SNAKE_UPPER of the input's name. With name: http, variable: ACME_HTTP, nesting: \"__\" \u2014 ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: \"30\", retry: {max: \"9\"}} (segments lowercased; values are strings). 'required: true' errors when no matching variables exist. 'default:' is rejected \u2014 seed defaults in code or config instead."
+              "description": "Env inputs only, map-typed ('map'/'object' \u2192 map[string]any): the separator that collects a family of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the UPPER_SNAKE form of the input's name. With name: http, variable: ACME_HTTP, nesting: \"__\", ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: \"30\", retry: {max: \"9\"}} (segments lowercased; values are strings). 'required: true' is an error when no matching variables exist. 'default:' is rejected: set defaults in code or in a config file instead."
             },
             "complete": {
               "type": "object",
@@ -610,7 +610,7 @@
               "required": [
                 "kind"
               ],
-              "description": "Declarative shell-completion hint for this input's VALUE \u2014 the case between a static `enum` and writing a Go FlagValueCompleter, which is 'this is a file': the commonest value shape there is.\n\nFlags and arguments only. The hint reaches the shell as a directive on the last line of the hidden __complete output, and each generated script translates it into that shell's own path completion. A dynamic completer still wins when it answers \u2014 this is the fallback, not a ceiling.",
+              "description": "Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter).\n\nFlags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.",
               "properties": {
                 "kind": {
                   "type": "string",
@@ -619,12 +619,12 @@
                     "directory",
                     "none"
                   ],
-                  "description": "'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete NOTHING \u2014 which is NOT the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that default is file completion; 'none' suppresses it, so an opaque value (a container id, an API resource name) stops a shell offering the contents of the current directory as if they were plausible answers."
+                  "description": "'file': complete file paths (narrowed by 'extensions'). 'directory': complete directories only. 'none': complete nothing, which is not the same as declaring no hint. With no hint the shell applies its own default, and for bash and zsh that is file completion; 'none' turns it off, so for an opaque value (a container id, an API resource name) the shell does not offer the files in the current directory."
                 },
                 "extensions": {
                   "type": "array",
                   "minItems": 1,
-                  "description": "Narrows kind 'file' to these suffixes, written WITHOUT a leading dot ('yaml', 'json'). Omitted offers every file. Rejected on the other kinds, which have no extensions to filter.",
+                  "description": "Narrows kind 'file' to these suffixes, written without a leading dot ('yaml', 'json'). Omitted, every file is offered. Rejected on the other kinds, which have no extensions to filter.",
                   "items": {
                     "type": "string",
                     "pattern": "^[A-Za-z0-9][A-Za-z0-9.+-]*$", "examples": ["yaml", "tar.gz"]
@@ -635,7 +635,7 @@
             "placeholder": {
               "type": "string",
               "minLength": 1,
-              "description": "Display name for this input's VALUE in generated help/man/usage \u2014 `--file <PATH>` instead of the Go type token, `<PATH>` instead of the argument's name. Pure presentation: parsing, completion, and the generated field are untouched. Conventionally UPPERCASE or <angle-bracketed>."
+              "description": "Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or <angle-bracketed>."
             }
           }
         }
@@ -668,7 +668,7 @@
         },
         "group": {
           "type": "string",
-          "description": "Group label that buckets this flag under its own heading in generated help, exactly as a command's 'group' buckets it in the Commands list: flags sharing a group appear together, groups appear in the order their first member is declared, and ungrouped flags fall under the default Flags heading.\n\nPRESENTATION ONLY \u2014 parsing, precedence and the generated field are untouched. It is for the command with twenty flags, where one undifferentiated wall is the difference between a help page someone reads and one they skim past. Not to be confused with 'flag_groups', which is cross-flag VALIDATION and shares nothing but the word."
+          "description": "Group label that puts this flag under its own heading in generated help, the way a command's 'group' does in the Commands list: flags sharing a group appear together, groups appear in the order their first member is declared, and ungrouped flags fall under the default Flags heading.\n\nPresentation only: parsing, precedence and the generated field are unchanged. Use it on a command with many flags, so its help page is easy to scan. Not to be confused with 'flag_groups', which validates combinations of flags."
         },
         "cascading": {
           "type": "boolean",
@@ -810,7 +810,7 @@
             "lines"
           ],
           "default": "json",
-          "description": "How the piped stdin payload is read.\n\nThe four DOCUMENT formats \u2014 json, yaml, jsonc, toml \u2014 decode it into the generated <Prefix>Stdin struct, validated against the declared schema. Defaults to json.\n\nThe two RAW formats are for the grep/jq/fmt family, whose stdin is not a document: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). Both require the schema's type to match \u2014 'string' for text, '[]string' or 'array' for lines \u2014 and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring the channel this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion."
+          "description": "How the piped stdin payload is read.\n\nThe four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.\n\nThe two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion."
         }
       }
     },
@@ -926,7 +926,7 @@
             "jsonc",
             "dotenv"
           ],
-          "description": "Decode format for the file. OMITTED means the format is inferred from the file extension \u2014 declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path."
+          "description": "The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path."
         },
         "schema": {
           "$ref": "#/definitions/Schema",
@@ -955,7 +955,7 @@
                 "walk-up",
                 "xdg"
               ],
-              "description": "'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached \u2014 project-local config, git-style. On Windows the walk stops at the drive root.\n\n'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>. XDG-LITERAL ON EVERY PLATFORM, Windows and macOS included: rotini deliberately does NOT substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere and a dotfiles repository works unchanged across machines. A tool that wants the platform-native location per OS declares a fixed 'path' instead."
+              "description": "'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.\n\n'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead."
             },
             "file": {
               "type": "string",
@@ -964,7 +964,7 @@
             },
             "app": {
               "type": "string",
-              "description": "The application directory under the XDG config root \u2014 the '<app>' in $XDG_CONFIG_HOME/<app>. REQUIRED by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. Both are enforced by rotini validation rather than by this schema, deliberately: a JSON Schema if/then can only say \"missing required property\", where `rotini validate` says which strategy needs it and what it is for.",
+              "description": "The application directory under the XDG config root: the '<app>' in $XDG_CONFIG_HOME/<app>. Required by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.",
               "pattern": "^[^/\\\\]+$", "examples": ["mytool"]
             }
           }

@@ -8,7 +8,7 @@ title: "specification"
 
 # .rotini.spec.yaml
 
-Schema for a Rotini CLI definition spec file. The document wraps a top-level `version` and a single root `command` (the CLI's root command); from there the tree is commands all the way down. `env_prefix` and `schemas` are root-command-level keys valid only on the root command (under `command`), and `$schema` is an optional document-level editor-tooling key.
+The spec describes your CLI: its commands, their inputs and what they write. The document holds a top-level `version` and one root `command` (the program itself), and every sub-command below it has the same shape. `env_prefix` and `schemas` are valid only on the root command, and `$schema` is an optional key for editor tooling.
 
 {{< code title=".rotini.spec.yaml — every key" language="yaml" file="examples/rotini.spec.yaml" open="true" copy="true" >}}{{< /code >}}
 
@@ -23,7 +23,7 @@ this list is rendered from the schema, so it always matches what the tool accept
 
 `string` · **required**
 
-The MINIMUM rotini this spec requires (X.Y.Z) — the feature set it was written against, not an exact pin. Any rotini of the same major at or beyond it accepts the document, so a patch or minor upgrade never forces an edit here. Two cases are errors: a rotini OLDER than this (it may not know keys the spec uses) and a different MAJOR (an incompatible feature set). The check is skipped for a development build of rotini, which reports no release version (0.0.0, or none at all). This — not the optional `$schema` URL — is the source of the check.
+The minimum rotini version this spec requires (X.Y.Z): the feature set it was written against, not an exact pin. Any rotini of the same major version at or beyond it accepts the document, so a patch or minor upgrade never requires an edit here. Two cases are errors: a rotini older than this, which may not know keys the spec uses, and a different major version. The check is skipped for a development build of rotini, which reports no release version (0.0.0, or none at all). This key, not the optional `$schema` URL, is what the check reads.
 
 ### `command`
 
@@ -35,7 +35,7 @@ The CLI's root command (the binary itself): its name, doc-fields, inputs (flags/
 
 `string`
 
-Optional URI identifying the rotini spec schema, for editor tooling ONLY — rotini itself never fetches it, and the binary-version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.0.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. This key is what `rotini init` seeds (`$schema: ./.rotini-schema.spec.json`) and works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
+Optional URI identifying the rotini spec schema, for editor tooling only: rotini never fetches it, and the version check reads the top-level `version` key, not this. Any URI is accepted: a released schema (https://raw.githubusercontent.com/go-rotini/rotini/refs/tags/v1.2.0/schema-spec.json — note the 'v', matching the git tag), a path written into your project by the conf's `generate.schemas.spec.file`, or a fork's own URL. A relative path is resolved by your editor, not by rotini. `rotini init` seeds this key (`$schema: ./.rotini-schema.spec.json`), and it works in every format; YAML editors also accept a `# yaml-language-server: $schema=<path>` comment in its place.
 
 
 ## Command
@@ -110,13 +110,15 @@ Declares expected stdin format and schema for this command
 
 array of [`ConfigurationFile`](#configurationfile)
 
-Config-file SOURCES this command contributes — where config values come from (a fixed 'path' or 'discover'). CASCADING: a command's effective sources are the union along the resolved chain (root → leaf), so a 'config' input on this command or any descendant may pin (schema 'file:') to a source declared here or on any ancestor. Only sources along the INVOKED chain are loaded — off-branch files are never read. Source names must be unique within a chain (a collision is an error); declaring the same physical file ('path'/'discover' target) at two levels is a warning. Precedence when two in-scope files define the same key: nearest-to-the-invoked-command wins, and within one command's list the FIRST declared wins — so list the more specific file (a project's) before the more general one (the user's). COMPOSITION: a $ref'd child's sources travel with its command tree, re-scoped to the path the graft occupies, so `parent child cmd` reads what `child cmd` reads without the parent re-declaring anything.
+Configuration files this command reads values from, each at a fixed 'path' or found with 'discover'. Files cascade: a command can read from the files declared on it and on every command above it, so a 'config' input here or on any sub-command may pin itself (schema 'file:') to a file declared here or on any ancestor. Only the files along the invoked command's path are loaded; files declared on other branches are never read. File names must be unique along a path (a collision is an error), and declaring the same physical file at two levels is a warning. When two files in scope define the same key, the one declared nearest the invoked command wins, and within one command's list the first declared wins, so list the more specific file (a project's) before the more general one (the user's). In a composed CLI, a `$ref`'d child's files travel with its commands, so `parent child cmd` reads what `child cmd` reads without the parent declaring anything.
 
 #### `env_prefix`
 
 `string`
 
-Document-level (root only): prefix for every DERIVED environment-variable name — the SNAKE_UPPER projections rotini computes: plain env inputs without 'variable:' (input 'home' → ACME_HOME), nested env families without 'variable:' (the family's base name), and flags' env fallbacks (key 'server.port' → ACME_SERVER_PORT). Explicitly named 'variable:' values are exempt — they are already exact. With a prefix declared the program's derived env namespace is SCOPED to it: an unprefixed conventional name (HOME for input 'home') no longer binds. UPPER_SNAKE, no trailing underscore (rotini adds the '_' separator). The derived name is written into the generated field's `env:` tag at codegen time, so what generated help prints is exactly what the input reader reads — a name is never re-derived at run time. COMPOSITION: a $ref'd child's env_prefix travels with its command tree, so a parent that declares none adopts the child's; a parent that declares one wins, and two children that disagree are rejected (one descriptor carries one prefix).
+Root only: a prefix for every environment-variable name rotini derives. Derived names are the UPPER_SNAKE forms of plain env inputs without 'variable:' (input 'home' → ACME_HOME), of nested env families without 'variable:' (the family's base name), and of flags' environment fallbacks (key 'server.port' → ACME_SERVER_PORT). A name set explicitly with 'variable:' is used exactly as written and is never prefixed. With a prefix declared, an unprefixed name no longer binds: input 'home' reads ACME_HOME, not HOME. Write it in UPPER_SNAKE with no trailing underscore (rotini adds the '_'). The derived name is written into the generated field's `env:` tag when you generate, so the name is fixed in the code. Help lists env: inputs by name under its Environment section; a flag's environment fallback is not listed, so mention the variable in the flag's summary when users need to know it.
+
+In a composed CLI, a `$ref`'d child's env_prefix travels with its commands: a parent that declares none adopts the child's, a parent that declares one wins, and two children with different prefixes are rejected.
 
 #### `flag_groups`
 
@@ -136,28 +138,37 @@ Conditional cross-flag requirements validated at parse time: when one flag is se
 
 array of [`Command`](#command)
 
-Sub-commands of this command (inline or composed via $ref). On a $ref node these are MERGED additively onto the composed child's own subtree (the overlay model — see '$ref'); a name/alias collision across the merged set is an error.
+Sub-commands of this command, declared inline or composed with $ref. On a $ref command these are added to the composed child's own sub-commands (see '$ref'); a name or alias that collides across the combined list is an error.
 
 #### `$ref`
 
 `string`
 
-Path to another rotini spec file whose root command is statically composed in as this sub-command. Relative to this spec file. Not valid on the root command.
+The spec file whose root command is mounted here as this sub-command. Not valid on the root command. Two forms are accepted:
 
-The composed child is the base, and the parent can adjust it at the point where it is mounted:
+- A relative path, resolved against this spec file's directory (`$ref: ../db/.rotini.spec.yaml`).
+- `mod://<module>@<version>/<path>`, a spec inside another Go module (`$ref: mod://github.com/acme/db@v1.4.0/cmd/db/.rotini.spec.yaml`). The version is required, and <path> is the spec file's path inside that module. The module is read from the module cache with `go mod download`, so it is verified against go.sum; add it to go.mod first (`go get github.com/acme/db@v1.4.0`). A relative $ref inside that spec resolves within the same module and cannot leave it.
 
-- Identity and presentation keys declared alongside the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) WIN over the child's, for that one composed node — the child's own sub-commands keep theirs. A parent tailors the child for its tree without forking it.
-- A 'commands:' authored next to the $ref is MERGED onto the child's own subtree: its inline entries get their own stubs, and its $ref entries compose as further children.
-- `handler:` on a $ref node points the composed command at a different handler package.
-- Handler-coupled keys (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough) CANNOT be overlaid: the composed command runs the child's handler, built against the child's own inputs and output, so validation rejects them here. Declare them in the child spec.
+Git and https URLs are not accepted. Either way, the mounted command uses the handlers of the composed spec's own generated package unless `handler:` names another.
 
-The child's own plugins, plugin_discovery and passthrough travel with it. The child is validated with the parent: `rotini validate` and `generate` on the parent check every locally composed spec as its own document, positioned in its own file.
+The composed spec is the base, and the parent can adjust it where it is mounted:
+
+- Identity and presentation keys declared next to the $ref (name, aliases, summary, description, usage, header, footer, examples, headings, help, man, markdown, exit_status, see_also, group, hidden, deprecated, deprecated_identifiers, filename, plugin_path) replace the child's, for that one mounted command only. The child's own sub-commands keep theirs, so a parent can tailor the child for its tree without forking it.
+- A 'commands:' list next to the $ref is added to the child's own sub-commands: its inline entries get their own handler files, and its $ref entries are mounted as further children.
+- `handler:` on a $ref command points it at a different handler package.
+- Keys the handler depends on (flags, arguments, env, config, config_files, stdin, flag_groups, flag_dependencies, output, plugins, plugin_discovery, passthrough) cannot be changed here: the mounted command runs the child's handler, built against the child's own inputs and output, so validation rejects them. Declare them in the child spec.
+
+The child's own plugins, plugin_discovery and passthrough travel with it. `rotini validate` and `generate` on the parent also check every spec composed by a relative path as its own document, reporting problems at their position in that file. A spec composed with mod:// is not checked that way: it belongs to its own module, which validates it.
 
 #### `handler`
 
 [`HandlerSource`](#handlersource)
 
-Source this command's handlers from an external Go PACKAGE instead of a generated stub (handler delegation). Valid on any SUB-command, not the root. On a '$ref' node it OVERRIDES the auto-derived child cli: a composed local or mod:// child normally delegates to its own generated package, and this points the command at a different one instead. On an INLINE command it is the own-types + delegated-handler hybrid: the command's structure and typed inputs are still generated locally, but its handler delegates to the package (no stub file is seeded). It applies per-command — there is no subtree cascade, so an inline sub-command without its own 'handler:' still gets a normal generated stub. The package must export a constructor '<convention>() rotini.Handler' per command (the normal five-hook handler type; unimplemented hooks default to no-op); codegen delegates 'pkg.<Convention>()'. The contract is enforced at COMPILE time — rotini cannot type-check a foreign package.
+Use a handler from another Go package for this command instead of a generated handler file. Valid on any sub-command, not the root.
+
+On a '$ref' command it replaces the default: a composed local or mod:// spec normally uses the handlers of its own generated package, and this points the command at a different package. On an inline command, the command's tree and typed inputs are still generated here, but its handler comes from the package and no handler file is written. It applies to this command only: an inline sub-command without its own 'handler:' still gets a generated handler file.
+
+The package must export a constructor '<convention>() rotini.Handler' for each command it serves (the usual five-hook handler; hooks it does not implement default to no-ops), and the generated code calls 'pkg.<Convention>()'. The compiler enforces this, since rotini cannot type-check another package.
 
 #### `passthrough`
 
@@ -225,7 +236,7 @@ Example command-line invocations, rendered one per line. Ignored when 'help' is 
 
 array of [`ExitStatusEntry`](#exitstatusentry)
 
-Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. DATA ONLY, and rotini does not check it: the runtime sets no exit code of its own except the outcome reporter's floor, which exits 1 for a recorded error or a recovered panic when no handler set a deliberate code, and the default signal handling, which exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls RecordError will actually exit 1 — set the code explicitly with rtx.Exit (or rtx.HaltWithCode) in the handler to make the binary agree with this section. Ignored when 'man' (verbatim) is set.
+Exit codes this command documents, rendered as an EXIT STATUS section in the man and markdown pages. This is documentation only, and rotini does not check it: the runtime sets no exit code of its own except two. A recorded error or a recovered panic exits 1 when no handler set a code, and the default signal handling exits 128+n on signal n (130 for Ctrl-C). So a command that documents `2: invalid input` here and only calls rtx.RecordError will exit 1. Set the code in the handler with rtx.Exit or rtx.HaltWithCode to make the program agree with this section. Ignored when 'man' (verbatim) is set.
 
 #### `see_also`
 
@@ -281,7 +292,7 @@ Exact, verbatim markdown reference page for this command (the markdown feature's
 
 [`Schema`](#schema)
 
-The shape of what this command writes to stdout when it succeeds, as a schema. rotini generates a typed '<Prefix>Output' Go type (a named-type alias when the shape is a '$ref' to a document-level schema), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
+The shape of what this command writes to stdout when it succeeds, as a schema. Rotini generates a typed '<Prefix>Output' Go type (when the shape is a '$ref' to a document-level schema, a new named type defined on that schema's type, such as 'type <Prefix>Output Task', so convert a value with <Prefix>Output(v)), documents the shape in an OUTPUT section of the help, man and markdown pages, and describes it in the output schema files and the contract document. It describes the shape only: it adds no flag and wires no format. How the output is written, and in which format, is the handler's own code — rtx.WriteOutput is an optional helper that writes json, yaml or toml, hands any other format to a renderer, and checks the value is this type. A command that writes a stream of items declares the shape of one item.
 
 #### `schemas`
 
@@ -328,9 +339,9 @@ CLI tokens for this input that are deprecated — a subset of its identifiers (f
 
 `string`
 
-Group label that buckets this flag under its own heading in generated help, exactly as a command's 'group' buckets it in the Commands list: flags sharing a group appear together, groups appear in the order their first member is declared, and ungrouped flags fall under the default Flags heading.
+Group label that puts this flag under its own heading in generated help, the way a command's 'group' does in the Commands list: flags sharing a group appear together, groups appear in the order their first member is declared, and ungrouped flags fall under the default Flags heading.
 
-PRESENTATION ONLY — parsing, precedence and the generated field are untouched. It is for the command with twenty flags, where one undifferentiated wall is the difference between a help page someone reads and one they skim past. Not to be confused with 'flag_groups', which is cross-flag VALIDATION and shares nothing but the word.
+Presentation only: parsing, precedence and the generated field are unchanged. Use it on a command with many flags, so its help page is easy to scan. Not to be confused with 'flag_groups', which validates combinations of flags.
 
 ### `hidden`
 
@@ -464,9 +475,9 @@ Short one-liner shown next to this input in the generated Environment/Configurat
 
 How the piped stdin payload is read.
 
-The four DOCUMENT formats — json, yaml, jsonc, toml — decode it into the generated <Prefix>Stdin struct, validated against the declared schema. Defaults to json.
+The four document formats (json, yaml, jsonc, toml) decode it into the generated <Prefix>Stdin struct, validated against the declared schema. The default is json.
 
-The two RAW formats are for the grep/jq/fmt family, whose stdin is not a document: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). Both require the schema's type to match — 'string' for text, '[]string' or 'array' for lines — and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring the channel this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
+The two raw formats are for commands whose stdin is not a document, such as text filters: 'text' binds the whole payload as a single string, and 'lines' binds it as []string split on newlines (a trailing newline adds no empty element). The schema's type must match ('string' for text, '[]string' or 'array' for lines), and neither generates a <Prefix>Stdin struct, because there is nothing to shape. Declaring stdin this way, rather than reading rtx.Stdin directly, puts it in the command's help page and completion.
 
 ### `schema`
 
@@ -493,7 +504,7 @@ Locate this file at run time instead of a fixed 'path'. Exactly one of 'path' or
 
 `string` · one of `json`, `yaml`, `toml`, `jsonc`, `dotenv`
 
-Decode format for the file. OMITTED means the format is inferred from the file extension — declare it when the extension is absent or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys stay VERBATIM: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
+The file's format. When omitted, the format is inferred from the file extension; declare it when the extension is missing or misleading. 'jsonc' is JSON with comments and trailing commas. 'dotenv' reads KEY=value lines whose keys are used as written: a config input reading one declares `key: API_ENDPOINT`, not a dotted path.
 
 ### `path`
 
@@ -550,7 +561,7 @@ Where a command's handlers come from when they are not a generated stub: a Go pa
 
 `string` · **required**
 
-Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deploycli github.com/acme/clis/deploy/rth'); deduped with other imports. A bare path derives its alias from the last segment. Codegen calls '<alias>.<convention>()'.
+Go import path of the handler package, in the same 'alias path' form an input type's 'import' uses (e.g. 'deployhandlers github.com/acme/clis/deploy/handlers'); identical imports are merged. A bare path takes its alias from the last path segment. The generated code calls '<alias>.<convention>()'.
 
 ### `convention`
 
@@ -691,7 +702,7 @@ JSON Schema-inspired type definition used for output/response and object propert
 
 `string`
 
-What this shape or property IS, in a sentence. rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema has `summary:` on the input instead.
+What this shape or property is, in a sentence. Rotini writes it as the Go doc comment on the generated type or struct field (a named schema, an output or stdin shape, and each of their properties), so the code a handler reads explains itself. Documentation only: it changes no validation and no field. Accepted on object schemas and their properties; an input's own schema uses `summary:` on the input instead.
 
 ### `required`
 
@@ -755,25 +766,25 @@ document instead; see [StdinSpec](#stdinspec).
 
 `object`
 
-Declarative shell-completion hint for this input's VALUE — the case between a static `enum` and writing a Go FlagValueCompleter, which is 'this is a file': the commonest value shape there is.
+Shell-completion hint for this input's value: for the common case of a file or directory, between a fixed `enum` and a completer written in Go (FlagValueCompleter).
 
-Flags and arguments only. The hint reaches the shell as a directive on the last line of the hidden __complete output, and each generated script translates it into that shell's own path completion. A dynamic completer still wins when it answers — this is the fallback, not a ceiling.
+Flags and arguments only. Each generated completion script turns the hint into that shell's own path completion. A completer written in Go still wins when it answers; the hint is the fallback.
 
 ### `config_source`
 
 `string`
 
-Flag and env inputs only: names a config_files entry whose file PATH this input supplies — the declarative two-phase parse (CLI bootstrap): argv and env are read first, then the file channel opens whatever they pointed at. Precedence for the path: the flag explicitly set on argv, then the env input's variable, then the flag's declared default, then the entry's own path/discover. A path supplied through this input must exist — unlike a declared path, a missing file is then an error, because the user explicitly asked for it. The input's type must be string. At most one flag and one env input may claim the same entry.
+Flag and env inputs only: names a config_files entry whose file path this input supplies, so a user can point the program at a config file (`--config ./other.yaml`). The command line and environment are read first, then the file they name is opened. The path comes from the flag if set on the command line, then the env input's variable, then the flag's default, then the entry's own path or discover. A path supplied this way must exist: unlike a declared path, a missing file is then an error, because the user asked for it. The input's type must be string. At most one flag and one env input may name the same entry.
 
 ### `default`
 
-The value an input takes when no channel supplies one. A scalar for a single value; a list for a repeatable input, each element seeded as one occurrence (as if the flag were repeated); a mapping for a map input, seeded as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). It is written the way a user would write the value (a duration as 30s, a date as 2026-09-29 or under `layout:`), and `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that takes it. A supplied value REPLACES the default, never merges with it. `default_text:` changes only how help shows it.
+The value an input takes when nothing supplies one. A scalar for a single value; a list for a repeatable input, each element added as one occurrence (as if the flag were repeated); a mapping for a map input, added as key=value pairs; and for an object-valued flag a mapping of the named schema's keys (a list of mappings for a list of objects). Write it the way a user would type the value (a duration as 30s, a date as 2026-09-29 or in the input's `layout:`). `rotini validate` checks it against the input's type, enum, bounds and schema, so a default that could never be accepted fails there rather than on every run that uses it. A supplied value replaces the default; the two never merge. `default_text:` changes only how help shows it.
 
 ### `default_text`
 
 `string`
 
-The default as help, man and markdown SHOW it, in place of the value itself. For a default that reads badly verbatim (`default_text: 'the number of CPUs'`, `default_text: '$HOME/.cache/app'`) or that the handler computes when the input is unset, so there is no literal to show. Display only: the value the input takes is still `default`, or nothing.
+How help, man and markdown pages show the default, in place of the value itself. Use it for a default that reads badly as written (`default_text: 'the number of CPUs'`, `default_text: '$HOME/.cache/app'`), or one the handler computes when the input is unset, so there is no literal to show. Display only: the value the input takes is still `default`, or nothing.
 
 ### `dotted_keys`
 
@@ -785,33 +796,33 @@ Map-typed flags only, and only with 'any' values ('map'/'object' → map[string]
 
 `string`
 
-Config inputs only: pins this input to ONE named config_files entry — the value (and its 'required') is read from that file ONLY, never from the merged precedence chain, so a key present in another file does not satisfy it. Omit to read through the declared precedence order (first file with the key wins).
+Config inputs only: reads this input from one named config_files entry only, never from the other files, so a key present in another file does not satisfy it (or its 'required'). Omit it to read through the declared order, where the first file with the key wins.
 
 ### `from`
 
 array of `string`
 
-Flag inputs only: where this flag's value may be acquired from, beyond the literal argv text.
+Flag inputs only: where this flag's value may come from, besides the text on the command line.
 
-- 'file' — a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for the token-file idiom)
-- 'stdin' — a value of exactly '-' is replaced by the piped stdin (`-f -`); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: channel, since stdin has one consumer
-- 'value' — implicit and always allowed; listing it is documentation only. Any value not matching an enabled sentinel stays literal
+- 'file' — a value starting with '@' is replaced by the named file's contents (`--token @/run/secret`; pair with `secret: true` for a token file)
+- 'stdin' — a value of exactly '-' is replaced by what is piped on stdin (`-f -`); empty stdin is then a usage error, and a command cannot combine a from:stdin flag with a declared stdin: input, since stdin can be read only once
+- 'value' — always allowed; listing it is documentation only. Any value that does not match an enabled marker stays literal
 
-Resolved file or stdin text has one trailing line ending removed (leading and interior whitespace is content), then flows through the normal type, enum and constraint checks — the flag's value IS the resolved text. On an object-valued flag the resolved text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the command as a whole is the stdin: channel's job.
+Text read from a file or stdin has one trailing line ending removed (leading and interior whitespace is kept), then goes through the normal type, enum and constraint checks: the flag's value is that text. On an object-valued flag the text is decoded as the object (JSON, or YAML when it spans lines); a structured payload for the whole command belongs in the command's stdin: input.
 
-Without 'from', '@' and '-' are ordinary characters. Declared defaults and env/config fallbacks are always literal — the sentinels apply to argv-supplied values only.
+Without 'from', '@' and '-' are ordinary characters. Defaults and environment and config fallbacks are always literal: the markers apply only to values given on the command line.
 
 ### `ignore_case`
 
 `boolean` · default `false`
 
-With 'enum' only: match a value against the enum without regard to case, so `--mode FAST` is accepted against [fast, slow]. The value binds as the DECLARED spelling (fast), so a handler compares against one form. Applies on every channel the input reads: argv, a flag's env and config fallbacks, and env and config inputs.
+With 'enum' only: match a value against the enum without regard to case, so `--mode FAST` is accepted against [fast, slow]. The value is stored in its declared spelling (fast), so a handler compares against one form. Applies wherever the input reads a value: the command line, a flag's environment and config fallbacks, and env and config inputs.
 
 ### `implicit_value`
 
 `string` or `number` or `boolean`
 
-FLAGS only: the value a flag takes when it is given WITHOUT one, which makes its value optional — the `--color[=when]` shape. With `implicit_value: always`, a bare `--color` means always, `--color=never` sets never, and a flag left out takes its `default` as usual. Because the value is optional it must be attached: `--color never` leaves `never` as the next argument, not the flag's value (a short flag attaches too: `-cnever`, `-c=never`). Help shows the flag as `--color[=<type>]` with `(implicit: always)`. For a scalar, non-bool flag — a bool already works this way, with true — and the value must satisfy the flag's type, enum and constraints.
+Flags only: the value a flag takes when it is given without one, which makes its value optional (the `--color[=when]` shape). With `implicit_value: always`, a bare `--color` means always, `--color=never` sets never, and a flag left out takes its `default` as usual. Because the value is optional it must be attached: in `--color never`, `never` is the next argument, not the flag's value (a short flag attaches too: `-cnever`, `-c=never`). Help shows the flag as `--color[=<type>]` with `(implicit: always)`. For a scalar flag that is not a bool (a bool already works this way, with true), and the value must satisfy the flag's type, enum and constraints.
 
 ### `key`
 
@@ -823,29 +834,29 @@ Dotted key path the value is read from (config inputs and flag config-fallbacks;
 
 `string`
 
-TIME inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout — the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is (`2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`) — or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies on every channel the input reads, and a `default` must parse under it.
+Time inputs only (time, datetime, date, time.Time, and lists of them): how the value is written. A Go reference-time layout (the reference time Mon Jan 2 15:04:05 MST 2006 written the way yours is: `2006-01-02`, `02/01/2006`, `Jan 2 2006 15:04`), or `unix` (seconds since the epoch, fractions allowed) or `unixmilli` (milliseconds). A layout with no zone parses as UTC. Without it, `date` reads `2006-01-02` (that day's UTC midnight) and `time`/`datetime` read RFC 3339 (`2026-09-29T14:00:00Z`). Applies wherever the input reads a value, and a `default` must parse under it.
 
 ### `negatable`
 
 `boolean` · default `false`
 
-BOOL FLAGS only: also accept a `--no-<name>` form for every LONG identifier, which sets the flag false. `--color` with negatable declares `--no-color` too.
+Bool flags only: also accept a `--no-<name>` form for every long identifier, which sets the flag false. `--color` with negatable declares `--no-color` too.
 
-It exists for the direction a plain bool cannot express: turning something OFF for one run when a default, a config file or an environment variable already turned it on. Short identifiers get no negated form — `-no-c` is not a thing, and inventing `-C` is not rotini's call.
+Use it to turn something off for one run when a default, a config file or an environment variable already turned it on, which a plain bool flag cannot do. Short identifiers get no negated form.
 
-A declared identifier always wins over a derived negated one, so an author who genuinely declares `--no-cache` on another flag keeps it. The negated form takes no value: `--no-color=true` is a parse error rather than a riddle. The generated field is the same single bool either way, and `--[no-]color` is how it renders in help.
+A declared identifier always wins over a derived negated one, so a flag you declare as `--no-cache` keeps that name. The negated form takes no value: `--no-color=true` is a parse error. The generated field is the same single bool either way, and help shows it as `--[no-]color`.
 
 ### `nesting`
 
 `string`
 
-Env inputs only, map-typed ('map'/'object' → map[string]any): the separator that aggregates a FAMILY of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the SNAKE_UPPER of the input's name. With name: http, variable: ACME_HTTP, nesting: "__" — ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: "30", retry: {max: "9"}} (segments lowercased; values are strings). 'required: true' errors when no matching variables exist. 'default:' is rejected — seed defaults in code or config instead.
+Env inputs only, map-typed ('map'/'object' → map[string]any): the separator that collects a family of environment variables into this one nested input. The variable prefix is 'variable:' when set, else the UPPER_SNAKE form of the input's name. With name: http, variable: ACME_HTTP, nesting: "__", ACME_HTTP__TIMEOUT=30 and ACME_HTTP__RETRY__MAX=9 bind as http = {timeout: "30", retry: {max: "9"}} (segments lowercased; values are strings). 'required: true' is an error when no matching variables exist. 'default:' is rejected: set defaults in code or in a config file instead.
 
 ### `placeholder`
 
 `string`
 
-Display name for this input's VALUE in generated help/man/usage — `--file <PATH>` instead of the Go type token, `<PATH>` instead of the argument's name. Pure presentation: parsing, completion, and the generated field are untouched. Conventionally UPPERCASE or <angle-bracketed>.
+Display name for this input's value in generated help, man pages and usage lines: `--file <PATH>` instead of the type, `<PATH>` instead of the argument's name. Presentation only: parsing, completion and the generated field are unchanged. Conventionally UPPERCASE or <angle-bracketed>.
 
 ### `required`
 
@@ -863,17 +874,17 @@ When true, this input's value is treated as a secret: redacted in provenance/err
 
 `string`
 
-LIST and MAP flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style — an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Omitted: one value per occurrence, the value untouched. Not on env and config INPUTS: an env input's list is split on commas by rotini's configuration reader (TAGS=a,b), and a configuration file writes a list as a list.
+List and map flags, and a variadic argument: split each value on this character, so `--tags a,b,c` is three tags and `--label a=1,b=2` two entries. Splitting is CSV-style: an item in double quotes keeps the separator (`--tags '"a,b",c'`), leading spaces are trimmed, and an empty value (`--tags ""`) is an empty list. Repeating the flag still appends, so `--tags a,b --tags c` is three tags. Items are split before validation, so enum, item constraints and minItems/maxItems see each one. A flag's environment-variable fallback splits the same way (TAGS=a,b); a configuration file's list binds item by item whether or not a separator is declared. Without a separator, each occurrence is one value, used as is. Not valid on env and config inputs: an env input's list is always split on commas (TAGS=a,b), and a configuration file writes a list as a list.
 
 ### `variable`
 
 `string` or `array`
 
-The EXACT environment variable this input reads, instead of the name rotini would derive — or a LIST of names, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on FLAGS (as a flag's env fallback); rejected on arguments, config inputs and stdin, which have no environment channel.
+The exact environment variable this input reads, instead of the name rotini would derive. It may be a list, first preferred: `variable: [GH_TOKEN, GITHUB_TOKEN]` reads the first one that is set, for a value other tools already know under more than one name. Help lists every name. A nested env input (`nesting:`) takes one name, since it is the prefix of a family of variables. Valid on env inputs and on flags (as a flag's environment fallback); rejected on arguments, config inputs and stdin, which have no environment variable.
 
-Exempt from `env_prefix` either way: an explicitly named variable is already exact, and prefixing it would silently make it a different variable.
+A variable named here is never given the `env_prefix`: it is already exact, and prefixing it would silently make it a different variable.
 
-On a flag it also opts the flag into the fallback chain (argv > env > config > default), keyed by the flag's own name unless `key:` names one — so `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no config `key:` whose SNAKE_UPPER must happen to match. Because the flag now has a key, a configuration file defining that key supplies it too; declare `key:` to control what that key is.
+On a flag it also turns on the fallback chain (command line, then environment, then config file, then default), keyed by the flag's own name unless `key:` names one. So `--token` with `variable: GITHUB_TOKEN` reads that variable directly, with no need for a config `key:` whose UPPER_SNAKE form happens to match. Because the flag now has a key, a configuration file that defines that key supplies it too; declare `key:` to control what that key is.
 
 
 ## ConfigurationFileDiscover
@@ -884,9 +895,9 @@ A run-time location strategy for a configuration file, instead of a fixed 'path'
 
 `string` · **required** · one of `walk-up`, `xdg`
 
-'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached — project-local config, git-style. On Windows the walk stops at the drive root.
+'walk-up': search from the working directory upward, one parent at a time, until a directory containing 'file' is found or the root is reached. Use it for project-local config. On Windows the search stops at the drive root.
 
-'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>. XDG-LITERAL ON EVERY PLATFORM, Windows and macOS included: rotini deliberately does NOT substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere and a dotfiles repository works unchanged across machines. A tool that wants the platform-native location per OS declares a fixed 'path' instead.
+'xdg': search $XDG_CONFIG_HOME/<app>, defaulting to ~/.config/<app>, on every platform, Windows and macOS included. Rotini does not substitute %APPDATA% or ~/Library/Application Support, so a CLI documented as reading ~/.config/<app> reads the same path everywhere, and a dotfiles repository works unchanged across machines. For the platform's native location on each OS, declare a fixed 'path' instead.
 
 ### `file`
 
@@ -898,7 +909,7 @@ The file name to look for in each searched directory (e.g. '.acme.toml', 'config
 
 `string`
 
-The application directory under the XDG config root — the '<app>' in $XDG_CONFIG_HOME/<app>. REQUIRED by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. Both are enforced by rotini validation rather than by this schema, deliberately: a JSON Schema if/then can only say "missing required property", where `rotini validate` says which strategy needs it and what it is for.
+The application directory under the XDG config root: the '<app>' in $XDG_CONFIG_HOME/<app>. Required by the 'xdg' strategy and rejected by 'walk-up', which has no such directory. `rotini validate` enforces both, so its message can say which strategy needs it and what it is for.
 
 
 ## BaseSchema
@@ -909,24 +920,24 @@ Shared fields for Schema and InputSchema. JSON Schema Draft 7 cannot combine all
 
 `string`
 
-Reference to a named schema in the root command's "schemas" map, by its name (`$ref: DB`) or as a JSON pointer (`$ref: '#/schemas/DB'`) — the two mean the same; the pointer is what JSON Schema tooling reads. Resolved at codegen time. A reference to a named SCALAR schema brings that schema's enum, pattern (and pattern_message), lengths and bounds with it, wherever the input leaves them unset.
+Reference to a named schema in the root command's "schemas" map, by its name (`$ref: DB`) or as a JSON pointer (`$ref: '#/schemas/DB'`). The two mean the same; the pointer is what JSON Schema tooling reads. Resolved when you generate. A reference to a named scalar schema brings that schema's enum, pattern (and pattern_message), lengths and bounds with it, wherever the input leaves them unset.
 
-On a FLAG, a named OBJECT schema makes the flag object-valued: its generated field is the schema's struct, and it takes any of:
+On a flag, a named object schema makes the flag object-valued: its generated field is the schema's struct, and it takes any of:
 
 - JSON — `--db '{"host":"h","port":5}'`
 - key=value pairs — `--db host=h,port=5`; dotted keys nest (`pool.max=9`), a repeated key appends to a list field, and quotes keep a comma (`host="a,b"`)
 - a JSON or YAML file, with `from: [file]` — `--db @db.yaml`
 - one field per flag — `--db.host=h --db.port=5`
 
-Occurrences MERGE in argv order, a later key winning. Declared as `type: array, items: {$ref: …}`, the flag is a list of objects and each occurrence is one element (per-field flags do not apply). A flag's environment fallback takes the same spellings (DB='{"host":"h"}'), and its configuration-file fallback is the object as a mapping (or a list of mappings).
+Occurrences merge in the order they appear, a later key winning. Declared as `type: array, items: {$ref: …}`, the flag is a list of objects and each occurrence is one element (per-field flags do not apply). A flag's environment fallback takes the same spellings (DB='{"host":"h"}'), and its configuration-file fallback is the object as a mapping (or a list of mappings).
 
-Every spelling is validated against the named schema — the same schema, and validator, a stdin payload of that shape meets — and errors name the flag and the key (`--db: port: value must be >= 1`, `unknown key "bogus"`). A `default` is written as a mapping (a list of mappings for a list) and is checked against the schema at validate time; a supplied value replaces it rather than merging. Scalar-shaping keys (enum, separator, ignore_case, implicit_value, negatable, dotted_keys, bounds, pattern) do not apply — an object's rules live in its schema. Arguments cannot be object-valued.
+Every spelling is validated against the named schema, with the same validator a stdin payload of that shape meets, and errors name the flag and the key (`--db: port: value must be >= 1`, `unknown key "bogus"`). A `default` is written as a mapping (a list of mappings for a list) and is checked against the schema by `rotini validate`; a supplied value replaces it rather than merging. Keys that shape a scalar value (enum, separator, ignore_case, implicit_value, negatable, dotted_keys, bounds, pattern) do not apply: an object's rules live in its schema. Arguments cannot be object-valued.
 
 ### `enum`
 
 array of `string`
 
-Allowed values, validated over the FULLY reconciled value (an env/config-supplied flag value is enum-checked too). At least one member — an empty list would mean the same as absent.
+Allowed values. The check applies to the final value, wherever it came from, so a flag value supplied by an environment variable or a config file is checked too. At least one member: an empty list would mean the same as no enum.
 
 ### `exclusiveMaximum`
 
@@ -950,7 +961,7 @@ Optional Go import path backing 'type'. Set it when 'type' references a stdlib o
 
 [`Schema`](#schema)
 
-Element schema for an array type: 'array' + items int generates []int, items $ref a named-type slice; omitted items default to string elements. Per-value constraints (enum, pattern, minimum/maximum, exclusiveMinimum/exclusiveMaximum, multipleOf, minLength/maxLength) apply to EVERY element and may be written either here, JSON-Schema style, or on the list itself — the two spellings mean the same thing, and declaring the same constraint in both places with different values is an error. minItems/maxItems belong on the list (they count elements) and are rejected here on flags, arguments, env and config. The TextUnmarshaler contract also applies per element (see 'type').
+Element schema for an array type: 'array' + items int generates []int, and items $ref a slice of the named type; with no items, elements are strings. Per-value constraints (enum, pattern, minimum/maximum, exclusiveMinimum/exclusiveMaximum, multipleOf, minLength/maxLength) apply to every element and may be written either here, JSON Schema style, or on the list itself. The two spellings mean the same thing, and declaring the same constraint in both places with different values is an error. minItems/maxItems belong on the list (they count elements) and are rejected here on flags, arguments, env and config. The TextUnmarshaler rule also applies to each element (see 'type').
 
 ### `maxItems`
 
@@ -986,7 +997,7 @@ Minimum string length in runes (string types only; for []string, each element) �
 
 `number` or `string` or `null`
 
-Minimum allowed value (inclusive). Numeric-family types (int/uint/float variants and the integer/number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes) — read by the same parser as the value, and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would be silently ignored. For a repeatable input the bound applies to each ELEMENT. minimum: 0 is a real, enforced bound.
+Minimum allowed value (inclusive). Number types (the int, uint and float types and the integer and number aliases) take a number; a duration takes a duration (`minimum: 1s`) and a bytesize a size (`minimum: 1Mi`, or a number of bytes), read by the same parser as the value and printed back that way in errors (`must be >= 1s`). Rejected on any other type, where it would have no effect. For a repeatable input the bound applies to each element. minimum: 0 is a real, enforced bound.
 
 ### `multipleOf`
 
@@ -1004,7 +1015,7 @@ Generate the field as a pointer (*T): nil means the input was not provided, dist
 
 `string`
 
-Regular expression the value must match (string types only; for arrays, each element). JSON-Schema SUBSTRING semantics: the pattern matches anywhere in the value unless anchored — use ^…$ for a full match. A failure shows the user the regex itself unless `pattern_message:` says it in words.
+Regular expression the value must match (string types only; for a list, each element). As in JSON Schema, the pattern matches anywhere in the value unless anchored: use ^…$ for a full match. A failure shows the user the regex itself unless `pattern_message:` says it in words.
 
 ### `pattern_message`
 
@@ -1046,7 +1057,7 @@ Shapes that change how a flag is written:
 - '[]…' / 'array' — repeatable (--tag a --tag b → a slice); 'items' declares the element type ('array' + items int → []int), defaulting to string
 - a map ('map[string]string', or 'map'/'object' → map[string]any) — repeatable too, taking 'key=value' pairs (--label k=v --label a=b; split on the first '='; the value coerced to the element type)
 
-Any other Go type (time.Time, uuid.UUID, your own): set 'import' to the backing package path. It must implement encoding.TextUnmarshaler — that method is its parser and validator, applied to each element of a list too. rotini refuses a type without it at parse time with a loud error, never a silently zeroed field; validate cannot check it, since that would mean type-checking foreign packages.
+Any other Go type (time.Time, uuid.UUID, your own): set 'import' to the backing package path. It must implement encoding.TextUnmarshaler — that method is its parser and validator, applied to each element of a list too. Rotini refuses a type without it at parse time with a loud error, never a silently zeroed field; validate cannot check it, since that would mean type-checking foreign packages.
 
 A NAMED OBJECT schema is different: a flag whose schema is `$ref: '#/schemas/DB'` (or `type: array, items: {$ref: '#/schemas/DB'}` for a list) takes a structured value — see `$ref`.
 

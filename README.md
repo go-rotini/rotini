@@ -47,7 +47,7 @@ the handler, build and run.
 | **Shell completion** | Scripts for bash, zsh, fish and PowerShell, with completion hints for values such as files and directories. |
 | **Man and markdown pages** | Roff man pages and markdown reference pages, ready to install or publish. |
 | **Structured output** | A JSON Schema for each command's output and a contract document describing the whole CLI, for scripts and agents. |
-| **Errors and exit codes** | Consistent `Error:` messages, with usage and internal errors mapped to exit codes, or reported as JSON for scripts. |
+| **Errors and exit codes** | Consistent `Error:` messages and a non-zero exit code. Every error carries a usage or internal category you can map to your own exit codes, and errors can be reported as JSON for scripts. |
 | **Deprecation** | Deprecated commands, aliases and flags keep working and are marked in help. Each use is reported to your code, which decides whether to warn. |
 | **Interrupts and panics** | Ctrl+C and SIGTERM stop the program cleanly, running its teardown, and a second Ctrl+C exits at once. A panic is reported as an error rather than a stack trace. |
 | **Suggestions** | "Did you mean" suggestions for a mistyped command or flag, opt-in. |
@@ -61,7 +61,8 @@ Requires Go 1.27 or later.
 
 Create a Go module and add the rotini tool to it. `go tool rotini init <name>` then sets up a
 working program: a spec and a conf, an entrypoint, a handler for each command, and the generated
-code; `go mod tidy` adds the rotini package that code imports. From there, development is a loop:
+code; `go mod tidy` records rotini as a direct dependency, since that code imports it. From there,
+development is a loop:
 describe a change in the spec (a command, a flag, an input, an output), run `go generate ./...` to
 regenerate the typed code, pages and completion, implement the handler for any new command, and
 build.

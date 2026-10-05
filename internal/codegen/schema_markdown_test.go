@@ -112,7 +112,7 @@ func TestSchemaDocsAreComplete(t *testing.T) {
 	for _, phrase := range []string{
 		"env_prefix",
 		"TextUnmarshaler",
-		"commands all the way down",
+		"every sub-command below it has the same shape",
 	} {
 		if !strings.Contains(page, phrase) {
 			t.Errorf("the rendered page does not carry %q — descriptions are missing", phrase)

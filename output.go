@@ -68,7 +68,7 @@ func (rtx *Context) WriteOutputItem[T any](item T, format string, render func(io
 // CheckOutput checks v against the invoked command's declared output schema, returning an
 // internal error that names each field that does not match:
 //
-//	taskr list: output does not match its contract: output.tasks[2].status: value must be one of "open", "done"
+//	taskr list: output does not match its contract: output.tasks[2].status: value is not in enum
 //
 // It writes nothing. [Program.WithOutputChecks] makes every WriteOutput call check.
 func (rtx *Context) CheckOutput(v any) error {

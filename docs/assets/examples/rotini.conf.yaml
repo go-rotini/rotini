@@ -1,6 +1,6 @@
 # Every key the conf accepts, in one valid file. `rotini validate` checks it on every test run.
 $schema: ./.rotini-schema.conf.json
-version: 1.0.0
+version: 1.2.0
 generate:
   schemas:
     spec:

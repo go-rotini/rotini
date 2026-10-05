@@ -6,8 +6,7 @@
 # usual fate of a tutorial.
 #
 # The only departure is the install: the page says
-# `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest` and
-# `go get github.com/go-rotini/rotini@latest`, and this module is wired to the
+# `go get -tool github.com/go-rotini/rotini/cmd/rotini@latest`, and this module is wired to the
 # working tree instead. Installing the PUBLISHED module is Mode A,
 # and it has its own gate (.github/workflows/release-fidelity.yml) because it needs a release
 # to install.
@@ -62,15 +61,18 @@ cp handler.go.txt internal/cmd/todo/todo_add.go
 exec go build -o todo$exe ./cmd/todo
 
 exec ./todo$exe add 'buy milk'
-stdout 'added: buy milk'
-stdout 'task added'
+stdout 'added "buy milk" \(priority normal\)'
 
-# "A handler does not print its own errors: it records them, and the runtime reports them
-# once, after teardown." A missing required argument proves it: the error is on stderr, the
+# The page's mistakes, reported before the handler's code runs: the error is on stderr, the
 # handler printed nothing, and the exit code is non-zero.
+! exec ./todo$exe add 'buy milk' -p urgent
+stderr 'invalid value "urgent" for -p \(one of: low, normal, high\)'
+! stdout 'added'
 ! exec ./todo$exe add
-stderr 'title'
-! stdout 'added:'
+stderr 'missing required input: <title>'
+! stdout 'added'
+! exec ./todo$exe add 'buy milk' --loud
+stderr 'unknown flag "--loud"'
 
 -- spec-with-add.yaml --
 version: 0.0.0
@@ -97,12 +99,20 @@ command:
   commands:
     - name: add
       summary: add a task
+      aliases: [a]
       arguments:
         - name: title
           summary: the task title
-          schema:
-            type: string
-            required: true
+          schema: { type: string, required: true, minLength: 1 }
+      flags:
+        - name: priority
+          summary: how urgent
+          identifiers: [-p, --priority]
+          schema: { type: string, default: normal, enum: [low, normal, high] }
+        - name: tag
+          summary: a label (repeatable)
+          identifiers: [--tag]
+          schema: { type: '[]string' }
     - name: help
       summary: print help
       description: Print help for a command.
@@ -150,14 +160,21 @@ type todoAddHandler struct {
 }
 
 func (*todoAddHandler) Run(ctx context.Context, rtx *rotini.Context) {
-	// One line reconciles every declared channel: argv, env, config files, stdin
-	// and defaults, in the documented precedence order.
-	inputs, err := rtx.Inputs[TodoAddInputs]()
-	if err != nil {
-		rtx.HaltWith(err) // record it and stop; the reporter picks the exit code
+	// Answer --help before reading inputs, so help works even with a required argument missing.
+	if argv, err := rtx.ArgvInputs[TodoAddInputs](); err == nil && argv.Values.Todo.Flags.Help {
+		fmt.Fprintln(rtx.Stdout, rtx.Help())
+		rtx.HaltWithCode(0)
 		return
 	}
 
-	fmt.Fprintln(rtx.Stdout, "added:", inputs.TodoAdd.Arguments.Title)
-	rtx.RecordSuccess("task added")
+	// One call reads every declared source (command line, environment, config files, stdin
+	// and defaults) in precedence order, and validates the result.
+	inputs, err := rtx.Inputs[TodoAddInputs]()
+	if err != nil {
+		rtx.HaltWith(err) // record the error and stop; the reporter prints it and sets the exit code
+		return
+	}
+
+	add := inputs.TodoAdd
+	fmt.Fprintf(rtx.Stdout, "added %q (priority %s)\n", add.Arguments.Title, add.Flags.Priority)
 }
