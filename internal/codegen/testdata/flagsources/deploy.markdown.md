@@ -14,9 +14,9 @@ app deploy <command> [flags]
 
 ## Flags
 
-- `-r, --replicas` `int` — how many (default `1`); env `APP_DEPLOY_REPLICAS`, config `deploy.replicas`
-- `--region` `string` — where; env `DEPLOY_REGION`, config `region`
+- `-r, --replicas` `int` — how many (default `1`); also set by `APP_DEPLOY_REPLICAS` or config key `deploy.replicas`
+- `--region` `string` — where; also set by `DEPLOY_REGION` or config key `region`
 
-## Inherited Flags
+## Global Flags
 
-- `--verbose` — say more; env `APP_LOG_VERBOSE`, config `log.verbose`
+- `--verbose` — say more; also set by `APP_LOG_VERBOSE` or config key `log.verbose`

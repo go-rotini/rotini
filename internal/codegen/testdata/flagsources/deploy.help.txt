@@ -8,10 +8,10 @@ Commands:
 
 Flags:
   -r, --replicas int    how many (default 1)
-                        env: APP_DEPLOY_REPLICAS · config: deploy.replicas
+                        also set by APP_DEPLOY_REPLICAS or config key deploy.replicas
   --region string       where
-                        env: DEPLOY_REGION · config: region
+                        also set by DEPLOY_REGION or config key region
 
 Global Flags:
   --verbose    say more
-               env: APP_LOG_VERBOSE · config: log.verbose
+               also set by APP_LOG_VERBOSE or config key log.verbose

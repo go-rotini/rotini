@@ -12,17 +12,17 @@ a canary deploy
 \fB\-r\fR, \fB\-\-replicas\fR \fIint\fR
 how many (default 1)
 .br
-env: \fBAPP_DEPLOY_REPLICAS\fR \(md config: \fBdeploy.replicas\fR
+also set by \fBAPP_DEPLOY_REPLICAS\fR or config key \fBdeploy.replicas\fR
 .TP
 \fB\-\-region\fR \fIstring\fR
 where
 .br
-env: \fBDEPLOY_REGION\fR \(md config: \fBregion\fR
+also set by \fBDEPLOY_REGION\fR or config key \fBregion\fR
 .SH "GLOBAL OPTIONS"
 .TP
 \fB\-\-verbose\fR
 say more
 .br
-env: \fBAPP_LOG_VERBOSE\fR \(md config: \fBlog.verbose\fR
+also set by \fBAPP_LOG_VERBOSE\fR or config key \fBlog.verbose\fR
 .SH "SEE ALSO"
 \fBapp\fR(1), \fBapp\-deploy\-canary\fR(1)

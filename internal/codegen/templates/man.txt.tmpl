@@ -18,16 +18,17 @@
          .FlagGroups[] .Cascading[] .Environment[] .Configuration[] .Output .ExitStatus[]
          .Examples[] .SeeAlso[]   (.Output is nil when the command declares no output)
          A flag row also carries .Env (its environment variables, in lookup order) and
-         .ConfigKey (its config key, set only when the command reads config files).
+         .ConfigKey (its config key, set only when the command reads config files);
+         alsoSetBy .Env .ConfigKey "\\fB" "\\fR" renders them as "also set by ...".
        HELPERS: roff, roffBlock, roffLines, roffArg, join, upper, lower, title, trim,
                 trimPrefix, trimSuffix, replace, indent, repeat, default, contains,
-                hasPrefix, hasSuffix, first, last. */ -}}
+                hasPrefix, hasSuffix, first, last, alsoSetBy. */ -}}
 {{- define "notes"}}{{if .Required}} (required){{end}}{{with .Default}} (default {{roff .}}){{end}}{{with .Enum}} [{{roff (join . "|")}}]{{end}}{{with .Deprecated}} (deprecated: {{roff .}}){{end}}{{end -}}
 {{- define "flag"}}.TP
 {{range $i, $id := .Identifiers}}{{if $i}}, {{end}}\fB{{roff $id}}\fR{{end}}{{with .Type}} \fI{{roff .}}\fR{{end}}
 {{roff .Summary}}{{template "notes" .}}{{with .Implicit}} (implicit: {{roff .}}){{end}}
 {{if or .Env .ConfigKey}}.br
-{{with .Env}}env: {{range $i, $v := .}}{{if $i}}, {{end}}\fB{{roff $v}}\fR{{end}}{{end}}{{if and .Env .ConfigKey}} \(md {{end}}{{with .ConfigKey}}config: \fB{{roff .}}\fR{{end}}
+{{alsoSetBy .Env .ConfigKey "\\fB" "\\fR"}}
 {{end}}{{end -}}
 .TH {{roffArg (upper .PageName)}} {{.Section}} "{{.Date}}" {{roffArg .Source}} "User Commands"
 .SH NAME

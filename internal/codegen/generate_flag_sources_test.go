@@ -165,9 +165,9 @@ func TestFlagSources_render(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"  -r, --replicas int    how many (default 1)\n                        env: APP_DEPLOY_REPLICAS · config: deploy.replicas\n",
-		"  --region string       where\n                        env: DEPLOY_REGION · config: region\n",
-		"  --verbose    say more\n               env: APP_LOG_VERBOSE · config: log.verbose",
+		"  -r, --replicas int    how many (default 1)\n                        also set by APP_DEPLOY_REPLICAS or config key deploy.replicas\n",
+		"  --region string       where\n                        also set by DEPLOY_REGION or config key region\n",
+		"  --verbose    say more\n               also set by APP_LOG_VERBOSE or config key log.verbose",
 	} {
 		if !strings.Contains(page, want) {
 			t.Errorf("help is missing\n%s\n--- page ---\n%s", want, page)
@@ -181,7 +181,7 @@ func TestFlagSources_render(t *testing.T) {
 	if page, err = renderManText(man, data); err != nil {
 		t.Fatal(err)
 	}
-	if want := "how many (default 1)\n.br\nenv: \\fBAPP_DEPLOY_REPLICAS\\fR \\(md config: \\fBdeploy.replicas\\fR\n"; !strings.Contains(page, want) {
+	if want := "how many (default 1)\n.br\nalso set by \\fBAPP_DEPLOY_REPLICAS\\fR or config key \\fBdeploy.replicas\\fR\n"; !strings.Contains(page, want) {
 		t.Errorf("man is missing\n%s\n--- page ---\n%s", want, page)
 	}
 
@@ -192,7 +192,7 @@ func TestFlagSources_render(t *testing.T) {
 	if page, err = renderDocText(md, data); err != nil {
 		t.Fatal(err)
 	}
-	if want := "- `-r, --replicas` `int` — how many (default `1`); env `APP_DEPLOY_REPLICAS`, config `deploy.replicas`"; !strings.Contains(page, want) {
+	if want := "- `-r, --replicas` `int` — how many (default `1`); also set by `APP_DEPLOY_REPLICAS` or config key `deploy.replicas`"; !strings.Contains(page, want) {
 		t.Errorf("markdown is missing\n%s\n--- page ---\n%s", want, page)
 	}
 
@@ -201,7 +201,7 @@ func TestFlagSources_render(t *testing.T) {
 	if page, err = renderDocText(help, root); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(page, "  --token string    a token\n                    env: GH_TOKEN, GITHUB_TOKEN") {
+	if !strings.Contains(page, "  --token string    a token\n                    also set by GH_TOKEN or GITHUB_TOKEN") {
 		t.Errorf("the root shows no config key and lists every variable\n%s", page)
 	}
 	if !strings.Contains(page, "  --plain string    argv only\n  --token") {
@@ -333,5 +333,27 @@ func TestFlagSources_golden(t *testing.T) {
 		if got != string(want) {
 			t.Errorf("%s differs from the golden file:\n--- got ---\n%s\n--- want ---\n%s", tt.file, got, want)
 		}
+	}
+}
+
+func TestAlsoSetBy(t *testing.T) {
+	for _, tt := range []struct {
+		env  []string
+		key  string
+		want string
+	}{
+		{nil, "", ""},
+		{[]string{"A"}, "", "also set by A"},
+		{nil, "k", "also set by config key k"},
+		{[]string{"A"}, "k", "also set by A or config key k"},
+		{[]string{"A", "B"}, "", "also set by A or B"},
+		{[]string{"A", "B"}, "k", "also set by A, B or config key k"},
+	} {
+		if got := alsoSetBy(tt.env, tt.key, "", ""); got != tt.want {
+			t.Errorf("alsoSetBy(%v, %q) = %q, want %q", tt.env, tt.key, got, tt.want)
+		}
+	}
+	if got := alsoSetBy([]string{"A"}, "k", "`", "`"); got != "also set by `A` or config key `k`" {
+		t.Errorf("wrapped = %q", got)
 	}
 }

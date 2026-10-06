@@ -786,6 +786,7 @@ func templateFuncMap() template.FuncMap {
 			}
 			return elems[len(elems)-1]
 		},
+		"alsoSetBy": alsoSetBy,
 		// roff escaping, for man page templates (see generate_roff.go).
 		"roff":      roffInline,
 		"roffLines": roffLines,
@@ -845,4 +846,25 @@ func templateFailure(name string, err error) string {
 		return fmt.Sprintf("%s; the fields available to this template are listed in the comment at the top of %s", msg, name)
 	}
 	return msg
+}
+
+// alsoSetBy phrases where else a flag's value can come from, for the line under it in help,
+// man and markdown: "also set by APP_PORT or config key server.port". Each name is wrapped in
+// before and after (bold in roff, code in markdown, nothing in help). Several variable names
+// read as a list, "A, B or C". It returns "" for a flag with neither.
+func alsoSetBy(env []string, configKey, before, after string) string {
+	var names []string
+	for _, e := range env {
+		names = append(names, before+e+after)
+	}
+	if configKey != "" {
+		names = append(names, "config key "+before+configKey+after)
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return "also set by " + names[0]
+	}
+	return "also set by " + strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }

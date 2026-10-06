@@ -114,7 +114,9 @@ rules:
   sub-command's page lists the flag under "Global Flags", where otherwise only its own command's
   page lists it. Parsing is the same either way, and a sub-command's handler sees the value either
   way, since its generated inputs include every parent's flags. Make a flag that sub-commands use
-  `cascading: true`, so their help pages show it.
+  `cascading: true`, so their help pages show it. Markdown pages use the same "Global Flags"
+  heading and man pages say GLOBAL OPTIONS; to call it something else, set `cascading:` under
+  the command's [`headings:`](/specification#headings).
 
 Mistakes are reported before your code runs:
 
@@ -171,7 +173,7 @@ $ ./todo add --help
 ...
 Flags:
   -p, --priority string    how urgent (default normal) [low|normal|high]
-                           env: TODO_DEFAULTS_PRIORITY · config: defaults.priority
+                           also set by TODO_DEFAULTS_PRIORITY or config key defaults.priority
   --tag []string           a label (repeatable)
 {{< /code >}}
 
