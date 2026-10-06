@@ -21,6 +21,14 @@ var (
 	pseudoVersionRe = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(?:\+[0-9A-Za-z.-]+)?$`)
 )
 
+var _ rotini.Handler = (*rotiniHandler)(nil)
+
+type rotiniHandler struct {
+	rotini.NoPreRun
+	rotini.NoPostRun
+	rotini.NoCascadingPostRun
+}
+
 // releaseVersion returns v's bare X.Y.Z when v names a release, or "" for an empty string,
 // "(devel)", a Go pseudo-version, or anything else that is not a semantic version.
 func releaseVersion(v string) string {
@@ -34,12 +42,19 @@ func releaseVersion(v string) string {
 	return ""
 }
 
-var _ rotini.Handler = (*rotiniHandler)(nil)
-
-type rotiniHandler struct {
-	rotini.NoPreRun
-	rotini.NoPostRun
-	rotini.NoCascadingPostRun
+// ResolveVersion returns the version the binary reports. The build info's module version wins
+// when it is a release (`go install pkg@v1.2.3`); otherwise the -ldflags stamp is used, reduced
+// to X.Y.Z when it is a semantic version and returned as is when not.
+func ResolveVersion(ldflagVersion string) string {
+	if info, ok := readBuildInfo(); ok {
+		if v := releaseVersion(info.Main.Version); v != "" {
+			return v
+		}
+	}
+	if v := releaseVersion(ldflagVersion); v != "" {
+		return v
+	}
+	return ldflagVersion
 }
 
 func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) {
@@ -71,21 +86,6 @@ func (*rotiniHandler) CascadingPreRun(ctx context.Context, rtx *rotini.Context) 
 		rtx.HaltWithCode(0)
 		return
 	}
-}
-
-// ResolveVersion returns the version the binary reports. The build info's module version wins
-// when it is a release (`go install pkg@v1.2.3`); otherwise the -ldflags stamp is used, reduced
-// to X.Y.Z when it is a semantic version and returned as is when not.
-func ResolveVersion(ldflagVersion string) string {
-	if info, ok := readBuildInfo(); ok {
-		if v := releaseVersion(info.Main.Version); v != "" {
-			return v
-		}
-	}
-	if v := releaseVersion(ldflagVersion); v != "" {
-		return v
-	}
-	return ldflagVersion
 }
 
 func (*rotiniHandler) Run(ctx context.Context, rtx *rotini.Context) {

@@ -1063,6 +1063,22 @@ go build -ldflags "-X main.version=1.2.3" ./cmd/todo
 ./todo --version   # 1.2.3
 {{< /code >}}
 
+A binary built with `go install github.com/me/todo/cmd/todo@v1.2.3`, or with `go build` in a
+tagged checkout, already knows its version from the build info. To use it when present:
+
+{{< code title="cmd/todo/main.go" language="go" open="true" collapsible="false" copy="true" >}}
+var version = "0.0.0"
+
+func main() {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "(devel)" && info.Main.Version != "" {
+		version = info.Main.Version
+	}
+	cmd.Program.
+		WithVersion(version).
+		Execute()
+}
+{{< /code >}}
+
 The `version:` key at the top of your spec and conf is the minimum rotini version they need. An
 older rotini, or a different major version, refuses to generate from them.
 
